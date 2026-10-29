@@ -5,7 +5,9 @@ dependencies {
     implementation 'org.noear:acp-sdk:3.10.1'
     runtimeOnly 'org.slf4j:slf4j-nop:2.0.17' // keep slf4j quiet; explicit logs go to STDERR ourselves
 }
-mainClassName = 'com.aresstack.askai.acp.demo.DemoAcpAgentMain'
+application {
+    mainClass = 'com.aresstack.askai.acp.demo.DemoAcpAgentMain'
+}
 task demoAgentJar(type: Jar) {
     group = 'build'
     description = 'Runnable demo ACP agent jar (spawned by the adapter round-trip test).'
@@ -15,5 +17,5 @@ task demoAgentJar(type: Jar) {
     dependsOn classes
     from sourceSets.main.output
     from { configurations.runtimeClasspath.filter { it.name.endsWith('.jar') }.collect { zipTree(it) } }
-    manifest { attributes('Main-Class': mainClassName) }
+    manifest { attributes('Main-Class': application.mainClass.get()) }
 }

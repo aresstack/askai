@@ -1,5 +1,5 @@
 allprojects {
-    group = 'com.aresstack.askai.java8'
+    group = 'com.aresstack.askai'
     version = (findProperty('releaseVersion') ?: '0.1.0').toString()
 
     repositories {
@@ -13,16 +13,15 @@ allprojects {
 subprojects {
     apply plugin: 'java'
 
-    // The DELIBERATE Java-21 sidecar processes: the browser MCP sidecar (playwright4j is major 65)
-    // and the local model runtime (win-directml-java is Java 21). Everything else stays strictly
-    // Java 8; the Java-8 host never compiles against or loads sidecar classes.
-    def java21Modules = [
-            'browser-mcp-server-java21',
-            'local-model-runtime-sidecar-java21'
-    ]
-    if (!(name in java21Modules)) {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+    // ONE language level for the whole build: Java 21 (the return from the Java-8 line, 2026-10). Every
+    // module — app, plugin, runtime and the former sidecars — is compiled, tested and run with a Java 21
+    // toolchain, so Gradle uses a JDK 21 for compile/test/run even when the Gradle daemon itself runs on
+    // an older JVM. The toolchain is found locally (IntelliJ ~/.jdks, JAVA_HOME, PATH, registry) or
+    // auto-provisioned through the foojay resolver declared in settings.gradle.
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
     }
 
     tasks.withType(JavaCompile) {

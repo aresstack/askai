@@ -1,4 +1,9 @@
-rootProject.name = 'askai-java8'
+plugins {
+    // Auto-provisions the Java 21 toolchain on machines without a local JDK 21 (CI, fresh checkouts).
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'askai'
 include 'ollama4j-java8'
 include 'group-chat-api'
 include 'group-chat-jgroups'

@@ -1,4 +1,4 @@
-// External Solon research agent runtime (Java 8): a separate process speaking ACP to AskAI and MCP to the
+// External Solon research agent runtime (Java 21): a separate process speaking ACP to AskAI and MCP to the
 // research-control (and later browser) endpoints. Solon/ACP/MCP types are allowed HERE; the UI plugin never
 // sees them. Not part of the AskAI fat jar (no dependency from askai-app).
 apply plugin: 'application'
@@ -36,7 +36,9 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
 }
 
-mainClassName = 'com.aresstack.askai.research.runtime.ResearchAgentMain'
+application {
+    mainClass = 'com.aresstack.askai.research.runtime.ResearchAgentMain'
+}
 
 task researchAgentJar(type: Jar) {
     group = 'build'
@@ -50,7 +52,7 @@ task researchAgentJar(type: Jar) {
     dependsOn configurations.runtimeClasspath
     from sourceSets.main.output
     from { configurations.runtimeClasspath.filter { it.name.endsWith('.jar') }.collect { zipTree(it) } }
-    manifest { attributes('Main-Class': mainClassName) }
+    manifest { attributes('Main-Class': application.mainClass.get()) }
 }
 
 test {
@@ -74,7 +76,8 @@ test {
             systemProperty 'askai.live.probe.target', System.getProperty('askai.live.probe.target')
         }
         systemProperty 'research.agent.jar', researchAgentJar.archiveFile.get().asFile.absolutePath
-        systemProperty 'acp.java.home', System.getProperty('java.home')
+        // The spawned agent runs on the test JVM's own JDK (the Java 21 toolchain): the tests fall back to
+        // their java.home, so no daemon-JVM path (possibly an older Java) is handed down any more.
         def sidecarTask = project(':browser-mcp-server-java21').tasks.getByName('sidecarJar')
         systemProperty 'browser.sidecar.jar', sidecarTask.archiveFile.get().asFile.absolutePath
         def localModelJar = project(':local-model-runtime-sidecar-java21').tasks.getByName('sidecarJar')

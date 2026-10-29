@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   release:
-    name: Build Java 8 AskAI
+    name: Build AskAI
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/v') || contains(github.event.head_commit.message, '[release]')
 
@@ -26,16 +26,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 8
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '8'
+          java-version: '21'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '7.6.4'
 
       - name: Resolve release version
         shell: bash
@@ -53,23 +51,25 @@ jobs:
           echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
           echo "TAG=v${VERSION}" >> "${GITHUB_ENV}"
 
-      - name: Build Java 8 fat jar
-        run: gradle --no-daemon clean :askai-app:fatJar -PreleaseVersion="${VERSION}"
+      - name: Build fat jar
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon clean :askai-app:fatJar -PreleaseVersion="${VERSION}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: askai-java8-${{ env.VERSION }}
-          path: askai-app/build/libs/askai-java8-${{ env.VERSION }}.jar
+          name: askai-${{ env.VERSION }}
+          path: askai-app/build/libs/askai-${{ env.VERSION }}.jar
           if-no-files-found: error
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          name: AskAI Java 8 ${{ env.TAG }}
+          name: AskAI ${{ env.TAG }}
           generate_release_notes: true
-          files: askai-app/build/libs/askai-java8-${{ env.VERSION }}.jar
+          files: askai-app/build/libs/askai-${{ env.VERSION }}.jar
           fail_on_unmatched_files: true
 
   # Rolling snapshot for quick testing. Runs on every push to any branch other than
@@ -85,26 +85,26 @@ jobs:
       github.ref != 'refs/heads/main' &&
       !startsWith(github.ref, 'refs/heads/v')
     concurrency:
-      group: askai-java8-snapshot
+      group: askai-snapshot
       cancel-in-progress: true
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 8
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '8'
+          java-version: '21'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '7.6.4'
 
       - name: Build snapshot fat jar
-        run: gradle --no-daemon clean :askai-app:fatJar -PreleaseVersion=snapshot
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon clean :askai-app:fatJar -PreleaseVersion=snapshot
 
       - name: Overwrite rolling snapshot release
         env:
@@ -113,7 +113,7 @@ jobs:
           # Remove the previous snapshot release and its tag so the new one fully replaces it.
           gh release delete snapshot --yes --cleanup-tag || true
           gh release create snapshot \
-            askai-app/build/libs/askai-java8-snapshot.jar \
+            askai-app/build/libs/askai-snapshot.jar \
             --prerelease \
             --target "${GITHUB_SHA}" \
             --title "Snapshot (latest build)" \

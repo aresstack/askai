@@ -1,9 +1,14 @@
 package com.aresstack.askai.java8.video.optional;
 
+import com.aresstack.askai.java8.video.MediaRecorder;
+import com.aresstack.askai.java8.video.VideoSettings;
+
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Method;
+import java.io.InputStream;
+import java.lang.reflect.Constructor;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -22,8 +27,13 @@ import java.util.List;
  * local lib dir — i.e. after that one confirmed download — they are attached silently on later runs,
  * which is the persisted result of the user's earlier consent, not a new download.
  *
- * <p>Java 8 only for the attach: the system classloader must be a {@link URLClassLoader}. Everything is
- * fetched from Maven Central over HTTPS into {@code ~/.askai/video-libs}.</p>
+ * <p>The attach is a dedicated {@link BackendClassLoader} over the downloaded jars. Java 9+ has no
+ * mutable system classloader any more (it is no {@link URLClassLoader}), so the ONE class that links
+ * against JavaCV — {@link FfmpegRecorder} — is defined inside that loader too, from the application's
+ * own class bytes, where its {@code org.bytedeco} references resolve. Everything else (the
+ * {@link MediaRecorder} contract, the settings) is delegated to the application classloader, so the
+ * recorder is a plain {@code MediaRecorder} to its caller. Everything is fetched from Maven Central over
+ * HTTPS into {@code ~/.askai/video-libs}.</p>
  */
 public final class FfmpegRuntimeLoader {
 
@@ -31,6 +41,14 @@ public final class FfmpegRuntimeLoader {
     private static final String JAVACV_VER = "1.5.10";
     private static final String JAVACPP_VER = "1.5.10";
     private static final String FFMPEG_VER = "6.1.1-1.5.10";
+
+    /** The one application class that links against JavaCV; defined inside the backend loader. */
+    static final String RECORDER_CLASS = "com.aresstack.askai.java8.video.optional.FfmpegRecorder";
+    /** Loadable only when the downloaded jars are attached. */
+    private static final String PROBE_CLASS = "org.bytedeco.javacv.FFmpegFrameRecorder";
+
+    /** The attached backend; null until the (previously downloaded) jars were attached successfully. */
+    private static BackendClassLoader backend;
 
     /** Progress callback for the (user-confirmed) download; called from the download thread. */
     public interface ProgressListener {
@@ -42,7 +60,7 @@ public final class FfmpegRuntimeLoader {
 
     /** True when the JavaCV/FFmpeg classes are loadable — attaching previously downloaded jars first. */
     public static synchronized boolean isReady() {
-        if (classesPresent()) {
+        if (backend != null) {
             return true;
         }
         if (!allJarsPresent()) {
@@ -53,7 +71,7 @@ public final class FfmpegRuntimeLoader {
         } catch (Exception attachFailed) {
             return false;
         }
-        return classesPresent();
+        return backend != null;
     }
 
     /** True when this platform is supported AND nothing was downloaded yet (a download would be needed). */
@@ -110,22 +128,22 @@ public final class FfmpegRuntimeLoader {
             }
         }
         attach(localJars());
-        if (!classesPresent()) {
-            throw new IllegalStateException("The FFmpeg libraries were downloaded but could not be "
-                    + "attached to the classloader (this needs a Java 8 runtime).");
+    }
+
+    /**
+     * A fresh {@link FfmpegRecorder} created inside the backend loader (the only place where its JavaCV
+     * references resolve). Only valid after {@link #isReady()} answered true.
+     */
+    public static synchronized MediaRecorder newRecorder(VideoSettings.Ffmpeg settings) throws Exception {
+        if (!isReady()) {
+            throw new IllegalStateException("The FFmpeg libraries are not attached.");
         }
+        Class<?> type = Class.forName(RECORDER_CLASS, true, backend);
+        Constructor<?> constructor = type.getConstructor(VideoSettings.Ffmpeg.class);
+        return (MediaRecorder) constructor.newInstance(settings);
     }
 
     // ------------------------------------------------------------------ internals
-
-    private static boolean classesPresent() {
-        try {
-            Class.forName("org.bytedeco.javacv.FFmpegFrameRecorder");
-            return true;
-        } catch (Throwable absent) {
-            return false;
-        }
-    }
 
     private static boolean allJarsPresent() {
         List<String> urls = requiredDownloadUrls();
@@ -209,16 +227,82 @@ public final class FfmpegRuntimeLoader {
         Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING);
     }
 
+    /** Opens the backend loader over the jars and proves the JavaCV classes load before publishing it. */
     private static void attach(List<Path> jars) throws Exception {
-        ClassLoader system = ClassLoader.getSystemClassLoader();
-        if (!(system instanceof URLClassLoader)) {
-            throw new IllegalStateException(
-                    "The system classloader is not a URLClassLoader (the FFmpeg backend needs Java 8).");
-        }
-        Method addUrl = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
-        addUrl.setAccessible(true);
+        URL[] urls = new URL[jars.size()];
         for (int i = 0; i < jars.size(); i++) {
-            addUrl.invoke(system, jars.get(i).toUri().toURL());
+            urls[i] = jars.get(i).toUri().toURL();
+        }
+        BackendClassLoader candidate =
+                new BackendClassLoader(urls, FfmpegRuntimeLoader.class.getClassLoader());
+        try {
+            Class.forName(PROBE_CLASS, false, candidate);
+        } catch (Throwable absent) {
+            try {
+                candidate.close();
+            } catch (IOException ignore) {
+            }
+            throw new IllegalStateException("The FFmpeg libraries are present in " + libDirectory()
+                    + " but their classes could not be loaded: " + absent, absent);
+        }
+        backend = candidate;
+    }
+
+    /**
+     * The downloaded JavaCV/FFmpeg jars plus {@link FfmpegRecorder} (and its inner classes), which this
+     * loader defines itself from the application's class bytes so the recorder links against the jars.
+     * Every other class is delegated parent-first to the application classloader, which keeps the
+     * {@link MediaRecorder} contract and the settings types identical on both sides.
+     */
+    static final class BackendClassLoader extends URLClassLoader {
+
+        BackendClassLoader(URL[] jars, ClassLoader application) {
+            super(jars, application);
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            if (!isBackendClass(name)) {
+                return super.loadClass(name, resolve);
+            }
+            synchronized (getClassLoadingLock(name)) {
+                Class<?> type = findLoadedClass(name);
+                if (type == null) {
+                    byte[] bytes = readFromApplication(name);
+                    type = defineClass(name, bytes, 0, bytes.length);
+                }
+                if (resolve) {
+                    resolveClass(type);
+                }
+                return type;
+            }
+        }
+
+        private static boolean isBackendClass(String name) {
+            return name.equals(RECORDER_CLASS) || name.startsWith(RECORDER_CLASS + "$");
+        }
+
+        private byte[] readFromApplication(String name) throws ClassNotFoundException {
+            InputStream in = getParent().getResourceAsStream(name.replace('.', '/') + ".class");
+            if (in == null) {
+                throw new ClassNotFoundException(name);
+            }
+            try {
+                ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int read;
+                while ((read = in.read(buf)) >= 0) {
+                    bytes.write(buf, 0, read);
+                }
+                return bytes.toByteArray();
+            } catch (IOException failed) {
+                throw new ClassNotFoundException(name, failed);
+            } finally {
+                try {
+                    in.close();
+                } catch (IOException ignore) {
+                }
+            }
         }
     }
 }

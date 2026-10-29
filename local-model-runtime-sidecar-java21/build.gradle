@@ -5,12 +5,6 @@
 // will host embeddings and further locally supported model kinds later.
 apply plugin: 'application'
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
 // The pinned win-directml-java runtime from MAVEN CENTRAL (0.1.1 = the release that extracted
 // :directml-model-package, so the published core is self-contained). For local development
 // against unreleased directml changes, publishToMavenLocal there and temporarily add
@@ -36,11 +30,13 @@ test {
     useJUnit()
 }
 
-mainClassName = 'com.aresstack.askai.localruntime.LocalModelRuntimeMain'
+application {
+    mainClass = 'com.aresstack.askai.localruntime.LocalModelRuntimeMain'
+}
 
 jar {
     manifest {
-        attributes('Main-Class': mainClassName)
+        attributes('Main-Class': application.mainClass.get())
     }
 }
 
@@ -61,7 +57,7 @@ task sidecarJar(type: Jar) {
     dependsOn classes, sidecarLibs
     from sourceSets.main.output
     manifest {
-        attributes('Main-Class': mainClassName)
+        attributes('Main-Class': application.mainClass.get())
         attributes('Class-Path': configurations.runtimeClasspath
                 .filter { it.name.endsWith('.jar') }
                 .collect { 'lib/' + it.name }

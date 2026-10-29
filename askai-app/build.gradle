@@ -14,12 +14,12 @@ dependencies {
     implementation 'uk.co.caprica:vlcj:3.12.1'
     // FFmpeg backend: compiled against JavaCV, but the jars (incl. ~100+ MB natives) are NEVER shipped
     // or fetched silently — FfmpegRuntimeLoader downloads them from Maven Central ONLY after the user's
-    // explicit, confirmed request (reference: WD4J/corenth VideoRuntimeLoader), then attaches them to
-    // the Java-8 system classloader. compileOnly keeps them out of the fat jar.
+    // explicit, confirmed request (reference: WD4J/corenth VideoRuntimeLoader), then attaches them in a
+    // dedicated backend classloader. compileOnly keeps them out of the fat jar.
     compileOnly 'org.bytedeco:javacv:1.5.10'
     compileOnly 'org.bytedeco:javacpp:1.5.10'
     compileOnly 'org.bytedeco:ffmpeg:6.1.1-1.5.10'
-    // Neutral win-directml model catalog (Java-8: no DirectML/Java-21 classes leak into the host): the
+    // Neutral win-directml model catalog (no DirectML runtime classes leak into the host): the
     // single source of truth for locally runnable model families (capabilities, download manifests,
     // runtime family, backends). Pinned to the published Maven Central release.
     implementation 'com.aresstack:directml-model-catalog:0.2.1'
@@ -63,7 +63,7 @@ dependencies {
     runtimeOnly 'com.tianscar.javasound:javasound-flac:1.4.1'
     runtimeOnly 'com.tianscar.javasound:javasound-aac:0.9.8'
 
-    // Markdown parsing — last Java 8-compatible line (do NOT move to 0.64.x which needs Java 11).
+    // Markdown parsing — pinned to the 0.62.x line (0.64.x changes the API; no Java-level reason any more).
     // Only the extensions actually used are added, not flexmark-all.
     implementation 'com.vladsch.flexmark:flexmark:0.62.2'
     implementation 'com.vladsch.flexmark:flexmark-ext-autolink:0.62.2'
@@ -106,22 +106,22 @@ test {
         // Forward the opt-in real-model-smoke flag from the Gradle CLI to the forked test JVM.
         systemProperty 'askai.local.realModelSmoke',
                 System.getProperty('askai.local.realModelSmoke', 'false')
-        try {
-            def launcher21 = javaToolchains.launcherFor {
-                languageVersion = JavaLanguageVersion.of(21)
-            }.get()
-            systemProperty 'sidecar.java', launcher21.executablePath.asFile.absolutePath
-            systemProperty 'askai.local.runtime.java', launcher21.executablePath.asFile.absolutePath
-        } catch (Exception noJava21) {
-        }
+        // The whole build runs on the Java 21 toolchain: the sidecar launcher is that toolchain's java.
+        def launcher21 = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(21)
+        }.get()
+        systemProperty 'sidecar.java', launcher21.executablePath.asFile.absolutePath
+        systemProperty 'askai.local.runtime.java', launcher21.executablePath.asFile.absolutePath
     }
 }
 
-mainClassName = 'com.aresstack.askai.java8.AskAiJava8App'
+application {
+    mainClass = 'com.aresstack.askai.java8.AskAiJava8App'
+}
 
 jar {
     manifest {
-        attributes('Main-Class': mainClassName)
+        attributes('Main-Class': application.mainClass.get())
     }
 }
 
@@ -186,8 +186,8 @@ task mergeServiceFiles {
 
 task fatJar(type: Jar) {
     group = 'build'
-    description = 'Build a Java 8 runnable jar containing AskAI, ollama4j-java8, and runtime dependencies.'
-    archiveBaseName = 'askai-java8'
+    description = 'Build the runnable AskAI fat jar (app + runtime dependencies; plugins and sidecar distributions stay outside).'
+    archiveBaseName = 'askai'
     archiveClassifier = ''
     archiveVersion = project.version.toString()
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -209,7 +209,7 @@ task fatJar(type: Jar) {
     }
 
     manifest {
-        attributes('Main-Class': mainClassName)
+        attributes('Main-Class': application.mainClass.get())
     }
 }
 
@@ -251,8 +251,8 @@ task researchRuntimeDist(type: Sync) {
     }
 }
 
-// The LOCAL MODEL RUNTIME distribution (R0): the Java-21 sidecar thin jar + lib/ in one stable
-// layout the app auto-detects — like the research runtime, never packed into the Java-8 fat jar.
+// The LOCAL MODEL RUNTIME distribution (R0): the sidecar thin jar + lib/ in one stable
+// layout the app auto-detects — like the research runtime, never packed into the fat jar.
 def localRuntimeDir = rootProject.layout.buildDirectory.dir('local-runtime')
 
 task localRuntimeDist(type: Sync) {
@@ -270,31 +270,21 @@ task localRuntimeDist(type: Sync) {
 }
 
 // The local model runtime (DirectML engine sidecar) is CORE APP functionality, not a plugin concern:
-// the plain `run` stages it exactly like runWithDevPlugins. It stays OPTIONAL nonetheless — Java 21
-// cannot be assumed on every machine, so without a resolvable 21 toolchain `run` simply starts
-// without the local runtime (the manager degrades gracefully) instead of failing the build.
-def java21Launcher = null
-try {
-    java21Launcher = javaToolchains.launcherFor {
-        languageVersion = JavaLanguageVersion.of(21)
-    }.get()
-} catch (Exception noJava21) {
-    logger.lifecycle('askai-app: no Java 21 toolchain — `run` starts without the local model runtime.')
-}
+// the plain `run` stages it exactly like runWithDevPlugins. The whole build runs on the Java 21
+// toolchain, so the sidecar launcher is simply that toolchain's java.
+def java21Launcher = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(21)
+}.get()
 run {
-    if (java21Launcher != null) {
-        dependsOn localRuntimeDist
-    }
-    // UTF-8 as the JVM default: on a German Windows the Java-8 default is Cp1252, and every library
+    dependsOn localRuntimeDist
+    // UTF-8 as the JVM default (Java 18+ defaults to UTF-8, it stays explicit anyway): every library
     // that decodes HTTP/JSON bytes with the platform default then reads UTF-8 as mojibake
     // ('ä' -> 'ÃÂ¤' after two hops through the MCP chain). All three processes
     // (app, agent, browser sidecar) run UTF-8 explicitly.
     jvmArgs '-Dfile.encoding=UTF-8'
     doFirst {
         systemProperty 'askai.local.runtime.dir', localRuntimeDir.get().asFile.absolutePath
-        if (java21Launcher != null) {
-            systemProperty 'askai.local.runtime.java', java21Launcher.executablePath.asFile.absolutePath
-        }
+        systemProperty 'askai.local.runtime.java', java21Launcher.executablePath.asFile.absolutePath
     }
 }
 
@@ -310,7 +300,7 @@ task runWithDevPlugins(type: JavaExec) {
     dependsOn researchRuntimeDist
     dependsOn localRuntimeDist
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = mainClassName
+    mainClass = application.mainClass
     jvmArgs '-Dfile.encoding=UTF-8' // see `run`: UTF-8 default on every process of the chain
     doFirst {
         // The assembled, immutable plugin directory (…/plugin-dist/research-agent-ui-plugin).
@@ -341,16 +331,9 @@ task runWithDevPlugins(type: JavaExec) {
         // DOCUMENTED hand-off of the assembled distribution (read by ResearchRuntimeDefaults; the
         // settings themselves stay in the typed, persisted model — this only feeds the defaults).
         systemProperty 'askai.research.runtime.dir', researchRuntimeDir.get().asFile.absolutePath
-        // Same hand-off for the Java-21 local model runtime sidecar (read by the manager defaults).
+        // Same hand-off for the local model runtime sidecar (read by the manager defaults).
         systemProperty 'askai.local.runtime.dir', localRuntimeDir.get().asFile.absolutePath
-        try {
-            def launcher21 = javaToolchains.launcherFor {
-                languageVersion = JavaLanguageVersion.of(21)
-            }.get()
-            systemProperty 'askai.local.runtime.java', launcher21.executablePath.asFile.absolutePath
-        } catch (Exception noJava21) {
-            // Without a Java-21 toolchain the manager falls back to ASKAI_LOCAL_RUNTIME_JAVA / PATH.
-        }
+        systemProperty 'askai.local.runtime.java', java21Launcher.executablePath.asFile.absolutePath
 
         // Prune generations that are GUARANTEED unused: a prior run that has exited releases its OS-level
         // lock, so tryLock on its .run.lock succeeds — only then do we delete. A generation whose JVM is

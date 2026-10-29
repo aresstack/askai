@@ -6,7 +6,7 @@ def ossTargetPath = rootProject.ext.has('ossLicenseTargetProjectPath')
         ? rootProject.ext.ossLicenseTargetProjectPath.toString()
         : ':'
 def ossTargetProject = rootProject.project(ossTargetPath)
-def ossOutputDir = new File(ossTargetProject.buildDir, 'generated-resources/oss-licenses')
+def ossOutputDir = ossTargetProject.layout.buildDirectory.dir('generated-resources/oss-licenses').get().asFile
 
 def ossReportTask = rootProject.tasks.register('generateOssLicenseReport') {
     group = 'documentation'

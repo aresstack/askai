@@ -8,12 +8,6 @@
 // blurred module boundary, no duplicate classes in the sidecar jar.
 apply plugin: 'application'
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
 dependencies {
     implementation project(':browser-api')
     // Java-8 bytecode consumed by this Java-21 process: the mechanical SERP analysis runs
@@ -49,11 +43,13 @@ test {
     // Chrome/Edge it SKIPS with a readable message instead of silently passing or failing the build.
 }
 
-mainClassName = 'com.aresstack.askai.browser.sidecar.BrowserMcpSidecarMain'
+application {
+    mainClass = 'com.aresstack.askai.browser.sidecar.BrowserMcpSidecarMain'
+}
 
 jar {
     manifest {
-        attributes('Main-Class': mainClassName)
+        attributes('Main-Class': application.mainClass.get())
     }
 }
 
@@ -78,7 +74,7 @@ task sidecarJar(type: Jar) {
     dependsOn classes, sidecarLibs
     from sourceSets.main.output
     manifest {
-        attributes('Main-Class': mainClassName)
+        attributes('Main-Class': application.mainClass.get())
         attributes('Class-Path': configurations.runtimeClasspath
                 .filter { it.name.endsWith('.jar') }
                 .collect { 'lib/' + it.name }

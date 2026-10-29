@@ -12,6 +12,7 @@ test {
     doFirst {
         def t = project(':acp-demo-agent').tasks.getByName('demoAgentJar')
         systemProperty 'acp.demo.agent.jar', t.archiveFile.get().asFile.absolutePath
-        systemProperty 'acp.java8.home', System.getProperty('java.home')
+        // The child agent runs on the test JVM's own JDK (the Java 21 toolchain): the test falls back to
+        // its java.home, so no daemon-JVM path (possibly an older Java) is handed down any more.
     }
 }

@@ -4,7 +4,7 @@
 
 # AskAI
 
-AskAI is a Java 8 Swing desktop client for local AI. It talks to an Ollama server and to its own
+AskAI is a Java 21 Swing desktop client for local AI. It talks to an Ollama server and to its own
 local model runtime, and you can extend it with PF4J agent plugins. The main plugin is the
 **Research Agent**. It turns a question into a researched document backed by sources, in four phases:
 **Concept → Sources → Outline → Document** (the outline is worked on in a drawer of the Document
@@ -112,10 +112,8 @@ tab). A **Revisions** view shows how the project got there.
 
 ## Requirements
 
-- **Java 8** to run AskAI. Every module except the two sidecars is compiled for Java 8.
-- **Java 21** for the sidecar processes `browser-mcp-server-java21` (Playwright4J) and
-  `local-model-runtime-sidecar-java21` (win-directml-java). Gradle finds Java 21 as a toolchain. If no
-  Java 21 toolchain is available, `run` starts without the local model runtime.
+- **Java 21** to build and run AskAI. Every module is compiled for Java 21; Gradle resolves a JDK 21
+  toolchain locally (IntelliJ `~/.jdks`, `JAVA_HOME`, PATH) or downloads one through the foojay resolver.
 - **An Ollama server** for chat, dictation and model management.
 - **Nothing to install for browser research** (Windows x86_64 and Linux x86_64): the default browser
   channel `camoufox` downloads Camoufox once (about 1.3 GB) to `%APPDATA%/.askai-java8/browser`. It is
@@ -127,10 +125,10 @@ tab). A **Revisions** view shows how the project got there.
 
 ## Build and run
 
-The Gradle wrapper uses Gradle 7.6.4. On Windows, run these commands from Git Bash.
+The Gradle wrapper uses Gradle 8.14.6. On Windows, run these commands from Git Bash (or use `gradlew.bat`).
 
 ```bash
-# Runnable Java 8 fat jar -> askai-app/build/libs/askai-java8-0.1.0.jar
+# Runnable fat jar -> askai-app/build/libs/askai-0.1.0.jar
 ./gradlew :askai-app:fatJar
 
 # Run AskAI (stages the local model runtime when a Java 21 toolchain is available)
