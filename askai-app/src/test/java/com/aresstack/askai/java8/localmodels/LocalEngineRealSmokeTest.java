@@ -41,10 +41,6 @@ public class LocalEngineRealSmokeTest {
 
     @Test
     public void everyEncoderAndTheRerankerRunThroughTheProductiveInstaller() throws Exception {
-        String runtimeDir = System.getProperty("askai.local.runtime.dir", "");
-        String java21 = System.getProperty("askai.local.runtime.java", "");
-        assumeTrue("SKIPPED (infra): -Daskai.local.runtime.dir not set", !runtimeDir.isEmpty());
-        assumeTrue("SKIPPED (infra): -Daskai.local.runtime.java (Java 21) not set", !java21.isEmpty());
         assumeTrue("SKIPPED: opt in with -Daskai.local.realModelSmoke=true",
                 Boolean.getBoolean("askai.local.realModelSmoke"));
 

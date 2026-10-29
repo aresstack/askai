@@ -75,8 +75,9 @@ tab). A **Revisions** view shows how the project got there.
 - Browse the Ollama library and pull model tags onto the configured Ollama server.
 - Search Hugging Face for GGUF models, download files and import them into Ollama.
 - Manage installed and running models (`/api/show`, `/api/ps`).
-- A local model runtime: a Java 21 sidecar with an Ollama-compatible HTTP API, for locally installed
-  models. Its first capability is cross-encoder reranking via win-directml-java.
+- A local model runtime: an in-process virtual Ollama container (Ollama-compatible HTTP API on
+  loopback) for locally installed models — cross-encoder reranking, embeddings and text generation via
+  win-directml-java.
 - A management tab for NLP models (OpenNLP), used by the knowledge pipeline.
 
 ### Audio
@@ -131,10 +132,10 @@ The Gradle wrapper uses Gradle 8.14.6. On Windows, run these commands from Git B
 # Runnable fat jar -> askai-app/build/libs/askai-0.1.0.jar
 ./gradlew :askai-app:fatJar
 
-# Run AskAI (stages the local model runtime when a Java 21 toolchain is available)
+# Run AskAI
 ./gradlew :askai-app:run
 
-# Run AskAI with the Research Agent plugin, the research runtime and the local model runtime
+# Run AskAI with the Research Agent plugin and the research runtime
 ./gradlew :askai-app:runWithDevPlugins
 ```
 
@@ -143,7 +144,6 @@ Individual distributions:
 | Task | Output |
 |---|---|
 | `:askai-app:researchRuntimeDist` | `build/research-runtime/` (research agent jar, browser sidecar jar, `lib/`) |
-| `:askai-app:localRuntimeDist` | `build/local-runtime/` (local model runtime sidecar jar, `lib/`) |
 | `:research-agent-ui-plugin:installDevPlugin` | installs the research plugin into `build/dev-plugins/` |
 | `:askai-app:verifyFatJarExclusions` | fails if research plugin classes leaked into the fat jar |
 
@@ -187,7 +187,7 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 | `browser-search-analysis` | Mechanical analysis of search result pages (regions, result blocks, candidates) |
 | `browser-static-http` | Static HTTP browser backend (`HttpURLConnection` + jsoup, no JavaScript) |
 | `browser-mcp-server-java21` | Java 21 browser MCP sidecar based on Playwright4J (`web_*` tools over Solon MCP) |
-| `local-model-runtime-sidecar-java21` | Java 21 local model runtime sidecar (Ollama-compatible API, DirectML reranking) |
+| `local-model-runtime` | The in-process local model runtime (Ollama-compatible API over win-directml-java: reranking, embeddings, generation) |
 | `mcp-runtime-api` | Generic MCP runtime contracts |
 | `mcp-solon-runtime` | Solon-based streamable-HTTP MCP server behind the runtime port |
 | `mcp-marketplace` | MCP marketplace search/registry/import browser (saves configurations only; not wired into the app) |

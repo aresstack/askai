@@ -29,8 +29,8 @@ import static org.junit.Assume.assumeTrue;
  * non-empty output through the DirectML runtime, /api/show carries chat/completion, and keep_alive:0
  * unloads the handle.
  *
- * <p>Environment-gated on the assembled sidecar distribution + a Java-21 launcher; opt in with
- * {@code -Daskai.local.realModelSmoke=true} so a normal build does not download a model.</p>
+ * <p>Opt in with {@code -Daskai.local.realModelSmoke=true} so a normal build does not download a model
+ * (the runtime itself runs in-process now, nothing has to be staged).</p>
  */
 public class LocalGenerationRealSmokeTest {
 
@@ -54,10 +54,6 @@ public class LocalGenerationRealSmokeTest {
 
     @Test
     public void everyRunnableGenerationFamilyInstallsLoadsAndAnswers() throws Exception {
-        assumeTrue("SKIPPED (infra): -Daskai.local.runtime.dir not set",
-                !System.getProperty("askai.local.runtime.dir", "").isEmpty());
-        assumeTrue("SKIPPED (infra): -Daskai.local.runtime.java (Java 21) not set",
-                !System.getProperty("askai.local.runtime.java", "").isEmpty());
         assumeTrue("SKIPPED: opt in with -Daskai.local.realModelSmoke=true",
                 Boolean.getBoolean("askai.local.realModelSmoke"));
 

@@ -27,6 +27,8 @@ dependencies {
     testImplementation project(':acp-solon-client')
     testImplementation project(':mcp-runtime-api')
     testImplementation project(':mcp-solon-runtime')
+    // The live reranker tests start the REAL local model runtime in-process (as the host does now).
+    testImplementation project(':local-model-runtime')
     // 36C: the live-sidecar integration test drives the PRODUCTIVE capture/acceptance lifecycle
     // (CaptureStore, SourceAcceptanceService, in-memory repository/index) behind the research endpoint.
     testImplementation project(':research-agent-ui-plugin')
@@ -62,10 +64,6 @@ test {
     // process (the Java-8 test JVM never loads sidecar classes). Without a Java-21 toolchain or an
     // installed browser the test SKIPS readably; the build stays green.
     dependsOn ':browser-mcp-server-java21:sidecarJar'
-    // A5 R0 proof: the reranker live test spawns the REAL Java-21 local-model runtime jar (backend=cpu)
-    // and calls /api/rerank against the installed cross-encoder. It SKIPS readably without a Java-21
-    // toolchain, the staged jar, or an installed reranker model; the build stays green either way.
-    dependsOn ':local-model-runtime-sidecar-java21:sidecarJar'
     doFirst {
         // Scope live-gate model override: -Daskai.live.main.model=gemma4:e2b runs the generator/
         // sweep gates against a SPECIFIC installed model instead of the first chat model found.
@@ -80,8 +78,6 @@ test {
         // their java.home, so no daemon-JVM path (possibly an older Java) is handed down any more.
         def sidecarTask = project(':browser-mcp-server-java21').tasks.getByName('sidecarJar')
         systemProperty 'browser.sidecar.jar', sidecarTask.archiveFile.get().asFile.absolutePath
-        def localModelJar = project(':local-model-runtime-sidecar-java21').tasks.getByName('sidecarJar')
-        systemProperty 'localmodel.sidecar.jar', localModelJar.archiveFile.get().asFile.absolutePath
         try {
             def launcher21 = javaToolchains.launcherFor {
                 languageVersion = JavaLanguageVersion.of(21)

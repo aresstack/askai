@@ -46,11 +46,8 @@ public class GuiChainReproductionTest {
         assumeTrue("SKIPPED: agent jar not built", new File(agentJar).isFile());
         assumeTrue("SKIPPED: sidecar jar not built", new File(sidecarJar).isFile());
         assumeTrue("SKIPPED: no Java 21", !sidecarJava.isEmpty() && new File(sidecarJava).isFile());
-        // The productive GUI path now requires the MANDATORY local reranker: its runtime jar must be
-        // staged and a cross-encoder model installed, else skip readably.
-        String localModelJar = System.getProperty("localmodel.sidecar.jar", "");
-        assumeTrue("SKIPPED: local reranker runtime jar not staged",
-                !localModelJar.isEmpty() && new File(localModelJar).isFile());
+        // The productive GUI path requires the MANDATORY local reranker (the in-process local model
+        // runtime): a cross-encoder model must be installed, else skip readably.
         // An installed rerank-capable model is required; its virtual id becomes the explicit selection
         // (the reranker is chosen centrally now, so nothing is auto-picked on the plugin side).
         List<String> installedRerankers =
@@ -71,26 +68,8 @@ public class GuiChainReproductionTest {
         }
         String oldDist = System.setProperty("askai.research.runtime.dir", dist.getAbsolutePath());
         String oldJava21 = System.setProperty("askai.research.java21", sidecarJava);
-        // Stage the local reranker runtime jar where the real LocalModelRuntimeManager looks for it,
-        // and point it at the Java-21 launcher — exactly as the assembled distribution provides them.
-        File localRuntimeDir = new File(dist, "local-runtime");
-        assertTrue(localRuntimeDir.mkdirs());
-        Files.copy(new File(localModelJar).toPath(),
-                new File(localRuntimeDir, "local-model-runtime-sidecar.jar").toPath());
-        // The thin jar has a Class-Path pointing at a sibling lib/ — stage it too.
-        File localModelLibsDir = new File(System.getProperty("localmodel.sidecar.libs", ""));
-        File libDir = new File(localRuntimeDir, "lib");
-        assertTrue(libDir.mkdirs());
-        if (localModelLibsDir.isDirectory()) {
-            for (File jar : localModelLibsDir.listFiles()) {
-                Files.copy(jar.toPath(), new File(libDir, jar.getName()).toPath());
-            }
-        }
-        String oldLocalDir = System.setProperty("askai.local.runtime.dir",
-                localRuntimeDir.getAbsolutePath());
-        String oldLocalJava = System.setProperty("askai.local.runtime.java", sidecarJava);
 
-        // EXACTLY like the GUI: the host services carry the local model runtime manager, so the
+        // EXACTLY like the GUI: the host services carry the (in-process) local model runtime manager, so the
         // mandatory reranker snapshot provider is published to the plugin.
         com.aresstack.askai.java8.localmodels.LocalModelRuntimeManager localRuntime =
                 new com.aresstack.askai.java8.localmodels.LocalModelRuntimeManager();
@@ -120,14 +99,11 @@ public class GuiChainReproductionTest {
                     greeted.await(30, TimeUnit.SECONDS));
         } finally {
             session.close();
-            // THE Zulu-JVM leak, live: without this stop, every run left its Java-21 local-model child
-            // running forever — 29 of them were found holding their staged temp jars open, which is also
-            // why the leaked ~300 MB stagings could never be deleted.
+            // The in-process runtime holds the model files open until it is closed: stop it before the
+            // staging is swept.
             localRuntime.stop();
             restore("askai.research.runtime.dir", oldDist);
             restore("askai.research.java21", oldJava21);
-            restore("askai.local.runtime.dir", oldLocalDir);
-            restore("askai.local.runtime.java", oldLocalJava);
         }
     }
 

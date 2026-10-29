@@ -36,6 +36,9 @@ dependencies {
     implementation project(':research-text-opennlp')
     // A5b: neutral reranker endpoint contract (DTO/codec only) shared with the research agent.
     implementation project(':agent-model-runtime-api')
+    // The local model runtime (virtual Ollama container over win-directml-java) runs INSIDE the app since
+    // the return to Java 21: LocalModelRuntimeManager starts it in-process on a loopback port.
+    implementation project(':local-model-runtime')
     implementation project(':group-chat-api')
     implementation project(':group-chat-jgroups')
     implementation project(':audio-dsp')
@@ -90,25 +93,13 @@ test {
     // App-classpath reproduction of the research-agent start (diagnoses -32603 from the GUI).
     dependsOn ':research-agent-runtime:researchAgentJar'
     dependsOn ':browser-mcp-server-java21:sidecarJar'
-    // A5: the GUI-chain reproduction needs the MANDATORY local reranker runtime jar staged so the real
-    // LocalModelRuntimeManager can start it (skips readably when no cross-encoder model is installed).
-    dependsOn ':local-model-runtime-sidecar-java21:sidecarJar', ':local-model-runtime-sidecar-java21:sidecarLibs'
-    // C2c: the opt-in real-model smoke drives the productive LocalModelRuntimeManager, which needs the
-    // assembled local-runtime distribution (thin jar + lib/) and a Java-21 launcher. Gated by
-    // -Daskai.local.realModelSmoke=true, so a normal build only stages the dist, never downloads models.
-    dependsOn 'localRuntimeDist'
     doFirst {
         def agentJarTask = project(':research-agent-runtime').tasks.getByName('researchAgentJar')
         systemProperty 'research.agent.jar', agentJarTask.archiveFile.get().asFile.absolutePath
         def sidecarTask = project(':browser-mcp-server-java21').tasks.getByName('sidecarJar')
         systemProperty 'browser.sidecar.jar', sidecarTask.archiveFile.get().asFile.absolutePath
-        def localModelJar = project(':local-model-runtime-sidecar-java21').tasks.getByName('sidecarJar')
-        systemProperty 'localmodel.sidecar.jar', localModelJar.archiveFile.get().asFile.absolutePath
-        def localModelLibs = project(':local-model-runtime-sidecar-java21').tasks.getByName('sidecarLibs')
-        systemProperty 'localmodel.sidecar.libs', localModelLibs.destinationDir.absolutePath
-        systemProperty 'askai.local.runtime.dir',
-                rootProject.layout.buildDirectory.dir('local-runtime').get().asFile.absolutePath
-        // Forward the opt-in real-model-smoke flag from the Gradle CLI to the forked test JVM.
+        // C2c: the opt-in real-model smoke drives the productive (in-process) LocalModelRuntimeManager.
+        // Gated by -Daskai.local.realModelSmoke=true, so a normal build never downloads models.
         systemProperty 'askai.local.realModelSmoke',
                 System.getProperty('askai.local.realModelSmoke', 'false')
         // The whole build runs on the Java 21 toolchain: the sidecar launcher is that toolchain's java.
@@ -116,7 +107,6 @@ test {
             languageVersion = JavaLanguageVersion.of(21)
         }.get()
         systemProperty 'sidecar.java', launcher21.executablePath.asFile.absolutePath
-        systemProperty 'askai.local.runtime.java', launcher21.executablePath.asFile.absolutePath
     }
 }
 
@@ -254,41 +244,12 @@ task researchRuntimeDist(type: Sync) {
     }
 }
 
-// The LOCAL MODEL RUNTIME distribution (R0): the sidecar thin jar + lib/ in one stable
-// layout the app auto-detects — like the research runtime, never packed into the fat jar.
-def localRuntimeDir = rootProject.layout.buildDirectory.dir('local-runtime')
-
-task localRuntimeDist(type: Sync) {
-    group = 'build'
-    description = 'Assemble the local model runtime distribution (sidecar jar + lib/).'
-    dependsOn ':local-model-runtime-sidecar-java21:sidecarJar',
-            ':local-model-runtime-sidecar-java21:sidecarLibs'
-    into localRuntimeDir
-    from({ project(':local-model-runtime-sidecar-java21').tasks.getByName('sidecarJar').archiveFile }) {
-        rename { 'local-model-runtime-sidecar.jar' }
-    }
-    from({ project(':local-model-runtime-sidecar-java21').tasks.getByName('sidecarLibs').destinationDir }) {
-        into 'lib'
-    }
-}
-
-// The local model runtime (DirectML engine sidecar) is CORE APP functionality, not a plugin concern:
-// the plain `run` stages it exactly like runWithDevPlugins. The whole build runs on the Java 21
-// toolchain, so the sidecar launcher is simply that toolchain's java.
-def java21Launcher = javaToolchains.launcherFor {
-    languageVersion = JavaLanguageVersion.of(21)
-}.get()
 run {
-    dependsOn localRuntimeDist
     // UTF-8 as the JVM default (Java 18+ defaults to UTF-8, it stays explicit anyway): every library
     // that decodes HTTP/JSON bytes with the platform default then reads UTF-8 as mojibake
     // ('ä' -> 'ÃÂ¤' after two hops through the MCP chain). All three processes
     // (app, agent, browser sidecar) run UTF-8 explicitly.
     jvmArgs '-Dfile.encoding=UTF-8'
-    doFirst {
-        systemProperty 'askai.local.runtime.dir', localRuntimeDir.get().asFile.absolutePath
-        systemProperty 'askai.local.runtime.java', java21Launcher.executablePath.asFile.absolutePath
-    }
 }
 
 // Same runtime classpath, main class and (default) JVM options as the regular `run`, but pointed at a
@@ -301,7 +262,6 @@ task runWithDevPlugins(type: JavaExec) {
     description = 'Run AskAI from a fresh immutable plugin generation under <root>/build/dev-plugin-runs.'
     dependsOn ':research-agent-ui-plugin:pluginDistribution'
     dependsOn researchRuntimeDist
-    dependsOn localRuntimeDist
     classpath = sourceSets.main.runtimeClasspath
     mainClass = application.mainClass
     jvmArgs '-Dfile.encoding=UTF-8' // see `run`: UTF-8 default on every process of the chain
@@ -334,9 +294,6 @@ task runWithDevPlugins(type: JavaExec) {
         // DOCUMENTED hand-off of the assembled distribution (read by ResearchRuntimeDefaults; the
         // settings themselves stay in the typed, persisted model — this only feeds the defaults).
         systemProperty 'askai.research.runtime.dir', researchRuntimeDir.get().asFile.absolutePath
-        // Same hand-off for the local model runtime sidecar (read by the manager defaults).
-        systemProperty 'askai.local.runtime.dir', localRuntimeDir.get().asFile.absolutePath
-        systemProperty 'askai.local.runtime.java', java21Launcher.executablePath.asFile.absolutePath
 
         // Prune generations that are GUARANTEED unused: a prior run that has exited releases its OS-level
         // lock, so tryLock on its .run.lock succeeds — only then do we delete. A generation whose JVM is
