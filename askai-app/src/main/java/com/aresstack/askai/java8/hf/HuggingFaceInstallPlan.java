@@ -1,6 +1,6 @@
 package com.aresstack.askai.java8.hf;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.File;
 import java.io.IOException;
@@ -220,7 +220,7 @@ public final class HuggingFaceInstallPlan {
         }
         File temp = File.createTempFile(modelFile.getName() + ".", ".askai-install.tmp", directory);
         try {
-            byte[] bytes = OllamaJson.toJson(toMap()).getBytes(StandardCharsets.UTF_8);
+            byte[] bytes = SimpleJson.toJson(toMap()).getBytes(StandardCharsets.UTF_8);
             Files.write(temp.toPath(), bytes);
             try {
                 // A fresh plan must overwrite a stale sidecar, atomically where the platform allows it.
@@ -255,7 +255,7 @@ public final class HuggingFaceInstallPlan {
         Object parsed;
         try {
             byte[] bytes = Files.readAllBytes(sidecar.toPath());
-            parsed = OllamaJson.parse(new String(bytes, StandardCharsets.UTF_8));
+            parsed = SimpleJson.parse(new String(bytes, StandardCharsets.UTF_8));
         } catch (Exception ex) {
             throw invalid(sidecar, ex.getMessage());
         }

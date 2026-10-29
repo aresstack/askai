@@ -166,8 +166,7 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 
 | Module | Purpose |
 |---|---|
-| `askai-app` | The Swing application: chat, models, audio, settings, plugin host wiring; builds the fat jar |
-| `ollama4j-java8` | Small Java 8 Ollama client based on `HttpURLConnection` |
+| `askai-app` | The Swing application: chat, models, audio, settings, plugin host wiring; talks to Ollama through the official `ollama4j` client; builds the fat jar |
 | `comic-controls` | Dependency-free Swing design system: palettes, themes, Java2D painters, controls |
 | `audio-dsp` | Audio capture and DSP pipeline (IIR filters via iirj, FFT/STFT blocks) |
 | `audio-openal` | Optional OpenAL Soft playback backend (LWJGL); natives are installed as an opt-in add-on |

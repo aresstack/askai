@@ -1,7 +1,7 @@
 package com.aresstack.askai.java8.hf.meta;
 
 import com.aresstack.askai.java8.hf.HuggingFaceInstallPlan;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -441,7 +441,7 @@ public final class HuggingFaceMetadataLoader {
             return null;
         }
         try {
-            Object parsed = OllamaJson.parse(text);
+            Object parsed = SimpleJson.parse(text);
             return parsed instanceof Map ? (Map<String, Object>) parsed : null;
         } catch (RuntimeException ex) {
             return null;

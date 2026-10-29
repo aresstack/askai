@@ -1,7 +1,7 @@
 package com.aresstack.askai.java8.localmodels;
 
 import com.aresstack.askai.java8.hf.HuggingFaceClient;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import org.junit.Test;
 
@@ -186,13 +186,13 @@ public class LocalEngineRealSmokeTest {
         connection.setConnectTimeout(30_000);
         connection.setReadTimeout(600_000);
         try (OutputStream out = connection.getOutputStream()) {
-            out.write(OllamaJson.toJson(body).getBytes(StandardCharsets.UTF_8));
+            out.write(SimpleJson.toJson(body).getBytes(StandardCharsets.UTF_8));
         }
         int status = connection.getResponseCode();
         InputStream in = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
         String text = new String(readAll(in), StandardCharsets.UTF_8);
         assertEquals(path + " -> " + text, expectedStatus, status);
-        return (Map<String, Object>) OllamaJson.parse(text);
+        return (Map<String, Object>) SimpleJson.parse(text);
     }
 
     private static byte[] readAll(InputStream in) throws IOException {

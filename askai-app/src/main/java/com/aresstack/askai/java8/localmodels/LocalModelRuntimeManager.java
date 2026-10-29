@@ -1,6 +1,6 @@
 package com.aresstack.askai.java8.localmodels;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -37,7 +37,7 @@ public final class LocalModelRuntimeManager {
                 return null;
             }
             try {
-                Object parsed = OllamaJson.parse(line);
+                Object parsed = SimpleJson.parse(line);
                 if (!(parsed instanceof Map)) {
                     return null;
                 }

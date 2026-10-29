@@ -1,6 +1,6 @@
 package com.aresstack.askai.java8.hf.catalog;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -58,7 +58,7 @@ public final class LiveCatalogParser {
      * @throws IllegalArgumentException when the JSON is not the expected object shape
      */
     public static FilterCatalogs parse(String json) {
-        Object parsed = OllamaJson.parse(json);
+        Object parsed = SimpleJson.parse(json);
         if (!(parsed instanceof Map)) {
             throw new IllegalArgumentException("models-tags-by-type: expected a JSON object");
         }

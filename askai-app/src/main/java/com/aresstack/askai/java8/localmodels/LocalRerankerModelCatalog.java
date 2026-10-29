@@ -2,7 +2,7 @@ package com.aresstack.askai.java8.localmodels;
 
 import com.aresstack.askai.agent.model.reranker.RerankerModelCatalog;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.File;
 import java.io.IOException;
@@ -62,7 +62,7 @@ public final class LocalRerankerModelCatalog implements RerankerModelCatalog {
         }
         Object parsed;
         try {
-            parsed = OllamaJson.parse(new String(Files.readAllBytes(manifestFile.toPath()), UTF_8));
+            parsed = SimpleJson.parse(new String(Files.readAllBytes(manifestFile.toPath()), UTF_8));
         } catch (IOException | RuntimeException unreadable) {
             return null; // a corrupt manifest is simply not a usable rerank model
         }

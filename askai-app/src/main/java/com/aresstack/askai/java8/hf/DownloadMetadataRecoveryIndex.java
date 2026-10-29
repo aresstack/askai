@@ -1,6 +1,6 @@
 package com.aresstack.askai.java8.hf;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.File;
 import java.io.IOException;
@@ -155,7 +155,7 @@ public final class DownloadMetadataRecoveryIndex {
         }
         try {
             byte[] bytes = Files.readAllBytes(indexFile.toPath());
-            Object parsed = OllamaJson.parse(new String(bytes, StandardCharsets.UTF_8));
+            Object parsed = SimpleJson.parse(new String(bytes, StandardCharsets.UTF_8));
             if (parsed instanceof Map) {
                 return new LinkedHashMap<String, Object>((Map<String, Object>) parsed);
             }
@@ -172,7 +172,7 @@ public final class DownloadMetadataRecoveryIndex {
         }
         File temp = File.createTempFile("askai-recovery", ".tmp", directory);
         try {
-            Files.write(temp.toPath(), OllamaJson.toJson(all).getBytes(StandardCharsets.UTF_8));
+            Files.write(temp.toPath(), SimpleJson.toJson(all).getBytes(StandardCharsets.UTF_8));
             try {
                 Files.move(temp.toPath(), indexFile.toPath(),
                         StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

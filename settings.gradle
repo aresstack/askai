@@ -4,7 +4,6 @@ plugins {
 }
 
 rootProject.name = 'askai'
-include 'ollama4j-java8'
 include 'group-chat-api'
 include 'group-chat-jgroups'
 include 'askai-app'

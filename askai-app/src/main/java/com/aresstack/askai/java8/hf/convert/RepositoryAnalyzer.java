@@ -1,7 +1,7 @@
 package com.aresstack.askai.java8.hf.convert;
 
 import com.aresstack.askai.java8.hf.HuggingFaceClient;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -64,7 +64,7 @@ public final class RepositoryAnalyzer {
     private void readConfig(String modelId, RepositoryAnalysis.Builder builder) {
         try {
             String text = client.fetchFileText(modelId, "config.json");
-            Object parsed = OllamaJson.parse(text);
+            Object parsed = SimpleJson.parse(text);
             if (parsed instanceof Map) {
                 Map map = (Map) parsed;
                 builder.architectures(stringList(map.get("architectures")));

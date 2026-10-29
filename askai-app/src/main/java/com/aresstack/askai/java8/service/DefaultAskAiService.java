@@ -16,12 +16,8 @@ import com.aresstack.askai.java8.hf.convert.RepositoryAnalysis;
 import com.aresstack.askai.java8.hf.convert.RepositoryAnalyzer;
 import com.aresstack.askai.java8.hf.convert.SupportDecision;
 import com.aresstack.askai.java8.ollamalib.OllamaLibraryClient;
-import io.github.ollama4j.Ollama;
-import io.github.ollama4j.models.ChatCompletion;
-import io.github.ollama4j.models.ChatMessage;
-import io.github.ollama4j.models.ChatTokenListener;
-import io.github.ollama4j.models.PullProgress;
-import io.github.ollama4j.models.PullProgressListener;
+import com.aresstack.askai.java8.client.OllamaPullListener;
+import com.aresstack.askai.java8.client.OllamaPullProgress;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -49,49 +45,12 @@ public final class DefaultAskAiService implements AskAiService {
         this.executorService = Executors.newCachedThreadPool(new DaemonThreadFactory());
     }
 
-    public void listModels(final ModelListListener listener) {
-        executorService.submit(new Runnable() {
-            public void run() {
-                try {
-                    listener.onModels(client().listModels());
-                } catch (Exception ex) {
-                    listener.onError(ex);
-                }
-            }
-        });
-    }
-
-    public void sendChat(final ChatRequest request, final ChatListener listener) {
-        executorService.submit(new Runnable() {
-            public void run() {
-                if (!request.isValid()) {
-                    listener.onError(new IllegalArgumentException("Choose a model and enter text."));
-                    return;
-                }
-                try {
-                    AppConfiguration configuration = configurationRepository.load();
-                    List<ChatMessage> messages = new ArrayList<ChatMessage>();
-                    messages.add(ChatMessage.user(request.getText()));
-                    ChatCompletion completion = client().streamChat(request.getModelName(), messages,
-                            configuration.getKeepAlive(), new ChatTokenListener() {
-                                public void onToken(String token) {
-                                    listener.onToken(token);
-                                }
-                            });
-                    listener.onComplete(new ChatSummary(completion.getEvalCount(), completion.getEvalDurationNanos()));
-                } catch (Exception ex) {
-                    listener.onError(ex);
-                }
-            }
-        });
-    }
-
     public void pullOllamaModel(final String modelName, final PullListener listener) {
         executorService.submit(new Runnable() {
             public void run() {
                 try {
-                    client().pullModel(modelName, new PullProgressListener() {
-                        public void onProgress(PullProgress progress) {
+                    client().pullModel(modelName, new OllamaPullListener() {
+                        public void onProgress(OllamaPullProgress progress) {
                             listener.onProgress(progress);
                         }
                     });
@@ -487,11 +446,9 @@ public final class DefaultAskAiService implements AskAiService {
         executorService.shutdownNow();
     }
 
-    private Ollama client() {
-        AppConfiguration configuration = configurationRepository.load();
-        Ollama ollama = new Ollama(configuration.getOllamaBaseUrl());
-        ollama.setRequestTimeoutSeconds(6L * 60L * 60L);
-        return ollama;
+    /** The Ollama adapter for the configured server (the official ollama4j client behind it). */
+    private AskAiOllamaClient client() {
+        return new AskAiOllamaClient(configurationRepository.load().getOllamaBaseUrl());
     }
 
     public void analyzeLocalRuntimeCompatibility(final String modelId,

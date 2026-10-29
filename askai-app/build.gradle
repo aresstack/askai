@@ -1,7 +1,12 @@
 apply plugin: 'application'
 
 dependencies {
-    implementation project(':ollama4j-java8')
+    // The official Ollama client, as the original AskAI used it before the Java-8 detour (Java 17+). It
+    // brings Jackson, Guava, the Prometheus simpleclient, jsoup and the MCP Java SDK (Reactor) along.
+    implementation 'io.github.ollama4j:ollama4j:1.1.7'
+    // Used directly ONLY inside the Ollama adapter (AskAiOllamaClient) to patch the library's request
+    // body on the JSON tree; everywhere else the app keeps Gson/SimpleJson.
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.0'
     // Comic UI foundation (issue #36): neutral Java-8 Swing controls — hover menus, comic split
     // pane, shared palette/painters. Deliberately free of AskAI/Research/PF4J types.
     implementation project(':comic-controls')
@@ -50,8 +55,8 @@ dependencies {
     // jodd-core transitively; only used to parse ollama.com HTML, the HTTP fetch goes through
     // the app's own proxy/TLS plumbing.
     implementation 'org.jodd:jodd-lagarto:6.0.6'
-    // JSON for versioned audio-profile import/export (Slice 3). Gson is Java 8 compatible; do not
-    // introduce Jackson in parallel.
+    // JSON for versioned audio-profile import/export (Slice 3). Gson stays the app's JSON library for
+    // its own files; Jackson is ollama4j's and confined to the Ollama adapter.
     implementation 'com.google.code.gson:gson:2.10.1'
 
     // Decode audio formats accepted by file transcription. vorbis/flac/aac are discovered via Java Sound
@@ -72,8 +77,8 @@ dependencies {
     // Mermaid rendered to a BufferedImage via GraalJS + Batik (no WebView / CDN / external process).
     implementation 'com.aresstack:mermaid-java:0.2.0-beta.2'
 
-    // Silence the "no SLF4J providers" startup warning Jodd's slf4j-api dependency prints.
-    runtimeOnly 'org.slf4j:slf4j-nop:1.7.36'
+    // Silence the "no SLF4J providers" startup warning the slf4j-api 2.x of ollama4j (and Jodd) prints.
+    runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
     testImplementation 'junit:junit:4.13.2'
     // TEST-ONLY: full GUI-chain reproduction (plugin factory on the APP classpath); the plugin
     // never becomes a runtime dependency and never enters the fat jar (verifyFatJarExclusions).
@@ -136,7 +141,6 @@ def mergedServicesDir = layout.buildDirectory.dir('mergedServices')
 
 task mergeServiceFiles {
     description = 'Concatenate META-INF/services descriptors so GraalVM language providers survive the fat jar.'
-    dependsOn ':ollama4j-java8:jar'
     dependsOn ':group-chat-api:jar'
     dependsOn ':group-chat-jgroups:jar'
     dependsOn ':audio-dsp:jar'
@@ -193,7 +197,6 @@ task fatJar(type: Jar) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     dependsOn classes
-    dependsOn ':ollama4j-java8:jar'
     dependsOn ':group-chat-api:jar'
     dependsOn ':group-chat-jgroups:jar'
     dependsOn ':audio-dsp:jar'

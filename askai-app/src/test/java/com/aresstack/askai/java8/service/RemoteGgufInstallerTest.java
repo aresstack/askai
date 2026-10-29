@@ -3,7 +3,7 @@ package com.aresstack.askai.java8.service;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import org.junit.After;
 import org.junit.Before;
@@ -78,7 +78,7 @@ public class RemoteGgufInstallerTest {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> createRequest() {
-        return (Map<String, Object>) OllamaJson.parse(createBody.get());
+        return (Map<String, Object>) SimpleJson.parse(createBody.get());
     }
 
     // ------------------------------------------------------------------ info.capabilities

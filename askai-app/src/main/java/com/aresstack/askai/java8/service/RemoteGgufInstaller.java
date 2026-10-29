@@ -1,7 +1,7 @@
 package com.aresstack.askai.java8.service;
 
 import com.aresstack.askai.java8.hf.GgufFile;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -152,7 +152,7 @@ public final class RemoteGgufInstaller {
             body.put("messages", toMessageMaps(metadata.messages()));
         }
         body.put("stream", Boolean.TRUE);
-        createModel("/api/create", OllamaJson.toJson(body), listener);
+        createModel("/api/create", SimpleJson.toJson(body), listener);
     }
 
     /**
@@ -189,7 +189,7 @@ public final class RemoteGgufInstaller {
         body.put("from", existingModel.trim());
         body.put("adapters", adapters);
         body.put("stream", Boolean.TRUE);
-        createModel("/api/create", OllamaJson.toJson(body), listener);
+        createModel("/api/create", SimpleJson.toJson(body), listener);
     }
 
     private static void putIfNotEmpty(Map<String, Object> body, String key, String value) {
@@ -431,7 +431,7 @@ public final class RemoteGgufInstaller {
             return null;
         }
         try {
-            Object parsed = OllamaJson.parse(line);
+            Object parsed = SimpleJson.parse(line);
             if (parsed instanceof Map) {
                 return (Map) parsed;
             }

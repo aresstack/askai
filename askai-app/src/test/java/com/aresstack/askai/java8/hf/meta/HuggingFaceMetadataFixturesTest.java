@@ -1,7 +1,7 @@
 package com.aresstack.askai.java8.hf.meta;
 
 import com.aresstack.askai.java8.hf.HuggingFaceInstallPlan;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -79,7 +79,7 @@ public class HuggingFaceMetadataFixturesTest {
 
         @SuppressWarnings("unchecked")
         FixtureGateway(String fixture) {
-            this.info = (Map<String, Object>) OllamaJson.parse(read("/hf/fixtures/" + fixture));
+            this.info = (Map<String, Object>) SimpleJson.parse(read("/hf/fixtures/" + fixture));
         }
 
         public String fetchFile(String repositoryId, String revision, String path) {

@@ -2,7 +2,7 @@ package com.aresstack.askai.java8.localmodels;
 
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -71,7 +71,7 @@ public final class HttpEmbeddingDimensionProbe implements EmbeddingDimensionProb
     static int dimensionOf(String responseJson) throws EmbeddingConfigurationException {
         Object parsed;
         try {
-            parsed = OllamaJson.parse(responseJson);
+            parsed = SimpleJson.parse(responseJson);
         } catch (RuntimeException ex) {
             throw invalid("response is not valid JSON: " + ex.getMessage());
         }

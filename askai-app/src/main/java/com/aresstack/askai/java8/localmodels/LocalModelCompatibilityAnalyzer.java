@@ -1,6 +1,6 @@
 package com.aresstack.askai.java8.localmodels;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -154,7 +154,7 @@ public final class LocalModelCompatibilityAnalyzer {
             return null;
         }
         try {
-            Object parsed = OllamaJson.parse(json);
+            Object parsed = SimpleJson.parse(json);
             return parsed instanceof Map ? (Map<String, Object>) parsed : null;
         } catch (RuntimeException unreadable) {
             return null;

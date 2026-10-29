@@ -1,7 +1,7 @@
 package com.aresstack.askai.java8.hf.meta;
 
 import com.aresstack.askai.java8.hf.HuggingFaceInstallPlan;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 import org.junit.Test;
 
 import java.io.File;
@@ -73,7 +73,7 @@ public class HuggingFaceImportProvenanceTest {
         File sidecar = HuggingFaceImportProvenance.sidecarFile(gguf);
         sidecar.deleteOnExit();
         assertTrue(sidecar.isFile());
-        Map<String, Object> read = (Map<String, Object>) OllamaJson.parse(
+        Map<String, Object> read = (Map<String, Object>) SimpleJson.parse(
                 new String(Files.readAllBytes(sidecar.toPath()), "UTF-8"));
         assertEquals(4, ((Number) read.get("schemaVersion")).intValue());
         assertEquals("owner/model", read.get("repositoryId"));

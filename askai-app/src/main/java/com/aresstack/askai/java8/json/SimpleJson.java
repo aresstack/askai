@@ -1,4 +1,4 @@
-package io.github.ollama4j.json;
+package com.aresstack.askai.java8.json;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -6,9 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-public final class OllamaJson {
+public final class SimpleJson {
 
-    private OllamaJson() {
+    private SimpleJson() {
     }
 
     /**

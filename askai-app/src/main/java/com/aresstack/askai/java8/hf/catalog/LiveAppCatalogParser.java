@@ -1,6 +1,6 @@
 package com.aresstack.askai.java8.hf.catalog;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -58,7 +58,7 @@ public final class LiveAppCatalogParser {
         if (json == null || json.trim().length() == 0) {
             return entries;
         }
-        Object parsed = OllamaJson.parse(json);
+        Object parsed = SimpleJson.parse(json);
         if (!(parsed instanceof List)) {
             return entries;
         }

@@ -3,7 +3,7 @@ package com.aresstack.askai.java8.localmodels;
 import com.aresstack.askai.agent.model.nlp.NlpCapability;
 import com.aresstack.askai.agent.model.nlp.NlpModelDescriptor;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.File;
 import java.io.IOException;
@@ -188,7 +188,7 @@ public final class LocalNlpModelStore {
     @SuppressWarnings("unchecked")
     static NlpModelDescriptor parse(File manifestFile) {
         try {
-            Object parsed = OllamaJson.parse(new String(Files.readAllBytes(manifestFile.toPath()), UTF8));
+            Object parsed = SimpleJson.parse(new String(Files.readAllBytes(manifestFile.toPath()), UTF8));
             if (!(parsed instanceof Map)) {
                 return null;
             }

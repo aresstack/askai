@@ -1,6 +1,6 @@
 package com.aresstack.askai.java8.hf.meta;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.File;
 import java.io.IOException;
@@ -53,7 +53,7 @@ public final class HuggingFaceImportProvenance {
         }
         File temp = File.createTempFile(modelFile.getName() + ".", ".askai-provenance.tmp", directory);
         try {
-            Files.write(temp.toPath(), OllamaJson.toJson(document).getBytes(StandardCharsets.UTF_8));
+            Files.write(temp.toPath(), SimpleJson.toJson(document).getBytes(StandardCharsets.UTF_8));
             try {
                 Files.move(temp.toPath(), target.toPath(),
                         StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

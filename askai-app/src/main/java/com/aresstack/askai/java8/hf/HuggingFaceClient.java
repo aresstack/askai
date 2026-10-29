@@ -4,7 +4,7 @@ import com.aresstack.askai.java8.net.CertificateTrustConfiguration;
 import com.aresstack.askai.java8.net.HttpClientConfiguration;
 import com.aresstack.askai.java8.net.ProxyConfiguration;
 import com.aresstack.askai.java8.net.SystemTrustSslSocketFactory;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -618,7 +618,7 @@ public final class HuggingFaceClient implements HuggingFaceSearchGateway {
             closeQuietly(inputStream);
             connection.disconnect();
         }
-        Object parsed = OllamaJson.parse(body);
+        Object parsed = SimpleJson.parse(body);
         List values = parsed instanceof List ? (List) parsed : new ArrayList();
         List<HuggingFaceModel> models = new ArrayList<HuggingFaceModel>();
         for (int i = 0; i < values.size(); i++) {
@@ -653,7 +653,7 @@ public final class HuggingFaceClient implements HuggingFaceSearchGateway {
 
     public List<HuggingFaceFile> listFiles(String modelId) throws IOException {
         String url = "https://huggingface.co/api/models/" + encodePath(modelId) + "/tree/main?recursive=true";
-        Object parsed = OllamaJson.parse(getText(url));
+        Object parsed = SimpleJson.parse(getText(url));
         List values = parsed instanceof List ? (List) parsed : new ArrayList();
         List<HuggingFaceFile> files = new ArrayList<HuggingFaceFile>();
         for (int i = 0; i < values.size(); i++) {
@@ -693,7 +693,7 @@ public final class HuggingFaceClient implements HuggingFaceSearchGateway {
      */
     public List<HuggingFaceFile> listAllFilesDetailed(String modelId) throws IOException {
         String url = "https://huggingface.co/api/models/" + encodePath(modelId) + "/tree/main?recursive=true";
-        Object parsed = OllamaJson.parse(getText(url));
+        Object parsed = SimpleJson.parse(getText(url));
         List values = parsed instanceof List ? (List) parsed : new ArrayList();
         List<HuggingFaceFile> files = new ArrayList<HuggingFaceFile>();
         for (int i = 0; i < values.size(); i++) {
@@ -731,7 +731,7 @@ public final class HuggingFaceClient implements HuggingFaceSearchGateway {
      */
     public List<String> listAllFiles(String modelId) throws IOException {
         String url = "https://huggingface.co/api/models/" + encodePath(modelId) + "/tree/main?recursive=true";
-        Object parsed = OllamaJson.parse(getText(url));
+        Object parsed = SimpleJson.parse(getText(url));
         List values = parsed instanceof List ? (List) parsed : new ArrayList();
         List<String> paths = new ArrayList<String>();
         for (int i = 0; i < values.size(); i++) {
@@ -783,7 +783,7 @@ public final class HuggingFaceClient implements HuggingFaceSearchGateway {
         for (int i = 0; i < MODEL_INFO_EXPAND.length; i++) {
             url.append(i == 0 ? '?' : '&').append("expand[]=").append(encode(MODEL_INFO_EXPAND[i]));
         }
-        Object parsed = OllamaJson.parse(getText(url.toString()));
+        Object parsed = SimpleJson.parse(getText(url.toString()));
         if (parsed instanceof Map) {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) parsed;

@@ -2,7 +2,7 @@ package com.aresstack.askai.java8.localmodels;
 
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.File;
 import java.io.IOException;
@@ -82,7 +82,7 @@ public final class LocalEmbeddingModelCatalog implements EmbeddingModelResolver 
             return null;
         }
         try {
-            Object parsed = OllamaJson.parse(new String(Files.readAllBytes(manifestFile.toPath()), UTF_8));
+            Object parsed = SimpleJson.parse(new String(Files.readAllBytes(manifestFile.toPath()), UTF_8));
             return parsed instanceof Map ? (Map<String, Object>) parsed : null;
         } catch (IOException | RuntimeException unreadable) {
             return null; // a corrupt manifest is simply not a usable model

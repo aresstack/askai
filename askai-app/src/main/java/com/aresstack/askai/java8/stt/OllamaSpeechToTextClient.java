@@ -1,6 +1,6 @@
 package com.aresstack.askai.java8.stt;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -207,7 +207,7 @@ final class OllamaSpeechToTextClient {
 
         Object parsed;
         try {
-            parsed = OllamaJson.parse(body);
+            parsed = SimpleJson.parse(body);
         } catch (RuntimeException ex) {
             throw new SpeechToTextException(TranscriptionErrorKind.BAD_JSON, status,
                     "Ollama returned an invalid transcription response (not JSON): " + excerpt(body), ex);
@@ -255,7 +255,7 @@ final class OllamaSpeechToTextClient {
             return "";
         }
         try {
-            Object parsed = OllamaJson.parse(body);
+            Object parsed = SimpleJson.parse(body);
             if (parsed instanceof Map) {
                 Object error = ((Map) parsed).get("error");
                 if (error instanceof Map) {

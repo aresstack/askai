@@ -1,40 +1,78 @@
 package com.aresstack.askai.java8.client;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.ollama4j.ModelPullListener;
 import io.github.ollama4j.Ollama;
 import io.github.ollama4j.exceptions.OllamaException;
-import io.github.ollama4j.models.ChatCompletion;
-import io.github.ollama4j.models.ChatMessage;
-import io.github.ollama4j.models.ChatStreamListener;
-import io.github.ollama4j.models.EmbeddingResult;
-import io.github.ollama4j.models.ToolCall;
-import io.github.ollama4j.models.Model;
-import io.github.ollama4j.models.ModelDetails;
-import io.github.ollama4j.models.ModelInfo;
-import io.github.ollama4j.models.PullProgress;
-import io.github.ollama4j.models.PullProgressListener;
-import io.github.ollama4j.models.RunningModel;
+import io.github.ollama4j.models.chat.OllamaChatMessage;
+import io.github.ollama4j.models.chat.OllamaChatMessageRole;
+import io.github.ollama4j.models.chat.OllamaChatRequest;
+import io.github.ollama4j.models.chat.OllamaChatResponseModel;
+import io.github.ollama4j.models.chat.OllamaChatResult;
+import io.github.ollama4j.models.chat.OllamaChatTokenHandler;
+import io.github.ollama4j.models.chat.OllamaChatToolCalls;
+import io.github.ollama4j.models.embed.OllamaEmbedRequest;
+import io.github.ollama4j.models.embed.OllamaEmbedResult;
+import io.github.ollama4j.models.generate.OllamaGenerateRequest;
+import io.github.ollama4j.models.ps.ModelProcessesResult;
+import io.github.ollama4j.models.response.Model;
+import io.github.ollama4j.models.response.ModelDetail;
+import io.github.ollama4j.models.response.ModelMeta;
+import io.github.ollama4j.models.response.ModelPullResponse;
+import io.github.ollama4j.models.response.OllamaResult;
+import io.github.ollama4j.tools.OllamaToolCallsFunction;
+import io.github.ollama4j.utils.Utils;
 
+import java.net.http.HttpRequest;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 /**
- * The sole adapter between AskAI and the embedded Java 8 {@code ollama4j-java8} library, mirroring
- * the original AskAI {@code AskAiOllamaClient} (which wrapped ollama4j 1.1.7). It maps library DTOs
- * into the AskAI domain models so the UI and services never depend on the library directly.
+ * The sole adapter between AskAI and the official {@code io.github.ollama4j:ollama4j} library (1.1.7, the
+ * client the original AskAI used before the Java-8 detour). It maps library DTOs into the AskAI domain
+ * models so the UI and services never depend on the library directly.
  *
- * <p>Where the lean Java 8 library lacks data the original library provided (e.g. model
- * capabilities from {@code /api/show}, per-process model details from {@code /api/ps}), the mapped
- * value is empty rather than failing — the UI renders what is available.</p>
+ * <p>Two wire details of AskAI's chat contract are not expressible in the library's typed request and are
+ * written by {@link RawChatRequest} directly into the JSON body: the {@code think} field as AskAI's
+ * {@code ThinkingOption} emits it (a boolean or one of the levels {@code low}/{@code medium}/{@code high}/
+ * {@code max}; the library's enum stops at {@code high}) and {@code tool_name} on tool-result turns (the
+ * library's message has no such field). Tool calls are executed by AskAI's own agent loop, never by the
+ * library: its automatic re-send on tool calls is switched off.</p>
  */
 public final class AskAiOllamaClient {
 
     private static final long REQUEST_TIMEOUT_SECONDS = 6L * 60L * 60L;
+    private static final String DEFAULT_BASE_URL = "http://localhost:11434";
+
+    static {
+        // ollama4j parses every response with ONE shared ObjectMapper, and some of its DTOs are strict
+        // (no ignoreUnknown on /api/version, /api/tags and the /api/ps details): a newer Ollama field —
+        // or the "features" block AskAI's own local model runtime adds to /api/version — would fail the
+        // whole call. Clients ignore what they do not know; that is the documented Ollama contract.
+        Utils.getObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
 
     private final Ollama ollama;
 
     public AskAiOllamaClient(String baseUrl) {
-        this.ollama = new Ollama(baseUrl);
+        this.ollama = new Ollama(normalizeBaseUrl(baseUrl));
+        // The library's default is 10 s for the whole request: far too short for a model that first has
+        // to load. AskAI's model-level timeouts are enforced by its own services, not here.
         this.ollama.setRequestTimeoutSeconds(REQUEST_TIMEOUT_SECONDS);
+        // AskAI's agent loop executes tool calls itself. Without this the library would re-send the
+        // conversation up to three times whenever the model requests a tool, and fail on the unknown tool.
+        this.ollama.setMaxChatToolCallRetries(0);
     }
 
     public boolean ping() throws OllamaRequestException {
@@ -57,8 +95,10 @@ public final class AskAiOllamaClient {
         try {
             List<Model> models = ollama.listModels();
             List<OllamaModelInfo> mapped = new ArrayList<OllamaModelInfo>();
-            for (Model model : models) {
-                mapped.add(toModelInfo(model));
+            if (models != null) {
+                for (Model model : models) {
+                    mapped.add(toModelInfo(model));
+                }
             }
             return mapped;
         } catch (OllamaException ex) {
@@ -76,16 +116,18 @@ public final class AskAiOllamaClient {
 
     public List<OllamaRunningModelInfo> getRunningModels() throws OllamaRequestException {
         try {
-            List<RunningModel> running = ollama.ps();
+            ModelProcessesResult result = ollama.ps();
             List<OllamaRunningModelInfo> mapped = new ArrayList<OllamaRunningModelInfo>();
-            for (RunningModel model : running) {
-                mapped.add(new OllamaRunningModelInfo(
-                        model.getName(),
-                        model.getName(),
-                        model.getExpiresAt(),
-                        model.getSize(),
-                        model.getSizeVram(),
-                        OllamaModelDetails.empty()));
+            if (result != null && result.getModels() != null) {
+                for (ModelProcessesResult.ModelProcess process : result.getModels()) {
+                    mapped.add(new OllamaRunningModelInfo(
+                            process.getName(),
+                            process.getModel(),
+                            process.getExpiresAt(),
+                            process.getSize(),
+                            process.getSizeVram(),
+                            toDetails(process.getDetails())));
+                }
             }
             return mapped;
         } catch (OllamaException ex) {
@@ -95,14 +137,14 @@ public final class AskAiOllamaClient {
 
     public OllamaModelInfoView getModelInfo(String modelName) throws OllamaRequestException {
         try {
-            ModelInfo info = ollama.getModelDetails(modelName);
+            ModelDetail info = ollama.getModelDetails(modelName);
             return new OllamaModelInfoView(
                     toDetails(info.getDetails()),
                     info.getTemplate(),
-                    "",
+                    info.getSystem(),
                     info.getParameters(),
                     info.getModelFile(),
-                    info.getCapabilities());
+                    capabilities(info.getCapabilities()));
         } catch (OllamaException ex) {
             throw wrap("model info for " + modelName, ex);
         }
@@ -110,7 +152,7 @@ public final class AskAiOllamaClient {
 
     public void deleteModel(String modelName) throws OllamaRequestException {
         try {
-            ollama.deleteModel(modelName);
+            ollama.deleteModel(modelName, false);
         } catch (OllamaException ex) {
             throw wrap("delete " + modelName, ex);
         }
@@ -126,11 +168,11 @@ public final class AskAiOllamaClient {
 
     public void pullModel(String modelName, final OllamaPullListener listener) throws OllamaRequestException {
         try {
-            ollama.pullModel(modelName, new PullProgressListener() {
-                public void onProgress(PullProgress progress) {
-                    if (listener != null) {
+            ollama.pullModel(modelName, new ModelPullListener() {
+                public void onStatusUpdate(String pulledModel, ModelPullResponse response) {
+                    if (listener != null && response != null) {
                         listener.onProgress(new OllamaPullProgress(
-                                progress.getStatus(), progress.getCompleted(), progress.getTotal()));
+                                response.getStatus(), response.getCompleted(), response.getTotal()));
                     }
                 }
             });
@@ -141,7 +183,12 @@ public final class AskAiOllamaClient {
 
     public String generate(String modelName, String prompt) throws OllamaRequestException {
         try {
-            return ollama.generate(modelName, prompt);
+            OllamaGenerateRequest request = OllamaGenerateRequest.builder()
+                    .withModel(modelName)
+                    .withPrompt(prompt)
+                    .build();
+            OllamaResult result = ollama.generate(request, null);
+            return result == null || result.getResponse() == null ? "" : result.getResponse();
         } catch (OllamaException ex) {
             throw wrap("generate with " + modelName, ex);
         }
@@ -149,8 +196,10 @@ public final class AskAiOllamaClient {
 
     public List<List<Double>> embed(String modelName, List<String> inputs) throws OllamaRequestException {
         try {
-            EmbeddingResult result = ollama.embed(modelName, inputs);
-            return result.getEmbeddings();
+            OllamaEmbedResult result = ollama.embed(new OllamaEmbedRequest(modelName, inputs));
+            return result == null || result.getEmbeddings() == null
+                    ? Collections.<List<Double>>emptyList()
+                    : result.getEmbeddings();
         } catch (OllamaException ex) {
             throw wrap("embed with " + modelName, ex);
         }
@@ -169,86 +218,124 @@ public final class AskAiOllamaClient {
                                            Object think, final OllamaChatStreamListener listener)
             throws OllamaRequestException {
         try {
-            List<ChatMessage> messages = new ArrayList<ChatMessage>();
+            // Mutable on purpose: the library appends the answer to the request's message list.
+            List<OllamaChatMessage> messages = new ArrayList<OllamaChatMessage>();
+            List<String> toolNames = new ArrayList<String>();
             for (OllamaChatTurn turn : conversation) {
                 messages.add(toChatMessage(turn));
+                toolNames.add(turn.isTool() ? turn.getToolName() : "");
             }
-            final OllamaChatCompletion[] mapped = new OllamaChatCompletion[] { OllamaChatCompletion.empty() };
-            ollama.streamChat(modelName, messages, keepAlive, think, new ChatStreamListener() {
-                public void onThinkingDelta(String delta) {
-                    if (listener != null) {
-                        listener.onThinkingDelta(delta);
-                    }
-                }
+            RawChatRequest request = new RawChatRequest(think, toolNames);
+            request.setModel(modelName);
+            request.setMessages(messages);
+            request.setKeepAlive(keepAlive);
+            request.setStream(true);
+            request.setUseTools(false);
 
-                public void onContentDelta(String delta) {
-                    if (listener != null) {
-                        listener.onContent(delta);
+            final StringBuilder thinking = new StringBuilder();
+            final StringBuilder content = new StringBuilder();
+            final List<OllamaToolCall> toolCalls = new ArrayList<OllamaToolCall>();
+            OllamaChatResult result = ollama.chat(request, new OllamaChatTokenHandler() {
+                public void accept(OllamaChatResponseModel chunk) {
+                    OllamaChatMessage message = chunk == null ? null : chunk.getMessage();
+                    if (message == null) {
+                        return;
                     }
-                }
-
-                public void onToolCalls(List<ToolCall> toolCalls) {
-                    if (listener != null) {
-                        listener.onToolCalls(toOllamaToolCalls(toolCalls));
+                    String thinkingDelta = message.getThinking();
+                    if (thinkingDelta != null && !thinkingDelta.isEmpty()) {
+                        thinking.append(thinkingDelta);
+                        if (listener != null) {
+                            listener.onThinkingDelta(thinkingDelta);
+                        }
                     }
-                }
-
-                public void onComplete(ChatCompletion completion) {
-                    mapped[0] = new OllamaChatCompletion(completion.getThinking(), completion.getContent(),
-                            toOllamaToolCalls(completion.getToolCalls()),
-                            completion.getEvalCount(), completion.getEvalDurationNanos());
-                    if (listener != null) {
-                        listener.onComplete(mapped[0]);
+                    String contentDelta = message.getResponse();
+                    if (contentDelta != null && !contentDelta.isEmpty()) {
+                        content.append(contentDelta);
+                        if (listener != null) {
+                            listener.onContent(contentDelta);
+                        }
+                    }
+                    List<OllamaToolCall> calls = toOllamaToolCalls(message.getToolCalls());
+                    if (!calls.isEmpty()) {
+                        toolCalls.addAll(calls);
+                        if (listener != null) {
+                            listener.onToolCalls(calls);
+                        }
                     }
                 }
             });
-            return mapped[0];
+            OllamaChatResponseModel last = result == null ? null : result.getResponseModel();
+            long evalCount = last == null || last.getEvalCount() == null ? 0L : last.getEvalCount();
+            long evalDuration = last == null || last.getEvalDuration() == null ? 0L : last.getEvalDuration();
+            OllamaChatCompletion completion = new OllamaChatCompletion(
+                    thinking.toString(), content.toString(), toolCalls, evalCount, evalDuration);
+            if (listener != null) {
+                listener.onComplete(completion);
+            }
+            return completion;
         } catch (OllamaException ex) {
             throw wrap("chat with " + modelName, ex);
         }
     }
 
-    private static List<OllamaToolCall> toOllamaToolCalls(List<ToolCall> toolCalls) {
+    // ------------------------------------------------------------------ mapping
+
+    private static List<OllamaToolCall> toOllamaToolCalls(List<OllamaChatToolCalls> toolCalls) {
         List<OllamaToolCall> result = new ArrayList<OllamaToolCall>();
         if (toolCalls != null) {
-            for (ToolCall call : toolCalls) {
-                result.add(new OllamaToolCall(call.getName(), call.getArguments()));
+            for (OllamaChatToolCalls call : toolCalls) {
+                OllamaToolCallsFunction function = call == null ? null : call.getFunction();
+                if (function != null) {
+                    result.add(new OllamaToolCall(function.getName(), function.getArguments()));
+                }
             }
         }
         return result;
     }
 
-    private static ChatMessage toChatMessage(OllamaChatTurn turn) {
+    private static OllamaChatMessage toChatMessage(OllamaChatTurn turn) {
         if (turn.isSystem()) {
-            return ChatMessage.system(turn.getContent());
+            return new OllamaChatMessage(OllamaChatMessageRole.SYSTEM, turn.getContent());
         }
         if (turn.isTool()) {
-            return ChatMessage.tool(turn.getToolName(), turn.getContent());
+            // tool_name travels through RawChatRequest; the library's message has no field for it.
+            return new OllamaChatMessage(OllamaChatMessageRole.TOOL, turn.getContent());
         }
         if (turn.isAssistant()) {
-            List<ToolCall> calls = new ArrayList<ToolCall>();
-            for (OllamaToolCall call : turn.getToolCalls()) {
-                calls.add(new ToolCall(call.getName(), call.getArguments()));
+            List<OllamaChatToolCalls> calls = null;
+            if (!turn.getToolCalls().isEmpty()) {
+                calls = new ArrayList<OllamaChatToolCalls>();
+                for (OllamaToolCall call : turn.getToolCalls()) {
+                    calls.add(new OllamaChatToolCalls(null, new OllamaToolCallsFunction(
+                            call.getName(), new LinkedHashMap<String, Object>(call.getArguments()))));
+                }
             }
-            return ChatMessage.assistant(turn.getThinking(), turn.getContent(), calls);
+            String thinking = turn.getThinking().isEmpty() ? null : turn.getThinking();
+            return new OllamaChatMessage(OllamaChatMessageRole.ASSISTANT, turn.getContent(), thinking, calls, null);
         }
         if (!turn.getImages().isEmpty()) {
-            return ChatMessage.user(turn.getContent(), turn.getImages());
+            List<byte[]> images = new ArrayList<byte[]>();
+            for (String image : turn.getImages()) {
+                images.add(Base64.getDecoder().decode(image));
+            }
+            return new OllamaChatMessage(OllamaChatMessageRole.USER, turn.getContent(), null, null, images);
         }
-        return ChatMessage.user(turn.getContent());
+        return new OllamaChatMessage(OllamaChatMessageRole.USER, turn.getContent());
     }
 
     private static OllamaModelInfo toModelInfo(Model model) {
+        String name = model.getName() != null && !model.getName().isEmpty() ? model.getName() : model.getModel();
+        String modelField = model.getModel() != null && !model.getModel().isEmpty() ? model.getModel() : name;
         return new OllamaModelInfo(
-                model.getName(),
-                model.getName(),
-                model.getModifiedAt(),
+                name,
+                modelField,
+                timestamp(model.getModifiedAt()),
                 model.getSize(),
                 model.getDigest(),
-                toDetails(model.getDetails()));
+                toDetails(model.getModelMeta()));
     }
 
-    private static OllamaModelDetails toDetails(ModelDetails details) {
+    private static OllamaModelDetails toDetails(ModelMeta details) {
         if (details == null) {
             return OllamaModelDetails.empty();
         }
@@ -259,7 +346,91 @@ public final class AskAiOllamaClient {
                 details.getQuantizationLevel());
     }
 
+    private static OllamaModelDetails toDetails(ModelProcessesResult.ModelDetails details) {
+        if (details == null) {
+            return OllamaModelDetails.empty();
+        }
+        return new OllamaModelDetails(
+                details.getFormat(),
+                details.getFamily(),
+                details.getParameterSize(),
+                details.getQuantizationLevel());
+    }
+
+    private static List<String> capabilities(String[] capabilities) {
+        return capabilities == null
+                ? Collections.<String>emptyList()
+                : new ArrayList<String>(Arrays.asList(capabilities));
+    }
+
+    /** ISO-8601 with offset and always with seconds (the model cards cut the text after the seconds). */
+    private static String timestamp(OffsetDateTime time) {
+        return time == null ? "" : DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(time);
+    }
+
+    private static String normalizeBaseUrl(String baseUrl) {
+        String url = baseUrl == null ? "" : baseUrl.trim();
+        if (url.isEmpty()) {
+            return DEFAULT_BASE_URL;
+        }
+        while (url.endsWith("/")) {
+            url = url.substring(0, url.length() - 1);
+        }
+        return url;
+    }
+
     private static OllamaRequestException wrap(String operation, OllamaException ex) {
         return new OllamaRequestException("Ollama request failed (" + operation + "): " + ex.getMessage(), ex);
+    }
+
+    /**
+     * The chat request with the two wire details the library's typed model cannot express. The body is the
+     * library's own serialization, patched on the JSON tree: {@code think} written verbatim (omitted when
+     * null), {@code tool_name} added to tool-result messages, and the library-internal {@code useTools} flag
+     * plus an empty {@code tools} list dropped so Ollama sees exactly the fields AskAI means.
+     */
+    static final class RawChatRequest extends OllamaChatRequest {
+
+        private final Object think;
+        private final List<String> toolNames;
+
+        RawChatRequest(Object think, List<String> toolNames) {
+            this.think = think;
+            this.toolNames = toolNames == null ? Collections.<String>emptyList() : toolNames;
+        }
+
+        @Override
+        public HttpRequest.BodyPublisher getBodyPublisher() {
+            return HttpRequest.BodyPublishers.ofString(toJson());
+        }
+
+        /** The exact JSON body sent to {@code /api/chat}. */
+        String toJson() {
+            ObjectMapper mapper = Utils.getObjectMapper();
+            ObjectNode body = mapper.valueToTree(this);
+            body.remove("think");
+            if (think != null) {
+                body.putPOJO("think", think);
+            }
+            body.remove("useTools");
+            JsonNode tools = body.get("tools");
+            if (tools == null || tools.isNull() || (tools.isArray() && tools.size() == 0)) {
+                body.remove("tools");
+            }
+            JsonNode messages = body.get("messages");
+            if (messages instanceof ArrayNode) {
+                for (int i = 0; i < messages.size() && i < toolNames.size(); i++) {
+                    String toolName = toolNames.get(i);
+                    if (toolName != null && !toolName.isEmpty() && messages.get(i) instanceof ObjectNode) {
+                        ((ObjectNode) messages.get(i)).put("tool_name", toolName);
+                    }
+                }
+            }
+            try {
+                return mapper.writeValueAsString(body);
+            } catch (JsonProcessingException ex) {
+                throw new IllegalArgumentException("Request not Body convertible.", ex);
+            }
+        }
     }
 }

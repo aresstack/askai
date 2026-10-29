@@ -656,7 +656,10 @@ final class LocalModelRuntimeServer {
             return "";
         }
         try {
-            return LocalJson.str(LocalJson.parseObject(body), "model");
+            Map<String, Object> object = LocalJson.parseObject(body);
+            // Ollama accepts both spellings on /api/show and /api/delete; ollama4j sends "name".
+            String model = LocalJson.str(object, "model");
+            return model.isEmpty() ? LocalJson.str(object, "name") : model;
         } catch (RuntimeException notJson) {
             return "";
         }

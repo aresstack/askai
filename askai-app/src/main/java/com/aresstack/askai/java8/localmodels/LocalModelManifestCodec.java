@@ -2,7 +2,7 @@ package com.aresstack.askai.java8.localmodels;
 
 import com.aresstack.windirectml.catalog.InstalledModelManifest;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.java8.json.SimpleJson;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,7 +32,7 @@ public final class LocalModelManifestCodec {
         m.put("sourceFormat", manifest.getSourceFormat());
         m.put("state", manifest.getState());
         m.put("installedAt", manifest.getInstalledAt());
-        return OllamaJson.toJson(m);
+        return SimpleJson.toJson(m);
     }
 
     /**
@@ -45,7 +45,7 @@ public final class LocalModelManifestCodec {
     public static InstalledModelManifest parse(String json) {
         Object parsed;
         try {
-            parsed = OllamaJson.parse(json);
+            parsed = SimpleJson.parse(json);
         } catch (RuntimeException unreadable) {
             return null;
         }
