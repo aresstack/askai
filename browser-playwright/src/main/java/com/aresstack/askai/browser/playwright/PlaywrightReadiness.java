@@ -1,7 +1,7 @@
 package com.aresstack.askai.browser.playwright;
 
 /**
- * Structured result of the capability probing at sidecar start. Statuses are SPECIFIC on purpose — a missing
+ * Structured result of the capability probing at browser runtime start. Statuses are SPECIFIC on purpose — a missing
  * browser is not reported the same way as a broken classpath. Note there is no NODE_RUNTIME_NOT_FOUND status:
  * playwright4j's whole point is that no Node.js runtime exists; its equivalent failure mode is a missing
  * driver-bundle (the Playwright Core JS package on the classpath), reported as DRIVER_BUNDLE_NOT_FOUND.

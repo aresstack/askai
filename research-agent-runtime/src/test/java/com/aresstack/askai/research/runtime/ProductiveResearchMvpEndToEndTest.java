@@ -1,8 +1,6 @@
 package com.aresstack.askai.research.runtime;
 
-import com.aresstack.askai.acp.solon.SolonAcpAgentConnector;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
-import com.aresstack.askai.mcp.solon.SolonMcpToolClientFactory;
 import com.aresstack.askai.research.backend.ResearchBackendEvent;
 import com.aresstack.askai.research.backend.ResearchProjectRequest;
 import com.aresstack.askai.research.backend.ResearchPrompt;
@@ -30,7 +28,6 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -50,8 +47,9 @@ import static org.junit.Assume.assumeTrue;
  * Commit 38: the PRODUCTIVE research MVP end to end, driven exclusively through the host wiring AskAI uses —
  * {@code ResearchRuntimeGenerationSwitch} → {@code ProductiveResearchBackendFactory} →
  * {@code ProductiveResearchSessionResources} → {@code ResearchSessionBackend} port. No ResearchLoop call, no
- * SolonToolInvoker, no fake backend, no STATIC_HTTP anywhere in this test: the loop runs INSIDE the real
- * external agent process; pages come from the real Playwright sidecar (JavaScript-only content, two hosts);
+ * ToolInvoker, no fake backend, no STATIC_HTTP anywhere in this test: the loop runs INSIDE the real
+ * in-process agent session; pages come from the real in-process Playwright browser (JavaScript-only
+ * content, two hosts);
  * sources persist through the Commit-37 acceptance path into the FILE repository; the host state machine is
  * the only transition authority (PHASE_READY is an event, the HOST dispatches REQUEST_EVIDENCE_REVIEW).
  * Also proven: ordered session teardown, prepare-then-publish generation switching and that a failed switch
@@ -108,11 +106,6 @@ public class ProductiveResearchMvpEndToEndTest {
     @Test
     public void productiveHostWiringRunsTheFullMvpAndSurvivesGenerationSwitching() throws Exception {
         // ---- external prerequisites (environment-gated with the concrete reason) ----
-        String agentJar = System.getProperty("research.agent.jar", "");
-        String agentHome = System.getProperty("acp.java.home", System.getProperty("java.home"));
-        String agentJava = agentHome + File.separator + "bin" + File.separator
-                + (System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
-        assumeTrue("SKIPPED: agent jar not built", new File(agentJar).isFile());
         // The reranker is MANDATORY for a productive browser session: start the real local reranker or
         // skip readably (no installed cross-encoder / no Java-21 launcher).
         com.aresstack.askai.research.runtime.rerank.LiveLocalRerankerRuntime reranker =
@@ -120,7 +113,7 @@ public class ProductiveResearchMvpEndToEndTest {
         assumeTrue("SKIPPED: no live local reranker (mandatory for a browser session)",
                 reranker != null);
 
-        // ---- an ENGINE server + two content servers (host:port families via the sidecar dev flag) ----
+        // ---- an ENGINE server + two content servers (host:port families via the browser dev flag) ----
         HttpServer engineServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         HttpServer serverOne = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         HttpServer serverTwo = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -145,16 +138,14 @@ public class ProductiveResearchMvpEndToEndTest {
         serverOne.start();
         serverTwo.start();
         // Documented dev/test hand-off: local multi-server worlds act as distinct domain families,
-        // and the local test engine is an EXPLICIT per-run sidecar flag (the persisted override is dead).
-        String oldSidecarArgs = System.setProperty("askai.research.browser.args",
+        // and the local test engine is an EXPLICIT per-run browser flag (the persisted override is dead).
+        String oldBrowserArgs = System.setProperty("askai.research.browser.args",
                 "--domain-key-mode=host-port --search-url=" + baseEngine + "/find?q={query}");
 
         SolonMcpServerRuntime registry = new SolonMcpServerRuntime();
         ResearchRuntimeGenerationSwitch switcher = new ResearchRuntimeGenerationSwitch(
-                registry, new SolonMcpToolClientFactory(),
-                new SolonAcpAgentConnector(Duration.ofSeconds(180), null),
-                reranker.asProvider(10));
-        ResearchRuntimeConfig config = new ResearchRuntimeConfig(agentJava, agentJar,
+                registry, reranker.asProvider(10));
+        ResearchRuntimeConfig config = new ResearchRuntimeConfig(
                 System.getenv().getOrDefault("ASKAI_TEST_BROWSER_CHANNEL", "chrome"),
                 true, true, reranker.modelName);
 
@@ -177,7 +168,7 @@ public class ProductiveResearchMvpEndToEndTest {
                     registry.endpointUrl(resources.getControlEndpoint().getHandle()));
             assertNotNull("browser bridge endpoint registered",
                     registry.endpointUrl(resources.getBrowserBridge().getHandle()));
-            // Lazy browser: creating the session must NOT start a sidecar — it stays STOPPED until the
+            // Lazy browser: creating the session must NOT start the browser — it stays STOPPED until the
             // first web_* command.
             assertFalse("browser runtime is STOPPED at session start (lazy)",
                     resources.getBrowser().isReady());
@@ -250,15 +241,7 @@ public class ProductiveResearchMvpEndToEndTest {
             assertNull("research endpoint unregistered (token invalid)",
                     registry.endpointUrl(controlHandle));
 
-            // ---- failed generation switch leaves generation 1 fully usable ----
-            ResearchRuntimeConfig broken = new ResearchRuntimeConfig(agentJava, agentJar + ".missing",
-                    "chrome", true, true, null);
-            try {
-                switcher.switchTo(broken);
-                fail("a broken config must not be published");
-            } catch (IllegalArgumentException expected) {
-                assertTrue(expected.getMessage().contains("keeping the current one"));
-            }
+            // ---- generation 1 stays usable until a NEW generation is published ----
             assertTrue("generation 1 still active", switcher.getActive() == gen1);
             assertFalse("generation 1 not retired", gen1.isRetired());
             ProductiveResearchSessionResources second = gen1.createSession("e2e2", projectDir);
@@ -287,10 +270,10 @@ public class ProductiveResearchMvpEndToEndTest {
             engineServer.stop(0);
             serverOne.stop(0);
             serverTwo.stop(0);
-            if (oldSidecarArgs == null) {
+            if (oldBrowserArgs == null) {
                 System.clearProperty("askai.research.browser.args");
             } else {
-                System.setProperty("askai.research.browser.args", oldSidecarArgs);
+                System.setProperty("askai.research.browser.args", oldBrowserArgs);
             }
         }
     }

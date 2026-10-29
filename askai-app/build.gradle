@@ -47,12 +47,10 @@ dependencies {
     // The research plugin is NOT a dependency and never enters the fat jar.
     implementation project(':agent-plugin-host')
     // Host runtime services for the PRODUCTIVE research mode (Commit 40): the host is the intended owner
-    // of the Solon MCP server runtime and the ACP connector; plugins reach them only through the neutral
-    // AgentHostContext.getService lookup. Research classes themselves stay out of the fat jar.
+    // of the Solon MCP server runtime; plugins reach it only through the neutral AgentHostContext.getService
+    // lookup. Research classes themselves stay out of the fat jar (the agent runs inside the plugin).
     implementation project(':mcp-runtime-api')
     implementation project(':mcp-solon-runtime')
-    implementation project(':acp-client-api')
-    implementation project(':acp-solon-client')
     implementation 'com.aresstack:win-proxy-java:0.1.0-beta.4'
     // HTML parsing for the Ollama Library scraper (Jerry/Lagarto). Java 8 bytecode, pulls
     // jodd-core transitively; only used to parse ollama.com HTML, the HTTP fetch goes through
@@ -90,11 +88,7 @@ dependencies {
 
 test {
     useJUnit()
-    // App-classpath reproduction of the research-agent start (diagnoses -32603 from the GUI).
-    dependsOn ':research-agent-runtime:researchAgentJar'
     doFirst {
-        def agentJarTask = project(':research-agent-runtime').tasks.getByName('researchAgentJar')
-        systemProperty 'research.agent.jar', agentJarTask.archiveFile.get().asFile.absolutePath
         // C2c: the opt-in real-model smoke drives the productive (in-process) LocalModelRuntimeManager.
         // Gated by -Daskai.local.realModelSmoke=true, so a normal build never downloads models.
         systemProperty 'askai.local.realModelSmoke',
@@ -172,7 +166,7 @@ task mergeServiceFiles {
 
 task fatJar(type: Jar) {
     group = 'build'
-    description = 'Build the runnable AskAI fat jar (app + runtime dependencies; the plugin and the research runtime distribution stay outside).'
+    description = 'Build the runnable AskAI fat jar (app + runtime dependencies; the research plugin stays outside).'
     archiveBaseName = 'askai'
     archiveClassifier = ''
     archiveVersion = project.version.toString()
@@ -213,21 +207,6 @@ def devPluginsDir = rootProject.layout.buildDirectory.dir('dev-plugins')
 // load lazily via PF4J — the root cause of the random ClassFormatError ($2 / $7) failures.
 def devPluginRunsDir = rootProject.layout.buildDirectory.dir('dev-plugin-runs')
 
-// The assembled research runtime distribution (Commit 42): the agent jar in a stable layout the app can
-// auto-detect — no manually typed build paths. (The browser runs in-process since the Java 21 return.)
-def researchRuntimeDir = rootProject.layout.buildDirectory.dir('research-runtime')
-
-task researchRuntimeDist(type: Sync) {
-    group = 'build'
-    description = 'Assemble the research runtime distribution (the agent jar).'
-    dependsOn ':research-agent-runtime:researchAgentJar'
-    into researchRuntimeDir
-    // The closure defers the cross-project task lookup to execution time (configuration order safe).
-    from({ project(':research-agent-runtime').tasks.getByName('researchAgentJar').archiveFile }) {
-        rename { 'research-agent-runtime.jar' }
-    }
-}
-
 run {
     // UTF-8 as the JVM default (Java 18+ defaults to UTF-8, it stays explicit anyway): every library
     // that decodes HTTP/JSON bytes with the platform default then reads UTF-8 as mojibake
@@ -245,7 +224,6 @@ task runWithDevPlugins(type: JavaExec) {
     group = 'application'
     description = 'Run AskAI from a fresh immutable plugin generation under <root>/build/dev-plugin-runs.'
     dependsOn ':research-agent-ui-plugin:pluginDistribution'
-    dependsOn researchRuntimeDist
     classpath = sourceSets.main.runtimeClasspath
     mainClass = application.mainClass
     jvmArgs '-Dfile.encoding=UTF-8' // see `run`: UTF-8 default on every process of the chain
@@ -275,9 +253,6 @@ task runWithDevPlugins(type: JavaExec) {
 
         systemProperty 'askai.pluginsDir', genRoot.absolutePath
         systemProperty 'askai.devPluginRun.lock', lockFile.absolutePath
-        // DOCUMENTED hand-off of the assembled distribution (read by ResearchRuntimeDefaults; the
-        // settings themselves stay in the typed, persisted model — this only feeds the defaults).
-        systemProperty 'askai.research.runtime.dir', researchRuntimeDir.get().asFile.absolutePath
 
         // Prune generations that are GUARANTEED unused: a prior run that has exited releases its OS-level
         // lock, so tryLock on its .run.lock succeeds — only then do we delete. A generation whose JVM is

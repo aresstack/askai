@@ -223,7 +223,7 @@ final class PlaywrightBrowserSession implements BrowserSession {
         java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> engines = enginesToVisit();
         if (engines.isEmpty()) {
             throw new BrowserException("No search engine is enabled for the Playwright backend "
-                    + "(enable one in the search settings, or start the sidecar with "
+                    + "(enable one in the search settings, or start the browser runtime with "
                     + "--search-url=<template containing {query}>).");
         }
         if (query == null || query.trim().isEmpty()) {

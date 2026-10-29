@@ -14,7 +14,7 @@ acceptance, findings or session state"). Two implementations:
 
 | Implementation | Path |
 |---|---|
-| `LegacyBrowserSearchStrategy` | browser SERP via the Playwright sidecar (Bing/DuckDuckGo, layout repair) |
+| `LegacyBrowserSearchStrategy` | browser SERP via the in-process Playwright browser (Bing/DuckDuckGo, layout repair) |
 | `SingleProviderSearchStrategy` | API providers (Brave, BrightData, DataForSEO, …) |
 
 Its result type `InitialSearchResult` is already richer than a URL list:

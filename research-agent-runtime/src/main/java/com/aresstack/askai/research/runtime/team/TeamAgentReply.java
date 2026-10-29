@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.runtime.team;
 
 /**
- * Maps a {@link TeamAgentResult} to the single user-visible line the runtime sends over ACP as a plain agent
+ * Maps a {@link TeamAgentResult} to the single user-visible line the runtime sends as a plain agent
  * message. An OK turn shows the model's own {@code assistantMessage}; every failure shows an HONEST, typed
  * line (never a fabricated answer, never the withheld message of a rejected command) that invites a retry.
  * <p>

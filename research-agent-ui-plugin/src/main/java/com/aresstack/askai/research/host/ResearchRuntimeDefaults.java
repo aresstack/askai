@@ -3,35 +3,20 @@ package com.aresstack.askai.research.host;
 import java.io.File;
 
 /**
- * Automatic defaults for the productive research runtime so a normal development start has NO empty
- * mandatory fields: the agent's Java comes from the running JVM ({@code java.home}) and the agent jar from
- * the assembled distribution directory (documented hand-off {@code askai.research.runtime.dir}, set by
- * {@code runWithDevPlugins} / an installer). Only EMPTY fields are completed — explicit user values always
- * win, and nothing is ever downloaded or installed. The single exception is the browser channel: when the
- * configured browser is provably absent but the other channel's browser is installed, the installed one is
- * used (otherwise every session would fail although a working browser exists). The browser itself runs
- * in-process and needs no runtime of its own.
+ * Automatic defaults for the productive research runtime. Both the research agent and the browser run
+ * in-process, so nothing has to be located any more; the one completion left is the browser channel: when
+ * the configured browser is provably absent but the other channel's browser is installed, the installed one
+ * is used (otherwise every session would fail although a working browser exists). Explicit user values
+ * always win, and nothing is ever downloaded or installed here.
  */
 public final class ResearchRuntimeDefaults {
-
-    /** Documented dev/installer hand-off for the assembled distribution directory. */
-    public static final String RUNTIME_DIR_PROPERTY = "askai.research.runtime.dir";
 
     private ResearchRuntimeDefaults() {
     }
 
-    /** Complete only the EMPTY fields of the settings from the detectable environment. */
+    /** Complete the settings from the detectable environment (the installed browsers). */
     public static ResearchRuntimeSettings complete(ResearchRuntimeSettings settings) {
-        String agentJava = settings.getAgentJavaExecutable();
-        if (agentJava.isEmpty()) {
-            agentJava = currentJvmJava();
-        }
-        String agentJar = settings.getAgentJar();
-        File dist = distributionDirectory();
-        if (dist != null && agentJar.isEmpty()) {
-            agentJar = existingPath(new File(dist, "research-agent-runtime.jar"));
-        }
-        return new ResearchRuntimeSettings(settings.getMode(), agentJava, agentJar,
+        return new ResearchRuntimeSettings(settings.getMode(),
                 installedBrowserChannel(settings.getBrowserChannel()), settings.isHeadless(),
                 settings.isAllowPrivateNetworks(), settings.getSelectedRerankerModel());
     }
@@ -91,31 +76,4 @@ public final class ResearchRuntimeDefaults {
         return false;
     }
 
-    /** The running JVM's launcher (the agent runs on AskAI's own Java). */
-    public static String currentJvmJava() {
-        String home = System.getProperty("java.home", "");
-        if (home.isEmpty()) {
-            return "";
-        }
-        File java = new File(home, "bin" + File.separator + (isWindows() ? "java.exe" : "java"));
-        return existingPath(java);
-    }
-
-    /** The assembled distribution directory, or null when not provided/absent. */
-    public static File distributionDirectory() {
-        String dir = System.getProperty(RUNTIME_DIR_PROPERTY, "");
-        if (dir.isEmpty()) {
-            return null;
-        }
-        File file = new File(dir);
-        return file.isDirectory() ? file : null;
-    }
-
-    private static String existingPath(File file) {
-        return file.isFile() ? file.getAbsolutePath() : "";
-    }
-
-    private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
-    }
 }

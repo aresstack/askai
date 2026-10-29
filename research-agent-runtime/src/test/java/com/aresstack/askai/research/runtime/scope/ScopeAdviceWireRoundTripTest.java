@@ -92,12 +92,12 @@ public class ScopeAdviceWireRoundTripTest {
     public void theRunWireLineCarriesThePayloadCorrelated() {
         String line = com.aresstack.askai.research.runtime.loop.ResearchRunWire
                 .adviceDecision("req-7", "{\"status\":\"OK\",\"decision\":\"NONE\"}");
-        assertEquals(com.aresstack.askai.research.acp.ResearchRunWire.TYPE_ADVICE,
-                com.aresstack.askai.research.acp.ResearchRunWire.typeOf(line));
+        assertEquals(com.aresstack.askai.research.agentwire.ResearchRunWire.TYPE_ADVICE,
+                com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
         java.util.Map<String, String> fields =
-                com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
+                com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
         assertEquals("req-7", fields.get("request_id"));
         assertEquals("{\"status\":\"OK\",\"decision\":\"NONE\"}",
-                com.aresstack.askai.research.acp.ResearchRunWire.decodedField(fields, "payload"));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(fields, "payload"));
     }
 }

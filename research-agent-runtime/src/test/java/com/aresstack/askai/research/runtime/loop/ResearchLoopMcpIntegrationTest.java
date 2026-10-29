@@ -1,15 +1,11 @@
 package com.aresstack.askai.research.runtime.loop;
 
-import com.aresstack.askai.mcp.api.McpEndpointDefinition;
-import com.aresstack.askai.mcp.api.McpEndpointHandle;
 import com.aresstack.askai.mcp.api.McpToolCall;
 import com.aresstack.askai.mcp.api.McpToolContribution;
 import com.aresstack.askai.mcp.api.McpToolHandler;
 import com.aresstack.askai.mcp.api.McpToolParameter;
 import com.aresstack.askai.mcp.api.McpToolResult;
-import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
 
-import org.junit.AfterClass;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -25,27 +21,15 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Leitplanke 2: the deterministic browser is a REAL MCP endpoint. The loop runs through real Solon MCP
- * clients (SolonToolInvoker) against real streamable endpoints — tool discovery, schemas, serialization and
- * results are exercised end-to-end; only the page contents are fixtures. The research endpoint applies the
+ * Leitplanke 2: the deterministic browser is a REAL tool contribution set. The loop runs through the
+ * productive in-process ContributionToolInvoker against the same contributions the host publishes —
+ * dispatch, argument decoding and result contracts are exercised end-to-end; only the page contents are fixtures. The research endpoint applies the
  * Commit-37 result contract server-side.
  */
 public class ResearchLoopMcpIntegrationTest {
 
-    private static SolonMcpServerRuntime runtime;
-
-    @AfterClass
-    public static void shutdown() {
-        if (runtime != null) {
-            runtime.shutdown();
-        }
-    }
-
     @Test
     public void loopRunsAgainstRealMcpEndpointsAndReachesSufficientEvidence() throws Exception {
-        if (runtime == null) {
-            runtime = new SolonMcpServerRuntime();
-        }
         // ---- deterministic browser endpoint (fixture pages, capture ids in results) ----
         final Map<String, String[]> pages = new LinkedHashMap<String, String[]>(); // url -> {title, text, links}
         pages.put("https://host1.com/a", new String[]{"PF4J primer",
@@ -60,8 +44,6 @@ public class ResearchLoopMcpIntegrationTest {
         final AtomicInteger capSeq = new AtomicInteger();
         final String[] current = {null};
 
-        McpEndpointHandle browserHandle = runtime.registerEndpoint(
-                new McpEndpointDefinition("browser.itest", "Browser"));
         List<McpToolContribution> browserTools = new ArrayList<McpToolContribution>();
         browserTools.add(McpToolContribution.of("web_search_prepare", "prepare", new McpToolHandler() {
             public McpToolResult invoke(McpToolCall call) {
@@ -96,15 +78,13 @@ public class ResearchLoopMcpIntegrationTest {
                 return McpToolResult.ok(page == null || page[2].isEmpty() ? "" : page[2]);
             }
         }));
-        runtime.updateTools(browserHandle, browserTools);
+        ContributionToolInvoker browser = new ContributionToolInvoker(browserTools);
 
         // ---- research endpoint honoring the Commit-37 contract ----
         final List<String> findings = new ArrayList<String>();
         final Map<String, String> sourceByCapture = new LinkedHashMap<String, String>();
         final AtomicInteger srcSeq = new AtomicInteger();
-        McpEndpointHandle researchHandle = runtime.registerEndpoint(
-                new McpEndpointDefinition("research.itest36a", "Research"));
-        runtime.updateTools(researchHandle, Arrays.asList(
+        ContributionToolInvoker research = new ContributionToolInvoker(Arrays.asList(
                 McpToolContribution.of("source_accept", "accept", new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
                         String cap = call.getString("capture_id");
@@ -127,9 +107,7 @@ public class ResearchLoopMcpIntegrationTest {
                 }, McpToolParameter.string("source_id", true, "s"),
                    McpToolParameter.string("text", true, "t"))));
 
-        // ---- the loop over REAL Solon MCP clients ----
-        SolonToolInvoker browser = new SolonToolInvoker(runtime.endpointUrl(browserHandle), "streamable");
-        SolonToolInvoker research = new SolonToolInvoker(runtime.endpointUrl(researchHandle), "streamable");
+        // ---- the loop over the productive in-process invokers ----
         final AtomicLong now = new AtomicLong(0);
         final List<ResearchStopReason> ready = new ArrayList<ResearchStopReason>();
         try {
@@ -169,8 +147,6 @@ public class ResearchLoopMcpIntegrationTest {
         } finally {
             browser.close();
             research.close();
-            runtime.unregisterEndpoint(browserHandle);
-            runtime.unregisterEndpoint(researchHandle);
         }
     }
 }

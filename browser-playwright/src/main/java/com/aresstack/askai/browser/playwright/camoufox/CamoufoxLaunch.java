@@ -120,7 +120,7 @@ public record CamoufoxLaunch(Map<String, String> environment, JsonNode fingerpri
 
     static ObjectNode defaultProfile() throws IOException {
         try (InputStream in = CamoufoxLaunch.class.getResourceAsStream(DEFAULT_PROFILE)) {
-            if (in == null) throw new IllegalStateException(DEFAULT_PROFILE + " missing from the browser sidecar jar");
+            if (in == null) throw new IllegalStateException(DEFAULT_PROFILE + " missing from the browser-playwright jar");
             return (ObjectNode) MAPPER.readTree(in);
         }
     }

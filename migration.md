@@ -88,3 +88,25 @@ UI and a research session. In productive mode the session owns its resources and
 authoritative host state machine (tool set republished, view model mirrored); the ACP backend stays a pure
 transport adapter. New `/do <command>` slash command completes exactly the live-allowed commands.
 MCP-P008 resolved.
+
+## Java 21 return — one process (2026-10)
+
+AskAI runs on Java 21 again and everything that used to be a side process now lives inside the app:
+
+- `ollama4j-java8` (the in-house Java-8 port) is gone; the official `io.github.ollama4j:ollama4j:1.1.7`
+  client is used directly (`AskAiOllamaClient` patches the raw chat body for `think`/`tool_name`).
+- `local-model-runtime-sidecar-java21` → `:local-model-runtime` (library). `LocalModelRuntimeManager`
+  starts `LocalModelRuntime` in-process; the loopback HTTP API stays for all consumers.
+- `browser-mcp-server-java21` → `:browser-playwright` (library). The research plugin bundles it and starts
+  `PlaywrightBrowserRuntime` in-process on the first browser command; `BrowserToolSet` serves the flat
+  `web_*` tool set with the former MCP text contracts. `BrowserMcpSidecarProcess` is gone.
+- `research-agent-runtime` is a library: `ResearchAgentSession` replaces the `ResearchAgentMain` process,
+  `ContributionToolInvoker` dispatches to the host's tool contributions directly (`SolonToolInvoker` gone).
+  The plugin's `InProcessResearchSessionBackend` replaces `AcpResearchSessionBackend`; the package
+  `research.acp` became `research.agentwire`.
+- Removed modules: `acp-client-api`, `acp-solon-client`, `acp-demo-agent`; removed ports `McpToolClient`,
+  `McpToolClientFactory`, `SolonMcpToolClientFactory` (no MCP client is needed in-process; the loopback MCP
+  server stays for external clients such as bot control).
+- Runtime settings keep only the browser channel, headless mode and the development loopback policy; the
+  agent-Java/agent-jar/sidecar-jar fields and `researchRuntimeDist` are gone. `:askai-app:fatJar` and
+  `:research-agent-ui-plugin:pluginDistribution` produce everything.

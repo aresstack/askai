@@ -17,8 +17,8 @@ import java.util.Map;
 
 /**
  * The PRODUCTIVE home of the {@code capture_id} convention (it is deliberately NOT in the agent loop): a
- * host-registered browser endpoint that delegates every {@code web_*} call to the Playwright sidecar via the
- * neutral {@link McpToolClient} and records every page-returning navigation into the session's Commit-37
+ * host-registered browser endpoint that delegates every {@code web_*} call to the in-process Playwright
+ * browser via {@link BrowserRuntimePort} and records every page-returning navigation into the session's Commit-37
  * {@link CaptureStore}. The model-facing result line is
  * {@code URL: <url> title="<title>" capture_id=<id>} followed by the cleaned text — the exact contract the
  * agent loop consumes and {@code source_accept} resolves. Endpoint identity is session+generation-scoped
@@ -32,6 +32,9 @@ public final class BrowserBridgeEndpoint {
     private final String endpointId;
     private McpEndpointHandle handle;
     private boolean closed;
+    /** The in-process browser lane of the agent (the same bridge tools, capture_id convention included). */
+    private final com.aresstack.askai.research.runtime.loop.ContributionToolInvoker invoker =
+            new com.aresstack.askai.research.runtime.loop.ContributionToolInvoker();
 
     public BrowserBridgeEndpoint(McpServerRegistry registry, BrowserRuntimePort browser, CaptureStore captures,
                                  String sessionKey, long generationId) {
@@ -47,6 +50,11 @@ public final class BrowserBridgeEndpoint {
 
     public McpEndpointHandle getHandle() {
         return handle;
+    }
+
+    /** The agent's in-process browser lane over this bridge's tools (no transport). */
+    public com.aresstack.askai.research.runtime.loop.ToolInvoker toolInvoker() {
+        return invoker;
     }
 
     /** Register and publish the bridge tool set. Idempotent. */
@@ -67,7 +75,7 @@ public final class BrowserBridgeEndpoint {
                 "Apply a runtime-validated layout decision to a cached snapshot (JSON in/out).",
                 McpToolParameter.string("submission", true, "The validated repair submission (JSON)")));
         tools.add(passThrough("web_search_discard_repair",
-                "Discard a pending layout-repair ticket held in the sidecar.",
+                "Discard a pending layout-repair ticket held in the browser runtime.",
                 McpToolParameter.string("repairTicketId", true, "The repair ticket id")));
         tools.add(capturing("web_open", "Open a URL and return the cleaned page text with a capture id.",
                 McpToolParameter.string("url", true, "The http(s) URL to open")));
@@ -86,8 +94,8 @@ public final class BrowserBridgeEndpoint {
         tools.add(capturing("web_back", "Go back to the previous page."));
         tools.add(passThrough("web_challenge_status",
                 "Poll the pending manual challenge (CAPTCHA): CHALLENGE/RESOLVED/NONE lines."));
-        // Research HUD sidecar tools: the runtime may ONLY call tools the bridge publishes, so these MUST be
-        // registered here too (the sidecar implements them) — otherwise the call is rejected before Playwright
+        // Research HUD browser runtime tools: the runtime may ONLY call tools the bridge publishes, so these MUST be
+        // registered here too (the browser runtime implements them) — otherwise the call is rejected before Playwright
         // is ever reached ("Unknown tool"). Both are best-effort pass-throughs (no capture): render pushes a
         // serialized state onto the overlay, poll drains the user's overlay commands.
         tools.add(passThrough("web_hud_render",
@@ -97,6 +105,7 @@ public final class BrowserBridgeEndpoint {
         // deliverable even while a data command (probe/read/open) blocks the browser owner thread.
         tools.add(controlPassThrough("web_hud_poll",
                 "Drain the HUD commands the user triggered in the overlay (PAUSE/RESUME/SKIP/…), or empty."));
+        invoker.setTools(tools);
         registry.updateTools(handle, tools);
     }
 
@@ -106,6 +115,7 @@ public final class BrowserBridgeEndpoint {
             return;
         }
         closed = true;
+        invoker.close();
         if (handle != null) {
             registry.unregisterEndpoint(handle);
             handle = null;
@@ -149,7 +159,7 @@ public final class BrowserBridgeEndpoint {
                 if (raw.isError()) {
                     return raw;
                 }
-                String[] page = parseSidecarPage(raw.getText());
+                String[] page = parseBrowserPage(raw.getText());
                 VisitedCapture capture = captures.record(page[0], page[1], page[2]);
                 return McpToolResult.ok("URL: " + page[0] + " title=\"" + page[1]
                         + "\" capture_id=" + capture.getCaptureId() + "\n" + page[2]);
@@ -158,18 +168,18 @@ public final class BrowserBridgeEndpoint {
     }
 
     private McpToolResult delegate(String tool, Map<String, Object> arguments) {
-        // The FIRST browser command lazily starts the sidecar on the runtime's dedicated owner thread
+        // The FIRST browser command lazily starts the browser runtime on the runtime's dedicated owner thread
         // (never the EDT); a dead generation is restarted+retried once inside the port.
         try {
             return McpToolResult.ok(browser.execute(tool, arguments));
         } catch (BrowserRuntimePort.BrowserRuntimeException ex) {
             return McpToolResult.error(ex.isEndpointUnavailable()
-                    ? "Browser sidecar unavailable: " + ex.getMessage() : ex.getMessage());
+                    ? "Browser runtime unavailable: " + ex.getMessage() : ex.getMessage());
         }
     }
 
-    /** Parse the sidecar's render format ("URL: u\nTITLE: t\n[(truncated)]\n\ntext") into {url, title, text}. */
-    static String[] parseSidecarPage(String rendered) {
+    /** Parse the browser's render format ("URL: u\nTITLE: t\n[(truncated)]\n\ntext") into {url, title, text}. */
+    static String[] parseBrowserPage(String rendered) {
         String url = "";
         String title = "";
         StringBuilder text = new StringBuilder();

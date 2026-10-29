@@ -1,34 +1,27 @@
 package com.aresstack.askai.research.host;
 
-import com.aresstack.askai.acp.AcpAgentConnector;
 import com.aresstack.askai.agent.model.reranker.RerankerConfigurationSnapshotProvider;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Prepare-then-publish generation switching for the productive research runtime. {@link #switchTo} fully
- * PREPARES the next generation (configuration validated — a broken jar/launcher path fails here) BEFORE it is
+ * PREPARES the next generation (configuration validated) BEFORE it is
  * published; only after publishing is the previous generation locked for new sessions and its resources
  * closed. A preparation failure throws and leaves the previously active generation completely untouched.
  */
 public final class ResearchRuntimeGenerationSwitch {
 
     private final McpServerRegistry registry;
-    private final McpToolClientFactory toolClients;
-    private final AcpAgentConnector connector;
     private final RerankerConfigurationSnapshotProvider rerankerSnapshots;
     private final AtomicLong generationIds = new AtomicLong();
     private volatile ResearchRuntimeGeneration active;
 
-    public ResearchRuntimeGenerationSwitch(McpServerRegistry registry, McpToolClientFactory toolClients,
-                                           AcpAgentConnector connector,
+    public ResearchRuntimeGenerationSwitch(McpServerRegistry registry,
                                            RerankerConfigurationSnapshotProvider rerankerSnapshots) {
         this.registry = registry;
-        this.toolClients = toolClients;
-        this.connector = connector;
         this.rerankerSnapshots = rerankerSnapshots;
     }
 
@@ -50,7 +43,7 @@ public final class ResearchRuntimeGenerationSwitch {
         }
         long id = generationIds.incrementAndGet();
         ResearchRuntimeGeneration next = new ResearchRuntimeGeneration(id,
-                new ProductiveResearchBackendFactory(registry, toolClients, connector, config, id,
+                new ProductiveResearchBackendFactory(registry, config, id,
                         rerankerSnapshots));
         // b) publish.
         ResearchRuntimeGeneration previous = active;

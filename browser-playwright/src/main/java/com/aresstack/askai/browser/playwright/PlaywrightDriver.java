@@ -112,7 +112,7 @@ interface PlaywrightDriver extends AutoCloseable {
 
     /**
      * Run the driver's event loop for at most {@code timeoutMillis} or until {@code wake} holds, so that
-     * browser-initiated events (route interception, exposeBinding, popups) are dispatched while the sidecar
+     * browser-initiated events (route interception, exposeBinding, popups) are dispatched while the browser runtime
      * is otherwise idle. Playwright Java only delivers these while a Playwright call is active — without a
      * pump, the request interception freezes every user-driven navigation the moment no tool call runs.
      * @return true when this driver pumped (or handled the wait itself), false when it has no event loop —
@@ -124,7 +124,7 @@ interface PlaywrightDriver extends AutoCloseable {
 
     /**
      * True when the USER closed the browser window (their stop signal) — as opposed to a session that
-     * was never opened or was torn down by the sidecar itself. Drivers without a real browser have
+     * was never opened or was torn down by the browser runtime itself. Drivers without a real browser have
      * nothing the user could close.
      */
     default boolean browserClosedByUser() {

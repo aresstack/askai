@@ -6,7 +6,7 @@ import java.util.Map;
 /**
  * Runtime-side PARSER of the host→runtime service-command envelope ({@code #RSC1#}), the sibling of the
  * runtime→host run wire ({@code #RSX1#}). A service command is a typed control instruction carried over the
- * ACP prompt frame (the only host→agent channel) — never a chat turn: {@code ResearchAgentMain} dispatches it
+ * prompt channel (the only host→agent channel) — never a chat turn: {@code ResearchAgentSession} dispatches it
  * before any model/TeamAgent/state logic. Encoded {@code key=value} with URL-encoded free-text values, so no
  * field ever contains a space. The ui-plugin's encoder of the same name is the ONLY producer; a round-trip
  * test pins the format across the process boundary.

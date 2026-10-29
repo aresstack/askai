@@ -15,6 +15,11 @@ dependencies {
     // stack, Jackson) ship in this plugin's lib/ and load plugin-first, so they never meet the host's
     // GraalJS 21.2 on one classpath; the driver child JVM takes its classpath from these jar URLs.
     implementation project(':browser-playwright')
+    // The research agent itself (ResearchAgentSession, the loop, the search strategies): since the return to
+    // Java 21 it runs IN-PROCESS inside this plugin instead of as an ACP child process. Its jar ships in
+    // this plugin's lib/; the host-provided APIs it compiles against (agent-model-runtime-api,
+    // mcp-runtime-api) stay excluded from lib/ below.
+    implementation project(':research-agent-runtime')
     // Central OAuth (AP 6): offline JWT validation of centrally issued access tokens.
     implementation 'com.aresstack:anauthentia:0.1.0'
     implementation 'com.aresstack:anauthentia-jwt:0.1.0'
@@ -44,7 +49,6 @@ dependencies {
     compileOnly project(':agent-workspace-api')
     compileOnly project(':agent-plugin-pf4j-api')
     compileOnly project(':mcp-runtime-api')      // host-provided, like the other shared APIs
-    compileOnly project(':acp-client-api')       // neutral ACP port, host-provided; NO acp-sdk types here
     // Neutral reranker host port (RerankerConfigurationSnapshotProvider + DTOs). Host-provided at
     // runtime by askai-app; the plugin never depends on askai-app or LocalModelRuntimeManager.
     compileOnly project(':agent-model-runtime-api')
@@ -56,7 +60,6 @@ dependencies {
     testImplementation project(':agent-workspace-api')
     testImplementation project(':agent-plugin-pf4j-api')
     testImplementation project(':mcp-runtime-api')
-    testImplementation project(':acp-client-api')
     testImplementation project(':agent-model-runtime-api')
     testImplementation 'org.pf4j:pf4j:3.15.0'
     testImplementation 'junit:junit:4.13.2'
@@ -128,7 +131,6 @@ task pluginDistribution(type: Sync) {
         // above; keep them out of lib/ so PF4J delegates them to the host.
         exclude 'agent-model-runtime-api*.jar'
         exclude 'mcp-runtime-api*.jar'
-        exclude 'acp-client-api*.jar'
         exclude 'agent-workspace-api*.jar'
         exclude 'agent-plugin-pf4j-api*.jar'
         exclude 'comic-controls*.jar' // host-provided visual foundation — same rule as the APIs
@@ -136,7 +138,7 @@ task pluginDistribution(type: Sync) {
     // Regression guard: fail the build if any host-provided shared API slipped into the plugin's lib/.
     doLast {
         def libDir = layout.buildDirectory.dir("plugin-dist/${researchPluginDirName}/lib").get().asFile
-        def forbidden = ['agent-model-runtime-api', 'mcp-runtime-api', 'acp-client-api',
+        def forbidden = ['agent-model-runtime-api', 'mcp-runtime-api',
                          'agent-workspace-api', 'agent-plugin-pf4j-api', 'comic-controls']
         def leaked = (libDir.listFiles() ?: []).findAll { file ->
             forbidden.any { file.name.startsWith(it) }

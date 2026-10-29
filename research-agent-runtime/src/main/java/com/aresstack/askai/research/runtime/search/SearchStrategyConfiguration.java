@@ -8,7 +8,7 @@ import com.aresstack.askai.research.runtime.search.provider.SearchProviderId;
  * and, for {@link StrategySelection#API_PROVIDER}, which {@link SearchProviderId}/{@link SearchEngine} plus
  * the non-secret locale hints. It deliberately carries NO provider credentials — API keys, usernames and
  * passwords live exclusively in the provider files under {@code ${user.home}/agents/research/providers} and
- * never travel through this snapshot, ACP arguments or the process environment. A running research session
+ * never travel through this snapshot, agent arguments or the process environment. A running research session
  * keeps this snapshot for its whole lifetime — the strategy is fixed once at start.
  */
 public final class SearchStrategyConfiguration {

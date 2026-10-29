@@ -104,5 +104,5 @@ Local test worlds pass extra browser arguments per run through the documented sy
 Unit tests (session mapping, link ids, pre/post-redirect policy, probe classification, request
 filter) plus `PlaywrightLiveBrowserTest` — a real browser run against JavaScript-only local pages,
 environment-gated on the probe (skips readably without an installed browser). The research runtime's
-`ResearchLoopPlaywrightSidecarIntegrationTest` drives the UNCHANGED research loop against the in-process
+`ResearchLoopPlaywrightIntegrationTest` drives the UNCHANGED research loop against the in-process
 browser through an in-JVM bridge endpoint.

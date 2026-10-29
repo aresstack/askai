@@ -29,7 +29,7 @@ public record CamoufoxDistribution(String release, String revision, URI baseUrl,
 
     public static CamoufoxDistribution builtIn() {
         try (InputStream in = CamoufoxDistribution.class.getResourceAsStream("/camoufox/distribution.properties")) {
-            if (in == null) throw new IllegalStateException("camoufox/distribution.properties missing from the browser sidecar jar");
+            if (in == null) throw new IllegalStateException("camoufox/distribution.properties missing from the browser-playwright jar");
             Properties properties = new Properties();
             try (Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
                 properties.load(reader);

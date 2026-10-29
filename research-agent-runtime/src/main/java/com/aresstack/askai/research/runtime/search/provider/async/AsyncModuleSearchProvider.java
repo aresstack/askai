@@ -34,7 +34,7 @@ import java.util.concurrent.TimeoutException;
  * {@link SearchProvider} seam. It holds a single module {@link WebSearchProvider} for one runtime
  * {@link SearchProviderId}/{@link SearchEngine} and blocks on the returned {@link CompletableFuture} with a
  * configured timeout — on the RESEARCH WORKER thread only (the same thread the old blocking providers ran
- * on); it never touches the Swing EDT, the ACP/MCP transport thread, or the AsyncHttpClient's I/O threads.
+ * on); it never touches the Swing EDT, the agent/MCP transport thread, or the AsyncHttpClient's I/O threads.
  *
  * <p>Module hits ({@code rank/title/url/snippet}) map to runtime {@link SearchHit}s with the domain derived
  * from the URL host. Module failures are translated to the runtime's typed exceptions by transport shape,

@@ -11,7 +11,7 @@ import com.aresstack.askai.plugin.api.service.PluginPathService;
 import com.aresstack.askai.plugin.api.service.ThemeService;
 import com.aresstack.askai.plugin.api.service.UiExecutor;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 import com.aresstack.askai.research.agent.ResearchAgentSessionFactory;
 import com.aresstack.askai.research.host.ResearchRuntimeSettings;
 
@@ -40,8 +40,6 @@ public class GuiChainReproductionTest {
 
     @Test
     public void activateStartsTheAgentExactlyLikeTheGui() throws Exception {
-        String agentJar = System.getProperty("research.agent.jar", "");
-        assumeTrue("SKIPPED: agent jar not built", new File(agentJar).isFile());
         // The productive GUI path requires the MANDATORY local reranker (the in-process local model
         // runtime): a cross-encoder model must be installed, else skip readably.
         // An installed rerank-capable model is required; its virtual id becomes the explicit selection
@@ -55,8 +53,6 @@ public class GuiChainReproductionTest {
         // Distribution layout like runWithDevPlugins assembles it. ~300 MB per run: swept + exit-cleaned,
         // because leaked copies of this staging once filled the whole drive (25 of them = 7.5 GB).
         File dist = stagedTempDist("askai-guichain");
-        Files.copy(new File(agentJar).toPath(), new File(dist, "research-agent-runtime.jar").toPath());
-        String oldDist = System.setProperty("askai.research.runtime.dir", dist.getAbsolutePath());
 
         // EXACTLY like the GUI: the host services carry the (in-process) local model runtime manager, so the
         // mandatory reranker snapshot provider is published to the plugin.
@@ -69,7 +65,7 @@ public class GuiChainReproductionTest {
         FakeHost host = new FakeHost(dist, services.asServiceMap(), problems, messages, greeted);
         // The GUI settings: productive requirements met, Bing search, strict policy (like the screenshot),
         // with the explicit reranker selection carried through to the host snapshot provider.
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "", "chrome", true,
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "chrome", true,
                 false, installedRerankers.get(0)).save(host.store);
 
         // REGRESSION: the REAL GUI session id contains '#' (pluginId + "#session") and an empty
@@ -91,7 +87,6 @@ public class GuiChainReproductionTest {
             // The in-process runtime holds the model files open until it is closed: stop it before the
             // staging is swept.
             localRuntime.stop();
-            restore("askai.research.runtime.dir", oldDist);
         }
     }
 

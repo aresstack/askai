@@ -63,7 +63,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     private ResearchSessionHandle handle;
     private boolean started;
-    // Volatile: set on close() (possibly off-EDT) and read by late async browser/ACP callbacks on the EDT —
+    // Volatile: set on close() (possibly off-EDT) and read by late async browser/agent callbacks on the EDT —
     // a callback that arrives after the tab closed must apply nothing.
     private volatile boolean disposed;
     private final com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostStateStore;
@@ -294,7 +294,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     /**
      * Surface the lazy browser lifecycle as a transient chat activity: a "Starte Browser…" thinking bubble
-     * when the sidecar starts on the first browser command, finished with "Browser bereit." on READY (or a
+     * when the browser starts on the first browser command, finished with "Browser bereit." on READY (or a
      * visible problem on failure). The runtime fires these on its owner thread; we marshal onto the EDT.
      */
     private void wireBrowserActivity(
@@ -372,13 +372,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     // ------------------------------------------------------------------ AgentSession lifecycle
 
-    /** Visible one-time message shown when the session starts (e.g. the demo-mode notice). */
-    private volatile String startupNotice;
-
-    public void setStartupNotice(String notice) {
-        this.startupNotice = notice;
-    }
-
     @Override
     public void activate() {
         if (disposed || started) {
@@ -398,21 +391,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             botRegistration = com.aresstack.askai.research.mcp.ResearchBotSessionDirectory.get()
                     .register(chatSessionId, sessionId, botGateway);
         }
-        // Wire the user web search onto the productive backend transport (a #RSC1# service command over ACP).
+        // Wire the user web search onto the productive backend transport (a #RSC1# service command through the backend transport).
         // Transport-agnostic: a fake/clickdummy backend's submitServiceCommand is a no-op. Tests may override
         // the port AFTER activate().
         this.manualWebSearchPort = new com.aresstack.askai.research.search.BackendManualWebSearchPort(
                 backend, handle);
         restoreManualSearchedQueries(); // covered queries survive a restart (each source remembers its query)
         wireToolActivityReadAloud();
-        final String notice = startupNotice;
-        if (notice != null && sink != null) {
-            uiExecutor.execute(new Runnable() {
-                public void run() {
-                    sink.showProblem(publish("research-runtime-mode"), notice);
-                }
-            });
-        }
         if (productiveResources != null && problemMessage.isEmpty()) {
             // Still restore the persisted assignment (question + focus areas) so a resumed project keeps its
             // scope for continuation; the scoping ceremony is no longer host-driven.
@@ -739,7 +724,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             waitingChooser.abortAll("session closed");
         }
         if (productiveResources != null) {
-            productiveResources.close(); // endpoints → sidecar client → sidecar process (idempotent)
+            productiveResources.close(); // endpoints → browser runtime (idempotent)
         }
     }
 
@@ -930,7 +915,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             // returns as an assistant message and any validated proposal returns as a SCOPE_PROPOSAL the host
             // executes. The host no longer runs ScopingConversation or the playbook greeting/outline here —
             // those stay for FAKE mode and the legacy tests only.
-            // The productive ACP agent cannot echo the user's OWN message back, so show it in the shared chat
+            // The productive in-process agent cannot echo the user's OWN message back, so show it in the shared chat
             // here (right-aligned, by role) before the agent replies — otherwise the user's turn is invisible.
             // Gate 6 contract: while a concept conflict is PENDING, the host OWNS the next
             // unambiguous yes/no — "Ja." never reaches the model (which once answered it with
@@ -1063,7 +1048,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * Show the user's OWN turn in the shared chat (right-aligned, by role) — the productive ACP agent never
+     * Show the user's OWN turn in the shared chat (right-aligned, by role) — the productive in-process agent never
      * echoes it back. Empty bootstrap turns carry no text and are ignored, so no blank user bubble appears.
      */
     private void echoUserMessage(final String text) {
@@ -1722,7 +1707,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * A user web search has TERMINATED (completed/failed): stop the host-owned Playwright browser sidecar so
+     * A user web search has TERMINATED (completed/failed): stop the host-owned Playwright browser runtime so
      * it never lingers open — the same lifecycle the autonomous run gets on RUN_OUTCOME. It is only called on
      * terminal events (a CAPTCHA/challenge wait emits {@code progress}, never {@code completed}/{@code failed}),
      * so an in-flight manual challenge is never cut off.

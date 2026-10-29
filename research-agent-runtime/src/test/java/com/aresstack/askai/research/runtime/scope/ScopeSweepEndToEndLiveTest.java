@@ -1,17 +1,12 @@
 package com.aresstack.askai.research.runtime.scope;
 
-import com.aresstack.askai.acp.AcpEndpointDescriptor;
-import com.aresstack.askai.acp.AgentLaunchSpec;
-import com.aresstack.askai.acp.solon.SolonAcpAgentConnector;
 import com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor;
-import com.aresstack.askai.mcp.api.McpEndpointDefinition;
-import com.aresstack.askai.mcp.api.McpEndpointHandle;
 import com.aresstack.askai.mcp.api.McpToolCall;
 import com.aresstack.askai.mcp.api.McpToolContribution;
 import com.aresstack.askai.mcp.api.McpToolHandler;
 import com.aresstack.askai.mcp.api.McpToolResult;
-import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
-import com.aresstack.askai.research.acp.AcpResearchSessionBackend;
+import com.aresstack.askai.research.agentwire.InProcessResearchSessionBackend;
+import com.aresstack.askai.research.runtime.loop.ContributionToolInvoker;
 import com.aresstack.askai.research.backend.ResearchBackendEvent;
 import com.aresstack.askai.research.backend.ResearchBackendEventType;
 import com.aresstack.askai.research.backend.ResearchProjectRequest;
@@ -30,9 +25,7 @@ import com.aresstack.askai.research.scope.ScopeSweepService;
 import com.aresstack.askai.research.store.FileResearchScopeDraftStore;
 import com.aresstack.askai.research.store.ScopeAnchorVectorIndex;
 
-import org.junit.AfterClass;
 import org.junit.Assume;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -44,7 +37,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -55,7 +47,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * The Z3b-3/Z4 END-TO-END LIVE GATE — one REAL full check round trip with
- * everything that the unit tests cannot see at once — a real spawned runtime process over ACP, the
+ * everything that the unit tests cannot see at once — the real in-process agent session, the
  * real {@code #RSC1# generate_probes} / {@code #RSX1# probes} wire, a real main-model call in the
  * runtime, real host-side correlation on the backend callback thread, real Ollama anchor +
  * transient embeddings on ONE frozen descriptor, the calibration, all gates, and a READY outcome
@@ -68,32 +60,6 @@ public class ScopeSweepEndToEndLiveTest {
 
     private static final String OLLAMA = "http://127.0.0.1:11434";
     private static final String EMBED_MODEL = "nomic-embed-text:latest";
-
-    private static SolonMcpServerRuntime runtime; // Solon is a process-global singleton → one per JVM
-
-    private String javaBin;
-    private String agentJar;
-
-    @Before
-    public void resolve() {
-        agentJar = System.getProperty("research.agent.jar");
-        Assume.assumeTrue("agent jar missing", agentJar != null && new File(agentJar).isFile());
-        String home = System.getProperty("acp.java.home", System.getProperty("java.home"));
-        javaBin = home + File.separator + "bin" + File.separator
-                + (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")
-                        ? "java.exe" : "java");
-        Assume.assumeTrue("java missing", new File(javaBin).isFile());
-        if (runtime == null) {
-            runtime = new SolonMcpServerRuntime();
-        }
-    }
-
-    @AfterClass
-    public static void shutdownRuntime() {
-        if (runtime != null) {
-            runtime.shutdown();
-        }
-    }
 
     @Test
     public void oneRealSweepRoundTripEndsReadyBoundToItsSnapshot() throws Exception {
@@ -132,10 +98,8 @@ public class ScopeSweepEndToEndLiveTest {
         System.err.println("[sweep-live] anchor vectors reconciled: " + anchorVectors.size()
                 + " @ " + embedder.modelFingerprint());
 
-        // --- the real runtime process over ACP, main model via the real inference descriptor ----
-        McpEndpointHandle endpoint = runtime.registerEndpoint(
-                new McpEndpointDefinition("research.sweeplive", "Research Control"));
-        runtime.updateTools(endpoint, Collections.singletonList(
+        // --- the real in-process agent session, main model via the real inference descriptor ----
+        ContributionToolInvoker research = new ContributionToolInvoker(Collections.singletonList(
                 McpToolContribution.of("research_status", "Current research state.",
                         new McpToolHandler() {
                             public McpToolResult invoke(McpToolCall call) {
@@ -149,12 +113,7 @@ public class ScopeSweepEndToEndLiveTest {
                 + "\"timeoutMillis\":300000}").getBytes(Charset.forName("UTF-8")));
         java.util.Map<String, String> env = new java.util.LinkedHashMap<String, String>();
         env.put("ASKAI_INFERENCE_CONFIG", inferenceConfig.getAbsolutePath());
-        AcpResearchSessionBackend backend = new AcpResearchSessionBackend(
-                new SolonAcpAgentConnector(Duration.ofSeconds(120), null),
-                new AgentLaunchSpec(javaBin, Arrays.asList("-jar", agentJar), env),
-                new AcpEndpointDescriptor("research.sweeplive", runtime.endpointUrl(endpoint),
-                        "streamable", endpoint.getToken()),
-                null);
+        InProcessResearchSessionBackend backend = new InProcessResearchSessionBackend(env, research, null, null);
 
         final BackendScopeProbeGenerator[] activeGenerator = {null};
         final com.aresstack.askai.research.scope.BackendScopeAdviceChooser[] activeChooser =
@@ -302,7 +261,6 @@ public class ScopeSweepEndToEndLiveTest {
             activeGenerator[0] = null;
             activeChooser[0] = null;
             backend.close(handle);
-            runtime.unregisterEndpoint(endpoint);
         }
     }
 

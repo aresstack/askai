@@ -64,7 +64,7 @@ public class ProductiveCommandBridgeTest {
         }
 
         public boolean canExecute(ResearchSessionHandle handle, ResearchCommandType command) {
-            return false; // like AcpResearchSessionBackend: NO phase logic in the transport adapter
+            return false; // like InProcessResearchSessionBackend: NO phase logic in the transport adapter
         }
 
         public void executeCommand(ResearchSessionHandle handle, ResearchCommandType command) {
@@ -292,8 +292,9 @@ public class ProductiveCommandBridgeTest {
         RecordingBackend backend = new RecordingBackend();
         assertFalse(backend.canExecute(null, ResearchCommandType.START));
         // And the real ACP adapter behaves identically by contract:
-        com.aresstack.askai.research.acp.AcpResearchSessionBackend acp =
-                new com.aresstack.askai.research.acp.AcpResearchSessionBackend(null, null, null, null);
+        com.aresstack.askai.research.agentwire.InProcessResearchSessionBackend acp =
+                new com.aresstack.askai.research.agentwire.InProcessResearchSessionBackend(
+                        null, null, null, null);
         assertFalse(acp.canExecute(null, ResearchCommandType.START));
     }
 

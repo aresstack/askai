@@ -245,12 +245,12 @@ public final class ResearchPlaybook {
         return de() ? "überlegt, wie es das am besten formuliert …" : "thinking about how to put this …";
     }
 
-    /** Transient activity while the lazy browser sidecar starts for a research run. */
+    /** Transient activity while the lazy browser starts for a research run. */
     public String browserStarting() {
         return de() ? "Starte Browser …" : "Starting browser…";
     }
 
-    /** Finishes the "Starte Browser" bubble once the sidecar is ready. */
+    /** Finishes the "Starte Browser" bubble once the browser is ready. */
     public String browserReady() {
         return de() ? "Browser bereit." : "Browser ready.";
     }
@@ -261,10 +261,10 @@ public final class ResearchPlaybook {
         return de()
                 ? "**Der Browser konnte nicht gestartet werden.**" + suffix
                         + " Ich empfehle, die Recherche erneut zu starten; falls das Problem bleibt, prüfe "
-                        + "die Browser-Einstellungen (Sidecar-Jar, Java ≥21, Browser-Kanal)."
+                        + "die Browser-Einstellungen (Browser-Kanal)."
                 : "**The browser could not be started.**" + suffix
                         + " I recommend starting the research again; if the problem persists, check the "
-                        + "browser settings (sidecar jar, Java ≥21, browser channel).";
+                        + "browser settings (browser channel).";
     }
 
     /** The card's live counters + a readable current activity (never enum names or raw URLs). */

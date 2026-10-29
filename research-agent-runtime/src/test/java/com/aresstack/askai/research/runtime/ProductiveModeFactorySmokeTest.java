@@ -1,11 +1,7 @@
 package com.aresstack.askai.research.runtime;
 
-import com.aresstack.askai.acp.AcpAgentConnector;
-import com.aresstack.askai.acp.solon.SolonAcpAgentConnector;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
-import com.aresstack.askai.mcp.solon.SolonMcpToolClientFactory;
 import com.aresstack.askai.plugin.api.agent.AgentConversationSink;
 import com.aresstack.askai.plugin.api.agent.AgentHostContext;
 import com.aresstack.askai.plugin.api.agent.AgentSession;
@@ -16,7 +12,7 @@ import com.aresstack.askai.plugin.api.service.PluginPathService;
 import com.aresstack.askai.plugin.api.service.ThemeService;
 import com.aresstack.askai.plugin.api.service.UiExecutor;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 import com.aresstack.askai.research.agent.ResearchAgentSession;
 import com.aresstack.askai.research.agent.ResearchAgentSessionFactory;
 import com.aresstack.askai.research.host.ResearchRuntimeSettings;
@@ -25,7 +21,6 @@ import org.junit.Test;
 
 import java.io.File;
 import java.nio.file.Files;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -53,11 +48,6 @@ public class ProductiveModeFactorySmokeTest {
 
     @Test
     public void factoryStartsAProductiveSessionAndUserCommandsDriveThePhases() throws Exception {
-        String agentJar = System.getProperty("research.agent.jar", "");
-        String agentHome = System.getProperty("acp.java.home", System.getProperty("java.home"));
-        String agentJava = agentHome + File.separator + "bin" + File.separator
-                + (System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
-        assumeTrue("SKIPPED: agent jar not built", new File(agentJar).isFile());
         // The reranker snapshot provider is MANDATORY for a productive session (A5): publish the real
         // local runtime as the host service, or skip readably when this environment lacks it.
         com.aresstack.askai.research.runtime.rerank.LiveLocalRerankerRuntime reranker =
@@ -88,31 +78,13 @@ public class ProductiveModeFactorySmokeTest {
         final java.util.List<String> messages = new java.util.concurrent.CopyOnWriteArrayList<String>();
         final CountDownLatch ready = new CountDownLatch(1);
         final CountDownLatch stopped = new CountDownLatch(1);
-        FakeHost host = new FakeHost(dataDir, registry, new SolonMcpToolClientFactory(),
-                new SolonAcpAgentConnector(Duration.ofSeconds(180),
-                        new java.util.function.Consumer<String>() {
-                            public void accept(String line) {
-                                System.err.println("[agent] " + line);
-                            }
-                        }), messages, ready, stopped);
-        // 42 acceptance: NO manually typed build paths. The test assembles the distribution exactly like
-        // `researchRuntimeDist` (canonical names + lib/) and publishes it via the DOCUMENTED hand-off;
-        // Java 8 comes from the running JVM, Java 21 via the documented override — the persisted settings
-        // carry ONLY the mode, the search provider and the explicit loopback override for the local
-        // test servers.
-        // ~300 MB per run (sidecar lib/ incl. the GraalJS driver bundle): without cleanup these copies
-        // accumulate until the drive is FULL (51 of them ate 15 GB on the live machine). Belt AND
-        // braces: stale siblings from earlier (crashed) runs are swept first, this run's directory is
-        // deleted at JVM exit.
-        sweepStaleSiblings("askai-research-runtime");
-        File dist = Files.createTempDirectory("askai-research-runtime").toFile();
-        deleteRecursivelyOnExit(dist);
-        Files.copy(new File(agentJar).toPath(),
-                new File(dist, "research-agent-runtime.jar").toPath());
-        String oldDist = System.setProperty("askai.research.runtime.dir", dist.getAbsolutePath());
+        FakeHost host = new FakeHost(dataDir, registry, messages, ready, stopped);
+        // 42 acceptance: NO manually typed build paths — the agent and the browser run in-process, so the
+        // persisted settings carry ONLY the mode, the search provider and the explicit loopback override
+        // for the local test servers.
         // The local test engine travels as the EXPLICIT per-run browser flag — the persisted
         // search-url override is dead, and dev worlds were always meant to be per-run.
-        String oldSidecarArgs = System.setProperty("askai.research.browser.args",
+        String oldBrowserArgs = System.setProperty("askai.research.browser.args",
                 "--search-url=" + baseOne + "/find?q={query}");
         host.services.put(com.aresstack.askai.agent.model.reranker
                 .RerankerConfigurationSnapshotProvider.class, reranker.asProvider(10));
@@ -145,7 +117,7 @@ public class ProductiveModeFactorySmokeTest {
                     }
                 });
         // The EXPLICIT reranker selection (A5): the persisted settings name the model to use.
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "",
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP,
                 System.getenv().getOrDefault("ASKAI_TEST_BROWSER_CHANNEL", "chrome"),
                 true, true, reranker.modelName).save(host.store);
 
@@ -200,14 +172,13 @@ public class ProductiveModeFactorySmokeTest {
                             .contains("WAITING"));
         } finally {
             session.close();
-            session.close(); // idempotent, closes agent + endpoints + sidecar via the owned resources
+            session.close(); // idempotent, closes agent + endpoints + browser via the owned resources
             registry.shutdown();
             reranker.close();
             mockModel.close();
             serverOne.stop(0);
             serverTwo.stop(0);
-            restore("askai.research.runtime.dir", oldDist);
-            restore("askai.research.browser.args", oldSidecarArgs);
+            restore("askai.research.browser.args", oldBrowserArgs);
         }
     }
 
@@ -264,16 +235,13 @@ public class ProductiveModeFactorySmokeTest {
 
         private final CountDownLatch stopped;
 
-        FakeHost(File dataDir, McpServerRegistry registry, McpToolClientFactory clients,
-                 AcpAgentConnector connector, java.util.List<String> messages, CountDownLatch ready,
-                 CountDownLatch stopped) {
+        FakeHost(File dataDir, McpServerRegistry registry, java.util.List<String> messages,
+                 CountDownLatch ready, CountDownLatch stopped) {
             this.dataDir = dataDir;
             this.messages = messages;
             this.ready = ready;
             this.stopped = stopped;
             services.put(McpServerRegistry.class, registry);
-            services.put(McpToolClientFactory.class, clients);
-            services.put(AcpAgentConnector.class, connector);
         }
 
         public UiExecutor getUiExecutor() {
@@ -422,39 +390,4 @@ public class ProductiveModeFactorySmokeTest {
         }
     }
 
-    /** Remove leftover prefix-siblings older than six hours (a concurrent run's fresh dir survives). */
-    private static void sweepStaleSiblings(String prefix) {
-        File[] siblings = new File(System.getProperty("java.io.tmpdir")).listFiles();
-        if (siblings == null) {
-            return;
-        }
-        long cutoff = System.currentTimeMillis() - 6L * 60 * 60 * 1000;
-        for (File sibling : siblings) {
-            if (sibling.isDirectory() && sibling.getName().startsWith(prefix)
-                    && sibling.lastModified() < cutoff) {
-                deleteRecursively(sibling);
-            }
-        }
-    }
-
-    /** Best-effort exit-time cleanup of the staged runtime distribution (children are gone by then). */
-    private static void deleteRecursivelyOnExit(final File root) {
-        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-            public void run() {
-                deleteRecursively(root);
-            }
-        }, "smoke-dist-cleanup"));
-    }
-
-    private static void deleteRecursively(File file) {
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                deleteRecursively(child);
-            }
-        }
-        if (!file.delete()) {
-            file.deleteOnExit();
-        }
-    }
 }

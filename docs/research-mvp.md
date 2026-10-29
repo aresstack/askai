@@ -3,18 +3,18 @@
 ## The chain
 
 ```text
-AskAI host (Java 8, Swing)
+AskAI host (Java 21, Swing) — ONE process
   ResearchRuntimeGenerationSwitch        prepare-then-publish generations
     ProductiveResearchBackendFactory     per-session composition (atomic, rollback)
       ProductiveResearchSessionResources one owner per resource
         OO research state machine        the ONLY transition authority
-        ResearchControlEndpoint          research.<session>.g<gen> on SolonMcpServerRuntime
-        BrowserBridgeEndpoint            browser.<session>.g<gen> (capture_id convention)
-        BrowserMcpSidecarProcess         Java-21 process: playwright4j → GraalJS driver → Chrome/Edge
-        AcpResearchSessionBackend        ResearchSessionBackend port (pure adapter)
-          research-agent-runtime         external Java-8 process over ACP/stdio
+        ResearchControlEndpoint          research.<session>.g<gen> on SolonMcpServerRuntime (+ in-process lane)
+        BrowserBridgeEndpoint            browser.<session>.g<gen> (capture_id convention, + in-process lane)
+        LazyRestartableBrowserRuntime    PlaywrightBrowserRuntime in-process: playwright4j → GraalJS driver JVM → Camoufox/Chrome/Edge
+        InProcessResearchSessionBackend  ResearchSessionBackend port (pure adapter)
+          ResearchAgentSession           the research agent, in-process (research-agent-runtime library)
             ResearchLoop                 deterministic autonomous loop (36A, backend-agnostic)
-              SolonToolInvoker ×2        real MCP clients → bridge + research endpoints
+              ContributionToolInvoker ×2 in-process lanes → bridge + research endpoints
 ```
 
 Sources persist via `CaptureStore → SourceAcceptanceService → FileResearchSourceRepository`
@@ -25,16 +25,14 @@ Sources persist via `CaptureStore → SourceAcceptanceService → FileResearchSo
 
 | Requirement                          | Used for                          |
 |--------------------------------------|-----------------------------------|
-| Java 8 (host JRE)                    | AskAI, agent process              |
-| Java 21 launcher (configured path)   | browser sidecar                   |
-| `research-agent-runtime-*-all.jar`   | external agent (`researchAgentJar`) |
-| `browser-mcp-sidecar-*.jar` + `lib/` | sidecar (`sidecarJar`, thin + Class-Path) |
-| locally installed Chrome or Edge     | Playwright channel browser        |
-| search provider URL (`{query}`)      | `web_search` (optional)           |
+| Java 21 (host JRE)                   | AskAI, the agent and the browser backend (one process) |
+| the research plugin (`lib/`)         | agent library + Playwright/playwright4j/GraalVM 25 jars |
+| Camoufox (downloaded once) or a locally installed Chrome/Edge | the Playwright channel browser |
+| the configured search engines        | `web_search` / `web_search_prepare` |
 
 Temporary artifacts: `%TEMP%/playwright4j-driver` (driver package assets, extracted by playwright4j).
-Shutdown order per session: agent process → research endpoint → browser bridge → sidecar client →
-sidecar process (which ends the GraalJS driver child and Chromium). All closes are idempotent.
+Shutdown order per session: agent session → research endpoint → browser bridge → browser runtime (which
+ends the GraalJS driver child and the browser). All closes are idempotent.
 
 ## What is proven automatically (all green, `./gradlew build --rerun-tasks`)
 
@@ -55,18 +53,15 @@ Start AskAI via `./gradlew :askai-app:runWithDevPlugins` — this assembles the 
 distribution (`build/research-runtime/`: agent jar, sidecar jar, `lib/`) and hands its location to
 the app. Then open the Research workspace → artifact tab **Runtime**:
 
-1. Set *Backend mode* to `Productive (ACP + browser sidecar)` (the default `Fake` is the labelled
-   clickdummy/development mode).
-2. The path fields are PRE-FILLED automatically: both jars from the assembled distribution and ONE
-   Java runtime — the >= 21 launcher for the browser sidecar, discovered in the standard JDK
-   locations (override: `askai.research.java21`; unnecessary when AskAI itself runs on >= 21). The
-   agent needs NO Java configuration at all: it is Java-8 bytecode and runs on AskAI's own JVM.
-   Every field has a Browse button; explicit values always win.
+1. Productive is simply THE mode whenever its requirements are met (a persisted `Fake` value remains a
+   developer-only override for the labelled clickdummy mode).
+2. There are no path fields any more: the agent and the browser run inside AskAI; only the browser
+   channel (Camoufox/Chrome/Edge), headless mode and the development-only loopback policy are configured.
 3. Enter a search provider URL containing `{query}` (e.g. `https://www.bing.com/search?q={query}`) —
    it is REQUIRED: autonomous research always starts with `web_search`; validation says so.
-4. **Check requirements** validates every item individually off the EDT and briefly starts the
-   sidecar to obtain its real readiness status (READY / INCOMPATIBLE_DRIVER /
-   DRIVER_BUNDLE_NOT_FOUND / BROWSER_NOT_INSTALLED / BROWSER_START_FAILED).
+4. **Check requirements** briefly starts the in-process browser off the EDT to obtain its real readiness
+   status (READY / INCOMPATIBLE_DRIVER / DRIVER_BUNDLE_NOT_FOUND / BROWSER_NOT_INSTALLED /
+   BROWSER_START_FAILED).
 5. **Save** persists through the typed `ResearchRuntimeSettings` model; saving an unusable productive
    configuration is rejected with the concrete problem list. The save output states EXPLICITLY that
    the running session keeps its backend — close the Research session and open a new one.
@@ -83,13 +78,13 @@ session for you (explicit close/reopen), and the very first prompt can rarely re
 
 ## Manual acceptance checklist
 
-Environment: Windows, Java 8 + Java 21 installed, Chrome installed, jars built.
+Environment: Windows, Java 21 installed, Camoufox downloaded (or Chrome installed), the plugin built.
 
 1. `./gradlew build` is green.
-2. `./gradlew :research-agent-runtime:researchAgentJar :browser-mcp-server-java21:sidecarJar` built both artifacts.
-3. Start the sidecar manually (port/token of your choice); STDERR shows `playwright readiness: READY: channel=chrome …`.
-4. STDERR shows `ready on 127.0.0.1:<port> backend=PLAYWRIGHT_SIDECAR`; the token appears nowhere in the output.
-5. Rename the Chrome folder (or use a machine without Chrome): readiness reports `BROWSER_NOT_INSTALLED`, tools return that status, the process stays up. Restore Chrome.
+2. `./gradlew :askai-app:runWithDevPlugins` starts AskAI with the research plugin from a fresh generation.
+3. The first browser command of a session logs `[browser] ready backend=PLAYWRIGHT_SIDECAR READY: channel=…` on the app console.
+4. The settings tab's **Check requirements** reports the browser readiness line; nothing else is required.
+5. Rename the Chrome folder (channel chrome, or use a machine without Chrome): the check reports `BROWSER_NOT_INSTALLED`, the session reports it honestly, AskAI stays up. Restore Chrome.
 6. `web_open` on a JavaScript-rendered page returns the rendered text (not the empty static HTML).
 7. `web_open` on `file:///…` and on `http://169.254.169.254/` is rejected with a readable reason.
 8. `web_links` → `web_follow` → `web_back` navigate correctly; link ids reset per page.

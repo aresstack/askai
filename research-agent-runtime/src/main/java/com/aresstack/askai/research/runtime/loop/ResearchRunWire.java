@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.runtime.loop;
 
 /**
- * Agent-side encoder of the research ACP extension: structured run events travel as ACP MESSAGE lines with a
+ * Agent-side encoder of the research wire: structured run events travel as agent output lines with a
  * reserved machine envelope. The UI-plugin's {@code ResearchRunWire} parser is the ONLY consumer; nothing in
  * this format is meant for (or shown to) humans, and the mapper never interprets human-readable text. The two
  * classes are deliberately small duplicates on either side of the process boundary (the runtime jar and the

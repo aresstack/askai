@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 
 import java.util.List;
 
@@ -15,8 +15,6 @@ import java.util.List;
 public final class ResearchRuntimeSettings {
 
     static final String KEY_MODE = "research.runtime.mode";
-    static final String KEY_AGENT_JAVA = "research.runtime.agentJava";
-    static final String KEY_AGENT_JAR = "research.runtime.agentJar";
     static final String KEY_BROWSER_CHANNEL = "research.runtime.browserChannel";
     /** Set once the stored channel went through the Camoufox switch (see {@link #load}). */
     static final String KEY_BROWSER_CHANNEL_CAMOUFOX_SWITCH = "research.runtime.browserChannel.camoufoxSwitch";
@@ -549,8 +547,6 @@ public final class ResearchRuntimeSettings {
     }
 
     private final ResearchBackendMode mode;
-    private final String agentJavaExecutable;
-    private final String agentJar;
     private final String browserChannel;
     private final boolean headless;
     private final boolean allowPrivateNetworks;
@@ -562,24 +558,20 @@ public final class ResearchRuntimeSettings {
      */
     private final String selectedRerankerModel;
 
-    public ResearchRuntimeSettings(ResearchBackendMode mode, String agentJavaExecutable, String agentJar,
-                                   String browserChannel, boolean headless) {
-        this(mode, agentJavaExecutable, agentJar, browserChannel, headless, false);
+    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel, boolean headless) {
+        this(mode, browserChannel, headless, false);
     }
 
     /** @param allowPrivateNetworks development-only override of the strict URL policy (default false). */
-    public ResearchRuntimeSettings(ResearchBackendMode mode, String agentJavaExecutable, String agentJar,
-                                   String browserChannel, boolean headless, boolean allowPrivateNetworks) {
-        this(mode, agentJavaExecutable, agentJar, browserChannel, headless, allowPrivateNetworks, "");
+    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel, boolean headless,
+                                   boolean allowPrivateNetworks) {
+        this(mode, browserChannel, headless, allowPrivateNetworks, "");
     }
 
     /** @param selectedRerankerModel the explicitly selected virtual reranker model id ("" = none). */
-    public ResearchRuntimeSettings(ResearchBackendMode mode, String agentJavaExecutable, String agentJar,
-                                   String browserChannel, boolean headless, boolean allowPrivateNetworks,
-                                   String selectedRerankerModel) {
+    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel, boolean headless,
+                                   boolean allowPrivateNetworks, String selectedRerankerModel) {
         this.mode = mode == null ? ResearchBackendMode.FAKE : mode;
-        this.agentJavaExecutable = nullToEmpty(agentJavaExecutable);
-        this.agentJar = nullToEmpty(agentJar);
         this.browserChannel = browserChannel == null || browserChannel.isEmpty() ? CAMOUFOX_CHANNEL : browserChannel;
         this.headless = headless;
         this.allowPrivateNetworks = allowPrivateNetworks;
@@ -587,7 +579,7 @@ public final class ResearchRuntimeSettings {
     }
 
     public static ResearchRuntimeSettings defaults() {
-        return new ResearchRuntimeSettings(ResearchBackendMode.FAKE, "", "", CAMOUFOX_CHANNEL, true);
+        return new ResearchRuntimeSettings(ResearchBackendMode.FAKE, CAMOUFOX_CHANNEL, true);
     }
 
     /** True when a mode value was ever persisted (the FAKE developer override requires an explicit one). */
@@ -606,8 +598,6 @@ public final class ResearchRuntimeSettings {
             mode = ResearchBackendMode.FAKE; // unknown persisted value → the safe, visible clickdummy mode
         }
         return new ResearchRuntimeSettings(mode,
-                store.get(KEY_AGENT_JAVA, ""),
-                store.get(KEY_AGENT_JAR, ""),
                 browserChannel(store),
                 store.getBoolean(KEY_HEADLESS, true),
                 store.getBoolean(KEY_ALLOW_PRIVATE, false),
@@ -645,8 +635,6 @@ public final class ResearchRuntimeSettings {
 
     public void save(WorkspaceStateStore store) {
         store.put(KEY_MODE, mode.name());
-        store.put(KEY_AGENT_JAVA, agentJavaExecutable);
-        store.put(KEY_AGENT_JAR, agentJar);
         store.put(KEY_BROWSER_CHANNEL, browserChannel);
         store.putBoolean(KEY_HEADLESS, headless);
         destroyLegacySearchUrlLeftover(store);
@@ -655,8 +643,6 @@ public final class ResearchRuntimeSettings {
     }
 
     public ResearchBackendMode getMode() { return mode; }
-    public String getAgentJavaExecutable() { return agentJavaExecutable; }
-    public String getAgentJar() { return agentJar; }
     public String getBrowserChannel() { return browserChannel; }
     public boolean isHeadless() { return headless; }
     public boolean isAllowPrivateNetworks() { return allowPrivateNetworks; }
@@ -665,8 +651,7 @@ public final class ResearchRuntimeSettings {
     /** The productive runtime config. The URL policy is strict unless the explicit, persisted
      * development-only override is set — never an implicit relaxation. */
     public ResearchRuntimeConfig toRuntimeConfig() {
-        return new ResearchRuntimeConfig(agentJavaExecutable, agentJar, browserChannel, headless,
-                allowPrivateNetworks, selectedRerankerModel);
+        return new ResearchRuntimeConfig(browserChannel, headless, allowPrivateNetworks, selectedRerankerModel);
     }
 
     /**

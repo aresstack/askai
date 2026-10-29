@@ -27,7 +27,7 @@ import java.util.stream.Stream;
 final class CamoufoxProvisioning {
 
     static final String CHANNEL = "camoufox";
-    /** Read by the host (BrowserMcpSidecarProcess.CAMOUFOX_INSTALL_MARKER) — keep both in sync. */
+    /** Prefix of the progress lines of the one-time Camoufox download (surfaced on the console/readiness). */
     static final String PROGRESS_MARKER = "camoufox install:";
     private static final Duration PROGRESS_INTERVAL = Duration.ofSeconds(5);
 
@@ -76,8 +76,8 @@ final class CamoufoxProvisioning {
     }
 
     /**
-     * The browser profile for this sidecar. One persistent profile (cookies, consent answers survive) owned
-     * by the first sidecar that locks it; a concurrent research session gets a temporary profile that is
+     * The browser profile for this browser runtime. One persistent profile (cookies, consent answers survive) owned
+     * by the first browser runtime that locks it; a concurrent research session gets a temporary profile that is
      * deleted on {@link ProfileLease#close()} — two Firefox processes can never share one profile.
      */
     static ProfileLease leaseProfile() {

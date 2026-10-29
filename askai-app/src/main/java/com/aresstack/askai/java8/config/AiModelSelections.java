@@ -11,7 +11,7 @@ package com.aresstack.askai.java8.config;
  * </ul>
  *
  * <p>Only model NAMES live here — never endpoints or secrets. The host resolves the actual endpoint
- * (local sidecar port or remote Ollama base URL) when it publishes a descriptor to a plugin. An empty
+ * (local runtime port or remote Ollama base URL) when it publishes a descriptor to a plugin. An empty
  * value means "not explicitly selected"; consumers fall back to their existing default behaviour.</p>
  */
 public final class AiModelSelections {

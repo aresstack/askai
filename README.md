@@ -53,8 +53,8 @@ tab). A **Revisions** view shows how the project got there.
 - **Semantic scope fence:** exclusions go on a blacklist, and that blacklist acts as a hard filter on
   what research collects. A scope probe tells you whether candidate terms are in scope, out of scope,
   or on the boundary.
-- **Web research:** a browser sidecar drives Camoufox (a hardened Firefox with a fingerprint profile)
-  through Playwright4J over WebDriver BiDi; Chrome or Edge remain selectable. It handles search result pages, link following, consent and captcha handling, and content-readiness
+- **Web research:** the in-process Playwright browser backend drives Camoufox (a hardened Firefox with a
+  fingerprint profile) through Playwright4J over WebDriver BiDi; Chrome or Edge remain selectable. It handles search result pages, link following, consent and captcha handling, and content-readiness
   checks.
 - **Sources:**
   - Each page moves through a lifecycle (visited → candidate → accepted) and is deduplicated by
@@ -67,8 +67,9 @@ tab). A **Revisions** view shows how the project got there.
 - **Control:** the user owns every phase transition. You can steer the agent with slash commands
   (`/status`, `/approve`, `/request-changes`, `/pause`, `/resume`, `/cancel`, `/open`) or the action
   tags in the chat.
-- **Runtime:** the agent runs as a separate process. It talks ACP to AskAI and MCP to the
-  research-control and browser endpoints.
+- **Runtime:** the research agent and the browser run inside AskAI (in the plugin's own classloader).
+  The agent reaches the host's research-control, service and browser tools through in-process lanes;
+  the same tools stay published on the host's loopback MCP server for external clients.
 
 ### Models
 
@@ -135,7 +136,7 @@ The Gradle wrapper uses Gradle 8.14.6. On Windows, run these commands from Git B
 # Run AskAI
 ./gradlew :askai-app:run
 
-# Run AskAI with the Research Agent plugin and the research runtime
+# Run AskAI with the Research Agent plugin
 ./gradlew :askai-app:runWithDevPlugins
 ```
 
@@ -143,15 +144,14 @@ Individual distributions:
 
 | Task | Output |
 |---|---|
-| `:askai-app:researchRuntimeDist` | `build/research-runtime/` (research agent jar) |
 | `:research-agent-ui-plugin:installDevPlugin` | installs the research plugin into `build/dev-plugins/` |
 | `:askai-app:verifyFatJarExclusions` | fails if research plugin classes leaked into the fat jar |
 
 To set the version, pass `-PreleaseVersion=<version>` (the default is `0.1.0`). `chatgpt-build.sh`
 builds the fat jar with a project-local Gradle home.
 
-The research plugin and both sidecars are deliberately **not** part of the fat jar. The plugin is loaded
-by PF4J from a plugin directory, and the sidecars run as separate processes.
+The research plugin is deliberately **not** part of the fat jar. PF4J loads it from a plugin directory; its
+`lib/` bundles the research agent and the Playwright browser backend (GraalVM 25 driver included).
 
 MP3, M4A/AAC, OGG and FLAC decoding depends on Java Sound service providers (`javasound-*`). The
 `mergeServiceFiles` task merges their `META-INF/services` descriptors into the fat jar. The first build
@@ -177,7 +177,7 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 | `agent-plugin-host` | PF4J plugin host: catalog, compatibility checks, workspace lifecycle |
 | `agent-model-runtime-api` | Neutral model-runtime contracts (reranker endpoint descriptor, configuration codec) |
 | `research-agent-ui-plugin` | The Research Agent PF4J plugin (UI, state machine, sources, scope, document) |
-| `research-agent-runtime` | External research agent process (ACP to AskAI, MCP to research-control/browser) |
+| `research-agent-runtime` | The research agent as a library (runs inside the plugin): the conversation TeamAgent, the autonomous research loop, search strategies, manual search and reranking |
 | `research-domain` | Research domain core: business objects, ids, revisions, approval baselines |
 | `research-knowledge-pipeline` | Research method pipeline: sentences → passages → topic clusters → concept/outline proposals |
 | `research-knowledge-processing` | Restart-safe processing queue and worker that drive captures through the pipeline |
@@ -191,9 +191,6 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 | `mcp-runtime-api` | Generic MCP runtime contracts |
 | `mcp-solon-runtime` | Solon-based streamable-HTTP MCP server behind the runtime port |
 | `mcp-marketplace` | MCP marketplace search/registry/import browser (saves configurations only; not wired into the app) |
-| `acp-client-api` | Neutral ACP client contracts |
-| `acp-solon-client` | ACP adapter (acp-sdk/Reactor) implementing the client port |
-| `acp-demo-agent` | Demo ACP agent process used by the adapter round-trip test |
 | `web-search-providers` | Isolated async web-search provider clients (Brave, Bright Data, DataForSEO); not productively switched on |
 
 ## Documentation
@@ -204,14 +201,14 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 - [docs/research-state-machine.md](docs/research-state-machine.md): research state machine
 - [docs/research-source-lifecycle.md](docs/research-source-lifecycle.md): source lifecycle and deduplication
 - [docs/research-search-architecture.md](docs/research-search-architecture.md): search architecture
-- [docs/research-agent-runtime.md](docs/research-agent-runtime.md): external research agent runtime
+- [docs/research-agent-runtime.md](docs/research-agent-runtime.md): the in-process research agent
 - [docs/research-control-mcp.md](docs/research-control-mcp.md): research-control MCP endpoint
 - [docs/research-bot-control.md](docs/research-bot-control.md): headless bot control
 - [docs/research-chatgpt-connector.md](docs/research-chatgpt-connector.md): ChatGPT connector (German)
-- [docs/browser-mcp.md](docs/browser-mcp.md): browser MCP sidecar
+- [docs/browser-mcp.md](docs/browser-mcp.md): the browser backend
 - [docs/agent-plugin-development.md](docs/agent-plugin-development.md): writing chat agent plugins
 - [docs/plugin-lifecycle.md](docs/plugin-lifecycle.md): plugin lifecycle
-- [docs/mcp-runtime.md](docs/mcp-runtime.md), [docs/mcp-marketplace.md](docs/mcp-marketplace.md), [docs/acp-client.md](docs/acp-client.md): MCP and ACP infrastructure
+- [docs/mcp-runtime.md](docs/mcp-runtime.md), [docs/mcp-marketplace.md](docs/mcp-marketplace.md): MCP infrastructure
 - [docs/theme-system-spec-v2.md](docs/theme-system-spec-v2.md): theme system specification (German)
 - [mvp-roadmap.md](mvp-roadmap.md): MVP roadmap (German)
 

@@ -1,6 +1,6 @@
 package com.aresstack.askai.research.runtime.loop;
 
-/** Why an autonomous run ended. Carried in the ACP terminal status and the research activity, not just logs. */
+/** Why an autonomous run ended. Carried in the run outcome line and the research activity, not just logs. */
 public enum ResearchStopReason {
     SUFFICIENT_EVIDENCE,
     TOOL_BUDGET_EXHAUSTED,

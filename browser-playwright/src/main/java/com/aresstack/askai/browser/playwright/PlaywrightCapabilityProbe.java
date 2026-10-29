@@ -10,7 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Real capability probing before the sidecar reports the Playwright backend as usable. Checks, in order:
+ * Real capability probing before the browser runtime reports the Playwright backend as usable. Checks, in order:
  * (1) the effective {@code com.microsoft.playwright.impl.driver.Driver} is playwright4j's replacement (its
  * child command runs {@code GraalDriverMain} — the upstream one would try to install/spawn Node),
  * (2) the Playwright Core JS driver package is on the classpath (embedded in the playwright4j jar),
@@ -77,7 +77,7 @@ final class PlaywrightCapabilityProbe {
         if (executable == null) {
             return new PlaywrightReadiness(PlaywrightReadiness.Status.BROWSER_NOT_INSTALLED,
                     "No installed browser found for channel '" + channel
-                            + "'. Install Google Chrome or Microsoft Edge; the sidecar never downloads browsers.");
+                            + "'. Install Google Chrome or Microsoft Edge; the browser runtime never downloads browsers.");
         }
         return new PlaywrightReadiness(PlaywrightReadiness.Status.READY,
                 "channel=" + channel + " executable=" + executable);

@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.plugin.api.agent.artifact.AgentArtifactStore;
-import com.aresstack.askai.research.acp.AcpResearchSessionBackend;
+import com.aresstack.askai.research.agentwire.InProcessResearchSessionBackend;
 import com.aresstack.askai.research.backend.ResearchSessionBackend;
 import com.aresstack.askai.research.capture.CaptureStore;
 import com.aresstack.askai.research.capture.SourceAcceptanceService;
@@ -17,17 +17,17 @@ import com.aresstack.askai.research.state.oo.ResearchStateTransitionResult;
 /**
  * Everything one PRODUCTIVE research session owns, with exactly one owner per resource:
  * <ul>
- * <li>the ACP research agent process — owned by the {@link AcpResearchSessionBackend} session handle,</li>
+ * <li>the in-process research agent — owned by the {@link InProcessResearchSessionBackend} session handle,</li>
  * <li>the research-control MCP endpoint — owned here ({@link ResearchControlEndpoint}),</li>
- * <li>the browser MCP sidecar process (+ its host-side client and bridge endpoint) — owned here,</li>
+ * <li>the in-process browser runtime (+ its bridge endpoint) — owned here,</li>
  * <li>the backend session — owned by whoever called {@code createSession} on the backend port.</li>
  * </ul>
  * The host-side hierarchical state machine held here is the ONLY transition authority: {@link #dispatch}
  * applies a command and immediately republishes the state-derived tool set (tools/list_changed). The agent
  * signals PHASE_READY as an event; the HOST decides by dispatching {@code REQUEST_EVIDENCE_REVIEW}.
  *
- * <p>{@link #close()} is idempotent and ordered: backend (agent process) → research-control endpoint →
- * browser bridge endpoint → sidecar client → sidecar process. Stores/repositories are not "closed" — their
+ * <p>{@link #close()} is idempotent and ordered: backend (agent sessions) → research-control endpoint →
+ * browser bridge endpoint → browser runtime. Stores/repositories are not "closed" — their
  * contents outlive the session.</p>
  */
 public final class ProductiveResearchSessionResources {
@@ -46,7 +46,7 @@ public final class ProductiveResearchSessionResources {
     private final BrowserBridgeEndpoint browserBridge;
     /** The LAZY, restartable browser runtime (STOPPED until the first browser command); owned here. */
     private final BrowserRuntimePort browser;
-    private final AcpResearchSessionBackend backend;
+    private final InProcessResearchSessionBackend backend;
     /** The session's immutable settings snapshot (A2c); set once by the factory right after creation. */
     private volatile com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot searchProfile;
     /** The continuous knowledge worker (persistent FIFO drainer), or null when the capability is unavailable. */
@@ -74,7 +74,7 @@ public final class ProductiveResearchSessionResources {
                                                projectContext,
                                        ResearchControlEndpoint controlEndpoint,
                                        BrowserBridgeEndpoint browserBridge, BrowserRuntimePort browser,
-                                       AcpResearchSessionBackend backend) {
+                                       InProcessResearchSessionBackend backend) {
         this(sessionKey, stateMachine, captures, repository, acceptance, projectContext, controlEndpoint,
                 browserBridge, browser, backend, null);
     }
@@ -86,7 +86,7 @@ public final class ProductiveResearchSessionResources {
                                                projectContext,
                                        ResearchControlEndpoint controlEndpoint,
                                        BrowserBridgeEndpoint browserBridge, BrowserRuntimePort browser,
-                                       AcpResearchSessionBackend backend,
+                                       InProcessResearchSessionBackend backend,
                                        com.aresstack.askai.research.mcp.ResearchServiceEndpoint
                                                serviceEndpoint) {
         this.sessionKey = sessionKey;
@@ -365,7 +365,7 @@ public final class ProductiveResearchSessionResources {
     }
 
     /**
-     * End the current browsing phase: stop the sidecar/browser but keep the TeamAgent and session alive. A
+     * End the current browsing phase: stop the browser but keep the TeamAgent and session alive. A
      * later research run lazily starts a fresh browser generation. Called when a research run finishes.
      */
     public void stopBrowserPhase() {
@@ -640,7 +640,7 @@ public final class ProductiveResearchSessionResources {
             browserBridge.close();
         }
         if (browser != null) {
-            browser.close(); // stops any running sidecar generation and releases the owner thread
+            browser.close(); // stops any running browser runtime generation and releases the owner thread
         }
     }
 }

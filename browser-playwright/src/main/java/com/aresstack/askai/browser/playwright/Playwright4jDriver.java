@@ -26,7 +26,7 @@ import java.util.function.Predicate;
  * persistent context, as Argos does), or the locally installed Chrome/Edge via the channel mechanism.
  * Playwright itself never downloads a browser ({@code PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1} is always set).
  *
- * <p>Lifecycle owned here (one research session per sidecar process): Playwright → Browser → one
+ * <p>Lifecycle owned here (one research session per runtime instance): Playwright → Browser → one
  * BrowserContext → one Page + history. Popups are closed immediately, downloads are refused, and when a
  * request filter is given, browser-side requests to disallowed targets are aborted via route interception.
  * {@link #close()} tears down page → context → browser → Playwright (ending the driver child) and is

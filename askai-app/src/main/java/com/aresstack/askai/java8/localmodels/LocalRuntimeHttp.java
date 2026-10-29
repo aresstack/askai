@@ -11,7 +11,7 @@ import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.Map;
 
-/** Minimal loopback HTTP/JSON helper for talking to the local model runtime sidecar. */
+/** Minimal loopback HTTP/JSON helper for talking to the local model runtime. */
 public final class LocalRuntimeHttp {
 
     private static final Charset UTF8 = Charset.forName("UTF-8");

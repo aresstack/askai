@@ -6,7 +6,7 @@ import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.theme.ThemeColor;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -27,7 +27,7 @@ import java.util.List;
 
 /**
  * The research runtime configuration surface. Reads/writes exclusively through
- * {@link ResearchRuntimeSettings} (the same mapper the session factory uses). Saving an ACP configuration
+ * {@link ResearchRuntimeSettings} (the same mapper the session factory uses). Saving a productive configuration
  * that fails validation is rejected with the concrete problem list; FAKE is labelled clearly as the
  * clickdummy/development mode. "Check requirements" runs validation + the browser readiness probe on a
  * background daemon thread (never the EDT) with a visible busy state; results come back via
@@ -116,11 +116,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
      * REST search providers. Provider credentials are NOT configured here — they live in
      * {@code ${user.home}/agents/research/providers/} (brave.json, brightdata.json, dataforseo.json).
      */
-    // Deliberately NO agent-Java field: the agent simply runs on AskAI's own JVM. A persisted override
-    // (store key) stays possible for special cases, but it is not a user decision. The browser runs
-    // inside AskAI and needs no runtime configuration at all.
-    private String agentJavaOverride = "";
-    private final JTextField agentJar = ComicControls.textField(38);
+    // No runtime path fields: the research agent and the browser run inside AskAI and need no
+    // Java/jar configuration at all.
     private final JComboBox<String> browserChannel = ComicControls.<String>comboBox(
             new String[]{ResearchRuntimeSettings.CAMOUFOX_CHANNEL, "chrome", "msedge"});
     // The reranker model is chosen centrally in AskAI (Configuration → AI models), NOT here. Any previously
@@ -290,7 +287,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         form.add(row("Central OAuth issuer:", connectorCentralIssuer));
         // The initial-search PROVIDER selection + its provider-specific settings live on their own
         // "Search" gear tab (SearchProviderCardsPanel), not as shared fields here.
-        form.add(pathRow("Research agent jar:", agentJar));
         form.add(row("Browser channel:", browserChannel));
         form.add(row("", headless));
         // Transparency does not depend on a visible browser window: the chat shows the visited sites.
@@ -320,7 +316,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // value (AskAI's own JVM) is applied by the factory and never written back as a setting.
         ResearchRuntimeSettings persisted = ResearchRuntimeSettings.load(store);
         apply(ResearchRuntimeDefaults.complete(persisted));
-        agentJavaOverride = persisted.getAgentJavaExecutable();
         // The combo persists the DEFAULT language for NEW research sessions; running sessions keep
         // their own session-local language (live-switchable at the session, never globally from here).
         String languageCode = ResearchRuntimeSettings.loadLanguage(store);
@@ -422,7 +417,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS,
                 "Timeout je Browser-Aufruf in Sekunden. Muss die komplette Suchmaschinen-Phase "
                         + "abdecken (mehrere Engines und Ergebnisseiten, sequenziell mit Auswertung) — "
-                        + "zu klein wird als 'Sidecar tot' fehlgedeutet und bricht jede Suche ab.");
+                        + "zu klein wird als 'Browser tot' fehlgedeutet und bricht jede Suche ab.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
                 "Wie viele Quellen eine Auswertung höchstens liest (neueste zuerst).");
@@ -456,7 +451,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // old default once wrote FAKE); the demo backend is chosen by the FACTORY only when the
         // requirements are not met.
         return new ResearchRuntimeSettings(ResearchBackendMode.ACP,
-                agentJavaOverride, agentJar.getText(),
                 String.valueOf(browserChannel.getSelectedItem()), headless.isSelected(),
                 allowPrivate.isSelected(), carriedRerankerModel);
     }
@@ -471,8 +465,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     }
 
     private void apply(ResearchRuntimeSettings settings) {
-        agentJavaOverride = settings.getAgentJavaExecutable();
-        agentJar.setText(settings.getAgentJar());
         browserChannel.setSelectedItem(settings.getBrowserChannel());
         // Carry any previously persisted reranker selection through invisibly (chosen centrally now).
         carriedRerankerModel = settings.getSelectedRerankerModel();

@@ -8,7 +8,7 @@ import java.util.List;
  * system prompt, the running user/assistant history and the scope so far — and turns each user message into a
  * validated {@link TeamAgentTurn} by calling the configured main model ({@link MainModelChat}).
  *
- * <p>It is deliberately transport-agnostic and Solon/ACP-free so the whole conversation can be driven in a unit
+ * <p>It is deliberately transport-agnostic and transport-free so the whole conversation can be driven in a unit
  * test with a scripted fake model. The host's two nested state patterns stay the authority in three ways:</p>
  * <ul>
  *   <li><b>Commands.</b> The engine only PROPOSES a command and pre-validates that proposal against the live

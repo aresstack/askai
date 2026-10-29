@@ -110,7 +110,7 @@ public final class WebAcquisitionText {
 
     /**
      * The FINAL post-navigation URL out of a {@code web_open} result. Both known result shapes start with
-     * "URL: &lt;url&gt;" — the bridge appends {@code title="…" capture_id=…} on the same line, the raw sidecar
+     * "URL: &lt;url&gt;" — the bridge appends {@code title="…" capture_id=…} on the same line, the raw browser runtime
      * puts TITLE on the next line; in both cases the URL is the token right after the prefix.
      */
     public static String finalUrlOf(String page) {
@@ -132,7 +132,7 @@ public final class WebAcquisitionText {
 
     /**
      * The page title out of a {@code web_open} result. The bridge appends {@code title="…"} on the URL line
-     * (parsed as the full quoted value, not just the first word), the raw sidecar reports a "TITLE: …" line.
+     * (parsed as the full quoted value, not just the first word), the raw browser runtime reports a "TITLE: …" line.
      */
     public static String titleOf(String page) {
         if (page == null) {

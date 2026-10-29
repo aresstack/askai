@@ -467,7 +467,7 @@ public class ConceptToolRoundsTest {
         assertEquals("the corrected answer replaces the false claim", "ESP-IDF ist ausgeschlossen.",
                 ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
         // The REPLACEMENT patch stays authoritative: the repaired output IS the returned final
-        // result, and the caller (ResearchAgentMain.emitTeamAgentResult -> emitScopeUpdate)
+        // result, and the caller (ResearchAgentSession.emitTeamAgentResult -> emitScopeUpdate)
         // emits exactly the final result's scope update to the host — repair fixes the COMMIT,
         // not just the wording.
         ScopeUpdateDocument replacement =

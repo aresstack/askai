@@ -5,7 +5,7 @@ import java.util.Map;
 /**
  * The neutral seam the browser bridge (and, through it, the TeamAgent) uses to run a browser command. The
  * TeamAgent, its state machine and the bridge know ONLY this port — never a concrete {@code ProcessBuilder},
- * Playwright or sidecar class. The browser is a short-lived, disposable, RESTARTABLE runtime with a lifetime
+ * Playwright or browser runtime class. The browser is a short-lived, disposable, RESTARTABLE runtime with a lifetime
  * of a single research/browsing phase, not of the session: it is started lazily on the first command and
  * stopped again when the phase ends, and a broken generation can be thrown away and replaced without
  * disturbing the TeamAgent.
@@ -77,7 +77,7 @@ public interface BrowserRuntimePort {
     /** Throw the current (possibly broken) generation away and start a fresh one. */
     void restart() throws BrowserRuntimeException;
 
-    /** Stop the current browser phase: close the browser and end the sidecar; the runtime returns to STOPPED. */
+    /** Stop the current browser phase: close the browser and end the browser runtime; the runtime returns to STOPPED. */
     void stop();
 
     boolean isReady();

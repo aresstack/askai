@@ -2,7 +2,7 @@ package com.aresstack.askai.research.runtime.service;
 
 /**
  * A typed host→runtime SERVICE COMMAND, parsed from the {@code #RSC1#} control envelope. A service command is
- * carried over the ACP prompt frame (the only host→agent channel) but is NOT a chat turn: it is dispatched
+ * carried over the prompt channel (the only host→agent channel) but is NOT a chat turn: it is dispatched
  * before any model / TeamAgent / state logic and reaches a plain application service (e.g. the productive
  * search backend). It never transitions the host state machine and is phase-independent.
  */

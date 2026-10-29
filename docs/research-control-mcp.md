@@ -27,7 +27,7 @@ blocked / failed / terminal):
 | FINALIZATION | `final_read`, `final_save`                     |
 
 There is deliberately **no phase-transition tool** (no advance_phase/approve_phase/set_state). The
-agent signals readiness only as an event (`PHASE_READY` over ACP); the host/plugin state machine is
+agent signals readiness only as an event (a `PHASE_READY` line to the host); the host/plugin state machine is
 the sole transition authority.
 
 ## Visibility ≠ authorization

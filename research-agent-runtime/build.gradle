@@ -1,67 +1,47 @@
-// External Solon research agent runtime (Java 21): a separate process speaking ACP to AskAI and MCP to the
-// research-control (and later browser) endpoints. Solon/ACP/MCP types are allowed HERE; the UI plugin never
-// sees them. Not part of the AskAI fat jar (no dependency from askai-app).
-apply plugin: 'application'
+// The research agent of the Research Agent plugin. Since the return to Java 21 it is a plain LIBRARY that
+// runs IN-PROCESS inside the plugin (ResearchAgentSession): one instance per research session, prompts and
+// typed service commands come in as method calls, every output line goes to the turn's AgentOutput, and the
+// host tools (research control, browser bridge, internal service) are reached through in-process
+// ToolInvoker lanes over the host's McpToolContributions. No ACP, no MCP client, no separate process.
+apply plugin: 'java-library'
 
 dependencies {
-    implementation 'org.noear:acp-sdk:3.10.1'
-    implementation 'org.noear:solon-ai-mcp:3.10.1'
-    // Public-suffix aware domain families (challenge locks, transit rules) — shared with the sidecar.
+    // The neutral MCP tool contracts (McpToolContribution/McpToolCall/McpToolResult): the in-process
+    // ContributionToolInvoker dispatches to the host's contributions directly. Host-provided at runtime
+    // (the plugin never bundles it), hence the same class identity as the host endpoints use.
+    implementation project(':mcp-runtime-api')
+    // Public-suffix aware domain families (challenge locks, transit rules) — shared with the browser backend.
     implementation project(':browser-api')
-    // The research DOMAIN CORE (pure Java 8, no dependencies): the runtime EXECUTES searches and produces
+    // The research DOMAIN CORE (pure Java, no dependencies): the runtime EXECUTES searches and produces
     // domain objects (SearchRun/SearchCandidate) that the host persists as project truth. Both sides must
     // speak the same model, or the wire between them degenerates into untyped strings again.
     implementation project(':research-domain')
     // A5: neutral reranker endpoint contract (descriptor + strict codec) published by the host.
     implementation project(':agent-model-runtime-api')
-    // A4 transport: the layout-repair codec and the model-using repair coordinator (Java-8, model-free
-    // analysis; the concrete StructuredInferencePort adapter is injected by the runtime).
+    // A4 transport: the layout-repair codec and the model-using repair coordinator (model-free analysis;
+    // the concrete StructuredInferencePort adapter is injected by the runtime).
     implementation project(':browser-search-analysis')
     // Slice 2: the async web-search-provider module (Brave/BrightData/DataForSEO over AsyncHttpClient),
     // consumed behind the existing SearchProvider seam via a thin adapter. File-based config + AES-GCM
     // secrets live in the module; the runtime never carries provider credentials.
     implementation project(':web-search-providers')
-    runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
 
-    testImplementation project(':acp-client-api')
-    testImplementation project(':acp-solon-client')
-    testImplementation project(':mcp-runtime-api')
+    // The E2E tests drive the PRODUCTIVE plugin wiring (factory, endpoints, in-process backend) and the
+    // live local runtimes; the plugin itself depends on this module (a test-only cycle, no task cycle).
+    testImplementation project(':research-agent-ui-plugin')
+    testImplementation project(':agent-workspace-api')
+    testImplementation project(':agent-plugin-pf4j-api')
     testImplementation project(':mcp-solon-runtime')
     // The live reranker tests start the REAL local model runtime in-process (as the host does now).
     testImplementation project(':local-model-runtime')
     // The live Playwright tests start the REAL browser in-process (as the plugin does now).
     testImplementation project(':browser-playwright')
-    // 36C: the live-sidecar integration test drives the PRODUCTIVE capture/acceptance lifecycle
-    // (CaptureStore, SourceAcceptanceService, in-memory repository/index) behind the research endpoint.
-    testImplementation project(':research-agent-ui-plugin')
-    // The plugin's shared APIs are compileOnly there (host-provided); the E2E host wiring test IS the host.
-    testImplementation project(':agent-workspace-api')
-    testImplementation project(':agent-plugin-pf4j-api')
     testImplementation 'junit:junit:4.13.2'
-}
-
-application {
-    mainClass = 'com.aresstack.askai.research.runtime.ResearchAgentMain'
-}
-
-task researchAgentJar(type: Jar) {
-    group = 'build'
-    description = 'Runnable external research agent jar (spawned by AskAI / the round-trip test).'
-    archiveBaseName = 'research-agent-runtime'
-    archiveClassifier = 'all'
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    dependsOn classes
-    // Ensure every runtime dependency jar (including sibling project jars like :web-search-providers) is
-    // actually built before this fat jar tries to expand it — the lazy from{} closure does not infer it.
-    dependsOn configurations.runtimeClasspath
-    from sourceSets.main.output
-    from { configurations.runtimeClasspath.filter { it.name.endsWith('.jar') }.collect { zipTree(it) } }
-    manifest { attributes('Main-Class': application.mainClass.get()) }
+    testRuntimeOnly 'org.slf4j:slf4j-nop:2.0.17'
 }
 
 test {
     useJUnit()
-    dependsOn researchAgentJar
     doFirst {
         // Scope live-gate model override: -Daskai.live.main.model=gemma4:e2b runs the generator/
         // sweep gates against a SPECIFIC installed model instead of the first chat model found.
@@ -71,8 +51,5 @@ test {
         if (System.getProperty('askai.live.probe.target') != null) {
             systemProperty 'askai.live.probe.target', System.getProperty('askai.live.probe.target')
         }
-        systemProperty 'research.agent.jar', researchAgentJar.archiveFile.get().asFile.absolutePath
-        // The spawned agent runs on the test JVM's own JDK (the Java 21 toolchain): the tests fall back to
-        // their java.home, so no daemon-JVM path (possibly an older Java) is handed down any more.
     }
 }

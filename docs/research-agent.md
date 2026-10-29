@@ -14,8 +14,8 @@ chat. It is selected under **Questing → Research Agent**. There is no standalo
     (DRAFT and FINALIZATION both work on it).
   - Structured: **Sources** (a writing manager) and **State** (state-machine visualization).
   - Legacy `concept/research-notes/findings/draft/final` files in old projects stay on disk but get no tabs.
-- A deterministic **fake backend** (`FakeResearchSessionBackend`) drives a simulated run; the same
-  `ResearchSessionBackend` port will later be implemented by an ACP backend without UI changes.
+- A deterministic **fake backend** (`FakeResearchSessionBackend`) drives a simulated run; the productive
+  `InProcessResearchSessionBackend` implements the same `ResearchSessionBackend` port without UI changes.
 
 ## Slash commands
 

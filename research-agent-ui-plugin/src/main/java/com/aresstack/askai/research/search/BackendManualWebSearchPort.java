@@ -6,9 +6,9 @@ import com.aresstack.askai.research.backend.ResearchSessionHandle;
 /**
  * The productive {@link ManualWebSearchPort}: it encodes a user search as a typed {@code #RSC1#} service
  * command and hands it to the session backend's {@link ResearchSessionBackend#submitServiceCommand} — a
- * transport-agnostic seam (the ACP backend carries it over the prompt frame; a fake backend ignores it). It is
+ * transport-agnostic seam (the productive backend carries it as a service command; a fake backend ignores it). It is
  * NOT the chat path: it never calls {@code submitPrompt}. Cancellation cancels the in-flight service command
- * through the backend. The port is transport-agnostic on purpose — if ACP later grows a real custom method,
+ * through the backend. The port is transport-agnostic on purpose — if the transport later grows a real custom method,
  * only the backend adapter changes, not this port or its callers.
  */
 public final class BackendManualWebSearchPort implements ManualWebSearchPort {
@@ -28,7 +28,7 @@ public final class BackendManualWebSearchPort implements ManualWebSearchPort {
                 request == null ? "" : request.getQuery(),
                 request == null ? null : request.getLanguage().getCode());
         backend.submitServiceCommand(handle, envelope);
-        System.err.println("[manual-search] ACP control turn sent requestId=" + requestId);
+        System.err.println("[manual-search] service command sent requestId=" + requestId);
         return new ManualWebSearchHandle() {
             public String getRequestId() {
                 return requestId;

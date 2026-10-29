@@ -14,7 +14,7 @@ import java.util.Locale;
 import java.util.function.Predicate;
 
 /**
- * Creates the Playwright-backed {@link BrowserSession} for the sidecar. Runs the structured capability probe
+ * Creates the Playwright-backed {@link BrowserSession} for the browser runtime. Runs the structured capability probe
  * first ({@link PlaywrightCapabilityProbe}); anything but READY yields an {@link UnavailableSession} whose
  * tool errors carry the SPECIFIC status (INCOMPATIBLE_DRIVER / DRIVER_BUNDLE_NOT_FOUND / BROWSER_NOT_INSTALLED
  * / BROWSER_START_FAILED) — never a blanket NOT_INSTALLED and never a silent STATIC_HTTP fallback. A launch

@@ -675,8 +675,8 @@ public final class AskAiFrame extends JFrame {
                         return agentPluginService.getSelectableAgentExtension(agentId);
                     }
                 };
-        // Host-owned runtime services for the productive research mode (lazy Solon MCP runtime,
-        // MCP tool-client factory, ACP connector). Plugins look them up via AgentHostContext.getService.
+        // Host-owned runtime services for the productive research mode (lazy Solon MCP runtime, model
+        // snapshot providers). Plugins look them up via AgentHostContext.getService.
         final com.aresstack.askai.java8.plugin.host.AgentRuntimeServices agentRuntimeServices =
                 new com.aresstack.askai.java8.plugin.host.AgentRuntimeServices(
                         askAiService.localRuntimeManager(), configurationRepository);

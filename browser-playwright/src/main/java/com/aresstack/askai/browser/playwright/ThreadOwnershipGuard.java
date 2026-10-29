@@ -3,7 +3,7 @@ package com.aresstack.askai.browser.playwright;
 /**
  * Captures the thread it was created on and rejects use from any other thread. Playwright Java is not
  * thread-safe AND only dispatches its events (route interception, exposeBinding, popups) while the owning
- * thread runs a Playwright call — so every Playwright object in this sidecar is created and used on exactly
+ * thread runs a Playwright call — so every Playwright object in this browser runtime is created and used on exactly
  * one owner thread (the {@link BrowserSessionActor} loop). This guard turns an accidental direct call from an
  * MCP HTTP worker into an immediate, readable failure instead of a latent race or a frozen browser.
  */

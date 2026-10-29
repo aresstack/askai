@@ -30,7 +30,7 @@ import java.util.function.Supplier;
  * ({@link PlaywrightDriver#pumpEvents}) so that a user-driven navigation still gets its
  * {@code route.resume()}, a HUD button click still reaches {@code exposeBinding}, and popups are still
  * closed, even when the research runtime is busy elsewhere or the run is already over. Without the pump,
- * the request interception freezes the visible browser the moment the sidecar goes idle.</p>
+ * the request interception freezes the visible browser the moment the browser runtime goes idle.</p>
  *
  * <p>Event callbacks run on the owner thread during the pump; they must never enqueue a command and wait
  * for it (self-deadlock) — the HUD binding only appends to a thread-safe buffer, the route handler only

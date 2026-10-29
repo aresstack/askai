@@ -6,11 +6,11 @@ import com.aresstack.askai.browser.hud.ResearchHudState;
  * Builds the JavaScript for the Research Browser HUD — a fixed overlay drawn OVER a visited target page (Slice 1:
  * a Pause/Resume control, a Skip control, a one-line status and a user-wait countdown). It is isolated so the
  * website's CSS cannot break it and — crucially — it is NEVER captured as page content: the host is mounted on
- * {@code document.documentElement} inside an OPEN Shadow DOM, while the sidecar extracts text with
+ * {@code document.documentElement} inside an OPEN Shadow DOM, while the browser runtime extracts text with
  * {@code page.innerText("body")} and walks {@code document.body}, so the HUD is outside every capture and every
  * consent/challenge/block text scan.
  *
- * <p>Buttons call {@code window.__askaiHudCommand('PAUSE'|'RESUME'|'SKIP'|'NEXT')}, which the sidecar wires to an
+ * <p>Buttons call {@code window.__askaiHudCommand('PAUSE'|'RESUME'|'SKIP'|'NEXT')}, which the browser runtime wires to an
  * exposed binding that buffers the command for the runtime to poll. Pure string building — unit-testable without
  * a browser.</p>
  */

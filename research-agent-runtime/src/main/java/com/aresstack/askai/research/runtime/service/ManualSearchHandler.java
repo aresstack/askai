@@ -16,8 +16,8 @@ import java.util.function.BooleanSupplier;
  * state / phase / TeamAgent / model dependency: a manual search is phase-independent by construction (there is
  * no {@code phase == RESEARCH} gate here — that gate belongs only to the agent's own MCP web-search tool).
  *
- * <p>Extracted from {@code ResearchAgentMain} so it is unit-testable with a fake strategy and a capturing
- * emitter, without an ACP context.</p>
+ * <p>Extracted from {@code ResearchAgentSession} so it is unit-testable with a fake strategy and a capturing
+ * emitter, without an agent output context.</p>
  */
 public final class ManualSearchHandler {
 

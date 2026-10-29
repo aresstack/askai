@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * Host-side JSON I/O for the neutral {@link InstalledModelManifest}. The value object and its trust rules
- * live in the shared catalog module (so the sidecar applies the SAME rules); only the JSON encoding lives
+ * live in the shared catalog module (so the local runtime applies the SAME rules); only the JSON encoding lives
  * here, on the host's existing JSON library.
  */
 public final class LocalModelManifestCodec {

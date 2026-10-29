@@ -6,8 +6,8 @@ import com.aresstack.askai.java8.localmodels.LocalModelRuntimeManager;
 
 /**
  * AskAI's own local model runtime as a virtual Ollama container; owns every {@code local/} model.
- * {@link #createClient()} starts the Java-21 sidecar on demand (there is no fixed port — the
- * manager reads the base URL from the sidecar's ready line).
+ * {@link #createClient()} starts the local runtime on demand (there is no fixed port — the
+ * manager reads the base URL from the in-process runtime).
  */
 public final class LocalAskAiContainerSource implements OllamaContainerSource {
 

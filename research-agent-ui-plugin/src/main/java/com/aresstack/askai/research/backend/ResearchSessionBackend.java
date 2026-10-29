@@ -3,9 +3,9 @@ package com.aresstack.askai.research.backend;
 import com.aresstack.askai.research.state.ResearchCommandType;
 
 /**
- * The fachlich port between the research UI and whatever runs the research. Today a deterministic fake
- * implements it; later {@code AcpResearchSessionBackend} implements exactly this interface, so no ACP type
- * ever reaches the UI. Free of Swing/PF4J/ACP/Reactor/Solon/executor types.
+ * The fachlich port between the research UI and whatever runs the research. A deterministic fake
+ * implements it, and so does the productive {@code InProcessResearchSessionBackend} (the agent running
+ * inside the plugin), so no runtime type ever reaches the UI. Free of Swing/PF4J/Solon/executor types.
  */
 public interface ResearchSessionBackend {
 
@@ -21,8 +21,8 @@ public interface ResearchSessionBackend {
     /**
      * Carry a typed SERVICE COMMAND control envelope (e.g. a user web search, {@code #RSC1#}) to the runtime.
      * Semantically SEPARATE from {@link #submitPrompt} — a service command is never a chat turn — even though a
-     * transport (ACP) may physically reuse the same frame underneath. The default ignores it: a fake/clickdummy
-     * backend has no service transport. The ACP backend overrides it.
+     * transport may physically reuse the same channel underneath. The default ignores it: a fake/clickdummy
+     * backend has no service transport. The productive backend overrides it.
      */
     default void submitServiceCommand(ResearchSessionHandle session, String controlEnvelope) {
         // no-op by default

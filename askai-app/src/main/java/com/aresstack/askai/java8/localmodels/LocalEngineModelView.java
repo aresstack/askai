@@ -68,7 +68,7 @@ public final class LocalEngineModelView {
 
     /**
      * Whether this model is a generation model whose runtime is not linked yet — capability-based, NOT a
-     * hardcoded family list. {@code generationLinked} comes from the sidecar's reported feature set.
+     * hardcoded family list. {@code generationLinked} comes from the local runtime's reported feature set.
      */
     public static boolean isRuntimePending(InstalledModelManifest manifest, boolean generationLinked) {
         return isGenerationManifest(manifest) && !generationLinked;
@@ -110,7 +110,7 @@ public final class LocalEngineModelView {
 
     /**
      * The line for a RUNNING local card: family + capabilities only. It deliberately does NOT claim an
-     * active backend mode (the sidecar does not report one) and does not invent one from the catalog.
+     * active backend mode (the local runtime does not report one) and does not invent one from the catalog.
      */
     public static String runningDetailLine(String virtualName) {
         LocalRuntimeModelDescriptor descriptor = descriptorOf(virtualName);

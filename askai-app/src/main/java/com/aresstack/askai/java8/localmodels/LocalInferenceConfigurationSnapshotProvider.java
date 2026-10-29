@@ -13,7 +13,7 @@ import java.io.IOException;
 /**
  * The productive host implementation of {@link InferenceConfigurationSnapshotProvider}. It reads the central
  * main (chat) model ({@code ai.mainModel}), resolves it to its ACTUAL serving endpoint — the local model
- * runtime sidecar for a {@code local/...} model, or the configured remote Ollama base URL otherwise — and
+ * runtime for a {@code local/...} model, or the configured remote Ollama base URL otherwise — and
  * writes a sekret-free {@code inference-config.json} into the session directory. AskAI stays the only model
  * manager; the agent receives only a file path and never selects a model.
  *
@@ -26,12 +26,12 @@ public final class LocalInferenceConfigurationSnapshotProvider
 
     static final String SNAPSHOT_FILE_NAME = "inference-config.json";
     static final String CHAT_PATH = "/api/chat";
-    /** The three endpoint sources, seamed so the local/remote routing is testable without a sidecar. */
+    /** The three endpoint sources, seamed so the local/remote routing is testable without a local runtime. */
     interface EndpointSources {
         /** The central main model name ("" when none is selected). */
         String modelName();
 
-        /** The local runtime sidecar base URL (starts it); only called for a {@code local/...} model. */
+        /** The local runtime base URL (starts it); only called for a {@code local/...} model. */
         String localRuntimeBaseUrl() throws IOException;
 
         /** The configured remote Ollama base URL; only called for a non-local model. */
@@ -95,7 +95,7 @@ public final class LocalInferenceConfigurationSnapshotProvider
         return new InferenceConfigurationSnapshot(target.getAbsoluteFile(), document);
     }
 
-    /** Local {@code local/...} models resolve to the runtime sidecar; everything else to remote Ollama. */
+    /** Local {@code local/...} models resolve to the runtime; everything else to remote Ollama. */
     private String resolveBaseUrl(String model) throws InferenceConfigurationException {
         if (LocalModelNames.isLocalModelName(model)) {
             try {

@@ -10,7 +10,7 @@ import com.aresstack.askai.plugin.api.service.PluginPathService;
 import com.aresstack.askai.plugin.api.service.ThemeService;
 import com.aresstack.askai.plugin.api.service.UiExecutor;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 import com.aresstack.askai.research.agent.ResearchAgentSessionFactory;
 
 import org.junit.Test;
@@ -125,13 +125,10 @@ public class ResearchRuntimeModeTest {
     @Test
     public void settingsRoundTripThroughTheStore() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "C:/j8/java.exe", "C:/agent.jar",
-                "msedge", false)
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "msedge", false)
                 .save(store);
         ResearchRuntimeSettings loaded = ResearchRuntimeSettings.load(store);
         assertEquals(ResearchBackendMode.ACP, loaded.getMode());
-        assertEquals("C:/j8/java.exe", loaded.getAgentJavaExecutable());
-        assertEquals("C:/agent.jar", loaded.getAgentJar());
         assertEquals("msedge", loaded.getBrowserChannel());
         assertEquals(false, loaded.isHeadless());
     }
@@ -168,6 +165,9 @@ public class ResearchRuntimeModeTest {
     @Test
     public void fakeModeCreatesTheFakeBackendWithoutAnyServiceLookup() {
         FakeHostContext host = new FakeHostContext();
+        // The developer-only override: a PERSISTED FAKE mode (nothing else can make the productive chain
+        // unavailable at configuration level — the agent and the browser run in-process).
+        new ResearchRuntimeSettings(ResearchBackendMode.FAKE, "chrome", true).save(host.store);
         AgentSession session = new ResearchAgentSessionFactory().create(
                 new AgentSessionCreationRequest("s1", "p1", new HashMap<String, String>()), host);
         assertNotNull(session);
@@ -176,30 +176,13 @@ public class ResearchRuntimeModeTest {
     }
 
     @Test
-    public void unmetRequirementsStartTheDemoBackendVisiblyWithoutServiceLookups() {
-        // There is no user-facing mode choice anymore: unmet requirements mean new sessions run the
-        // DEMO backend with a visible startup notice (surfaced in the chat on activate) — and the
-        // host runtime services are never touched.
-        FakeHostContext host = new FakeHostContext();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "", "chrome", true)
-                .save(host.store);
-        AgentSession session = new ResearchAgentSessionFactory().create(
-                new AgentSessionCreationRequest("s1", "p1", new HashMap<String, String>()), host);
-        assertNotNull(session);
-        assertEquals("no service lookup for a demo start", 0, host.serviceLookups);
-        session.close();
-    }
-
-    @Test
     public void missingHostServiceIsNamedIndividually() throws Exception {
         FakeHostContext host = new FakeHostContext();
-        // Paths pass validation (real temp files), but the host offers no runtime services.
+        // The configuration is complete (nothing external left to configure), but the host offers no
+        // runtime services.
         File dir = Files.createTempDirectory("askai-mode").toFile();
-        File java8 = touch(dir, "java.exe");
-        File agentJar = touch(dir, "agent.jar");
         host.workspaceDir = dir;
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, java8.getAbsolutePath(),
-                agentJar.getAbsolutePath(), "chrome", true).save(host.store);
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "chrome", true).save(host.store);
         try {
             new ResearchAgentSessionFactory().create(
                     new AgentSessionCreationRequest("s1", "p1", new HashMap<String, String>()), host);
@@ -216,10 +199,7 @@ public class ResearchRuntimeModeTest {
         // Regression (user-reported): Save validated the RAW panel fields and demanded the removed
         // agent-Java field. Validation must always run on the COMPLETED settings — the agent runs on
         // AskAI's own JVM.
-        File dir = Files.createTempDirectory("askai-defaults").toFile();
-        File agentJar = touch(dir, "research-agent-runtime.jar");
-        ResearchRuntimeSettings raw = new ResearchRuntimeSettings(ResearchBackendMode.ACP,
-                "", agentJar.getAbsolutePath(), "chrome", true);
+        ResearchRuntimeSettings raw = new ResearchRuntimeSettings(ResearchBackendMode.ACP, "chrome", true);
         java.util.List<String> problems =
                 ResearchRuntimeDefaults.complete(raw).validateProductive();
         assertTrue("completed settings must be fully usable: " + problems, problems.isEmpty());
@@ -246,12 +226,11 @@ public class ResearchRuntimeModeTest {
     @Test
     public void panelReadsAndWritesTheSameTypedMapper() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "a", "b", "msedge", false)
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "msedge", false)
                 .save(store);
         ResearchRuntimeSettingsPanel panel = new ResearchRuntimeSettingsPanel(store);
         ResearchRuntimeSettings fromPanel = panel.currentSettings();
         assertEquals(ResearchBackendMode.ACP, fromPanel.getMode());
-        assertEquals("a", fromPanel.getAgentJavaExecutable());
         assertEquals("msedge", fromPanel.getBrowserChannel());
         assertEquals(false, fromPanel.isHeadless());
     }
@@ -259,7 +238,7 @@ public class ResearchRuntimeModeTest {
     @Test
     public void rerankerSelectionIsPersistedThroughTheSameTypedMapper() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "a", "b", "chrome", true,
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "chrome", true,
                 false, "local/cross-encoder/ms-marco-MiniLM-L-6-v2:latest")
                 .save(store);
         ResearchRuntimeSettings loaded = ResearchRuntimeSettings.load(store);

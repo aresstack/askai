@@ -18,9 +18,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The DEDICATED local store for static NLP model artifacts — separate from the runtime/sidecar model store
+ * The DEDICATED local store for static NLP model artifacts — separate from the runtime model store
  * ({@code .../models/local}) and from any research-agent-specific path, because OpenNLP models are a global AskAI
- * NLP resource loaded directly by Java, not a runnable sidecar model. Default location
+ * NLP resource loaded directly by Java, not a runnable local-runtime model. Default location
  * {@code %APPDATA%\.askai\models\nlp\<implementation>\<id>\} with a small {@code askai-nlp-model.json} manifest +
  * the artifact file; the file name is NEVER the identity (the manifest is).
  *

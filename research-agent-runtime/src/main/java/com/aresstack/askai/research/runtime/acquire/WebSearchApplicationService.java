@@ -212,13 +212,13 @@ public final class WebSearchApplicationService {
     /** Upper bound for the inter-page delay slider (mirrors the overlay's max), so a stray value cannot stall a run. */
     private static final long HUD_MAX_DELAY_MILLIS = 30_000L;
     /**
-     * Set when a browser call reports the endpoint is gone (the browser was closed / the sidecar died even after
+     * Set when a browser call reports the endpoint is gone (the browser was closed / the browser runtime died even after
      * one restart). It makes {@link #stopReasonNow} return MCP_UNAVAILABLE so the run ends TECHNICALLY instead of
      * spinning forever on a dead browser (→ manualSearchFailed → the composer is freed + a red error shows).
      */
     private volatile boolean browserGone;
     /**
-     * Set when a browser call fails with the sidecar's typed BROWSER_CLOSED marker: the USER closed the
+     * Set when a browser call fails with the browser runtime's typed BROWSER_CLOSED marker: the USER closed the
      * window. That is their stop signal — the run ends as USER_CANCELLED (their decision, sources kept),
      * never as a technical failure and never by polling a dead browser until a budget gives out.
      */
@@ -402,10 +402,10 @@ public final class WebSearchApplicationService {
                 // reranker failure ends the run with a typed reason and opens nothing.
                 seedStop = seedReranking(query, result.candidates, frontier);
             } catch (ToolInvoker.EndpointUnavailable ex) {
-                // The browser MCP endpoint is gone (the sidecar likely died): this is the concrete,
+                // The browser MCP endpoint is gone (the browser runtime likely died): this is the concrete,
                 // retryable technical cause behind a SEARCH_TECHNICAL_PROBLEM — log it, never swallow it.
                 listener.status("[web-search] technical failure stage=SEED_SEARCH (endpoint unavailable —"
-                        + " sidecar may be dead) cause=" + describe(ex));
+                        + " browser runtime may be dead) cause=" + describe(ex));
                 return ResearchStopReason.MCP_UNAVAILABLE;
             } catch (ToolInvoker.ToolFailure ex) {
                 if (noteIfBrowserClosed(ex)) {
@@ -636,7 +636,7 @@ public final class WebSearchApplicationService {
                     frontier.add(FrontierEntry.fromDiscoveredLink(linkUrl, url));
                 }
             } catch (ToolInvoker.EndpointUnavailable ex) {
-                listener.status("[web-search] technical failure stage=PAGE_OPEN (endpoint unavailable — sidecar"
+                listener.status("[web-search] technical failure stage=PAGE_OPEN (endpoint unavailable — browser runtime"
                         + " may be dead) url=" + url + " cause=" + describe(ex));
                 return ResearchStopReason.MCP_UNAVAILABLE;
             } catch (ToolInvoker.ToolFailure ex) {
@@ -1108,7 +1108,7 @@ public final class WebSearchApplicationService {
             pr = com.aresstack.askai.browser.BrowserPageReadiness.parse(
                     callBrowser("web_probe", args("url", url)));
         } catch (ToolInvoker.ToolFailure ex) {
-            // A sidecar without web_probe: fall back to the single-step open (never fail the visit here).
+            // A browser runtime without web_probe: fall back to the single-step open (never fail the visit here).
             return callBrowser("web_open", args("url", url));
         }
         if (visitSkipped()) {
@@ -1346,7 +1346,7 @@ public final class WebSearchApplicationService {
             browserGone = true;
         }
         String line = "[browser-hud] " + stage + " failed"
-                + (endpoint ? " (endpoint unavailable — sidecar may be dead)" : "") + " cause=" + describe(ex);
+                + (endpoint ? " (endpoint unavailable — browser runtime may be dead)" : "") + " cause=" + describe(ex);
         if (!line.equals(lastHudErrorLine)) {
             lastHudErrorLine = line;
             listener.status(line);
@@ -1765,7 +1765,7 @@ public final class WebSearchApplicationService {
             return ResearchStopReason.USER_CANCELLED;
         }
         if (browserGone) {
-            return ResearchStopReason.MCP_UNAVAILABLE; // sidecar dead → end technically, never hang
+            return ResearchStopReason.MCP_UNAVAILABLE; // browser runtime dead → end technically, never hang
         }
         if (browserClosedByUser) {
             // Closing the window IS the user's stop: their decision, not a failure — sources stay.
@@ -1808,7 +1808,7 @@ public final class WebSearchApplicationService {
     }
 
     /**
-     * The sidecar's {@code serp-pages: host=n, host=n} diagnostics line, rendered for the funnel card
+     * The browser runtime's {@code serp-pages: host=n, host=n} diagnostics line, rendered for the funnel card
      * ({@code "html.duckduckgo.com 3 Seiten"}). Empty when the search carried none (API provider).
      */
     static String serpSummaryOf(List<String> diagnostics) {
@@ -1835,7 +1835,7 @@ public final class WebSearchApplicationService {
     }
 
     /**
-     * The ONE recognizer of the sidecar's typed "the user closed the window" marker. Every path a tool
+     * The ONE recognizer of the browser runtime's typed "the user closed the window" marker. Every path a tool
      * failure can take (page visit, SERP prepare, challenge poll) funnels through here, so the user's
      * stop can never be laundered into a technical failure by the catch that happened to see it first.
      */

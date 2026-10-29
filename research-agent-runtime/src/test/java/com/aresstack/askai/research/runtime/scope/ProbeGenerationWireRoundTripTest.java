@@ -119,13 +119,13 @@ public class ProbeGenerationWireRoundTripTest {
     public void theRunWireLineCarriesThePayloadUrlEncodedAndCorrelated() {
         String line = com.aresstack.askai.research.runtime.loop.ResearchRunWire
                 .probeGeneration("req-9", "{\"status\":\"OK\",\"message\":\"a b\"}");
-        assertTrue(com.aresstack.askai.research.acp.ResearchRunWire.isWireLine(line));
-        assertEquals(com.aresstack.askai.research.acp.ResearchRunWire.TYPE_PROBES,
-                com.aresstack.askai.research.acp.ResearchRunWire.typeOf(line));
+        assertTrue(com.aresstack.askai.research.agentwire.ResearchRunWire.isWireLine(line));
+        assertEquals(com.aresstack.askai.research.agentwire.ResearchRunWire.TYPE_PROBES,
+                com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
         java.util.Map<String, String> fields =
-                com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
+                com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
         assertEquals("req-9", fields.get("request_id"));
         assertEquals("{\"status\":\"OK\",\"message\":\"a b\"}",
-                com.aresstack.askai.research.acp.ResearchRunWire.decodedField(fields, "payload"));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(fields, "payload"));
     }
 }

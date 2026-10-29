@@ -1,14 +1,10 @@
 package com.aresstack.askai.java8.plugin.host;
 
-import com.aresstack.askai.acp.AcpAgentConnector;
-import com.aresstack.askai.acp.solon.SolonAcpAgentConnector;
 import com.aresstack.askai.mcp.api.McpEndpointDefinition;
 import com.aresstack.askai.mcp.api.McpEndpointHandle;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
 import com.aresstack.askai.mcp.api.McpToolContribution;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
-import com.aresstack.askai.mcp.solon.SolonMcpToolClientFactory;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshot;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshotProvider;
@@ -36,7 +32,6 @@ import com.aresstack.askai.java8.localmodels.LocalRerankerConfigurationSnapshotP
 import com.aresstack.askai.java8.localmodels.LocalRerankerModelCatalog;
 
 import java.io.File;
-import java.time.Duration;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -44,21 +39,14 @@ import java.util.Map;
 /**
  * The app-level owner of the host runtime services handed to agent plugins via
  * {@code AgentHostContext.getService}: the Solon MCP server runtime (LAZY — the loopback HTTP server only
- * starts when a plugin actually registers an endpoint, i.e. when the productive research mode is used), the
- * MCP tool-client factory and the ACP agent connector. One instance per application; {@link #shutdown()}
+ * starts when a plugin actually registers an endpoint, i.e. when the productive research mode is used) and
+ * the model/NLP/speech services. The research agent and the browser run inside the plugin now, so there is
+ * no tool-client factory and no agent connector any more. One instance per application; {@link #shutdown()}
  * stops the MCP runtime if it was ever started.
  */
 public final class AgentRuntimeServices {
 
     private final LazyRegistry registry = new LazyRegistry();
-    private final McpToolClientFactory toolClients = new SolonMcpToolClientFactory();
-    // The agent's STDERR goes to the app console: without it a failed agent start is undiagnosable.
-    private final AcpAgentConnector connector = new SolonAcpAgentConnector(Duration.ofSeconds(180),
-            new java.util.function.Consumer<String>() {
-                public void accept(String line) {
-                    System.err.println("[research-agent] " + line);
-                }
-            });
     /** Publishes the mandatory per-session reranker snapshot from the local model runtime. */
     private final RerankerConfigurationSnapshotProvider rerankerSnapshots;
     /** Lists the installed rerank-capable models for the EXPLICIT selection in the settings UI. */
@@ -77,7 +65,7 @@ public final class AgentRuntimeServices {
     private final com.aresstack.askai.agent.model.speech.SpeechSynthesisPort speechSynthesis =
             new com.aresstack.askai.java8.tts.PiperReadAloudService();
 
-    /** The embedding descriptor request timeout (local sidecar; probe + calls). */
+    /** The embedding descriptor request timeout (local runtime; probe + calls). */
     private static final long EMBEDDING_TIMEOUT_MILLIS = 60_000L;
 
     /** @deprecated retained only for callers without the local model runtime (no reranker service). */
@@ -104,7 +92,7 @@ public final class AgentRuntimeServices {
                 : new LocalRerankerConfigurationSnapshotProvider(localModelRuntime, centralConfig);
         this.rerankerCatalog = localModelRuntime == null ? null
                 : new LocalRerankerModelCatalog(localModelRuntime);
-        // Inference uses the central main model, which may live on the LOCAL sidecar or a REMOTE Ollama —
+        // Inference uses the central main model, which may live on the LOCAL runtime or a REMOTE Ollama —
         // so it is published whenever there is a central config, even without a local runtime.
         this.inferenceSnapshots = centralConfig == null ? null
                 : new LocalInferenceConfigurationSnapshotProvider(localModelRuntime, centralConfig);
@@ -112,7 +100,7 @@ public final class AgentRuntimeServices {
         // a central config — the Ollama arm needs only the central Ollama endpoint, not a local runtime.
         this.embeddingSnapshots = centralConfig == null ? null
                 : embeddingProvider(localModelRuntime, centralConfig);
-        // NLP models are a global AskAI resource in their OWN store (not the sidecar runtime store), so the
+        // NLP models are a global AskAI resource in their OWN store (not the local runtime store), so the
         // catalog is always available; the snapshot provider needs the central selection to resolve.
         LocalNlpModelStore nlpStore = new LocalNlpModelStore();
         this.nlpCatalog = new LocalNlpModelCatalog(nlpStore);
@@ -192,8 +180,6 @@ public final class AgentRuntimeServices {
     public Map<Class<?>, Object> asServiceMap() {
         Map<Class<?>, Object> services = new LinkedHashMap<Class<?>, Object>();
         services.put(McpServerRegistry.class, registry);
-        services.put(McpToolClientFactory.class, toolClients);
-        services.put(AcpAgentConnector.class, connector);
         if (rerankerSnapshots != null) {
             services.put(RerankerConfigurationSnapshotProvider.class, rerankerSnapshots);
         }

@@ -1,25 +1,21 @@
 package com.aresstack.askai.research.runtime;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * The validated ASKAI_* launch contract of the external agent. The research endpoint is mandatory (URL +
- * transport; token travels inside the URL path AND as a dedicated variable); browser variables are either
- * fully present or fully absent — an absent browser is a visible, non-fatal condition. {@link #toString()}
- * never contains tokens; error messages never dump the whole environment.
+ * The validated {@code ASKAI_*} configuration contract of a research agent session — the same keys the host
+ * used to hand to the agent PROCESS as launch environment, now passed as a map to the in-process
+ * {@link ResearchAgentSession}: session identity, the session's snapshot files (browser search settings,
+ * reranker, inference descriptor, search strategy) and the numeric/boolean settings hand-offs read through
+ * {@link #get(String)}. Tool endpoints are no longer part of it — they are injected as in-process invokers.
  */
-final class ResearchAgentEnvironment {
+public final class ResearchAgentEnvironment {
 
     final String sessionId;
     final String projectId;
-    final String researchUrl;
-    final String researchTransport;
-    final String browserUrl;      // null when no browser backend is available
-    final String browserTransport;
-    /** Internal service endpoint (manual_source_accept) for user searches; null when absent. */
-    final String serviceUrl;
-    final String serviceTransport;
-    /** Path of the legacy-browser-search config document (same file the sidecar receives), or null. */
+    /** Path of the legacy-browser-search config document (same settings the browser gets), or null. */
     final String browserSearchConfigPath;
     /** Path of the reranker start snapshot (the mandatory local cross-encoder endpoint), or null. */
     final String rerankerConfigPath;
@@ -36,56 +32,35 @@ final class ResearchAgentEnvironment {
     final String inferenceConfigPath;
     /** Actionable reason the main model is unavailable when no descriptor was published, or null. */
     final String inferenceUnavailableReason;
+    private final Map<String, String> values;
 
-    private ResearchAgentEnvironment(String sessionId, String projectId, String researchUrl,
-                                     String researchTransport, String browserUrl, String browserTransport,
-                                     String browserSearchConfigPath, String rerankerConfigPath,
-                                     String rerankerConfigEnPath, String rerankerConfigDePath,
-                                     String searchStrategyConfigPath, String inferenceConfigPath,
-                                     String inferenceUnavailableReason,
-                                     String serviceUrl, String serviceTransport) {
-        this.sessionId = sessionId;
-        this.projectId = projectId;
-        this.researchUrl = researchUrl;
-        this.researchTransport = researchTransport;
-        this.browserUrl = browserUrl;
-        this.browserTransport = browserTransport;
-        this.browserSearchConfigPath = browserSearchConfigPath;
-        this.rerankerConfigPath = rerankerConfigPath;
-        this.rerankerConfigEnPath = rerankerConfigEnPath;
-        this.rerankerConfigDePath = rerankerConfigDePath;
-        this.searchStrategyConfigPath = searchStrategyConfigPath;
-        this.inferenceConfigPath = inferenceConfigPath;
-        this.inferenceUnavailableReason = inferenceUnavailableReason;
-        this.serviceUrl = serviceUrl;
-        this.serviceTransport = serviceTransport;
+    private ResearchAgentEnvironment(Map<String, String> values) {
+        this.values = Collections.unmodifiableMap(new LinkedHashMap<String, String>(values));
+        this.sessionId = orDefault(values.get("ASKAI_SESSION_ID"), "");
+        this.projectId = orDefault(values.get("ASKAI_PROJECT_ID"), "");
+        this.browserSearchConfigPath = blankToNull(values.get("ASKAI_BROWSER_SEARCH_CONFIG"));
+        this.rerankerConfigPath = blankToNull(values.get("ASKAI_RERANKER_CONFIG"));
+        this.rerankerConfigEnPath = blankToNull(values.get("ASKAI_RERANKER_CONFIG_EN"));
+        this.rerankerConfigDePath = blankToNull(values.get("ASKAI_RERANKER_CONFIG_DE"));
+        this.searchStrategyConfigPath = blankToNull(values.get("ASKAI_SEARCH_STRATEGY_CONFIG"));
+        this.inferenceConfigPath = blankToNull(values.get("ASKAI_INFERENCE_CONFIG"));
+        this.inferenceUnavailableReason = blankToNull(values.get("ASKAI_INFERENCE_UNAVAILABLE_REASON"));
     }
 
-    static ResearchAgentEnvironment from(Map<String, String> env) {
-        String researchUrl = required(env, "ASKAI_RESEARCH_MCP_URL");
-        String researchTransport = orDefault(env.get("ASKAI_RESEARCH_MCP_TRANSPORT"), "streamable");
-        String browserUrl = blankToNull(env.get("ASKAI_BROWSER_MCP_URL"));
-        String serviceUrl = blankToNull(env.get("ASKAI_RESEARCH_SERVICE_MCP_URL"));
-        return new ResearchAgentEnvironment(
-                orDefault(env.get("ASKAI_SESSION_ID"), ""),
-                orDefault(env.get("ASKAI_PROJECT_ID"), ""),
-                researchUrl, researchTransport,
-                browserUrl,
-                browserUrl == null ? null : orDefault(env.get("ASKAI_BROWSER_MCP_TRANSPORT"), "streamable"),
-                blankToNull(env.get("ASKAI_BROWSER_SEARCH_CONFIG")),
-                blankToNull(env.get("ASKAI_RERANKER_CONFIG")),
-                blankToNull(env.get("ASKAI_RERANKER_CONFIG_EN")),
-                blankToNull(env.get("ASKAI_RERANKER_CONFIG_DE")),
-                blankToNull(env.get("ASKAI_SEARCH_STRATEGY_CONFIG")),
-                blankToNull(env.get("ASKAI_INFERENCE_CONFIG")),
-                blankToNull(env.get("ASKAI_INFERENCE_UNAVAILABLE_REASON")),
-                serviceUrl,
-                serviceUrl == null ? null
-                        : orDefault(env.get("ASKAI_RESEARCH_SERVICE_MCP_TRANSPORT"), "streamable"));
+    /** @param values the ASKAI_* hand-off (null entries and blanks count as absent). */
+    public static ResearchAgentEnvironment from(Map<String, String> values) {
+        return new ResearchAgentEnvironment(values == null
+                ? Collections.<String, String>emptyMap() : values);
     }
 
-    boolean hasService() {
-        return serviceUrl != null;
+    /** A raw hand-off value (trimmed), or null when absent/blank. */
+    public String get(String key) {
+        return blankToNull(values.get(key));
+    }
+
+    /** The whole hand-off (e.g. for the run budget codec). */
+    public Map<String, String> values() {
+        return values;
     }
 
     boolean hasSearchStrategyConfig() {
@@ -100,18 +75,6 @@ final class ResearchAgentEnvironment {
         return inferenceConfigPath != null;
     }
 
-    boolean hasBrowser() {
-        return browserUrl != null;
-    }
-
-    private static String required(Map<String, String> env, String key) {
-        String value = blankToNull(env.get(key));
-        if (value == null) {
-            throw new IllegalStateException("Missing required launch variable: " + key);
-        }
-        return value;
-    }
-
     private static String blankToNull(String v) {
         return v == null || v.trim().isEmpty() ? null : v.trim();
     }
@@ -122,8 +85,8 @@ final class ResearchAgentEnvironment {
 
     @Override
     public String toString() {
-        // Tokens are embedded in the URLs; keep them out of any printable form.
         return "ResearchAgentEnvironment{sessionId=" + sessionId + ", projectId=" + projectId
-                + ", research=<configured>, browser=" + (hasBrowser() ? "<configured>" : "absent") + "}";
+                + ", reranker=" + (hasReranker() ? "<configured>" : "absent")
+                + ", inference=" + (hasInference() ? "<configured>" : "absent") + "}";
     }
 }

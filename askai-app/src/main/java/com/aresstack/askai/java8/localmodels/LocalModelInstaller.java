@@ -20,10 +20,10 @@ import java.util.Map;
 /**
  * The staged LOCAL installation of a catalogued Hugging Face model. The FAMILY is decided by the neutral
  * catalog (never a name heuristic): resolve revision → download the catalogued files (checksums verified by
- * the HF client) → hand the staged directory to the Java-21 sidecar, which re-resolves the repository
+ * the HF client) → hand the staged directory to the local runtime, which re-resolves the repository
  * against the catalog ITSELF, compiles the family's {@code *.wdmlpack} and runs a package-backed
  * smoke-load → write the shared v2 provenance manifest LAST → atomically activate the directory. Nothing
- * half-installed becomes visible; the sidecar only publishes directories whose manifest validates against
+ * half-installed becomes visible; the local runtime only publishes directories whose manifest validates against
  * the catalog.
  */
 public final class LocalModelInstaller {
@@ -96,7 +96,7 @@ public final class LocalModelInstaller {
             String baseUrl = manager.ensureStarted();
             File finalDirectory = new File(localRoot, directoryName);
             if (finalDirectory.exists()) {
-                // Reinstallation: ask the sidecar to unload the previous installation, then remove it.
+                // Reinstallation: ask the local runtime to unload the previous installation, then remove it.
                 try {
                     LocalRuntimeHttp.postJson(baseUrl, "/api/generate", unloadRequest(virtualName));
                 } catch (IOException ignored) {
@@ -104,9 +104,9 @@ public final class LocalModelInstaller {
                 }
                 deleteRecursively(finalDirectory);
             }
-            // Move the raw assets into their FINAL home BEFORE the sidecar compiles + smoke-loads them. A
+            // Move the raw assets into their FINAL home BEFORE the local runtime compiles + smoke-loads them. A
             // generation smoke memory-maps the compiled package and the win-directml runtime keeps that file
-            // locked for the sidecar's lifetime, so renaming the directory AFTER the smoke is impossible on
+            // locked for the local runtime's lifetime, so renaming the directory AFTER the smoke is impossible on
             // Windows. Compiling in place and writing the manifest LAST preserves the "nothing half-installed
             // is visible" guarantee: the fail-closed reader ignores any directory without a valid manifest.
             activate(assembly, finalDirectory);
@@ -115,7 +115,7 @@ public final class LocalModelInstaller {
                 listener.onStep("Compiling the runtime package (" + descriptor.runtimePackageFileName()
                         + ") and smoke-loading it…");
                 Map<String, Object> installRequest = new LinkedHashMap<String, Object>();
-                // The sidecar re-derives family/capabilities/package from the catalog; these are identifiers.
+                // The local runtime re-derives family/capabilities/package from the catalog; these are identifiers.
                 installRequest.put("repositoryId", descriptor.huggingFaceRepositoryId());
                 installRequest.put("runtimeModelId", descriptor.runtimeModelId());
                 installRequest.put("virtualName", virtualName);
@@ -150,7 +150,7 @@ public final class LocalModelInstaller {
     }
 
     /**
-     * Rename the staged raw-asset directory into its final home (before the sidecar compiles/smokes it). A
+     * Rename the staged raw-asset directory into its final home (before the local runtime compiles/smokes it). A
      * few retries absorb the transient {@link java.nio.file.AccessDeniedException} Windows raises when an
      * antivirus/search indexer momentarily holds a just-downloaded file.
      */
