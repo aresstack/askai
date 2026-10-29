@@ -300,4 +300,116 @@ public class BrowserSessionActorTest {
             actor.close();
         }
     }
+
+    /** A session whose open() blocks until close() — the real driver: a cut connection fails the call. */
+    static final class StuckSession implements BrowserSession {
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch released = new CountDownLatch(1);
+        volatile boolean closed;
+
+        private void requireOpen() throws BrowserException {
+            if (closed) {
+                throw new BrowserException("Browser session is closed.");
+            }
+        }
+
+        public BrowserBackendKind getBackendKind() {
+            return BrowserBackendKind.PLAYWRIGHT_SIDECAR;
+        }
+
+        public WebSearchResult search(String query) throws BrowserException {
+            requireOpen();
+            return new WebSearchResult(Collections.emptyList(), Collections.emptyList(),
+                    Collections.emptyList());
+        }
+
+        public BrowserPageSnapshot open(String url) throws BrowserException {
+            requireOpen();
+            entered.countDown();
+            try {
+                released.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            throw new BrowserException("Browser connection closed.");
+        }
+
+        public BrowserPageSnapshot currentPage() throws BrowserException {
+            requireOpen();
+            return new BrowserPageSnapshot("http://example.test/", "t", "text", false);
+        }
+
+        public List<BrowserLink> links() throws BrowserException {
+            requireOpen();
+            return Collections.emptyList();
+        }
+
+        public BrowserPageSnapshot follow(String linkId) throws BrowserException {
+            requireOpen();
+            throw new BrowserException("Unknown link id: " + linkId);
+        }
+
+        public BrowserPageSnapshot back() throws BrowserException {
+            requireOpen();
+            return currentPage();
+        }
+
+        public void close() {
+            closed = true;
+            released.countDown();
+        }
+    }
+
+    @Test
+    public void terminateFailsTheStuckCommandAndEveryQueuedOneWithoutTheOwner() throws Exception {
+        final StuckSession stuck = new StuckSession();
+        final BrowserSessionActor actor = BrowserSessionActor.start(new Supplier<BrowserSession>() {
+            public BrowserSession get() {
+                return stuck;
+            }
+        });
+        final AtomicReference<Throwable> stuckFailure = new AtomicReference<Throwable>();
+        final AtomicReference<Throwable> queuedFailure = new AtomicReference<Throwable>();
+        Thread caller = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    actor.open("http://example.test/");
+                } catch (Throwable t) {
+                    stuckFailure.set(t);
+                }
+            }
+        }, "stuck-caller");
+        caller.start();
+        assertTrue(stuck.entered.await(5, TimeUnit.SECONDS));
+        Thread queued = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    actor.currentPage();
+                } catch (Throwable t) {
+                    queuedFailure.set(t);
+                }
+            }
+        }, "queued-caller");
+        queued.start();
+        Thread.sleep(100); // let it enqueue behind the stuck command
+
+        long before = System.currentTimeMillis();
+        actor.terminate(); // foreign thread: must not wait for the owner
+        long elapsed = System.currentTimeMillis() - before;
+        assertTrue("terminate never blocks on the owner (took " + elapsed + " ms)", elapsed < 2000);
+
+        caller.join(5000);
+        queued.join(5000);
+        assertTrue("the session connection was cut", stuck.closed);
+        assertTrue("the stuck command failed: " + stuckFailure.get(),
+                stuckFailure.get() instanceof BrowserException);
+        assertTrue("the queued command failed readably: " + queuedFailure.get(),
+                queuedFailure.get() instanceof BrowserException);
+        try {
+            actor.currentPage();
+            fail("a terminated actor refuses new commands");
+        } catch (BrowserException expected) {
+            // expected
+        }
+    }
 }

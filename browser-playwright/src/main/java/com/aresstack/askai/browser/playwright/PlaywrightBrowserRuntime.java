@@ -204,6 +204,19 @@ public final class PlaywrightBrowserRuntime implements AutoCloseable {
         session.close();
     }
 
+    /**
+     * EMERGENCY teardown from a foreign thread when a data call is stuck (the host's per-call browser timeout
+     * fired): never blocks on the owner thread; the stuck call fails and the driver child ends. {@link #close()}
+     * stays the orderly path.
+     */
+    public void terminate() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        session.terminate();
+    }
+
     // ------------------------------------------------------------------ static helpers
 
     /** Cheap capability probe for a channel (driver, driver bundle, installed browser) — launches nothing. */

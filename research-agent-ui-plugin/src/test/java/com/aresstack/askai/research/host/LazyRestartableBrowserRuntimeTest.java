@@ -276,4 +276,153 @@ public class LazyRestartableBrowserRuntimeTest {
         }
         assertEquals("no sidecar is started after close", 0, starter.starts.get());
     }
+
+    /**
+     * A generation whose data call for {@code hangOn} never returns on its own. Honouring fakes fail the call
+     * when terminated (the real one: the cut Playwright connection fails it); wedged fakes ignore both the
+     * termination and interrupts, like a call stuck outside Playwright.
+     */
+    private static final class HangingSidecar implements LazyRestartableBrowserRuntime.Sidecar {
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch released = new CountDownLatch(1);
+        final String hangOn;
+        final boolean honoursTerminate;
+        volatile boolean terminated;
+        volatile boolean closed;
+
+        HangingSidecar(String hangOn, boolean honoursTerminate) {
+            this.hangOn = hangOn;
+            this.honoursTerminate = honoursTerminate;
+        }
+
+        public String call(String tool, Map<String, Object> arguments)
+                throws BrowserRuntimePort.BrowserRuntimeException {
+            if (!hangOn.equals(tool)) {
+                return "gen1:" + tool;
+            }
+            entered.countDown();
+            long deadline = System.currentTimeMillis() + 20_000L;
+            while (System.currentTimeMillis() < deadline) {
+                try {
+                    if (released.await(deadline - System.currentTimeMillis(), TimeUnit.MILLISECONDS)) {
+                        break;
+                    }
+                } catch (InterruptedException ignored) {
+                    // a stuck call ignores interrupts (keep waiting)
+                }
+            }
+            throw new BrowserRuntimePort.BrowserRuntimeException("connection closed", true);
+        }
+
+        public boolean isAlive() {
+            return !closed && !terminated;
+        }
+
+        public void close() {
+            closed = true;
+            released.countDown();
+        }
+
+        public void terminate() {
+            terminated = true;
+            if (honoursTerminate) {
+                released.countDown();
+            }
+        }
+    }
+
+    private static LazyRestartableBrowserRuntime.SidecarStarter firstThenFresh(
+            final LazyRestartableBrowserRuntime.Sidecar first, final AtomicInteger starts) {
+        return new LazyRestartableBrowserRuntime.SidecarStarter() {
+            public LazyRestartableBrowserRuntime.Sidecar start() {
+                int n = starts.incrementAndGet();
+                return n == 1 ? first : new FakeSidecar(n, false);
+            }
+        };
+    }
+
+    @Test
+    public void aHungDataCallTimesOutTerminatesTheGenerationAndRetriesOnAFreshOne() throws Exception {
+        final HangingSidecar hanging = new HangingSidecar("web_read", true);
+        final AtomicInteger starts = new AtomicInteger();
+        LazyRestartableBrowserRuntime runtime =
+                new LazyRestartableBrowserRuntime(firstThenFresh(hanging, starts), 300L);
+        try {
+            assertEquals("gen1:web_open", runtime.execute("web_open", NO_ARGS));
+            long before = System.currentTimeMillis();
+            // The hung call hits the per-call timeout: the generation is terminated OFF the owner thread
+            // (the real termination cuts the Playwright connection), a fresh one starts, the command is
+            // retried once — the caller never waits for the hang itself.
+            assertEquals("gen2:web_read", runtime.execute("web_read", NO_ARGS));
+            long elapsed = System.currentTimeMillis() - before;
+            assertTrue("the hung generation was terminated", hanging.terminated);
+            assertEquals("restart + retry on a fresh generation", 2, starts.get());
+            assertTrue("bounded by the timeout, not by the hang (took " + elapsed + " ms)", elapsed < 5000);
+            assertTrue(runtime.isReady());
+        } finally {
+            hanging.released.countDown();
+            runtime.close();
+        }
+    }
+
+    @Test
+    public void aWedgedOwnerIsAbandonedAndTheNextCommandRunsOnAFreshOwner() throws Exception {
+        final HangingSidecar wedged = new HangingSidecar("web_read", false); // ignores terminate + interrupts
+        final AtomicInteger starts = new AtomicInteger();
+        LazyRestartableBrowserRuntime runtime =
+                new LazyRestartableBrowserRuntime(firstThenFresh(wedged, starts), 200L);
+        try {
+            assertEquals("gen1:web_open", runtime.execute("web_open", NO_ARGS));
+            long before = System.currentTimeMillis();
+            try {
+                runtime.execute("web_read", NO_ARGS);
+                fail("a generation that survives its termination must surface as a typed failure");
+            } catch (BrowserRuntimePort.BrowserRuntimeException expected) {
+                assertTrue(expected.getMessage(), expected.isEndpointUnavailable());
+            }
+            long elapsed = System.currentTimeMillis() - before;
+            assertTrue("timeout + bounded recovery, never the hang (took " + elapsed + " ms)", elapsed < 5000);
+            assertTrue(wedged.terminated);
+            // The wedged owner thread is left behind (daemon); a fresh owner serves the next command.
+            assertEquals("gen2:web_search", runtime.execute("web_search", NO_ARGS));
+            assertEquals(2, starts.get());
+        } finally {
+            wedged.released.countDown();
+            runtime.close();
+        }
+    }
+
+    @Test
+    public void closeOnAStuckGenerationReturnsWithinTheBound() throws Exception {
+        final HangingSidecar wedged = new HangingSidecar("web_read", false);
+        final AtomicInteger starts = new AtomicInteger();
+        final LazyRestartableBrowserRuntime runtime =
+                new LazyRestartableBrowserRuntime(firstThenFresh(wedged, starts), 200L);
+        Thread dataCall = null;
+        try {
+            runtime.execute("web_open", NO_ARGS);
+            dataCall = new Thread(new Runnable() {
+                public void run() {
+                    try {
+                        runtime.execute("web_read", NO_ARGS);
+                    } catch (Exception ignored) {
+                        // the stuck call ends as a typed failure — not under test here
+                    }
+                }
+            }, "stuck-data-call");
+            dataCall.start();
+            assertTrue(wedged.entered.await(5, TimeUnit.SECONDS));
+            long before = System.currentTimeMillis();
+            runtime.close(); // queues behind the stuck call → bounded → terminates off the owner
+            long elapsed = System.currentTimeMillis() - before;
+            assertTrue("close must not hang on a stuck generation (took " + elapsed + " ms)", elapsed < 5000);
+            assertTrue(wedged.terminated);
+            assertFalse(runtime.isReady());
+        } finally {
+            wedged.released.countDown();
+            if (dataCall != null) {
+                dataCall.join(5000);
+            }
+        }
+    }
 }

@@ -15,6 +15,11 @@
   phase; `BrowserToolSet` dispatches the flat `web_*` tool set by name with exactly the text contracts the
   sidecar used to serve over MCP. The host's `BrowserBridgeEndpoint` still publishes those tools (plus the
   `capture_id` convention) to the research runtime.
+- The host wrapper `LazyRestartableBrowserRuntime` bounds every data call with the per-call browser timeout
+  setting ("Tool timeout (s)" in the research settings). A call that exceeds it is treated like the former dead
+  sidecar process: the generation is terminated off the owner thread (the Playwright connection is cut, which
+  fails the stuck call and ends the driver child) and the command is retried once on a fresh generation; a
+  wedged owner thread is abandoned behind a bounded wait, so neither a command nor the session close can hang.
 
 ## How the Playwright backend works (MCP-P005, resolved)
 

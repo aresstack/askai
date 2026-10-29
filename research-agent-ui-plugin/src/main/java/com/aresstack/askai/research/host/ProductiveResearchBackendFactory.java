@@ -136,7 +136,10 @@ public final class ProductiveResearchBackendFactory {
         this.useAiReranker = enabled;
     }
 
-    /** Per-call timeout toward the browser runtime (seconds) — the settings value, never a constant. */
+    /**
+     * Per-call timeout toward the browser runtime (seconds) — the settings value, never a constant. Applied by
+     * {@link LazyRestartableBrowserRuntime} to every data call (hung call → generation terminated + retried).
+     */
     public void setBrowserToolTimeoutSeconds(int seconds) {
         if (seconds > 0) {
             this.browserToolTimeoutSeconds = seconds;
@@ -620,8 +623,10 @@ public final class ProductiveResearchBackendFactory {
         // The managed Camoufox is downloaded once; start that now in the background so the first browser
         // command (usually minutes later, after scoping) finds it installed. Spawns no browser.
         CamoufoxPrefetch.startOnce(config.getBrowserChannel());
+        // The per-call browser timeout (settings) bounds every data call of this runtime: a hung call
+        // terminates the generation and the command is retried once on a fresh one (see the runtime).
         final BrowserRuntimePort browser = new LazyRestartableBrowserRuntime(config,
-                browserConfigFile.getAbsolutePath());
+                browserConfigFile.getAbsolutePath(), browserToolTimeoutSeconds);
         try {
             // 3. Host endpoints for this session+generation (the bridge forwards through the lazy runtime).
             bridge = new BrowserBridgeEndpoint(registry, browser, captures, sessionKey, generationId);
@@ -834,8 +839,6 @@ public final class ProductiveResearchBackendFactory {
             baseEnv.put("ASKAI_SEARCH_MAX_TOOL_CALLS", String.valueOf(searchMaxToolCalls));
             baseEnv.put("ASKAI_SEARCH_MAX_MINUTES", String.valueOf(searchMaxMinutes));
             baseEnv.put("ASKAI_SEARCH_MAX_ERRORS", String.valueOf(searchMaxErrors));
-            baseEnv.put("ASKAI_BROWSER_TOOL_TIMEOUT_SECONDS",
-                    String.valueOf(browserToolTimeoutSeconds));
             // "KI-Reranker verwenden": OFF = the runtime scores lexically (BM25, no model call).
             baseEnv.put("ASKAI_USE_AI_RERANKER", String.valueOf(useAiReranker));
             InProcessResearchSessionBackend backend = null; // assigned after the endpoints are open

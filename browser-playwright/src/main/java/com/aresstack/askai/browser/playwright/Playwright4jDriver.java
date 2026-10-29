@@ -571,6 +571,37 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
     }
 
+    @Override
+    public void terminate() {
+        // Deliberately NO owner check: the owner thread is the stuck one. Cutting the Playwright connection
+        // fails its pending call ("connection closed") and ends the driver child; `closed` stops the pump
+        // and every later call. The cut runs on its own daemon thread because Playwright's close waits
+        // (bounded) for the driver process to exit — the caller must never block here. Context and browser
+        // are NOT closed over the stuck connection (that could block forever); the browser window of a cut
+        // connection may therefore survive as an orphan. close() stays the orderly path.
+        if (closed) {
+            return;
+        }
+        closed = true;
+        browserDisconnected = true;
+        final Playwright toCut = playwright;
+        final CamoufoxProvisioning.ProfileLease lease = profileLease;
+        Thread cutter = new Thread(new Runnable() {
+            public void run() {
+                closeQuietly(null, null, toCut);
+                if (lease != null) {
+                    try {
+                        lease.close();
+                    } catch (RuntimeException ignored) {
+                        // best effort: a profile still held by an orphaned browser stays on disk
+                    }
+                }
+            }
+        }, "playwright-terminate");
+        cutter.setDaemon(true);
+        cutter.start();
+    }
+
     /** Whether the browser is still there; a persistent context without a Browser object ends with its context. */
     private boolean connected() {
         return browser != null ? browser.isConnected() : !contextClosed;

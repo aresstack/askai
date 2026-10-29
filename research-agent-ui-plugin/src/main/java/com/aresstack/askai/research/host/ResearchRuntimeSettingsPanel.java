@@ -48,7 +48,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             "AI-phrased guidance (uses the main model; applies to new sessions)", false);
     /** Scoping orientation tags (default off = long-standing behaviour): suggestions on every broad turn. */
     private final JCheckBox alwaysSuggest = ComicControls.checkBox(
-            "Immer Suchvorschläge anbieten (Orientierungs-Tags; applies to new sessions)", false);
+            "Always offer search suggestions (orientation tags; applies to new sessions)", false);
     /** Answer budget per agent model turn (tokens) — the longest contracted answer is the source review. */
     private final JTextField agentMaxTokens = ComicControls.textField(6);
     // Konzeptpapier tool-round loop: work budget and error tolerance, deliberately separate.
@@ -91,7 +91,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField scopeCheckDuplicateCeiling = ComicControls.textField(4);
     /** AI reranker opt-in (default OFF = lexical BM25 scoring, no model load). */
     private final JCheckBox useAiReranker = ComicControls.checkBox(
-            "KI-Reranker verwenden (semantisches Modell statt BM25; gilt für neue Sessions)", false);
+            "Use the AI reranker (semantic model instead of BM25; applies to new sessions)", false);
     /** Bot-control MCP (default ON): run_command/session_state/chat_history + service-endpoint.json. */
     private final JCheckBox botControlMcp = ComicControls.checkBox(
             "Bot control via MCP (applies to new sessions)", true);
@@ -145,29 +145,29 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         JPanel form = new JPanel();
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
         form.add(row("Backend:", backendStatus));
-        form.add(row("Language / Sprache:", agentLanguage));
+        form.add(row("Language:", agentLanguage));
         form.add(row("", llmNarration));
         form.add(row("", alwaysSuggest));
-        form.add(row("Agent-Antwortbudget (Tokens):", agentMaxTokens));
+        form.add(row("Agent answer budget (tokens):", agentMaxTokens));
         JPanel searchLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         searchLimits.setOpaque(false);
-        searchLimits.add(labelled("Quellenziel", searchTargetSources));
+        searchLimits.add(labelled("Target sources", searchTargetSources));
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Seiten", searchMaxPages));
+        searchLimits.add(labelled("Pages", searchMaxPages));
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Tool-Calls", searchMaxToolCalls));
+        searchLimits.add(labelled("Tool calls", searchMaxToolCalls));
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Minuten", searchMaxMinutes));
-        searchLimits.add(labelled("Tool-Timeout (s)", browserToolTimeout));
+        searchLimits.add(labelled("Minutes", searchMaxMinutes));
+        searchLimits.add(labelled("Tool timeout (s)", browserToolTimeout));
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Fehler", searchMaxErrors));
-        form.add(row("Such-Limits:", searchLimits));
+        searchLimits.add(labelled("Errors", searchMaxErrors));
+        form.add(row("Search limits:", searchLimits));
         JPanel reviewLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         reviewLimits.setOpaque(false);
-        reviewLimits.add(labelled("Quellen", reviewMaxSources));
+        reviewLimits.add(labelled("Sources", reviewMaxSources));
         reviewLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        reviewLimits.add(labelled("Zeichen/Quelle", reviewMaxChars));
-        form.add(row("Review-Kontext:", reviewLimits));
+        reviewLimits.add(labelled("Chars/source", reviewMaxChars));
+        form.add(row("Review context:", reviewLimits));
         JPanel conceptLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         conceptLimits.setOpaque(false);
         conceptLimits.add(labelled("Tool rounds", conceptToolRounds));
@@ -176,31 +176,31 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         form.add(row("Concept loop:", conceptLimits));
         JPanel scopeCheckRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         scopeCheckRow.setOpaque(false);
-        scopeCheckRow.add(labelled("Breite (Konzepte)", scopeCheckTargetProbes));
+        scopeCheckRow.add(labelled("Breadth (concepts)", scopeCheckTargetProbes));
         scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Beispiele je Pfosten", scopeCheckControlsPerAnchor));
+        scopeCheckRow.add(labelled("Samples per post", scopeCheckControlsPerAnchor));
         scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Max. Themen", scopeCheckMaxTopics));
+        scopeCheckRow.add(labelled("Max. topics", scopeCheckMaxTopics));
         scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
         scopeCheckRow.add(labelled("Timeout (s)", scopeCheckTimeout));
         scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
         final javax.swing.JButton scopeCheckAdvancedToggle =
-                new ComicButton("Erweitert…");
+                new ComicButton("Advanced…");
         scopeCheckRow.add(scopeCheckAdvancedToggle);
-        form.add(row("Scope-Prüfung:", scopeCheckRow));
+        form.add(row("Scope check:", scopeCheckRow));
         JPanel scopeCheckModelRow = new JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         scopeCheckModelRow.setOpaque(false);
-        scopeCheckModelRow.add(labelled("Gen-Temp", scopeCheckGenTemperature));
+        scopeCheckModelRow.add(labelled("Gen temp", scopeCheckGenTemperature));
         scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Gen-Tokens", scopeCheckGenMaxTokens));
+        scopeCheckModelRow.add(labelled("Gen tokens", scopeCheckGenMaxTokens));
         scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Wahl-Temp", scopeCheckChooserTemperature));
+        scopeCheckModelRow.add(labelled("Choice temp", scopeCheckChooserTemperature));
         scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Wahl-Tokens", scopeCheckChooserMaxTokens));
+        scopeCheckModelRow.add(labelled("Choice tokens", scopeCheckChooserMaxTokens));
         scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Wahl-Timeout (s)", scopeCheckChoiceTimeout));
-        final JPanel scopeCheckModelSettings = row("  erweitert (Modell):", scopeCheckModelRow);
+        scopeCheckModelRow.add(labelled("Choice timeout (s)", scopeCheckChoiceTimeout));
+        final JPanel scopeCheckModelSettings = row("  advanced (model):", scopeCheckModelRow);
         scopeCheckModelSettings.setVisible(false);
         form.add(scopeCheckModelSettings);
         JPanel scopeCheckCalibrationRow = new JPanel(
@@ -208,35 +208,35 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckCalibrationRow.setOpaque(false);
         scopeCheckCalibrationRow.add(labelled("near", scopeCheckNearSimilarity));
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Hint-Margin", scopeCheckHintBoundaryMargin));
+        scopeCheckCalibrationRow.add(labelled("Hint margin", scopeCheckHintBoundaryMargin));
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Mission-Q", scopeCheckMissionQuantile));
+        scopeCheckCalibrationRow.add(labelled("Mission Q", scopeCheckMissionQuantile));
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Mission-Slack", scopeCheckMissionMargin));
+        scopeCheckCalibrationRow.add(labelled("Mission slack", scopeCheckMissionMargin));
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Nachbar-Q", scopeCheckNeighborQuantile));
+        scopeCheckCalibrationRow.add(labelled("Neighbour Q", scopeCheckNeighborQuantile));
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Nachbar-Slack", scopeCheckNeighborMargin));
+        scopeCheckCalibrationRow.add(labelled("Neighbour slack", scopeCheckNeighborMargin));
         final JPanel scopeCheckCalibrationSettings =
-                row("  erweitert (Kalibrierung):", scopeCheckCalibrationRow);
+                row("  advanced (calibration):", scopeCheckCalibrationRow);
         scopeCheckCalibrationSettings.setVisible(false);
         form.add(scopeCheckCalibrationSettings);
         JPanel scopeCheckSweepRow = new JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         scopeCheckSweepRow.setOpaque(false);
-        scopeCheckSweepRow.add(labelled("Min. Pfosten", scopeCheckMinNegotiated));
+        scopeCheckSweepRow.add(labelled("Min. posts", scopeCheckMinNegotiated));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Min. Beispiele", scopeCheckMinNeighbors));
+        scopeCheckSweepRow.add(labelled("Min. samples", scopeCheckMinNeighbors));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Boundary-Margin", scopeCheckBoundaryMargin));
+        scopeCheckSweepRow.add(labelled("Boundary margin", scopeCheckBoundaryMargin));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Novelty-Gap", scopeCheckNoveltyGap));
+        scopeCheckSweepRow.add(labelled("Novelty gap", scopeCheckNoveltyGap));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Novelty-Gewicht", scopeCheckNoveltyWeight));
+        scopeCheckSweepRow.add(labelled("Novelty weight", scopeCheckNoveltyWeight));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Dublette ≥", scopeCheckDuplicateCeiling));
+        scopeCheckSweepRow.add(labelled("Duplicate ≥", scopeCheckDuplicateCeiling));
         final JPanel scopeCheckSweepSettings =
-                row("  erweitert (Sweep):", scopeCheckSweepRow);
+                row("  advanced (sweep):", scopeCheckSweepRow);
         scopeCheckSweepSettings.setVisible(false);
         form.add(scopeCheckSweepSettings);
         scopeCheckAdvancedToggle.addActionListener(new ActionListener() {
@@ -262,7 +262,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         botTools.setEnabled(liveEndpoint != null);
         botTools.setToolTipText(liveEndpoint != null
                 ? "Streamable HTTP (MCP JSON-RPC): " + liveEndpoint.connectionUrl()
-                : "Diese Session hat keinen Bot-Endpoint (deaktiviert oder keine produktive Session)");
+                : "This session has no bot endpoint (disabled, or not a productive session)");
         form.add(row("", useAiReranker));
         JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         botRow.setOpaque(false);
@@ -327,8 +327,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             }
         });
         useAiReranker.setSelected(ResearchRuntimeSettings.loadUseAiReranker(store));
-        useAiReranker.setToolTipText("Aus: Suchtreffer werden lexikalisch per BM25 bewertet — schnell, "
-                + "ohne Modell. An: das konfigurierte Cross-Encoder-Modell bewertet semantisch.");
+        useAiReranker.setToolTipText("Off: search hits are scored lexically with BM25 — fast, "
+                + "no model. On: the configured cross-encoder model scores them semantically.");
         useAiReranker.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 ResearchRuntimeSettings.saveUseAiReranker(ResearchRuntimeSettingsPanel.this.store,
@@ -382,9 +382,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             }
         });
         agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
-        agentMaxTokens.setToolTipText("Antwort-Budget des Agenten in Tokens pro Modell-Turn (die längste "
-                + "Antwort ist die Quellen-Auswertung). Ein zu kleiner Wert schneidet Antworten ab. "
-                + "Gilt für neue Sessions.");
+        agentMaxTokens.setToolTipText("The agent's answer budget in tokens per model turn (the longest "
+                + "answer is the source review). Too small a value truncates answers. "
+                + "Applies to new sessions.");
         agentMaxTokens.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 persistAgentMaxTokens();
@@ -399,31 +399,31 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindScopeCheckSettings();
         bindLimit(searchTargetSources, ResearchRuntimeSettings.KEY_SEARCH_TARGET_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_TARGET_SOURCES,
-                "Die Suche endet regulär bei so vielen akzeptierten Quellen (gilt für neue Sessions).");
+                "The search ends regularly once this many sources are accepted (applies to new sessions).");
         bindLimit(searchMaxPages, ResearchRuntimeSettings.KEY_SEARCH_MAX_PAGES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_PAGES,
-                "Sicherheitslimit: maximal besuchte Seiten pro Suchlauf.");
+                "Safety limit: maximum pages visited per search run.");
         bindLimit(searchMaxToolCalls, ResearchRuntimeSettings.KEY_SEARCH_MAX_TOOL_CALLS,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_TOOL_CALLS,
-                "Sicherheitslimit: maximale Tool-Aufrufe pro Suchlauf.");
+                "Safety limit: maximum tool calls per search run.");
         bindLimit(searchMaxMinutes, ResearchRuntimeSettings.KEY_SEARCH_MAX_MINUTES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_MINUTES,
-                "Sicherheitslimit (Timeout): maximale Laufzeit in Minuten; Wartezeiten auf den "
-                        + "Nutzer zählen nicht.");
+                "Safety limit (timeout): maximum run time in minutes; waiting for the "
+                        + "user does not count.");
         bindLimit(searchMaxErrors, ResearchRuntimeSettings.KEY_SEARCH_MAX_ERRORS,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_ERRORS,
-                "Sicherheitslimit: maximale AUFEINANDERFOLGENDE technische Fehler, bevor der Lauf endet.");
+                "Safety limit: maximum CONSECUTIVE technical errors before the run ends.");
         bindLimit(browserToolTimeout, ResearchRuntimeSettings.KEY_BROWSER_TOOL_TIMEOUT_SECONDS,
                 ResearchRuntimeSettings.DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS,
-                "Timeout je Browser-Aufruf in Sekunden. Muss die komplette Suchmaschinen-Phase "
-                        + "abdecken (mehrere Engines und Ergebnisseiten, sequenziell mit Auswertung) — "
-                        + "zu klein wird als 'Browser tot' fehlgedeutet und bricht jede Suche ab.");
+                "Timeout per browser call in seconds. Must cover the whole search-engine phase "
+                        + "(several engines and result pages, sequential with evaluation) — too small "
+                        + "is misread as 'browser dead' and aborts every search.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
-                "Wie viele Quellen eine Auswertung höchstens liest (neueste zuerst).");
+                "How many sources one review reads at most (newest first).");
         bindLimit(reviewMaxChars, ResearchRuntimeSettings.KEY_REVIEW_MAX_CHARS,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_CHARS,
-                "Wie viele Zeichen je Quelle in die Auswertung gelangen.");
+                "How many characters per source enter the review.");
         bindLimit(conceptToolRounds, ResearchRuntimeSettings.KEY_CONCEPT_TOOL_ROUNDS,
                 ResearchRuntimeSettings.DEFAULT_CONCEPT_TOOL_ROUNDS,
                 "How many model-tool cycles ONE concept turn may make (work budget).");
@@ -526,78 +526,78 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         com.aresstack.askai.research.scope.ScopeSweepConfiguration d =
                 com.aresstack.askai.research.scope.ScopeSweepConfiguration.defaults();
         bindLimit(scopeCheckTargetProbes, ResearchRuntimeSettings.KEY_SCOPE_CHECK_TARGET_PROBES,
-                d.targetBroadProbes, "Wie viele breite Konzepte eine Themenraum-Prüfung erzeugt. "
-                        + "Kleine Hauptmodelle (2B-Klasse) halten 50 oft nicht durch — dann 20 "
-                        + "einstellen.");
+                d.targetBroadProbes, "How many broad concepts one scope check generates. "
+                        + "Small main models (2B class) often cannot sustain 50 — set 20 "
+                        + "then.");
         bindLimit(scopeCheckControlsPerAnchor,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CONTROLS_PER_ANCHOR, d.controlsPerAnchor,
-                "Lokale Kalibrierungs-Beispiele je ausgehandeltem Zaunpfosten");
+                "Local calibration samples per negotiated fence post");
         bindLimit(scopeCheckMaxTopics, ResearchRuntimeSettings.KEY_SCOPE_CHECK_MAX_TOPICS,
                 d.selectorParameters.maximumCandidates,
-                "Höchstens so viele unerforschte Themen je Prüfung vorschlagen");
+                "Suggest at most this many unexplored topics per check");
         bindLimit(scopeCheckTimeout, ResearchRuntimeSettings.KEY_SCOPE_CHECK_TIMEOUT_SECONDS,
-                d.generationTimeoutSeconds, "Timeout der Themen-Generierung in Sekunden");
+                d.generationTimeoutSeconds, "Timeout of the topic generation in seconds");
         bindDecimal(scopeCheckGenTemperature,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_GEN_TEMPERATURE, d.generatorTemperature,
-                "Temperatur der Themen-Generierung (Breite braucht Vielfalt)");
+                "Temperature of the topic generation (breadth needs variety)");
         bindLimit(scopeCheckGenMaxTokens, ResearchRuntimeSettings.KEY_SCOPE_CHECK_GEN_MAX_TOKENS,
-                d.generatorMaxOutputTokens, "Token-Budget der Themen-Generierung");
+                d.generatorMaxOutputTokens, "Token budget of the topic generation");
         bindDecimal(scopeCheckChooserTemperature,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOOSER_TEMPERATURE, d.chooserTemperature,
-                "Temperatur der Fragen-Auswahl (fokussiert, nicht kreativ)");
+                "Temperature of the question choice (focused, not creative)");
         bindLimit(scopeCheckChooserMaxTokens,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOOSER_MAX_TOKENS,
-                d.chooserMaxOutputTokens, "Token-Budget der Fragen-Auswahl");
+                d.chooserMaxOutputTokens, "Token budget of the question choice");
         bindLimit(scopeCheckChoiceTimeout,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOICE_TIMEOUT_SECONDS,
-                d.choiceTimeoutSeconds, "Timeout der Fragen-Auswahl in Sekunden");
-        String spike = " (Mess-Spike: Formel bewusst vorläufig, wird nach produktiven "
-                + "Messungen eingefroren)";
+                d.choiceTimeoutSeconds, "Timeout of the question choice in seconds");
+        String spike = " (measurement spike: the formula is deliberately provisional, frozen after "
+                + "productive measurements)";
         bindDecimal(scopeCheckNearSimilarity,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEAR_SIMILARITY,
-                d.fenceThresholds.nearSimilarity, "Z2-Hint: ab dieser Cosine gilt "
-                        + "\u201enahe an einem Pfosten\u201c" + spike);
+                d.fenceThresholds.nearSimilarity, "Z2 hint: from this cosine on a probe counts as "
+                        + "'near a fence post'" + spike);
         bindDecimal(scopeCheckHintBoundaryMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_HINT_BOUNDARY_MARGIN,
-                d.fenceThresholds.boundaryMargin, "Z2-Hint-Boundary-Margin" + spike);
+                d.fenceThresholds.boundaryMargin, "Z2 hint boundary margin" + spike);
         bindDecimal(scopeCheckMissionQuantile,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MISSION_QUANTILE,
                 d.calibrationParameters.missionRelevanceQuantile,
-                "Quantil der Anker-Missionsrelevanz (0=Minimum)" + spike);
+                "Quantile of the anchors' mission relevance (0 = minimum)" + spike);
         bindDecimal(scopeCheckMissionMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MISSION_MARGIN,
                 d.calibrationParameters.missionRelevanceMargin,
-                "Slack unter dem Missions-Quantil" + spike);
+                "Slack below the mission quantile" + spike);
         bindDecimal(scopeCheckNeighborQuantile,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEIGHBOR_QUANTILE,
                 d.calibrationParameters.neighborSimilarityQuantile,
-                "Quantil der Anker-Nachbar-Cosines (0=Minimum)" + spike);
+                "Quantile of the anchor-neighbour cosines (0 = minimum)" + spike);
         bindDecimal(scopeCheckNeighborMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEIGHBOR_MARGIN,
                 d.calibrationParameters.neighborSimilarityMargin,
-                "Slack unter dem Nachbar-Quantil" + spike);
+                "Slack below the neighbour quantile" + spike);
         bindLimit(scopeCheckMinNegotiated,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MIN_NEGOTIATED,
                 d.calibrationParameters.minimumNegotiatedAnchors,
-                "Mindestzahl ausgehandelter IN/OUT-Pfosten für eine belastbare Kalibrierung");
+                "Minimum number of negotiated IN/OUT fence posts for a reliable calibration");
         bindLimit(scopeCheckMinNeighbors,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MIN_NEIGHBORS,
                 d.calibrationParameters.minimumNeighborSamples,
-                "Mindestzahl gültiger Nachbar-Beispiele");
+                "Minimum number of valid neighbour samples");
         bindDecimal(scopeCheckBoundaryMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_BOUNDARY_MARGIN, d.boundaryMargin,
-                "|margin| unter diesem Wert = echte IN/OUT-Grenzfrage" + spike);
+                "|margin| below this value = a genuine IN/OUT boundary question" + spike);
         bindDecimal(scopeCheckNoveltyGap,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NOVELTY_GAP, d.sweepNoveltyGap,
-                "Sweep-relative Novelty-Linie: Median minus dieser Wert" + spike);
+                "Sweep-relative novelty line: median minus this value" + spike);
         bindDecimal(scopeCheckNoveltyWeight,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NOVELTY_WEIGHT,
                 d.selectorParameters.noveltyWeight,
-                "Gewicht der Neuheit in der Themen-Diversität");
+                "Weight of novelty in the topic diversity");
         bindDecimal(scopeCheckDuplicateCeiling,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_DUPLICATE_CEILING,
                 d.selectorParameters.duplicateSimilarityCeiling,
-                "Ab dieser Ähnlichkeit gelten zwei Themen als Wortvarianten");
+                "From this similarity on two topics count as word variants");
     }
 
     /** Like {@link #bindLimit} for decimal knobs (temperatures, cosines, margins). */

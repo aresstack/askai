@@ -523,6 +523,11 @@ final class PlaywrightBrowserSession implements BrowserSession {
         driver.close();
     }
 
+    /** EMERGENCY teardown from a foreign thread (stuck owner): see {@link PlaywrightDriver#terminate()}. */
+    void terminate() {
+        driver.terminate();
+    }
+
     /**
      * Keep the driver's event loop alive while the owner thread has no command to run (route interception,
      * HUD binding, popup close). @return false when the driver has no event loop to pump.

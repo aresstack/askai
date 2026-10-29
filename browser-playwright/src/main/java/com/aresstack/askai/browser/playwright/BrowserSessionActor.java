@@ -325,6 +325,28 @@ final class BrowserSessionActor implements BrowserSession {
         running.set(false); // the loop drains, fails leftovers and ends within one pump slice
     }
 
+    /**
+     * EMERGENCY stop from a FOREIGN thread while the owner is stuck inside a data command: the loop is told
+     * to end, every command still queued fails readably, and the driver connection is cut — which fails the
+     * stuck command on the owner thread. Never blocks on the owner; new calls are refused from here on.
+     */
+    void terminate() {
+        running.set(false);
+        Command<?> leftover;
+        while ((leftover = queue.poll()) != null) {
+            leftover.fail(new BrowserException("Browser session is closed."));
+        }
+        try {
+            if (playwrightBacked != null) {
+                playwrightBacked.terminate();
+            } else {
+                underlying.close();
+            }
+        } catch (RuntimeException ignored) {
+            // best effort — the loop ends as soon as the stuck command returns
+        }
+    }
+
     private static final class Command<T> {
         final SessionTask<T> task;
         final CompletableFuture<T> result = new CompletableFuture<T>();

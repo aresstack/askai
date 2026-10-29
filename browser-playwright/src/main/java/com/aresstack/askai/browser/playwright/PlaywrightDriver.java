@@ -133,4 +133,13 @@ interface PlaywrightDriver extends AutoCloseable {
 
     /** Idempotent: page → context → browser → Playwright (and with it the GraalJS driver child). */
     void close();
+
+    /**
+     * EMERGENCY teardown from a FOREIGN thread while the owner thread is stuck inside a driver call that
+     * does not return. Must never block on the owner and must make the stuck call fail. The default is
+     * the regular {@link #close()} (drivers without an owner-bound connection).
+     */
+    default void terminate() {
+        close();
+    }
 }
