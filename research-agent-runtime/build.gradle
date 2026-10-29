@@ -29,6 +29,8 @@ dependencies {
     testImplementation project(':mcp-solon-runtime')
     // The live reranker tests start the REAL local model runtime in-process (as the host does now).
     testImplementation project(':local-model-runtime')
+    // The live Playwright tests start the REAL browser in-process (as the plugin does now).
+    testImplementation project(':browser-playwright')
     // 36C: the live-sidecar integration test drives the PRODUCTIVE capture/acceptance lifecycle
     // (CaptureStore, SourceAcceptanceService, in-memory repository/index) behind the research endpoint.
     testImplementation project(':research-agent-ui-plugin')
@@ -60,10 +62,6 @@ task researchAgentJar(type: Jar) {
 test {
     useJUnit()
     dependsOn researchAgentJar
-    // 36C: the loop-vs-live-Playwright test spawns the REAL Java-21 sidecar fat jar as a separate
-    // process (the Java-8 test JVM never loads sidecar classes). Without a Java-21 toolchain or an
-    // installed browser the test SKIPS readably; the build stays green.
-    dependsOn ':browser-mcp-server-java21:sidecarJar'
     doFirst {
         // Scope live-gate model override: -Daskai.live.main.model=gemma4:e2b runs the generator/
         // sweep gates against a SPECIFIC installed model instead of the first chat model found.
@@ -76,15 +74,5 @@ test {
         systemProperty 'research.agent.jar', researchAgentJar.archiveFile.get().asFile.absolutePath
         // The spawned agent runs on the test JVM's own JDK (the Java 21 toolchain): the tests fall back to
         // their java.home, so no daemon-JVM path (possibly an older Java) is handed down any more.
-        def sidecarTask = project(':browser-mcp-server-java21').tasks.getByName('sidecarJar')
-        systemProperty 'browser.sidecar.jar', sidecarTask.archiveFile.get().asFile.absolutePath
-        try {
-            def launcher21 = javaToolchains.launcherFor {
-                languageVersion = JavaLanguageVersion.of(21)
-            }.get()
-            systemProperty 'sidecar.java', launcher21.executablePath.asFile.absolutePath
-        } catch (Exception noJava21) {
-            // property absent → the sidecar test skips with a readable message
-        }
     }
 }

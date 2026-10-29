@@ -109,15 +109,10 @@ public class ProductiveResearchMvpEndToEndTest {
     public void productiveHostWiringRunsTheFullMvpAndSurvivesGenerationSwitching() throws Exception {
         // ---- external prerequisites (environment-gated with the concrete reason) ----
         String agentJar = System.getProperty("research.agent.jar", "");
-        String sidecarJar = System.getProperty("browser.sidecar.jar", "");
-        String sidecarJava = System.getProperty("sidecar.java", "");
         String agentHome = System.getProperty("acp.java.home", System.getProperty("java.home"));
         String agentJava = agentHome + File.separator + "bin" + File.separator
                 + (System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         assumeTrue("SKIPPED: agent jar not built", new File(agentJar).isFile());
-        assumeTrue("SKIPPED: sidecar jar not built", new File(sidecarJar).isFile());
-        assumeTrue("SKIPPED: no Java 21 toolchain for the sidecar",
-                !sidecarJava.isEmpty() && new File(sidecarJava).isFile());
         // The reranker is MANDATORY for a productive browser session: start the real local reranker or
         // skip readably (no installed cross-encoder / no Java-21 launcher).
         com.aresstack.askai.research.runtime.rerank.LiveLocalRerankerRuntime reranker =
@@ -151,7 +146,7 @@ public class ProductiveResearchMvpEndToEndTest {
         serverTwo.start();
         // Documented dev/test hand-off: local multi-server worlds act as distinct domain families,
         // and the local test engine is an EXPLICIT per-run sidecar flag (the persisted override is dead).
-        String oldSidecarArgs = System.setProperty("askai.research.sidecar.args",
+        String oldSidecarArgs = System.setProperty("askai.research.browser.args",
                 "--domain-key-mode=host-port --search-url=" + baseEngine + "/find?q={query}");
 
         SolonMcpServerRuntime registry = new SolonMcpServerRuntime();
@@ -160,7 +155,7 @@ public class ProductiveResearchMvpEndToEndTest {
                 new SolonAcpAgentConnector(Duration.ofSeconds(180), null),
                 reranker.asProvider(10));
         ResearchRuntimeConfig config = new ResearchRuntimeConfig(agentJava, agentJar,
-                sidecarJava, sidecarJar, System.getenv().getOrDefault("ASKAI_TEST_BROWSER_CHANNEL", "chrome"),
+                System.getenv().getOrDefault("ASKAI_TEST_BROWSER_CHANNEL", "chrome"),
                 true, true, reranker.modelName);
 
         File projectDir = Files.createTempDirectory("askai-e2e").toFile();
@@ -256,8 +251,8 @@ public class ProductiveResearchMvpEndToEndTest {
                     registry.endpointUrl(controlHandle));
 
             // ---- failed generation switch leaves generation 1 fully usable ----
-            ResearchRuntimeConfig broken = new ResearchRuntimeConfig(agentJava, agentJar,
-                    sidecarJava, sidecarJar + ".missing", "chrome", true, true, null);
+            ResearchRuntimeConfig broken = new ResearchRuntimeConfig(agentJava, agentJar + ".missing",
+                    "chrome", true, true, null);
             try {
                 switcher.switchTo(broken);
                 fail("a broken config must not be published");
@@ -293,9 +288,9 @@ public class ProductiveResearchMvpEndToEndTest {
             serverOne.stop(0);
             serverTwo.stop(0);
             if (oldSidecarArgs == null) {
-                System.clearProperty("askai.research.sidecar.args");
+                System.clearProperty("askai.research.browser.args");
             } else {
-                System.setProperty("askai.research.sidecar.args", oldSidecarArgs);
+                System.setProperty("askai.research.browser.args", oldSidecarArgs);
             }
         }
     }

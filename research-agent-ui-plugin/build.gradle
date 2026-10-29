@@ -10,6 +10,11 @@ dependencies {
     // bundled INTO the plugin jar below (no other classloader in the host loads them — no identity
     // split).
     implementation project(':browser-api')
+    // The IN-PROCESS Playwright browser (playwright4j GraalJS driver, Camoufox, the web_* tool set): the
+    // plugin starts it on the first browser command. Its jars (Playwright, playwright4j, the GraalVM 25
+    // stack, Jackson) ship in this plugin's lib/ and load plugin-first, so they never meet the host's
+    // GraalJS 21.2 on one classpath; the driver child JVM takes its classpath from these jar URLs.
+    implementation project(':browser-playwright')
     // Central OAuth (AP 6): offline JWT validation of centrally issued access tokens.
     implementation 'com.aresstack:anauthentia:0.1.0'
     implementation 'com.aresstack:anauthentia-jwt:0.1.0'

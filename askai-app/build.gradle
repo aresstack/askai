@@ -92,21 +92,13 @@ test {
     useJUnit()
     // App-classpath reproduction of the research-agent start (diagnoses -32603 from the GUI).
     dependsOn ':research-agent-runtime:researchAgentJar'
-    dependsOn ':browser-mcp-server-java21:sidecarJar'
     doFirst {
         def agentJarTask = project(':research-agent-runtime').tasks.getByName('researchAgentJar')
         systemProperty 'research.agent.jar', agentJarTask.archiveFile.get().asFile.absolutePath
-        def sidecarTask = project(':browser-mcp-server-java21').tasks.getByName('sidecarJar')
-        systemProperty 'browser.sidecar.jar', sidecarTask.archiveFile.get().asFile.absolutePath
         // C2c: the opt-in real-model smoke drives the productive (in-process) LocalModelRuntimeManager.
         // Gated by -Daskai.local.realModelSmoke=true, so a normal build never downloads models.
         systemProperty 'askai.local.realModelSmoke',
                 System.getProperty('askai.local.realModelSmoke', 'false')
-        // The whole build runs on the Java 21 toolchain: the sidecar launcher is that toolchain's java.
-        def launcher21 = javaToolchains.launcherFor {
-            languageVersion = JavaLanguageVersion.of(21)
-        }.get()
-        systemProperty 'sidecar.java', launcher21.executablePath.asFile.absolutePath
     }
 }
 
@@ -180,7 +172,7 @@ task mergeServiceFiles {
 
 task fatJar(type: Jar) {
     group = 'build'
-    description = 'Build the runnable AskAI fat jar (app + runtime dependencies; plugins and sidecar distributions stay outside).'
+    description = 'Build the runnable AskAI fat jar (app + runtime dependencies; the plugin and the research runtime distribution stay outside).'
     archiveBaseName = 'askai'
     archiveClassifier = ''
     archiveVersion = project.version.toString()
@@ -221,26 +213,18 @@ def devPluginsDir = rootProject.layout.buildDirectory.dir('dev-plugins')
 // load lazily via PF4J — the root cause of the random ClassFormatError ($2 / $7) failures.
 def devPluginRunsDir = rootProject.layout.buildDirectory.dir('dev-plugin-runs')
 
-// One assembled research runtime distribution (Commit 42): agent jar + sidecar thin jar + its lib/
-// directory in a single, stable layout the app can auto-detect — no manually typed build paths.
+// The assembled research runtime distribution (Commit 42): the agent jar in a stable layout the app can
+// auto-detect — no manually typed build paths. (The browser runs in-process since the Java 21 return.)
 def researchRuntimeDir = rootProject.layout.buildDirectory.dir('research-runtime')
 
 task researchRuntimeDist(type: Sync) {
     group = 'build'
-    description = 'Assemble the research runtime distribution (agent jar, sidecar jar, lib/).'
+    description = 'Assemble the research runtime distribution (the agent jar).'
     dependsOn ':research-agent-runtime:researchAgentJar'
-    dependsOn ':browser-mcp-server-java21:sidecarJar'
-    dependsOn ':browser-mcp-server-java21:sidecarJar', ':browser-mcp-server-java21:sidecarLibs'
     into researchRuntimeDir
-    // Closures defer the cross-project task lookups to execution time (configuration order safe).
+    // The closure defers the cross-project task lookup to execution time (configuration order safe).
     from({ project(':research-agent-runtime').tasks.getByName('researchAgentJar').archiveFile }) {
         rename { 'research-agent-runtime.jar' }
-    }
-    from({ project(':browser-mcp-server-java21').tasks.getByName('sidecarJar').archiveFile }) {
-        rename { 'browser-mcp-sidecar.jar' }
-    }
-    from({ project(':browser-mcp-server-java21').tasks.getByName('sidecarLibs').destinationDir }) {
-        into 'lib'
     }
 }
 

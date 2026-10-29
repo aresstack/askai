@@ -62,11 +62,8 @@ public class MandatoryRerankerWiringTest {
     public void createSessionPassesTheSessionResearchLanguageToTheRerankerResolution() throws Exception {
         File exe = folder.newFile("java");
         File jar = folder.newFile("agent.jar");
-        File sidecarJava = folder.newFile("java21");
-        File sidecarJar = folder.newFile("sidecar.jar");
         ResearchRuntimeConfig config = new ResearchRuntimeConfig(exe.getAbsolutePath(),
-                jar.getAbsolutePath(), sidecarJava.getAbsolutePath(), sidecarJar.getAbsolutePath(),
-                "chrome", true, true);
+                jar.getAbsolutePath(), "chrome", true, true);
         // Records the language the factory resolves the reranker with, then aborts the start (visible error).
         final String[] seenLanguage = new String[1];
         com.aresstack.askai.agent.model.reranker.RerankerConfigurationSnapshotProvider recording =
@@ -103,11 +100,8 @@ public class MandatoryRerankerWiringTest {
     public void createSessionPublishesPerLanguageRerankerSnapshots() throws Exception {
         File exe = folder.newFile("java");
         File jar = folder.newFile("agent.jar");
-        File sidecarJava = folder.newFile("java21");
-        File sidecarJar = folder.newFile("sidecar.jar");
         ResearchRuntimeConfig config = new ResearchRuntimeConfig(exe.getAbsolutePath(),
-                jar.getAbsolutePath(), sidecarJava.getAbsolutePath(), sidecarJar.getAbsolutePath(),
-                "chrome", true, true);
+                jar.getAbsolutePath(), "chrome", true, true);
         // Serves the session-default and "en" snapshots, then aborts on the "de" publication — proving the
         // factory resolves session-language + en + de (in that order) before the runtime is launched.
         final java.util.List<String> languages = new java.util.ArrayList<String>();
@@ -162,11 +156,8 @@ public class MandatoryRerankerWiringTest {
     public void createSessionWithoutARerankerProviderFailsVisibly() throws Exception {
         File exe = folder.newFile("java");
         File jar = folder.newFile("agent.jar");
-        File sidecarJava = folder.newFile("java21");
-        File sidecarJar = folder.newFile("sidecar.jar");
         ResearchRuntimeConfig config = new ResearchRuntimeConfig(exe.getAbsolutePath(),
-                jar.getAbsolutePath(), sidecarJava.getAbsolutePath(), sidecarJar.getAbsolutePath(),
-                "chrome", true, true);
+                jar.getAbsolutePath(), "chrome", true, true);
         // A null provider models "the host did not publish the mandatory reranker service".
         ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(
                 null, null, null, config, 1L, null);

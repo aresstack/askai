@@ -31,7 +31,7 @@ import static org.junit.Assume.assumeTrue;
 
 /**
  * The EXACT GUI chain, headless, on the APP classpath: the frame's {@link AgentRuntimeServices} as host
- * services, the plugin's {@link ResearchAgentSessionFactory} (auto defaults, sidecar spawn, both endpoints,
+ * services, the plugin's {@link ResearchAgentSessionFactory} (auto defaults, in-process browser, both endpoints,
  * ACP agent) and {@code activate()} — the place the GUI reported
  * "session/new failed ... [code=-32603]". A failure here reproduces the GUI bug headlessly; a pass means
  * the remaining difference is Swing/EDT or the PF4J classloader.
@@ -41,11 +41,7 @@ public class GuiChainReproductionTest {
     @Test
     public void activateStartsTheAgentExactlyLikeTheGui() throws Exception {
         String agentJar = System.getProperty("research.agent.jar", "");
-        String sidecarJar = System.getProperty("browser.sidecar.jar", "");
-        String sidecarJava = System.getProperty("sidecar.java", "");
         assumeTrue("SKIPPED: agent jar not built", new File(agentJar).isFile());
-        assumeTrue("SKIPPED: sidecar jar not built", new File(sidecarJar).isFile());
-        assumeTrue("SKIPPED: no Java 21", !sidecarJava.isEmpty() && new File(sidecarJava).isFile());
         // The productive GUI path requires the MANDATORY local reranker (the in-process local model
         // runtime): a cross-encoder model must be installed, else skip readably.
         // An installed rerank-capable model is required; its virtual id becomes the explicit selection
@@ -60,14 +56,7 @@ public class GuiChainReproductionTest {
         // because leaked copies of this staging once filled the whole drive (25 of them = 7.5 GB).
         File dist = stagedTempDist("askai-guichain");
         Files.copy(new File(agentJar).toPath(), new File(dist, "research-agent-runtime.jar").toPath());
-        Files.copy(new File(sidecarJar).toPath(), new File(dist, "browser-mcp-sidecar.jar").toPath());
-        File libTarget = new File(dist, "lib");
-        assertTrue(libTarget.mkdirs());
-        for (File jar : new File(new File(sidecarJar).getParentFile(), "lib").listFiles()) {
-            Files.copy(jar.toPath(), new File(libTarget, jar.getName()).toPath());
-        }
         String oldDist = System.setProperty("askai.research.runtime.dir", dist.getAbsolutePath());
-        String oldJava21 = System.setProperty("askai.research.java21", sidecarJava);
 
         // EXACTLY like the GUI: the host services carry the (in-process) local model runtime manager, so the
         // mandatory reranker snapshot provider is published to the plugin.
@@ -80,7 +69,7 @@ public class GuiChainReproductionTest {
         FakeHost host = new FakeHost(dist, services.asServiceMap(), problems, messages, greeted);
         // The GUI settings: productive requirements met, Bing search, strict policy (like the screenshot),
         // with the explicit reranker selection carried through to the host snapshot provider.
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "", "", "", "chrome", true,
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "", "chrome", true,
                 false, installedRerankers.get(0)).save(host.store);
 
         // REGRESSION: the REAL GUI session id contains '#' (pluginId + "#session") and an empty
@@ -103,7 +92,6 @@ public class GuiChainReproductionTest {
             // staging is swept.
             localRuntime.stop();
             restore("askai.research.runtime.dir", oldDist);
-            restore("askai.research.java21", oldJava21);
         }
     }
 

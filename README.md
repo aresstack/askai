@@ -143,7 +143,7 @@ Individual distributions:
 
 | Task | Output |
 |---|---|
-| `:askai-app:researchRuntimeDist` | `build/research-runtime/` (research agent jar, browser sidecar jar, `lib/`) |
+| `:askai-app:researchRuntimeDist` | `build/research-runtime/` (research agent jar) |
 | `:research-agent-ui-plugin:installDevPlugin` | installs the research plugin into `build/dev-plugins/` |
 | `:askai-app:verifyFatJarExclusions` | fails if research plugin classes leaked into the fat jar |
 
@@ -186,7 +186,7 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 | `browser-api` | Generic, framework-free browser port |
 | `browser-search-analysis` | Mechanical analysis of search result pages (regions, result blocks, candidates) |
 | `browser-static-http` | Static HTTP browser backend (`HttpURLConnection` + jsoup, no JavaScript) |
-| `browser-mcp-server-java21` | Java 21 browser MCP sidecar based on Playwright4J (`web_*` tools over Solon MCP) |
+| `browser-playwright` | The in-process Playwright browser backend (playwright4j GraalJS driver, Camoufox, the `web_*` tool set) |
 | `local-model-runtime` | The in-process local model runtime (Ollama-compatible API over win-directml-java: reranking, embeddings, generation) |
 | `mcp-runtime-api` | Generic MCP runtime contracts |
 | `mcp-solon-runtime` | Solon-based streamable-HTTP MCP server behind the runtime port |

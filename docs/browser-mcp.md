@@ -1,27 +1,31 @@
-# Browser MCP (Playwright sidecar + static backend)
+# Browser backend (in-process Playwright + static backend)
 
 ## Modules
 
-- `:browser-api` (Java 8) — the shared port: `BrowserSession` (search/open/currentPage/links/follow/
-  back/close), `BrowserPageSnapshot` (url/title/clean text/truncated — never raw HTML),
+- `:browser-api` — the shared port: `BrowserSession` (search/open/currentPage/links/follow/back/probe/
+  dismissConsent/HUD/close), `BrowserPageSnapshot` (url/title/clean text/truncated — never raw HTML),
   `BrowserLink` (stable per-snapshot ids `link-1..n`), `WebSearchResult`, `UrlSafetyPolicy`,
   `BrowserLimits`, `BrowserBackendKind { PLAYWRIGHT_SIDECAR, STATIC_HTTP }`.
-- `:browser-static-http` (Java 8) — `StaticHttpBrowserSession` (jsoup): static fetch + cleanup only;
+- `:browser-static-http` — `StaticHttpBrowserSession` (jsoup): static fetch + cleanup only;
   search is honestly unsupported. A separate, visibly limited backend — **never** an automatic
-  fallback for the sidecar.
-- `:browser-mcp-server-java21` — the ONE deliberate Java-21 process. The Java-8 host never compiles
-  against it and never loads its classes; it only talks MCP to it.
+  fallback for the Playwright backend.
+- `:browser-playwright` — the Playwright backend as a LIBRARY (until the return to Java 21 this was the
+  separate Java-21 sidecar process `browser-mcp-server-java21`). The research plugin bundles it in its
+  `lib/` and starts `PlaywrightBrowserRuntime` IN-PROCESS on the first browser command of a research
+  phase; `BrowserToolSet` dispatches the flat `web_*` tool set by name with exactly the text contracts the
+  sidecar used to serve over MCP. The host's `BrowserBridgeEndpoint` still publishes those tools (plus the
+  `capture_id` convention) to the research runtime.
 
 ## How the Playwright backend works (MCP-P005, resolved)
 
-The sidecar uses the OFFICIAL Playwright Java API (`com.microsoft.playwright:playwright:1.62.0`,
+The backend uses the OFFICIAL Playwright Java API (`com.microsoft.playwright:playwright:1.62.0`,
 with its `driver`/`driver-bundle` modules excluded) plus `com.aresstack:playwright4j:0.3.0`, which
 replaces `com.microsoft.playwright.impl.driver.Driver`: instead of a Node.js process it spawns a
 second **Java** process (`GraalDriverMain`) hosting the Playwright Core JS driver on GraalJS.
 
-The default browser is **Camoufox** (`--browser-channel=camoufox`), taken over from
+The default browser is **Camoufox** (channel `camoufox`), taken over from
 [Argos](https://github.com/aresstack/argos) with minimal changes (package
-`com.aresstack.askai.browser.sidecar.camoufox`: `CamoufoxDistribution`, `CamoufoxInstaller`,
+`com.aresstack.askai.browser.playwright.camoufox`: `CamoufoxDistribution`, `CamoufoxInstaller`,
 `CamoufoxLaunch`, plus `camoufox/distribution.properties` and the fingerprint profile
 `camoufox/default-launch.json`):
 
@@ -37,25 +41,47 @@ The default browser is **Camoufox** (`--browser-channel=camoufox`), taken over f
   profile, and no Playwright emulation (viewport, color scheme ...), exactly as Argos starts it. Profile:
   `%APPDATA%/.askai-java8/browser-profiles/camoufox`; a concurrent research session gets a temporary
   profile that is deleted on close.
-- **Progress**: while installing, the sidecar prints `camoufox install: ...` lines every 5 s; the host
-  restarts its readiness timeout on each one. When a research session starts, the host runs
-  `--install-camoufox` in the background so the first browser command usually finds the browser ready.
+- **Prefetch**: when a productive research session with the Camoufox channel starts, the plugin runs the
+  installer once in the background (`CamoufoxPrefetch` → `PlaywrightBrowserRuntime.installCamoufox()`), so
+  the first browser command usually finds the browser ready; the installer prints `camoufox install: ...`
+  progress lines every 5 s.
 
 The channels `chrome` / `msedge` use a **locally installed** Chrome or Edge via the channel mechanism.
 
-Process tree: `sidecar JVM -> GraalDriverMain JVM -> browser processes`. playwright4j embeds the Playwright Core
-JS package (`driver/package/**`, no Node.js binaries) in its own jar; `driver-bundle` is no longer needed.
+Process tree: `AskAI JVM -> GraalDriverMain JVM -> browser processes`. playwright4j embeds the Playwright Core
+JS package (`driver/package/**`, no Node.js binaries) in its own jar; `driver-bundle` is not needed.
 
 **Playwright never downloads a browser**: `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` is fixed; Chrome/Edge
 discovery only probes standard install locations. The only download is the pinned Camoufox above.
+
+## Classloading and packaging
+
+The browser stack (Playwright, playwright4j, the GraalVM 25 polyglot/Truffle/JS jars, Jackson) ships as
+intact jars in the research plugin's `lib/` and is loaded plugin-first by the PF4J plugin classloader. It
+therefore never shares a classpath with the host's GraalJS 21.2 (mermaid-java, PAC evaluation), and nothing
+is repackaged: Truffle needs the jars' `Multi-Release: true` manifests and their `META-INF/services` files
+untouched (a fat jar breaks it with `InternalError: Truffle could not be initialized`). The AskAI fat jar
+never contains the plugin. The driver child JVM takes its classpath from the plugin classloader's jar URLs
+(`DriverClasspath` in playwright4j); `-Dplaywright4j.driver.classpath=<path-list>` overrides the detection.
+
+## Threading
+
+Playwright Java is not thread-safe and dispatches its events only while the owning thread is inside a
+Playwright call. `BrowserSessionActor` creates Playwright and everything below it on ONE dedicated owner
+thread and runs every command there; callers block on a future. While idle the owner pumps the Playwright
+event loop (route interception, HUD bindings, popup close). The HUD command poll (`web_hud_poll`) drains its
+inbox directly on the caller's thread, so a Skip is deliverable while a data call blocks the owner. The
+plugin's `LazyRestartableBrowserRuntime` adds its own owner thread per research session: created STOPPED,
+started on the first command, stopped when the browsing phase ends, replaced on failure.
 
 ## Capability probing
 
 `PlaywrightCapabilityProbe` reports a SPECIFIC status before the backend is offered:
 `READY / INCOMPATIBLE_DRIVER / DRIVER_BUNDLE_NOT_FOUND / BROWSER_NOT_INSTALLED /
 BROWSER_START_FAILED`. There is no `NODE_RUNTIME_NOT_FOUND` — playwright4j needs no Node; the
-equivalent failure is a missing embedded driver package. When not READY, every tool returns the status as a
-readable error; the endpoint stays up and there is no STATIC_HTTP fallback.
+equivalent failure is a missing embedded driver package. When not READY, `PlaywrightBrowserRuntime.start`
+fails with that status line (the settings tab's "Check requirements" shows it); there is no STATIC_HTTP
+fallback.
 
 ## Security
 
@@ -65,33 +91,18 @@ readable error; the endpoint stays up and there is no STATIC_HTTP fallback.
   cloud-metadata literals (strict mode).
 - Downloads refused, popups closed immediately, one BrowserContext per session, navigation timeouts
   and text/link limits from `BrowserLimits`.
-- `web_search` is navigation to a configured `--search-url={query}` provider (extraction behind
-  `WebSearchProvider`); without configuration it fails honestly. No hardcoded search engine.
+- `web_search` is navigation to the configured search engines (extraction behind `WebSearchProvider`).
 
-## Packaging (thin jar + lib/)
+## Dev/test hand-off
 
-A fat jar is NOT viable: repackaging GraalJS/Truffle loses `Multi-Release: true` and collapses
-duplicate `META-INF/services` files → `InternalError: Truffle could not be initialized` (found by
-the 36C live test). The `sidecarJar` task builds `build/sidecar/browser-mcp-sidecar-<version>.jar`
-(thin, `Class-Path` manifest) + `build/sidecar/lib/` (62 untouched dependency jars). `java -jar`
-works; the `-cp`-spawned driver child inherits the classpath via the same jar mechanism.
-
-## Running
-
-```
-java -jar browser-mcp-sidecar-<version>.jar --port=<port> --token=<token> \
-     [--browser-channel=camoufox|chrome|msedge] [--headless=true|false] \
-     [--allow-private=true|false] [--search-url=<template with {query}>]
-
-java -jar browser-mcp-sidecar-<version>.jar --install-camoufox   # download/verify only, exit 0 = ready
-```
-
-MCP endpoint: `http://127.0.0.1:<port>/mcp/browser/<token>` (streamable). Logs go to STDERR only;
-the token never appears in them. Shutdown closes page → context → browser → Playwright (ending the
-driver child and Chromium).
+Local test worlds pass extra browser arguments per run through the documented system property
+`askai.research.browser.args`, e.g. `--domain-key-mode=host-port` (host:port domain families) and
+`--search-url=http://127.0.0.1:1234/find?q={query}` (one explicit engine). Never a persisted value.
 
 ## Verification
 
 Unit tests (session mapping, link ids, pre/post-redirect policy, probe classification, request
-filter) plus `PlaywrightLiveBrowserTest` — a real Chrome run against JavaScript-only local pages,
-environment-gated on the probe (skips readably without an installed browser).
+filter) plus `PlaywrightLiveBrowserTest` — a real browser run against JavaScript-only local pages,
+environment-gated on the probe (skips readably without an installed browser). The research runtime's
+`ResearchLoopPlaywrightSidecarIntegrationTest` drives the UNCHANGED research loop against the in-process
+browser through an in-JVM bridge endpoint.

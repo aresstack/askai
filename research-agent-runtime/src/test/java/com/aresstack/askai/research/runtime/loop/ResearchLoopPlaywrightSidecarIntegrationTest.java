@@ -9,6 +9,7 @@ import com.aresstack.askai.mcp.api.McpToolParameter;
 import com.aresstack.askai.mcp.api.McpToolResult;
 import com.aresstack.askai.browser.search.analysis.SearchLayoutRepairCoordination;
 import com.aresstack.askai.browser.search.analysis.SearchLayoutRepairCoordinator;
+import com.aresstack.askai.browser.playwright.PlaywrightBrowserRuntime;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
 import com.aresstack.askai.research.capture.CaptureStore;
 import com.aresstack.askai.research.capture.ResearchSearchIndex;
@@ -69,11 +70,6 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
 
     @Test
     public void unchangedLoopReachesSufficientEvidenceThroughTheLiveSidecar() throws Exception {
-        String sidecarJar = System.getProperty("browser.sidecar.jar", "");
-        String sidecarJava = System.getProperty("sidecar.java", "");
-        assumeTrue("SKIPPED: sidecar jar not built", !sidecarJar.isEmpty() && new File(sidecarJar).isFile());
-        assumeTrue("SKIPPED: no Java 21 toolchain available for the sidecar",
-                !sidecarJava.isEmpty() && new File(sidecarJava).isFile());
 
         // ---- an ENGINE server + two content servers (host:port families via --domain-key-mode) ----
         HttpServer engineServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -103,54 +99,15 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
         serverOne.start();
         serverTwo.start();
 
-        // ---- the LIVE sidecar process (Java 21) ----
-        int sidecarPort = freePort();
-        String token = "t-" + UUID.randomUUID();
-        Process sidecar = new ProcessBuilder(sidecarJava, "-jar", sidecarJar,
-                "--port=" + sidecarPort, "--token=" + token,
-                "--allow-private=true", "--headless=true",
-                "--domain-key-mode=host-port",
-                "--search-url=" + baseEngine + "/find?q={query}")
-                .redirectErrorStream(false)
-                .start();
-        final CountDownLatch ready = new CountDownLatch(1);
-        final AtomicReference<String> readinessLine = new AtomicReference<String>();
-        Thread stderrDrain = new Thread(new Runnable() {
-            public void run() {
-                try {
-                    BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(sidecar.getErrorStream(), StandardCharsets.UTF_8));
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        System.err.println("[sidecar] " + line);
-                        if (line.contains("playwright readiness:")) {
-                            readinessLine.set(line);
-                        }
-                        if (line.contains("ready on 127.0.0.1:")) {
-                            ready.countDown();
-                        }
-                    }
-                } catch (IOException ignored) {
-                }
-            }
-        }, "sidecar-stderr-drain");
-        stderrDrain.setDaemon(true);
-        stderrDrain.start();
-
+        // ---- the LIVE Playwright browser, in-process (exactly as the plugin runs it) ----
         SolonMcpServerRuntime runtime = new SolonMcpServerRuntime();
-        SolonToolInvoker sidecarClient = null;
+        PlaywrightBrowserRuntime browserRuntime = null;
         SolonToolInvoker browser = null;
         SolonToolInvoker research = null;
         McpEndpointHandle bridgeHandle = null;
         McpEndpointHandle researchHandle = null;
         try {
-            assumeTrue("SKIPPED: sidecar did not come up within 120s", ready.await(120, TimeUnit.SECONDS));
-            String readiness = readinessLine.get();
-            assumeTrue("SKIPPED (environment-gated): " + readiness,
-                    readiness != null && readiness.contains("READY"));
-
-            String sidecarUrl = "http://127.0.0.1:" + sidecarPort + "/mcp/browser/" + token;
-            sidecarClient = new SolonToolInvoker(sidecarUrl, "streamable");
+            browserRuntime = startBrowserOrSkip(null, baseEngine + "/find?q={query}");
 
             // ---- PRODUCTIVE Commit-37 lifecycle behind the research endpoint ----
             final CaptureStore captures = new CaptureStore(100);
@@ -165,7 +122,7 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
             final List<String> findings = new ArrayList<String>();
 
             // ---- browser BRIDGE endpoint: sidecar delegation + capture_id convention (host-side glue) ----
-            final SolonToolInvoker toSidecar = sidecarClient;
+            final PlaywrightBrowserRuntime toSidecar = browserRuntime;
             bridgeHandle = runtime.registerEndpoint(new McpEndpointDefinition("browser.bridge36c", "Browser"));
             runtime.updateTools(bridgeHandle, Arrays.asList(
                     // A4: the loop drives the typed web_search_prepare; the bridge delegates it to the
@@ -266,16 +223,16 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
             // A4 tool surface on the REAL sidecar: the loop already drove web_search_prepare above;
             // web_search stays a working compatibility surface and the repair tools are discoverable.
             assertNotNull("web_search remains a working compatibility surface",
-                    sidecarClient.call("web_search",
+                    browserRuntime.call("web_search",
                             java.util.Collections.<String, Object>singletonMap("query", "pf4j")));
             assertTrue("web_search_discard_repair is registered on the sidecar",
-                    sidecarClient.call("web_search_discard_repair",
+                    browserRuntime.call("web_search_discard_repair",
                             java.util.Collections.<String, Object>singletonMap("repairTicketId", "x"))
                             .startsWith("DISCARDED"));
             // A HIGH-confidence real SERP prepares organic candidates directly — zero inference.
             com.aresstack.askai.browser.search.repair.PreparedWebSearchResult prepared =
                     com.aresstack.askai.browser.search.analysis.SearchLayoutRepairJson.decodePrepared(
-                            sidecarClient.call("web_search_prepare",
+                            browserRuntime.call("web_search_prepare",
                                     java.util.Collections.<String, Object>singletonMap("query",
                                             "pf4j")));
             assertEquals("real high-confidence SERP → organic, no repair ticket",
@@ -287,7 +244,7 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
         } finally {
             close(browser);
             close(research);
-            close(sidecarClient);
+            closeBrowser(browserRuntime);
             if (bridgeHandle != null) {
                 runtime.unregisterEndpoint(bridgeHandle);
             }
@@ -295,11 +252,6 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
                 runtime.unregisterEndpoint(researchHandle);
             }
             runtime.shutdown();
-            sidecar.destroy();
-            if (!sidecar.waitFor(15, TimeUnit.SECONDS)) {
-                sidecar.destroyForcibly();
-                sidecar.waitFor(15, TimeUnit.SECONDS);
-            }
             engineServer.stop(0);
             serverOne.stop(0);
             serverTwo.stop(0);
@@ -316,11 +268,6 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
      */
     @Test
     public void lowConfidenceRepairOnLiveSnapshotYieldsRealCandidates() throws Exception {
-        String sidecarJar = System.getProperty("browser.sidecar.jar", "");
-        String sidecarJava = System.getProperty("sidecar.java", "");
-        assumeTrue("SKIPPED: sidecar jar not built", !sidecarJar.isEmpty() && new File(sidecarJar).isFile());
-        assumeTrue("SKIPPED: no Java 21 toolchain available for the sidecar",
-                !sidecarJava.isEmpty() && new File(sidecarJava).isFile());
 
         HttpServer engineServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         HttpServer serverOne = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -349,51 +296,14 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
         serverTwo.start();
 
         String configPath = writeLowConfidenceConfig();
-        int sidecarPort = freePort();
-        String token = "t-" + UUID.randomUUID();
-        Process sidecar = new ProcessBuilder(sidecarJava, "-jar", sidecarJar,
-                "--port=" + sidecarPort, "--token=" + token, "--allow-private=true", "--headless=true",
-                "--domain-key-mode=host-port", "--browser-config=" + configPath,
-                "--search-url=" + baseEngine + "/find?q={query}")
-                .redirectErrorStream(false).start();
-        final CountDownLatch ready = new CountDownLatch(1);
-        final AtomicReference<String> readinessLine = new AtomicReference<String>();
-        Thread drain = new Thread(new Runnable() {
-            public void run() {
-                try {
-                    BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(sidecar.getErrorStream(), StandardCharsets.UTF_8));
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        System.err.println("[sidecar-lowconf] " + line);
-                        if (line.contains("playwright readiness:")) {
-                            readinessLine.set(line);
-                        }
-                        if (line.contains("ready on 127.0.0.1:")) {
-                            ready.countDown();
-                        }
-                    }
-                } catch (IOException ignored) {
-                }
-            }
-        }, "sidecar-lowconf-drain");
-        drain.setDaemon(true);
-        drain.start();
-
-        SolonToolInvoker sidecarClient = null;
+        PlaywrightBrowserRuntime browserRuntime = null;
         try {
-            assumeTrue("SKIPPED: sidecar did not come up within 120s",
-                    ready.await(120, TimeUnit.SECONDS));
-            String readiness = readinessLine.get();
-            assumeTrue("SKIPPED (environment-gated): " + readiness,
-                    readiness != null && readiness.contains("READY"));
-            sidecarClient = new SolonToolInvoker(
-                    "http://127.0.0.1:" + sidecarPort + "/mcp/browser/" + token, "streamable");
+            browserRuntime = startBrowserOrSkip(configPath, baseEngine + "/find?q={query}");
 
             // ---- prepare on the REAL browser render → typed REPAIR_REQUIRED ----
             com.aresstack.askai.browser.search.repair.PreparedWebSearchResult prepared =
                     com.aresstack.askai.browser.search.analysis.SearchLayoutRepairJson.decodePrepared(
-                            sidecarClient.call("web_search_prepare",
+                            browserRuntime.call("web_search_prepare",
                                     java.util.Collections.<String, Object>singletonMap("query", "pf4j")));
             assertEquals("the mechanics are unsure on this snapshot",
                     com.aresstack.askai.browser.search.repair.WebSearchPreparationStatus.REPAIR_REQUIRED,
@@ -438,7 +348,7 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
                     .encodeSubmission(coordination.submission);
             com.aresstack.askai.browser.search.repair.SearchLayoutRepairResult applied =
                     com.aresstack.askai.browser.search.analysis.SearchLayoutRepairJson.decodeRepairResult(
-                            sidecarClient.call("web_search_apply_layout",
+                            browserRuntime.call("web_search_apply_layout",
                                     java.util.Collections.<String, Object>singletonMap("submission",
                                             submissionJson)));
             assertEquals(com.aresstack.askai.browser.search.repair.SearchLayoutRepairStatus
@@ -467,18 +377,13 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
             // ---- a second apply of the SAME ticket is hard-rejected (one-shot) ----
             com.aresstack.askai.browser.search.repair.SearchLayoutRepairResult again =
                     com.aresstack.askai.browser.search.analysis.SearchLayoutRepairJson.decodeRepairResult(
-                            sidecarClient.call("web_search_apply_layout",
+                            browserRuntime.call("web_search_apply_layout",
                                     java.util.Collections.<String, Object>singletonMap("submission",
                                             submissionJson)));
             assertEquals(com.aresstack.askai.browser.search.repair.SearchLayoutRepairStatus
                     .UNKNOWN_ATTEMPT, again.status);
         } finally {
-            close(sidecarClient);
-            sidecar.destroy();
-            if (!sidecar.waitFor(15, TimeUnit.SECONDS)) {
-                sidecar.destroyForcibly();
-                sidecar.waitFor(15, TimeUnit.SECONDS);
-            }
+            closeBrowser(browserRuntime);
             engineServer.stop(0);
             serverOne.stop(0);
             serverTwo.stop(0);
@@ -495,11 +400,6 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
      */
     @Test
     public void livePlaywrightCandidatesFlowThroughTheRealLocalReranker() throws Exception {
-        String sidecarJar = System.getProperty("browser.sidecar.jar", "");
-        String sidecarJava = System.getProperty("sidecar.java", "");
-        assumeTrue("SKIPPED: sidecar jar not built", !sidecarJar.isEmpty() && new File(sidecarJar).isFile());
-        assumeTrue("SKIPPED: no Java 21 toolchain available for the sidecar",
-                !sidecarJava.isEmpty() && new File(sidecarJava).isFile());
         com.aresstack.askai.research.runtime.rerank.LiveLocalRerankerRuntime reranker =
                 com.aresstack.askai.research.runtime.rerank.LiveLocalRerankerRuntime.startOrNull();
         assumeTrue("SKIPPED: no live local reranker (Java-21 / staged jar / installed model)",
@@ -530,49 +430,14 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
         serverOne.start();
         serverTwo.start();
 
-        int sidecarPort = freePort();
-        String token = "t-" + UUID.randomUUID();
-        Process sidecar = new ProcessBuilder(sidecarJava, "-jar", sidecarJar,
-                "--port=" + sidecarPort, "--token=" + token, "--allow-private=true", "--headless=true",
-                "--domain-key-mode=host-port", "--search-url=" + baseEngine + "/find?q={query}")
-                .redirectErrorStream(false).start();
-        final CountDownLatch ready = new CountDownLatch(1);
-        final AtomicReference<String> readinessLine = new AtomicReference<String>();
-        Thread drain = new Thread(new Runnable() {
-            public void run() {
-                try {
-                    BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(sidecar.getErrorStream(), StandardCharsets.UTF_8));
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        System.err.println("[sidecar-rerank] " + line);
-                        if (line.contains("playwright readiness:")) {
-                            readinessLine.set(line);
-                        }
-                        if (line.contains("ready on 127.0.0.1:")) {
-                            ready.countDown();
-                        }
-                    }
-                } catch (IOException ignored) {
-                }
-            }
-        }, "sidecar-rerank-drain");
-        drain.setDaemon(true);
-        drain.start();
-
         SolonMcpServerRuntime runtime = new SolonMcpServerRuntime();
-        SolonToolInvoker sidecarClient = null;
+        PlaywrightBrowserRuntime browserRuntime = null;
         SolonToolInvoker browser = null;
         SolonToolInvoker research = null;
         McpEndpointHandle bridgeHandle = null;
         McpEndpointHandle researchHandle = null;
         try {
-            assumeTrue("SKIPPED: sidecar did not come up within 120s", ready.await(120, TimeUnit.SECONDS));
-            String readiness = readinessLine.get();
-            assumeTrue("SKIPPED (environment-gated): " + readiness,
-                    readiness != null && readiness.contains("READY"));
-            sidecarClient = new SolonToolInvoker(
-                    "http://127.0.0.1:" + sidecarPort + "/mcp/browser/" + token, "streamable");
+            browserRuntime = startBrowserOrSkip(null, baseEngine + "/find?q={query}");
 
             final CaptureStore captures = new CaptureStore(100);
             final InMemoryResearchSourceRepository repository = InMemoryResearchSourceRepository.empty();
@@ -583,7 +448,7 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
                             repository.put(record);
                         }
                     }, index);
-            final SolonToolInvoker toSidecar = sidecarClient;
+            final PlaywrightBrowserRuntime toSidecar = browserRuntime;
             bridgeHandle = runtime.registerEndpoint(new McpEndpointDefinition("browser.rerank", "Browser"));
             runtime.updateTools(bridgeHandle, Arrays.asList(
                     McpToolContribution.of("web_search_prepare", "prepare", new McpToolHandler() {
@@ -687,7 +552,7 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
         } finally {
             close(browser);
             close(research);
-            close(sidecarClient);
+            closeBrowser(browserRuntime);
             if (bridgeHandle != null) {
                 runtime.unregisterEndpoint(bridgeHandle);
             }
@@ -696,11 +561,6 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
             }
             runtime.shutdown();
             reranker.close();
-            sidecar.destroy();
-            if (!sidecar.waitFor(15, TimeUnit.SECONDS)) {
-                sidecar.destroyForcibly();
-                sidecar.waitFor(15, TimeUnit.SECONDS);
-            }
             engineServer.stop(0);
             serverOne.stop(0);
             serverTwo.stop(0);
@@ -790,14 +650,35 @@ public class ResearchLoopPlaywrightSidecarIntegrationTest {
 
     // ------------------------------------------------------------------ helpers
 
-    /** Delegate a tool call to the live sidecar; its failures surface as readable tool errors. */
-    private static McpToolResult delegate(SolonToolInvoker sidecar, String tool, Map<String, Object> args) {
+    /** Delegate a tool call to the live in-process browser; its failures surface as readable tool errors. */
+    private static McpToolResult delegate(PlaywrightBrowserRuntime browser, String tool,
+                                          Map<String, Object> args) {
         try {
-            return McpToolResult.ok(sidecar.call(tool, args));
-        } catch (ToolInvoker.ToolFailure ex) {
+            return McpToolResult.ok(browser.call(tool, args));
+        } catch (com.aresstack.askai.browser.BrowserException ex) {
             return McpToolResult.error(ex.getMessage());
-        } catch (ToolInvoker.EndpointUnavailable ex) {
-            return McpToolResult.error("Sidecar unavailable: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * Start the in-process browser for a local test world (loopback targets allowed, host:port domain
+     * families, ONE explicit search engine), or SKIP readably with the browser's own readiness status.
+     */
+    private static PlaywrightBrowserRuntime startBrowserOrSkip(String browserConfigPath, String searchUrl)
+            throws Exception {
+        try {
+            return PlaywrightBrowserRuntime.start(new PlaywrightBrowserRuntime.Options(
+                    System.getenv().getOrDefault("ASKAI_TEST_BROWSER_CHANNEL", "camoufox"), true, true,
+                    searchUrl, PlaywrightBrowserRuntime.loadBrowserConfig(browserConfigPath), true));
+        } catch (PlaywrightBrowserRuntime.StartFailure notReady) {
+            assumeTrue("SKIPPED (environment-gated): " + notReady.readiness(), false);
+            throw notReady;
+        }
+    }
+
+    private static void closeBrowser(PlaywrightBrowserRuntime browser) {
+        if (browser != null) {
+            browser.close();
         }
     }
 

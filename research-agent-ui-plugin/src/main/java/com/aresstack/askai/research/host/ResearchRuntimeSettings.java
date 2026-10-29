@@ -17,12 +17,10 @@ public final class ResearchRuntimeSettings {
     static final String KEY_MODE = "research.runtime.mode";
     static final String KEY_AGENT_JAVA = "research.runtime.agentJava";
     static final String KEY_AGENT_JAR = "research.runtime.agentJar";
-    static final String KEY_SIDECAR_JAVA = "research.runtime.sidecarJava";
-    static final String KEY_SIDECAR_JAR = "research.runtime.sidecarJar";
     static final String KEY_BROWSER_CHANNEL = "research.runtime.browserChannel";
     /** Set once the stored channel went through the Camoufox switch (see {@link #load}). */
     static final String KEY_BROWSER_CHANNEL_CAMOUFOX_SWITCH = "research.runtime.browserChannel.camoufoxSwitch";
-    /** The managed Camoufox browser (downloaded once by the sidecar) — the default channel. */
+    /** The managed Camoufox browser (downloaded once by the in-process browser runtime) — the default channel. */
     public static final String CAMOUFOX_CHANNEL = "camoufox";
     static final String KEY_HEADLESS = "research.runtime.headless";
     /** Conversation-policy thresholds (documented defaults; adjustable WITHOUT a rebuild via
@@ -181,7 +179,7 @@ public final class ResearchRuntimeSettings {
     /** Safety time limit per search run (minutes) — user waits are never counted against it. */
     public static final int DEFAULT_SEARCH_MAX_MINUTES = 10;
 
-    /** Per-call MCP timeout toward the browser sidecar (seconds) — must cover a multi-page SERP prepare. */
+    /** Per-call timeout toward the browser (seconds) — must cover a multi-page SERP prepare. */
     public static final String KEY_BROWSER_TOOL_TIMEOUT_SECONDS =
             "research.search.browserToolTimeoutSeconds";
     public static final int DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS = 300;
@@ -553,8 +551,6 @@ public final class ResearchRuntimeSettings {
     private final ResearchBackendMode mode;
     private final String agentJavaExecutable;
     private final String agentJar;
-    private final String sidecarJavaExecutable;
-    private final String sidecarJar;
     private final String browserChannel;
     private final boolean headless;
     private final boolean allowPrivateNetworks;
@@ -567,30 +563,23 @@ public final class ResearchRuntimeSettings {
     private final String selectedRerankerModel;
 
     public ResearchRuntimeSettings(ResearchBackendMode mode, String agentJavaExecutable, String agentJar,
-                                   String sidecarJavaExecutable, String sidecarJar, String browserChannel,
-                                   boolean headless) {
-        this(mode, agentJavaExecutable, agentJar, sidecarJavaExecutable, sidecarJar, browserChannel,
-                headless, false);
+                                   String browserChannel, boolean headless) {
+        this(mode, agentJavaExecutable, agentJar, browserChannel, headless, false);
     }
 
     /** @param allowPrivateNetworks development-only override of the strict URL policy (default false). */
     public ResearchRuntimeSettings(ResearchBackendMode mode, String agentJavaExecutable, String agentJar,
-                                   String sidecarJavaExecutable, String sidecarJar, String browserChannel,
-                                   boolean headless, boolean allowPrivateNetworks) {
-        this(mode, agentJavaExecutable, agentJar, sidecarJavaExecutable, sidecarJar, browserChannel,
-                headless, allowPrivateNetworks, "");
+                                   String browserChannel, boolean headless, boolean allowPrivateNetworks) {
+        this(mode, agentJavaExecutable, agentJar, browserChannel, headless, allowPrivateNetworks, "");
     }
 
     /** @param selectedRerankerModel the explicitly selected virtual reranker model id ("" = none). */
     public ResearchRuntimeSettings(ResearchBackendMode mode, String agentJavaExecutable, String agentJar,
-                                   String sidecarJavaExecutable, String sidecarJar, String browserChannel,
-                                   boolean headless, boolean allowPrivateNetworks,
+                                   String browserChannel, boolean headless, boolean allowPrivateNetworks,
                                    String selectedRerankerModel) {
         this.mode = mode == null ? ResearchBackendMode.FAKE : mode;
         this.agentJavaExecutable = nullToEmpty(agentJavaExecutable);
         this.agentJar = nullToEmpty(agentJar);
-        this.sidecarJavaExecutable = nullToEmpty(sidecarJavaExecutable);
-        this.sidecarJar = nullToEmpty(sidecarJar);
         this.browserChannel = browserChannel == null || browserChannel.isEmpty() ? CAMOUFOX_CHANNEL : browserChannel;
         this.headless = headless;
         this.allowPrivateNetworks = allowPrivateNetworks;
@@ -598,7 +587,7 @@ public final class ResearchRuntimeSettings {
     }
 
     public static ResearchRuntimeSettings defaults() {
-        return new ResearchRuntimeSettings(ResearchBackendMode.FAKE, "", "", "", "", CAMOUFOX_CHANNEL, true);
+        return new ResearchRuntimeSettings(ResearchBackendMode.FAKE, "", "", CAMOUFOX_CHANNEL, true);
     }
 
     /** True when a mode value was ever persisted (the FAKE developer override requires an explicit one). */
@@ -619,8 +608,6 @@ public final class ResearchRuntimeSettings {
         return new ResearchRuntimeSettings(mode,
                 store.get(KEY_AGENT_JAVA, ""),
                 store.get(KEY_AGENT_JAR, ""),
-                store.get(KEY_SIDECAR_JAVA, ""),
-                store.get(KEY_SIDECAR_JAR, ""),
                 browserChannel(store),
                 store.getBoolean(KEY_HEADLESS, true),
                 store.getBoolean(KEY_ALLOW_PRIVATE, false),
@@ -660,8 +647,6 @@ public final class ResearchRuntimeSettings {
         store.put(KEY_MODE, mode.name());
         store.put(KEY_AGENT_JAVA, agentJavaExecutable);
         store.put(KEY_AGENT_JAR, agentJar);
-        store.put(KEY_SIDECAR_JAVA, sidecarJavaExecutable);
-        store.put(KEY_SIDECAR_JAR, sidecarJar);
         store.put(KEY_BROWSER_CHANNEL, browserChannel);
         store.putBoolean(KEY_HEADLESS, headless);
         destroyLegacySearchUrlLeftover(store);
@@ -672,8 +657,6 @@ public final class ResearchRuntimeSettings {
     public ResearchBackendMode getMode() { return mode; }
     public String getAgentJavaExecutable() { return agentJavaExecutable; }
     public String getAgentJar() { return agentJar; }
-    public String getSidecarJavaExecutable() { return sidecarJavaExecutable; }
-    public String getSidecarJar() { return sidecarJar; }
     public String getBrowserChannel() { return browserChannel; }
     public boolean isHeadless() { return headless; }
     public boolean isAllowPrivateNetworks() { return allowPrivateNetworks; }
@@ -682,27 +665,19 @@ public final class ResearchRuntimeSettings {
     /** The productive runtime config. The URL policy is strict unless the explicit, persisted
      * development-only override is set — never an implicit relaxation. */
     public ResearchRuntimeConfig toRuntimeConfig() {
-        return new ResearchRuntimeConfig(agentJavaExecutable, agentJar, sidecarJavaExecutable, sidecarJar,
-                browserChannel, headless, allowPrivateNetworks, selectedRerankerModel);
+        return new ResearchRuntimeConfig(agentJavaExecutable, agentJar, browserChannel, headless,
+                allowPrivateNetworks, selectedRerankerModel);
     }
 
     /**
-     * The runtime rules ({@link ResearchRuntimeConfig#validate()}) PLUS the product-level requirement
-     * that the thin sidecar jar needs its sibling {@code lib/} directory. Empty = usable.
+     * The runtime rules ({@link ResearchRuntimeConfig#validate()}). Empty = usable.
      * <p>
      * A search provider URL does not exist anymore: the product ships with search engines and the
-     * user orders them in the search settings. Dev/test worlds pass the sidecar an explicit
-     * {@code --search-url} per run (askai.research.sidecar.args) — never a persisted value.
+     * user orders them in the search settings. Dev/test worlds pass the in-process browser an explicit
+     * {@code --search-url} per run (askai.research.browser.args) — never a persisted value.
      */
     public List<String> validateProductive() {
-        List<String> problems = new java.util.ArrayList<String>(toRuntimeConfig().validate());
-        if (!sidecarJar.isEmpty() && new java.io.File(sidecarJar).isFile()) {
-            java.io.File lib = new java.io.File(new java.io.File(sidecarJar).getParentFile(), "lib");
-            if (!lib.isDirectory()) {
-                problems.add("sidecar lib directory missing next to the jar: " + lib);
-            }
-        }
-        return problems;
+        return new java.util.ArrayList<String>(toRuntimeConfig().validate());
     }
 
     private static String nullToEmpty(String value) {

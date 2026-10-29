@@ -29,7 +29,7 @@ import java.util.List;
  * The research runtime configuration surface. Reads/writes exclusively through
  * {@link ResearchRuntimeSettings} (the same mapper the session factory uses). Saving an ACP configuration
  * that fails validation is rejected with the concrete problem list; FAKE is labelled clearly as the
- * clickdummy/development mode. "Check requirements" runs validation + the sidecar readiness probe on a
+ * clickdummy/development mode. "Check requirements" runs validation + the browser readiness probe on a
  * background daemon thread (never the EDT) with a visible busy state; results come back via
  * {@link SwingUtilities#invokeLater} as one structured line per requirement.
  */
@@ -116,14 +116,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
      * REST search providers. Provider credentials are NOT configured here — they live in
      * {@code ${user.home}/agents/research/providers/} (brave.json, brightdata.json, dataforseo.json).
      */
-    // Deliberately NO agent-Java field: the agent is Java-8 bytecode and simply runs on AskAI's own
-    // JVM. A persisted override (store key) stays possible for special cases, but it is not a user
-    // decision — the ONE configurable runtime is the Java >= 21 for the browser sidecar (GraalJS),
-    // and even that is auto-discovered (or unnecessary when AskAI itself runs on >= 21).
+    // Deliberately NO agent-Java field: the agent simply runs on AskAI's own JVM. A persisted override
+    // (store key) stays possible for special cases, but it is not a user decision. The browser runs
+    // inside AskAI and needs no runtime configuration at all.
     private String agentJavaOverride = "";
     private final JTextField agentJar = ComicControls.textField(38);
-    private final JTextField sidecarJava = ComicControls.textField(38);
-    private final JTextField sidecarJar = ComicControls.textField(38);
     private final JComboBox<String> browserChannel = ComicControls.<String>comboBox(
             new String[]{ResearchRuntimeSettings.CAMOUFOX_CHANNEL, "chrome", "msedge"});
     // The reranker model is chosen centrally in AskAI (Configuration → AI models), NOT here. Any previously
@@ -294,8 +291,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // The initial-search PROVIDER selection + its provider-specific settings live on their own
         // "Search" gear tab (SearchProviderCardsPanel), not as shared fields here.
         form.add(pathRow("Research agent jar:", agentJar));
-        form.add(pathRow("Java for browser (≥21):", sidecarJava));
-        form.add(pathRow("Browser sidecar jar:", sidecarJar));
         form.add(row("Browser channel:", browserChannel));
         form.add(row("", headless));
         // Transparency does not depend on a visible browser window: the chat shows the visited sites.
@@ -461,7 +456,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // old default once wrote FAKE); the demo backend is chosen by the FACTORY only when the
         // requirements are not met.
         return new ResearchRuntimeSettings(ResearchBackendMode.ACP,
-                agentJavaOverride, agentJar.getText(), sidecarJava.getText(), sidecarJar.getText(),
+                agentJavaOverride, agentJar.getText(),
                 String.valueOf(browserChannel.getSelectedItem()), headless.isSelected(),
                 allowPrivate.isSelected(), carriedRerankerModel);
     }
@@ -478,8 +473,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private void apply(ResearchRuntimeSettings settings) {
         agentJavaOverride = settings.getAgentJavaExecutable();
         agentJar.setText(settings.getAgentJar());
-        sidecarJava.setText(settings.getSidecarJavaExecutable());
-        sidecarJar.setText(settings.getSidecarJar());
         browserChannel.setSelectedItem(settings.getBrowserChannel());
         // Carry any previously persisted reranker selection through invisibly (chosen centrally now).
         carriedRerankerModel = settings.getSelectedRerankerModel();
@@ -764,7 +757,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         final ResearchRuntimeSettings settings = ResearchRuntimeDefaults.complete(currentSettings());
         check.setEnabled(false);
         save.setEnabled(false);
-        busy.setText("Checking requirements (starts the sidecar briefly)…");
+        busy.setText("Checking requirements (starts the browser briefly)…");
         results.setText("");
         Thread worker = new Thread(new Runnable() {
             public void run() {

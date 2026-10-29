@@ -54,14 +54,10 @@ public class ProductiveModeFactorySmokeTest {
     @Test
     public void factoryStartsAProductiveSessionAndUserCommandsDriveThePhases() throws Exception {
         String agentJar = System.getProperty("research.agent.jar", "");
-        String sidecarJar = System.getProperty("browser.sidecar.jar", "");
-        String sidecarJava = System.getProperty("sidecar.java", "");
         String agentHome = System.getProperty("acp.java.home", System.getProperty("java.home"));
         String agentJava = agentHome + File.separator + "bin" + File.separator
                 + (System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         assumeTrue("SKIPPED: agent jar not built", new File(agentJar).isFile());
-        assumeTrue("SKIPPED: sidecar jar not built", new File(sidecarJar).isFile());
-        assumeTrue("SKIPPED: no Java 21 toolchain", new File(sidecarJava).isFile());
         // The reranker snapshot provider is MANDATORY for a productive session (A5): publish the real
         // local runtime as the host service, or skip readably when this environment lacks it.
         com.aresstack.askai.research.runtime.rerank.LiveLocalRerankerRuntime reranker =
@@ -113,19 +109,10 @@ public class ProductiveModeFactorySmokeTest {
         deleteRecursivelyOnExit(dist);
         Files.copy(new File(agentJar).toPath(),
                 new File(dist, "research-agent-runtime.jar").toPath());
-        Files.copy(new File(sidecarJar).toPath(),
-                new File(dist, "browser-mcp-sidecar.jar").toPath());
-        File libSource = new File(new File(sidecarJar).getParentFile(), "lib");
-        File libTarget = new File(dist, "lib");
-        assertTrue(libTarget.mkdirs());
-        for (File jar : libSource.listFiles()) {
-            Files.copy(jar.toPath(), new File(libTarget, jar.getName()).toPath());
-        }
         String oldDist = System.setProperty("askai.research.runtime.dir", dist.getAbsolutePath());
-        String oldJava21 = System.setProperty("askai.research.java21", sidecarJava);
-        // The local test engine travels as the EXPLICIT per-run sidecar flag — the persisted
+        // The local test engine travels as the EXPLICIT per-run browser flag — the persisted
         // search-url override is dead, and dev worlds were always meant to be per-run.
-        String oldSidecarArgs = System.setProperty("askai.research.sidecar.args",
+        String oldSidecarArgs = System.setProperty("askai.research.browser.args",
                 "--search-url=" + baseOne + "/find?q={query}");
         host.services.put(com.aresstack.askai.agent.model.reranker
                 .RerankerConfigurationSnapshotProvider.class, reranker.asProvider(10));
@@ -158,7 +145,7 @@ public class ProductiveModeFactorySmokeTest {
                     }
                 });
         // The EXPLICIT reranker selection (A5): the persisted settings name the model to use.
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "", "", "",
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "",
                 System.getenv().getOrDefault("ASKAI_TEST_BROWSER_CHANNEL", "chrome"),
                 true, true, reranker.modelName).save(host.store);
 
@@ -220,8 +207,7 @@ public class ProductiveModeFactorySmokeTest {
             serverOne.stop(0);
             serverTwo.stop(0);
             restore("askai.research.runtime.dir", oldDist);
-            restore("askai.research.java21", oldJava21);
-            restore("askai.research.sidecar.args", oldSidecarArgs);
+            restore("askai.research.browser.args", oldSidecarArgs);
         }
     }
 
