@@ -125,6 +125,59 @@ public class AskAiOllamaChatRequestBodyTest {
         assertFalse(requestBody.get().contains("useTools"));
     }
 
+    @Test
+    public void modelPortCallsCarryRawToolSchemasFormatOptionsAndKeepAlive() throws Exception {
+        String toolSchema = "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\","
+                + "\"pattern\":\"^https://\"}},\"required\":[\"url\"],\"additionalProperties\":false}";
+        java.util.Map<String, Object> options = new java.util.LinkedHashMap<String, Object>();
+        options.put("num_ctx", 8192);
+        options.put("temperature", 0.2d);
+        options.put("num_predict", 256);
+        OllamaChatOptions extras = new OllamaChatOptions(
+                Collections.singletonList(new OllamaChatOptions.Tool("open", "Open a page.", toolSchema)),
+                "{\"type\":\"object\",\"properties\":{\"verdict\":{\"enum\":[\"yes\",\"no\"]}}}",
+                options, false, null);
+        client().streamChat("m", Collections.singletonList(OllamaChatTurn.user("hi")), "30m", Boolean.FALSE,
+                extras, null);
+        JsonNode body = new ObjectMapper().readTree(requestBody.get());
+
+        assertEquals("keep_alive is the per-call value", "30m", body.get("keep_alive").asText());
+        assertFalse(body.get("think").asBoolean());
+        JsonNode tool = body.get("tools").get(0);
+        assertEquals("function", tool.get("type").asText());
+        assertEquals("open", tool.get("function").get("name").asText());
+        assertEquals("Open a page.", tool.get("function").get("description").asText());
+        // The schema travels VERBATIM: keywords the library's typed tool spec has no field for survive.
+        assertEquals(new ObjectMapper().readTree(toolSchema), tool.get("function").get("parameters"));
+        assertEquals("^https://", tool.get("function").get("parameters").get("properties").get("url")
+                .get("pattern").asText());
+        assertEquals("yes", body.get("format").get("properties").get("verdict").get("enum").get(0).asText());
+        assertEquals(8192, body.get("options").get("num_ctx").asInt());
+        assertEquals(0.2d, body.get("options").get("temperature").asDouble(), 0.0d);
+        assertEquals(256, body.get("options").get("num_predict").asInt());
+        assertNull(body.get("useTools"));
+    }
+
+    @Test
+    public void genericJsonModeIsTheJsonFormatString() throws Exception {
+        client().streamChat("m", Collections.singletonList(OllamaChatTurn.user("hi")), "5m", null,
+                new OllamaChatOptions(null, null, null, true, null), null);
+        JsonNode body = new ObjectMapper().readTree(requestBody.get());
+        assertEquals("json", body.get("format").asText());
+        assertNull("no tools offered, none sent", body.get("tools"));
+        assertNull("no options set, none sent", body.get("options"));
+    }
+
+    @Test
+    public void replayedToolCallsKeepTheProviderCallId() throws Exception {
+        List<OllamaToolCall> calls = Collections.singletonList(new OllamaToolCall("call_7", "open",
+                Collections.<String, Object>singletonMap("url", "https://x")));
+        JsonNode messages = send(null, Arrays.asList(OllamaChatTurn.user("go"),
+                OllamaChatTurn.assistant("", "", calls), OllamaChatTurn.tool("open", "page text"))).get("messages");
+        assertEquals("call_7", messages.get(1).get("tool_calls").get(0).get("id").asText());
+        assertEquals("open", messages.get(2).get("tool_name").asText());
+    }
+
     private static byte[] drain(InputStream in) throws java.io.IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         byte[] chunk = new byte[8192];

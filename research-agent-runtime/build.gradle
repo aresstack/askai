@@ -36,6 +36,9 @@ dependencies {
     testImplementation project(':local-model-runtime')
     // The live Playwright tests start the REAL browser in-process (as the plugin does now).
     testImplementation project(':browser-playwright')
+    // The live model gates run the roles over the REAL model port (ollama4j) against a local Ollama, as the
+    // host does; only its main classes are needed (askai-app's own tests depend on the plugin: test-only).
+    testImplementation project(':askai-app')
     testImplementation 'junit:junit:4.13.2'
     testRuntimeOnly 'org.slf4j:slf4j-nop:2.0.17'
 }

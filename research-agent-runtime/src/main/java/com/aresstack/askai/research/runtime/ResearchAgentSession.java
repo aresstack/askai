@@ -40,6 +40,15 @@ public final class ResearchAgentSession {
      * the agent surfaces an honest, retryable {@code MODEL_UNAVAILABLE} rather than a static fake dialogue.
      */
     private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat mainModelChat;
+    /** The scope sweep's transport (probe generator, advice chooser): the {@code scope} model slot. */
+    private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat scopeModelChat;
+    /** The page readiness judge's transport: the {@code judge} model slot. */
+    private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat judgeModelChat;
+    /**
+     * The host's model port (ADR 0001, 3.2): the ONLY way this runtime reaches a model. Null when the host
+     * offers none (an older host or a test without models); every model role is then honestly unavailable.
+     */
+    private final com.aresstack.askai.agent.model.port.ModelPort modelPort;
     /** When the LAST user search started — the lower edge of "the new sources" its review reads. */
     private volatile long lastManualSearchStartedAt;
     /** The request id of the LAST manual search — the default scope of /review-sources. */
@@ -111,6 +120,17 @@ public final class ResearchAgentSession {
      */
     public ResearchAgentSession(ResearchAgentEnvironment environment, ToolInvoker research,
                                 ToolInvoker browser, ToolInvoker service) {
+        this(environment, research, browser, service, null);
+    }
+
+    /**
+     * @param modelPort the host's model port, or null when the host offers none (model roles then report an
+     *                  honest {@code MODEL_UNAVAILABLE})
+     */
+    public ResearchAgentSession(ResearchAgentEnvironment environment, ToolInvoker research,
+                                ToolInvoker browser, ToolInvoker service,
+                                com.aresstack.askai.agent.model.port.ModelPort modelPort) {
+        this.modelPort = modelPort;
         this.environment = environment;
         this.research = research;
         this.browser = browser;
@@ -158,7 +178,11 @@ public final class ResearchAgentSession {
         // the conversation runs on the central main model even while the browser stays STOPPED. It must NOT
         // live under hasBrowser() or the research loop.
         this.mainModelChat = new com.aresstack.askai.research.runtime.team.ReloadableMainModelChat(
-                buildMainModelChat());
+                buildModelChat(com.aresstack.askai.research.runtime.inference.ResearchModelSlots.CONVERSATION));
+        this.scopeModelChat = new com.aresstack.askai.research.runtime.team.ReloadableMainModelChat(
+                buildModelChat(com.aresstack.askai.research.runtime.inference.ResearchModelSlots.SCOPE));
+        this.judgeModelChat = new com.aresstack.askai.research.runtime.team.ReloadableMainModelChat(
+                buildModelChat(com.aresstack.askai.research.runtime.inference.ResearchModelSlots.JUDGE));
         // The assembler reads the session's LIVE working language per turn: a set_language between turns
         // changes the next turn's context, never the history.
         this.teamAgent = new com.aresstack.askai.research.runtime.team.ResearchTeamAgent(mainModelChat,
@@ -214,7 +238,7 @@ public final class ResearchAgentSession {
         // WORK budget, the other the ERROR tolerance; both are settings, never hidden constants.
         conceptMaxToolRounds = envInt("ASKAI_CONCEPT_TOOL_ROUNDS", conceptMaxToolRounds);
         conceptMaxRepairAttempts = envInt("ASKAI_CONCEPT_REPAIR_ATTEMPTS", conceptMaxRepairAttempts);
-        System.err.println("[research-agent] TeamAgent ready on main model: " + mainModelChat.modelName()
+        System.err.println("[research-agent] TeamAgent ready on " + mainModelChat.modelName()
                 + " outputBudget=" + teamAgent.getMaxOutputTokens()
                 + " conceptTools=" + conceptToolsAvailable
                 + (conceptToolsAvailable
@@ -333,16 +357,18 @@ public final class ResearchAgentSession {
     }
 
     /**
-     * Build the session's main-model chat transport from the host-published inference descriptor
-     * ({@code ASKAI_INFERENCE_CONFIG}, the central main model — e.g. {@code gemma4:e2b}). This is the SAME
-     * descriptor the SERP-repair inference port uses, but here it drives the TeamAgent conversation. An absent
-     * or invalid descriptor is NOT fatal and NEVER a static fake dialogue: it yields an
+     * Build one model role's chat transport over the host's model port (ADR 0001, 3.2): the role names its
+     * model slot, the platform resolves it (by default to the central main model). The host-published
+     * inference descriptor ({@code ASKAI_INFERENCE_CONFIG}) still gates it: it is how AskAI says that a main
+     * model is selected, and it carries the user's per-call timeout. An absent or invalid descriptor, or a
+     * host without a model port, is NOT fatal and NEVER a static fake dialogue: it yields an
      * {@code UnavailableMainModelChat}, so the very first greeting is an honest, retryable
      * {@code MODEL_UNAVAILABLE}. A later valid descriptor is swapped in via {@link ReloadableMainModelChat}.
      */
-    private com.aresstack.askai.research.runtime.team.MainModelChat buildMainModelChat() {
+    private com.aresstack.askai.research.runtime.team.MainModelChat buildModelChat(
+            com.aresstack.askai.agent.model.port.ModelSlot slot) {
         if (!environment.hasInference()) {
-            System.err.println("[research-agent] no inference descriptor — TeamAgent main model unavailable");
+            System.err.println("[research-agent] no inference descriptor — model slot " + slot + " unavailable");
             // Prefer the actionable reason the host passed (e.g. "No main model is selected. Choose a chat
             // model…"); fall back to a self-explanatory default that still points the user at the selector.
             String reason = environment.inferenceUnavailableReason != null
@@ -351,40 +377,55 @@ public final class ResearchAgentSession {
                             + "chat, then reopen the research tab.";
             return new com.aresstack.askai.research.runtime.team.UnavailableMainModelChat(reason);
         }
+        if (modelPort == null) {
+            System.err.println("[research-agent] the host offers no model port — model slot " + slot
+                    + " unavailable");
+            return new com.aresstack.askai.research.runtime.team.UnavailableMainModelChat(
+                    "This AskAI host offers no model port; update AskAI to use the research assistant.");
+        }
         try {
             com.aresstack.askai.agent.model.inference.InferenceConfigurationDocument document =
                     com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
                             .load(environment.inferenceConfigPath);
-            System.err.println("[research-agent] TeamAgent main model: " + document.getModel());
-            return new com.aresstack.askai.research.runtime.team.HttpMainModelChatClient(document.descriptor);
+            return new com.aresstack.askai.research.runtime.team.PortMainModelChat(modelPort, slot,
+                    callTimeout(document));
         } catch (java.io.IOException ex) {
             System.err.println("[research-agent] main-model descriptor unusable ("
                     + environment.inferenceConfigPath + "): " + ex.getMessage()
-                    + " — TeamAgent starts in MODEL_UNAVAILABLE");
+                    + " — model slot " + slot + " starts in MODEL_UNAVAILABLE");
             return new com.aresstack.askai.research.runtime.team.UnavailableMainModelChat(
                     "main-model descriptor unusable: " + ex.getMessage());
         }
     }
 
+    /** The user's per-call main-model timeout, carried by the descriptor; null = the platform default. */
+    private static java.time.Duration callTimeout(
+            com.aresstack.askai.agent.model.inference.InferenceConfigurationDocument document) {
+        long millis = document.descriptor.timeoutMillis;
+        return millis > 0 ? java.time.Duration.ofMillis(millis) : null;
+    }
+
     /**
-     * Build the OPTIONAL structured-inference port from the host-published descriptor
-     * ({@code ASKAI_INFERENCE_CONFIG}, the central main model). Unlike the mandatory reranker this NEVER
-     * fails the session: an absent or invalid descriptor keeps the honest
-     * {@code UnavailableStructuredInferencePort}, so a low-confidence SERP simply stays unresolvable rather
-     * than fabricating results.
+     * Build the OPTIONAL structured-inference port (model-backed SERP layout repair) over the host's model
+     * port. Unlike the mandatory reranker this NEVER fails the session: an absent or invalid descriptor, or a
+     * host without a model port, keeps the honest {@code UnavailableStructuredInferencePort}, so a
+     * low-confidence SERP simply stays unresolvable rather than fabricating results.
      */
     private com.aresstack.askai.browser.search.inference.StructuredInferencePort buildInferencePort() {
-        if (!environment.hasInference()) {
-            System.err.println("[research-agent] no inference descriptor — SERP layout repair unavailable");
+        if (!environment.hasInference() || modelPort == null) {
+            System.err.println("[research-agent] no inference descriptor or no model port — SERP layout repair "
+                    + "unavailable");
             return new com.aresstack.askai.browser.search.analysis.UnavailableStructuredInferencePort();
         }
         try {
             com.aresstack.askai.agent.model.inference.InferenceConfigurationDocument document =
                     com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
                             .load(environment.inferenceConfigPath);
-            System.err.println("[research-agent] inference ready: " + document.getModel());
-            return new com.aresstack.askai.research.runtime.inference.HttpStructuredInferenceClient(
-                    document.descriptor);
+            System.err.println("[research-agent] SERP layout repair ready on model slot "
+                    + com.aresstack.askai.research.runtime.inference.ResearchModelSlots.LAYOUT_REPAIR);
+            return new com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient(modelPort,
+                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.LAYOUT_REPAIR,
+                    callTimeout(document));
         } catch (java.io.IOException ex) {
             System.err.println("[research-agent] inference descriptor unusable ("
                     + environment.inferenceConfigPath + "): " + ex.getMessage()
@@ -398,28 +439,40 @@ public final class ResearchAgentSession {
      * last good port) when the descriptor is absent or invalid — never a fabricated success.
      */
     private boolean reloadInferencePort() {
-        if (!environment.hasInference()) {
+        if (!environment.hasInference() || modelPort == null) {
             return false;
         }
         try {
             com.aresstack.askai.agent.model.inference.InferenceConfigurationDocument document =
                     com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
                             .load(environment.inferenceConfigPath);
-            // Swap the SERP-repair port (browser path) AND the TeamAgent's main-model transport. The swap is
-            // a single atomic reference set at this turn boundary: the agent's conversation history,
-            // proposed/confirmed scope and pending turn are untouched — only the client underneath changes.
-            this.inferencePort = new com.aresstack.askai.research.runtime.inference
-                    .HttpStructuredInferenceClient(document.descriptor);
-            if (mainModelChat != null) {
-                mainModelChat.swap(new com.aresstack.askai.research.runtime.team.HttpMainModelChatClient(
-                        document.descriptor));
-            }
+            // The port resolves the slots per call, so a new central model already applies; the reload swaps
+            // the clients for the descriptor's (possibly new) timeout. The swap is a single atomic reference
+            // set at this turn boundary: the agent's conversation history, proposed/confirmed scope and
+            // pending turn are untouched — only the client underneath changes.
+            java.time.Duration timeout = callTimeout(document);
+            this.inferencePort = new com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient(
+                    modelPort, com.aresstack.askai.research.runtime.inference.ResearchModelSlots.LAYOUT_REPAIR,
+                    timeout);
+            swapPortChat(mainModelChat,
+                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.CONVERSATION, timeout);
+            swapPortChat(scopeModelChat,
+                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.SCOPE, timeout);
+            swapPortChat(judgeModelChat,
+                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.JUDGE, timeout);
             System.err.println("[research-agent] main model + inference reloaded: " + document.getModel());
             return true;
         } catch (java.io.IOException ex) {
             System.err.println("[research-agent] inference reload failed, keeping the last good config: "
                     + ex.getMessage());
             return false;
+        }
+    }
+
+    private void swapPortChat(com.aresstack.askai.research.runtime.team.ReloadableMainModelChat chat,
+                              com.aresstack.askai.agent.model.port.ModelSlot slot, java.time.Duration timeout) {
+        if (chat != null) {
+            chat.swap(new com.aresstack.askai.research.runtime.team.PortMainModelChat(modelPort, slot, timeout));
         }
     }
 
@@ -558,10 +611,21 @@ public final class ResearchAgentSession {
     public void cancel() {
         System.err.println("[research-agent] cancel");
         cancelled.set(true);
-        // Abort any in-flight main-model /api/chat so a pause/cancel or a session/tab close returns promptly
-        // instead of waiting out the full model timeout; the aborted call surfaces as an honest non-OK turn.
+        // Abort any in-flight model call so a pause/cancel or a session/tab close returns promptly instead of
+        // waiting out the full model timeout; the aborted call surfaces as an honest non-OK turn.
         if (mainModelChat != null) {
             mainModelChat.cancelInFlight();
+        }
+        if (scopeModelChat != null) {
+            scopeModelChat.cancelInFlight();
+        }
+        if (judgeModelChat != null) {
+            judgeModelChat.cancelInFlight();
+        }
+        com.aresstack.askai.browser.search.inference.StructuredInferencePort inference = inferencePort;
+        if (inference instanceof com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) {
+            ((com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) inference)
+                    .cancelInFlight();
         }
     }
 
@@ -739,7 +803,7 @@ public final class ResearchAgentSession {
                     com.aresstack.askai.research.runtime.scope.ScopeAdviceWire
                             .parseRequest(requestJson);
             result = new com.aresstack.askai.research.runtime.scope.MainModelScopeAdviceChooser(
-                    mainModelChat, parsed.settings).choose(parsed.request);
+                    scopeModelChat, parsed.settings).choose(parsed.request);
         } catch (IllegalArgumentException malformedRequest) {
             result = com.aresstack.askai.research.domain.scope.ScopeAdviceChooser.ChoiceResult
                     .failure(com.aresstack.askai.research.domain.scope.ScopeAdviceChooser
@@ -772,7 +836,7 @@ public final class ResearchAgentSession {
                     com.aresstack.askai.research.runtime.scope.ProbeGenerationWire
                             .parseRequest(requestJson);
             result = new com.aresstack.askai.research.runtime.scope.MainModelScopeProbeGenerator(
-                    mainModelChat, parsed.settings).generate(parsed.request);
+                    scopeModelChat, parsed.settings).generate(parsed.request);
         } catch (IllegalArgumentException malformedRequest) {
             result = com.aresstack.askai.research.domain.scope.ScopeProbeGenerator
                     .ProbeGenerationResult.failure(
@@ -1015,7 +1079,7 @@ public final class ResearchAgentSession {
                             new com.aresstack.askai.research.runtime.acquire.PageReadinessModel() {
                                 public String complete(String system, String user) {
                                     com.aresstack.askai.research.runtime.team.MainModelChatResult r =
-                                            mainModelChat.complete(java.util.Arrays.asList(
+                                            judgeModelChat.complete(java.util.Arrays.asList(
                                                     com.aresstack.askai.research.runtime.team.ChatMessage
                                                             .system(system),
                                                     com.aresstack.askai.research.runtime.team.ChatMessage

@@ -88,10 +88,11 @@ public class ProductiveModeFactorySmokeTest {
                 "--search-url=" + baseOne + "/find?q={query}");
         host.services.put(com.aresstack.askai.agent.model.reranker
                 .RerankerConfigurationSnapshotProvider.class, reranker.asProvider(10));
-        // The model-backed TeamAgent now OWNS the productive conversation: publish an inference descriptor
-        // pointing at a mock /api/chat (gemma4:e2b) so the real spawned agent greets and proposes a scope.
-        final com.aresstack.askai.research.runtime.team.MockMainModelServer mockModel =
-                new com.aresstack.askai.research.runtime.team.MockMainModelServer();
+        // The model-backed TeamAgent now OWNS the productive conversation: publish an inference descriptor (a
+        // main model is selected) and a fake model port, so the real agent greets and proposes a scope.
+        final com.aresstack.askai.research.runtime.team.FakeModelPort mockModel =
+                new com.aresstack.askai.research.runtime.team.FakeModelPort();
+        host.services.put(com.aresstack.askai.agent.model.port.ModelPort.class, mockModel);
         mockModel.enqueueMessage("Hi! I'm your research assistant. What would you like to find out?");
         // The successful greeting advances the state SCOPING/NEW -> SCOPING/RUNNING (GREETING_DONE), where
         // SUBMIT_SCOPE is the allowed command; the model uses it to submit its confirmed scope and the host
@@ -144,7 +145,8 @@ public class ProductiveModeFactorySmokeTest {
             // failing; the in-process passthrough test verifies the greeting/scope logic non-flakily.
             assumeTrue("SKIPPED (RA-P003: first-prompt/greeting response path wedged; see problems.md): "
                     + messages, host.approvalRequested.await(30, TimeUnit.SECONDS));
-            assertTrue("the mock /api/chat received model=gemma4:e2b", mockModel.sawModel("gemma4:e2b"));
+            assertTrue("the model port received the conversation slot", mockModel.sawSlot(
+                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.CONVERSATION));
             // Model-driven conversation: the mock was called for BOTH the greeting bootstrap turn and the
             // user turn (the outline gate above came from the model's validated scope proposal, not a static
             // host dialogue). The greeting CONTENT reaching the chat is covered non-flakily by the in-process
