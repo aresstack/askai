@@ -3,9 +3,10 @@ package com.aresstack.askai.mcp.api;
 import java.util.Map;
 
 /**
- * Neutral client port for calling tools on a remote MCP endpoint (no Solon/MCP-SDK types). The plugin's
- * browser bridge uses this to delegate {@code web_*} calls to the Java-21 Playwright sidecar; the Solon
- * implementation lives in {@code mcp-solon-runtime} (host-provided, like the server side of this API).
+ * Neutral client port for calling tools on another MCP endpoint (no Solon/MCP-SDK types): external MCP servers
+ * and, later, a remote agent (ADR 0001, section 3.3). Our own roles do not use it; they dispatch in-process to
+ * the same contributions. The Solon implementation lives in {@code mcp-solon-runtime} (host-provided, like the
+ * server side of this API).
  */
 public interface McpToolClient {
 

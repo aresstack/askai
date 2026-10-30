@@ -44,7 +44,10 @@ public final class SolonMcpToolClientFactory implements McpToolClientFactory {
                 try {
                     ToolResult result = client.callTool(toolName, arguments);
                     String text = String.valueOf(result);
-                    if (text.startsWith("Tool failed:") || text.startsWith("Not allowed")) {
+                    // An MCP error result (isError, which the server sends for a handler error or a thrown
+                    // handler) is a tool failure. The text prefixes alone missed it: Solon renders those
+                    // results as "Error: ...", so the client handed them back as ordinary text.
+                    if (result.isError() || text.startsWith("Tool failed:") || text.startsWith("Not allowed")) {
                         throw new McpToolCallException(text, false);
                     }
                     return text;
@@ -52,8 +55,11 @@ public final class SolonMcpToolClientFactory implements McpToolClientFactory {
                     throw ex;
                 } catch (RuntimeException ex) {
                     String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                    // "failed to initialize": the endpoint answers no MCP session any more (unregistered
+                    // with its session, token invalid), which is a gone endpoint, not a tool error.
                     boolean unavailable = message.contains("Connection") || message.contains("connect")
-                            || message.contains("Timeout") || message.contains("timeout");
+                            || message.contains("Timeout") || message.contains("timeout")
+                            || message.contains("failed to initialize");
                     throw new McpToolCallException(message, unavailable);
                 }
             }
