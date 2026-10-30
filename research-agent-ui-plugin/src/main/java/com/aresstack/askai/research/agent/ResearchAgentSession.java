@@ -4634,6 +4634,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (sink != null) { // headless/tests: the readable tail above still records everything
             sink.appendTechnicalLog(line);
         }
+        if (ConceptToolActivityFormatter.isHostReceipt(line)) {
+            // The host's own receipts (cards ADDED, tags OFFERED, topic EXCLUDED …) confirm what the
+            // concept bubble may report as done; they arrive on the tool thread.
+            final String receipt = line;
+            onUi(new Runnable() {
+                public void run() {
+                    updateConceptToolBubble(receipt);
+                }
+            });
+        }
     }
 
     /** The last {@code tailLines} technical lines, oldest first ({@code <= 0} = a sane default). */
@@ -4667,38 +4677,41 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     /** The open yellow bubble mirroring this turn's concept/scope tool rounds, or {@code null}. */
     private String conceptToolBubbleId;
-    private final java.util.List<String> conceptToolBubbleLines = new java.util.ArrayList<String>();
+    /** Display adapter only (issue #20): reads the log lines, never changes the technical log. */
+    private final ConceptToolActivityFormatter conceptToolActivity = new ConceptToolActivityFormatter();
     private final java.util.concurrent.atomic.AtomicLong conceptToolBubbleSequence =
             new java.util.concurrent.atomic.AtomicLong();
 
+    /** EDT only: projects one technical line onto the bubble; opens it once there is something to show. */
     private void updateConceptToolBubble(String logLine) {
-        if (sink == null || logLine == null || !logLine.startsWith("concept ")) {
+        if (sink == null || !ConceptToolActivityFormatter.isRelevant(logLine)) {
             return;
         }
+        if (conceptToolBubbleId == null && !agentTurnInFlight
+                && ConceptToolActivityFormatter.isHostReceipt(logLine)) {
+            return; // a receipt outside a turn (e.g. a direct tool call) has no bubble to close it
+        }
+        if (!conceptToolActivity.accept(logLine)) {
+            return;
+        }
+        boolean german = playbook.isGerman();
         if (conceptToolBubbleId == null) {
+            if (!conceptToolActivity.hasVisibleLines()) {
+                return; // NONE, nudges, repairs: nothing to show yet, no empty bubble
+            }
             conceptToolBubbleId = "concept-tools-" + conceptToolBubbleSequence.incrementAndGet();
-            conceptToolBubbleLines.clear();
-            sink.startThinking(conceptToolBubbleId, playbook.isGerman()
-                    ? "Werkzeug-Schritte an Konzept & Themenraum …"
-                    : "Tool steps on concept & scope …");
+            sink.startThinking(conceptToolBubbleId, conceptToolActivity.title(german));
         }
-        conceptToolBubbleLines.add(logLine.substring("concept ".length()));
-        StringBuilder body = new StringBuilder();
-        for (String line : conceptToolBubbleLines) {
-            body.append("• ").append(line).append('\n');
-        }
-        sink.updateThinking(conceptToolBubbleId, body.toString());
+        sink.updateThinking(conceptToolBubbleId, conceptToolActivity.body(german));
     }
 
-    /** Close the bubble with an honest step count — never leave it thinking past the turn. */
+    /** Close the bubble with the confirmed results — never leave it thinking past the turn. */
     private void finishConceptToolBubble() {
         if (conceptToolBubbleId != null && sink != null) {
-            sink.finishThinking(conceptToolBubbleId, playbook.isGerman()
-                    ? conceptToolBubbleLines.size() + " Werkzeug-Schritte"
-                    : conceptToolBubbleLines.size() + " tool steps");
+            sink.finishThinking(conceptToolBubbleId, conceptToolActivity.summary(playbook.isGerman()));
         }
         conceptToolBubbleId = null;
-        conceptToolBubbleLines.clear();
+        conceptToolActivity.reset();
     }
 
     private void applyRunProgress(ResearchBackendEvent event) {

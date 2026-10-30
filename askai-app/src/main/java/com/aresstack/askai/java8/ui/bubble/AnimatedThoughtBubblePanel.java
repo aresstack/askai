@@ -182,6 +182,15 @@ public class AnimatedThoughtBubblePanel extends JPanel {
         }
     }
 
+    /** Replaces the whole bubble body (a status view that updates in place instead of growing). */
+    public void setBodyText(String text) {
+        if (visualState != VisualState.RUNNING) {
+            return;
+        }
+        explanationArea.setText(text == null ? "" : text);
+        refreshLayout();
+    }
+
     /** Appends a streamed delta to the bubble body (used to stream thinking text live). */
     public void appendBodyText(String delta) {
         if (visualState != VisualState.RUNNING || delta == null || delta.isEmpty()) {
