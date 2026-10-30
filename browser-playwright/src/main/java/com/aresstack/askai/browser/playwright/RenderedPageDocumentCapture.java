@@ -266,6 +266,14 @@ final class RenderedPageDocumentCapture {
                 + "  let capReached = false, depthReached = false, linkCapReached = false;\n"
                 + "  const pad = n => String(n).padStart(4, '0');\n"
                 + "  const clean = t => (t || '').replace(/\\s+/g, ' ').trim();\n"
+                // Open shadow roots are part of the rendered page: a result list rendered by a web
+                // component is invisible to a childNodes-only walk (no containers, no links).
+                + "  let shadowRoots = 0;\n"
+                + "  const kidsOf = n => {\n"
+                + "    if (!n.shadowRoot) return n.childNodes;\n"
+                + "    shadowRoots++;\n"
+                + "    return Array.from(n.shadowRoot.childNodes).concat(Array.from(n.childNodes));\n"
+                + "  };\n"
                 // textContent minus the SKIP subtrees: raw textContent includes <style>/<script> text,
                 // which turned Bing's inline CSS into stored search excerpts. Every user-facing text
                 // (excerpts, link texts, headings) goes through THIS, never through raw textContent.
@@ -274,7 +282,7 @@ final class RenderedPageDocumentCapture {
                 + "    const walk = (n) => {\n"
                 + "      if (n.nodeType === 3) { out += n.nodeValue + ' '; return; }\n"
                 + "      if (n.nodeType !== 1 || SKIP.has(n.tagName)) return;\n"
-                + "      for (const c of n.childNodes) walk(c);\n"
+                + "      for (const c of kidsOf(n)) walk(c);\n"
                 + "    };\n"
                 + "    if (el) walk(el);\n"
                 + "    return clean(out);\n"
@@ -344,7 +352,7 @@ final class RenderedPageDocumentCapture {
                 + "      countLink(node, stats);\n"
                 + "      return;\n"
                 + "    }\n"
-                + "    for (const child of node.childNodes) collectInline(child, containerId, stats, ctx);\n"
+                + "    for (const child of kidsOf(node)) collectInline(child, containerId, stats, ctx);\n"
                 + "  };\n"
                 + "  const pageHost = location.hostname;\n"
                 + "  const countLink = (a, stats) => {\n"
@@ -372,7 +380,7 @@ final class RenderedPageDocumentCapture {
                 + "    const ctx = { links: 0, lastHeading: '', containerEl: el };\n"
                 + "    const childIds = [];\n"
                 + "    let childIndex = 0;\n"
-                + "    for (const child of el.childNodes) {\n"
+                + "    for (const child of kidsOf(el)) {\n"
                 + "      if (child.nodeType === 1 && CONTAINER.has(child.tagName) && !SKIP.has(child.tagName)) {\n"
                 // display:none subtrees (closed flyouts, menus, templates) are never visible results;
                 // walking them only spent the container budget before the result list was reached.
@@ -458,6 +466,7 @@ final class RenderedPageDocumentCapture {
                 + "  if (document.body) walk(document.body, '', 0, 0);\n"
                 // Truncation must be VISIBLE in the diagnostics: a capped capture flattens everything
                 // past the bound into its ancestors, and the result list then no longer repeats.
+                + "  if (shadowRoots > 0) warnings.push('SHADOW_DOM: open shadow roots were traversed');\n"
                 + "  if (capReached) warnings.push('CAPTURE_TRUNCATED: container cap ' + MAX_CONTAINERS\n"
                 + "      + ' reached; later page structure was flattened into its ancestors');\n"
                 + "  if (depthReached) warnings.push('CAPTURE_TRUNCATED: container depth bound ' + MAX_DEPTH\n"

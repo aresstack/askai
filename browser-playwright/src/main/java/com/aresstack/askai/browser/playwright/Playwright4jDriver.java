@@ -293,7 +293,8 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         try {
             final Page target = page;
-            return renderedCapture.capture(new RenderedPageDocumentCapture.PageScriptRunner() {
+            com.aresstack.askai.browser.render.RenderedPageDocument document =
+                    renderedCapture.capture(new RenderedPageDocumentCapture.PageScriptRunner() {
                 public Object evaluate(String script) {
                     return target.evaluate(script);
                 }
@@ -306,6 +307,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     return target.title();
                 }
             }, domainKeys, snapshotGeneration);
+            System.err.println(SerpCaptureDiagnostics.summary(document));
+            java.nio.file.Path dumpDirectory = SerpCaptureDiagnostics.snapshotDirectory();
+            if (dumpDirectory != null) {
+                try {
+                    Object html = target.evaluate(SerpCaptureDiagnostics.SANITIZED_HTML_SCRIPT);
+                    System.err.println("[serp-capture] snapshot written to " + SerpCaptureDiagnostics
+                            .dump(dumpDirectory, document, html == null ? "" : String.valueOf(html)));
+                } catch (java.io.IOException | PlaywrightException dumpFailed) {
+                    // Diagnostics only: a failed dump never fails the search.
+                    System.err.println("[serp-capture] snapshot dump failed: " + dumpFailed);
+                }
+            }
+            return document;
         } catch (PlaywrightException ex) {
             throw asBrowserException("Structured page capture failed", ex);
         }

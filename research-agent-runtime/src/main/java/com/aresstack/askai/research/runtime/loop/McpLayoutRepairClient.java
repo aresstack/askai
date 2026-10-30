@@ -111,10 +111,20 @@ public final class McpLayoutRepairClient {
                 break;
         }
 
+        java.util.Set<String> enginesRejectedByValidation = new java.util.HashSet<String>();
         for (SearchLayoutRepairRequest ticket : prepared.repairRequests) {
             if (cancellationSignal.isCancelled()) {
                 return result(Outcome.CANCELLED, noCandidates(), providerHosts, challenges,
                         diagnostics);
+            }
+            if (enginesRejectedByValidation.contains(ticket.engineHost)) {
+                // The engine's further result pages share the layout the model just failed on with
+                // validation feedback in every attempt; repeating it per page was 3 x 3 useless calls.
+                String skipped = "repair ticket " + ticket.snapshotId + " skipped: the AI layout "
+                        + "for " + ticket.engineHost + " already failed validation on an earlier page";
+                diagnostics.add(skipped);
+                System.err.println("[initial-search] " + skipped);
+                continue;
             }
             // D1 per-ticket diagnostics: the mechanical situation the coordinator starts from.
             String ticketSummary = ticketSummary(ticket);
@@ -127,6 +137,11 @@ public final class McpLayoutRepairClient {
                     + selectedOrganicInfo(coordination)
                     + (coordination.diagnostics.isEmpty() ? "" : " diagnostics=" + coordination.diagnostics));
             if (!coordination.shouldSubmit()) {
+                if (coordination.resolverResult != null && coordination.resolverResult.outcome
+                        == com.aresstack.askai.browser.search.layout.SearchPageLayoutResolverOutcome
+                                .VALIDATION_FAILED) {
+                    enginesRejectedByValidation.add(ticket.engineHost);
+                }
                 continue; // AI disabled/unavailable/validation-failed for this engine — try the next
             }
             if (!budget.beforeToolCall()) {
