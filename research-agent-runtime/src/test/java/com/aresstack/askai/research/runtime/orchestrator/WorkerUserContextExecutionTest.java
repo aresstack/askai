@@ -274,4 +274,83 @@ public class WorkerUserContextExecutionTest {
         }
         assertEquals("the pool's 4, not the setting's 1", 4, browser);
     }
+
+    /** A pool whose acquire blocks until it is interrupted, or hands out a lease after {@code delayMillis}. */
+    static final class SlowPool implements BrowserUserContextPool {
+        final FakePool inner = new FakePool(2);
+        volatile long delayMillis = -1;
+        volatile long requestedTimeout;
+
+        public BrowserUserContextLease acquire(BrowserUserContextRequest request)
+                throws BrowserCapacityException, InterruptedException {
+            requestedTimeout = request.acquireTimeoutMillis();
+            if (delayMillis < 0) {
+                Thread.sleep(60_000L); // "all user contexts busy" — only an interrupt ends this wait
+            } else {
+                Thread.sleep(delayMillis);
+            }
+            return inner.acquire(request);
+        }
+
+        public int capacity() {
+            return 2;
+        }
+    }
+
+    @Test(timeout = 10_000L)
+    public void aCancelledTurnEndsTheWaitForAUserContextAtOnce() throws Exception {
+        SlowPool pool = new SlowPool();
+        final UserContextWebAcquisition acquisition = (UserContextWebAcquisition) UserContextWebAcquisition.over(
+                pool, chatBrowser, searchRun(1));
+        final java.util.concurrent.atomic.AtomicReference<WebAcquisition.Result> result =
+                new java.util.concurrent.atomic.AtomicReference<WebAcquisition.Result>();
+        Thread worker = new Thread(() -> result.set(
+                acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong())));
+        worker.start();
+        Thread.sleep(200L);
+        long start = System.nanoTime();
+        acquisition.cancelWaits();
+        worker.join(5_000L);
+        assertFalse(worker.isAlive());
+        assertTrue("ended at once", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+                < 2_000L);
+        assertEquals(ResearchStopReason.USER_CANCELLED, result.get().getStopReason());
+        assertTrue("nothing ran", lanesUsed.isEmpty());
+    }
+
+    @Test
+    public void cancelWaitsNeverInterruptsARunningSearchRun() throws Exception {
+        FakePool pool = new FakePool(1);
+        final UserContextWebAcquisition acquisition = (UserContextWebAcquisition) UserContextWebAcquisition.over(
+                pool, chatBrowser, searchRun(300));
+        Thread worker = new Thread(() -> acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong()));
+        worker.start();
+        Thread.sleep(100L); // the search run is running now
+        acquisition.cancelWaits();
+        worker.join(5_000L);
+        assertEquals(1, lanesUsed.size());
+        assertFalse(pool.leases.get(0).isOpen());
+    }
+
+    @Test
+    public void theWaitIsBoundedByAndTakenOffThePackagesTime() {
+        SlowPool pool = new SlowPool();
+        pool.delayMillis = 200L;
+        final AtomicLong runGot = new AtomicLong(-1);
+        WebAcquisition acquisition = UserContextWebAcquisition.over(pool, chatBrowser,
+                (browser, query, research, accepted, maxDurationMillis, tokens) -> {
+                    runGot.set(maxDurationMillis);
+                    return new WebAcquisition.Result(ResearchStopReason.SUFFICIENT_EVIDENCE, "");
+                });
+        acquisition.acquire("q", null, source -> { }, 1_000L, new AtomicLong());
+        assertEquals("the wait may not exceed the package's time", 1_000L, pool.requestedTimeout);
+        assertTrue("the search run gets the time that is left: " + runGot.get(),
+                runGot.get() > 0 && runGot.get() <= 800L);
+
+        WebAcquisition.Result late = acquisition.acquire("q", null, source -> { }, 100L, new AtomicLong());
+        assertEquals(ResearchStopReason.TIME_BUDGET_EXHAUSTED, late.getStopReason());
+        for (FakeLease lease : pool.inner.leases) {
+            assertFalse("given back", lease.isOpen());
+        }
+    }
 }

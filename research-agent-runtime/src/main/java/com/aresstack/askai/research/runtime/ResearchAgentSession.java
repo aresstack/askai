@@ -72,6 +72,8 @@ public final class ResearchAgentSession {
     /** The orchestrated run of this session, built on first use. */
     private com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession orchestrator;
     private volatile com.aresstack.askai.research.runtime.browser.BrowserUserContextPool browserUserContexts;
+    /** The orchestrated run's acquisition on worker user contexts (null without them); cancel ends its waits. */
+    private volatile com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition workerAcquisition;
     /** The output of the turn running the orchestrated cycle: the worker's search runs report there. */
     private volatile AgentOutput orchestratorTurn;
     /** The orchestrated run's chats (weakly held: a finished package's chat goes with it), cancelled with the turn. */
@@ -717,6 +719,11 @@ public final class ResearchAgentSession {
             ((com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) inference)
                     .cancelInFlight();
         }
+        // Packages waiting for a free worker user context stop now, not after the wait setting.
+        com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition workers = workerAcquisition;
+        if (workers != null) {
+            workers.cancelWaits();
+        }
     }
 
     /**
@@ -982,6 +989,10 @@ public final class ResearchAgentSession {
                             (browserLane, query, permittedResearch, accepted, maxDurationMillis, tokens) ->
                                     acquireWith(browserLane, query, permittedResearch, accepted,
                                             maxDurationMillis, tokens, budget));
+            if (acquisition instanceof com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition) {
+                workerAcquisition =
+                        (com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition) acquisition;
+            }
             orchestrator = new com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession(board,
                     orchestratorSettings(), orchestratorChats(), modelPort,
                     com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition.browserSlots(pool),
