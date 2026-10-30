@@ -185,9 +185,10 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
                 if ((chosen == null || chosen.userContexts > 0) && roomForProcess) {
                     chosen = newSlot(chat);
                     startIt = true;
-                } else if (chosen == null && reclaimIdleLaneOfAnotherChat(chat)) {
-                    chosen = newSlot(chat);
-                    startIt = true;
+                } else if (chosen == null) {
+                    // At the cap: stop an idle worker browser of another chat. Its process still counts until
+                    // it is gone; its removal wakes this wait, which then starts the new one.
+                    reclaimIdleLaneOfAnotherChat(chat);
                 }
                 if (chosen != null) {
                     break;
@@ -208,29 +209,64 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
             chosen.lane.start(chat.factory);
         }
         final String state = storageState;
+        // Who owns a user context created for a caller that was interrupted meanwhile: the owner thread closes
+        // it when it finishes after the cancel, the caller when the creation finished just before.
+        final Object handoff = new Object();
+        final boolean[] abandoned = {false};
+        final String[][] made = {null};
         try {
             chosen.lane.awaitStarted();
             String[] created = chosen.lane.call(new WorkerBrowserLane.LaneTask<String[]>() {
                 public String[] run(WorkerBrowserBackend backend) throws BrowserException {
                     String userContext = backend.newUserContext(state);
+                    String tab;
                     try {
-                        return new String[]{userContext, backend.newBrowsingContext(userContext)};
+                        tab = backend.newBrowsingContext(userContext);
                     } catch (BrowserException tabFailed) {
                         backend.closeUserContext(userContext);
                         throw tabFailed;
                     }
+                    synchronized (handoff) {
+                        if (abandoned[0]) {
+                            backend.closeUserContext(userContext);
+                            throw new BrowserException("user context creation cancelled");
+                        }
+                        made[0] = new String[]{userContext, tab};
+                        return made[0];
+                    }
                 }
             }, current.callTimeoutMillis);
             return new WorkerUserContext(this, chosen, id, label, created[0], created[1]);
-        } catch (BrowserException | InterruptedException | RuntimeException failed) {
-            release(chosen);
-            if (!chosen.lane.isAlive()) {
-                synchronized (this) {
-                    lanes.remove(chosen);
-                    notifyAll();
-                }
+        } catch (InterruptedException cancelled) {
+            final String[] orphan;
+            synchronized (handoff) {
+                abandoned[0] = true;
+                orphan = made[0];
             }
+            if (orphan != null) {
+                // FIFO lane: this close runs before any later creation on the same worker browser.
+                chosen.lane.submit(new WorkerBrowserLane.LaneTask<Object>() {
+                    public Object run(WorkerBrowserBackend backend) {
+                        backend.closeUserContext(orphan[0]);
+                        return null;
+                    }
+                });
+            }
+            failedCreation(chosen);
+            throw cancelled;
+        } catch (BrowserException | RuntimeException failed) {
+            failedCreation(chosen);
             throw failed;
+        }
+    }
+
+    private void failedCreation(LaneSlot chosen) {
+        release(chosen);
+        if (!chosen.lane.isAlive()) {
+            synchronized (this) {
+                lanes.remove(chosen);
+                notifyAll();
+            }
         }
     }
 
@@ -254,18 +290,40 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
         return slot;
     }
 
-    /** At the process cap: stop one idle worker browser of ANOTHER chat to make room. */
-    private boolean reclaimIdleLaneOfAnotherChat(Chat chat) {
-        for (Iterator<LaneSlot> it = lanes.iterator(); it.hasNext(); ) {
-            LaneSlot slot = it.next();
-            if (slot.chat != chat && slot.userContexts == 0) {
-                it.remove();
-                slot.stopping = true;
-                slot.lane.close();
-                return true;
+    /**
+     * At the process cap: stop one idle worker browser of ANOTHER chat to make room — unless one is already
+     * stopping (its exit makes the room; stopping a second would only cost another chat its warm browser).
+     */
+    private void reclaimIdleLaneOfAnotherChat(Chat chat) {
+        for (LaneSlot slot : lanes) {
+            if (slot.stopping) {
+                return;
             }
         }
-        return false;
+        for (LaneSlot slot : lanes) {
+            if (slot.chat != chat && slot.userContexts == 0) {
+                beginStop(slot);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Orderly stop of one worker browser. The lane stays in {@code lanes} (so it still counts against the process
+     * cap) until its process is really gone; then it is removed and waiting acquisitions are woken.
+     */
+    private void beginStop(final LaneSlot slot) {
+        if (slot.stopping) {
+            return;
+        }
+        slot.stopping = true;
+        slot.lane.close();
+        slot.lane.stopped().whenComplete((done, failure) -> {
+            synchronized (PlaywrightUserContextPool.this) {
+                lanes.remove(slot);
+                notifyAll();
+            }
+        });
     }
 
     private void purgeDead() {
@@ -281,7 +339,7 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
     void release(final LaneSlot slot) {
         synchronized (this) {
             slot.userContexts = Math.max(0, slot.userContexts - 1);
-            if (slot.userContexts == 0 && !closed && lanes.contains(slot)) {
+            if (slot.userContexts == 0 && !closed && !slot.stopping && lanes.contains(slot)) {
                 final long token = ++slot.idleToken;
                 long idle = limits.idleStopMillis;
                 if (idle <= 0) {
@@ -303,12 +361,10 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
     }
 
     private synchronized void stopIdle(LaneSlot slot, long token) {
-        if (slot.idleToken != token || slot.userContexts > 0 || !lanes.remove(slot)) {
+        if (slot.idleToken != token || slot.userContexts > 0 || slot.stopping || !lanes.contains(slot)) {
             return; // reused meanwhile, or already gone
         }
-        slot.stopping = true;
-        slot.lane.close();
-        notifyAll();
+        beginStop(slot);
     }
 
     private ScheduledExecutorService idleTimer() {
@@ -328,22 +384,14 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
         return sites;
     }
 
-    private void closeChat(Chat chat) {
-        List<LaneSlot> stopping = new ArrayList<LaneSlot>();
-        synchronized (this) {
-            for (Iterator<LaneSlot> it = lanes.iterator(); it.hasNext(); ) {
-                LaneSlot slot = it.next();
-                if (slot.chat == chat) {
-                    it.remove();
-                    slot.stopping = true;
-                    stopping.add(slot);
-                }
+    private synchronized void closeChat(Chat chat) {
+        // The open user contexts of this chat end with their worker browsers; each still counts until it is gone.
+        for (LaneSlot slot : new ArrayList<LaneSlot>(lanes)) {
+            if (slot.chat == chat) {
+                beginStop(slot);
             }
-            notifyAll();
         }
-        for (LaneSlot slot : stopping) {
-            slot.lane.close(); // the open user contexts of this chat end with their worker browser
-        }
+        notifyAll();
     }
 
     /**

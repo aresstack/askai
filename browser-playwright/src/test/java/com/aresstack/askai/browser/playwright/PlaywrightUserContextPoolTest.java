@@ -358,6 +358,58 @@ public class PlaywrightUserContextPoolTest {
     }
 
     @Test
+    public void aStoppingWorkerBrowserCountsAgainstTheCapUntilItsProcessIsGone() throws Exception {
+        pool = new PlaywrightUserContextPool(new WorkerBrowserLimits(1, 2, 2, 4, 5_000L, 5_000L, 60_000L));
+        world.closeMillis = 400L; // a slow browser exit
+        PlaywrightUserContextPool.Chat chatA = pool.openChat("chat-a", world.factory());
+        PlaywrightUserContextPool.Chat chatB = pool.openChat("chat-b", world.factory());
+        chatA.acquire("worker-1", null, 0).close(); // idle, warm
+        long start = System.nanoTime();
+        try (WorkerUserContext b = chatB.acquire("worker-1", null, 0)) {
+            assertTrue("chat B waited for chat A's browser to exit",
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) >= 350L);
+            assertEquals("never more browser processes than the cap", 1, world.maxLive.get());
+            assertEquals(1, pool.processCount());
+        }
+        chatB.close();
+        assertEquals("a stopping browser is still counted", 1, pool.processCount());
+        long deadline = System.currentTimeMillis() + 3_000L;
+        while (pool.processCount() > 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertEquals(0, pool.processCount());
+        assertEquals(1, world.maxLive.get());
+    }
+
+    @Test
+    public void aUserContextCreatedForACancelledWorkerIsClosedAndNotCounted() throws Exception {
+        pool = new PlaywrightUserContextPool(new WorkerBrowserLimits(1, 1, 2, 4, 5_000L, 5_000L, 60_000L));
+        final PlaywrightUserContextPool.Chat chat = pool.openChat("chat-a", world.factory());
+        chat.acquire("warm-up", null, 0).close(); // the worker browser is up
+        world.newUserContextMillis = 300L;
+        final AtomicReference<Throwable> outcome = new AtomicReference<Throwable>();
+        Thread worker = new Thread(() -> {
+            try {
+                chat.acquire("worker-1", null, 0);
+            } catch (Throwable t) {
+                outcome.set(t);
+            }
+        });
+        worker.start();
+        Thread.sleep(100); // the creation runs on the owner thread now
+        worker.interrupt();
+        worker.join(2_000);
+        assertTrue(String.valueOf(outcome.get()), outcome.get() instanceof InterruptedException);
+        world.newUserContextMillis = 0L;
+        try (WorkerUserContext next = chat.acquire("worker-2", null, 0)) {
+            assertTrue(next.isOpen());
+            assertEquals("the abandoned user context was closed: only the new one lives (limit 1)",
+                    1, world.liveUserContexts.get());
+        }
+        assertEquals(0, pool.userContextCount());
+    }
+
+    @Test
     public void aFailedStartReleasesItsSlot() throws Exception {
         PlaywrightUserContextPool.Chat chat = pool(1, 1, 4).openChat("chat-a", world.factory());
         world.failLaunch = true;

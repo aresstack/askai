@@ -38,6 +38,15 @@ final class FakeWorkerBrowserBackend implements WorkerBrowserBackend {
         volatile String challengeStatus = "NONE";
         /** web_search_prepare fails like the real capture does when the window is gone. */
         volatile boolean prepareSeesClosedWindow;
+        /** Browser processes alive right now, and the most at any moment. */
+        final AtomicInteger live = new AtomicInteger();
+        final AtomicInteger maxLive = new AtomicInteger();
+        /** User contexts alive over all backends. */
+        final AtomicInteger liveUserContexts = new AtomicInteger();
+        /** A slow browser exit (orderly close). */
+        volatile long closeMillis;
+        /** A slow user context creation. */
+        volatile long newUserContextMillis;
 
         WorkerBrowserBackend.Factory factory() {
             return new WorkerBrowserBackend.Factory() {
@@ -46,6 +55,7 @@ final class FakeWorkerBrowserBackend implements WorkerBrowserBackend {
                         throw new BrowserException("Worker browser start failed (fake)");
                     }
                     launched.incrementAndGet();
+                    maxLive.accumulateAndGet(live.incrementAndGet(), Math::max);
                     return new FakeWorkerBrowserBackend(Shared.this);
                 }
             };
@@ -75,6 +85,8 @@ final class FakeWorkerBrowserBackend implements WorkerBrowserBackend {
 
     public String newUserContext(String storageState) {
         checkOwner("newUserContext");
+        sleepQuietly(shared.newUserContextMillis);
+        shared.liveUserContexts.incrementAndGet();
         String id = "uc" + (++ids);
         Map<String, Map<String, String>> jar = new TreeMap<String, Map<String, String>>();
         if (storageState != null) {
@@ -209,7 +221,9 @@ final class FakeWorkerBrowserBackend implements WorkerBrowserBackend {
 
     public void closeUserContext(String userContextId) {
         checkOwner("closeUserContext");
-        jars.remove(userContextId);
+        if (jars.remove(userContextId) != null) {
+            shared.liveUserContexts.decrementAndGet();
+        }
         tabUserContext.values().removeIf(userContextId::equals);
     }
 
@@ -228,14 +242,33 @@ final class FakeWorkerBrowserBackend implements WorkerBrowserBackend {
     public void close() {
         checkOwner("close");
         if (open) {
+            sleepQuietly(shared.closeMillis);
             open = false;
+            shared.liveUserContexts.addAndGet(-jars.size());
+            jars.clear();
             shared.closed.incrementAndGet();
+            shared.live.decrementAndGet();
         }
     }
 
     public void terminate() {
+        boolean wasOpen = open;
         open = false;
         terminated.countDown();
         shared.closed.incrementAndGet();
+        if (wasOpen) {
+            shared.live.decrementAndGet();
+        }
+    }
+
+    private static void sleepQuietly(long millis) {
+        if (millis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
