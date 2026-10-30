@@ -187,10 +187,18 @@ public final class ResearchTeamAgent {
      * assembled on top of that fiction.
      */
     public TeamAgentResult internalTurn(String instruction, TeamAgentStateView state) {
+        return internalTurn(instruction, state, null);
+    }
+
+    /**
+     * An internal turn that must answer with ONE action type (a nudge or repair asking for exactly that
+     * action): the generation-time schema admits only that variant. {@code null} = an ordinary internal turn.
+     */
+    public TeamAgentResult internalTurn(String instruction, TeamAgentStateView state, String requiredActionType) {
         PhaseAssistantProfile profile = profiles.forPhase(state.getPhaseId());
         List<ChatMessage> messages = baseMessages(state);
         messages.add(ChatMessage.user(instruction == null ? "" : instruction.trim()));
-        TeamAgentResult result = runTurn(messages, state, profile.getOutputContract());
+        TeamAgentResult result = runTurn(messages, state, profile.getOutputContract(), requiredActionType);
         if (result.isOk()) {
             // The ANSWER is real conversation — the user sees it, and the next turn must know it exists.
             // Only the instruction stays out.
@@ -246,7 +254,12 @@ public final class ResearchTeamAgent {
      */
     private TeamAgentResult runTurn(List<ChatMessage> messages, TeamAgentStateView state,
                                     PhaseOutputContract contract) {
-        Parsed parsed = callParseWithRepair(messages, contract);
+        return runTurn(messages, state, contract, null);
+    }
+
+    private TeamAgentResult runTurn(List<ChatMessage> messages, TeamAgentStateView state,
+                                    PhaseOutputContract contract, String requiredActionType) {
+        Parsed parsed = callParseWithRepair(messages, contract, requiredActionType);
         if (parsed.failure != null) {
             return parsed.failure;
         }
@@ -269,16 +282,19 @@ public final class ResearchTeamAgent {
      * (Ollama structured outputs) — grammar stops a small model from losing count of its braces;
      * without a schema the long-standing plain completion stays byte-identical.
      */
-    private MainModelChatResult callModel(List<ChatMessage> messages, PhaseOutputContract contract) {
-        String schema = contract.outputSchemaJson();
+    private MainModelChatResult callModel(List<ChatMessage> messages, PhaseOutputContract contract,
+                                          String requiredActionType) {
+        String schema = requiredActionType == null ? contract.outputSchemaJson()
+                : contract.outputSchemaJson(requiredActionType);
         return schema == null
                 ? model.complete(messages, TEMPERATURE, maxOutputTokens)
                 : model.completeJson(messages, TEMPERATURE, maxOutputTokens, schema);
     }
 
     /** One model call + phase-contract parse, with EXACTLY ONE bounded parse-repair on failure. */
-    private Parsed callParseWithRepair(List<ChatMessage> messages, PhaseOutputContract contract) {
-        MainModelChatResult call = callModel(messages, contract);
+    private Parsed callParseWithRepair(List<ChatMessage> messages, PhaseOutputContract contract,
+                                       String requiredActionType) {
+        MainModelChatResult call = callModel(messages, contract, requiredActionType);
         if (!call.isOk()) {
             return Parsed.fail(TeamAgentResult.modelUnavailable(call.getDetail()));
         }
@@ -290,7 +306,7 @@ public final class ResearchTeamAgent {
         List<ChatMessage> repair = new ArrayList<ChatMessage>(messages);
         repair.add(ChatMessage.assistant(call.getText()));
         repair.add(ChatMessage.user(TeamAgentPlaybook.repairNudge()));
-        return callParseOnce(repair, contract);
+        return callParseOnce(repair, contract, requiredActionType);
     }
 
     /**
@@ -330,8 +346,9 @@ public final class ResearchTeamAgent {
      * failed as UNUSABLE_ANSWER — the user then sees the fixed, meta-free typed line, and the pending user
      * turn stays intact for a clean retry.
      */
-    private Parsed callParseOnce(List<ChatMessage> messages, PhaseOutputContract contract) {
-        MainModelChatResult call = callModel(messages, contract);
+    private Parsed callParseOnce(List<ChatMessage> messages, PhaseOutputContract contract,
+                                 String requiredActionType) {
+        MainModelChatResult call = callModel(messages, contract, requiredActionType);
         if (!call.isOk()) {
             return Parsed.fail(TeamAgentResult.modelUnavailable(call.getDetail()));
         }

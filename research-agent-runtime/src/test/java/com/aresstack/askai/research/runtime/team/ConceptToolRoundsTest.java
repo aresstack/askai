@@ -25,8 +25,15 @@ public class ConceptToolRoundsTest {
     private static final class ScriptedTurns implements ConceptToolRounds.FollowUpTurn {
         final List<TeamAgentResult> script = new ArrayList<TeamAgentResult>();
         final List<String> feedbackSeen = new ArrayList<String>();
+        /** The action type each follow-up's grammar was restricted to (null = free). */
+        final List<String> requiredTypes = new ArrayList<String>();
 
         public TeamAgentResult run(String feedbackInstruction) {
+            return run(feedbackInstruction, null);
+        }
+
+        public TeamAgentResult run(String feedbackInstruction, String requiredActionType) {
+            requiredTypes.add(requiredActionType);
             feedbackSeen.add(feedbackInstruction);
             if (script.isEmpty()) {
                 throw new AssertionError("more follow-up turns requested than scripted");
@@ -1009,5 +1016,286 @@ public class ConceptToolRoundsTest {
         assertEquals("„ESP-IDF“ wurde ausgeschlossen.",
                 ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
         assertTrue(trace.toString(), trace.toString().contains("EXCLUDED (terminal)"));
+    }
+
+    /**
+     * Scoping regression (Meerschweinchen): the visible answer spelled "add_cards: …" while the action
+     * channel said none. That is never a finished turn: the loop repairs it, the model sends the action
+     * through conceptAction, the host executes it and only the clean final answer reaches the user.
+     */
+    @Test
+    public void anActionSpelledInTheVisibleAnswerIsRepairedNotTreatedAsDone() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung und Sozialverhalten\","
+                + "\"Ernährung und Futter\"]", "added 2 cards revision=1");
+        turns.script.add(turn("Ich lege die Bereiche an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung und Sozialverhalten\",\"Ernährung und Futter\"]}"));
+        turns.script.add(turn("Ich habe Haltung und Ernährung angelegt.", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(
+                turn("add_cards:\\n    - Haltung und Sozialverhalten\\n    - Ernährung und Futter\\n"
+                        + "    offer: Welche spezifischen Aspekte?", "{\"type\":\"none\"}"),
+                turns, tool, 4, 2, true, null, traceSink);
+
+        assertEquals("Ich habe Haltung und Ernährung angelegt.",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertTrue("the repair names the contradiction",
+                turns.feedbackSeen.get(0).contains("ACTION WRITTEN AS TEXT"));
+        assertTrue("and that nothing was executed", turns.feedbackSeen.get(0).contains("NICHTS wurde ausgeführt"));
+        assertTrue("the action then went through the structured channel", tool.calls.contains(
+                "add_cards parent=[] names=[\"Haltung und Sozialverhalten\",\"Ernährung und Futter\"]"));
+        assertTrue(trace.toString(), trace.toString().contains(
+                "visible answer spells the action \"add_cards\" while conceptAction is none — NOT executed"));
+        assertTrue(trace.contains("round 1 -> APPLIED revision=1"));
+    }
+
+    /** Hasenhaltung regression: a bare "none" as the visible answer is a leak, not a reply. */
+    @Test
+    public void aBareNoneAsTheVisibleAnswerIsRepaired() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        turns.script.add(turn("Worum genau soll es bei der Hasenhaltung gehen?", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("none", "{\"type\":\"none\"}"),
+                turns, tool, 4, 2, true, null, traceSink);
+
+        assertEquals("Worum genau soll es bei der Hasenhaltung gehen?",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertEquals(1, turns.feedbackSeen.size());
+    }
+
+    /** Without repair budget the leaked text still never reaches the user, and nothing is claimed. */
+    @Test
+    public void withoutRepairBudgetTheHostAnswersHonestlyInsteadOfShowingTheLeak() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+
+        TeamAgentResult result = ConceptToolRounds.run(
+                turn("add_cards:\\n- Haltung", "{\"type\":\"none\"}"), turns, tool, 4, 0, true, null,
+                traceSink);
+
+        String visible = ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage();
+        assertEquals(TeamAgentPlaybook.conceptActionLeakAnswer(true,
+                java.util.Collections.<String>emptyList(), false), visible);
+        assertTrue("the host answer says nothing changed", visible.contains("nichts geändert"));
+        assertTrue("and never the leaked text", !visible.contains("add_cards"));
+        assertTrue("no follow-up inference", turns.feedbackSeen.isEmpty());
+        assertTrue("no concept call", tool.calls.isEmpty());
+    }
+
+    /** Prompt-contamination guard: an instruction placeholder never becomes a card. */
+    @Test
+    public void aPlaceholderCopiedFromTheInstructionsIsRefusedBeforeTheHost() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        turns.script.add(turn("Welche Bereiche der Hasenhaltung interessieren dich?", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("lege an",
+                "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<area 1>\",\"<area 2>\"]}"),
+                turns, tool, 4, 2, true, null, traceSink);
+
+        assertEquals("Welche Bereiche der Hasenhaltung interessieren dich?",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertTrue("the placeholder never reached the host", tool.calls.isEmpty());
+        assertTrue(trace.toString(), trace.contains("round 1 -> REFUSED (placeholder copied from the instructions)"));
+        assertTrue(turns.feedbackSeen.get(0).contains("a name in <angle brackets>"));
+    }
+
+    /** Angle-bracket names the user wrote literally still go through: only invented placeholders are refused. */
+    @Test
+    public void legitimateAngleBracketNamesAreNoPlaceholders() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"<h1>\",\"std::vector<int>\"]",
+                "added 2 cards revision=1");
+        turns.script.add(turn("Angelegt.", "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("lege an",
+                "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<h1>\",\"std::vector<int>\"]}"),
+                turns, tool, 4, 2, true, null, traceSink, false, ConceptTurnPolicy.Mode.FULL, false, null,
+                "Lege Karten für <h1> und std::vector<int> an.");
+
+        assertTrue(tool.calls.toString(),
+                tool.calls.contains("add_cards parent=[] names=[\"<h1>\",\"std::vector<int>\"]"));
+    }
+
+    /** An over-budget wrap-up offer with an instruction placeholder never becomes a search tag. */
+    @Test
+    public void aWrapUpOfferWithAPlaceholderIsNotExecuted() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\"]", "added revision=1");
+        turns.script.add(turn("Fertig.", "{\"type\":\"offer\",\"suggestions\":[{\"query\":"
+                + "\"<topic> basics overview\",\"purpose\":\"x\"}]}"));
+
+        ConceptToolRounds.run(turn("lege an", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\"]}"), turns, tool, 1, 2, true, null, traceSink);
+
+        for (String call : tool.calls) {
+            assertTrue("no offer reached the host: " + tool.calls, !call.startsWith("offer"));
+        }
+        assertTrue(trace.toString(), trace.contains(
+                "wrap-up offer REFUSED (placeholder copied from the instructions)"));
+    }
+
+    /**
+     * Meerschweinchen live gate: gemma invented "<name1>"/"<name2>" (not in any instruction) and the host
+     * stored them. A value that is nothing but an angle-bracket token, or "...", is a placeholder unless
+     * the user wrote it literally.
+     */
+    @Test
+    public void anInventedPlaceholderLikeName1IsRefusedBeforeTheHost() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]",
+                "APPLIED revision=1\nADDED: Haltung\nADDED: Ernährung");
+        turns.script.add(turn("Ich lege die Bereiche an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\",\"Ernährung\"]}"));
+        turns.script.add(turn("Haltung und Ernährung sind angelegt.", "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("lege an",
+                "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<name1>\",\"<name2>\"]}"),
+                turns, tool, 4, 2, true, null, traceSink, false, ConceptTurnPolicy.Mode.FULL, false, null,
+                "Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
+
+        for (String call : tool.calls) {
+            assertTrue("a placeholder reached the host: " + tool.calls, !call.contains("<name"));
+        }
+        assertTrue(tool.calls.contains("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]"));
+        assertTrue(trace.contains("round 1 -> REFUSED (placeholder copied from the instructions)"));
+    }
+
+    @Test
+    public void anEllipsisQueryIsAPlaceholderToo() {
+        ConceptAction offer = ScopingAssistantOutputParser.parse("{\"assistantMessage\":\"x\",\"conceptAction\":"
+                + "{\"type\":\"offer\",\"suggestions\":[{\"query\":\"...\",\"purpose\":\"...\"}]}}")
+                .getOutput().getConceptAction();
+        assertTrue(ConceptToolRounds.hasPlaceholder(offer));
+        ConceptAction real = ScopingAssistantOutputParser.parse("{\"assistantMessage\":\"x\",\"conceptAction\":"
+                + "{\"type\":\"offer\",\"suggestions\":[{\"query\":\"Meerschweinchen Futter\"}]}}")
+                .getOutput().getConceptAction();
+        assertTrue(!ConceptToolRounds.hasPlaceholder(real));
+    }
+
+    /**
+     * Meerschweinchen live gate: the first turn only offered searches and ended with an EMPTY concept.
+     * One machinery nudge asks for the missing cards; they then go through conceptAction.
+     */
+    @Test
+    public void aFirstTurnThatBuiltNoCardGetsOneCardNudge() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("offer suggestions=1", "OFFERED 1");
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]",
+                "APPLIED revision=1\nADDED: Haltung\nADDED: Ernährung");
+        turns.script.add(turn("Ich schaue mir das an.", "{\"type\":\"none\"}"));
+        turns.script.add(turn("Ich lege die Bereiche an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\",\"Ernährung\"]}"));
+        turns.script.add(turn("Haltung und Ernährung stehen jetzt im Konzept.", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("Gern!",
+                "{\"type\":\"offer\",\"suggestions\":[{\"query\":\"Meerschweinchen Haltung\"}]}"),
+                turns, tool, 4, 2, true, null, traceSink, true, ConceptTurnPolicy.Mode.FULL, false, null,
+                "Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
+
+        assertEquals("Haltung und Ernährung stehen jetzt im Konzept.",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertTrue(trace.toString(), trace.contains("concept cards missing (concept empty) — card nudge turn"));
+        assertTrue(turns.feedbackSeen.get(1).startsWith("CONCEPT CARDS MISSING"));
+        assertTrue(tool.calls.contains("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]"));
+    }
+
+    @Test
+    public void aBareGreetingNeverGetsTheCardNudge() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("Hallo! Worüber möchtest du recherchieren?",
+                "{\"type\":\"none\"}"), turns, tool, 4, 2, true, null, traceSink, true,
+                ConceptTurnPolicy.Mode.FULL, false, null, "Hallo");
+
+        assertEquals("Hallo! Worüber möchtest du recherchieren?",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertTrue("no nudge, no concept call", tool.calls.isEmpty() && turns.feedbackSeen.isEmpty());
+    }
+
+    /** The honest close names exactly the cards the host reported ADDED — never a generic sentence. */
+    @Test
+    public void theHonestCloseIsBuiltFromTheReceipts() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]",
+                "APPLIED revision=1\nADDED: Haltung\nADDED: Ernährung");
+        turns.script.add(turn("offer:\\n- Meerschweinchen Futter", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("lege an", "{\"type\":\"add_cards\","
+                + "\"parent\":[],\"names\":[\"Haltung\",\"Ernährung\"]}"), turns, tool, 4, 0, true, null,
+                traceSink);
+
+        String visible = ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage();
+        assertTrue(visible, visible.startsWith("Ich habe ins Konzept übernommen: Haltung, Ernährung."));
+        assertTrue(visible, !visible.contains("nicht ausführen"));
+    }
+
+    /**
+     * Second live acceptance: free nudges kept answering "none". The card nudge restricts the grammar to
+     * add_cards, the offer nudge to offer, the closing grounding turn to none.
+     */
+    @Test
+    public void nudgesRestrictTheGrammarToTheActionTheyAskFor() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]",
+                "APPLIED revision=1\nADDED: Haltung\nADDED: Ernährung");
+        tool.byDescription.put("offer suggestions=1", "OFFERED 1");
+        turns.script.add(turn("Ich lege die Bereiche an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\",\"Ernährung\"]}"));
+        turns.script.add(turn("Haltung und Ernährung stehen im Konzept.", "{\"type\":\"none\"}"));
+        turns.script.add(turn("Hier sind Suchvorschläge.", "{\"type\":\"offer\",\"suggestions\":"
+                + "[{\"query\":\"Meerschweinchen Heu Vitamin C\"}]}"));
+        turns.script.add(turn("Haltung und Ernährung stehen im Konzept, Suchvorschläge sind bereit.",
+                "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("Gern!", "{\"type\":\"none\"}"), turns, tool, 4, 2, true, null, traceSink,
+                true, ConceptTurnPolicy.Mode.FULL, false, null,
+                "Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
+
+        assertEquals(java.util.Arrays.asList("add_cards", null, "offer", null), turns.requiredTypes);
+        assertTrue(tool.calls.toString(), tool.calls.contains("offer suggestions=1"));
+    }
+
+    /** A malformed or placeholder add_cards/offer is repaired with the grammar of exactly that action. */
+    @Test
+    public void aRepairOfAMalformedOfferAsksForAnOfferAgain() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("offer suggestions=1", "OFFERED 1");
+        turns.script.add(turn("Hier sind Suchvorschläge.", "{\"type\":\"offer\",\"suggestions\":"
+                + "[{\"query\":\"Meerschweinchen Gehege\"}]}"));
+        turns.script.add(turn("Suchvorschläge sind bereit.", "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("x", "{\"type\":\"offer\",\"suggestions\":[]}"), turns, tool, 4, 2,
+                true, null, traceSink);
+
+        assertEquals("offer", turns.requiredTypes.get(0));
+        assertTrue(trace.contains("follow-up grammar admits only offer"));
+        assertTrue(tool.calls.contains("offer suggestions=1"));
+    }
+
+    @Test
+    public void aLeakedAddCardsIsRepairedWithTheAddCardsGrammar() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\"]", "APPLIED revision=1\nADDED: Haltung");
+        turns.script.add(turn("Ich lege Haltung an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\"]}"));
+        turns.script.add(turn("Haltung steht im Konzept.", "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("add_cards:\n- Haltung", "{\"type\":\"none\"}"), turns, tool, 4, 2, true,
+                null, traceSink);
+
+        assertEquals("add_cards", turns.requiredTypes.get(0));
+        assertTrue(tool.calls.contains("add_cards parent=[] names=[\"Haltung\"]"));
     }
 }

@@ -404,21 +404,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             restoreProjectMetadata();
             // Show the last PERSISTED visualization (possibly stale) — never regenerate on open (issue #29).
             restorePersistedVisualization();
-            // The greeting depends ONLY on the state: greet exactly once, when the scope state is still fresh
-            // (SCOPING/NEW). A restored session whose state already advanced past NEW is NOT greeted again —
-            // its prior greeting comes back from the persisted chat transcript instead (no double greeting).
+            // A fresh chat (SCOPING/NEW) stays EMPTY: no bootstrap turn, no model call. The former greeting
+            // asked for a topic the user was about to name anyway, cost a model call on every new chat and sat
+            // in the context of the real first turn. The scoping starts with the user's first message (see
+            // startScopingOnFirstMessage).
             com.aresstack.askai.research.state.oo.ResearchStateMemento current =
                     productiveResources.currentState();
             boolean freshState =
                     com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(current.getPhaseId())
                     && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW.equals(current.getStateId());
-            if (freshState) {
-                // The model-backed TeamAgent (runtime process) OWNS the greeting: send ONE bootstrap turn so
-                // its model-generated greeting arrives as an assistant message. On success the runtime signals
-                // GREETING_DONE and the host advances the state one step (see handleGreetingDone).
-                beginAgentTurn(); // busy + preempt visualizer; cleared by the greeting turn's terminal event
-                backend.submitPrompt(handle, new ResearchPrompt("", ""));
-            } else {
+            if (!freshState) {
                 // Restored session: the conversation text comes back from the persisted transcript, but the
                 // interactive buttons do not. Re-derive the decision buttons from the live state
                 // (non-persisted, so they never duplicate/accumulate across restarts), and bring back the
@@ -983,6 +978,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 technicalLog("stale decision tombstone superseded by a substantive turn");
             }
             echoUserMessage(text);
+            startScopingOnFirstMessage();
             // KISS (live-gate 4): the mission is bookkeeping, not intelligence — the user's
             // FIRST message IS the mission until they restate it. No model turn ever begs
             // for setMission again.
@@ -1062,7 +1058,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * non-fresh state and never greets again (the persisted chat shows the prior greeting instead). Idempotent
      * and only meaningful while still at SCOPING/NEW.
      */
-    private void handleGreetingDone() {
+    /**
+     * SCOPING/NEW → SCOPING/RUNNING when the user sends the first message of a fresh chat — synchronously,
+     * BEFORE the turn reaches the runtime, so the turn's concept writes (bound to SCOPING/running) are allowed
+     * and the runtime answers the topic directly. Also the handler of a runtime's GREETING_DONE signal.
+     */
+    private void startScopingOnFirstMessage() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return;
         }
@@ -1994,7 +1995,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 handleScopeProposal(event.getText(), event.getTechnicalDetail());
                 break;
             case GREETING_DONE:
-                handleGreetingDone();
+                startScopingOnFirstMessage();
                 break;
             case SCOPE_UPDATE:
                 applyScopeUpdate(event.getText());
@@ -3132,6 +3133,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private int turnsWithoutNewCards;
     /** The ephemeral fence block, recomputed once per user turn — NEVER persisted state. */
     private volatile String conversationPolicyBlock = "";
+    /** The stage behind that block, or null while no policy is projected (no scope system). */
+    private volatile ConversationPolicyProjection.Stage conversationPolicyStage;
 
     /** The concept side of the fence fingerprint: epoch + working revision (or a marker). */
     private String conceptStamp() {
@@ -3159,6 +3162,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 scopeCoordinator();
         if (service == null || coordinator == null || !coordinator.isUsable()) {
             conversationPolicyBlock = "";
+            conversationPolicyStage = null;
             return;
         }
         java.util.Set<String> ids =
@@ -3217,6 +3221,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 ConversationPolicyProjection.stageOf(inputs);
         conversationPolicyBlock =
                 ConversationPolicyProjection.hintBlock(stage, calibrationWeak);
+        conversationPolicyStage = stage;
         technicalLog(ConversationPolicyProjection.logLine(stage, inputs));
     }
 
@@ -3621,8 +3626,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 suggestions = parseOfferedSearches(suggestionsJson);
         if (suggestions.isEmpty()) {
             return "No usable suggestion — every entry needs a non-empty \"query\". Example: "
-                    + "[{\"query\":\"FreeRTOS ESP32 Grundlagen Tutorial\","
-                    + "\"purpose\":\"Einstieg sichten\"}]";
+                    + "[{\"query\":\"<topic> basics overview\","
+                    + "\"purpose\":\"<core aspect>\"}]";
         }
         latestScopingProjection = new com.aresstack.askai.research.backend.ScopingAssistantUpdate(
                 state.getPhaseId(), suggestions, "", "");
@@ -3651,6 +3656,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (coordinator == null || !coordinator.isUsable() || handle == null
                 || productiveResources == null || productiveResources.isClosed()) {
             return null; // no scope system — the tool answers honestly
+        }
+        // The probe is the CLOSURE-CHECK sensor (AP3 drill). The prompt says so, but the PR #19
+        // live acceptance saw gemma4:e2b probe in the FIRST turn of both topics, and the sensor
+        // lock then turned the whole opening answer into a probe summary. Machinery now: outside
+        // CLOSURE_CHECK the host refuses the measurement before any embedding runs, with a
+        // teaching rejection the loop hands back to the model (a REJECTED round, no lock).
+        ConversationPolicyProjection.Stage stage = conversationPolicyStage;
+        if (stage != null && stage != ConversationPolicyProjection.Stage.CLOSURE_CHECK) {
+            technicalLog("scope_probe -> PROBE_REFUSED stage=" + stage.name()
+                    + " (the probe is the closure-check sensor only)");
+            return ConversationPolicyProjection.probeRefusal(stage);
         }
         com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor descriptor =
                 productiveResources.getEmbeddingDescriptor();

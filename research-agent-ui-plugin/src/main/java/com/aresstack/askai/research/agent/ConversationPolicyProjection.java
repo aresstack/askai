@@ -85,6 +85,22 @@ public final class ConversationPolicyProjection {
         return Stage.GUIDED_EXPLORATION;
     }
 
+    /**
+     * The host's refusal of a {@code scope_probe} outside the closure check — machinery, not
+     * prompt text: the PR #19 live acceptance saw gemma4:e2b probe in the FIRST turn of both
+     * topics although the prompt restricts the probe to CLOSURE_CHECK, and the sensor lock then
+     * turned the whole opening answer into a probe summary. The text starts with
+     * {@code PROBE_REFUSED} so the tool reports it as a rejection (the loop books a REJECTED
+     * round and hands the text back to the model), and it names the stage so the model learns
+     * WHY and answers the user's request instead of retrying.
+     */
+    public static String probeRefusal(Stage stage) {
+        return "PROBE_REFUSED: scope_probe is the closure-check sensor and is available only while "
+                + "the CONVERSATION POLICY stage is CLOSURE_CHECK — the stage is " + stage.name()
+                + ". Do not probe now and do not retry it in this turn: answer the user's request "
+                + "directly (cards, offer, exclusion or a plain reply).";
+    }
+
     /** The delimited host-guidance block the fence carries (ratified header + hard lines). */
     public static String hintBlock(Stage stage, boolean calibrationWeak) {
         StringBuilder block = new StringBuilder("\nCONVERSATION POLICY\n"

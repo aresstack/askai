@@ -1,7 +1,7 @@
 # The research agent (in-process)
 
 `:research-agent-runtime` is a LIBRARY: the research agent that drives a session — the conversation
-TeamAgent (greeting, scoping, outline dialog), the autonomous research loop, the search strategies, the
+TeamAgent (scoping and outline dialog; a new chat stays empty until the user writes), the autonomous research loop, the search strategies, the
 manual web search and the reranking. Since the return to Java 21 it runs INSIDE AskAI, in the research
 plugin's classloader (the plugin bundles the jar in its `lib/`); the earlier external Java-8 agent process
 and its ACP wire are gone. It is never part of the AskAI fat jar.

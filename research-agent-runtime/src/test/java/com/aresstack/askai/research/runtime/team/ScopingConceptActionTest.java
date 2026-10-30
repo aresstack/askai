@@ -71,7 +71,7 @@ public class ScopingConceptActionTest {
         assertNull(missingName.getConceptAction());
         assertTrue(missingName.getConceptActionError().contains("requires \"name\""));
         assertTrue("the example teaches segments",
-                missingName.getConceptActionError().contains("\"parent\":[\"FreeRTOS\"]"));
+                missingName.getConceptActionError().contains("\"parent\":[\"<card>\"]"));
 
         ScopingAssistantOutput missingPath = parse("{\"assistantMessage\":\"m\","
                 + "\"conceptAction\":{\"type\":\"remove\"}}");

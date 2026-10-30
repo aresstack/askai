@@ -834,34 +834,26 @@ public final class ResearchAgentSession {
         }
         // Productive conversation: the model-backed TeamAgent LEADS the greeting, scoping and outline dialog.
         // Apply any pending central-model reload at this turn boundary (never mid-request), mirror the live
-        // host state, then greet on the first turn / respond on later turns. The host stays the state
+        // host state, then respond. The host stays the state
         // authority — this only reads research_status and speaks the model's own words.
         applyPendingModelReload(ctx);
         com.aresstack.askai.research.runtime.team.TeamAgentStateView view = readStateView(ctx);
         reconcileConfirmedScope(view);
-        // The greeting depends ONLY on the host state: greet solely when the scope state is still fresh
-        // (SCOPING/NEW). A restored session (fresh process, but the host state already advanced past NEW)
-        // responds directly and is never greeted again — the prior greeting comes from the persisted chat.
+        // No greeting turn: a fresh chat stays empty until the user writes, and the first answer replies to
+        // the user's topic directly. The host starts the scoping (SCOPING/NEW → running) on the first message;
+        // a host that has not yet done so gets the one-step signal here. An empty turn on a fresh state (an
+        // older host's bootstrap) costs no model call.
         boolean freshState = "scoping".equalsIgnoreCase(view.getPhaseId())
                 && "new".equalsIgnoreCase(view.getStateId());
-        com.aresstack.askai.research.runtime.team.TeamAgentResult result;
-        if (!teamAgent.hasGreeted() && freshState) {
-            result = teamAgent.greet(view);
-            emitTeamAgentResult(ctx, result, view.getPhaseId());
-            if (result.isOk()) {
-                // Signal the host to advance the scope state one step, so this greeting is never repeated.
-                ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
-                // A greeting bootstrap carries no user text; if this first turn DID carry a real message,
-                // answer it in the same turn so nothing the user typed is dropped.
-                if (!text.trim().isEmpty()) {
-                    emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text),
-                            view.getPhaseId());
-                }
-            }
-        } else {
-            emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text),
-                    view.getPhaseId());
+        if (freshState && text.trim().isEmpty()) {
+            return cancelled.get()
+                    ? AgentTurnOutcome.CANCELLED
+                    : AgentTurnOutcome.END_TURN;
         }
+        if (freshState) {
+            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
+        }
+        emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text), view.getPhaseId());
         return cancelled.get()
                 ? AgentTurnOutcome.CANCELLED
                 : AgentTurnOutcome.END_TURN;
@@ -1690,6 +1682,13 @@ public final class ResearchAgentSession {
                         // review turns use; the instruction never enters the history as user text.
                         return teamAgent.internalTurn(feedbackInstruction, view);
                     }
+
+                    public com.aresstack.askai.research.runtime.team.TeamAgentResult run(
+                            String feedbackInstruction, String requiredActionType) {
+                        // A nudge/repair that asks for ONE action type gets the grammar of only
+                        // that variant — it can neither answer "none" nor narrate the action.
+                        return teamAgent.internalTurn(feedbackInstruction, view, requiredActionType);
+                    }
                 },
                 new com.aresstack.askai.research.runtime.team.ConceptToolRounds.ConceptTool() {
                     public String call(com.aresstack.askai.research.runtime.team.ConceptAction action)
@@ -1717,7 +1716,10 @@ public final class ResearchAgentSession {
                 // restructuring or delete wish closes the concept mutation channel for the
                 // WHOLE turn — capability withdrawal per action was not enough.
                 com.aresstack.askai.research.runtime.team.ConceptTurnPolicy.modeFor(userText),
-                seededMovedReceipt, seededMoveOutcome);
+                seededMovedReceipt, seededMoveOutcome,
+                // A name the user wrote literally is never taken for a prompt placeholder, and a
+                // bare greeting never triggers the first-turn card nudge.
+                userText);
     }
 
     /** Whether THIS session ever offered exploration tags — ends the one-shot offer nudge. */

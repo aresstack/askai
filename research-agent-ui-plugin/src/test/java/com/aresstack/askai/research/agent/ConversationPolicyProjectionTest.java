@@ -134,4 +134,17 @@ public class ConversationPolicyProjectionTest {
         assertTrue(stale.contains("scopeCheck=STALE_OR_NONE"));
         assertTrue(stale.contains("novelty=1/3"));
     }
+
+    @Test
+    public void probeRefusalOutsideTheClosureCheckIsARejectionThatNamesTheStage() {
+        for (ConversationPolicyProjection.Stage stage : ConversationPolicyProjection.Stage.values()) {
+            String refusal = ConversationPolicyProjection.probeRefusal(stage);
+            // The scope_probe tool maps every reply that does not start with PROBED to an
+            // error — the loop then books a REJECTED round and hands the text to the model.
+            assertTrue(refusal.startsWith("PROBE_REFUSED"));
+            assertTrue(refusal.contains("CLOSURE_CHECK"));
+            assertTrue(refusal.contains("the stage is " + stage.name()));
+            assertTrue(refusal.contains("Do not probe now"));
+        }
+    }
 }

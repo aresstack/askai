@@ -27,7 +27,8 @@ import static org.junit.Assert.assertTrue;
  * The five existing roles on the role interface (ADR 0001, lane D). The prompts must stay byte for byte what
  * they were before the migration: the SHA-256 fingerprints below were taken from the role classes on
  * {@code adr0001/c} (commit 07724a3) before any change, so a prompt edit fails here and must be a deliberate,
- * separately reviewed change.
+ * separately reviewed change. The four scoping fingerprints were re-taken deliberately for the scoping
+ * regression fix (domain examples replaced by placeholders; ESP32/FreeRTOS cards leaked into unrelated topics).
  */
 public class ResearchRolesTest {
 
@@ -45,13 +46,13 @@ public class ResearchRolesTest {
     public void conversationPromptsAreByteIdenticalToBeforeTheMigration() throws Exception {
         assertEquals("0989113034c7a54ef97d392df1de9f6555038e691c30d8c1dfe3848d126b3944",
                 sha256(ResearchRoles.CONVERSATION.getSystemPrompt()));
-        assertEquals("923bf0c9c627985c1b6f92f5911152b66c066667a21d0c3c0ce9c93a4a61e460",
+        assertEquals("b863e619aa39f6339739831434a5c07e4caa9c9ee9c99b0e130938d84c76968e",
                 sha256(scopingRole(false, false).getSystemPrompt()));
-        assertEquals("e530d927cb752ce78b7f8b579f91f4d4fdf2a4b3802c89a1b1f27fb07664b803",
+        assertEquals("fa8b014ce18346a7e409ca752f55d046869503cd78a9b55bcfe0c27d71205a61",
                 sha256(scopingRole(false, true).getSystemPrompt()));
-        assertEquals("8ea29310898bf035aa70e9bd2f0f9f5e91452c0c9fdc526abfbf80eefaa363e6",
+        assertEquals("f72854a2a5495cd10695f1441358aa2d41d76f94dac1183c524217159d227539",
                 sha256(scopingRole(true, false).getSystemPrompt()));
-        assertEquals("fca2ee637a7624f0204878dad3065cd384f01130772783b00bac6813a7238ee2",
+        assertEquals("b46f080272b8b7c6243d4ebdcd384fa80e6205b0b19be387c8458921a1794cc5",
                 sha256(scopingRole(true, true).getSystemPrompt()));
     }
 

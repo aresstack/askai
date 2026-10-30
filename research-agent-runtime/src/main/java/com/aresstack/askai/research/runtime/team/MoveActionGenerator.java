@@ -49,8 +49,8 @@ public final class MoveActionGenerator {
                         + "- If the user's words do not name BOTH clearly, reply "
                         + "{\"source\": [\"" + UNCLEAR_MARKER + "\"], \"parent\": []} — "
                         + "NEVER guess.\n"
-                        + "Example: \"Verschiebe Scheduling unter FreeRTOS.\" -> "
-                        + "{\"source\": [\"Scheduling\"], \"parent\": [\"FreeRTOS\"]}"));
+                        + "Example: \"Verschiebe <child card> unter <new parent>.\" -> "
+                        + "{\"source\": [\"<child card>\"], \"parent\": [\"<new parent>\"]}"));
         messages.add(new ChatMessage(ChatMessage.Role.USER,
                 "CURRENT CONCEPT:\n" + (conceptContext == null ? "" : conceptContext)
                         + "\n\nUSER ORDER:\n" + userOrder));

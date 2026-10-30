@@ -190,15 +190,15 @@ public final class TeamAgentPlaybook {
                         ? "- With the action channel active, suggestions are OFFERED as a "
                         + "command: leave the searchSuggestions field empty and use the offer "
                         + "action (see THE SEARCH OFFER COMMAND below).\n"
-                        : "- FULL EXAMPLE — broad first topic \"FreeRTOS auf dem ESP32\": besides "
-                        + "your answer you would offer\n"
+                        : "- SHAPE EXAMPLE — a broad first topic (<topic> stands for the USER'S "
+                        + "topic): besides your answer you would offer\n"
                         + "    \"searchSuggestions\": [\n"
-                        + "      {\"query\": \"FreeRTOS ESP32 Grundlagen Tutorial\", \"purpose\": "
-                        + "\"Einstieg und Grundbegriffe sichten\"},\n"
-                        + "      {\"query\": \"FreeRTOS task scheduling ESP32\", \"purpose\": "
-                        + "\"Kernmechanik verstehen\"},\n"
-                        + "      {\"query\": \"ESP32 Arduino FreeRTOS Praxisprojekte\", "
-                        + "\"purpose\": \"Praxisbeispiele sammeln\"}\n"
+                        + "      {\"query\": \"<topic> basics overview\", \"purpose\": "
+                        + "\"<first direction>\"},\n"
+                        + "      {\"query\": \"<topic> <core aspect>\", \"purpose\": "
+                        + "\"<second direction>\"},\n"
+                        + "      {\"query\": \"<topic> <practical aspect>\", "
+                        + "\"purpose\": \"<third direction>\"}\n"
                         + "    ]\n"
                         + "  Each query opens a DIFFERENT direction of the area; the user clicks "
                         + "one to look around. The application shows them as clickable tags — "
@@ -213,7 +213,28 @@ public final class TeamAgentPlaybook {
                 + "Answer with a SINGLE JSON object and nothing else (the user only ever sees "
                 + "assistantMessage):\n"
                 + "{\n"
-                + "  \"assistantMessage\": string,        // required: warm, concise, plain language\n"
+                // Scoping regression: the action comes FIRST (the grammar emits it first too),
+                // so the visible sentence follows the decision instead of narrating it.
+                + (conceptTools
+                        ? "  \"conceptAction\": {              // FIRST: your ONE action THIS "
+                        + "inference; use type none when you change nothing\n"
+                        + "    \"type\": \"none\"|\"read\"|\"add_cards\"|\"exclude\""
+                        + "|\"resolve\"|\"offer\"|\"rename\",\n"
+                        + "    \"path\": [string],                // read/rename: card names as "
+                        + "SEGMENTS from the concept root\n"
+                        + "    \"parent\": [string], \"names\": [string],  // add_cards: where "
+                        + "(segments) and ALL new card names as ONE list\n"
+                        + "    \"name\": string,                  // rename: path + the new name\n"
+                        + "    \"topic\": string,                 // exclude: the term in the USER'S "
+                        + "words, nothing else\n"
+                        + "    \"conflictId\": string, \"decision\": \"REMOVE\"|\"KEEP_SUPPRESSED\","
+                        + "  // resolve: answer a reported concept conflict\n"
+                        + "    \"suggestions\": [{\"query\": string, \"purpose\": string}]  "
+                        + "// offer: 3-5 orientation searches as clickable tags\n"
+                        + "  },\n"
+                        + "  \"assistantMessage\": string,        // required: ONLY plain sentences for "
+                        + "the user — never action names, colon lists or JSON\n"
+                        : "  \"assistantMessage\": string,        // required: warm, concise, plain language\n")
                 // K4: with the concept tools the CONCEPT is the one scoping artifact — the
                 // legacy brief field is neither requested nor produced anymore; the flagless
                 // old-host prompt keeps it (their hosts still render the brief).
@@ -236,25 +257,7 @@ public final class TeamAgentPlaybook {
                 + "  ],\n"
                 + "  \"orientationSuggestions\": [         // OPTIONAL: short lookups you PROPOSE\n"
                 + "    { \"label\": string, \"query\": string, \"rationale\": string }\n"
-                + "  ]"
-                + (conceptTools
-                        ? ",\n  \"conceptAction\": {              // your ONE action THIS "
-                        + "inference; use type none when you change nothing\n"
-                        + "    \"type\": \"none\"|\"read\"|\"add_cards\"|\"exclude\""
-                        + "|\"resolve\"|\"offer\"|\"rename\",\n"
-                        + "    \"path\": [string],                // read/rename: card names as "
-                        + "SEGMENTS from the concept root\n"
-                        + "    \"parent\": [string], \"names\": [string],  // add_cards: where "
-                        + "(segments) and ALL new card names as ONE list\n"
-                        + "    \"name\": string,                  // rename: path + the new name\n"
-                        + "    \"topic\": string,                 // exclude: the term in the USER'S "
-                        + "words, nothing else\n"
-                        + "    \"conflictId\": string, \"decision\": \"REMOVE\"|\"KEEP_SUPPRESSED\","
-                        + "  // resolve: answer a reported concept conflict\n"
-                        + "    \"suggestions\": [{\"query\": string, \"purpose\": string}]  "
-                        + "// offer: 3-5 orientation searches as clickable tags\n"
-                        + "  }\n"
-                        : "\n")
+                + "  ]\n"
                 + "}\n\n"
                 + (conceptTools ? conceptToolRules() : "")
                 + scopePatchContract(conceptTools)
@@ -308,8 +311,8 @@ public final class TeamAgentPlaybook {
                         + "resolveIssue{issueId}.\n")
                 + "- EVERY operation carries a facetId (the format requires it): a STABLE, SHORT "
                 + "technical id — lowercase letters/digits/hyphens, at most 64 characters — derived "
-                + "from the label once (\"ESP-IDF\" -> \"esp-idf\", \"Worker Safety\" -> "
-                + "\"worker-safety\") and then REUSED. NEVER a sentence, a placeholder text or "
+                + "from the label once (\"Worker Safety\" -> \"worker-safety\", \"Data Privacy\" -> "
+                + "\"data-privacy\") and then REUSED. NEVER a sentence, a placeholder text or "
                 + "leftover JSON — such an operation is rejected whole. Never create a second facet "
                 + "for the same thing."
                 + (conceptTools
@@ -845,26 +848,29 @@ public final class TeamAgentPlaybook {
                 + "- Cards are addressed by NAME SEGMENTS (JSON arrays of card names). A name is "
                 + "ONE label, NEVER a path — '/' inside a name is just a character (TCP/IP), "
                 + "never a separator. No ids, no handles.\n"
+                + "- EXAMPLES SHOW THE SHAPE ONLY. Words in <angle brackets> are placeholders: "
+                + "fill them with the USER'S topic and the user's own words from the conversation "
+                + "and the CURRENT RESEARCH SCOPE — never output a placeholder, and never take a "
+                + "topic, card name or query from these instructions.\n"
                 + "- Examples:\n"
                 + "    inspect everything:   {\"type\":\"read\",\"path\":[]}\n"
-                + "    inspect one branch:   {\"type\":\"read\",\"path\":[\"FreeRTOS\"]}\n"
+                + "    inspect one branch:   {\"type\":\"read\",\"path\":[\"<card>\"]}\n"
                 + "    capture ALL named areas in ONE step:\n"
-                + "        {\"type\":\"add_cards\",\"parent\":[],\"names\":[\"Grundlagen\","
-                + "\"Entwicklungsumgebung\",\"Architektur\",\"Tasks\",\"Synchronisation\","
-                + "\"Debugging\"]}\n"
+                + "        {\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<area 1>\","
+                + "\"<area 2>\",\"<area 3>\",\"<area 4>\"]}\n"
                 + "    one new subtopic:     {\"type\":\"add_cards\",\"parent\":"
-                + "[\"FreeRTOS\",\"Kommunikation\"],\"names\":[\"Task Notifications\"]}\n"
+                + "[\"<card>\",\"<child card>\"],\"names\":[\"<subtopic>\"]}\n"
                 + "    rename a card:        {\"type\":\"rename\",\"path\":"
-                + "[\"FreeRTOS\",\"Setup\"],\"name\":\"ESP32-Entwicklung\"}\n"
+                + "[\"<card>\",\"<child card>\"],\"name\":\"<new name>\"}\n"
                 + "    change nothing:       {\"type\":\"none\"}\n"
                 + "- Map an explicit user command DIRECTLY to its one action:\n"
-                + "    \"Speichere ausschlie\u00dflich die Karte FreeRTOS.\"  ->  "
-                + "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"FreeRTOS\"]}\n"
-                + "    \"F\u00fcge unter FreeRTOS Tasks hinzu.\"           ->  "
-                + "{\"type\":\"add_cards\",\"parent\":[\"FreeRTOS\"],\"names\":"
-                + "[\"Tasks\"]}\n"
-                + "    \"ESP-IDF möchte ich nicht behandeln.\"          ->  "
-                + "{\"type\":\"exclude\",\"topic\":\"ESP-IDF\"} (see THE EXCLUSION COMMAND)\n"
+                + "    \"Speichere ausschlie\u00dflich die Karte <X>.\"  ->  "
+                + "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<X>\"]}\n"
+                + "    \"F\u00fcge unter <X> <Y> hinzu.\"           ->  "
+                + "{\"type\":\"add_cards\",\"parent\":[\"<X>\"],\"names\":"
+                + "[\"<Y>\"]}\n"
+                + "    \"<Z> möchte ich nicht behandeln.\"          ->  "
+                + "{\"type\":\"exclude\",\"topic\":\"<Z>\"} (see THE EXCLUSION COMMAND)\n"
 
                 + "    \"Lösche die Karte/den Zweig X.\"                ->  {\"type\":\"none\"} "
                 + "— deleting concept cards is the USER'S manual editor work, never a scope "
@@ -897,9 +903,9 @@ public final class TeamAgentPlaybook {
                 + "APPLIED in this turn. A rejected step changed NOTHING — say so honestly or fix "
                 + "it.\n"
                 + "THE EXCLUSION COMMAND (one command, one effect, one reply):\n"
-                + "- When the user rules something out (\"ESP-IDF möchte ich doch nicht "
+                + "- When the user rules something out (\"<Z> möchte ich doch nicht "
                 + "behandeln\"), your WHOLE reaction is ONE action: {\"type\": \"exclude\", "
-                + "\"topic\": \"ESP-IDF\"} — the topic in the USER'S words, nothing else. No id, "
+                + "\"topic\": \"<Z>\"} — the topic in the USER'S words, nothing else. No id, "
                 + "no scopePatch, no concept edit. The application derives the id, records the "
                 + "exclusion (immediately effective for all research) and checks the concept "
                 + "itself.\n"
@@ -917,14 +923,15 @@ public final class TeamAgentPlaybook {
                 + "- While the area is broad or unclear — especially on the FIRST turn of a wide "
                 + "topic — offer 3-5 orientation searches as ONE action:\n"
                 + "    {\"type\": \"offer\", \"suggestions\": [\n"
-                + "      {\"query\": \"FreeRTOS ESP32 Grundlagen Tutorial\", \"purpose\": "
-                + "\"Einstieg und Grundbegriffe sichten\"},\n"
-                + "      {\"query\": \"FreeRTOS task scheduling ESP32\", \"purpose\": "
-                + "\"Kernmechanik verstehen\"},\n"
-                + "      {\"query\": \"ESP32 Arduino FreeRTOS Praxisprojekte\", \"purpose\": "
-                + "\"Praxisbeispiele sammeln\"}\n"
+                + "      {\"query\": \"<topic> basics overview\", \"purpose\": "
+                + "\"<first direction>\"},\n"
+                + "      {\"query\": \"<topic> <core aspect>\", \"purpose\": "
+                + "\"<second direction>\"},\n"
+                + "      {\"query\": \"<topic> <practical aspect>\", \"purpose\": "
+                + "\"<third direction>\"}\n"
                 + "    ]}\n"
-                + "  Each query opens a DIFFERENT direction of the area. The application shows "
+                + "  <topic> is the USER'S topic; each query opens a DIFFERENT direction of THAT "
+                + "area. The application shows "
                 + "them as clickable tags — they are HOW the user explores before deciding; "
                 + "nothing runs until the user clicks. Offer once per turn at most, never as a "
                 + "replacement for your answer, and never queries about excluded topics.\n"
@@ -932,10 +939,12 @@ public final class TeamAgentPlaybook {
                 + "FIRST one add_cards capturing EVERY area the user explicitly named (this "
                 + "outranks offers, own additions and hierarchy questions), THEN exactly one "
                 + "offer action, then finish with type \"none\" — the user gets the complete "
-                + "structure AND their exploration tags in the same turn.\n"
+                + "structure AND their exploration tags in the same turn. When the user only "
+                + "names a topic, the first cards are the main areas of THAT topic, named in the "
+                + "user's language.\n"
                 + "- TWO IDENTITY SPACES, never mixed: conceptAction path/parent segments are the "
-                + "EXACT card names from CURRENT_CONCEPT (e.g. [\"ESP32 und FreeRTOS Setup\"]); "
-                + "scope facet ids from CURRENT RESEARCH SCOPE (e.g. \"esp32-setup\") are "
+                + "EXACT card names from CURRENT_CONCEPT (e.g. [\"<card name>\"]); "
+                + "scope facet ids from CURRENT RESEARCH SCOPE (e.g. \"<facet-id>\") are "
                 + "NEVER concept path segments, and a card name is NEVER a facetId.\n"
                 + "- The concept mirrors the CONVERSATION: add what the user asks for, propose "
                 + "what scope and sources suggest.\n"
@@ -943,7 +952,7 @@ public final class TeamAgentPlaybook {
                 + "- Use scope_probe ONLY during the late closure check, when CONVERSATION "
                 + "POLICY says CLOSURE_CHECK. Probe several plausible remaining concepts "
                 + "together in ONE action: {\"type\": \"probe\", \"terms\": "
-                + "[\"Priority Inversion\", \"SMP Scheduling\"]}. Do not use it for "
+                + "[\"<term 1>\", \"<term 2>\"]}. Do not use it for "
                 + "ordinary exploration.\n"
                 + "- The result is an OBSERVATION, never a decision — it changes nothing.\n"
                 + "- After the result: only LIKELY_IN/LIKELY_OUT -> no new question; summarize "
@@ -965,8 +974,8 @@ public final class TeamAgentPlaybook {
                 + "attempt it, do not substitute it with add_cards, do not claim it.\n"
                 + "RENAMING (rename):\n"
                 + "- rename changes ONE card's name at any depth; children and position stay: "
-                + "{\"type\": \"rename\", \"path\": [\"FreeRTOS\", \"Setup\"], \"name\": "
-                + "\"ESP32-Entwicklung mit Arduino\"}. A rename is NEVER a deletion.\n"
+                + "{\"type\": \"rename\", \"path\": [\"<card>\", \"<child card>\"], \"name\": "
+                + "\"<new name>\"}. A rename is NEVER a deletion.\n"
                 + "YOU CANNOT DELETE OR REBUILD — deliberate, not an error to fight:\n"
                 + "- You have NO delete and NO rewrite action. The ONLY way content leaves the "
                 + "concept: the user rules a topic out -> your exclude command -> the "
@@ -1019,6 +1028,79 @@ public final class TeamAgentPlaybook {
     }
 
     /** Feedback for a REJECTED mutation — the diagnostic is the model's repair input. */
+    /**
+     * Feedback when the visible answer SPELLED a concept action ("add_cards: …", "offer: …", a bare "none")
+     * while the action channel carried none: nothing was executed, and the text must not reach the user.
+     */
+    public static String conceptActionWrittenAsText(String leakedAction, boolean german) {
+        return german
+                ? "ACTION WRITTEN AS TEXT — NICHTS wurde ausgeführt, das Konzept ist UNVERÄNDERT.\n"
+                        + "Deine assistantMessage enthält die Aktion \"" + leakedAction + "\" als Text, "
+                        + "dein conceptAction-Feld aber keine ausführbare Aktion. Der Nutzer sieht "
+                        + "assistantMessage — Aktionsnamen, Doppelpunkt-Listen und JSON gehören NIE "
+                        + "dort hinein.\n"
+                        + "Setze die Aktion jetzt in das Feld conceptAction (es steht ZUERST in deiner "
+                        + "Antwort), mit den echten Namen aus dem Thema des Nutzers. Schreibe in "
+                        + "assistantMessage danach nur einen kurzen, freundlichen Satz an den Nutzer."
+                : "ACTION WRITTEN AS TEXT — NOTHING was executed, the concept is UNCHANGED.\n"
+                        + "Your assistantMessage contains the action \"" + leakedAction + "\" as text, "
+                        + "but your conceptAction field carries no executable action. The user reads "
+                        + "assistantMessage — action names, colon lists and JSON NEVER belong there.\n"
+                        + "Put the action into the conceptAction field now (it comes FIRST in your "
+                        + "answer), with the real names from the user's topic. Then write only a short, "
+                        + "friendly sentence to the user in assistantMessage.";
+    }
+
+    /**
+     * The host's honest closing answer when a turn still spells its action as text and no repair budget is
+     * left: the leaked instructions never reach the user. It is built from this turn's RECEIPTS only — the
+     * cards the host reported ADDED and whether search tags were OFFERED — so it claims exactly what happened.
+     */
+    public static String conceptActionLeakAnswer(boolean german, java.util.List<String> addedCards,
+                                                 boolean offered) {
+        StringBuilder sb = new StringBuilder();
+        if (!addedCards.isEmpty()) {
+            sb.append(german ? "Ich habe ins Konzept übernommen: " : "I added to the concept: ")
+                    .append(String.join(", ", addedCards)).append(". ");
+        } else {
+            sb.append(german ? "Am Konzept habe ich in diesem Schritt nichts geändert. "
+                    : "I did not change the concept in this step. ");
+        }
+        if (offered) {
+            sb.append(german ? "Suchvorschläge zum Erkunden stehen als Tags bereit. "
+                    : "Search suggestions to explore are ready as tags. ");
+        }
+        sb.append(addedCards.isEmpty()
+                ? (german ? "Welche Bereiche sollen ins Konzept?" : "Which areas should go into the concept?")
+                : (german ? "Welchen Bereich möchtest du zuerst vertiefen?"
+                        : "Which area would you like to deepen first?"));
+        return sb.toString();
+    }
+
+    /**
+     * The machinery nudge when the session's first substantive turn ends with an EMPTY concept: the
+     * Meerschweinchen live gate offered three searches and built no card although the user named the areas.
+     */
+    public static String conceptCardsMissing(boolean german) {
+        return german
+                ? "CONCEPT CARDS MISSING — das Konzept ist noch LEER.\n"
+                        + "Sende jetzt GENAU EINE add_cards-Aktion (parent []) mit den Bereichen, die der "
+                        + "Nutzer genannt hat, sonst mit den Hauptbereichen SEINES Themas — echte, kurze "
+                        + "Namen in der Sprache des Nutzers. Danach schließe mit type \"none\" ab."
+                : "CONCEPT CARDS MISSING — the concept is still EMPTY.\n"
+                        + "Now send EXACTLY ONE add_cards action (parent []) with the areas the user "
+                        + "named, otherwise the main areas of THEIR topic — real, short names in the "
+                        + "user's language. Afterwards finish with type \"none\".";
+    }
+
+    /** The refusal diagnostic for an action that carries a placeholder copied from the instructions. */
+    public static String placeholderCopied() {
+        return "The action contains a placeholder instead of a real name (a name in <angle brackets> "
+                + "such as <name1>, or \"...\"). NOTHING was saved. Placeholders only show the SHAPE: "
+                + "use real names from the user's topic, the conversation and the CURRENT RESEARCH "
+                + "SCOPE instead.";
+    }
+
     public static String conceptToolRejected(String diagnostic, boolean german) {
         return german
                 ? "CONCEPT TOOL REJECTED — das Konzept ist UNVERÄNDERT.\n" + diagnostic
@@ -1049,7 +1131,7 @@ public final class TeamAgentPlaybook {
                 + "setGeographicScope/setTemporalScope{value}, "
                 + "addUnresolvedIssue{issueId,description}, resolveIssue{issueId}. "
                 + "facetId is a SHORT technical id (lowercase letters/digits/hyphens, e.g. "
-                + "\"esp-idf\") — never a sentence.";
+                + "\"data-privacy\") — never a sentence.";
         return german
                 ? "SCOPE PATCH REJECTED — der Rechercheumfang ist UNVERÄNDERT.\n" + violations
                         + "\n" + fieldReference
@@ -1088,14 +1170,14 @@ public final class TeamAgentPlaybook {
         return german
                 ? "SEARCH TAGS MISSING — der Nutzer hat noch keine gelben Erkundungs-Tags.\n"
                         + "Sende jetzt GENAU EINE offer-Aktion mit 3-5 Queries, die je eine "
-                        + "ANDERE Richtung des Themas öffnen: {\"type\": \"offer\", "
-                        + "\"suggestions\": [{\"query\": \"...\", \"purpose\": \"...\"}]}. "
+                        + "ANDERE Richtung DES NUTZERTHEMAS öffnen (echte Suchbegriffe, keine "
+                        + "Platzhalter) — im Feld conceptAction, type \"offer\". "
                         + "Keine Konzept-Änderung in diesem Schritt; danach schließe mit type "
                         + "\"none\" ab."
                 : "SEARCH TAGS MISSING — the user has no yellow exploration tags yet.\n"
                         + "Now send EXACTLY ONE offer action with 3-5 queries, each opening a "
-                        + "DIFFERENT direction of the area: {\"type\": \"offer\", "
-                        + "\"suggestions\": [{\"query\": \"...\", \"purpose\": \"...\"}]}. "
+                        + "DIFFERENT direction of THE USER'S topic (real search terms, no "
+                        + "placeholders) — in the conceptAction field, type \"offer\". "
                         + "No concept change in this step; afterwards finish with type "
                         + "\"none\".";
     }
