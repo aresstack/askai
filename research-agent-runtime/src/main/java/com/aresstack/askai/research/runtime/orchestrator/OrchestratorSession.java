@@ -42,10 +42,21 @@ public final class OrchestratorSession {
     public OrchestratorSession(TaskBoard board, OrchestratorSettings settings, RoleChats chats, ModelPort port,
                                List<TaskWorker> workers, int minimumSources, int minimumHosts,
                                int maxOutputTokens, Supplier<ResearchOutline> outline) {
+        this(board, settings, chats, port, 0, workers, minimumSources, minimumHosts, maxOutputTokens, outline);
+    }
+
+    /**
+     * @param browserSlots how many browser-bound tasks may run at once: the capacity of the chat's worker user
+     *                     contexts; {@code <= 0} = the browser-slot setting (workers share the chat browser)
+     */
+    public OrchestratorSession(TaskBoard board, OrchestratorSettings settings, RoleChats chats, ModelPort port,
+                               int browserSlots, List<TaskWorker> workers, int minimumSources, int minimumHosts,
+                               int maxOutputTokens, Supplier<ResearchOutline> outline) {
         this.outline = outline;
         final AtomicReference<OrchestratedResearchRun> self = new AtomicReference<OrchestratedResearchRun>();
         TaskExecutor executor = new TaskExecutor(board, workers, chats,
-                ExecutorCapacity.fromPort(port, settings.getBrowserSlots()), System::currentTimeMillis,
+                ExecutorCapacity.fromPort(port, browserSlots > 0 ? browserSlots : settings.getBrowserSlots()),
+                System::currentTimeMillis,
                 new TaskExecutor.Listener() {
                     public void taskStarted(com.aresstack.askai.research.domain.task.ResearchTask task) {
                         log("task started: " + task.getTaskId() + " on " + task.getEndpoint());

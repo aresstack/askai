@@ -84,6 +84,10 @@ plugin's `LazyRestartableBrowserRuntime` adds its own owner thread per research 
 started on the first command, kept warm for the idle keep-alive after a browsing phase (settings: "Idle
 stop (s)", default 300; 0 = stopped right away), replaced on failure.
 
+Parallel research workers do not share this owner thread: they get isolated WebDriver BiDi user contexts in
+separate worker browsers, each with its own owner thread — see
+[research-browser-user-contexts.md](research-browser-user-contexts.md).
+
 ## Capability probing
 
 `PlaywrightCapabilityProbe` reports a SPECIFIC status before the backend is offered:

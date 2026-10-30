@@ -71,6 +71,9 @@ public final class ResearchAgentSession {
     private volatile com.aresstack.askai.research.runtime.orchestrator.TaskBoard taskBoard;
     /** The orchestrated run of this session, built on first use. */
     private com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession orchestrator;
+    private volatile com.aresstack.askai.research.runtime.browser.BrowserUserContextPool browserUserContexts;
+    /** The orchestrated run's acquisition on worker user contexts (null without them); cancel ends its waits. */
+    private volatile com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition workerAcquisition;
     /** The output of the turn running the orchestrated cycle: the worker's search runs report there. */
     private volatile AgentOutput orchestratorTurn;
     /** The orchestrated run's chats (weakly held: a finished package's chat goes with it), cancelled with the turn. */
@@ -178,6 +181,16 @@ public final class ResearchAgentSession {
     /** The project's blackboard for the orchestrated run; set before the first turn. */
     public void setTaskBoard(com.aresstack.askai.research.runtime.orchestrator.TaskBoard board) {
         this.taskBoard = board;
+    }
+
+    /**
+     * The chat's worker browser user contexts; set before the first turn. With a pool that has capacity, every
+     * search run of the orchestrated run's web research worker browses in its OWN user context (own cookies,
+     * storage, sign-in), and the executor's browser capacity is the pool's. Null or without capacity: the
+     * workers share the chat browser one after another, bounded by the orchestrator's browser-slot setting.
+     */
+    public void setBrowserUserContexts(com.aresstack.askai.research.runtime.browser.BrowserUserContextPool pool) {
+        this.browserUserContexts = pool;
     }
 
     private boolean hasBrowser() {
@@ -706,6 +719,11 @@ public final class ResearchAgentSession {
             ((com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) inference)
                     .cancelInFlight();
         }
+        // Packages waiting for a free worker user context stop now, not after the wait setting.
+        com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition workers = workerAcquisition;
+        if (workers != null) {
+            workers.cancelWaits();
+        }
     }
 
     /**
@@ -966,33 +984,21 @@ public final class ResearchAgentSession {
                     : new com.aresstack.askai.research.runtime.orchestrator.InMemoryTaskBoard();
             final com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget =
                     com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(environment.values());
+            // Each search run of a web research worker browses in its own user context of this chat (own
+            // cookies, storage, sign-in); without worker browsers the runs share the chat browser.
+            final com.aresstack.askai.research.runtime.browser.BrowserUserContextPool pool = browserUserContexts;
             com.aresstack.askai.research.runtime.orchestrator.WebAcquisition acquisition =
-                    new com.aresstack.askai.research.runtime.orchestrator.WebAcquisition() {
-                        public Result acquire(String query, ToolInvoker permittedResearch,
-                                              java.util.function.Consumer<com.aresstack.askai.research.runtime
-                                                      .acquire.WebSearchApplicationService.AcceptedSource> accepted,
-                                              long maxDurationMillis,
-                                              java.util.concurrent.atomic.AtomicLong tokens,
-                                              java.util.function.BooleanSupplier exhausted) {
-                            com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
-                                    buildResearchLoop(orchestratorTurn, permittedResearch,
-                                            boundedBy(budget, maxDurationMillis));
-                            com.aresstack.askai.browser.search.inference.StructuredInferencePort metered =
-                                    meteredInference(tokens, exhausted);
-                            if (metered != null) {
-                                loop.setStructuredInferencePort(metered);
-                            }
-                            loop.setAcceptedSourceObserver(accepted);
-                            com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(query);
-                            synchronized (visitedAcrossRuns) {
-                                visitedAcrossRuns.addAll(loop.getProgress().getVisitedCanonicalUrls());
-                            }
-                            return new Result(reason, "pages " + loop.getProgress().getPagesVisited()
-                                    + ", hosts " + loop.getProgress().getDistinctHosts().size());
-                        }
-                    };
+                    com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition.over(pool, browser,
+                            (browserLane, query, permittedResearch, accepted, maxDurationMillis, tokens,
+                             exhausted) -> acquireWith(browserLane, query, permittedResearch, accepted,
+                                    maxDurationMillis, tokens, exhausted, budget));
+            if (acquisition instanceof com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition) {
+                workerAcquisition =
+                        (com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition) acquisition;
+            }
             orchestrator = new com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession(board,
                     orchestratorSettings(), orchestratorChats(), modelPort,
+                    com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition.browserSlots(pool),
                     com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession.workers(
                             acquisition, research, orchestratorSettings(),
                             com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.from(
@@ -1007,6 +1013,32 @@ public final class ResearchAgentSession {
                     });
         }
         return orchestrator;
+    }
+
+    /** One search run of the orchestrated run's web research worker over {@code browserLane}. */
+    private com.aresstack.askai.research.runtime.orchestrator.WebAcquisition.Result acquireWith(
+            ToolInvoker browserLane, String query, ToolInvoker permittedResearch,
+            java.util.function.Consumer<com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService
+                    .AcceptedSource> accepted,
+            long maxDurationMillis, java.util.concurrent.atomic.AtomicLong tokens,
+            java.util.function.BooleanSupplier exhausted,
+            com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget) {
+        com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
+                buildResearchLoop(orchestratorTurn, browserLane, permittedResearch,
+                        boundedBy(budget, maxDurationMillis));
+        com.aresstack.askai.browser.search.inference.StructuredInferencePort metered =
+                meteredInference(tokens, exhausted);
+        if (metered != null) {
+            loop.setStructuredInferencePort(metered);
+        }
+        loop.setAcceptedSourceObserver(accepted);
+        com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(query);
+        synchronized (visitedAcrossRuns) {
+            visitedAcrossRuns.addAll(loop.getProgress().getVisitedCanonicalUrls());
+        }
+        return new com.aresstack.askai.research.runtime.orchestrator.WebAcquisition.Result(reason,
+                "pages " + loop.getProgress().getPagesVisited()
+                        + ", hosts " + loop.getProgress().getDistinctHosts().size());
     }
 
     /**
@@ -1963,7 +1995,8 @@ public final class ResearchAgentSession {
         {
             final com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget =
                     com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(environment.values());
-            com.aresstack.askai.research.runtime.loop.ResearchLoop loop = buildResearchLoop(ctx, research, budget);
+            com.aresstack.askai.research.runtime.loop.ResearchLoop loop = buildResearchLoop(ctx, browser, research,
+                    budget);
             com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(task);
             visitedAcrossRuns.addAll(loop.getProgress().getVisitedCanonicalUrls());
             // The STRUCTURED outcome is the only basis for the user-facing result card.
@@ -1973,12 +2006,13 @@ public final class ResearchAgentSession {
     }
 
     /**
-     * The productive autonomous loop over {@code researchLane}: the single loop's configuration, shared by the
-     * orchestrated run's web research worker so both paths run through the SAME funnel. {@code ctx} receives
+     * The productive autonomous loop over {@code browserLane} and {@code researchLane}: the single loop's
+     * configuration, shared by the orchestrated run's web research worker (on its own worker user context, or on
+     * the chat browser without one) so both paths run through the SAME funnel. {@code ctx} receives
      * the loop's status, progress and attention lines; null routes them to the technical log only.
      */
     private com.aresstack.askai.research.runtime.loop.ResearchLoop buildResearchLoop(final AgentOutput turn,
-            ToolInvoker researchLane,
+            ToolInvoker browserLane, ToolInvoker researchLane,
             final com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget) {
         final AgentOutput ctx = turn != null ? turn : new AgentOutput() {
             public void message(String line) {
@@ -1987,7 +2021,7 @@ public final class ResearchAgentSession {
         };
         {
             com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
-                    new com.aresstack.askai.research.runtime.loop.ResearchLoop(browser, researchLane, budget,
+                    new com.aresstack.askai.research.runtime.loop.ResearchLoop(browserLane, researchLane, budget,
                             new com.aresstack.askai.research.runtime.loop.ResearchLoopClock() {
                                 public long currentTimeMillis() {
                                     return System.currentTimeMillis();
