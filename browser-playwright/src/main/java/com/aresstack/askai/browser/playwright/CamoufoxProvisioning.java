@@ -8,6 +8,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -17,6 +18,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -87,16 +89,31 @@ final class CamoufoxProvisioning {
      * is deleted on {@link ProfileLease#close()}, since two Firefox processes can never share one profile.
      * Without a chat key (capability probe, tests) the browser always gets a temporary profile: there is no
      * app-wide shared profile any more.
+     *
+     * <p>A generation of the same chat that was just terminated (a hung call) releases its lock on a background
+     * thread once its browser has exited; the restarted generation waits up to {@link #RELEASE_WAIT_MILLIS} for
+     * that instead of falling back to a temporary profile without the chat's sign-ins. Temporary profiles left
+     * behind by a crash are swept after a day.</p>
      */
     static ProfileLease leaseProfile(String chatKey) {
-        return leaseProfile(appDirectory().resolve("browser-profiles"), chatKey);
+        return leaseProfile(appDirectory().resolve("browser-profiles"), chatKey, RELEASE_WAIT_MILLIS);
     }
 
+    /** How long a restart waits for this JVM's previous generation of the same chat to release the profile. */
+    static final long RELEASE_WAIT_MILLIS = 15_000L;
+    /** Temporary profiles older than this are left-overs of a crash or a failed delete. */
+    static final long STALE_TEMPORARY_MILLIS = 24L * 60L * 60L * 1000L;
+
     static ProfileLease leaseProfile(Path profiles, String chatKey) {
+        return leaseProfile(profiles, chatKey, 0L);
+    }
+
+    static ProfileLease leaseProfile(Path profiles, String chatKey, long releaseWaitMillis) {
         try {
             if (chatKey == null || chatKey.trim().isEmpty()) {
                 Path scratch = profiles.resolve("temporary");
                 Files.createDirectories(scratch);
+                sweepStaleTemporaries(scratch, CHANNEL + "-");
                 return new ProfileLease(Files.createTempDirectory(scratch, CHANNEL + "-"), null, null, true);
             }
             Path chat = chatProfileDirectory(profiles, chatKey);
@@ -104,21 +121,65 @@ final class CamoufoxProvisioning {
             restrictToOwner(chat);
             FileChannel channel = FileChannel.open(chat.resolve(CHANNEL + ".lock"),
                     StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-            FileLock lock;
-            try {
-                lock = channel.tryLock();
-            } catch (IOException | RuntimeException busy) {
-                lock = null;
-            }
+            FileLock lock = lockReleasedWithin(channel, releaseWaitMillis);
             if (lock != null) {
                 Path persistent = chat.resolve(CHANNEL);
                 Files.createDirectories(persistent);
                 return new ProfileLease(persistent, channel, lock, false);
             }
             channel.close();
+            sweepStaleTemporaries(chat, CHANNEL + "-session-");
             return new ProfileLease(Files.createTempDirectory(chat, CHANNEL + "-session-"), null, null, true);
         } catch (IOException failed) {
             throw new UncheckedIOException("Camoufox profile unavailable under " + profiles, failed);
+        }
+    }
+
+    /**
+     * The profile lock, or null when another browser holds it. A lock held by ANOTHER process (a second AskAI)
+     * fails at once; one held inside this JVM (a terminated generation of the same chat still shutting down)
+     * is retried until {@code waitMillis} has passed.
+     */
+    private static FileLock lockReleasedWithin(FileChannel channel, long waitMillis) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, waitMillis));
+        while (true) {
+            try {
+                return channel.tryLock();
+            } catch (OverlappingFileLockException sameJvm) {
+                if (System.nanoTime() >= deadline) {
+                    return null;
+                }
+                try {
+                    Thread.sleep(100L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            } catch (IOException | RuntimeException busy) {
+                return null;
+            }
+        }
+    }
+
+    /** Best effort: remove temporary profiles a crash left behind (a live one is never a day old). */
+    private static void sweepStaleTemporaries(Path parent, String prefix) {
+        long cutoff = System.currentTimeMillis() - STALE_TEMPORARY_MILLIS;
+        try (Stream<Path> entries = Files.list(parent)) {
+            for (Path entry : (Iterable<Path>) entries::iterator) {
+                String name = entry.getFileName().toString();
+                if (name.startsWith(prefix) && !name.endsWith(".lock") && Files.isDirectory(entry)
+                        && Files.getLastModifiedTime(entry).toMillis() < cutoff) {
+                    deleteRecursively(entry);
+                }
+            }
+        } catch (IOException | RuntimeException ignored) {
+        }
+    }
+
+    static void deleteRecursively(Path directory) {
+        try (Stream<Path> walk = Files.walk(directory)) {
+            walk.sorted(Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+        } catch (IOException | RuntimeException ignored) {
         }
     }
 
@@ -177,10 +238,7 @@ final class CamoufoxProvisioning {
             } catch (IOException ignored) {
             }
             if (temporary) {
-                try (Stream<Path> walk = Files.walk(directory)) {
-                    walk.sorted(Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
-                } catch (IOException | RuntimeException ignored) {
-                }
+                deleteRecursively(directory);
             }
         }
     }

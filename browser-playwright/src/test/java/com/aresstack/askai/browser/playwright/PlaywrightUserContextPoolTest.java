@@ -233,6 +233,21 @@ public class PlaywrightUserContextPoolTest {
     }
 
     @Test
+    public void aCallerMayWaitLessThanTheSettingButNeverLonger() throws Exception {
+        PlaywrightUserContextPool.Chat chat = pool(1, 1, 4).openChat("chat-a", world.factory()); // wait 2 s
+        WorkerUserContext holder = chat.acquire("worker-1", null, 0);
+        long start = System.nanoTime();
+        try {
+            chat.acquire("worker-2", null, 60_000);
+            fail("still no free user context");
+        } catch (BrowserException expected) {
+            long waited = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            assertTrue("capped at the setting: " + waited, waited >= 1_900L && waited < 5_000L);
+        }
+        holder.close();
+    }
+
+    @Test
     public void aCancelledWaitingWorkerLeavesNoTrace() throws Exception {
         final PlaywrightUserContextPool.Chat chat = pool(1, 1, 4).openChat("chat-a", world.factory());
         WorkerUserContext holder = chat.acquire("worker-1", null, 0);

@@ -117,4 +117,43 @@ public class CamoufoxChannelTest {
         assertFalse(Files.exists(first.directory()));
         assertFalse("no app-wide profile is created", Files.exists(profiles.resolve("camoufox")));
     }
+
+    @Test
+    public void aRestartWaitsForTheTerminatedGenerationOfTheSameChatToReleaseItsProfile() throws Exception {
+        Path profiles = temporary.getRoot().toPath();
+        final CamoufoxProvisioning.ProfileLease terminated = CamoufoxProvisioning.leaseProfile(profiles, "chat-a");
+        Thread cutter = new Thread(() -> {
+            try {
+                Thread.sleep(300L); // the terminate thread closes Playwright, then releases the lease
+            } catch (InterruptedException ignored) {
+            }
+            terminated.close();
+        });
+        cutter.start();
+        CamoufoxProvisioning.ProfileLease restarted = CamoufoxProvisioning.leaseProfile(profiles, "chat-a", 5_000L);
+        try {
+            assertFalse("the restart got the chat's own profile, with its sign-ins", restarted.isTemporary());
+            assertEquals(terminated.directory(), restarted.directory());
+        } finally {
+            restarted.close();
+            cutter.join();
+        }
+    }
+
+    @Test
+    public void temporaryProfilesLeftByACrashAreSweptAfterADay() throws Exception {
+        Path profiles = temporary.getRoot().toPath();
+        Path scratch = profiles.resolve("temporary");
+        Path stale = Files.createDirectories(scratch.resolve("camoufox-crashed"));
+        Files.write(stale.resolve("cookies.sqlite"), new byte[]{1});
+        Files.setLastModifiedTime(stale, java.nio.file.attribute.FileTime.fromMillis(
+                System.currentTimeMillis() - CamoufoxProvisioning.STALE_TEMPORARY_MILLIS - 60_000L));
+        Path recent = Files.createDirectories(scratch.resolve("camoufox-running"));
+
+        CamoufoxProvisioning.ProfileLease lease = CamoufoxProvisioning.leaseProfile(profiles, null);
+        lease.close();
+
+        assertFalse("a day-old temporary profile is removed", Files.exists(stale));
+        assertTrue("a live browser's temporary profile is left alone", Files.isDirectory(recent));
+    }
 }
