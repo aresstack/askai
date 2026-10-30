@@ -129,7 +129,7 @@ public final class ModelResourceScheduler implements AutoCloseable {
                 return future;
             }
             EndpointState state = state(endpointId);
-            waiter = new Waiter(++sequence, endpointId, slot, model, future);
+            waiter = new Waiter(++sequence, slot, model, future);
             state.queue.add(waiter);
             admitted = dispatch(endpointId, state);
         }
@@ -373,14 +373,12 @@ public final class ModelResourceScheduler implements AutoCloseable {
 
     private static final class Waiter {
         final long seq;
-        final String endpointId;
         final ModelSlot slot;
         final String model;
         final CompletableFuture<Grant> future;
 
-        Waiter(long seq, String endpointId, ModelSlot slot, String model, CompletableFuture<Grant> future) {
+        Waiter(long seq, ModelSlot slot, String model, CompletableFuture<Grant> future) {
             this.seq = seq;
-            this.endpointId = endpointId;
             this.slot = slot;
             this.model = model;
             this.future = future;

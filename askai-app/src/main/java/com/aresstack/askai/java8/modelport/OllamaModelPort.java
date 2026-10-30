@@ -198,7 +198,10 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             return result;
         }
         final String endpointId = slots.endpointFor(model);
-        int defaultContext = settings().slotContextTokens(slot.getName());
+        ModelPortSettings settings = settings();
+        // Memory planning needs fresh loaded sizes; the probe runs in the background, never here.
+        residency.refreshIfOlderThan(Duration.ofSeconds(settings.getResidencyRefreshSeconds()));
+        int defaultContext = settings.slotContextTokens(slot.getName());
         final int context = request.getContextTokens() > 0 ? request.getContextTokens() : defaultContext;
         final CompletableFuture<ModelResourceScheduler.Grant> grant =
                 scheduler.acquire(slot, endpointId, model, request.getMaxWait());
@@ -587,7 +590,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 final Duration limit = timeout;
                 deadline = timers.schedule(new Runnable() {
                     public void run() {
-                                abort(ModelFailure.Kind.TIMEOUT, "the call exceeded its time limit of "
+                        abort(ModelFailure.Kind.TIMEOUT, "the call exceeded its time limit of "
                                 + limit.toMillis() + " ms");
                     }
                 }, timeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -604,6 +607,10 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         }
 
         private void execute(Reservation reservation) {
+            if (terminal.get()) {
+                finish(); // cancelled or timed out before it reached the wire
+                return;
+            }
             long started = System.nanoTime();
             String baseUrl;
             try {
@@ -694,6 +701,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 return;
             }
             if (terminal.compareAndSet(false, true)) {
+                finish(); // free the reservation BEFORE the callback: the caller may chain the next call
                 listener.onCompleted(new ChatResult(completion.getContent(), completion.getThinking(), toolCalls,
                         finishReason(completion.getDoneReason(), !toolCalls.isEmpty()),
                         new TokenUsage((int) Math.min(Integer.MAX_VALUE, completion.getPromptEvalCount()),
@@ -705,6 +713,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
 
         void fail(ModelFailure.Kind kind, String detail) {
             if (terminal.compareAndSet(false, true)) {
+                finish(); // free the reservation BEFORE the callback: the caller may chain the next call
                 listener.onFailed(new ModelFailure(kind, detail));
             }
             finish();
