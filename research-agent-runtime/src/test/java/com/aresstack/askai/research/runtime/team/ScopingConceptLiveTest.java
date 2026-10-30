@@ -49,6 +49,8 @@ public class ScopingConceptLiveTest {
     private static final String BASE_URL = "http://127.0.0.1:11434";
     private static final String MODEL = System.getProperty("askai.live.main.model", "gemma4:e2b");
     private static final String[] FOREIGN = {"esp32", "esp-idf", "freertos", "arduino", "praxisprojekt"};
+    /** Repeated runs per case ({@code -Daskai.live.repeat=N}): a passing case must pass every time. */
+    private static final int REPEAT = Integer.getInteger("askai.live.repeat", 1);
 
     private static OllamaModelPort port;
 
@@ -76,7 +78,12 @@ public class ScopingConceptLiveTest {
 
     @Test
     public void hasenhaltungBuildsFittingCardsWithoutForeignOnesOrPlaceholders() {
-        Chat chat = new Chat("hasen");
+        for (int run = 1; run <= REPEAT; run++) {
+            hasenhaltung(new Chat("hasen#" + run));
+        }
+    }
+
+    private static void hasenhaltung(Chat chat) {
         chat.say("hasenhaltung");
         chat.report();
         assertFalse("the first turn must build cards through conceptAction: " + chat.host.calls,
@@ -88,13 +95,20 @@ public class ScopingConceptLiveTest {
             }
         }
         chat.assertCardsFit(RABBIT_WORDS);
+        assertTrue("the first turn offers search tags through conceptAction: " + chat.host.calls,
+                chat.host.offers > 0);
         chat.assertNoPlaceholderCards();
         chat.assertCleanConversation();
     }
 
     @Test
     public void meerschweinchenCardsAreStoredAndAnExclusionStillRuns() {
-        Chat chat = new Chat("meerschweinchen");
+        for (int run = 1; run <= REPEAT; run++) {
+            meerschweinchen(new Chat("meerschweinchen#" + run));
+        }
+    }
+
+    private static void meerschweinchen(Chat chat) {
         chat.say("Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
         assertFalse("cards must be executed through conceptAction, not only described: " + chat.host.calls,
                 chat.host.cards.isEmpty());
@@ -114,9 +128,15 @@ public class ScopingConceptLiveTest {
 
     @Test
     public void aSecondChatSeesNothingOfTheFirstChatsTopic() {
-        Chat first = new Chat("first");
+        for (int run = 1; run <= REPEAT; run++) {
+            secondChat(run);
+        }
+    }
+
+    private static void secondChat(int run) {
+        Chat first = new Chat("first#" + run);
         first.say("hasenhaltung");
-        Chat second = new Chat("second");
+        Chat second = new Chat("second#" + run);
         second.say("Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
         second.report();
         for (List<ChatMessage> request : second.recording.requests) {
@@ -147,6 +167,7 @@ public class ScopingConceptLiveTest {
         final TeamAgentStateView view = new TeamAgentStateView("scoping", "running",
                 Collections.<String>emptyList());
         boolean offered;
+        int printed;
 
         Chat(String name) {
             this.name = name;
@@ -154,13 +175,27 @@ public class ScopingConceptLiveTest {
 
         void say(String userText) {
             TeamAgentResult result = ConceptToolRounds.run(agent.respond(userText, view),
-                    feedback -> agent.internalTurn(feedback, view), host,
+                    new ConceptToolRounds.FollowUpTurn() {
+                        public TeamAgentResult run(String feedback) {
+                            return agent.internalTurn(feedback, view);
+                        }
+
+                        public TeamAgentResult run(String feedback, String requiredActionType) {
+                            return agent.internalTurn(feedback, view, requiredActionType);
+                        }
+                    }, host,
                     ConceptToolRounds.DEFAULT_MAX_TOOL_ROUNDS, ConceptToolRounds.DEFAULT_MAX_REPAIR_ATTEMPTS,
                     true, null, line -> trace.add(line), !offered,
                     ConceptTurnPolicy.modeFor(userText), false, null, userText);
+            for (String line : trace.subList(printed, trace.size())) {
+                System.err.println("[scoping-live " + name + "] concept " + line);
+            }
+            printed = trace.size();
             assertTrue("turn failed: " + result.getStatus() + " " + result.getDetail(), result.isOk());
             offered |= host.offers > 0;
             visible.add(result.getOutput().getAssistantMessage());
+            System.err.println("[scoping-live " + name + "] visible: "
+                    + result.getOutput().getAssistantMessage().replace('\n', ' '));
         }
 
         /** At least one card names the topic's own areas (a loose word list — no exact model output). */
@@ -203,14 +238,8 @@ public class ScopingConceptLiveTest {
         }
 
         void report() {
-            System.err.println("[scoping-live " + name + "] model=" + MODEL);
-            for (String line : trace) {
-                System.err.println("[scoping-live " + name + "] concept " + line);
-            }
-            System.err.println("[scoping-live " + name + "] cards=" + host.cards + " offers=" + host.offers);
-            for (String message : visible) {
-                System.err.println("[scoping-live " + name + "] visible: " + message.replace('\n', ' '));
-            }
+            System.err.println("[scoping-live " + name + "] model=" + MODEL + " cards=" + host.cards
+                    + " offers=" + host.offers + " calls=" + host.calls);
         }
     }
 

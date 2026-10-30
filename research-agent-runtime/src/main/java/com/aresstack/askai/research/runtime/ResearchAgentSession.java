@@ -845,18 +845,19 @@ public final class ResearchAgentSession {
         boolean freshState = "scoping".equalsIgnoreCase(view.getPhaseId())
                 && "new".equalsIgnoreCase(view.getStateId());
         com.aresstack.askai.research.runtime.team.TeamAgentResult result;
-        if (!teamAgent.hasGreeted() && freshState) {
+        if (!teamAgent.hasGreeted() && freshState && !text.trim().isEmpty()) {
+            // The user opened the chat WITH their topic: a model greeting first would answer a
+            // question nobody asked (second live acceptance: "Hallo! Worüber möchtest du …" above
+            // the real answer). The state still advances one step, exactly as after a greeting.
+            teamAgent.markGreeted();
+            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
+            emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text), view.getPhaseId());
+        } else if (!teamAgent.hasGreeted() && freshState) {
             result = teamAgent.greet(view);
             emitTeamAgentResult(ctx, result, view.getPhaseId());
             if (result.isOk()) {
                 // Signal the host to advance the scope state one step, so this greeting is never repeated.
                 ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
-                // A greeting bootstrap carries no user text; if this first turn DID carry a real message,
-                // answer it in the same turn so nothing the user typed is dropped.
-                if (!text.trim().isEmpty()) {
-                    emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text),
-                            view.getPhaseId());
-                }
             }
         } else {
             emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text),
@@ -1689,6 +1690,13 @@ public final class ResearchAgentSession {
                         // Machinery instruction, real conversation context — same seam the
                         // review turns use; the instruction never enters the history as user text.
                         return teamAgent.internalTurn(feedbackInstruction, view);
+                    }
+
+                    public com.aresstack.askai.research.runtime.team.TeamAgentResult run(
+                            String feedbackInstruction, String requiredActionType) {
+                        // A nudge/repair that asks for ONE action type gets the grammar of only
+                        // that variant — it can neither answer "none" nor narrate the action.
+                        return teamAgent.internalTurn(feedbackInstruction, view, requiredActionType);
                     }
                 },
                 new com.aresstack.askai.research.runtime.team.ConceptToolRounds.ConceptTool() {

@@ -25,8 +25,15 @@ public class ConceptToolRoundsTest {
     private static final class ScriptedTurns implements ConceptToolRounds.FollowUpTurn {
         final List<TeamAgentResult> script = new ArrayList<TeamAgentResult>();
         final List<String> feedbackSeen = new ArrayList<String>();
+        /** The action type each follow-up's grammar was restricted to (null = free). */
+        final List<String> requiredTypes = new ArrayList<String>();
 
         public TeamAgentResult run(String feedbackInstruction) {
+            return run(feedbackInstruction, null);
+        }
+
+        public TeamAgentResult run(String feedbackInstruction, String requiredActionType) {
+            requiredTypes.add(requiredActionType);
             feedbackSeen.add(feedbackInstruction);
             if (script.isEmpty()) {
                 throw new AssertionError("more follow-up turns requested than scripted");
@@ -1229,5 +1236,66 @@ public class ConceptToolRoundsTest {
         String visible = ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage();
         assertTrue(visible, visible.startsWith("Ich habe ins Konzept übernommen: Haltung, Ernährung."));
         assertTrue(visible, !visible.contains("nicht ausführen"));
+    }
+
+    /**
+     * Second live acceptance: free nudges kept answering "none". The card nudge restricts the grammar to
+     * add_cards, the offer nudge to offer, the closing grounding turn to none.
+     */
+    @Test
+    public void nudgesRestrictTheGrammarToTheActionTheyAskFor() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]",
+                "APPLIED revision=1\nADDED: Haltung\nADDED: Ernährung");
+        tool.byDescription.put("offer suggestions=1", "OFFERED 1");
+        turns.script.add(turn("Ich lege die Bereiche an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\",\"Ernährung\"]}"));
+        turns.script.add(turn("Haltung und Ernährung stehen im Konzept.", "{\"type\":\"none\"}"));
+        turns.script.add(turn("Hier sind Suchvorschläge.", "{\"type\":\"offer\",\"suggestions\":"
+                + "[{\"query\":\"Meerschweinchen Heu Vitamin C\"}]}"));
+        turns.script.add(turn("Haltung und Ernährung stehen im Konzept, Suchvorschläge sind bereit.",
+                "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("Gern!", "{\"type\":\"none\"}"), turns, tool, 4, 2, true, null, traceSink,
+                true, ConceptTurnPolicy.Mode.FULL, false, null,
+                "Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
+
+        assertEquals(java.util.Arrays.asList("add_cards", null, "offer", null), turns.requiredTypes);
+        assertTrue(tool.calls.toString(), tool.calls.contains("offer suggestions=1"));
+    }
+
+    /** A malformed or placeholder add_cards/offer is repaired with the grammar of exactly that action. */
+    @Test
+    public void aRepairOfAMalformedOfferAsksForAnOfferAgain() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("offer suggestions=1", "OFFERED 1");
+        turns.script.add(turn("Hier sind Suchvorschläge.", "{\"type\":\"offer\",\"suggestions\":"
+                + "[{\"query\":\"Meerschweinchen Gehege\"}]}"));
+        turns.script.add(turn("Suchvorschläge sind bereit.", "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("x", "{\"type\":\"offer\",\"suggestions\":[]}"), turns, tool, 4, 2,
+                true, null, traceSink);
+
+        assertEquals("offer", turns.requiredTypes.get(0));
+        assertTrue(trace.contains("follow-up grammar admits only offer"));
+        assertTrue(tool.calls.contains("offer suggestions=1"));
+    }
+
+    @Test
+    public void aLeakedAddCardsIsRepairedWithTheAddCardsGrammar() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\"]", "APPLIED revision=1\nADDED: Haltung");
+        turns.script.add(turn("Ich lege Haltung an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\"]}"));
+        turns.script.add(turn("Haltung steht im Konzept.", "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("add_cards:\n- Haltung", "{\"type\":\"none\"}"), turns, tool, 4, 2, true,
+                null, traceSink);
+
+        assertEquals("add_cards", turns.requiredTypes.get(0));
+        assertTrue(tool.calls.contains("add_cards parent=[] names=[\"Haltung\"]"));
     }
 }

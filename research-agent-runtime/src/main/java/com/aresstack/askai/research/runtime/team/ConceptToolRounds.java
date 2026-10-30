@@ -28,6 +28,15 @@ public final class ConceptToolRounds {
     /** One follow-up inference within the same user turn (machinery instruction, not user text). */
     public interface FollowUpTurn {
         TeamAgentResult run(String feedbackInstruction);
+
+        /**
+         * A machinery turn that asks for exactly ONE action type ("add_cards", "offer", "none"): the
+         * generation-time grammar then admits only that variant (second live acceptance: free nudges and
+         * repairs kept answering "none" or narrating the action). Hosts without a grammar ignore the type.
+         */
+        default TeamAgentResult run(String feedbackInstruction, String requiredActionType) {
+            return run(feedbackInstruction);
+        }
     }
 
     /** The synchronous host tool call (MCP lane). Returns the tool's text; failures throw. */
@@ -242,7 +251,7 @@ public final class ConceptToolRounds {
                         result = turn.run(withProbeMeaning(TeamAgentPlaybook.conceptReceipts(
                                 conceptRevision, applied, noChange, rejected, currentConcept,
                                 germanFeedback) + TeamAgentPlaybook.conceptActionWrittenAsText(leak,
-                                germanFeedback), probeMeaningReminder));
+                                germanFeedback), probeMeaningReminder), creatingTypeOf(leak));
                         continue;
                     }
                     trace.line("visible answer spells the action \"" + leak + "\" while conceptAction is "
@@ -282,7 +291,7 @@ public final class ConceptToolRounds {
                     if (intermediateSink != null) {
                         intermediateSink.intermediate(output);
                     }
-                    result = turn.run(TeamAgentPlaybook.conceptCardsMissing(germanFeedback));
+                    result = turn.run(TeamAgentPlaybook.conceptCardsMissing(germanFeedback), "add_cards");
                     continue;
                 }
                 // Gate 9b: the session's FIRST substantive card-building turn must not end
@@ -295,7 +304,7 @@ public final class ConceptToolRounds {
                     if (intermediateSink != null) {
                         intermediateSink.intermediate(output);
                     }
-                    result = turn.run(TeamAgentPlaybook.offerSearchesMissing(germanFeedback));
+                    result = turn.run(TeamAgentPlaybook.offerSearchesMissing(germanFeedback), "offer");
                     continue;
                 }
                 if (offerNudgeSpent && !offeredThisTurn && !suggestionGroundingSpent
@@ -311,7 +320,7 @@ public final class ConceptToolRounds {
                         intermediateSink.intermediate(output);
                     }
                     result = turn.run(
-                            TeamAgentPlaybook.searchSuggestionsGrounding(germanFeedback));
+                            TeamAgentPlaybook.searchSuggestionsGrounding(germanFeedback), "none");
                     continue;
                 }
                 // The model finished without a further action — the normal end.
@@ -358,9 +367,13 @@ public final class ConceptToolRounds {
             }
             rounds++;
             String feedback;
+            // The one action type the follow-up must answer with (null = free): a repair of a
+            // malformed or placeholder add_cards/offer asks for exactly that action again.
+            String requiredType = null;
             if (actionError != null) {
                 // A malformed action never reaches the host; the reason goes straight back.
                 repairs++;
+                requiredType = creatingTypeOf(typeNamedIn(actionError));
                 rejected.add("(invalid) " + firstLine(actionError));
                 trace.line("round " + rounds + ": invalid conceptAction (" + actionError + ")");
                 feedback = TeamAgentPlaybook.conceptToolRejected(actionError, germanFeedback);
@@ -394,6 +407,7 @@ public final class ConceptToolRounds {
                 // <placeholders>; a placeholder copied into an action is never the user's topic
                 // and never reaches the host.
                 repairs++;
+                requiredType = creatingTypeOf(action.getType().name().toLowerCase(java.util.Locale.ROOT));
                 rejected.add(action.describe() + " — placeholder from the instructions");
                 trace.line("round " + rounds + ": " + action.describe());
                 trace.line("round " + rounds + " -> REFUSED (placeholder copied from the "
@@ -582,6 +596,7 @@ public final class ConceptToolRounds {
                     // normal-end nudge never ran and the first-turn offer stayed red — the
                     // wrap-up turn asks for the offer too (executed above despite the budget).
                     offerNudgeSpent = true;
+                    requiredType = "offer";
                     trace.line("search tags missing — offer nudge in wrap-up");
                     feedback = feedback + "\n\n"
                             + TeamAgentPlaybook.offerSearchesMissing(germanFeedback);
@@ -598,11 +613,33 @@ public final class ConceptToolRounds {
                     intermediateSink.intermediate(output);
                 }
             }
+            if (requiredType != null) {
+                trace.line("follow-up grammar admits only " + requiredType);
+            }
             result = turn.run(withProbeMeaning(TeamAgentPlaybook.conceptReceipts(
                     conceptRevision, applied, noChange, rejected, currentConcept,
-                    germanFeedback) + feedback, probeMeaningReminder));
+                    germanFeedback) + feedback, probeMeaningReminder), requiredType);
         }
         return result;
+    }
+
+    /** The creating action ("add_cards", "offer") a leak or rejection names; any other type stays free. */
+    static String creatingTypeOf(String actionName) {
+        if (actionName == null) {
+            return null;
+        }
+        String lower = actionName.toLowerCase(java.util.Locale.ROOT);
+        if (lower.equals("add_cards")) {
+            return "add_cards";
+        }
+        return lower.equals("offer") || lower.equals("searchsuggestions") ? "offer" : null;
+    }
+
+    /** The action type a parser diagnostic names ({@code conceptAction type "offer" requires …}). */
+    private static String typeNamedIn(String actionError) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("type \"([a-z_]+)\"").matcher(actionError);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     /**

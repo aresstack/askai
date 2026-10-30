@@ -143,18 +143,19 @@ public class ScopingConceptPromptTest {
         // Gate ruling: the dedicated generator owns the model side of moves EXCLUSIVELY —
         // the universal enum advertises no move (its starving invalid rounds once competed
         // with the pre-executed dedicated path and produced a false close).
-        assertTrue(schema.contains(
-                "\"enum\":[\"none\",\"read\",\"add_cards\",\"exclude\",\"resolve\","
-                        + "\"offer\",\"rename\",\"probe\"]"));
+        for (String type : new String[] {"none", "read", "add_cards", "exclude", "resolve", "offer", "rename",
+                "probe"}) {
+            assertTrue(type, schema.contains("\"enum\":[\"" + type + "\"]"));
+        }
         // scope_probe (AP3): ONE field, a bounded list of terms — no ids, no thresholds.
-        assertTrue(schema.contains("\"terms\":{\"type\":\"array\",\"maxItems\":12"));
+        assertTrue(schema.contains("\"terms\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":12"));
         assertFalse(schema.contains("\"move\""));
         assertFalse(schema.contains("\"source\""));
         assertTrue("the names list is grammar-bounded and typed",
-                schema.contains("\"names\":{\"type\":\"array\",\"maxItems\":16"));
+                schema.contains("\"names\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":16"));
         assertFalse(schema.contains("\"rewrite\""));
         assertFalse(schema.contains("\"leaves\""));
-        assertTrue(schema.contains("\"topic\":{\"type\":\"string\"}"));
+        assertTrue(schema.contains("\"topic\":{\"type\":\"string\",\"minLength\":1}"));
         assertTrue(schema.contains("\"enum\":[\"REMOVE\",\"KEEP_SUPPRESSED\"]"));
         assertTrue("the action decision is always explicit",
                 schema.contains("\"required\":[\"conceptAction\",\"assistantMessage\"]"));
@@ -204,11 +205,12 @@ public class ScopingConceptPromptTest {
         java.util.Map<?, ?> conceptAction = (java.util.Map<?, ?>)
                 ((java.util.Map<?, ?>) ((java.util.Map<?, ?>) parsed).get("properties"))
                         .get("conceptAction");
-        java.util.Map<?, ?> properties =
-                (java.util.Map<?, ?>) conceptAction.get("properties");
-        assertNull("no source field left in the universal grammar", properties.get("source"));
-        assertFalse("move is NOT an emittable type here", String.valueOf(
-                ((java.util.Map<?, ?>) properties.get("type")).get("enum")).contains("move"));
+        for (Object variant : (java.util.List<?>) conceptAction.get("anyOf")) {
+            java.util.Map<?, ?> properties = (java.util.Map<?, ?>) ((java.util.Map<?, ?>) variant).get("properties");
+            assertNull("no source field left in the universal grammar", properties.get("source"));
+            assertFalse("move is NOT an emittable type here", String.valueOf(
+                    ((java.util.Map<?, ?>) properties.get("type")).get("enum")).contains("move"));
+        }
     }
 
     @Test
@@ -263,5 +265,56 @@ public class ScopingConceptPromptTest {
         assertTrue(with.indexOf("\"conceptAction\": {") < with.indexOf("\"assistantMessage\": string"));
         assertFalse("no placeholder-valued example in the nudges", TeamAgentPlaybook.offerSearchesMissing(true)
                 .contains("\"...\""));
+    }
+
+    /**
+     * Second live acceptance: the flat action object made {"type":"add_cards"} and
+     * {"type":"offer","suggestions":[]} grammatical (checked with llama.cpp's json-schema-to-grammar, which
+     * Ollama uses). Each action type is now its own variant with its required, non-empty fields.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    public void everyActionVariantRequiresTheFieldsItsCommandNeeds() {
+        java.util.Map<String, Object> schema = (java.util.Map<String, Object>)
+                com.aresstack.askai.agent.model.reranker.MiniJson.parse(
+                        new ScopingPhaseOutputContract(true).outputSchemaJson());
+        java.util.Map<String, Object> action = (java.util.Map<String, Object>)
+                ((java.util.Map<String, Object>) schema.get("properties")).get("conceptAction");
+        java.util.List<Object> variants = (java.util.List<Object>) action.get("anyOf");
+        java.util.Map<String, java.util.List<Object>> required = new java.util.LinkedHashMap<String, java.util.List<Object>>();
+        java.util.Map<String, java.util.Map<String, Object>> properties =
+                new java.util.LinkedHashMap<String, java.util.Map<String, Object>>();
+        for (Object v : variants) {
+            java.util.Map<String, Object> variant = (java.util.Map<String, Object>) v;
+            java.util.Map<String, Object> props = (java.util.Map<String, Object>) variant.get("properties");
+            String type = (String) ((java.util.List<Object>) ((java.util.Map<String, Object>) props.get("type"))
+                    .get("enum")).get(0);
+            required.put(type, (java.util.List<Object>) variant.get("required"));
+            properties.put(type, props);
+        }
+        assertEquals(java.util.Arrays.asList("none", "read", "add_cards", "exclude", "resolve", "offer", "rename",
+                "probe"), new java.util.ArrayList<String>(required.keySet()));
+        assertEquals(java.util.Arrays.asList("type", "parent", "names"), required.get("add_cards"));
+        assertEquals(java.util.Arrays.asList("type", "suggestions"), required.get("offer"));
+        assertEquals(java.util.Arrays.asList("type", "topic"), required.get("exclude"));
+        assertEquals(java.util.Arrays.asList("type", "path", "name"), required.get("rename"));
+        assertEquals(java.util.Arrays.asList("type", "terms"), required.get("probe"));
+        assertEquals(1.0, ((Number) ((java.util.Map<String, Object>) properties.get("add_cards").get("names"))
+                .get("minItems")).doubleValue(), 0.0);
+        assertEquals(1.0, ((Number) ((java.util.Map<String, Object>) properties.get("offer").get("suggestions"))
+                .get("minItems")).doubleValue(), 0.0);
+        assertFalse("no move in the model grammar", required.containsKey("move"));
+    }
+
+    /** A nudge asking for ONE action gets the grammar of only that variant: no "none", no other action. */
+    @Test
+    public void aRequiredActionTypeLeavesOnlyThatVariant() {
+        String offerOnly = new ScopingPhaseOutputContract(true).outputSchemaJson("offer");
+        assertTrue(offerOnly.contains("\"enum\":[\"offer\"]"));
+        assertFalse(offerOnly.contains("\"enum\":[\"none\"]"));
+        assertFalse(offerOnly.contains("\"anyOf\""));
+        assertTrue(new ScopingPhaseOutputContract(true).outputSchemaJson("add_cards")
+                .contains("\"required\":[\"type\",\"parent\",\"names\"]"));
+        assertEquals(null, new ScopingPhaseOutputContract(false).outputSchemaJson("offer"));
     }
 }

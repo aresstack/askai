@@ -34,14 +34,15 @@ public final class ScopingPhaseOutputContract implements PhaseOutputContract {
     /**
      * The scoping answer's shape as a grammar. Deliberate choices: {@code assistantMessage} and
      * {@code conceptAction} are REQUIRED (the action decision is always explicit — type "none"
-     * says "I change nothing"); the concept action types are an enum; list sizes carry maxItems
+     * says "I change nothing"); the concept action is a union of one variant per type, each with
+     * its own required fields (see {@link #conceptActionSchema}); list sizes carry maxItems
      * (the Weidezaun lesson: a model that loses count is stopped by the grammar, not by prose);
      * scope operations pin {@code kind} to the known enum AND require a {@code facetId} in the
      * TECHNICAL-ID shape (live-gate 2: missing ids starved the Weidezaun; live-gate 3: minLength
      * alone let a 100-char prompt placeholder become a canonical facet — the pattern blocks
      * commas, colons, braces and sentences at generation time, and the runtime re-checks it for
-     * engines that ignore {@code pattern}). The grammar is FLAT on purpose (the K2c lesson: no
-     * oneOf for small models), so {@code facetId} is demanded on EVERY operation — on non-facet
+     * engines that ignore {@code pattern}). The scope operations stay FLAT (the K2c choice), so
+     * {@code facetId} is demanded on EVERY operation — on non-facet
      * kinds the codec simply ignores the extra field, which is far cheaper than a branched
      * grammar. Advisory suggestions require NON-EMPTY label+query — the first live gate saw
      * {@code "label":""} slip past a presence-only schema. Per-kind REQUIRED fields (addExclusion
@@ -50,6 +51,16 @@ public final class ScopingPhaseOutputContract implements PhaseOutputContract {
      */
     @Override
     public String outputSchemaJson() {
+        return outputSchemaJson(null);
+    }
+
+    /**
+     * @param requiredActionType null for an ordinary turn (every action type, "none" included); otherwise the
+     *  ONE action type a machinery nudge or repair asks for ("add_cards", "offer"): the grammar then admits
+     *  only that variant, so the answer cannot fall back to "none" or narrate the action as text.
+     */
+    @Override
+    public String outputSchemaJson(String requiredActionType) {
         if (!conceptTools) {
             return null;
         }
@@ -66,34 +77,7 @@ public final class ScopingPhaseOutputContract implements PhaseOutputContract {
                 // a user-named card to the four-round budget of one-by-one adds) — the model
                 // captures ALL named areas as ONE typed list; the parser stays tolerant of
                 // legacy "add" transcripts, the loop refuses their execution.
-                + "\"conceptAction\":{\"type\":\"object\",\"properties\":{"
-                // The dedicated move generator owns the model side of moves EXCLUSIVELY
-                // (gate ruling): the universal enum advertises no move, so no starving
-                // invalid rounds compete with the pre-executed dedicated path.
-                + "\"type\":{\"type\":\"string\",\"enum\":[\"none\",\"read\",\"add_cards\","
-                + "\"exclude\",\"resolve\",\"offer\",\"rename\",\"probe\"]},"
-                + "\"path\":{\"type\":\"array\",\"maxItems\":6,\"items\":"
-                + "{\"type\":\"string\"}},"
-                + "\"parent\":{\"type\":\"array\",\"maxItems\":6,\"items\":"
-                + "{\"type\":\"string\"}},"
-                + "\"name\":{\"type\":\"string\"},"
-                + "\"names\":{\"type\":\"array\",\"maxItems\":16,\"items\":"
-                + "{\"type\":\"string\",\"minLength\":1}},"
-                // scope_probe (AP3): ONE list of terms — no ids, no thresholds, no cosines;
-                // the host owns the complexity, the grammar bounds the list.
-                + "\"terms\":{\"type\":\"array\",\"maxItems\":12,\"items\":"
-                + "{\"type\":\"string\",\"minLength\":1}},"
-
-                + "\"topic\":{\"type\":\"string\"},"
-                + "\"conflictId\":{\"type\":\"string\"},"
-                + "\"decision\":{\"type\":\"string\",\"enum\":[\"REMOVE\","
-                + "\"KEEP_SUPPRESSED\"]},"
-                + "\"suggestions\":{\"type\":\"array\",\"maxItems\":5,\"items\":"
-                + "{\"type\":\"object\",\"properties\":{"
-                + "\"query\":{\"type\":\"string\",\"minLength\":1},"
-                + "\"purpose\":{\"type\":\"string\"}},"
-                + "\"required\":[\"query\"]}}},"
-                + "\"required\":[\"type\"]},"
+                + "\"conceptAction\":" + conceptActionSchema(requiredActionType) + ","
                 + "\"assistantMessage\":{\"type\":\"string\"},"
                 // K4: the concept is the ONE scoping artifact — the legacy brief field left the
                 // grammar entirely (this schema only exists WITH the concept tools).
@@ -134,5 +118,74 @@ public final class ScopingPhaseOutputContract implements PhaseOutputContract {
                 + "\"rationale\":{\"type\":\"string\"}},"
                 + "\"required\":[\"label\",\"query\"]}}"
                 + "},\"required\":[\"conceptAction\",\"assistantMessage\"]}";
+    }
+    /** The action types a turn may emit, in grammar order; moves stay with the dedicated generator. */
+    static final String[] ACTION_TYPES = {"none", "read", "add_cards", "exclude", "resolve", "offer", "rename",
+            "probe"};
+
+    /**
+     * The concept action as a DISCRIMINATED UNION: one variant per type, each REQUIRING exactly the fields its
+     * command needs. The second live acceptance of the scoping regression proved the former flat object's hole
+     * at grammar level (llama.cpp's json-schema-to-grammar, which Ollama uses): with every field but
+     * {@code type} optional, {@code {"type":"add_cards"}} and {@code {"type":"offer","suggestions":[]}} were
+     * grammatical, and gemma4:e2b emitted exactly those — an add without names (Hasenhaltung: the concept
+     * stayed empty) and an offer without a query (Meerschweinchen: no search tags). Now a variant cannot be
+     * closed before its required fields, lists that a command needs are non-empty and names are non-blank.
+     */
+    static String conceptActionSchema(String requiredActionType) {
+        java.util.List<String> variants = new java.util.ArrayList<String>();
+        for (String type : ACTION_TYPES) {
+            if (requiredActionType == null || requiredActionType.equals(type)) {
+                variants.add(variant(type));
+            }
+        }
+        if (variants.isEmpty()) {
+            throw new IllegalArgumentException("unknown concept action type: " + requiredActionType);
+        }
+        return variants.size() == 1 ? variants.get(0)
+                : "{\"anyOf\":[" + String.join(",", variants) + "]}";
+    }
+
+    private static final String NAME = "{\"type\":\"string\",\"minLength\":1}";
+    private static final String SEGMENTS = "{\"type\":\"array\",\"maxItems\":6,\"items\":" + NAME + "}";
+
+    private static String variant(String type) {
+        String typeField = "\"type\":{\"type\":\"string\",\"enum\":[\"" + type + "\"]}";
+        switch (type) {
+            case "none":
+                return object(typeField, "\"type\"");
+            case "read":
+                // path [] = the whole concept.
+                return object(typeField + ",\"path\":" + SEGMENTS, "\"type\",\"path\"");
+            case "add_cards":
+                // ALL named areas as ONE list under one parent ([] = top level).
+                return object(typeField + ",\"parent\":" + SEGMENTS
+                        + ",\"names\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":16,\"items\":"
+                        + NAME + "}", "\"type\",\"parent\",\"names\"");
+            case "exclude":
+                return object(typeField + ",\"topic\":" + NAME, "\"type\",\"topic\"");
+            case "resolve":
+                return object(typeField + ",\"conflictId\":" + NAME
+                        + ",\"decision\":{\"type\":\"string\",\"enum\":[\"REMOVE\",\"KEEP_SUPPRESSED\"]}",
+                        "\"type\",\"conflictId\",\"decision\"");
+            case "offer":
+                return object(typeField + ",\"suggestions\":{\"type\":\"array\",\"minItems\":1,"
+                        + "\"maxItems\":5,\"items\":{\"type\":\"object\",\"properties\":{"
+                        + "\"query\":" + NAME + ",\"purpose\":{\"type\":\"string\"}},"
+                        + "\"required\":[\"query\"]}}", "\"type\",\"suggestions\"");
+            case "rename":
+                return object(typeField + ",\"path\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":6,"
+                        + "\"items\":" + NAME + "},\"name\":" + NAME, "\"type\",\"path\",\"name\"");
+            case "probe":
+                // scope_probe (AP3): ONE list of terms — no ids, no thresholds; the host owns the rest.
+                return object(typeField + ",\"terms\":{\"type\":\"array\",\"minItems\":1,"
+                        + "\"maxItems\":12,\"items\":" + NAME + "}", "\"type\",\"terms\"");
+            default:
+                throw new IllegalArgumentException(type);
+        }
+    }
+
+    private static String object(String properties, String required) {
+        return "{\"type\":\"object\",\"properties\":{" + properties + "},\"required\":[" + required + "]}";
     }
 }
