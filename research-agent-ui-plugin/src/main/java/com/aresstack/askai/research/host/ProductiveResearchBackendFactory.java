@@ -1041,7 +1041,9 @@ public final class ProductiveResearchBackendFactory {
             resources.setSearchProfile(profile);
             // Parallel research workers: isolated browser user contexts of THIS chat, their pages recorded
             // into the SAME capture store as the session browser's (one source process for all workers).
+            // The orchestrated run's web research workers browse in them (one user context per search run).
             resources.setBrowserUserContexts(workerUserContexts(sessionKey, browserConfigFile, captures));
+            backend.setBrowserUserContexts(resources.getBrowserUserContexts());
             // Z3b-3: the sweep needs the SAME frozen embedding world the knowledge pipeline got.
             resources.setEmbeddingDescriptor(embeddingDescriptor);
             if (botControl != null) {
