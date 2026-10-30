@@ -84,8 +84,11 @@ jobs:
       startsWith(github.ref, 'refs/heads/') &&
       github.ref != 'refs/heads/main' &&
       !startsWith(github.ref, 'refs/heads/v')
+    # Per branch: a newer push to the SAME branch supersedes the old build, but a push to another branch no
+    # longer cancels this one. With one global group, every push anywhere cancelled the snapshot build of all
+    # other branches, so open pull requests showed "cancelled" instead of a build result.
     concurrency:
-      group: askai-snapshot
+      group: askai-snapshot-${{ github.ref }}
       cancel-in-progress: true
 
     steps:
@@ -110,11 +113,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Remove the previous snapshot release and its tag so the new one fully replaces it.
-          gh release delete snapshot --yes --cleanup-tag || true
-          gh release create snapshot \
-            askai-app/build/libs/askai-snapshot.jar \
-            --prerelease \
-            --target "${GITHUB_SHA}" \
-            --title "Snapshot (latest build)" \
-            --notes "Rolling snapshot built from \`${GITHUB_REF_NAME}\` @ ${GITHUB_SHA}. Overwritten on every non-main push; this is a test build, not a real release."
+          # Remove the previous snapshot release and its tag so the new one fully replaces it. Builds of
+          # different branches may now publish at the same time; whoever finishes last wins, and a collision
+          # (the other build recreated the release in between) is retried instead of failing the build.
+          for attempt in 1 2 3 4 5; do
+            gh release delete snapshot --yes --cleanup-tag || true
+            if gh release create snapshot \
+              askai-app/build/libs/askai-snapshot.jar \
+              --prerelease \
+              --target "${GITHUB_SHA}" \
+              --title "Snapshot (latest build)" \
+              --notes "Rolling snapshot built from \`${GITHUB_REF_NAME}\` @ ${GITHUB_SHA}. Overwritten on every non-main push; this is a test build, not a real release."; then
+              exit 0
+            fi
+            sleep $((attempt * 5 + RANDOM % 5))
+          done
+          exit 1
