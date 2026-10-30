@@ -1717,7 +1717,10 @@ public final class ResearchAgentSession {
                 // restructuring or delete wish closes the concept mutation channel for the
                 // WHOLE turn — capability withdrawal per action was not enough.
                 com.aresstack.askai.research.runtime.team.ConceptTurnPolicy.modeFor(userText),
-                seededMovedReceipt, seededMoveOutcome);
+                seededMovedReceipt, seededMoveOutcome,
+                // A name the user wrote literally is never taken for a prompt placeholder, and a
+                // bare greeting never triggers the first-turn card nudge.
+                userText);
     }
 
     /** Whether THIS session ever offered exploration tags — ends the one-shot offer nudge. */

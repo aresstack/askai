@@ -37,7 +37,8 @@ import static org.junit.Assert.assertTrue;
  *   <li>a guinea-pig request yields cards that are actually executed through conceptAction;</li>
  *   <li>no visible answer spells an internal action (add_cards/offer/none);</li>
  *   <li>a second chat sees nothing of the first chat's topic;</li>
- *   <li>search offers and an exclusion still run through their commands.</li>
+ *   <li>search offers and an exclusion still run through their commands;</li>
+ *   <li>the conversation ends cleanly: no host fallback answer, no unanswered nudge.</li>
  * </ol>
  * Skips itself without a local Ollama on 127.0.0.1:11434 or without the model. The full app path (plugin
  * concept service, persisted Konzeptpapier, research scope) is checked separately over the AskAI test MCP
@@ -64,30 +65,46 @@ public class ScopingConceptLiveTest {
         }
     }
 
+    /** Words of which at least one card of a fitting rabbit-keeping concept names. */
+    private static final String[] RABBIT_WORDS = {"hase", "kaninchen", "haltung", "gehege", "stall", "auslauf",
+            "ernährung", "futter", "fütterung", "gesundheit", "pflege", "tierarzt", "unterbringung", "verhalten",
+            "sozial", "artgerecht", "krankheit", "impf", "beschäftigung", "einrichtung"};
+    /** Words of which at least one card of a fitting guinea-pig concept names. */
+    private static final String[] GUINEA_PIG_WORDS = {"meerschwein", "haltung", "gehege", "stall", "käfig",
+            "auslauf", "ernährung", "futter", "fütterung", "heu", "vitamin", "gesundheit", "pflege", "tierarzt",
+            "unterbringung", "verhalten", "sozial", "artgerecht", "gruppe", "krankheit", "einrichtung"};
+
     @Test
-    public void hasenhaltungGetsNoForeignCardsAndNoLeakedActions() {
+    public void hasenhaltungBuildsFittingCardsWithoutForeignOnesOrPlaceholders() {
         Chat chat = new Chat("hasen");
         chat.say("hasenhaltung");
         chat.report();
+        assertFalse("the first turn must build cards through conceptAction: " + chat.host.calls,
+                chat.host.cards.isEmpty());
         for (String card : chat.host.cards) {
             String lower = card.toLowerCase(Locale.ROOT);
             for (String foreign : FOREIGN) {
                 assertFalse("foreign card from the prompt examples: " + card, lower.contains(foreign));
             }
-            assertFalse("placeholder became a card: " + card, card.contains("<"));
         }
-        chat.assertNoLeaks();
+        chat.assertCardsFit(RABBIT_WORDS);
+        chat.assertNoPlaceholderCards();
+        chat.assertCleanConversation();
     }
 
     @Test
-    public void meerschweinchenCardsAreExecutedAndAnExclusionStillRuns() {
+    public void meerschweinchenCardsAreStoredAndAnExclusionStillRuns() {
         Chat chat = new Chat("meerschweinchen");
         chat.say("Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
         assertFalse("cards must be executed through conceptAction, not only described: " + chat.host.calls,
                 chat.host.cards.isEmpty());
+        chat.assertCardsFit(GUINEA_PIG_WORDS);
+        assertTrue("the first turn offers search tags through conceptAction: " + chat.host.calls,
+                chat.host.offers > 0);
         chat.say("Zucht möchte ich nicht behandeln.");
         chat.report();
-        chat.assertNoLeaks();
+        chat.assertNoPlaceholderCards();
+        chat.assertCleanConversation();
         boolean excluded = false;
         for (String call : chat.host.calls) {
             excluded |= call.startsWith("exclude") && call.toLowerCase(Locale.ROOT).contains("zucht");
@@ -111,6 +128,8 @@ public class ScopingConceptLiveTest {
         for (String card : second.host.cards) {
             assertFalse("a card of the first chat: " + card, card.toLowerCase(Locale.ROOT).contains("hase"));
         }
+        assertFalse("the second chat builds its own cards: " + second.host.calls, second.host.cards.isEmpty());
+        second.assertNoPlaceholderCards();
     }
 
     // ------------------------------------------------------------------ one chat
@@ -138,17 +157,49 @@ public class ScopingConceptLiveTest {
                     feedback -> agent.internalTurn(feedback, view), host,
                     ConceptToolRounds.DEFAULT_MAX_TOOL_ROUNDS, ConceptToolRounds.DEFAULT_MAX_REPAIR_ATTEMPTS,
                     true, null, line -> trace.add(line), !offered,
-                    ConceptTurnPolicy.modeFor(userText), false, null);
+                    ConceptTurnPolicy.modeFor(userText), false, null, userText);
             assertTrue("turn failed: " + result.getStatus() + " " + result.getDetail(), result.isOk());
             offered |= host.offers > 0;
             visible.add(result.getOutput().getAssistantMessage());
         }
 
-        void assertNoLeaks() {
+        /** At least one card names the topic's own areas (a loose word list — no exact model output). */
+        void assertCardsFit(String[] topicWords) {
+            for (String card : host.cards) {
+                String lower = card.toLowerCase(Locale.ROOT);
+                for (String word : topicWords) {
+                    if (lower.contains(word)) {
+                        return;
+                    }
+                }
+            }
+            throw new AssertionError("no card names an area of the topic: " + host.cards);
+        }
+
+        /** No stored card is a placeholder ("<…>", "...", "…") or empty. */
+        void assertNoPlaceholderCards() {
+            for (String card : host.cards) {
+                String trimmed = card.trim();
+                assertFalse("placeholder became a card: " + card, trimmed.isEmpty() || trimmed.contains("<")
+                        || trimmed.contains(">") || trimmed.contains("...") || trimmed.contains("…"));
+            }
+        }
+
+        /**
+         * The conversation ends cleanly: no visible answer spells an internal action, none is the host's
+         * fallback for an unexecuted action, and the last answer is a real reply to the user.
+         */
+        void assertCleanConversation() {
             for (String message : visible) {
                 assertNull("visible answer spells an internal action: " + message,
                         VisibleAssistantMessageValidator.actionLeakIn(message));
             }
+            for (String line : trace) {
+                assertFalse("the host had to replace a leaked answer: " + line,
+                        line.contains("host answer replaces"));
+            }
+            String last = visible.get(visible.size() - 1).trim();
+            assertTrue("the last answer is a real reply: " + last, last.length() >= 20);
         }
 
         void report() {
@@ -209,7 +260,7 @@ public class ScopingConceptLiveTest {
                     for (String name : names) {
                         cards.add(name);
                         tree.computeIfAbsent(parent, key -> new ArrayList<String>()).add(name);
-                        receipt.append("ADDED \"").append(name).append("\"\n");
+                        receipt.append("ADDED: ").append(name).append("\n");
                     }
                     return receipt.toString();
                 }
@@ -230,6 +281,9 @@ public class ScopingConceptLiveTest {
         private String conceptJson() {
             StringBuilder sb = new StringBuilder("{\"concept\":[");
             List<String> roots = tree.containsKey("") ? tree.get("") : Collections.<String>emptyList();
+            if (roots.isEmpty()) {
+                return "{\"concept\":[]}";
+            }
             for (int i = 0; i < roots.size(); i++) {
                 sb.append(i > 0 ? "," : "").append("{\"").append(roots.get(i)).append("\":[");
                 List<String> children = tree.containsKey(roots.get(i)) ? tree.get(roots.get(i))

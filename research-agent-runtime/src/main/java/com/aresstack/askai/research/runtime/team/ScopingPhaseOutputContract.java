@@ -54,6 +54,46 @@ public final class ScopingPhaseOutputContract implements PhaseOutputContract {
             return null;
         }
         return "{\"type\":\"object\",\"properties\":{"
+                // Scoping regression (Meerschweinchen live gate): Ollama's grammar emits the
+                // REQUIRED properties first, in schema order. With assistantMessage first the
+                // small model narrated its action in the visible text ("add_cards: …") and then
+                // answered conceptAction "none". The action now comes FIRST: the model decides
+                // the step in the structured channel, then writes the sentence for the user.
+                // Safety slice after the slice-2 gate: remove/rewrite left the grammar — a
+                // small model must not be able to EMIT a destructive concept edit (the parser
+                // stays tolerant for legacy transcripts; the loop refuses execution).
+                // add_cards slice: the single add left the ACTIVE contract (the live gate lost
+                // a user-named card to the four-round budget of one-by-one adds) — the model
+                // captures ALL named areas as ONE typed list; the parser stays tolerant of
+                // legacy "add" transcripts, the loop refuses their execution.
+                + "\"conceptAction\":{\"type\":\"object\",\"properties\":{"
+                // The dedicated move generator owns the model side of moves EXCLUSIVELY
+                // (gate ruling): the universal enum advertises no move, so no starving
+                // invalid rounds compete with the pre-executed dedicated path.
+                + "\"type\":{\"type\":\"string\",\"enum\":[\"none\",\"read\",\"add_cards\","
+                + "\"exclude\",\"resolve\",\"offer\",\"rename\",\"probe\"]},"
+                + "\"path\":{\"type\":\"array\",\"maxItems\":6,\"items\":"
+                + "{\"type\":\"string\"}},"
+                + "\"parent\":{\"type\":\"array\",\"maxItems\":6,\"items\":"
+                + "{\"type\":\"string\"}},"
+                + "\"name\":{\"type\":\"string\"},"
+                + "\"names\":{\"type\":\"array\",\"maxItems\":16,\"items\":"
+                + "{\"type\":\"string\",\"minLength\":1}},"
+                // scope_probe (AP3): ONE list of terms — no ids, no thresholds, no cosines;
+                // the host owns the complexity, the grammar bounds the list.
+                + "\"terms\":{\"type\":\"array\",\"maxItems\":12,\"items\":"
+                + "{\"type\":\"string\",\"minLength\":1}},"
+
+                + "\"topic\":{\"type\":\"string\"},"
+                + "\"conflictId\":{\"type\":\"string\"},"
+                + "\"decision\":{\"type\":\"string\",\"enum\":[\"REMOVE\","
+                + "\"KEEP_SUPPRESSED\"]},"
+                + "\"suggestions\":{\"type\":\"array\",\"maxItems\":5,\"items\":"
+                + "{\"type\":\"object\",\"properties\":{"
+                + "\"query\":{\"type\":\"string\",\"minLength\":1},"
+                + "\"purpose\":{\"type\":\"string\"}},"
+                + "\"required\":[\"query\"]}}},"
+                + "\"required\":[\"type\"]},"
                 + "\"assistantMessage\":{\"type\":\"string\"},"
                 // K4: the concept is the ONE scoping artifact — the legacy brief field left the
                 // grammar entirely (this schema only exists WITH the concept tools).
@@ -92,42 +132,7 @@ public final class ScopingPhaseOutputContract implements PhaseOutputContract {
                 + "\"label\":{\"type\":\"string\",\"minLength\":1},"
                 + "\"query\":{\"type\":\"string\",\"minLength\":1},"
                 + "\"rationale\":{\"type\":\"string\"}},"
-                + "\"required\":[\"label\",\"query\"]}},"
-                // Safety slice after the slice-2 gate: remove/rewrite left the grammar — a
-                // small model must not be able to EMIT a destructive concept edit (the parser
-                // stays tolerant for legacy transcripts; the loop refuses execution).
-                // add_cards slice: the single add left the ACTIVE contract (the live gate lost
-                // a user-named card to the four-round budget of one-by-one adds) — the model
-                // captures ALL named areas as ONE typed list; the parser stays tolerant of
-                // legacy "add" transcripts, the loop refuses their execution.
-                + "\"conceptAction\":{\"type\":\"object\",\"properties\":{"
-                // The dedicated move generator owns the model side of moves EXCLUSIVELY
-                // (gate ruling): the universal enum advertises no move, so no starving
-                // invalid rounds compete with the pre-executed dedicated path.
-                + "\"type\":{\"type\":\"string\",\"enum\":[\"none\",\"read\",\"add_cards\","
-                + "\"exclude\",\"resolve\",\"offer\",\"rename\",\"probe\"]},"
-                + "\"path\":{\"type\":\"array\",\"maxItems\":6,\"items\":"
-                + "{\"type\":\"string\"}},"
-                + "\"parent\":{\"type\":\"array\",\"maxItems\":6,\"items\":"
-                + "{\"type\":\"string\"}},"
-                + "\"name\":{\"type\":\"string\"},"
-                + "\"names\":{\"type\":\"array\",\"maxItems\":16,\"items\":"
-                + "{\"type\":\"string\",\"minLength\":1}},"
-                // scope_probe (AP3): ONE list of terms — no ids, no thresholds, no cosines;
-                // the host owns the complexity, the grammar bounds the list.
-                + "\"terms\":{\"type\":\"array\",\"maxItems\":12,\"items\":"
-                + "{\"type\":\"string\",\"minLength\":1}},"
-
-                + "\"topic\":{\"type\":\"string\"},"
-                + "\"conflictId\":{\"type\":\"string\"},"
-                + "\"decision\":{\"type\":\"string\",\"enum\":[\"REMOVE\","
-                + "\"KEEP_SUPPRESSED\"]},"
-                + "\"suggestions\":{\"type\":\"array\",\"maxItems\":5,\"items\":"
-                + "{\"type\":\"object\",\"properties\":{"
-                + "\"query\":{\"type\":\"string\",\"minLength\":1},"
-                + "\"purpose\":{\"type\":\"string\"}},"
-                + "\"required\":[\"query\"]}}},"
-                + "\"required\":[\"type\"]}"
-                + "},\"required\":[\"assistantMessage\",\"conceptAction\"]}";
+                + "\"required\":[\"label\",\"query\"]}}"
+                + "},\"required\":[\"conceptAction\",\"assistantMessage\"]}";
     }
 }

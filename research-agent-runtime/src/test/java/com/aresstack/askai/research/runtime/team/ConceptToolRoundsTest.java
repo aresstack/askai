@@ -1069,8 +1069,10 @@ public class ConceptToolRoundsTest {
                 traceSink);
 
         String visible = ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage();
-        assertEquals(TeamAgentPlaybook.conceptActionLeakAnswer(true, false), visible);
+        assertEquals(TeamAgentPlaybook.conceptActionLeakAnswer(true,
+                java.util.Collections.<String>emptyList(), false), visible);
         assertTrue("the host answer says nothing changed", visible.contains("nichts geändert"));
+        assertTrue("and never the leaked text", !visible.contains("add_cards"));
         assertTrue("no follow-up inference", turns.feedbackSeen.isEmpty());
         assertTrue("no concept call", tool.calls.isEmpty());
     }
@@ -1090,10 +1092,10 @@ public class ConceptToolRoundsTest {
                 ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
         assertTrue("the placeholder never reached the host", tool.calls.isEmpty());
         assertTrue(trace.toString(), trace.contains("round 1 -> REFUSED (placeholder copied from the instructions)"));
-        assertTrue(turns.feedbackSeen.get(0).contains("placeholder in <angle brackets>"));
+        assertTrue(turns.feedbackSeen.get(0).contains("a name in <angle brackets>"));
     }
 
-    /** The placeholder guard is a closed list: angle-bracket names a user researches still go through. */
+    /** Angle-bracket names the user wrote literally still go through: only invented placeholders are refused. */
     @Test
     public void legitimateAngleBracketNamesAreNoPlaceholders() throws Exception {
         ScriptedTurns turns = new ScriptedTurns();
@@ -1104,7 +1106,8 @@ public class ConceptToolRoundsTest {
 
         ConceptToolRounds.run(turn("lege an",
                 "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<h1>\",\"std::vector<int>\"]}"),
-                turns, tool, 4, 2, true, null, traceSink);
+                turns, tool, 4, 2, true, null, traceSink, false, ConceptTurnPolicy.Mode.FULL, false, null,
+                "Lege Karten für <h1> und std::vector<int> an.");
 
         assertTrue(tool.calls.toString(),
                 tool.calls.contains("add_cards parent=[] names=[\"<h1>\",\"std::vector<int>\"]"));
@@ -1127,5 +1130,104 @@ public class ConceptToolRoundsTest {
         }
         assertTrue(trace.toString(), trace.contains(
                 "wrap-up offer REFUSED (placeholder copied from the instructions)"));
+    }
+
+    /**
+     * Meerschweinchen live gate: gemma invented "<name1>"/"<name2>" (not in any instruction) and the host
+     * stored them. A value that is nothing but an angle-bracket token, or "...", is a placeholder unless
+     * the user wrote it literally.
+     */
+    @Test
+    public void anInventedPlaceholderLikeName1IsRefusedBeforeTheHost() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]",
+                "APPLIED revision=1\nADDED: Haltung\nADDED: Ernährung");
+        turns.script.add(turn("Ich lege die Bereiche an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\",\"Ernährung\"]}"));
+        turns.script.add(turn("Haltung und Ernährung sind angelegt.", "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("lege an",
+                "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<name1>\",\"<name2>\"]}"),
+                turns, tool, 4, 2, true, null, traceSink, false, ConceptTurnPolicy.Mode.FULL, false, null,
+                "Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
+
+        for (String call : tool.calls) {
+            assertTrue("a placeholder reached the host: " + tool.calls, !call.contains("<name"));
+        }
+        assertTrue(tool.calls.contains("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]"));
+        assertTrue(trace.contains("round 1 -> REFUSED (placeholder copied from the instructions)"));
+    }
+
+    @Test
+    public void anEllipsisQueryIsAPlaceholderToo() {
+        ConceptAction offer = ScopingAssistantOutputParser.parse("{\"assistantMessage\":\"x\",\"conceptAction\":"
+                + "{\"type\":\"offer\",\"suggestions\":[{\"query\":\"...\",\"purpose\":\"...\"}]}}")
+                .getOutput().getConceptAction();
+        assertTrue(ConceptToolRounds.hasPlaceholder(offer));
+        ConceptAction real = ScopingAssistantOutputParser.parse("{\"assistantMessage\":\"x\",\"conceptAction\":"
+                + "{\"type\":\"offer\",\"suggestions\":[{\"query\":\"Meerschweinchen Futter\"}]}}")
+                .getOutput().getConceptAction();
+        assertTrue(!ConceptToolRounds.hasPlaceholder(real));
+    }
+
+    /**
+     * Meerschweinchen live gate: the first turn only offered searches and ended with an EMPTY concept.
+     * One machinery nudge asks for the missing cards; they then go through conceptAction.
+     */
+    @Test
+    public void aFirstTurnThatBuiltNoCardGetsOneCardNudge() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("offer suggestions=1", "OFFERED 1");
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]",
+                "APPLIED revision=1\nADDED: Haltung\nADDED: Ernährung");
+        turns.script.add(turn("Ich schaue mir das an.", "{\"type\":\"none\"}"));
+        turns.script.add(turn("Ich lege die Bereiche an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\",\"Ernährung\"]}"));
+        turns.script.add(turn("Haltung und Ernährung stehen jetzt im Konzept.", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("Gern!",
+                "{\"type\":\"offer\",\"suggestions\":[{\"query\":\"Meerschweinchen Haltung\"}]}"),
+                turns, tool, 4, 2, true, null, traceSink, true, ConceptTurnPolicy.Mode.FULL, false, null,
+                "Ich möchte mich über artgerechte Haltung und Ernährung von Meerschweinchen informieren.");
+
+        assertEquals("Haltung und Ernährung stehen jetzt im Konzept.",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertTrue(trace.toString(), trace.contains("concept cards missing (concept empty) — card nudge turn"));
+        assertTrue(turns.feedbackSeen.get(1).startsWith("CONCEPT CARDS MISSING"));
+        assertTrue(tool.calls.contains("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]"));
+    }
+
+    @Test
+    public void aBareGreetingNeverGetsTheCardNudge() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("Hallo! Worüber möchtest du recherchieren?",
+                "{\"type\":\"none\"}"), turns, tool, 4, 2, true, null, traceSink, true,
+                ConceptTurnPolicy.Mode.FULL, false, null, "Hallo");
+
+        assertEquals("Hallo! Worüber möchtest du recherchieren?",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertTrue("no nudge, no concept call", tool.calls.isEmpty() && turns.feedbackSeen.isEmpty());
+    }
+
+    /** The honest close names exactly the cards the host reported ADDED — never a generic sentence. */
+    @Test
+    public void theHonestCloseIsBuiltFromTheReceipts() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\",\"Ernährung\"]",
+                "APPLIED revision=1\nADDED: Haltung\nADDED: Ernährung");
+        turns.script.add(turn("offer:\\n- Meerschweinchen Futter", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("lege an", "{\"type\":\"add_cards\","
+                + "\"parent\":[],\"names\":[\"Haltung\",\"Ernährung\"]}"), turns, tool, 4, 0, true, null,
+                traceSink);
+
+        String visible = ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage();
+        assertTrue(visible, visible.startsWith("Ich habe ins Konzept übernommen: Haltung, Ernährung."));
+        assertTrue(visible, !visible.contains("nicht ausführen"));
     }
 }

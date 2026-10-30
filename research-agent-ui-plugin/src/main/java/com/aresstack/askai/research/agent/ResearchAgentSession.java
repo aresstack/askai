@@ -3621,8 +3621,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 suggestions = parseOfferedSearches(suggestionsJson);
         if (suggestions.isEmpty()) {
             return "No usable suggestion — every entry needs a non-empty \"query\". Example: "
-                    + "[{\"query\":\"FreeRTOS ESP32 Grundlagen Tutorial\","
-                    + "\"purpose\":\"Einstieg sichten\"}]";
+                    + "[{\"query\":\"<topic> basics overview\","
+                    + "\"purpose\":\"<core aspect>\"}]";
         }
         latestScopingProjection = new com.aresstack.askai.research.backend.ScopingAssistantUpdate(
                 state.getPhaseId(), suggestions, "", "");

@@ -48,11 +48,11 @@ public class ResearchRolesTest {
                 sha256(ResearchRoles.CONVERSATION.getSystemPrompt()));
         assertEquals("b863e619aa39f6339739831434a5c07e4caa9c9ee9c99b0e130938d84c76968e",
                 sha256(scopingRole(false, false).getSystemPrompt()));
-        assertEquals("cf300466dd52a559964e54c5f9af265e8daeef8d227399209c61e309b9821b79",
+        assertEquals("fa8b014ce18346a7e409ca752f55d046869503cd78a9b55bcfe0c27d71205a61",
                 sha256(scopingRole(false, true).getSystemPrompt()));
         assertEquals("f72854a2a5495cd10695f1441358aa2d41d76f94dac1183c524217159d227539",
                 sha256(scopingRole(true, false).getSystemPrompt()));
-        assertEquals("2d19e74e0775cefd0ea02507e0c91d8e0839c9e2c00d7ee761c2506074a16c92",
+        assertEquals("b46f080272b8b7c6243d4ebdcd384fa80e6205b0b19be387c8458921a1794cc5",
                 sha256(scopingRole(true, true).getSystemPrompt()));
     }
 

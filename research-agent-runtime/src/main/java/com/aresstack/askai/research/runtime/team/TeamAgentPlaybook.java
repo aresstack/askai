@@ -213,7 +213,28 @@ public final class TeamAgentPlaybook {
                 + "Answer with a SINGLE JSON object and nothing else (the user only ever sees "
                 + "assistantMessage):\n"
                 + "{\n"
-                + "  \"assistantMessage\": string,        // required: warm, concise, plain language\n"
+                // Scoping regression: the action comes FIRST (the grammar emits it first too),
+                // so the visible sentence follows the decision instead of narrating it.
+                + (conceptTools
+                        ? "  \"conceptAction\": {              // FIRST: your ONE action THIS "
+                        + "inference; use type none when you change nothing\n"
+                        + "    \"type\": \"none\"|\"read\"|\"add_cards\"|\"exclude\""
+                        + "|\"resolve\"|\"offer\"|\"rename\",\n"
+                        + "    \"path\": [string],                // read/rename: card names as "
+                        + "SEGMENTS from the concept root\n"
+                        + "    \"parent\": [string], \"names\": [string],  // add_cards: where "
+                        + "(segments) and ALL new card names as ONE list\n"
+                        + "    \"name\": string,                  // rename: path + the new name\n"
+                        + "    \"topic\": string,                 // exclude: the term in the USER'S "
+                        + "words, nothing else\n"
+                        + "    \"conflictId\": string, \"decision\": \"REMOVE\"|\"KEEP_SUPPRESSED\","
+                        + "  // resolve: answer a reported concept conflict\n"
+                        + "    \"suggestions\": [{\"query\": string, \"purpose\": string}]  "
+                        + "// offer: 3-5 orientation searches as clickable tags\n"
+                        + "  },\n"
+                        + "  \"assistantMessage\": string,        // required: ONLY plain sentences for "
+                        + "the user — never action names, colon lists or JSON\n"
+                        : "  \"assistantMessage\": string,        // required: warm, concise, plain language\n")
                 // K4: with the concept tools the CONCEPT is the one scoping artifact — the
                 // legacy brief field is neither requested nor produced anymore; the flagless
                 // old-host prompt keeps it (their hosts still render the brief).
@@ -236,25 +257,7 @@ public final class TeamAgentPlaybook {
                 + "  ],\n"
                 + "  \"orientationSuggestions\": [         // OPTIONAL: short lookups you PROPOSE\n"
                 + "    { \"label\": string, \"query\": string, \"rationale\": string }\n"
-                + "  ]"
-                + (conceptTools
-                        ? ",\n  \"conceptAction\": {              // your ONE action THIS "
-                        + "inference; use type none when you change nothing\n"
-                        + "    \"type\": \"none\"|\"read\"|\"add_cards\"|\"exclude\""
-                        + "|\"resolve\"|\"offer\"|\"rename\",\n"
-                        + "    \"path\": [string],                // read/rename: card names as "
-                        + "SEGMENTS from the concept root\n"
-                        + "    \"parent\": [string], \"names\": [string],  // add_cards: where "
-                        + "(segments) and ALL new card names as ONE list\n"
-                        + "    \"name\": string,                  // rename: path + the new name\n"
-                        + "    \"topic\": string,                 // exclude: the term in the USER'S "
-                        + "words, nothing else\n"
-                        + "    \"conflictId\": string, \"decision\": \"REMOVE\"|\"KEEP_SUPPRESSED\","
-                        + "  // resolve: answer a reported concept conflict\n"
-                        + "    \"suggestions\": [{\"query\": string, \"purpose\": string}]  "
-                        + "// offer: 3-5 orientation searches as clickable tags\n"
-                        + "  }\n"
-                        : "\n")
+                + "  ]\n"
                 + "}\n\n"
                 + (conceptTools ? conceptToolRules() : "")
                 + scopePatchContract(conceptTools)
@@ -1036,46 +1039,66 @@ public final class TeamAgentPlaybook {
                         + "dein conceptAction-Feld aber keine ausführbare Aktion. Der Nutzer sieht "
                         + "assistantMessage — Aktionsnamen, Doppelpunkt-Listen und JSON gehören NIE "
                         + "dort hinein.\n"
-                        + "Sende die Aktion jetzt im Feld conceptAction (z. B. {\"type\": "
-                        + "\"add_cards\", \"parent\": [], \"names\": [\"<Bereich 1>\", "
-                        + "\"<Bereich 2>\"]} mit den Bereichen DES NUTZERTHEMAS) und schreibe in "
-                        + "assistantMessage nur einen kurzen, freundlichen Satz an den Nutzer."
+                        + "Setze die Aktion jetzt in das Feld conceptAction (es steht ZUERST in deiner "
+                        + "Antwort), mit den echten Namen aus dem Thema des Nutzers. Schreibe in "
+                        + "assistantMessage danach nur einen kurzen, freundlichen Satz an den Nutzer."
                 : "ACTION WRITTEN AS TEXT — NOTHING was executed, the concept is UNCHANGED.\n"
                         + "Your assistantMessage contains the action \"" + leakedAction + "\" as text, "
                         + "but your conceptAction field carries no executable action. The user reads "
                         + "assistantMessage — action names, colon lists and JSON NEVER belong there.\n"
-                        + "Send the action now in the conceptAction field (e.g. {\"type\": "
-                        + "\"add_cards\", \"parent\": [], \"names\": [\"<area 1>\", "
-                        + "\"<area 2>\"]} with the areas of THE USER'S topic) and write only a short, "
+                        + "Put the action into the conceptAction field now (it comes FIRST in your "
+                        + "answer), with the real names from the user's topic. Then write only a short, "
                         + "friendly sentence to the user in assistantMessage.";
     }
 
     /**
      * The host's honest closing answer when a turn still spells its action as text and no repair budget is
-     * left: the leaked instructions never reach the user, and nothing is claimed that did not happen.
+     * left: the leaked instructions never reach the user. It is built from this turn's RECEIPTS only — the
+     * cards the host reported ADDED and whether search tags were OFFERED — so it claims exactly what happened.
      */
-    public static String conceptActionLeakAnswer(boolean german, boolean appliedAny) {
-        if (appliedAny) {
-            return german
-                    ? "Ich habe das Konzeptpapier in diesem Schritt aktualisiert — die übernommenen Karten "
-                            + "siehst du im Konzept. Einen weiteren Vorschlag konnte ich nicht ausführen. "
-                            + "Was soll ich als Nächstes ergänzen?"
-                    : "I updated the concept in this step — the cards I added are shown in the concept. "
-                            + "I could not carry out a further proposal. What should I add next?";
+    public static String conceptActionLeakAnswer(boolean german, java.util.List<String> addedCards,
+                                                 boolean offered) {
+        StringBuilder sb = new StringBuilder();
+        if (!addedCards.isEmpty()) {
+            sb.append(german ? "Ich habe ins Konzept übernommen: " : "I added to the concept: ")
+                    .append(String.join(", ", addedCards)).append(". ");
+        } else {
+            sb.append(german ? "Am Konzept habe ich in diesem Schritt nichts geändert. "
+                    : "I did not change the concept in this step. ");
         }
+        if (offered) {
+            sb.append(german ? "Suchvorschläge zum Erkunden stehen als Tags bereit. "
+                    : "Search suggestions to explore are ready as tags. ");
+        }
+        sb.append(addedCards.isEmpty()
+                ? (german ? "Welche Bereiche sollen ins Konzept?" : "Which areas should go into the concept?")
+                : (german ? "Welchen Bereich möchtest du zuerst vertiefen?"
+                        : "Which area would you like to deepen first?"));
+        return sb.toString();
+    }
+
+    /**
+     * The machinery nudge when the session's first substantive turn ends with an EMPTY concept: the
+     * Meerschweinchen live gate offered three searches and built no card although the user named the areas.
+     */
+    public static String conceptCardsMissing(boolean german) {
         return german
-                ? "Ich konnte meinen Vorschlag in diesem Schritt nicht ins Konzeptpapier übernehmen — "
-                        + "am Konzept hat sich nichts geändert. Schreib mir bitte noch einmal, welche "
-                        + "Bereiche ich anlegen soll."
-                : "I could not apply my proposal to the concept in this step — nothing in the concept "
-                        + "changed. Please tell me again which areas I should add.";
+                ? "CONCEPT CARDS MISSING — das Konzept ist noch LEER.\n"
+                        + "Sende jetzt GENAU EINE add_cards-Aktion (parent []) mit den Bereichen, die der "
+                        + "Nutzer genannt hat, sonst mit den Hauptbereichen SEINES Themas — echte, kurze "
+                        + "Namen in der Sprache des Nutzers. Danach schließe mit type \"none\" ab."
+                : "CONCEPT CARDS MISSING — the concept is still EMPTY.\n"
+                        + "Now send EXACTLY ONE add_cards action (parent []) with the areas the user "
+                        + "named, otherwise the main areas of THEIR topic — real, short names in the "
+                        + "user's language. Afterwards finish with type \"none\".";
     }
 
     /** The refusal diagnostic for an action that carries a placeholder copied from the instructions. */
     public static String placeholderCopied() {
-        return "The action contains a placeholder in <angle brackets> copied from the instructions. "
-                + "Placeholders only show the SHAPE: use the user's own topic and words from the "
-                + "conversation and the CURRENT RESEARCH SCOPE instead.";
+        return "The action contains a placeholder instead of a real name (a name in <angle brackets> "
+                + "such as <name1>, or \"...\"). NOTHING was saved. Placeholders only show the SHAPE: "
+                + "use real names from the user's topic, the conversation and the CURRENT RESEARCH "
+                + "SCOPE instead.";
     }
 
     public static String conceptToolRejected(String diagnostic, boolean german) {
@@ -1147,14 +1170,14 @@ public final class TeamAgentPlaybook {
         return german
                 ? "SEARCH TAGS MISSING — der Nutzer hat noch keine gelben Erkundungs-Tags.\n"
                         + "Sende jetzt GENAU EINE offer-Aktion mit 3-5 Queries, die je eine "
-                        + "ANDERE Richtung des Themas öffnen: {\"type\": \"offer\", "
-                        + "\"suggestions\": [{\"query\": \"...\", \"purpose\": \"...\"}]}. "
+                        + "ANDERE Richtung DES NUTZERTHEMAS öffnen (echte Suchbegriffe, keine "
+                        + "Platzhalter) — im Feld conceptAction, type \"offer\". "
                         + "Keine Konzept-Änderung in diesem Schritt; danach schließe mit type "
                         + "\"none\" ab."
                 : "SEARCH TAGS MISSING — the user has no yellow exploration tags yet.\n"
                         + "Now send EXACTLY ONE offer action with 3-5 queries, each opening a "
-                        + "DIFFERENT direction of the area: {\"type\": \"offer\", "
-                        + "\"suggestions\": [{\"query\": \"...\", \"purpose\": \"...\"}]}. "
+                        + "DIFFERENT direction of THE USER'S topic (real search terms, no "
+                        + "placeholders) — in the conceptAction field, type \"offer\". "
                         + "No concept change in this step; afterwards finish with type "
                         + "\"none\".";
     }

@@ -407,8 +407,8 @@ public final class ResearchToolPolicy {
     private static McpToolContribution conceptReadTool(final ResearchControlContext ctx) {
         return McpToolContribution.of("concept_read",
                 "Read the concept tree or one of its branches. "
-                        + "Example: path=\"\" (whole concept). Example: path=\"FreeRTOS\". "
-                        + "Example: path=\"FreeRTOS/Kommunikation\".",
+                        + "Example: path=\"\" (whole concept). Example: path=\"<card>\". "
+                        + "Example: path=\"<card>/<child card>\".",
                 new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
                         com.aresstack.askai.research.concept.ConceptBranchService.ReadResult result =
@@ -599,9 +599,9 @@ public final class ResearchToolPolicy {
     private static McpToolContribution conceptAddTool(final ResearchControlContext ctx) {
         return McpToolContribution.of("concept_add",
                 "Add ONE new topic card to the concept. "
-                        + "Example: parent_path=\"\", name=\"FreeRTOS\" (a top-level card). "
-                        + "Example: parent_path=\"FreeRTOS/Kommunikation\", "
-                        + "name=\"Task Notifications\". "
+                        + "Example: parent_path=\"\", name=\"<card>\" (a top-level card). "
+                        + "Example: parent_path=\"<card>/<child card>\", "
+                        + "name=\"<subtopic>\". "
                         + "If unsure whether the parent exists, call concept_read first.",
                 new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
@@ -612,7 +612,7 @@ public final class ResearchToolPolicy {
                         String name = call.getString("name");
                         if (name == null || name.trim().isEmpty()) {
                             return McpToolResult.error("Missing argument: name — example: "
-                                    + "parent_path=\"FreeRTOS\", name=\"Synchronisation\"");
+                                    + "parent_path=\"<card>\", name=\"<subtopic>\"");
                         }
                         com.aresstack.askai.research.concept.ConceptBranchService.EditResult result =
                                 ctx.conceptBranchService().addNode(
@@ -638,8 +638,7 @@ public final class ResearchToolPolicy {
     private static McpToolContribution conceptRenameTool(final ResearchControlContext ctx) {
         return McpToolContribution.of("concept_rename",
                 "Rename ONE concept card; its children and position stay untouched. "
-                        + "Example: path=\"FreeRTOS/Setup\", name=\"ESP32-Entwicklung mit "
-                        + "Arduino\".",
+                        + "Example: path=\"<card>/<child card>\", name=\"<new name>\".",
                 new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
                         McpToolResult denied = requireWritable(ctx, ResearchStateIds.SCOPING);
@@ -649,7 +648,7 @@ public final class ResearchToolPolicy {
                         String name = call.getString("name");
                         if (name == null || name.trim().isEmpty()) {
                             return McpToolResult.error("Missing argument: name — example: "
-                                    + "path=\"FreeRTOS/Setup\", name=\"ESP32-Entwicklung\"");
+                                    + "path=\"<card>/<child card>\", name=\"<new name>\"");
                         }
                         java.util.List<String> path = segmentsOf(call, "path");
                         com.aresstack.askai.research.concept.ConceptBranchService.EditResult result =
@@ -683,7 +682,7 @@ public final class ResearchToolPolicy {
         return McpToolContribution.of("concept_move_leaf",
                 "Move ONE existing LEAF card under an existing parent (or the top level). "
                         + "Never a branch, never creates the target. Example: "
-                        + "source_json=[\"Scheduling\"], parent_path_json=[\"FreeRTOS\"]; "
+                        + "source_json=[\"<child card>\"], parent_path_json=[\"<new parent>\"]; "
                         + "parent_path_json=[] moves to the top level.",
                 new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
@@ -696,7 +695,7 @@ public final class ResearchToolPolicy {
                             return McpToolResult.error("Missing argument: source_json — the "
                                     + "leaf as a JSON array of card names (a globally unique "
                                     + "single name is enough), e.g. "
-                                    + "source_json=[\"Scheduling\"]");
+                                    + "source_json=[\"<child card>\"]");
                         }
                         com.aresstack.askai.research.concept.ConceptBranchService
                                 .MoveLeafResult result = ctx.conceptBranchService()
@@ -788,7 +787,7 @@ public final class ResearchToolPolicy {
         return McpToolContribution.of("exclude_topic",
                 "Record a topic the user ruled out, in the USER'S words. The application derives "
                         + "the id, suppresses the topic for all research and checks the concept "
-                        + "for a conflicting entry. Example: topic=\"ESP-IDF\".",
+                        + "for a conflicting entry. Example: topic=\"<term>\".",
                 new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
                         McpToolResult denied = requireWritable(ctx, ResearchStateIds.SCOPING);
@@ -798,7 +797,7 @@ public final class ResearchToolPolicy {
                         String topic = call.getString("topic");
                         if (topic == null || topic.trim().isEmpty()) {
                             return McpToolResult.error(
-                                    "Missing argument: topic — example: topic=\"ESP-IDF\"");
+                                    "Missing argument: topic — example: topic=\"<term>\"");
                         }
                         String reply = ctx.excludeTopic(topic.trim());
                         if (reply == null) {
@@ -811,7 +810,7 @@ public final class ResearchToolPolicy {
                     }
                 },
                 McpToolParameter.string("topic", true,
-                        "The excluded topic in the user's own words, e.g. \"ESP-IDF\""));
+                        "The excluded topic in the user's own words, e.g. \"<term>\""));
     }
 
     /** The search-offer command: 3-5 AI-authored lookups rendered as clickable exploration tags. */
@@ -819,8 +818,8 @@ public final class ResearchToolPolicy {
         return McpToolContribution.of("offer_searches",
                 "Offer 3-5 orientation searches the user can run with one click (yellow tags). "
                         + "Nothing runs by itself. Example: suggestions_json="
-                        + "[{\"query\":\"FreeRTOS ESP32 Grundlagen Tutorial\","
-                        + "\"purpose\":\"Einstieg sichten\"}]",
+                        + "[{\"query\":\"<topic> basics overview\","
+                        + "\"purpose\":\"<core aspect>\"}]",
                 new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
                         McpToolResult denied = requireWritable(ctx, ResearchStateIds.SCOPING);
@@ -830,8 +829,8 @@ public final class ResearchToolPolicy {
                         String suggestionsJson = call.getString("suggestions_json");
                         if (suggestionsJson == null || suggestionsJson.trim().isEmpty()) {
                             return McpToolResult.error("Missing argument: suggestions_json — "
-                                    + "example: [{\"query\":\"FreeRTOS ESP32 Grundlagen "
-                                    + "Tutorial\",\"purpose\":\"Einstieg sichten\"}]");
+                                    + "example: [{\"query\":\"<topic> basics overview\","
+                                    + "\"purpose\":\"<core aspect>\"}]");
                         }
                         String reply = ctx.offerSearches(suggestionsJson.trim());
                         if (reply == null) {
@@ -851,7 +850,7 @@ public final class ResearchToolPolicy {
                 "READ-ONLY: measure where the given terms sit relative to the negotiated "
                         + "research scope (LIKELY_IN / LIKELY_OUT / BOUNDARY / NOVEL). Changes "
                         + "nothing. Use it only for the late closure check. Example: "
-                        + "terms_json=[\"Priority Inversion\",\"SMP Scheduling\"].",
+                        + "terms_json=[\"<term 1>\",\"<term 2>\"].",
                 new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
                         McpToolResult denied = requireWritable(ctx, ResearchStateIds.SCOPING);
@@ -861,8 +860,8 @@ public final class ResearchToolPolicy {
                         java.util.List<String> terms = namesOf(call.getString("terms_json"));
                         if (terms == null || terms.isEmpty()) {
                             return McpToolResult.error("Missing argument: terms_json — a JSON "
-                                    + "array of terms, e.g. terms_json=[\"Priority Inversion\","
-                                    + "\"SMP Scheduling\"]");
+                                    + "array of terms, e.g. terms_json=[\"<term 1>\","
+                                    + "\"<term 2>\"]");
                         }
                         String reply = ctx.scopeProbe(terms);
                         if (reply == null) {

@@ -52,13 +52,19 @@ public final class ConceptToolRounds {
     }
 
     /**
-     * Exactly the placeholders the instructions use ({@code <area 1>}, {@code <topic>}, …). Deliberately a
-     * closed list: legitimate angle-bracket names a user researches ({@code <h1>}, {@code vector<int>}) pass.
+     * The placeholders the instructions themselves use, anywhere inside a value ({@code "<topic> basics"}).
      */
-    private static final java.util.regex.Pattern PLACEHOLDER = java.util.regex.Pattern.compile(
+    private static final java.util.regex.Pattern INSTRUCTION_PLACEHOLDER = java.util.regex.Pattern.compile(
             "<(topic|area \\d+|Bereich \\d+|card|child card|card name|subtopic|new name|new parent|term"
                     + "|term \\d+|leaf \\d+|facet-id|direction|first direction|second direction"
                     + "|third direction|core aspect|practical aspect|X|Y|Z)>");
+    /**
+     * A value that is NOTHING but an angle-bracket token or an ellipsis: {@code <name1>} (the Meerschweinchen
+     * live gate — a placeholder the model invented after the instructions' style), {@code <Bereich>},
+     * {@code ...}. Such a value is a placeholder unless the user or the current concept carries it literally.
+     */
+    private static final java.util.regex.Pattern WHOLE_PLACEHOLDER = java.util.regex.Pattern.compile(
+            "^\\s*(<[^<>]{1,40}>|\\.{3}|\u2026)\\s*$");
 
     private ConceptToolRounds() {
     }
@@ -121,6 +127,24 @@ public final class ConceptToolRounds {
                                       boolean nudgeOfferWhenMissing,
                                       ConceptTurnPolicy.Mode mode,
                                       boolean seededMovedReceipt, String seededMoveOutcome) {
+        return run(initial, turn, tool, maxToolRounds, maxRepairAttempts, germanFeedback,
+                intermediateSink, trace, nudgeOfferWhenMissing, mode, seededMovedReceipt,
+                seededMoveOutcome, null);
+    }
+
+    /**
+     * @param userText the user's message of this turn (null for machinery turns): a name the user wrote
+     *  literally — even one in angle brackets such as {@code <h1>} — is never taken for a placeholder, and a
+     *  bare greeting never triggers the card nudge.
+     */
+    public static TeamAgentResult run(TeamAgentResult initial, FollowUpTurn turn,
+                                      ConceptTool tool, int maxToolRounds,
+                                      int maxRepairAttempts, boolean germanFeedback,
+                                      IntermediateSink intermediateSink, Trace trace,
+                                      boolean nudgeOfferWhenMissing,
+                                      ConceptTurnPolicy.Mode mode,
+                                      boolean seededMovedReceipt, String seededMoveOutcome,
+                                      String userText) {
         boolean readOnly = mode == ConceptTurnPolicy.Mode.RESTRUCTURE_READ_ONLY
                 || mode == ConceptTurnPolicy.Mode.DELETE_READ_ONLY;
         if (readOnly) {
@@ -165,6 +189,9 @@ public final class ConceptToolRounds {
         boolean budgetExhausted = false;
         boolean offeredThisTurn = false;
         boolean offerNudgeSpent = false;
+        boolean cardsNudgeSpent = false;
+        // The cards the host reported ADDED this turn (receipt lines), for an honest host close.
+        java.util.List<String> addedCards = new java.util.ArrayList<String>();
         boolean suggestionGroundingSpent = false;
         // The AUTHORITATIVE change receipts, carried across the rounds: every feedback lists
         // WHICH actions were applied and WHICH were rejected (and why), plus the CURRENT
@@ -221,7 +248,7 @@ public final class ConceptToolRounds {
                     trace.line("visible answer spells the action \"" + leak + "\" while conceptAction is "
                             + channel + " — no repair budget left, host answer replaces the text");
                     return syntheticAnswer(TeamAgentPlaybook.conceptActionLeakAnswer(germanFeedback,
-                            !applied.isEmpty()), result);
+                            addedCards, offeredThisTurn), result);
                 }
                 // GROUNDING (live-gate 2): a finished turn whose scopePatch failed validation
                 // would leave the visible answer claiming a change the application refused
@@ -241,6 +268,21 @@ public final class ConceptToolRounds {
                     result = turn.run(withProbeMeaning(TeamAgentPlaybook.scopePatchRejected(
                             scopeUpdate.describeViolations(), germanFeedback),
                             probeMeaningReminder));
+                    continue;
+                }
+                // Meerschweinchen live gate: the first substantive turn offered searches and
+                // built NO card although the user named the areas. ONE machinery nudge asks for
+                // exactly the missing cards — only while the persisted concept is still empty,
+                // never on a bare greeting, never in a restricted turn, never over budget.
+                if (nudgeOfferWhenMissing && !cardsNudgeSpent && addedCards.isEmpty()
+                        && mode == ConceptTurnPolicy.Mode.FULL && !budgetExhausted && !probedThisTurn
+                        && isSubstantive(userText) && conceptIsEmpty(tool)) {
+                    cardsNudgeSpent = true;
+                    trace.line("concept cards missing (concept empty) — card nudge turn");
+                    if (intermediateSink != null) {
+                        intermediateSink.intermediate(output);
+                    }
+                    result = turn.run(TeamAgentPlaybook.conceptCardsMissing(germanFeedback));
                     continue;
                 }
                 // Gate 9b: the session's FIRST substantive card-building turn must not end
@@ -279,14 +321,14 @@ public final class ConceptToolRounds {
             }
             if (budgetExhausted) {
                 if (action != null && action.getType() == ConceptAction.Type.OFFER
-                        && !offeredThisTurn && hasPlaceholder(action)) {
+                        && !offeredThisTurn && hasPlaceholder(action, userText, currentConcept)) {
                     // The contamination guard covers the over-budget offer as well: an
                     // instruction placeholder never becomes a clickable search tag.
                     trace.line("wrap-up offer REFUSED (placeholder copied from the instructions)");
                     return withoutActionLeak(closeProbeTurn(withMoveTruth(result, mode, movedReceipt,
                             !applied.isEmpty(), moveOutcome, germanFeedback, trace),
-                            probeReceiptText, germanFeedback, trace), !applied.isEmpty(), germanFeedback,
-                            trace);
+                            probeReceiptText, germanFeedback, trace), addedCards, offeredThisTurn,
+                            germanFeedback, trace);
                 }
                 if (action != null && action.getType() == ConceptAction.Type.OFFER
                         && !offeredThisTurn) {
@@ -306,13 +348,13 @@ public final class ConceptToolRounds {
                     }
                     return withoutActionLeak(closeProbeTurn(withMoveTruth(result, mode, movedReceipt,
                             !applied.isEmpty(), moveOutcome, germanFeedback, trace),
-                            probeReceiptText, germanFeedback, trace), !applied.isEmpty(), germanFeedback,
-                            trace);
+                            probeReceiptText, germanFeedback, trace), addedCards, offeredThisTurn,
+                            germanFeedback, trace);
                 }
                 trace.line("tool budget exhausted — dropping the further conceptAction");
                 return withoutActionLeak(closeProbeTurn(withMoveTruth(result, mode, movedReceipt,
                         !applied.isEmpty(), moveOutcome, germanFeedback, trace),
-                        probeReceiptText, germanFeedback, trace), !applied.isEmpty(), germanFeedback, trace);
+                        probeReceiptText, germanFeedback, trace), addedCards, offeredThisTurn, germanFeedback, trace);
             }
             rounds++;
             String feedback;
@@ -347,7 +389,7 @@ public final class ConceptToolRounds {
                         "You already executed exactly this action in this turn — do not "
                                 + "repeat it. Finish with your final answer, or perform a "
                                 + "genuinely different REQUESTED action.", germanFeedback);
-            } else if (hasPlaceholder(action)) {
+            } else if (hasPlaceholder(action, userText, currentConcept)) {
                 // Prompt-contamination guard: the instructions show their examples with
                 // <placeholders>; a placeholder copied into an action is never the user's topic
                 // and never reaches the host.
@@ -477,6 +519,9 @@ public final class ConceptToolRounds {
                     } else {
                         conceptRevision = revisionIn(text, conceptRevision);
                         applied.add(action.describe() + " (revision " + conceptRevision + ")");
+                        if (action.getType() == ConceptAction.Type.ADD_CARDS) {
+                            addedCards.addAll(receiptNames(text, "ADDED"));
+                        }
                         executedMutationSignatures.add(action.describe());
                         refetchConcept = true;
                         if (action.getType() == ConceptAction.Type.MOVE) {
@@ -613,19 +658,114 @@ public final class ConceptToolRounds {
         return synthetic.isOk() ? TeamAgentResult.ok(synthetic.getOutput(), null) : fallback;
     }
 
-    /** True when the action carries an example placeholder of the instructions in any field. */
+    /** True when any value the action would hand to the host is a placeholder, not a real name. */
     static boolean hasPlaceholder(ConceptAction action) {
-        String suggestions = action.getType() == ConceptAction.Type.OFFER ? action.getSuggestionsJson() : null;
-        return PLACEHOLDER.matcher(action.describe()).find()
-                || (suggestions != null && PLACEHOLDER.matcher(suggestions).find());
+        return hasPlaceholder(action, null, null);
+    }
+
+    /**
+     * @param userText       the user's message (a literal name there is real, never a placeholder)
+     * @param currentConcept the persisted concept as last read (an existing card is real)
+     */
+    static boolean hasPlaceholder(ConceptAction action, String userText, String currentConcept) {
+        for (String value : valuesOf(action)) {
+            if (INSTRUCTION_PLACEHOLDER.matcher(value).find()) {
+                return true;
+            }
+            if (WHOLE_PLACEHOLDER.matcher(value).matches()) {
+                String literal = value.trim();
+                boolean real = (userText != null && userText.contains(literal))
+                        || (currentConcept != null && currentConcept.contains(literal));
+                if (!real) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Every name, path segment, topic and query an action carries. */
+    @SuppressWarnings("unchecked")
+    private static java.util.List<String> valuesOf(ConceptAction action) {
+        java.util.List<String> values = new java.util.ArrayList<String>();
+        values.addAll(action.getPath());
+        values.addAll(action.getParent());
+        if (action.getName() != null && action.getType() != ConceptAction.Type.OFFER) {
+            values.add(action.getName());
+        }
+        if (action.getType() == ConceptAction.Type.EXCLUDE && action.getTopic() != null) {
+            values.add(action.getTopic());
+        }
+        String json = action.getType() == ConceptAction.Type.ADD_CARDS ? action.getNamesJson()
+                : action.getType() == ConceptAction.Type.OFFER ? action.getSuggestionsJson()
+                : action.getType() == ConceptAction.Type.PROBE ? action.getTermsJson() : null;
+        if (json != null) {
+            try {
+                Object parsed = com.aresstack.askai.agent.model.reranker.MiniJson.parse(json);
+                if (parsed instanceof java.util.List) {
+                    for (Object element : (java.util.List<Object>) parsed) {
+                        if (element instanceof java.util.Map) {
+                            Object query = ((java.util.Map<String, Object>) element).get("query");
+                            if (query != null) {
+                                values.add(String.valueOf(query));
+                            }
+                        } else if (element != null) {
+                            values.add(String.valueOf(element));
+                        }
+                    }
+                }
+            } catch (RuntimeException notJson) {
+                values.add(json);
+            }
+        }
+        return values;
+    }
+
+    /** The names of one receipt category ("ADDED: Haltung" lines) in receipt order. */
+    static java.util.List<String> receiptNames(String receipt, String category) {
+        java.util.List<String> names = new java.util.ArrayList<String>();
+        if (receipt != null) {
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("(?m)^" + category + ": (.+)$").matcher(receipt);
+            while (matcher.find()) {
+                names.add(matcher.group(1).trim());
+            }
+        }
+        return names;
+    }
+
+    /** A user message worth building cards from: not empty, not a bare greeting. */
+    private static boolean isSubstantive(String userText) {
+        if (userText == null) {
+            return false;
+        }
+        String text = userText.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("[!.?,]", "").trim();
+        return text.length() >= 3 && !text.matches(
+                "(hallo|hi|hey|moin|servus|hello|guten (morgen|tag|abend)|danke|ok|okay|ja|nein)( .{0,12})?");
+    }
+
+    /** The persisted concept has no card yet (a failed read counts as "not known empty"). */
+    private static boolean conceptIsEmpty(ConceptTool tool) {
+        try {
+            String text = tool.call(readAll());
+            if (text == null) {
+                return false;
+            }
+            String flat = text.replaceAll("\\s+", "");
+            return flat.contains("\"concept\":[]") || flat.contains("\"concept\":[{}]");
+        } catch (ToolInvoker.ToolFailure failed) {
+            return false;
+        } catch (ToolInvoker.EndpointUnavailable dead) {
+            return false;
+        }
     }
 
     /**
      * The last line of defence for a turn that closes without a further inference (budget spent): a visible
      * answer that spells an action as text is replaced by the honest host answer instead of reaching the user.
      */
-    private static TeamAgentResult withoutActionLeak(TeamAgentResult result, boolean appliedAny,
-                                                     boolean german, Trace trace) {
+    private static TeamAgentResult withoutActionLeak(TeamAgentResult result, java.util.List<String> addedCards,
+                                                     boolean offered, boolean german, Trace trace) {
         if (result == null || !result.isOk() || !(result.getOutput() instanceof ScopingAssistantOutput)) {
             return result;
         }
@@ -636,7 +776,7 @@ public final class ConceptToolRounds {
         }
         trace.line("visible answer spells the action \"" + leak + "\" at the budget close — host answer "
                 + "replaces the text");
-        return syntheticAnswer(TeamAgentPlaybook.conceptActionLeakAnswer(german, appliedAny), result);
+        return syntheticAnswer(TeamAgentPlaybook.conceptActionLeakAnswer(german, addedCards, offered), result);
     }
 
     /** The whole-concept read used to ground the receipts in the persisted state. */

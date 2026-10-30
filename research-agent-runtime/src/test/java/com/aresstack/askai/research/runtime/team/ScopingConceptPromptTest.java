@@ -157,7 +157,7 @@ public class ScopingConceptPromptTest {
         assertTrue(schema.contains("\"topic\":{\"type\":\"string\"}"));
         assertTrue(schema.contains("\"enum\":[\"REMOVE\",\"KEEP_SUPPRESSED\"]"));
         assertTrue("the action decision is always explicit",
-                schema.contains("\"required\":[\"assistantMessage\",\"conceptAction\"]"));
+                schema.contains("\"required\":[\"conceptAction\",\"assistantMessage\"]"));
         assertTrue("runaway lists are stopped by the grammar", schema.contains("maxItems"));
         // Scope hardening after the live gates: operations pin their kind AND a non-empty
         // facetId (gate 2: excludeFacet/addFacet arrived without one and the exclusion never
@@ -241,5 +241,27 @@ public class ScopingConceptPromptTest {
                 with.contains("{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<area 1>\""));
         assertTrue("a bare topic gets the topic's own areas",
                 with.contains("When the user only names a topic, the first cards are the main areas of THAT topic"));
+    }
+
+    /**
+     * Meerschweinchen live gate: with assistantMessage generated first the small model narrated its action
+     * ("add_cards: …") and then answered "none". The grammar (required properties first, in schema order)
+     * and the prompt contract now put conceptAction FIRST.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    public void theActionComesBeforeTheVisibleMessage() {
+        java.util.Map<String, Object> schema = (java.util.Map<String, Object>)
+                com.aresstack.askai.agent.model.reranker.MiniJson.parse(
+                        new ScopingPhaseOutputContract(true).outputSchemaJson());
+        java.util.List<String> keys = new java.util.ArrayList<String>(
+                ((java.util.Map<String, Object>) schema.get("properties")).keySet());
+        assertEquals("conceptAction", keys.get(0));
+        assertEquals("assistantMessage", keys.get(1));
+        assertEquals(java.util.Arrays.asList("conceptAction", "assistantMessage"), schema.get("required"));
+        String with = TeamAgentPlaybook.scopingSystemPrompt(true, true);
+        assertTrue(with.indexOf("\"conceptAction\": {") < with.indexOf("\"assistantMessage\": string"));
+        assertFalse("no placeholder-valued example in the nudges", TeamAgentPlaybook.offerSearchesMissing(true)
+                .contains("\"...\""));
     }
 }
