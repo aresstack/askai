@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -28,7 +29,7 @@ public final class UserContextWebAcquisition implements WebAcquisition {
     public interface SearchRun {
         Result run(ToolInvoker browser, String query, ToolInvoker research,
                    Consumer<WebSearchApplicationService.AcceptedSource> accepted, long maxDurationMillis,
-                   AtomicLong tokens);
+                   AtomicLong tokens, BooleanSupplier exhausted);
     }
 
     /** The worker id the leases carry (diagnostics and per-chat bookkeeping in the pool). */
@@ -59,8 +60,8 @@ public final class UserContextWebAcquisition implements WebAcquisition {
         if (browserSlots(pool) > 0) {
             return new UserContextWebAcquisition(pool, run);
         }
-        return (query, research, accepted, maxDurationMillis, tokens) ->
-                run.run(sharedBrowser, query, research, accepted, maxDurationMillis, tokens);
+        return (query, research, accepted, maxDurationMillis, tokens, exhausted) ->
+                run.run(sharedBrowser, query, research, accepted, maxDurationMillis, tokens, exhausted);
     }
 
     /** How many browser-bound tasks may run at once on {@code pool}; 0 = no pool (use the setting). */
@@ -84,7 +85,7 @@ public final class UserContextWebAcquisition implements WebAcquisition {
     @Override
     public Result acquire(String query, ToolInvoker research,
                           Consumer<WebSearchApplicationService.AcceptedSource> accepted, long maxDurationMillis,
-                          AtomicLong tokens) {
+                          AtomicLong tokens, BooleanSupplier exhausted) {
         // Waits at most the "Worker browsers" wait setting for a free user context, and never longer than the
         // package's remaining time; the wait is taken off the time the search run gets.
         BrowserUserContextRequest request = BrowserUserContextRequest.of(WORKER_ID,
@@ -102,7 +103,7 @@ public final class UserContextWebAcquisition implements WebAcquisition {
                             "the package's time ran out waiting for a worker browser");
                 }
             }
-            return run.run(lease.browser(), query, research, accepted, left, tokens);
+            return run.run(lease.browser(), query, research, accepted, left, tokens, exhausted);
         } catch (BrowserCapacityException busy) {
             // Retryable: another package may have given its user context back by the next attempt.
             return new Result(ResearchStopReason.MCP_UNAVAILABLE, "no worker browser: " + busy.getMessage());

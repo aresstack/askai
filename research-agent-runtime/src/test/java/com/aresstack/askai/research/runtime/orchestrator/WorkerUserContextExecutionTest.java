@@ -117,7 +117,7 @@ public class WorkerUserContextExecutionTest {
 
     /** The session's funnel stand-in: records which browser lane it drove and how many ran at once. */
     private UserContextWebAcquisition.SearchRun searchRun(final long millis) {
-        return (browser, query, research, accepted, maxDurationMillis, tokens) -> {
+        return (browser, query, research, accepted, maxDurationMillis, tokens, exhausted) -> {
             lanesUsed.add(browser);
             maxRunning.accumulateAndGet(running.incrementAndGet(), Math::max);
             try {
@@ -229,11 +229,11 @@ public class WorkerUserContextExecutionTest {
     public void theUserContextIsGivenBackWhenTheSearchRunFails() {
         FakePool pool = new FakePool(2);
         WebAcquisition acquisition = UserContextWebAcquisition.over(pool, chatBrowser,
-                (browser, query, research, accepted, maxDurationMillis, tokens) -> {
+                (browser, query, research, accepted, maxDurationMillis, tokens, exhausted) -> {
                     throw new IllegalStateException("loop crashed");
                 });
         try {
-            acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong());
+            acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong(), () -> false);
             fail("the failure propagates");
         } catch (IllegalStateException expected) {
             assertEquals("loop crashed", expected.getMessage());
@@ -247,14 +247,14 @@ public class WorkerUserContextExecutionTest {
         FakePool pool = new FakePool(1);
         pool.refuse = new BrowserCapacityException("all user contexts busy");
         WebAcquisition acquisition = UserContextWebAcquisition.over(pool, chatBrowser, searchRun(1));
-        WebAcquisition.Result busy = acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong());
+        WebAcquisition.Result busy = acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong(), () -> false);
         assertEquals(ResearchStopReason.MCP_UNAVAILABLE, busy.getStopReason());
         assertTrue(busy.getSummary(), busy.getSummary().contains("all user contexts busy"));
         assertEquals(WorkerResult.Kind.RETRYABLE, WebResearchWorker.map(busy.getStopReason(), "").getKind());
 
         pool.refuse = null;
         pool.interrupt = true;
-        WebAcquisition.Result cancelled = acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong());
+        WebAcquisition.Result cancelled = acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong(), () -> false);
         assertTrue("interrupt status kept", Thread.interrupted());
         assertEquals(ResearchStopReason.USER_CANCELLED, cancelled.getStopReason());
         assertTrue("nothing ran", lanesUsed.isEmpty());
@@ -305,7 +305,7 @@ public class WorkerUserContextExecutionTest {
         final java.util.concurrent.atomic.AtomicReference<WebAcquisition.Result> result =
                 new java.util.concurrent.atomic.AtomicReference<WebAcquisition.Result>();
         Thread worker = new Thread(() -> result.set(
-                acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong())));
+                acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong(), () -> false)));
         worker.start();
         Thread.sleep(200L);
         long start = System.nanoTime();
@@ -323,7 +323,7 @@ public class WorkerUserContextExecutionTest {
         FakePool pool = new FakePool(1);
         final UserContextWebAcquisition acquisition = (UserContextWebAcquisition) UserContextWebAcquisition.over(
                 pool, chatBrowser, searchRun(300));
-        Thread worker = new Thread(() -> acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong()));
+        Thread worker = new Thread(() -> acquisition.acquire("q", null, source -> { }, 0L, new AtomicLong(), () -> false));
         worker.start();
         Thread.sleep(100L); // the search run is running now
         acquisition.cancelWaits();
@@ -338,16 +338,16 @@ public class WorkerUserContextExecutionTest {
         pool.delayMillis = 200L;
         final AtomicLong runGot = new AtomicLong(-1);
         WebAcquisition acquisition = UserContextWebAcquisition.over(pool, chatBrowser,
-                (browser, query, research, accepted, maxDurationMillis, tokens) -> {
+                (browser, query, research, accepted, maxDurationMillis, tokens, exhausted) -> {
                     runGot.set(maxDurationMillis);
                     return new WebAcquisition.Result(ResearchStopReason.SUFFICIENT_EVIDENCE, "");
                 });
-        acquisition.acquire("q", null, source -> { }, 1_000L, new AtomicLong());
+        acquisition.acquire("q", null, source -> { }, 1_000L, new AtomicLong(), () -> false);
         assertEquals("the wait may not exceed the package's time", 1_000L, pool.requestedTimeout);
         assertTrue("the search run gets the time that is left: " + runGot.get(),
                 runGot.get() > 0 && runGot.get() <= 800L);
 
-        WebAcquisition.Result late = acquisition.acquire("q", null, source -> { }, 100L, new AtomicLong());
+        WebAcquisition.Result late = acquisition.acquire("q", null, source -> { }, 100L, new AtomicLong(), () -> false);
         assertEquals(ResearchStopReason.TIME_BUDGET_EXHAUSTED, late.getStopReason());
         for (FakeLease lease : pool.inner.leases) {
             assertFalse("given back", lease.isOpen());

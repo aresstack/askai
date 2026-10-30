@@ -95,7 +95,7 @@ public final class WebResearchWorker implements TaskWorker {
                             context.artifact(TaskArtifact.Kind.FINDING, evidence, source.getSourceId());
                         }
                     }
-                }, remaining, context.tokens());
+                }, remaining, context.tokens(), context::isBudgetExhausted);
         ResearchStopReason reason = result.getStopReason();
         String line = "search run stopped: " + reason + ", " + accepted.get() + " source(s) accepted"
                 + (result.getSummary().isEmpty() ? "" : "; " + result.getSummary());
