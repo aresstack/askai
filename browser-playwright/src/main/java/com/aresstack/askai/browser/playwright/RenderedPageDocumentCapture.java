@@ -263,6 +263,7 @@ final class RenderedPageDocumentCapture {
                 + "  const vw = window.innerWidth, vh = window.innerHeight;\n"
                 + "  const containers = [], links = [], warnings = [];\n"
                 + "  let truncated = false, containerSeq = 0, linkSeq = 0;\n"
+                + "  let capReached = false, depthReached = false, linkCapReached = false;\n"
                 + "  const pad = n => String(n).padStart(4, '0');\n"
                 + "  const clean = t => (t || '').replace(/\\s+/g, ' ').trim();\n"
                 // textContent minus the SKIP subtrees: raw textContent includes <style>/<script> text,
@@ -312,7 +313,7 @@ final class RenderedPageDocumentCapture {
                 + "    return '';\n"
                 + "  };\n"
                 + "  const recordLink = (a, containerId, ctx) => {\n"
-                + "    if (ctx.links >= MAX_LINKS_PER) { truncated = true; return; }\n"
+                + "    if (ctx.links >= MAX_LINKS_PER) { truncated = true; linkCapReached = true; return; }\n"
                 + "    ctx.links++;\n"
                 + "    const rect = a.getBoundingClientRect();\n"
                 + "    const st = getComputedStyle(a);\n"
@@ -361,7 +362,9 @@ final class RenderedPageDocumentCapture {
                 + "    stats.externalLinks++;\n"
                 + "  };\n"
                 + "  const walk = (el, parentId, depth, siblingIndex) => {\n"
-                + "    if (containerSeq >= MAX_CONTAINERS || depth > MAX_DEPTH) { truncated = true; return null; }\n"
+                + "    if (containerSeq >= MAX_CONTAINERS) { truncated = true; capReached = true; return null; }\n"
+                + "    if (depth > MAX_DEPTH) { truncated = true; depthReached = true; return null; }\n"
+                + "    const seqAtEntry = containerSeq, containersAtEntry = containers.length;\n"
                 + "    const id = 'container-' + pad(++containerSeq);\n"
                 + "    const stats = { text: 0, linkText: 0, headings: 0, paragraphs: 0, linkCount: 0,\n"
                 + "      sameHostLinks: 0, sameRegistrableLinks: 0, subdomainLinks: 0,\n"
@@ -371,6 +374,9 @@ final class RenderedPageDocumentCapture {
                 + "    let childIndex = 0;\n"
                 + "    for (const child of el.childNodes) {\n"
                 + "      if (child.nodeType === 1 && CONTAINER.has(child.tagName) && !SKIP.has(child.tagName)) {\n"
+                // display:none subtrees (closed flyouts, menus, templates) are never visible results;
+                // walking them only spent the container budget before the result list was reached.
+                + "        if (getComputedStyle(child).display === 'none') continue;\n"
                 + "        const childResult = walk(child, id, depth + 1, childIndex);\n"
                 + "        if (childResult) {\n"
                 + "          childIds.push(childResult.id); childIndex++;\n"
@@ -390,6 +396,13 @@ final class RenderedPageDocumentCapture {
                 + "      } else {\n"
                 + "        collectInline(child, id, stats, ctx);\n"
                 + "      }\n"
+                + "    }\n"
+                // A subtree without any text or link (icon/image wrappers, spacers, empty slots) can
+                // never hold a result; it gives its ids back so the budget reaches the result list.
+                // The descendants were pushed after this entry, so they are exactly the tail.
+                + "    if (depth > 0 && stats.text === 0 && stats.linkCount === 0) {\n"
+                + "      containers.length = containersAtEntry; containerSeq = seqAtEntry;\n"
+                + "      return null;\n"
                 + "    }\n"
                 + "    const rect = el.getBoundingClientRect();\n"
                 + "    const st = getComputedStyle(el);\n"
@@ -443,6 +456,14 @@ final class RenderedPageDocumentCapture {
                 + "    return { id: id, stats: stats };\n"
                 + "  };\n"
                 + "  if (document.body) walk(document.body, '', 0, 0);\n"
+                // Truncation must be VISIBLE in the diagnostics: a capped capture flattens everything
+                // past the bound into its ancestors, and the result list then no longer repeats.
+                + "  if (capReached) warnings.push('CAPTURE_TRUNCATED: container cap ' + MAX_CONTAINERS\n"
+                + "      + ' reached; later page structure was flattened into its ancestors');\n"
+                + "  if (depthReached) warnings.push('CAPTURE_TRUNCATED: container depth bound ' + MAX_DEPTH\n"
+                + "      + ' reached');\n"
+                + "  if (linkCapReached) warnings.push('CAPTURE_TRUNCATED: more than ' + MAX_LINKS_PER\n"
+                + "      + ' links in one container; the rest was not recorded');\n"
                 + "  return {\n"
                 + "    viewportWidth: vw, viewportHeight: vh,\n"
                 + "    documentWidth: document.documentElement ? document.documentElement.scrollWidth : vw,\n"

@@ -39,7 +39,11 @@ public final class SearchPageMechanicalAnalyzer {
         for (RenderedContainerDescriptor container : document.containers) {
             SearchPageRegionClassification region = classify(container);
             regions.put(container.containerId, region);
+            // The root (body) is the whole page, never a result region: the decision validator
+            // refuses it as FULL_PAGE_SELECTION, so offering it only let a small model pick it on
+            // every repair attempt.
             if (region == SearchPageRegionClassification.UNKNOWN && container.visible
+                    && !container.parentContainerId.isEmpty()
                     && container.linkCount > 0
                     && container.totalTextLength
                             >= settings.analysis.minimumContainerTextCharacters) {

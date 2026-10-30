@@ -43,10 +43,50 @@ public class McpLayoutRepairClientTest {
                 1000L);
     }
 
+    /** The same ticket without a harvested fallback — a page with no external link at all. */
+    private PreparedWebSearchResult repairRequiredWithoutFallback() {
+        PreparedWebSearchResult prepared = repairRequired();
+        return new PreparedWebSearchResult(prepared.status,
+                new ArrayList<com.aresstack.askai.browser.search.SearchResultCandidate>(),
+                prepared.repairRequests, prepared.providerHosts, prepared.engineAttempts,
+                prepared.challenges, prepared.diagnostics);
+    }
+
+    private McpLayoutRepairClient unavailableRepairClient(FakeBrowser browser) {
+        return new McpLayoutRepairClient(browser,
+                new SearchLayoutRepairCoordinator(RepairBridgeFixtures.lowConfidenceAiEnabled(),
+                        new UnavailableStructuredInferencePort(), InferenceBudgetGate.ALLOW_ALL,
+                        RetryDelay.IMMEDIATE, null));
+    }
+
+    @Test
+    public void everyRepairFailingFallsBackToTheHarvestedLinks() throws Exception {
+        // Live on Bing: three repair attempts failed and the search ended "technically failed"
+        // although the page listed results. The harvested external links are the answer then.
+        PreparedWebSearchResult prepared = repairRequired();
+        assertFalse("fixture: the prepare carried a harvested fallback",
+                prepared.candidates.isEmpty());
+        FakeBrowser browser = new FakeBrowser();
+        browser.answers.put("web_search_prepare", SearchLayoutRepairJson.encodePrepared(prepared));
+
+        McpLayoutRepairClient.Result result = unavailableRepairClient(browser)
+                .searchWithRepair("q", CancellationSignal.NONE, 1000L, UNLIMITED);
+
+        assertEquals(McpLayoutRepairClient.Outcome.ORGANIC_RESULTS, result.status);
+        assertEquals(prepared.candidates.size(), result.candidates.size());
+        assertFalse("apply must never run without a validated decision",
+                browser.calls.contains("web_search_apply_layout"));
+        String diagnostics = describe(result.diagnostics);
+        assertTrue("the AI outcome stays visible: " + diagnostics,
+                diagnostics.contains("AI_UNAVAILABLE"));
+        assertTrue("the fallback is named: " + diagnostics,
+                diagnostics.contains("falling back to"));
+    }
+
     @Test
     public void aiUnavailableRepairEndsInHonestExtractionFailedWithPerTicketDiagnostics()
             throws Exception {
-        PreparedWebSearchResult prepared = repairRequired();
+        PreparedWebSearchResult prepared = repairRequiredWithoutFallback();
         assertEquals(WebSearchPreparationStatus.REPAIR_REQUIRED, prepared.status);
         FakeBrowser browser = new FakeBrowser();
         browser.answers.put("web_search_prepare", SearchLayoutRepairJson.encodePrepared(prepared));

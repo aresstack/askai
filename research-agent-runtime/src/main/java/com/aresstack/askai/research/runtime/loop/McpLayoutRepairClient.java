@@ -20,8 +20,9 @@ import java.util.Map;
  * {@code web_search_prepare}; on REPAIR_REQUIRED it runs the model-using
  * {@link SearchLayoutRepairCoordinator} (profile or {@code StructuredInferencePort}) for each ordered
  * repair ticket and sends a validated decision back through {@code web_search_apply_layout} until one
- * yields organic results. If every repair fails, the outcome is EXTRACTION_FAILED — never a fabricated
- * empty engine. The central research tool budget is consulted BEFORE every MCP call via
+ * yields organic results. If every repair fails, the harvested external links the prepare step carried
+ * along are the result; only without them the outcome is EXTRACTION_FAILED — never a fabricated empty
+ * engine. The central research tool budget is consulted BEFORE every MCP call via
  * {@link ToolBudget}; the coordinator's inference budget covers only the model calls.
  */
 public final class McpLayoutRepairClient {
@@ -145,6 +146,16 @@ public final class McpLayoutRepairClient {
                         diagnostics);
             }
             // this ticket produced no valid block — try the next repair ticket / engine
+        }
+        if (!prepared.candidates.isEmpty()) {
+            // Every repair failed, but the pages' external links were harvested: hand them to the
+            // reranker instead of ending a search on a page that visibly listed results.
+            String fallback = "layout repair failed for every ticket — falling back to "
+                    + prepared.candidates.size() + " harvested external link(s)";
+            diagnostics.add(fallback);
+            System.err.println("[initial-search] " + fallback);
+            return result(Outcome.ORGANIC_RESULTS, prepared.candidates, providerHosts, challenges,
+                    diagnostics);
         }
         return result(Outcome.EXTRACTION_FAILED, noCandidates(), providerHosts, challenges,
                 diagnostics);
