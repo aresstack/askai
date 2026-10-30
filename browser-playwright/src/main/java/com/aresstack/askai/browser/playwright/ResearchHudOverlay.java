@@ -10,6 +10,10 @@ import com.aresstack.askai.browser.hud.ResearchHudState;
  * {@code page.innerText("body")} and walks {@code document.body}, so the HUD is outside every capture and every
  * consent/challenge/block text scan.
  *
+ * <p>Since the AskAI Research add-on (docs/research-browser-addon.md) this overlay is only the FALLBACK: a page can
+ * see the host element and the window globals, the add-on's toolbar button and sidebar it cannot. Camoufox shows the
+ * HUD through the add-on; the overlay is used for Chrome/Edge and when the add-on does not connect.</p>
+ *
  * <p>Buttons call {@code window.__askaiHudCommand('PAUSE'|'RESUME'|'SKIP'|'NEXT')}, which the browser runtime wires to an
  * exposed binding that buffers the command for the runtime to poll. Pure string building — unit-testable without
  * a browser.</p>
@@ -120,6 +124,17 @@ final class ResearchHudOverlay {
                         ? "  wait.hidden = false; $('hud-count').textContent = " + state.countdownSeconds + ";\n"
                         : "  wait.hidden = true;\n")
                 + "  return 'rendered';\n"
+                + "}";
+    }
+
+    /** Take the fallback overlay out of the page again (the research add-on took over). Returns 'removed'/'none'. */
+    static String removeScript() {
+        return "() => {\n"
+                + "  const host = document.getElementById('" + HOST_ID + "');\n"
+                + "  delete window.__askaiResearchHudRoot;\n"
+                + "  if (!host) return 'none';\n"
+                + "  host.remove();\n"
+                + "  return 'removed';\n"
                 + "}";
     }
 
