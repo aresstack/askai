@@ -186,7 +186,7 @@ public class LangChain4jSpikeLiveTest {
             result = WorkerResult.failed("unmapped " + unexpected.getClass().getSimpleName() + ": "
                     + unexpected.getMessage());
         }
-        book(tally, result, context, counting, start, twin.tokens());
+        book(tally, result, context, counting, start, context.tokens.get());
     }
 
     private static void book(Tally tally, WorkerResult result, SpikeWorkerContext context, CountingPort counting,

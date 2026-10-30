@@ -30,6 +30,7 @@ public class SearchPlannerTwinTest {
         WorkerResult result;
         List<String> queries;
         List<String> requests = new ArrayList<String>();
+        long tokens;
     }
 
     private static Run original(Consumer<ScriptedModelPort> script, String... searched) {
@@ -60,6 +61,7 @@ public class SearchPlannerTwinTest {
 
     private static Run finish(Run run, SpikeWorkerContext context, ScriptedModelPort port) {
         run.queries = context.plannedQueries();
+        run.tokens = context.tokens.get();
         for (ChatRequest request : port.requests()) {
             run.requests.add(ScriptedModelPort.describe(request));
         }
@@ -84,6 +86,8 @@ public class SearchPlannerTwinTest {
         assertEquals(WorkerResult.Kind.COMPLETED, twin.result.getKind());
         assertEquals(Arrays.asList("BEG heat pump subsidy 2024 rates", "KfW 458 heat pump grant"), twin.queries);
         assertEquals(1, twin.requests.size());
+        assertEquals("both twins book the same tokens on the task", original.tokens, twin.tokens);
+        assertTrue(twin.tokens > 0);
         assertTrue("the planner setting's maxItems reaches the wire schema", twin.requests.get(0)
                 .contains("\"maxItems\":3"));
     }

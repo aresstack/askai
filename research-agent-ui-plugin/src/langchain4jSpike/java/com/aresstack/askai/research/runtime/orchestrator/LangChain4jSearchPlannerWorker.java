@@ -20,7 +20,6 @@ import dev.langchain4j.service.AiServices;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -31,9 +30,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * reached through {@link ModelPortChatModel} over the host's model port. SPIKE ONLY: not registered as a worker
  * and not in the plugin's lib/.
  *
- * <p>What it cannot do through today's {@link WorkerContext}: book its tokens on the task budget. The context
- * only hands out the original's chat transport; this twin needs the port, so it gets the port at construction
- * and counts its tokens on its own counter.</p>
+ * <p>The twin needs the port itself (the context's chat transport has no LangChain4j shape), so it gets the port
+ * at construction; its tokens are booked on the task's account ({@link WorkerContext#tokens()}), so they count
+ * against the task and the run budget like the original's.</p>
  */
 public final class LangChain4jSearchPlannerWorker implements TaskWorker {
 
@@ -49,7 +48,6 @@ public final class LangChain4jSearchPlannerWorker implements TaskWorker {
     private final int maxQueries;
     private final int repairAttempts;
     private final int maxOutputTokens;
-    private final AtomicLong tokens = new AtomicLong();
 
     public LangChain4jSearchPlannerWorker(ModelPort port, Duration timeout, int maxQueries, int repairAttempts,
                                           int maxOutputTokens) {
@@ -68,11 +66,6 @@ public final class LangChain4jSearchPlannerWorker implements TaskWorker {
     @Override
     public boolean needsBrowser() {
         return false;
-    }
-
-    /** Tokens of every call this twin made (it cannot book them on the task budget, see the class doc). */
-    public long tokens() {
-        return tokens.get();
     }
 
     @Override
@@ -108,7 +101,7 @@ public final class LangChain4jSearchPlannerWorker implements TaskWorker {
         };
         Planner planner = AiServices.builder(Planner.class)
                 .chatModel(new ModelPortChatModel(port, SearchPlannerWorker.ROLE.getSlot(),
-                        SearchPlannerWorker.ROLE.getContextTokens(), timeout, tokens))
+                        SearchPlannerWorker.ROLE.getContextTokens(), timeout, context.tokens()))
                 .systemMessage(SearchPlannerWorker.SYSTEM)
                 .chatMemory(MessageWindowChatMemory.withMaxMessages(3 + 2 * (repairAttempts + 1)))
                 .chatRequestTransformer(request -> request.toBuilder()

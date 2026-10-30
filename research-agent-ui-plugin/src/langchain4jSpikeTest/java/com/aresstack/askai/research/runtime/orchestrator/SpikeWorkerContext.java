@@ -93,4 +93,8 @@ final class SpikeWorkerContext implements WorkerContext {
     public boolean isBudgetExhausted() {
         return false;
     }
+
+    public AtomicLong tokens() {
+        return tokens;
+    }
 }

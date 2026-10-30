@@ -51,7 +51,7 @@ reader, repair reason, budget, cancel) has to be translated into a framework ext
 | Tool-round budget with a graceful close of the turn | **no**: `maxSequentialToolsInvocations` throws; the turn's text is lost and the caller must build the close itself (our `ConceptToolRounds` closes the turn with what it has) |
 | Repair round with the reader's reason | yes, `OutputGuardrail.reprompt`; **`maxRetries` counts attempts, not repairs** (`maxRetries(1)` sends nothing back; found by the twin test) |
 | Schema limits from settings (`maxItems`, `minLength`, `maxLength`) | **not in the typed schema model** (`JsonArraySchema`/`JsonStringSchema` have no limits); only as `JsonRawSchema`, which the adapter passes verbatim |
-| Booking tokens on the task budget | **not through today's `WorkerContext`**: it hands out the product chat transport, while the twin needs the port. The twin counts its own tokens; booking them would need a runtime interface change (not made) |
+| Booking tokens on the task budget | yes, through `WorkerContext.tokens()` (added by lane F for the layout repair); the twin's adapter meters onto it, `SearchPlannerTwinTest` pins equal bookings |
 | Cancel | between attempts (guardrail returns `fatal`) or by interrupting the calling thread; no handle on the AI service call |
 | Model access, slots, scheduling, residency | stay in the platform: the adapter is one port call on one slot, LangChain4j never sees a model name |
 
@@ -93,7 +93,7 @@ reachable at ...", with a missing model it names the model.
 > twins send identical requests to the port. Findings: the role loop grows from 38 to 68 lines plus a 156-line
 > adapter; receipts, the sensor lock and the repetition guard can be plugged in only by wrapping each
 > `ToolExecutor`; the tool-round budget ends with an exception instead of a graceful close; settings-driven
-> schema limits need raw schemas; per-task token booking would need a change to `WorkerContext`; bundling would
+> schema limits need raw schemas; bundling would
 > add about 5 MB to the plugin `lib/`, including Jackson and an OpenNLP 2.x that conflicts with the plugin's
 > 1.9.4.
 >
