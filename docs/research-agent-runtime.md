@@ -8,8 +8,10 @@ and its ACP wire are gone. It is never part of the AskAI fat jar.
 
 ## Session contract
 
-- `ResearchAgentSession(environment, research, browser, service)` — one instance per research session,
-  created by the plugin's `InProcessResearchSessionBackend`. The `ToolInvoker` lanes are the host's own
+- `ResearchAgentSession(environment, research, browser, service, modelPort)` — one instance per research
+  session, created by the plugin's `InProcessResearchSessionBackend`. `modelPort` is the host's `ModelPort`
+  service (see "Model access" below); a host without it leaves the model roles honestly
+  `MODEL_UNAVAILABLE`. The `ToolInvoker` lanes are the host's own
   tool contributions: `ContributionToolInvoker` dispatches directly to the `McpToolContribution`s of the
   research-control, service and browser-bridge endpoints — no MCP client, no HTTP. The same tools stay
   published on the host's loopback MCP server for external clients (bot control).
@@ -24,6 +26,58 @@ and its ACP wire are gone. It is never part of the AskAI fat jar.
   wire the plugin's `ResearchAgentEventMapper` turns into backend events.
 - `cancel()` stops the running turn at the next gate; `close()` releases the model watcher and the
   provider registry. Diagnostics go to STDERR only; logs never contain tokens.
+
+## Model access: model port v2 and slots (ADR 0001, 3.2 and 4.5)
+
+The runtime has no Ollama client and sees no model names. Every model call goes through the host's
+`ModelPort` (`agent-model-runtime-api`, package `agent.model.port`): one call is one model turn with
+messages, tool definitions, an output format (text, JSON, JSON schema), a thinking mode, a context size and
+a timeout; the port streams thinking and content deltas, can be cancelled and never executes tools.
+`PortMainModelChat` (package `team`) and `PortStructuredInferenceClient` (package `inference`) replace the
+former HTTP clients and keep their call shapes; tests use `FakeModelPort` instead of a mock HTTP server.
+
+Each call names a model slot, never a model. `ResearchModelSlots` defines `conversation`, `scope`, `judge`,
+`layout-repair`, `orchestrator`, `planner`, `verifier` and `synthesis`. The platform resolves a slot to the
+model the user assigned to it, otherwise to the main model, so an unconfigured install behaves as before.
+
+The host implementation is `OllamaModelPort` in `askai-app` (package `modelport`) on ollama4j, published to
+plugins by `AgentRuntimeServices`. Its `ModelResourceScheduler` owns the resource contract of ADR 4.5:
+endpoints `ollama` and `local-runtime`, a capacity per model and endpoint (setting, default 1; never more
+calls on the wire than the capacity), a GPU memory budget per endpoint, waiting work grouped by model so a
+model switch is one deliberate step, residency read from `GET /api/ps` (advisory only) and `keep_alive` on
+every call. All of it is a setting in `model-port.properties`, edited in the panel "Model resources"
+under AI models (capacity, memory budget, model and context per slot, keep-alive, maximum wait).
+
+## Roles (ADR 0001, 4.1)
+
+A model role is a `ResearchRole` (package `role`): id, purpose, system prompt (or `CALLER` when the request
+carries it), tool catalog (`RoleToolCatalog`, bound to what the host offers at call time, never more),
+output contract (`RoleOutput`: TEXT, JSON, JSON_SCHEMA), model slot and context size (0 = the slot's
+setting). Callers reach a model only through `RoleChatFactory.chatFor(role)`; productive is
+`ResearchAgentSession.roleChats()`, tests and the benchmark inject their own.
+
+`ResearchRoles` lists the five roles that existed before the ADR (`CONVERSATION`,
+`SCOPE_PROBE_GENERATOR`, `SCOPE_ADVICE_CHOOSER`, `PAGE_READINESS_JUDGE`, `SERP_LAYOUT_REPAIR`); their
+prompts are byte-identical to before and pinned by SHA-256 in `ResearchRolesTest`. `ResearchRoles.orchestration()`
+adds the orchestrator and the worker roles below. The conversation TeamAgent runs per-phase profiles
+(`PhaseAssistantProfile`): RESEARCH and DRAFT (FINALIZATION shares the DRAFT prompt) have their own
+prompts and read-only tool subsets; no profile can advance a phase.
+
+## Task model and persistence (ADR 0001, 4.4)
+
+A work package is a `ResearchTask` (`research-domain`, package `research.domain.task`): id, phase (the
+plugin's phase name as text), role, dependencies, state, inputs, artifacts (`FINDING`, `SOURCE_REFERENCE`,
+`VERDICT`, `TEXT`), model slot, context size, time and token budget, retry counter and limit, receipts,
+timestamps and the assigned endpoint. `TaskState` is our own enumeration (`submitted`, `working`,
+`input-required`, `completed`, `failed`, `canceled`, `rejected`, names chosen to match A2A 1.0, no
+dependency) with one closed transition table; an invalid transition throws
+`IllegalTaskTransitionException`.
+
+The plugin persists every task as `<project>/tasks/<taskId>.json` (`FileResearchTaskStore`, Gson, written
+atomically on every change, full transition history). A file that breaks the rules is rejected and
+reported, never repaired. `ResearchTaskResumption` applies the resume rules: completed tasks are never re-run,
+`working` tasks are re-queued as interrupted within their retry limit, `input-required` tasks keep waiting
+for the user, budgets carry over. The State tab shows a read-only task list when a run has tasks.
 
 ## The autonomous loop (36A)
 
@@ -111,6 +165,43 @@ its own subject (`orchestrated+search-planner`, `orchestrated+source-verifier`, 
 next to `orchestrated-run` (all lane G roles off) and the baseline; select subjects with
 `-Daskai.benchmark.subjects=...`.
 
+## Parallel browsing for workers (BrowserUserContextPool)
+
+Research workers of one chat browse in parallel (design: `docs/research-browser-user-contexts.md`). Terms
+follow WebDriver BiDi: each search run of a worker gets its own **user context** (`browser.createUserContext`:
+own cookies, local storage and sign-ins); inside it the worker opens **browsing contexts** (tabs,
+`browsingContext.create` with `userContext`). The chat's own browser (the chat's own persistent Camoufox
+profile, HUD, serial loop, manual search) stays the chat browser; each chat now has its own persistent
+profile instead of one shared profile for the first session.
+
+Playwright Java runs one call at a time per instance, so real parallelism comes from several **worker
+browsers**: each is one Playwright instance on its own owner thread with one non-persistent browser process
+hosting several user contexts, and belongs to exactly one chat. Every worker tab is served through the
+session's `BrowserBridgeEndpoint`, so every page lands in the session's one `CaptureStore` and goes through
+its one `SourceAcceptanceService`. Sign-in state is kept only on request, outside the project folder. The
+runtime API is `runtime.browser.BrowserUserContextPool`; the plugin hands it out via
+`ProductiveResearchSessionResources.getBrowserUserContexts()`. Plugin settings row "Worker browsers":
+processes 3, user contexts per process 4, tabs per user context 4, per site 2, wait 120 s; separate from the
+model capacity.
+
+Wiring into the orchestrated run:
+
+- `ProductiveResearchBackendFactory.createSession` hands the chat's pool through
+  `InProcessResearchSessionBackend` to `ResearchAgentSession.setBrowserUserContexts`.
+- `ResearchAgentSession.orchestratorSession()` sizes the executor's browser capacity from the pool
+  (`UserContextWebAcquisition.browserSlots(pool)`); without a pool `ASKAI_ORCHESTRATOR_BROWSER_SLOTS`
+  (default 1) applies and the packages share the chat browser one after another.
+- `UserContextWebAcquisition` (the orchestrated run's `WebAcquisition`) leases one user context per search
+  run and gives it back on success, failure, cancel and before a retry. The wait for a free user context is
+  bounded by the package's remaining time and taken off it; no free user context is a retryable stop, a
+  cancelled turn ends every wait at once.
+- `ResearchAgentSession.buildResearchLoop(turn, browserLane, researchLane, budget)` takes the browser lane
+  as a parameter: the same funnel (`WebSearchApplicationService`) runs on the worker's user context or on the
+  chat browser.
+
+The serial `research:` loop and the manual search keep the chat browser. A CAPTCHA in a worker tab cannot be
+solved by the user; a user context lost during a challenge wait ends the run as retryable.
+
 ## Tests
 
 - `ResearchLoopTest` — 7 content-fixture tests (budgets, cancel, error reset, late-write rejection,
@@ -123,3 +214,17 @@ next to `orchestrated-run` (all lane G roles off) and the baseline; select subje
 - `InProcessResearchSessionBackendTest` (plugin) — the adapter: lines → events, typed COMPLETED terminal,
   silence after close.
 - `ProductiveResearchMvpEndToEndTest` — the full productive host wiring (see research-mvp.md).
+- `WorkerUserContextExecutionTest` — the real `TaskExecutor` and `WebResearchWorker` on a pool: one user
+  context per package, parallel browsing up to the pool's capacity, leases always given back, the chat
+  browser as fallback without a pool.
+- `ResearchRolesTest`, `ResearchRoleTest`, `RoleToolCatalogTest` — the role interface and the pinned prompts.
+- `PortMainModelPassthroughTest`, `PortStructuredInferenceClientTest`, `MainModelCancelOnCloseTest` — the
+  roles on the model port (with `FakeModelPort`).
+- `TaskExecutorTest`, `OrchestratedResearchRunTest`, `OrchestratorDecisionCodecTest`, `OrchestratorModelTest`
+  — executor, envelope and decision schema.
+- `SearchPlannerWorkerTest`, `SourceVerifierWorkerTest`, `WriterWorkerTest`, `WorkerChainTest` — the lane G
+  worker roles, the chain plan → search → verify → write through the real executor.
+- `ToolTransportParityTest` — the same contributions in-process and over the loopback server (see
+  mcp-runtime.md).
+- Quality against the single-agent baseline is measured by `:research-benchmark` (see its README), not by
+  these tests.

@@ -27,6 +27,15 @@
   logged. The official MCP Java SDK's `HttpClientStreamableHttpTransport` client can replace it behind
   the same port if Solon's client ever falls short (ADR 0001, section 3.3).
 
+## Host wiring
+
+`AgentRuntimeServices` (askai-app) publishes the client port to plugins as a host service:
+`McpToolClientFactory` is backed by `SolonMcpToolClientFactory`, next to the `ModelPort` service (see
+research-agent-runtime.md). No role uses it yet: the research orchestrator and its workers call only the
+host's own tools in-process; a role that needs an external MCP server gets it through this factory.
+Activating marketplace entries as live clients is not wired either (the marketplace saves configurations
+only).
+
 ## Transports
 
 How a tool call is executed is a transport question; the contributions, their gates and their receipts

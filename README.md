@@ -166,7 +166,7 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 
 | Module | Purpose |
 |---|---|
-| `askai-app` | The Swing application: chat, models, audio, settings, plugin host wiring; talks to Ollama through the official `ollama4j` client; builds the fat jar |
+| `askai-app` | The Swing application: chat, models, audio, settings, plugin host wiring; talks to Ollama through the official `ollama4j` client (the only Ollama client in the JVM) and publishes it to plugins as the `ModelPort` host service (`OllamaModelPort` with the resource scheduler, settings panel "Model resources"); builds the fat jar |
 | `comic-controls` | Dependency-free Swing design system: palettes, themes, Java2D painters, controls |
 | `audio-dsp` | Audio capture and DSP pipeline (IIR filters via iirj, FFT/STFT blocks) |
 | `audio-openal` | Optional OpenAL Soft playback backend (LWJGL); natives are installed as an opt-in add-on |
@@ -175,10 +175,10 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 | `agent-workspace-api` | Framework-free workspace and host-service contracts shared by host and plugins |
 | `agent-plugin-pf4j-api` | The PF4J extension point bridge |
 | `agent-plugin-host` | PF4J plugin host: catalog, compatibility checks, workspace lifecycle |
-| `agent-model-runtime-api` | Neutral model-runtime contracts (reranker endpoint descriptor, configuration codec) |
-| `research-agent-ui-plugin` | The Research Agent PF4J plugin (UI, state machine, sources, scope, document) |
-| `research-agent-runtime` | The research agent as a library (runs inside the plugin): the conversation TeamAgent, the autonomous research loop, search strategies, manual search and reranking |
-| `research-domain` | Research domain core: business objects, ids, revisions, approval baselines |
+| `agent-model-runtime-api` | Neutral model-runtime contracts: the model port v2 (`ModelPort`: chat with tools, schema output, streaming with thinking, cancel, model slot and context size per call) with its resource contract (endpoint pool, capacity per model and endpoint, residency, slot reservation), plus the reranker endpoint descriptor and configuration codec. No Ollama types |
+| `research-agent-ui-plugin` | The Research Agent PF4J plugin (UI, state machine, sources, scope, document, task store and orchestrated-run controls in the State tab) |
+| `research-agent-runtime` | The research agent as a library (runs inside the plugin): the conversation TeamAgent, the autonomous research loop, search strategies, manual search and reranking; the role interface (`ResearchRole`), the research orchestrator, the task executor and the worker roles (web researcher, search planner, source verifier, writer) |
+| `research-domain` | Research domain core: business objects, ids, revisions, approval baselines, the task model (`ResearchTask`, `TaskState` with checked transitions) |
 | `research-knowledge-pipeline` | Research method pipeline: sentences → passages → topic clusters → concept/outline proposals |
 | `research-knowledge-processing` | Restart-safe processing queue and worker that drive captures through the pipeline |
 | `research-text-opennlp` | Apache OpenNLP sentence-segmentation adapter |
@@ -188,10 +188,11 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 | `browser-static-http` | Static HTTP browser backend (`HttpURLConnection` + jsoup, no JavaScript) |
 | `browser-playwright` | The in-process Playwright browser backend (playwright4j GraalJS driver, Camoufox, the `web_*` tool set) |
 | `local-model-runtime` | The in-process local model runtime (Ollama-compatible API over win-directml-java: reranking, embeddings, generation) |
-| `mcp-runtime-api` | Generic MCP runtime contracts |
-| `mcp-solon-runtime` | Solon-based streamable-HTTP MCP server behind the runtime port |
+| `mcp-runtime-api` | Generic MCP runtime contracts: server registry and tool contributions, and the client port (`McpToolClient`, `McpToolClientFactory`) |
+| `mcp-solon-runtime` | Solon-based streamable-HTTP MCP server behind the runtime port, and the Solon MCP client behind the client port |
 | `mcp-marketplace` | MCP marketplace search/registry/import browser (saves configurations only; not wired into the app) |
 | `web-search-providers` | Isolated async web-search provider clients (Brave, Bright Data, DataForSEO); not productively switched on |
+| `research-benchmark` | Test-only research benchmark (ADR 0001, work item H): fixed question set, fixture world, metrics and a Markdown report per run; compares the single-agent baseline with the orchestrated run and the worker roles (`gradlew :research-benchmark:benchmark -Daskai.benchmark.models=...`) |
 
 ## Documentation
 
@@ -201,11 +202,15 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 - [docs/research-state-machine.md](docs/research-state-machine.md): research state machine
 - [docs/research-source-lifecycle.md](docs/research-source-lifecycle.md): source lifecycle and deduplication
 - [docs/research-search-architecture.md](docs/research-search-architecture.md): search architecture
-- [docs/research-agent-runtime.md](docs/research-agent-runtime.md): the in-process research agent
+- [docs/research-agent-runtime.md](docs/research-agent-runtime.md): the in-process research agent, model slots, roles, orchestrator, task executor and worker roles
+- [docs/adr/0001-research-agent-architecture-after-java-21.md](docs/adr/0001-research-agent-architecture-after-java-21.md): ADR 0001, research agent architecture after the return to Java 21 (proposed), with implementation notes per work item
+- [research-benchmark/README.md](research-benchmark/README.md): the research benchmark harness
+- [docs/langchain4j-spike.md](docs/langchain4j-spike.md): LangChain4j spike result (ADR 0001, work item I)
 - [docs/research-control-mcp.md](docs/research-control-mcp.md): research-control MCP endpoint
 - [docs/research-bot-control.md](docs/research-bot-control.md): headless bot control
 - [docs/research-chatgpt-connector.md](docs/research-chatgpt-connector.md): ChatGPT connector (German)
 - [docs/browser-mcp.md](docs/browser-mcp.md): the browser backend
+- [docs/research-browser-user-contexts.md](docs/research-browser-user-contexts.md): parallel web research with WebDriver BiDi user contexts per worker
 - [docs/agent-plugin-development.md](docs/agent-plugin-development.md): writing chat agent plugins
 - [docs/plugin-lifecycle.md](docs/plugin-lifecycle.md): plugin lifecycle
 - [docs/mcp-runtime.md](docs/mcp-runtime.md), [docs/mcp-marketplace.md](docs/mcp-marketplace.md): MCP infrastructure
