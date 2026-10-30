@@ -13,6 +13,7 @@ import com.aresstack.askai.browser.render.RenderedPageDocument;
 import com.aresstack.askai.browser.render.RenderedPageFingerprint;
 import com.aresstack.askai.browser.render.RenderedPageViewport;
 import com.aresstack.askai.browser.search.SearchPageAnalysisSettings;
+import com.aresstack.askai.browser.search.SearchPageReadinessSettings;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -50,11 +51,29 @@ final class RenderedPageDocumentCapture {
         void settle(long millis);
     }
 
+    /**
+     * Share of the page text that must sit under a {@code visibility:hidden} root before the capture
+     * waits: the MAJORITY of the content, i.e. the page has not revealed itself yet. A hidden menu or
+     * tooltip never reaches it.
+     */
+    static final double HIDDEN_CONTENT_MAJORITY = 0.5;
+
     private final SearchPageAnalysisSettings limits;
     private final SettleDelay settleDelay;
+    private final int revealPollMillis;
+    private final int revealTimeoutMillis;
 
     RenderedPageDocumentCapture(SearchPageAnalysisSettings limits) {
-        this(limits, new SettleDelay() {
+        this(limits, (SearchPageReadinessSettings) null);
+    }
+
+    /**
+     * @param readiness the content-readiness clock: its poll interval and content-readiness deadline
+     *                  bound the wait for a page that still hides its content; null = no wait
+     */
+    RenderedPageDocumentCapture(SearchPageAnalysisSettings limits,
+                                SearchPageReadinessSettings readiness) {
+        this(limits, readiness, new SettleDelay() {
             public void settle(long millis) {
                 try {
                     Thread.sleep(millis);
@@ -66,13 +85,21 @@ final class RenderedPageDocumentCapture {
     }
 
     RenderedPageDocumentCapture(SearchPageAnalysisSettings limits, SettleDelay settleDelay) {
+        this(limits, null, settleDelay);
+    }
+
+    RenderedPageDocumentCapture(SearchPageAnalysisSettings limits,
+                                SearchPageReadinessSettings readiness, SettleDelay settleDelay) {
         this.limits = limits;
         this.settleDelay = settleDelay;
+        this.revealPollMillis = readiness == null ? 0 : Math.max(1, readiness.pollIntervalMillis);
+        this.revealTimeoutMillis = readiness == null ? 0 : readiness.contentReadinessTimeoutMillis;
     }
 
     RenderedPageDocument capture(PageScriptRunner page, DomainKeyResolver domainKeys,
                                  long snapshotGeneration) {
         List<String> warnings = new ArrayList<String>();
+        awaitRevealedContent(page, warnings);
         RenderedPageFingerprint before = fingerprint(page);
         Object raw = page.evaluate(captureScript());
         RenderedPageFingerprint after = fingerprint(page);
@@ -93,6 +120,60 @@ final class RenderedPageDocumentCapture {
         return convert(raw, page.url(), page.title(), after, snapshotGeneration, domainKeys,
                 warnings);
     }
+
+    /**
+     * Bing keeps {@code #b_content} at {@code visibility:hidden} until its deferred stylesheets have
+     * loaded. Captured in that state every result block and title link is invisible, although they
+     * already have their final boxes (live: intersection 1.0, visible=false, no primary link). The
+     * capture therefore waits, bounded by the content-readiness deadline, until most of the page text
+     * is no longer hidden. If the page stays hidden, the capture still runs and says so — the hidden
+     * blocks stay invisible, nothing is declared visible that a user could not see.
+     */
+    private void awaitRevealedContent(PageScriptRunner page, List<String> warnings) {
+        if (revealTimeoutMillis <= 0) {
+            return;
+        }
+        double hidden = hiddenShare(page);
+        int waited = 0;
+        while (hidden >= HIDDEN_CONTENT_MAJORITY && waited < revealTimeoutMillis) {
+            settleDelay.settle(revealPollMillis);
+            waited += revealPollMillis;
+            hidden = hiddenShare(page);
+        }
+        if (waited > 0) {
+            warnings.add(hidden >= HIDDEN_CONTENT_MAJORITY
+                    ? "CONTENT_HIDDEN: " + Math.round(hidden * 100) + "% of the page text still under "
+                            + "visibility:hidden after " + waited + " ms"
+                    : "CONTENT_REVEALED: waited " + waited + " ms for hidden page content");
+        }
+    }
+
+    private static double hiddenShare(PageScriptRunner page) {
+        Object value = page.evaluate(HIDDEN_SHARE_SCRIPT);
+        return value instanceof Number ? ((Number) value).doubleValue() : 0.0;
+    }
+
+    /**
+     * Share (0..1) of the body text below {@code visibility:hidden} ROOTS (hidden element, visible
+     * parent) within the top levels of the page, where a page hides its content wholesale.
+     */
+    static final String HIDDEN_SHARE_SCRIPT = "() => {\n"
+            + "  const body = document.body;\n"
+            + "  if (!body) return 0;\n"
+            + "  const total = (body.textContent || '').length;\n"
+            + "  if (total === 0) return 0;\n"
+            + "  let hidden = 0;\n"
+            + "  const visit = (el, depth) => {\n"
+            + "    for (const child of el.children) {\n"
+            + "      const st = getComputedStyle(child);\n"
+            + "      if (st.display === 'none') continue;\n"
+            + "      if (st.visibility === 'hidden') { hidden += (child.textContent || '').length; continue; }\n"
+            + "      if (depth < 4) visit(child, depth + 1);\n"
+            + "    }\n"
+            + "  };\n"
+            + "  visit(body, 1);\n"
+            + "  return hidden / total;\n"
+            + "}";
 
     private RenderedPageFingerprint fingerprint(PageScriptRunner page) {
         Object value = page.evaluate(FINGERPRINT_SCRIPT);
@@ -256,7 +337,9 @@ final class RenderedPageDocumentCapture {
                 + "  const MAX_LINKS_PER = " + limits.maximumLinksPerContainer + ";\n"
                 + "  const SIG_DEPTH = " + limits.maximumStructureSignatureDepth + ";\n"
                 + "  const EXCERPT = 200;\n"
-                + "  const SKIP = new Set(['SCRIPT','STYLE','NOSCRIPT','TEMPLATE','SVG','IFRAME','HEAD']);\n"
+                // LINK/META are never rendered: Bing puts deferred stylesheet <link>s INTO the first
+                // result block, whose structure signature became li(link,link,...) and never matched.
+                + "  const SKIP = new Set(['SCRIPT','STYLE','NOSCRIPT','TEMPLATE','SVG','IFRAME','HEAD','LINK','META']);\n"
                 + "  const CONTAINER = new Set(['DIV','SECTION','MAIN','NAV','HEADER','FOOTER','ASIDE',"
                 + "'ARTICLE','UL','OL','LI','FORM','TABLE','TBODY','TR','TD','DL','DD','DT',"
                 + "'FIELDSET','DETAILS','BODY']);\n"

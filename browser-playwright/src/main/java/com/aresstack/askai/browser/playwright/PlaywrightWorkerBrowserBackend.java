@@ -192,7 +192,8 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
             Page page = userContext.context.newPage();
             Playwright4jDriver driver = Playwright4jDriver.inBrowsingContext(browser, userContext.context, page,
                     timeoutMillis, options.settings.consent, options.settings.captcha);
-            driver.setRenderedCapture(new RenderedPageDocumentCapture(options.settings.analysis));
+            driver.setRenderedCapture(new RenderedPageDocumentCapture(
+                    options.settings.analysis, options.settings.readiness));
             UrlSafetyPolicy policy = options.allowPrivateNetworks
                     ? UrlSafetyPolicy.allowingPrivateNetworks() : UrlSafetyPolicy.strict();
             PlaywrightBrowserSession session = new PlaywrightBrowserSession(driver, policy, BrowserLimits.defaults(),
