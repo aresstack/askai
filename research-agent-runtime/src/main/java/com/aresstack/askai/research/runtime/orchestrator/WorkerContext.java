@@ -23,12 +23,20 @@ public interface WorkerContext {
     /**
      * The current state of the tasks this task depends on, in the order of its {@code dependsOn} (ADR 0001,
      * 4.3 BLACKBOARD: a worker reads what its upstream packages recorded, e.g. the verifier the sources a web
-     * research package accepted). Read when called, so it is the persisted state at that moment.
+     * research package accepted). Read when called, so it is the persisted state at that moment. The default
+     * (a context without a board) has none.
      */
-    List<ResearchTask> dependencies();
+    default List<ResearchTask> dependencies() {
+        return java.util.Collections.emptyList();
+    }
 
-    /** Every task of this task's run as persisted at the moment of the call (the run's blackboard view). */
-    List<ResearchTask> runTasks();
+    /**
+     * Every task of this task's run as persisted at the moment of the call (the run's blackboard view). The
+     * default (a context without a board) has none.
+     */
+    default List<ResearchTask> runTasks() {
+        return java.util.Collections.emptyList();
+    }
 
     /**
      * The worker role's chat transport; its token usage is booked on this task's budget. Workers that call a
