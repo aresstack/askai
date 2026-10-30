@@ -29,6 +29,14 @@ final class PlaywrightSessionFactory {
     static BrowserSession create(String channel, boolean headless, boolean allowPrivateNetworks,
                                  String searchUrlTemplate, BrowserLimits limits,
                                  com.aresstack.askai.browser.search.LegacyBrowserSearchSettings settings) {
+        return create(channel, headless, allowPrivateNetworks, searchUrlTemplate, limits, settings, null);
+    }
+
+    /** @param profileKey the chat whose persistent browser profile to use; null = a temporary profile */
+    static BrowserSession create(String channel, boolean headless, boolean allowPrivateNetworks,
+                                 String searchUrlTemplate, BrowserLimits limits,
+                                 com.aresstack.askai.browser.search.LegacyBrowserSearchSettings settings,
+                                 String profileKey) {
         String normalizedChannel = normalizeChannel(channel);
         PlaywrightReadiness readiness = new PlaywrightCapabilityProbe().probe(normalizedChannel);
         System.err.println("[browser-mcp] playwright readiness: " + readiness.render());
@@ -39,7 +47,7 @@ final class PlaywrightSessionFactory {
                 ? UrlSafetyPolicy.allowingPrivateNetworks() : UrlSafetyPolicy.strict();
         try {
             Playwright4jDriver driver = Playwright4jDriver.launch(normalizedChannel, headless,
-                    settings.navigation.navigationCommitTimeoutMillis,
+                    settings.navigation.navigationCommitTimeoutMillis, profileKey,
                     allowPrivateNetworks ? null : new PrivateTargetRequestFilter(),
                     settings.consent, settings.captcha);
             driver.setRenderedCapture(new RenderedPageDocumentCapture(settings.analysis));

@@ -89,7 +89,7 @@ public class PlaywrightActorLiveBrowserTest {
             public BrowserSession get() {
                 try {
                     Playwright4jDriver driver = Playwright4jDriver.launch(launchChannel, true,
-                            settings.navigation.navigationCommitTimeoutMillis,
+                            settings.navigation.navigationCommitTimeoutMillis, null,
                             new java.util.function.Predicate<String>() {
                                 public boolean test(String url) {
                                     return true; // interception installed, everything allowed
@@ -228,7 +228,7 @@ public class PlaywrightActorLiveBrowserTest {
             public BrowserSession get() {
                 try {
                     Playwright4jDriver driver = Playwright4jDriver.launch(launchChannel, true,
-                            settings.navigation.navigationCommitTimeoutMillis, null,
+                            settings.navigation.navigationCommitTimeoutMillis, null, null,
                             settings.consent, settings.captcha);
                     return new PlaywrightBrowserSession(driver,
                             UrlSafetyPolicy.allowingPrivateNetworks(), BrowserLimits.defaults(),
