@@ -1,8 +1,11 @@
 package com.aresstack.askai.research.runtime.orchestrator;
 
+import com.aresstack.askai.research.domain.task.ResearchTask;
 import com.aresstack.askai.research.domain.task.TaskArtifact;
 import com.aresstack.askai.research.runtime.loop.ToolInvoker;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
+
+import java.util.List;
 
 /**
  * What the {@link TaskExecutor} hands a {@link TaskWorker} for one attempt. Everything a worker records goes
@@ -16,6 +19,24 @@ public interface WorkerContext {
 
     /** The orchestrator's brief for the task, without the query line. */
     String brief();
+
+    /**
+     * The current state of the tasks this task depends on, in the order of its {@code dependsOn} (ADR 0001,
+     * 4.3 BLACKBOARD: a worker reads what its upstream packages recorded, e.g. the verifier the sources a web
+     * research package accepted). Read when called, so it is the persisted state at that moment. The default
+     * (a context without a board) has none.
+     */
+    default List<ResearchTask> dependencies() {
+        return java.util.Collections.emptyList();
+    }
+
+    /**
+     * Every task of this task's run as persisted at the moment of the call (the run's blackboard view). The
+     * default (a context without a board) has none.
+     */
+    default List<ResearchTask> runTasks() {
+        return java.util.Collections.emptyList();
+    }
 
     /**
      * The worker role's chat transport; its token usage is booked on this task's budget. Workers that call a

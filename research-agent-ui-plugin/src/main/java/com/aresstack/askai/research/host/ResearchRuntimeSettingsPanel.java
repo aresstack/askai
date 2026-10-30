@@ -106,6 +106,13 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField orchestratorTimeBudget = ComicControls.textField(4);
     private final JTextField orchestratorTaskRetries = ComicControls.textField(3);
     private final JTextField orchestratorSectionSources = ComicControls.textField(3);
+    /** ADR 0001 lane G: the worker roles the orchestrator may delegate to, and their limits. */
+    private final JCheckBox workerSearchPlanner = ComicControls.checkBox("Search planner", true);
+    private final JCheckBox workerSourceVerifier = ComicControls.checkBox("Source verifier", true);
+    private final JCheckBox workerWriter = ComicControls.checkBox("Writer", true);
+    private final JTextField workerPlannerQueries = ComicControls.textField(3);
+    private final JTextField workerVerifierSources = ComicControls.textField(3);
+    private final JTextField workerWriterSources = ComicControls.textField(3);
     /** AI reranker opt-in (default OFF = lexical BM25 scoring, no model load). */
     private final JCheckBox useAiReranker = ComicControls.checkBox(
             "Use the AI reranker (semantic model instead of BM25; applies to new sessions)", false);
@@ -210,6 +217,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         workerLimits.add(javax.swing.Box.createHorizontalStrut(10));
         workerLimits.add(labelled("Wait (s)", workerAcquireTimeout));
         form.add(row("Worker browsers:", workerLimits));
+        JPanel workerRoles = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        workerRoles.setOpaque(false);
+        workerRoles.add(workerSearchPlanner);
+        workerRoles.add(labelled("Queries", workerPlannerQueries));
+        workerRoles.add(javax.swing.Box.createHorizontalStrut(10));
+        workerRoles.add(workerSourceVerifier);
+        workerRoles.add(labelled("Sources", workerVerifierSources));
+        workerRoles.add(javax.swing.Box.createHorizontalStrut(10));
+        workerRoles.add(workerWriter);
+        workerRoles.add(labelled("Sources", workerWriterSources));
+        form.add(row("Worker roles:", workerRoles));
         JPanel reviewLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         reviewLimits.setOpaque(false);
         reviewLimits.add(labelled("Sources", reviewMaxSources));
@@ -405,6 +423,24 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(orchestratorSectionSources, ResearchRuntimeSettings.KEY_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
                 ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
                 "Accepted sources every outline section needs before the run may close.");
+        bindWorkerRole(workerSearchPlanner, ResearchRuntimeSettings.KEY_WORKER_SEARCH_PLANNER,
+                "The orchestrator may hand an aspect to the search planner, which writes distinct search "
+                        + "queries that a web research package then searches.");
+        bindWorkerRole(workerSourceVerifier, ResearchRuntimeSettings.KEY_WORKER_SOURCE_VERIFIER,
+                "The orchestrator may have accepted sources checked: relevance, the claim each supports, "
+                        + "contradictions. Rejected sources stop counting as evidence; nothing is removed.");
+        bindWorkerRole(workerWriter, ResearchRuntimeSettings.KEY_WORKER_WRITER,
+                "The orchestrator may have cited section drafts written from the sources. The drafts stay on "
+                        + "the task; the document is only written in the draft phase.");
+        bindLimit(workerPlannerQueries, ResearchRuntimeSettings.KEY_WORKER_PLANNER_MAX_QUERIES,
+                ResearchRuntimeSettings.DEFAULT_WORKER_PLANNER_MAX_QUERIES,
+                "Search queries one planner package may propose.");
+        bindLimit(workerVerifierSources, ResearchRuntimeSettings.KEY_WORKER_VERIFIER_MAX_SOURCES,
+                ResearchRuntimeSettings.DEFAULT_WORKER_VERIFIER_MAX_SOURCES,
+                "Sources one verifier package checks.");
+        bindLimit(workerWriterSources, ResearchRuntimeSettings.KEY_WORKER_WRITER_MAX_SOURCES,
+                ResearchRuntimeSettings.DEFAULT_WORKER_WRITER_MAX_SOURCES,
+                "Sources one writer package writes from.");
         useAiReranker.setSelected(ResearchRuntimeSettings.loadUseAiReranker(store));
         useAiReranker.setToolTipText("Off: search hits are scored lexically with BM25 — fast, "
                 + "no model. On: the configured cross-encoder model scores them semantically.");
@@ -769,6 +805,16 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             @Override
             public void focusLost(java.awt.event.FocusEvent event) {
                 persist.run();
+            }
+        });
+    }
+
+    private void bindWorkerRole(final JCheckBox box, final String key, String tooltip) {
+        box.setSelected(ResearchRuntimeSettings.loadWorkerRole(store, key));
+        box.setToolTipText(tooltip + " Applies to new sessions.");
+        box.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveWorkerRole(ResearchRuntimeSettingsPanel.this.store, key, box.isSelected());
             }
         });
     }

@@ -68,6 +68,10 @@ public final class ResearchRoles {
         List<ResearchRole> roles = new ArrayList<ResearchRole>();
         roles.add(com.aresstack.askai.research.runtime.orchestrator.ResearchOrchestrator.ROLE);
         roles.add(com.aresstack.askai.research.runtime.orchestrator.WebResearchWorker.ROLE);
+        // Lane G: the new worker roles (each can be switched off in the settings).
+        roles.add(com.aresstack.askai.research.runtime.orchestrator.SearchPlannerWorker.ROLE);
+        roles.add(com.aresstack.askai.research.runtime.orchestrator.SourceVerifierWorker.ROLE);
+        roles.add(com.aresstack.askai.research.runtime.orchestrator.WriterWorker.ROLE);
         return Collections.unmodifiableList(roles);
     }
 

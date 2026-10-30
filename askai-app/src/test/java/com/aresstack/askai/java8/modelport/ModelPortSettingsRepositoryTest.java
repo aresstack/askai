@@ -35,7 +35,7 @@ public class ModelPortSettingsRepositoryTest {
                 new File(folder.getRoot(), "model-port.properties"));
         Map<String, String> slotModels = new LinkedHashMap<String, String>();
         slotModels.put("judge", "gemma4:e2b");
-        slotModels.put("synthesis", "gpt-oss:20b");
+        slotModels.put("narration", "gpt-oss:20b");
         Map<String, Integer> contexts = new LinkedHashMap<String, Integer>();
         contexts.put("judge", 4096);
         repository.save(new ModelPortSettings(2, Collections.singletonMap("gemma4:e2b", 4),
@@ -46,12 +46,12 @@ public class ModelPortSettingsRepositoryTest {
         assertEquals(4, loaded.capacityOf("gemma4:e2b"));
         assertEquals(2, loaded.capacityOf("gpt-oss:20b"));
         assertEquals(16384L * 1024L * 1024L, loaded.memoryBudgetBytes("ollama"));
-        assertEquals("gpt-oss:20b", loaded.slotModel("synthesis"));
+        assertEquals("gpt-oss:20b", loaded.slotModel("narration"));
         assertEquals(4096, loaded.slotContextTokens("judge"));
         assertEquals("30m", loaded.getKeepAlive());
         assertEquals(120, loaded.getImplicitWaitSeconds());
         assertEquals(7, loaded.getResidencyRefreshSeconds());
-        assertEquals("the extra slot is listed after the defaults", "synthesis",
+        assertEquals("the extra slot is listed after the defaults", "narration",
                 loaded.knownSlotNames().get(ModelPortSettings.DEFAULT_SLOTS.size()));
 
         repository.save(new ModelPortSettings(3, null, null, null, null, null, 600, 5));

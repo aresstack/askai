@@ -38,6 +38,11 @@ public final class BenchmarkSettings {
     public final long inferenceTimeoutMillis;
     /** Question ids to run; empty means the whole set. */
     public final List<String> questionIds;
+    /**
+     * Subject names to run (e.g. {@code single-agent-baseline,orchestrated+writer}); empty means every subject.
+     * Lane G measures each new worker role as its own subject, so a role can be compared alone.
+     */
+    public final List<String> subjects;
     /** Where the Markdown reports are written (relative paths resolve against the working directory). */
     public final File reportDirectory;
     /** Browser channel of the subject's in-process browser ("chrome", "camoufox", ...). */
@@ -67,6 +72,7 @@ public final class BenchmarkSettings {
         this.inferenceTimeoutMillis = Math.max(1000L, longValue(properties, used, "inferenceTimeoutMillis",
                 300_000L));
         this.questionIds = list(string(properties, used, "questions", ""));
+        this.subjects = list(string(properties, used, "subjects", ""));
         this.reportDirectory = new File(string(properties, used, "reportDir",
                 "build/reports/research-benchmark"));
         String channelDefault = environment.get("ASKAI_TEST_BROWSER_CHANNEL");

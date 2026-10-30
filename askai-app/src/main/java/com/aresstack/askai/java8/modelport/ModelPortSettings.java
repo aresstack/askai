@@ -31,11 +31,13 @@ public final class ModelPortSettings {
     public static final int DEFAULT_CAPACITY = 1;
     /**
      * The slots the settings panel offers out of the box: the model roles of the research plugin today
-     * (ADR 0001, 1.3). Every other slot name a plugin uses resolves the same way (to the main model unless
-     * configured); this list only decides what is shown.
+     * (ADR 0001, 1.3), the orchestrator (lane F) and the worker roles of lane G (planner, verifier, synthesis).
+     * Every other slot name a plugin uses resolves the same way (to the main model unless configured); this list
+     * only decides what is shown.
      */
     public static final java.util.List<String> DEFAULT_SLOTS = java.util.Collections.unmodifiableList(
-            java.util.Arrays.asList("conversation", "scope", "judge", "layout-repair"));
+            java.util.Arrays.asList("conversation", "scope", "judge", "layout-repair", "orchestrator", "planner",
+                    "verifier", "synthesis"));
     public static final String DEFAULT_KEEP_ALIVE = "5m";
     public static final int DEFAULT_IMPLICIT_WAIT_SECONDS = 600;
     public static final int DEFAULT_RESIDENCY_REFRESH_SECONDS = 5;

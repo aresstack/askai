@@ -29,6 +29,60 @@ public final class BenchmarkRunRecord {
         }
     }
 
+    /**
+     * Lane G: what the worker roles of an orchestrated run did, read from the run's task record. Null when the
+     * subject has no such roles (the baseline, the orchestrator alone).
+     */
+    public static final class RoleObservation {
+        int plannerPackages;
+        int plannedQueries;
+        int verifierPackages;
+        int verifiedSources;
+        final List<String> rejectedUrls = new ArrayList<String>();
+        int verifierContradictions;
+        int writerPackages;
+        int draftParagraphs;
+        int rolePackagesFailed;
+        /** The corpus pages behind {@link #rejectedUrls}; set by {@link #resolvePages}. */
+        final List<String> rejectedPageIds = new ArrayList<String>();
+
+        public int getPlannerPackages() {
+            return plannerPackages;
+        }
+
+        public int getPlannedQueries() {
+            return plannedQueries;
+        }
+
+        public int getVerifierPackages() {
+            return verifierPackages;
+        }
+
+        public int getVerifiedSources() {
+            return verifiedSources;
+        }
+
+        public List<String> getRejectedUrls() {
+            return rejectedUrls;
+        }
+
+        public int getVerifierContradictions() {
+            return verifierContradictions;
+        }
+
+        public int getWriterPackages() {
+            return writerPackages;
+        }
+
+        public int getDraftParagraphs() {
+            return draftParagraphs;
+        }
+
+        public int getRolePackagesFailed() {
+            return rolePackagesFailed;
+        }
+    }
+
     /** Outcome of the resume-after-interruption scenario. */
     public static final class ResumeOutcome {
         /** Accepted sources when the run was interrupted. */
@@ -90,6 +144,7 @@ public final class BenchmarkRunRecord {
     List<String> reportedContradictions;
     List<String> reportedGaps;
     ResumeOutcome resume;
+    RoleObservation roles;
 
     public BenchmarkRunRecord(String subject, String model, String questionId, int repetition) {
         this.subject = subject;
@@ -107,6 +162,19 @@ public final class BenchmarkRunRecord {
             BenchmarkQuestion.Page page = world.pageForUrl(source.url);
             source.pageId = page == null ? null : page.getId();
         }
+        if (roles != null) {
+            roles.rejectedPageIds.clear();
+            for (String url : roles.rejectedUrls) {
+                BenchmarkQuestion.Page page = world.pageForUrl(url);
+                if (page != null) {
+                    roles.rejectedPageIds.add(page.getId());
+                }
+            }
+        }
+    }
+
+    public RoleObservation getRoles() {
+        return roles;
     }
 
     public String getSubject() {

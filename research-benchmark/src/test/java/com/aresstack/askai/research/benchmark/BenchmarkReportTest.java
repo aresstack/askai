@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class BenchmarkReportTest {
@@ -68,5 +69,28 @@ public class BenchmarkReportTest {
         File file = report.write();
         assertEquals("research-benchmark-20261030-030000.md", file.getName());
         assertEquals(md, new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+    }
+
+    /** Lane G: the role table appears only for subjects with worker roles. */
+    @Test
+    public void theRoleTableShowsWhatEachRoleDid() {
+        BenchmarkSettings settings = BenchmarkSettings.of(Collections.<String, String>emptyMap());
+        BenchmarkQuestion question = BenchmarkQuestionSet.load().select(
+                Collections.singletonList("q1-sufficiency")).get(0);
+        BenchmarkScorer scorer = new BenchmarkScorer(settings);
+        BenchmarkReport report = new BenchmarkReport(Instant.parse("2026-10-30T03:00:00Z"), settings, 1);
+        report.add(scorer.score(question, new BenchmarkRunRecord(SingleAgentBaselineSubject.NAME, "m",
+                question.getId(), 1)));
+        assertFalse(report.render().contains("## Worker roles (lane G)"));
+
+        BenchmarkRunRecord verifier = new BenchmarkRunRecord("orchestrated+source-verifier", "m", question.getId(), 1);
+        verifier.roles = new BenchmarkRunRecord.RoleObservation();
+        verifier.roles.verifierPackages = 2;
+        verifier.roles.verifiedSources = 5;
+        verifier.roles.rejectedUrls.add("http://127.0.0.1:1/x");
+        report.add(scorer.score(question, verifier));
+        String md = report.render();
+        assertTrue(md.contains("## Worker roles (lane G)"));
+        assertTrue(md, md.contains("| `orchestrated+source-verifier` | m | `q1-sufficiency` | 1 | 0 (0) | 2 (5) | 1 |"));
     }
 }

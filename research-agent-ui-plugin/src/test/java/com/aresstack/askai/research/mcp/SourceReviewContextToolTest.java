@@ -177,6 +177,31 @@ public class SourceReviewContextToolTest {
         assertEquals("No sources to review.", invoke("0"));
     }
 
+    /**
+     * ADR 0001 lane G: the source verifier and the writer read exactly the sources their upstream packages
+     * accepted, by id, never the whole corpus.
+     */
+    @Test
+    public void theSourceIdsScopeTheContextToExactlyThoseSources() {
+        add("s1", "Wanted one", "text one", 1_000L, SourceStatus.ACCEPTED);
+        add("s2", "Not wanted", "text two", 2_000L, SourceStatus.ACCEPTED);
+        add("s3", "Wanted three", "text three", 3_000L, SourceStatus.NEW);
+
+        Map<String, Object> args = new HashMap<String, Object>();
+        args.put("source_ids", " s1 ,s3,");
+        String context = null;
+        for (McpToolContribution tool : ResearchToolPolicy.toolsFor(ResearchStateIds.RESEARCH,
+                ResearchStateIds.RUNNING, ctx)) {
+            if ("source_review_context".equals(tool.getName())) {
+                context = String.valueOf(tool.getHandler()
+                        .invoke(new McpToolCall("source_review_context", args)).getText());
+            }
+        }
+        assertTrue(context.contains("--- s1"));
+        assertTrue(context.contains("--- s3"));
+        assertFalse("a source outside the ids is not material", context.contains("Not wanted"));
+    }
+
     /** A source without readable text says so, rather than looking like a page that said nothing. */
     @Test
     public void aSourceWithoutTextSaysSo() {

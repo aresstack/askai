@@ -107,6 +107,32 @@ public final class OrchestratorSession {
         return workers;
     }
 
+    /**
+     * The worker set of a session (lane G): the web research worker, plus the search planner, the source
+     * verifier and the writer as far as {@code roles} switches them on. The orchestrator can delegate only to
+     * the roles listed here.
+     *
+     * @param maxOutputTokens the agent's model-turn budget (the default output budget of a worker answer)
+     */
+    public static List<TaskWorker> workers(WebAcquisition acquisition, ToolInvoker research,
+                                           OrchestratorSettings settings, WorkerRoleSettings roles,
+                                           int maxOutputTokens) {
+        List<TaskWorker> workers = defaultWorkers(acquisition, research, settings);
+        if (roles.isSearchPlanner()) {
+            workers.add(new SearchPlannerWorker(roles.getPlannerMaxQueries(), roles.getRepairAttempts(),
+                    maxOutputTokens));
+        }
+        if (roles.isSourceVerifier()) {
+            workers.add(new SourceVerifierWorker(research, roles.getVerifierMaxSources(), roles.getRepairAttempts(),
+                    maxOutputTokens));
+        }
+        if (roles.isWriter()) {
+            workers.add(new WriterWorker(research, roles.getWriterMaxSources(), roles.getRepairAttempts(),
+                    roles.getWriterMaxOutputTokens() > 0 ? roles.getWriterMaxOutputTokens() : maxOutputTokens));
+        }
+        return workers;
+    }
+
     public OrchestratorRun current() {
         return run.current();
     }

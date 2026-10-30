@@ -233,7 +233,7 @@ public final class TaskExecutor {
                         pool.execute(new Runnable() {
                             public void run() {
                                 try {
-                                    attempt(started, worker, cancelled);
+                                    attempt(run, started, worker, cancelled);
                                 } finally {
                                     release(resources);
                                     finished.add(started.getTaskId());
@@ -331,7 +331,8 @@ public final class TaskExecutor {
     }
 
     /** One attempt: run the worker, book the spending, map the result onto the state table, persist. */
-    private void attempt(ResearchTask started, TaskWorker worker, AtomicBoolean cancelled) {
+    private void attempt(final OrchestratorRun run, ResearchTask started, TaskWorker worker,
+                         AtomicBoolean cancelled) {
         final long begin = clock.getAsLong();
         final AtomicLong tokens = new AtomicLong();
         final TaskHolder holder = new TaskHolder(started);
@@ -346,6 +347,31 @@ public final class TaskExecutor {
 
             public String brief() {
                 return TaskBriefs.briefOf(initial.getInputs());
+            }
+
+            public List<ResearchTask> dependencies() {
+                Map<String, ResearchTask> byId = new HashMap<String, ResearchTask>();
+                for (ResearchTask task : snapshot()) {
+                    byId.put(task.getTaskId(), task);
+                }
+                List<ResearchTask> dependencies = new ArrayList<ResearchTask>();
+                for (String id : initial.getDependsOn()) {
+                    ResearchTask dependency = byId.get(id);
+                    if (dependency != null) {
+                        dependencies.add(dependency);
+                    }
+                }
+                return dependencies;
+            }
+
+            public List<ResearchTask> runTasks() {
+                List<ResearchTask> tasks = new ArrayList<ResearchTask>();
+                for (ResearchTask task : snapshot()) {
+                    if (run.owns(task.getTaskId())) {
+                        tasks.add(task);
+                    }
+                }
+                return tasks;
             }
 
             public MainModelChat chat() {
@@ -470,6 +496,12 @@ public final class TaskExecutor {
     private void save(ResearchTask task) {
         synchronized (boardLock) {
             board.save(task);
+        }
+    }
+
+    private List<ResearchTask> snapshot() {
+        synchronized (boardLock) {
+            return board.tasks();
         }
     }
 

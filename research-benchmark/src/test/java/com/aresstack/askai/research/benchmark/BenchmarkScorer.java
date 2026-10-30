@@ -120,6 +120,35 @@ public final class BenchmarkScorer {
             }
         }
 
+        // ---- lane G worker roles: what the verifier's rejections did to the source quality ----
+        BenchmarkRunRecord.RoleObservation roles = record.getRoles();
+        if (roles != null) {
+            Set<String> rejectedPages = new HashSet<String>(roles.rejectedPageIds);
+            for (String page : rejectedPages) {
+                if (expected.getDistractorPages().contains(page)) {
+                    scores.distractorsRejected++;
+                }
+                if (expected.getRelevantPages().contains(page)) {
+                    scores.relevantRejected++;
+                }
+            }
+            int kept = 0;
+            int keptRelevant = 0;
+            Set<String> counted = new HashSet<String>();
+            for (BenchmarkRunRecord.AcceptedSource source : record.getAcceptedSources()) {
+                String page = source.getPageId();
+                if (roles.getRejectedUrls().contains(source.url) || (page != null && rejectedPages.contains(page))) {
+                    continue;
+                }
+                kept++;
+                if (page != null && counted.add(page) && expected.getRelevantPages().contains(page)) {
+                    keptRelevant++;
+                }
+            }
+            scores.verifiedPrecision = roles.getVerifierPackages() == 0 || kept == 0 ? null
+                    : ratio(keptRelevant, kept);
+        }
+
         // ---- tool calls ----
         scores.toolCallSuccess = record.getToolCalls() == 0 ? null
                 : ratio(Math.max(0, record.getToolCalls() - record.getToolFailures()), record.getToolCalls());
@@ -301,6 +330,11 @@ public final class BenchmarkScorer {
         public int gapsDetected;
         public String gapMethod = "";
         public Double toolCallSuccess;
+        /** Lane G: distractor and relevant pages the source verifier rejected. */
+        public int distractorsRejected;
+        public int relevantRejected;
+        /** Lane G: precision of the accepted sources the verifier did not reject; null without a verifier. */
+        public Double verifiedPrecision;
 
         RunScores(BenchmarkRunRecord record) {
             this.record = record;

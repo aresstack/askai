@@ -93,6 +93,7 @@ public final class BenchmarkReport {
         }
         renderSummary(md);
         renderRuns(md);
+        renderRoles(md);
         renderResume(md);
         renderMethod(md);
         return md.toString();
@@ -209,6 +210,44 @@ public final class BenchmarkReport {
         }
     }
 
+    /** Lane G: what each worker role did in the runs of the subjects that have it. */
+    private void renderRoles(StringBuilder md) {
+        List<BenchmarkScorer.RunScores> withRoles = new ArrayList<BenchmarkScorer.RunScores>();
+        for (BenchmarkScorer.RunScores scores : runs) {
+            if (scores.record.getRoles() != null) {
+                withRoles.add(scores);
+            }
+        }
+        if (withRoles.isEmpty()) {
+            return;
+        }
+        md.append("\n## Worker roles (lane G)\n\n");
+        md.append("Each role is measured as its own subject next to the orchestrator alone (`")
+                .append(OrchestratedResearchSubject.NAME).append("`) and the baseline. A role package the "
+                        + "orchestrator never planned shows as 0.\n\n");
+        md.append("| Subject | Model | Question | # | Planner packages (queries) | Verifier packages (sources) | "
+                + "Rejected | Distractors rejected | Relevant rejected | Precision before → after verification | "
+                + "Verifier contradictions | Writer packages (paragraphs) | Supported claims | Failed role packages |\n");
+        md.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+        for (BenchmarkScorer.RunScores scores : withRoles) {
+            BenchmarkRunRecord record = scores.record;
+            BenchmarkRunRecord.RoleObservation roles = record.getRoles();
+            md.append("| `").append(record.getSubject()).append("` | ").append(cell(record.getModel()))
+                    .append(" | `").append(record.getQuestionId()).append("` | ").append(record.getRepetition())
+                    .append(" | ").append(roles.getPlannerPackages()).append(" (").append(roles.getPlannedQueries())
+                    .append(") | ").append(roles.getVerifierPackages()).append(" (").append(roles.getVerifiedSources())
+                    .append(") | ").append(roles.getRejectedUrls().size())
+                    .append(" | ").append(scores.distractorsRejected)
+                    .append(" | ").append(scores.relevantRejected)
+                    .append(" | ").append(percentOrNa(scores.sourcePrecision)).append(" → ")
+                    .append(percentOrNa(scores.verifiedPrecision))
+                    .append(" | ").append(roles.getVerifierContradictions())
+                    .append(" | ").append(roles.getWriterPackages()).append(" (").append(roles.getDraftParagraphs())
+                    .append(") | ").append(scores.claims == 0 ? "n/a" : scores.supportedClaims + "/" + scores.claims)
+                    .append(" | ").append(roles.getRolePackagesFailed()).append(" |\n");
+        }
+    }
+
     private void renderResume(StringBuilder md) {
         md.append("\n## Resume after interruption\n\n");
         if (resumeRuns.isEmpty()) {
@@ -260,6 +299,10 @@ public final class BenchmarkReport {
         md.append("- The subject gets the full question. The baseline has no outline input, so its gap "
                 + "detection measures what it reports unprompted; a subject that takes an outline gets the "
                 + "question's outline.\n");
+        md.append("- Worker roles (lane G): read from the run's task record. A subject with the writer is scored on "
+                + "the writer's drafts as its statements (citations stripped) when it drafted any; the verifier's "
+                + "contradictions join the orchestrator's structured findings; precision after verification "
+                + "leaves out the sources the verifier rejected.\n");
         md.append("- Tool calls: the run's tool-call count from the progress events; failed = ERROR and "
                 + "PROBLEM_REPORTED events plus logged search/page-open tool failures. Model calls and tokens: "
                 + "the recording pass-through in front of Ollama.\n");
