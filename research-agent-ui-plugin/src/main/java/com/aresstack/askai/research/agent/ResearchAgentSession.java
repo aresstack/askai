@@ -4511,6 +4511,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
+     * The persisted work packages of this project (ADR 0001, section 4.4), oldest first — read-only, for the
+     * task list in the State tab. Empty without a productive project context.
+     */
+    public java.util.List<com.aresstack.askai.research.domain.task.ResearchTask> currentResearchTasks() {
+        if (productiveResources == null || productiveResources.getProjectContext() == null) {
+            return java.util.Collections.emptyList();
+        }
+        return productiveResources.getProjectContext().getTaskStore().loadAll().getTasks();
+    }
+
+    /**
      * The sources MINDMAP, built completely mechanically (no model): root = the research question,
      * branches = the user's search queries, leaves = each branch's best-rated sources. @return the
      * Mermaid source, or {@code null} when no source qualifies yet.

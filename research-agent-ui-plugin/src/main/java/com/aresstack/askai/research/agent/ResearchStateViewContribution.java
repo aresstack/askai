@@ -61,9 +61,12 @@ public final class ResearchStateViewContribution implements ArtifactViewContribu
             public void run() {
                 // Snapshot is read on the caller thread but applied to Swing via the UiExecutor.
                 final ResearchStateSnapshot snapshot = research.currentResearchSnapshot();
+                final java.util.List<com.aresstack.askai.research.domain.task.ResearchTask> tasks =
+                        research.currentResearchTasks();
                 uiExecutor.execute(new Runnable() {
                     public void run() {
                         view.setSnapshot(snapshot);
+                        view.setTasks(tasks);
                     }
                 });
             }
