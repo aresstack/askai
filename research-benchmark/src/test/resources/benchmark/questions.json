@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "q1-sufficiency",
+      "purpose": "Plain sufficiency: three relevant pages on two hosts, one off-topic page. Measures source quality, completeness and the stop rule.",
+      "question": "What is the Corvane plugin loader and how does it isolate plugins?",
+      "query": "Corvane plugin loader isolation",
+      "outline": ["Overview", "Isolation model", "Adoption"],
+      "pages": [
+        {
+          "id": "q1-primer", "host": "docs", "path": "/corvane/primer", "title": "Corvane plugin loader primer",
+          "paragraphs": [
+            "The Corvane plugin loader is an open plugin framework for desktop applications written in Java. It discovers plugins in a directory and starts them in a defined order.",
+            "Corvane isolates every plugin in its own class loader. Classes of the plugin are loaded plugin-first, so two plugins can bundle different versions of the same library.",
+            "The project was started in 2019 and is maintained by a small group of volunteers."
+          ],
+          "links": ["q1-review"]
+        },
+        {
+          "id": "q1-review", "host": "blog", "path": "/2024/corvane-review", "title": "Independent review of the Corvane plugin loader",
+          "paragraphs": [
+            "In our review the Corvane plugin loader handled forty plugins without conflicts. Plugin-first class loading kept the bundled library versions apart.",
+            "Startup took 1.8 seconds for forty plugins on a laptop, which the reviewers found acceptable for a desktop application."
+          ],
+          "links": ["q1-field"]
+        },
+        {
+          "id": "q1-field", "host": "blog", "path": "/2025/corvane-in-production", "title": "Corvane plugin loader in production",
+          "paragraphs": [
+            "Three desktop vendors run the Corvane plugin loader in production. They report that the isolation by class loader prevented dependency clashes after updates.",
+            "One vendor ships 120 plugins with Corvane and updates them independently of the host application."
+          ],
+          "links": []
+        },
+        {
+          "id": "q1-offtopic", "host": "shop", "path": "/corvane-garden-loader", "title": "Corvane garden loader, 40 litre bucket",
+          "paragraphs": [
+            "The Corvane garden loader is a 40 litre plastic bucket with a reinforced handle. It fits most wheelbarrows.",
+            "Available in green and grey. Free delivery from two buckets."
+          ],
+          "links": []
+        }
+      ],
+      "expected": {
+        "relevantPages": ["q1-primer", "q1-review", "q1-field"],
+        "distractorPages": ["q1-offtopic"],
+        "minimumSources": 3,
+        "minimumDistinctHosts": 2,
+        "stopReason": "SUFFICIENT_EVIDENCE",
+        "facts": [
+          {"id": "q1-f1", "keywords": ["corvane", "own class loader"], "supportedBy": ["q1-primer"]},
+          {"id": "q1-f2", "keywords": ["plugin-first"], "supportedBy": ["q1-primer", "q1-review"]},
+          {"id": "q1-f3", "keywords": ["120 plugins"], "supportedBy": ["q1-field"]}
+        ],
+        "contradictions": [],
+        "gaps": []
+      }
+    },
+    {
+      "id": "q2-contradiction",
+      "purpose": "Contradiction detection: the manufacturer and an independent test state different battery capacities.",
+      "question": "What battery capacity does the Kestrel-7 field tablet have?",
+      "query": "Kestrel-7 field tablet battery capacity",
+      "outline": ["Battery", "Runtime", "Charging"],
+      "pages": [
+        {
+          "id": "q2-maker", "host": "maker", "path": "/kestrel-7/specs", "title": "Kestrel-7 field tablet specifications",
+          "paragraphs": [
+            "The Kestrel-7 field tablet has a battery capacity of 4,200 mAh and runs for up to eleven hours of mapping work.",
+            "The Kestrel-7 field tablet charges over USB-C with 18 watts and reaches eighty percent in ninety minutes."
+          ],
+          "links": ["q2-lab"]
+        },
+        {
+          "id": "q2-lab", "host": "lab", "path": "/tests/kestrel-7", "title": "Lab test: Kestrel-7 field tablet battery",
+          "paragraphs": [
+            "We opened the Kestrel-7 field tablet and measured the battery cell. The printed and measured battery capacity is 3,800 mAh.",
+            "In our mapping workload the Kestrel-7 field tablet ran for nine hours and twenty minutes."
+          ],
+          "links": ["q2-forum"]
+        },
+        {
+          "id": "q2-forum", "host": "lab", "path": "/forum/kestrel-7-runtime", "title": "Kestrel-7 field tablet runtime reports from users",
+          "paragraphs": [
+            "Users of the Kestrel-7 field tablet report between nine and ten hours of runtime during survey work.",
+            "Several users charge the Kestrel-7 field tablet in the car with a USB-C adapter."
+          ],
+          "links": []
+        },
+        {
+          "id": "q2-bird", "host": "nature", "path": "/birds/kestrel", "title": "The common kestrel",
+          "paragraphs": [
+            "The common kestrel is a small falcon that hovers above fields while hunting voles.",
+            "A kestrel weighs between 150 and 300 grams."
+          ],
+          "links": []
+        }
+      ],
+      "expected": {
+        "relevantPages": ["q2-maker", "q2-lab", "q2-forum"],
+        "distractorPages": ["q2-bird"],
+        "minimumSources": 3,
+        "minimumDistinctHosts": 2,
+        "stopReason": "SUFFICIENT_EVIDENCE",
+        "facts": [
+          {"id": "q2-f1", "keywords": ["4,200 mah"], "supportedBy": ["q2-maker"]},
+          {"id": "q2-f2", "keywords": ["3,800 mah"], "supportedBy": ["q2-lab"]},
+          {"id": "q2-f3", "keywords": ["usb-c"], "supportedBy": ["q2-maker", "q2-forum"]}
+        ],
+        "contradictions": [
+          {"id": "q2-c1", "subject": "battery capacity of the Kestrel-7", "pageA": "q2-maker", "valueA": "4,200 mAh", "pageB": "q2-lab", "valueB": "3,800 mAh"}
+        ],
+        "gaps": []
+      }
+    },
+    {
+      "id": "q3-gap",
+      "purpose": "Gap detection: the outline asks for the environmental impact, no page covers it.",
+      "question": "What does the renovation of the Harbor Lane bridge in Ostmarsh cost, how long does it take and what is its environmental impact?",
+      "query": "Harbor Lane bridge Ostmarsh renovation",
+      "outline": ["Cost", "Schedule", "Environmental impact"],
+      "pages": [
+        {
+          "id": "q3-council", "host": "council", "path": "/projects/harbor-lane-bridge", "title": "Harbor Lane bridge renovation, Ostmarsh town council",
+          "paragraphs": [
+            "The Ostmarsh town council approved the renovation of the Harbor Lane bridge with a budget of 14.6 million euros.",
+            "Work on the Harbor Lane bridge starts in March and is planned to last 22 months, with one lane open at all times."
+          ],
+          "links": ["q3-paper"]
+        },
+        {
+          "id": "q3-paper", "host": "news", "path": "/local/harbor-lane-bridge-works", "title": "Harbor Lane bridge: what drivers in Ostmarsh must know",
+          "paragraphs": [
+            "The renovation of the Harbor Lane bridge in Ostmarsh will cost 14.6 million euros according to the council.",
+            "Drivers should expect a single open lane on the Harbor Lane bridge for 22 months."
+          ],
+          "links": ["q3-contractor"]
+        },
+        {
+          "id": "q3-contractor", "host": "news", "path": "/business/ostmarsh-bridge-contract", "title": "Contractor chosen for the Harbor Lane bridge in Ostmarsh",
+          "paragraphs": [
+            "A regional construction firm won the Harbor Lane bridge contract in Ostmarsh. The bridge deck and the railings will be replaced.",
+            "The firm will work in two phases so that the Harbor Lane bridge stays passable."
+          ],
+          "links": []
+        }
+      ],
+      "expected": {
+        "relevantPages": ["q3-council", "q3-paper", "q3-contractor"],
+        "distractorPages": [],
+        "minimumSources": 3,
+        "minimumDistinctHosts": 2,
+        "stopReason": "SUFFICIENT_EVIDENCE",
+        "facts": [
+          {"id": "q3-f1", "keywords": ["14.6 million euros"], "supportedBy": ["q3-council", "q3-paper"]},
+          {"id": "q3-f2", "keywords": ["22 months"], "supportedBy": ["q3-council", "q3-paper"]}
+        ],
+        "contradictions": [],
+        "gaps": [
+          {"id": "q3-g1", "section": "Environmental impact", "keywords": ["environmental", "environment"]}
+        ]
+      }
+    },
+    {
+      "id": "q4-distractors",
+      "purpose": "Source quality under noise: two on-topic technical pages among same-name off-topic pages.",
+      "question": "How corrosion resistant is Lindqvist alloy in sea water?",
+      "query": "Lindqvist alloy corrosion sea water",
+      "outline": ["Composition", "Corrosion in sea water"],
+      "pages": [
+        {
+          "id": "q4-datasheet", "host": "metals", "path": "/alloys/lindqvist", "title": "Lindqvist alloy datasheet",
+          "paragraphs": [
+            "Lindqvist alloy is a copper nickel alloy with 2.5 percent tin. In sea water Lindqvist alloy loses 0.02 millimetres per year to corrosion.",
+            "Lindqvist alloy is used for propeller shafts and sea water valves."
+          ],
+          "links": ["q4-study"]
+        },
+        {
+          "id": "q4-study", "host": "journal", "path": "/marine/lindqvist-corrosion-study", "title": "Corrosion of Lindqvist alloy in North Sea water: a two-year study",
+          "paragraphs": [
+            "Coupons of Lindqvist alloy were exposed to North Sea water for two years. The corrosion rate stayed below 0.03 millimetres per year.",
+            "Pitting was not observed on Lindqvist alloy, unlike on the stainless steel reference samples."
+          ],
+          "links": ["q4-forum"]
+        },
+        {
+          "id": "q4-forum", "host": "journal", "path": "/marine/lindqvist-valves-field-notes", "title": "Field notes: Lindqvist alloy sea water valves after five years",
+          "paragraphs": [
+            "Ship engineers removed Lindqvist alloy sea water valves after five years of service and found only light surface corrosion.",
+            "The valves were reinstalled without machining."
+          ],
+          "links": []
+        },
+        {
+          "id": "q4-family", "host": "genealogy", "path": "/families/lindqvist", "title": "The Lindqvist family of Gothenburg",
+          "paragraphs": [
+            "The Lindqvist family were merchants in Gothenburg from 1780. Their ships traded salt and sea water fish.",
+            "A family alloy of silver cutlery is kept in the town museum."
+          ],
+          "links": []
+        },
+        {
+          "id": "q4-band", "host": "music", "path": "/bands/lindqvist-alloy", "title": "Lindqvist Alloy, a metal band from Malmo",
+          "paragraphs": [
+            "Lindqvist Alloy is a metal band from Malmo. Their second album Corrosion was recorded by the sea.",
+            "The band tours Scandinavia every winter."
+          ],
+          "links": []
+        }
+      ],
+      "expected": {
+        "relevantPages": ["q4-datasheet", "q4-study", "q4-forum"],
+        "distractorPages": ["q4-family", "q4-band"],
+        "minimumSources": 3,
+        "minimumDistinctHosts": 2,
+        "stopReason": "SUFFICIENT_EVIDENCE",
+        "facts": [
+          {"id": "q4-f1", "keywords": ["copper nickel", "tin"], "supportedBy": ["q4-datasheet"]},
+          {"id": "q4-f2", "keywords": ["millimetres per year"], "supportedBy": ["q4-datasheet", "q4-study"]},
+          {"id": "q4-f3", "keywords": ["pitting"], "supportedBy": ["q4-study"]}
+        ],
+        "contradictions": [],
+        "gaps": []
+      }
+    }
+  ]
+}
