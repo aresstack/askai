@@ -41,10 +41,10 @@ public final class ResearchAgentSession {
      */
     private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat mainModelChat;
     /**
-     * One hot-swappable transport per model role (ADR 0001, 4.1), keyed by role id, each bound to its role's
-     * slot and context size: the conversation, the scope sweep's generator and chooser, the readiness judge,
-     * and any role a later caller asks for through {@link #roleChats()}. A reload swaps all of them, a
-     * cancel aborts all of them.
+     * One hot-swappable transport per model role (ADR 0001, 4.1), keyed by role id, slot and context size and
+     * bound to them: the conversation, the scope sweep's generator and chooser, the readiness judge, and any
+     * role a later caller asks for through {@link #roleChats()}. A reload swaps all of them, a cancel aborts
+     * all of them.
      */
     private final java.util.Map<String, RoleTransport> roleChats = new java.util.LinkedHashMap<String, RoleTransport>();
 
@@ -418,16 +418,19 @@ public final class ResearchAgentSession {
 
     /**
      * The transport of {@code role}: created on first use (bound to the role's slot and context size) and
-     * then reused, so the reload and the cancel reach it. Roles are keyed by id.
+     * then reused, so the reload and the cancel reach it. Transports are keyed by role id, slot and context
+     * size, so a role with a context override ({@link com.aresstack.askai.research.runtime.role.ResearchRole
+     * #withContextTokens}) gets its own transport instead of silently reusing the default one.
      */
     private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat roleChat(
             com.aresstack.askai.research.runtime.role.ResearchRole role) {
+        String key = role.getId() + "@" + role.getSlot().getName() + "#" + role.getContextTokens();
         synchronized (roleChats) {
-            RoleTransport transport = roleChats.get(role.getId());
+            RoleTransport transport = roleChats.get(key);
             if (transport == null) {
                 transport = new RoleTransport(role,
                         new com.aresstack.askai.research.runtime.team.ReloadableMainModelChat(buildModelChat(role)));
-                roleChats.put(role.getId(), transport);
+                roleChats.put(key, transport);
             }
             return transport.chat;
         }
