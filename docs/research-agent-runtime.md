@@ -165,29 +165,42 @@ its own subject (`orchestrated+search-planner`, `orchestrated+source-verifier`, 
 next to `orchestrated-run` (all lane G roles off) and the baseline; select subjects with
 `-Daskai.benchmark.subjects=...`.
 
-## Parallel browsing for workers (PR #12, not yet on this branch)
+## Parallel browsing for workers (BrowserUserContextPool)
 
-PR #12 (`adr0001/browser-parallel`, design in `docs/research-browser-user-contexts.md` on that branch) lets
-research workers of one chat browse in parallel. Terms follow WebDriver BiDi: each worker gets its own
-**user context** (`browser.createUserContext`: own cookies, local storage and sign-ins); inside it the worker
-opens **browsing contexts** (tabs, `browsingContext.create` with `userContext`). The chat's own browser
-(persistent profile, HUD, serial loop, manual search) stays unchanged.
+Research workers of one chat browse in parallel (design: `docs/research-browser-user-contexts.md`). Terms
+follow WebDriver BiDi: each search run of a worker gets its own **user context** (`browser.createUserContext`:
+own cookies, local storage and sign-ins); inside it the worker opens **browsing contexts** (tabs,
+`browsingContext.create` with `userContext`). The chat's own browser (the chat's own persistent Camoufox
+profile, HUD, serial loop, manual search) stays the chat browser; each chat now has its own persistent
+profile instead of one shared profile for the first session.
 
 Playwright Java runs one call at a time per instance, so real parallelism comes from several **worker
-browsers** per chat: each is one Playwright instance on its own owner thread with one non-persistent
-browser process hosting several user contexts. A worker browser belongs to exactly one chat. Every worker
-tab is served through the session's `BrowserBridgeEndpoint`, so every page lands in the session's one
-`CaptureStore` and goes through its one `SourceAcceptanceService`. Sign-in state is kept only on request,
-outside the project folder. The runtime API is `runtime.browser.BrowserUserContextPool`; the plugin hands
-it out via `ProductiveResearchSessionResources.getBrowserUserContexts()`. Plugin settings row "Worker
-browsers": processes 3, user contexts per process 4, tabs per user context 4, per site 2, wait 120 s;
-separate from the model capacity.
+browsers**: each is one Playwright instance on its own owner thread with one non-persistent browser process
+hosting several user contexts, and belongs to exactly one chat. Every worker tab is served through the
+session's `BrowserBridgeEndpoint`, so every page lands in the session's one `CaptureStore` and goes through
+its one `SourceAcceptanceService`. Sign-in state is kept only on request, outside the project folder. The
+runtime API is `runtime.browser.BrowserUserContextPool`; the plugin hands it out via
+`ProductiveResearchSessionResources.getBrowserUserContexts()`. Plugin settings row "Worker browsers":
+processes 3, user contexts per process 4, tabs per user context 4, per site 2, wait 120 s; separate from the
+model capacity.
 
-Not wired into the orchestrator yet. After #12 and the orchestrator are both on `develop`, two places change:
-`ExecutorCapacity.fromPort(modelPort, pool.capacity())` in `ResearchAgentSession.orchestratorSession()`
-(`ASKAI_ORCHESTRATOR_BROWSER_SLOTS` stays as the fallback without a pool), and one
-`BrowserUserContextLease` per task attempt in `WebAcquisition.acquire`. Until then all packages share the
-one session browser, which is why the orchestrator's browser capacity defaults to 1.
+Wiring into the orchestrated run:
+
+- `ProductiveResearchBackendFactory.createSession` hands the chat's pool through
+  `InProcessResearchSessionBackend` to `ResearchAgentSession.setBrowserUserContexts`.
+- `ResearchAgentSession.orchestratorSession()` sizes the executor's browser capacity from the pool
+  (`UserContextWebAcquisition.browserSlots(pool)`); without a pool `ASKAI_ORCHESTRATOR_BROWSER_SLOTS`
+  (default 1) applies and the packages share the chat browser one after another.
+- `UserContextWebAcquisition` (the orchestrated run's `WebAcquisition`) leases one user context per search
+  run and gives it back on success, failure, cancel and before a retry. The wait for a free user context is
+  bounded by the package's remaining time and taken off it; no free user context is a retryable stop, a
+  cancelled turn ends every wait at once.
+- `ResearchAgentSession.buildResearchLoop(turn, browserLane, researchLane, budget)` takes the browser lane
+  as a parameter: the same funnel (`WebSearchApplicationService`) runs on the worker's user context or on the
+  chat browser.
+
+The serial `research:` loop and the manual search keep the chat browser. A CAPTCHA in a worker tab cannot be
+solved by the user; a user context lost during a challenge wait ends the run as retryable.
 
 ## Tests
 
@@ -201,6 +214,9 @@ one session browser, which is why the orchestrator's browser capacity defaults t
 - `InProcessResearchSessionBackendTest` (plugin) — the adapter: lines → events, typed COMPLETED terminal,
   silence after close.
 - `ProductiveResearchMvpEndToEndTest` — the full productive host wiring (see research-mvp.md).
+- `WorkerUserContextExecutionTest` — the real `TaskExecutor` and `WebResearchWorker` on a pool: one user
+  context per package, parallel browsing up to the pool's capacity, leases always given back, the chat
+  browser as fallback without a pool.
 - `ResearchRolesTest`, `ResearchRoleTest`, `RoleToolCatalogTest` — the role interface and the pinned prompts.
 - `PortMainModelPassthroughTest`, `PortStructuredInferenceClientTest`, `MainModelCancelOnCloseTest` — the
   roles on the model port (with `FakeModelPort`).

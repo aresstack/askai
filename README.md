@@ -209,6 +209,7 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 - [docs/research-bot-control.md](docs/research-bot-control.md): headless bot control
 - [docs/research-chatgpt-connector.md](docs/research-chatgpt-connector.md): ChatGPT connector (German)
 - [docs/browser-mcp.md](docs/browser-mcp.md): the browser backend
+- [docs/research-browser-user-contexts.md](docs/research-browser-user-contexts.md): parallel web research with WebDriver BiDi user contexts per worker
 - [docs/agent-plugin-development.md](docs/agent-plugin-development.md): writing chat agent plugins
 - [docs/plugin-lifecycle.md](docs/plugin-lifecycle.md): plugin lifecycle
 - [docs/mcp-runtime.md](docs/mcp-runtime.md), [docs/mcp-marketplace.md](docs/mcp-marketplace.md): MCP infrastructure

@@ -474,7 +474,9 @@ stacked on another, it is merged after its base.
   capacity of 4.5: per research worker a WebDriver BiDi user context (`browser.createUserContext`), browsing
   contexts as tabs, several worker-browser processes per chat (Playwright Java serializes calls per
   instance), every page through the session's one capture store and source acceptance. Settings row "Worker
-  browsers". Wiring into the task executor follows once #12 and #13 are on `develop`.
+  browsers". Also one persistent Camoufox profile per chat instead of one shared profile. PR #18 wires the
+  pool into the task executor: the browser capacity is the pool's capacity (`ASKAI_ORCHESTRATOR_BROWSER_SLOTS`
+  only without a pool), and `UserContextWebAcquisition` leases one user context per search run.
 - **L, documentation** (this note). `docs/research-mvp.md`, `docs/research-agent-runtime.md`,
   `docs/mcp-runtime.md` and the module table in `README.md` describe the state above.
 - **Not started:** B and B' wait for the decision of 3.5. I (LangChain4j spike, optional) runs separately

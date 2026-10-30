@@ -114,7 +114,7 @@ Environment: Windows, Java 21 installed, Camoufox downloaded (or Chrome installe
 ## State after ADR 0001 (work items A, C0, C, D, E0, E, F, G, H, J)
 
 ADR 0001 (`docs/adr/0001-research-agent-architecture-after-java-21.md`) is implemented in stacked PRs
-against `develop` (#11, #6, #5, #8, #7, #9, #10, #13, #14; this document is item L). What they add on top of
+against `develop` (#11, #6, #5, #8, #7, #9, #10, #13, #14, plus #12, #18 and #17; this document is item L). What they add on top of
 the chain above, as built:
 
 - **Model port v2.** All model roles reach a model through the platform's `ModelPort`; ollama4j is the only
@@ -138,12 +138,13 @@ the chain above, as built:
   against the in-process lane by a parity test. One Gson version constant (`ext.gsonVersion`)
   serves our own JSON code; `browser-playwright` moved from Jackson to Gson, so the plugin `lib/` carries no
   Jackson.
-- **Parallel browsing** for workers (WebDriver BiDi user contexts per worker, browsing contexts as tabs,
-  worker browsers per chat, settings row "Worker browsers") is PR #12, independent of the lanes and not yet
-  wired into the task executor (see research-agent-runtime.md).
+- **Parallel browsing** for workers (#12, wired by #18): WebDriver BiDi user contexts per worker search run,
+  browsing contexts as tabs, worker browsers per chat, settings row "Worker browsers"; the task executor's
+  browser capacity is the pool's capacity. Each chat has its own persistent Camoufox profile (see
+  research-agent-runtime.md and research-browser-user-contexts.md).
 
 Not part of these items: the ACP question (ADR 3.5 stays open, work item B waits for the owner), the
-LangChain4j spike (item I, optional), per-chat persistent browser profiles.
+LangChain4j spike (item I, optional).
 
 ## Maturity levels (review framing)
 
