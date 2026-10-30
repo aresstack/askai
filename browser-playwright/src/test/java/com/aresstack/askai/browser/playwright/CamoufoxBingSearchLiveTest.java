@@ -41,11 +41,30 @@ public class CamoufoxBingSearchLiveTest {
 
     /** Why the first result block is hidden: every ancestor that is not plainly visible, with its cause. */
     private String probe() throws Exception {
+        return String.valueOf(page().evaluate(PROBE));
+    }
+
+    private com.microsoft.playwright.Page page() throws Exception {
         java.lang.reflect.Field field = Playwright4jDriver.class.getDeclaredField("page");
         field.setAccessible(true);
-        com.microsoft.playwright.Page page = (com.microsoft.playwright.Page) field.get(driver);
-        return String.valueOf(page.evaluate(PROBE));
+        return (com.microsoft.playwright.Page) field.get(driver);
     }
+
+    /** Where Bing's own scripts touch b_content or visibility — what its reveal waits for. */
+    private static final String SCRIPT_HINTS = "() => {\n"
+            + "  const hits = [];\n"
+            + "  for (const s of document.scripts) {\n"
+            + "    const t = s.textContent || '';\n"
+            + "    for (const key of ['b_content', 'visibility']) {\n"
+            + "      let i = t.indexOf(key);\n"
+            + "      while (i >= 0 && hits.length < 12) {\n"
+            + "        hits.push(key + ': ' + t.substring(Math.max(0, i - 160), i + 160).replace(/\\s+/g, ' '));\n"
+            + "        i = t.indexOf(key, i + 1);\n"
+            + "      }\n"
+            + "    }\n"
+            + "  }\n"
+            + "  return hits.join('\\n  | ');\n"
+            + "}";
 
     private static final String PROBE = "() => {\n"
             + "  const first = document.querySelector('li.b_algo');\n"
@@ -103,6 +122,22 @@ public class CamoufoxBingSearchLiveTest {
 
         driver.pumpEvents(() -> false, 3000L);
         System.err.println("[bing-live] 3 s later: " + probe());
+        if ("1".equals(System.getenv("ASKAI_LIVE_BING_DIAG"))) {
+            com.microsoft.playwright.Page page = page();
+            System.err.println("[bing-live] reveal scripts: " + page.evaluate(SCRIPT_HINTS));
+            System.err.println("[bing-live] focus=" + page.evaluate("() => document.hasFocus() + '/' "
+                    + "+ document.visibilityState"));
+            page.mouse().move(400, 300);
+            page.mouse().move(420, 320);
+            driver.pumpEvents(() -> false, 1000L);
+            System.err.println("[bing-live] after mouse move: " + probe());
+            page.mouse().wheel(0, 300);
+            driver.pumpEvents(() -> false, 1000L);
+            System.err.println("[bing-live] after wheel: " + probe());
+            page.bringToFront();
+            driver.pumpEvents(() -> false, 5000L);
+            System.err.println("[bing-live] after bringToFront + 5 s: " + probe());
+        }
 
         assertTrue("Bing delivered result blocks (consent or challenge page?): " + blocks, blocks >= 5);
         assertEquals("every Bing result block is captured visible", blocks, visibleBlocks);
