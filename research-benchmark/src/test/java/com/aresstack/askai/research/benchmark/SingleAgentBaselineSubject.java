@@ -6,6 +6,7 @@ import com.aresstack.askai.agent.model.inference.InferenceConfigurationException
 import com.aresstack.askai.agent.model.inference.InferenceConfigurationSnapshot;
 import com.aresstack.askai.agent.model.inference.InferenceConfigurationSnapshotProvider;
 import com.aresstack.askai.agent.model.inference.InferenceEndpointDescriptor;
+import com.aresstack.askai.java8.modelport.OllamaModelPort;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
 import com.aresstack.askai.research.backend.ResearchBackendEvent;
 import com.aresstack.askai.research.backend.ResearchBackendEventType;
@@ -78,7 +79,7 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
     public BenchmarkRunRecord run(BenchmarkQuestion question, FixtureWorld world, String model, String modelBaseUrl,
                                   int repetition, BenchmarkSettings settings) throws Exception {
         BenchmarkRunRecord record = new BenchmarkRunRecord(NAME, model, question.getId(), repetition);
-        try (Session session = Session.open(question, world, model, modelBaseUrl, settings, reranker, record)) {
+        try (Session session = Session.open(question, world, model, modelBaseUrl, settings, reranker, record, null)) {
             if (session == null) {
                 return record;
             }
@@ -96,7 +97,7 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
     public BenchmarkRunRecord runInterrupted(BenchmarkQuestion question, FixtureWorld world, String model,
                                              String modelBaseUrl, BenchmarkSettings settings) throws Exception {
         BenchmarkRunRecord record = new BenchmarkRunRecord(NAME, model, question.getId(), 0);
-        try (Session session = Session.open(question, world, model, modelBaseUrl, settings, reranker, record)) {
+        try (Session session = Session.open(question, world, model, modelBaseUrl, settings, reranker, record, null)) {
             if (session == null) {
                 return record;
             }
@@ -171,16 +172,20 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
 
     // ------------------------------------------------------------------ one productive session
 
-    private static final class Session implements AutoCloseable {
+    /** One productive session in RESEARCH/running; the orchestrated subject drives the same wiring. */
+    static final class Session implements AutoCloseable {
         final SolonMcpServerRuntime registry;
         final ProductiveResearchSessionResources resources;
         final ResearchSessionHandle handle;
         final Observer observer;
         final String previousBrowserArgs;
         final File projectDir;
+        final OllamaModelPort modelPort;
 
         private Session(SolonMcpServerRuntime registry, ProductiveResearchSessionResources resources,
-                        ResearchSessionHandle handle, Observer observer, String previousBrowserArgs, File projectDir) {
+                        ResearchSessionHandle handle, Observer observer, String previousBrowserArgs, File projectDir,
+                        OllamaModelPort modelPort) {
+            this.modelPort = modelPort;
             this.registry = registry;
             this.resources = resources;
             this.handle = handle;
@@ -191,8 +196,8 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
 
         /** Open a session in RESEARCH/running; null (with the reason in the record) when it cannot start. */
         static Session open(BenchmarkQuestion question, FixtureWorld world, String model, String modelBaseUrl,
-                            BenchmarkSettings settings, LocalRerankerRuntime reranker, BenchmarkRunRecord record)
-                throws IOException {
+                            BenchmarkSettings settings, LocalRerankerRuntime reranker, BenchmarkRunRecord record,
+                            Map<String, String> orchestratorEnvironment) throws IOException {
             // Documented dev/test hand-off (as in the MVP end-to-end test): every loopback server is its own
             // domain family, and the fixture engine is the search engine of this run.
             String previousBrowserArgs = System.setProperty(BROWSER_ARGS_PROPERTY,
@@ -204,6 +209,13 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
                     Collections.<String, String>emptyMap(), 0L, reranker.asProvider(settings.rerankTopN),
                     inference(model, modelBaseUrl, settings.inferenceTimeoutMillis));
             File projectDir = Files.createTempDirectory("askai-benchmark-" + question.getId()).toFile();
+            // Since lane C every model role reaches the model through the host's port, as in the product.
+            OllamaModelPort modelPort = BenchmarkModelPort.open(model, modelBaseUrl, settings.inferenceTimeoutMillis,
+                    projectDir);
+            factory.setModelPort(modelPort);
+            if (orchestratorEnvironment != null) {
+                factory.setOrchestratorEnvironment(orchestratorEnvironment);
+            }
             String sessionKey = "bench-" + question.getId() + "-" + System.nanoTime();
             ProductiveResearchSessionResources resources;
             try {
@@ -211,6 +223,7 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
             } catch (IOException notReady) {
                 restore(previousBrowserArgs);
                 registry.shutdown();
+                modelPort.close();
                 record.failure = "session could not be created (environment): " + notReady.getMessage();
                 record.environmentFailure = true;
                 return null;
@@ -222,6 +235,7 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
                     resources.close();
                     restore(previousBrowserArgs);
                     registry.shutdown();
+                    modelPort.close();
                     record.failure = "host state machine rejected " + command;
                     return null;
                 }
@@ -230,13 +244,18 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
             ResearchSessionHandle handle = resources.getBackend().createSession(
                     new ResearchProjectRequest(sessionKey, "benchmark-" + question.getId(), question.getQuestion()),
                     observer);
-            return new Session(registry, resources, handle, observer, previousBrowserArgs, projectDir);
+            return new Session(registry, resources, handle, observer, previousBrowserArgs, projectDir, modelPort);
         }
 
         /** The full question, not only its keywords: the subject must see every requirement it is scored on. */
         void submit(BenchmarkQuestion question) {
             resources.getBackend().submitPrompt(handle, new ResearchPrompt("research: " + question.getQuestion(),
                     ""));
+        }
+
+        /** A prompt as the user's chat input sends it (a question, or a typed command envelope). */
+        void submitText(String text) {
+            resources.getBackend().submitPrompt(handle, new ResearchPrompt(text, ""));
         }
 
         void collect(BenchmarkRunRecord record, FixtureWorld world, boolean finished, int timeoutSeconds) {
@@ -294,6 +313,7 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
                 resources.close();
                 registry.shutdown();
                 restore(previousBrowserArgs);
+                modelPort.close();
             }
         }
 
@@ -314,6 +334,8 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
         final AtomicLong firstSourceNanos = new AtomicLong();
         final CountDownLatch firstSource = new CountDownLatch(1);
         final AtomicInteger outcomes = new AtomicInteger();
+        /** Turns the agent ended normally (a cancelled turn reports none). */
+        final AtomicInteger completions = new AtomicInteger();
         final AtomicInteger toolCalls = new AtomicInteger();
         final AtomicInteger failures = new AtomicInteger();
         final List<String> statements = new CopyOnWriteArrayList<String>();
@@ -348,6 +370,11 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
                 if (!text.isEmpty()) {
                     statements.add(text);
                 }
+            } else if (type == ResearchBackendEventType.COMPLETED) {
+                synchronized (lock) {
+                    completions.incrementAndGet();
+                    lock.notifyAll();
+                }
             } else if (type == ResearchBackendEventType.RUN_OUTCOME) {
                 lastOutcome = event.getRunOutcome();
                 // The outcome's limitation is user-facing text too ("only two hosts found ...").
@@ -376,9 +403,17 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
         }
 
         boolean awaitOutcomes(int count, int timeoutSeconds) throws InterruptedException {
+            return await(outcomes, count, timeoutSeconds);
+        }
+
+        boolean awaitCompletions(int count, int timeoutSeconds) throws InterruptedException {
+            return await(completions, count, timeoutSeconds);
+        }
+
+        private boolean await(AtomicInteger counter, int count, int timeoutSeconds) throws InterruptedException {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
             synchronized (lock) {
-                while (outcomes.get() < count) {
+                while (counter.get() < count) {
                     long left = deadline - System.nanoTime();
                     if (left <= 0) {
                         return false;

@@ -13,6 +13,8 @@ dependencies {
     // ProductiveResearchSessionResources → ResearchSessionBackend), exactly as the MVP end-to-end test does.
     testImplementation project(':research-agent-ui-plugin')
     testImplementation project(':research-agent-runtime')
+    // The task record the orchestrated subject reads back (ADR 0001, 4.4).
+    testImplementation project(':research-domain')
     // The plugin compiles these against the host (compileOnly); a test outside the host provides them.
     testImplementation project(':mcp-runtime-api')
     testImplementation project(':mcp-solon-runtime')
@@ -21,6 +23,9 @@ dependencies {
     testImplementation project(':agent-plugin-pf4j-api')
     // The baseline's mandatory reranker: the real local model runtime, started in-process as the host does.
     testImplementation project(':local-model-runtime')
+    // Since lane C the agent reaches every model through the host's model port: the platform's own Ollama port,
+    // pointed at the token meter (ollama4j stays inside askai-app; the benchmark only constructs the port).
+    testImplementation project(':askai-app')
     testImplementation 'org.pf4j:pf4j:3.15.0'
     // Fixture files and the token meter's response parsing (Gson is the house JSON library, ADR 3.1).
     testImplementation 'com.google.code.gson:gson:2.13.1'

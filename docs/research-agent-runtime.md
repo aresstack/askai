@@ -43,6 +43,43 @@ at the next gate.
 against in-JVM endpoints (36A), against the live in-process Playwright browser (36C) and inside the
 productive E2E (38) — there is no backend-specific code path in the loop.
 
+## The orchestrated run (ADR 0001, 4.2 to 4.5)
+
+With the setting "Orchestrated research" (`research.orchestrator.enabled`, default off; runtime key
+`ASKAI_ORCHESTRATOR_MODE=orchestrated`) a plain research question in RESEARCH/running goes to the
+orchestrator instead of the single loop. `research:` keeps running the single loop in both modes.
+Package `runtime.orchestrator`:
+
+- `ResearchOrchestrator` is a model role (`research-orchestrator`, slot `orchestrator`, the main model
+  unless the user assigns one). Every decision is schema output with a per-request schema
+  (`OrchestratorDecisionCodec`): the plan (work packages with role, query, brief, outline sections and
+  dependencies) and the round decision (evaluation per package, gaps, contradictions, quality, then
+  `continue`, `close` or `ask-user` with follow-ups). An answer that breaks the schema or the run's facts
+  (unknown role, section or package, a cycle, too many packages) is sent back once with the reason
+  (`ASKAI_ORCHESTRATOR_DECISION_REPAIR_ATTEMPTS`).
+- `TaskExecutor` is deterministic code. It persists every package as a `ResearchTask` on the project's
+  blackboard (`TaskBoard`; in the plugin `ProjectTaskBoard`: the task store plus
+  `orchestrator/run.json`), dispatches ready tasks in dependency order and caps concurrency with the
+  capacity the model port reports per model and endpoint, plus a separate browser capacity. Each worker
+  sees only the tools of its role (`RoleScopedToolInvoker`), its tokens and time are booked on its task,
+  retryable failures are retried within `ASKAI_ORCHESTRATOR_TASK_RETRY_LIMIT`, a package whose dependency
+  did not complete is cancelled, and `resume` re-queues what an interrupted session left working.
+- `WebResearchWorker` (role `web-researcher`) runs the same `ResearchLoop` over the same
+  `WebSearchApplicationService` funnel as `research:`; there is no second acquisition path. Each accepted
+  source becomes a `SOURCE_REFERENCE` artifact on its task.
+- `OrchestratedResearchRun` is the envelope. Nothing runs before the user approves the plan; follow-ups
+  inside the approved sections and roles run without asking, anything beyond them, the round limit and the
+  run budget (tokens, minutes, packages) go back to the user (`AWAITING_APPROVAL`). `ask-user` waits for
+  the answer (`AWAITING_INPUT`; the next chat message is the answer). A `close` is accepted only when
+  `EvidenceMeter` agrees: the run rule (minimum sources and hosts of the search-run settings), every
+  outline section covered by `ASKAI_ORCHESTRATOR_MIN_SOURCES_PER_SECTION` sources and no open package.
+  The orchestrator never switches a phase; approve, continue and stop are typed service commands
+  (`orchestrator_approve`, `orchestrator_stop`, `orchestrator_answer`) from the State tab.
+
+All limits are settings with defaults (`OrchestratorSettings`, plugin: Settings, Research runtime,
+"Orchestrator" row). The research benchmark measures the run as subject `orchestrated-run` next to the
+single-agent baseline.
+
 ## Tests
 
 - `ResearchLoopTest` — 7 content-fixture tests (budgets, cancel, error reset, late-write rejection,
