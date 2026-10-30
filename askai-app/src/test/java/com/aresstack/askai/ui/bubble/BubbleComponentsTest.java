@@ -93,6 +93,22 @@ public class BubbleComponentsTest {
     }
 
     @Test
+    public void thinkingBubbleBodyCanBeReplacedInPlace() throws Exception {
+        final AtomicReference<AssistantThinkingBubblePanel> ref = new AtomicReference<AssistantThinkingBubblePanel>();
+        SwingUtilities.invokeAndWait(new Runnable() {
+            public void run() {
+                AssistantThinkingBubblePanel bubble = new AssistantThinkingBubblePanel(
+                        BubbleSide.LEFT, BubblePalette.windowsPhoneInspired(), "AskAI", "");
+                bubble.setBodyText("• Preparing topic areas …");
+                bubble.setBodyText("• Concept extended – 2 topic areas added: A, B");
+                ref.set(bubble);
+            }
+        });
+        // A status bubble shows the latest full text — never the earlier lines again.
+        assertEquals("• Concept extended – 2 topic areas added: A, B", ref.get().getExplanation());
+    }
+
+    @Test
     public void transcriptThinkingHandleStreamsWithoutError() throws Exception {
         SwingUtilities.invokeAndWait(new Runnable() {
             public void run() {

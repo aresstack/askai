@@ -572,6 +572,14 @@ public final class BubbleTranscriptPanel extends JPanel {
         refreshTranscript();
     }
 
+    /** Replaces the thinking bubble's body with the full current text (agent status bubbles). */
+    public void replaceAssistantThinkingText(ThinkingHandle handle, String text) {
+        requireEventDispatchThread();
+        requireKnownActivity(handle == null ? null : handle.bubble);
+        handle.bubble.setBodyText(text);
+        refreshTranscript();
+    }
+
     /** Finishes thinking: the bubble bursts and the summary rises over the transcript, then the row is removed. */
     public void completeAssistantThinking(ThinkingHandle handle, String summary) {
         requireEventDispatchThread();

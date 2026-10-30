@@ -195,6 +195,10 @@ final class ChatTranscript {
         panel.appendAssistantThinkingDelta(handle, delta);
     }
 
+    void replaceAssistantThinkingText(BubbleTranscriptPanel.ThinkingHandle handle, String text) {
+        panel.replaceAssistantThinkingText(handle, text);
+    }
+
     void completeAssistantThinking(BubbleTranscriptPanel.ThinkingHandle handle, String summary) {
         panel.completeAssistantThinking(handle, summary);
     }
