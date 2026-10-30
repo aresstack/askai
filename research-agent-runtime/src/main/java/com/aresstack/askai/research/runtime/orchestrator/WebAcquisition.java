@@ -21,10 +21,11 @@ public interface WebAcquisition {
      * @param accepted notified for every newly accepted source
      * @param maxDurationMillis the task's remaining time; the run ends at the earlier of this and the search-run
      *                          time limit ({@code <= 0}: the search-run limit alone)
+     * @param tokens            the task's token account; model calls of the search run are metered onto it
      * @return why the run stopped and a one-line summary
      */
     Result acquire(String query, ToolInvoker research, Consumer<WebSearchApplicationService.AcceptedSource> accepted,
-                   long maxDurationMillis);
+                   long maxDurationMillis, java.util.concurrent.atomic.AtomicLong tokens);
 
     /** How one search run ended. */
     final class Result {

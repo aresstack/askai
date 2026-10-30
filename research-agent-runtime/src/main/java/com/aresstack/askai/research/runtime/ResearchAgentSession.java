@@ -77,6 +77,11 @@ public final class ResearchAgentSession {
     private final java.util.Set<com.aresstack.askai.research.runtime.team.MainModelChat> orchestratorChatsInFlight =
             java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(
                     new java.util.WeakHashMap<com.aresstack.askai.research.runtime.team.MainModelChat, Boolean>()));
+    /** The work packages' metered layout-repair transports, cancelled with the turn like the chats. */
+    private final java.util.Set<com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient>
+            orchestratorInferenceInFlight = java.util.Collections.synchronizedSet(
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<
+                    com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient, Boolean>()));
     /** When the LAST user search started — the lower edge of "the new sources" its review reads. */
     private volatile long lastManualSearchStartedAt;
     /** The request id of the LAST manual search — the default scope of /review-sources. */
@@ -690,6 +695,12 @@ public final class ResearchAgentSession {
                 chat.cancelInFlight();
             }
         }
+        synchronized (orchestratorInferenceInFlight) {
+            for (com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient client
+                    : orchestratorInferenceInFlight) {
+                client.cancelInFlight();
+            }
+        }
         com.aresstack.askai.browser.search.inference.StructuredInferencePort inference = inferencePort;
         if (inference instanceof com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) {
             ((com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) inference)
@@ -957,10 +968,16 @@ public final class ResearchAgentSession {
                         public Result acquire(String query, ToolInvoker permittedResearch,
                                               java.util.function.Consumer<com.aresstack.askai.research.runtime
                                                       .acquire.WebSearchApplicationService.AcceptedSource> accepted,
-                                              long maxDurationMillis) {
+                                              long maxDurationMillis,
+                                              java.util.concurrent.atomic.AtomicLong tokens) {
                             com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
                                     buildResearchLoop(orchestratorTurn, permittedResearch,
                                             boundedBy(budget, maxDurationMillis));
+                            com.aresstack.askai.browser.search.inference.StructuredInferencePort metered =
+                                    meteredInference(tokens);
+                            if (metered != null) {
+                                loop.setStructuredInferencePort(metered);
+                            }
                             loop.setAcceptedSourceObserver(accepted);
                             com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(query);
                             synchronized (visitedAcrossRuns) {
@@ -986,6 +1003,30 @@ public final class ResearchAgentSession {
                     });
         }
         return orchestrator;
+    }
+
+    /**
+     * The session's layout-repair transport, metered onto a work package's token account (null when the session
+     * has none, or the search strategy is an API provider and the loop needs no inference). Registered so
+     * {@link #cancel()} aborts it with the turn.
+     */
+    private com.aresstack.askai.browser.search.inference.StructuredInferencePort meteredInference(
+            java.util.concurrent.atomic.AtomicLong tokens) {
+        if (tokens == null || modelPort == null || inferencePort == null || searchStrategy != null) {
+            return null;
+        }
+        try {
+            com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient client =
+                    com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient.forRole(
+                            new com.aresstack.askai.research.runtime.orchestrator.MeteredModelPort(modelPort, tokens),
+                            com.aresstack.askai.research.runtime.role.ResearchRoles.SERP_LAYOUT_REPAIR,
+                            callTimeout(com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
+                                    .load(environment.inferenceConfigPath)));
+            orchestratorInferenceInFlight.add(client);
+            return client;
+        } catch (java.io.IOException unusable) {
+            return null;
+        }
     }
 
     /** The search-run budget with its time limit lowered to a work package's remaining time. */

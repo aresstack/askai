@@ -127,7 +127,7 @@ public class OrchestratorModelTest {
     @Test
     public void theWebWorkerBoundsItsSearchRunByTheTasksRemainingTime() {
         final java.util.concurrent.atomic.AtomicLong passed = new java.util.concurrent.atomic.AtomicLong(-1);
-        WebResearchWorker worker = new WebResearchWorker((query, research, accepted, maxDurationMillis) -> {
+        WebResearchWorker worker = new WebResearchWorker((query, research, accepted, maxDurationMillis, tokens) -> {
             passed.set(maxDurationMillis);
             return new WebAcquisition.Result(
                     com.aresstack.askai.research.runtime.loop.ResearchStopReason.NO_SEMANTIC_MATCHES, "");
@@ -146,6 +146,9 @@ public class OrchestratorModelTest {
             public void log(String line) { }
             public boolean isCancelled() { return false; }
             public boolean isBudgetExhausted() { return false; }
+            public java.util.concurrent.atomic.AtomicLong tokens() {
+                return new java.util.concurrent.atomic.AtomicLong();
+            }
         };
         assertEquals(WorkerResult.Kind.COMPLETED, worker.execute(task, context).getKind());
         assertEquals(45_000L, passed.get());
