@@ -931,6 +931,9 @@ public final class ResearchAgentSession {
             session.answer(command.getQuery(), cancelled, out);
         } else if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_ORCHESTRATOR_STOP
                 .equals(type)) {
+            // A stop arrives on its own turn while the approving turn still runs the cycle: cancel the session's
+            // work first (flag, in-flight model calls), so running packages end now instead of browsing on.
+            cancel();
             session.stop(out);
         }
     }
@@ -969,12 +972,13 @@ public final class ResearchAgentSession {
                                               java.util.function.Consumer<com.aresstack.askai.research.runtime
                                                       .acquire.WebSearchApplicationService.AcceptedSource> accepted,
                                               long maxDurationMillis,
-                                              java.util.concurrent.atomic.AtomicLong tokens) {
+                                              java.util.concurrent.atomic.AtomicLong tokens,
+                                              java.util.function.BooleanSupplier exhausted) {
                             com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
                                     buildResearchLoop(orchestratorTurn, permittedResearch,
                                             boundedBy(budget, maxDurationMillis));
                             com.aresstack.askai.browser.search.inference.StructuredInferencePort metered =
-                                    meteredInference(tokens);
+                                    meteredInference(tokens, exhausted);
                             if (metered != null) {
                                 loop.setStructuredInferencePort(metered);
                             }
@@ -1008,14 +1012,15 @@ public final class ResearchAgentSession {
      * {@link #cancel()} aborts it with the turn.
      */
     private com.aresstack.askai.browser.search.inference.StructuredInferencePort meteredInference(
-            java.util.concurrent.atomic.AtomicLong tokens) {
+            java.util.concurrent.atomic.AtomicLong tokens, java.util.function.BooleanSupplier exhausted) {
         if (tokens == null || modelPort == null || inferencePort == null || searchStrategy != null) {
             return null;
         }
         try {
             com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient client =
                     com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient.forRole(
-                            new com.aresstack.askai.research.runtime.orchestrator.MeteredModelPort(modelPort, tokens),
+                            new com.aresstack.askai.research.runtime.orchestrator.MeteredModelPort(modelPort, tokens,
+                                    exhausted),
                             com.aresstack.askai.research.runtime.role.ResearchRoles.SERP_LAYOUT_REPAIR,
                             callTimeout(com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
                                     .load(environment.inferenceConfigPath)));
