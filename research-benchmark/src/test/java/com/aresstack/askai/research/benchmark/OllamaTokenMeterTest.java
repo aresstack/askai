@@ -11,6 +11,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class OllamaTokenMeterTest {
 
@@ -40,7 +42,8 @@ public class OllamaTokenMeterTest {
             exchange.close();
         });
         upstream.start();
-        try (OllamaTokenMeter meter = OllamaTokenMeter.start("http://127.0.0.1:" + upstream.getAddress().getPort())) {
+        try (OllamaTokenMeter meter = OllamaTokenMeter.start("http://127.0.0.1:" + upstream.getAddress().getPort(),
+                10_000L)) {
             OllamaTokenMeter.Usage before = meter.snapshot();
             assertEquals(STREAM, post(meter.baseUrl() + "/api/chat", "{\"stream\":true}", 200));
             assertEquals("{\"stream\":true}", seenBody[0]);
@@ -53,6 +56,7 @@ public class OllamaTokenMeterTest {
             assertEquals(10, used.outputTokens);
             assertEquals(160, used.totalTokens());
             assertEquals(3000, used.modelMillis);
+            assertTrue("nothing in flight after the calls returned", meter.awaitIdle(1000));
         } finally {
             upstream.stop(0);
         }
@@ -62,10 +66,49 @@ public class OllamaTokenMeterTest {
     public void anUnreachableUpstreamIsAFailedCall() throws Exception {
         // Port 1 (tcpmux) is never served here. A freshly freed ephemeral port would not do: the meter itself
         // may bind it and then forward to itself.
-        try (OllamaTokenMeter meter = OllamaTokenMeter.start("http://127.0.0.1:1")) {
+        try (OllamaTokenMeter meter = OllamaTokenMeter.start("http://127.0.0.1:1", 10_000L)) {
             post(meter.baseUrl() + "/api/chat", "{}", 502);
             assertEquals(1, meter.snapshot().calls);
             assertEquals(1, meter.snapshot().failedCalls);
+        }
+    }
+
+    @Test
+    public void aRunsUsageIsSettledOnlyAfterItsSlowCallFinished() throws Exception {
+        HttpServer upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        upstream.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        upstream.createContext("/api/chat", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            try {
+                release.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            byte[] body = SINGLE.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+        try (OllamaTokenMeter meter = OllamaTokenMeter.start("http://127.0.0.1:" + upstream.getAddress().getPort(),
+                10_000L)) {
+            Thread caller = new Thread(() -> {
+                try {
+                    post(meter.baseUrl() + "/api/chat", "{\"stream\":false}", 200);
+                } catch (Exception ignored) {
+                    // the assertion below is what matters
+                }
+            });
+            caller.start();
+            Thread.sleep(300);
+            assertFalse("the slow call is still in flight", meter.awaitIdle(200));
+            release.countDown();
+            assertTrue(meter.awaitIdle(5000));
+            assertEquals(30, meter.snapshot().promptTokens);
+            caller.join(5000);
+        } finally {
+            upstream.stop(0);
         }
     }
 

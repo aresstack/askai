@@ -15,6 +15,7 @@ import com.aresstack.askai.research.backend.ResearchRunOutcomeInfo;
 import com.aresstack.askai.research.backend.ResearchSessionHandle;
 import com.aresstack.askai.research.backend.ResearchSessionListener;
 import com.aresstack.askai.research.capture.VisitedCapture;
+import com.aresstack.askai.research.host.BrowserRuntimePort;
 import com.aresstack.askai.research.host.ProductiveResearchBackendFactory;
 import com.aresstack.askai.research.host.ProductiveResearchSessionResources;
 import com.aresstack.askai.research.host.ResearchRuntimeConfig;
@@ -55,8 +56,6 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
 
     public static final String NAME = "single-agent-baseline";
     private static final String BROWSER_ARGS_PROPERTY = "askai.research.browser.args";
-    /** How long a cancelled run may take to report its outcome before the continuation is submitted. */
-    private static final int CANCEL_SETTLE_SECONDS = 30;
 
     private final LocalRerankerRuntime reranker;
 
@@ -115,7 +114,17 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
             }
             // ---- interruption: the user cancels the running prompt ----
             session.resources.getBackend().cancel(session.handle);
-            session.observer.awaitOutcomes(1, CANCEL_SETTLE_SECONDS);
+            if (!session.observer.awaitOutcomes(1, settings.cancelSettleSeconds)) {
+                // The cancelled run is still going (a browser call is not aborted by a cancel). Submitting the
+                // continuation now would run two prompts in one session and mix their outcomes.
+                record.wallMillis = (System.nanoTime() - start) / 1_000_000L;
+                session.collect(record, world, false, settings.cancelSettleSeconds);
+                record.resume = new BenchmarkRunRecord.ResumeOutcome(
+                        session.resources.getRepository().find(SourceQuery.all()).size(), false, "", false, 0, 0,
+                        record.wallMillis, "the cancelled run did not settle within " + settings.cancelSettleSeconds
+                        + " s; the continuation was not submitted");
+                return record;
+            }
             List<ResearchSourceRecord> before = session.resources.getRepository().find(SourceQuery.all());
             List<VisitedCapture> capturesBefore = session.resources.getCaptures().list();
             Set<String> visitedBefore = new HashSet<String>();
@@ -203,6 +212,7 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
                 restore(previousBrowserArgs);
                 registry.shutdown();
                 record.failure = "session could not be created (environment): " + notReady.getMessage();
+                record.environmentFailure = true;
                 return null;
             }
             for (ResearchCommandType command : new ResearchCommandType[]{
@@ -223,8 +233,10 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
             return new Session(registry, resources, handle, observer, previousBrowserArgs, projectDir);
         }
 
+        /** The full question, not only its keywords: the subject must see every requirement it is scored on. */
         void submit(BenchmarkQuestion question) {
-            resources.getBackend().submitPrompt(handle, new ResearchPrompt("research: " + question.getQuery(), ""));
+            resources.getBackend().submitPrompt(handle, new ResearchPrompt("research: " + question.getQuestion(),
+                    ""));
         }
 
         void collect(BenchmarkRunRecord record, FixtureWorld world, boolean finished, int timeoutSeconds) {
@@ -257,6 +269,21 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
             }
             record.statements.clear();
             record.statements.addAll(observer.statements);
+            // The browser starts lazily on the first web command, so a missing browser does not fail the
+            // session start. A run that visited nothing is checked once more: if the browser cannot start,
+            // the environment failed, not the subject. (Checked after the run, so the browser start stays
+            // part of the measured time.)
+            if (record.visitedUrls.isEmpty()) {
+                try {
+                    resources.getBrowser().ensureStarted();
+                } catch (BrowserRuntimePort.BrowserRuntimeException noBrowser) {
+                    record.environmentFailure = true;
+                    record.failure = "browser could not start (environment): " + noBrowser.getMessage();
+                } catch (RuntimeException noBrowser) {
+                    record.environmentFailure = true;
+                    record.failure = "browser could not start (environment): " + noBrowser;
+                }
+            }
         }
 
         @Override

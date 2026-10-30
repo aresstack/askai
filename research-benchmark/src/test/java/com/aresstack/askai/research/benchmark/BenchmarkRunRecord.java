@@ -66,6 +66,8 @@ public final class BenchmarkRunRecord {
     /** False when the run never produced a structured outcome (timeout, start failure). */
     boolean finished;
     String failure = "";
+    /** True when the environment, not the subject, failed (no browser, session could not start). */
+    boolean environmentFailure;
     String stopReason = "";
     boolean evidenceSufficient;
     int pagesVisited;
@@ -129,6 +131,10 @@ public final class BenchmarkRunRecord {
 
     public String getFailure() {
         return failure;
+    }
+
+    public boolean isEnvironmentFailure() {
+        return environmentFailure;
     }
 
     public String getStopReason() {

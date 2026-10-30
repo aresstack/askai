@@ -34,6 +34,7 @@ public final class OllamaTokenMeter implements AutoCloseable {
     private static final int CONNECT_TIMEOUT_MILLIS = 10_000;
 
     private final String upstream;
+    private final int readTimeoutMillis;
     private final HttpServer server;
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "benchmark-token-meter");
@@ -45,18 +46,46 @@ public final class OllamaTokenMeter implements AutoCloseable {
     private final AtomicLong promptTokens = new AtomicLong();
     private final AtomicLong outputTokens = new AtomicLong();
     private final AtomicLong modelNanos = new AtomicLong();
+    /** Requests being forwarded right now; a run's usage is final only when this is back to zero. */
+    private final java.util.concurrent.atomic.AtomicInteger inFlight =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final Object idle = new Object();
 
-    private OllamaTokenMeter(String upstream) throws IOException {
+    private OllamaTokenMeter(String upstream, int readTimeoutMillis) throws IOException {
         this.upstream = upstream.endsWith("/") ? upstream.substring(0, upstream.length() - 1) : upstream;
+        this.readTimeoutMillis = readTimeoutMillis;
         this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.setExecutor(executor);
         server.createContext("/", this::forward);
         server.start();
     }
 
-    /** Start a meter that forwards to {@code upstreamBaseUrl} (for example {@code http://127.0.0.1:11434}). */
-    public static OllamaTokenMeter start(String upstreamBaseUrl) throws IOException {
-        return new OllamaTokenMeter(upstreamBaseUrl);
+    /**
+     * Start a meter that forwards to {@code upstreamBaseUrl} (for example {@code http://127.0.0.1:11434}).
+     *
+     * @param readTimeoutMillis upper bound of one forwarded call (the subject's model-call timeout), so a call
+     *                          its subject abandoned cannot stay in flight forever
+     */
+    public static OllamaTokenMeter start(String upstreamBaseUrl, long readTimeoutMillis) throws IOException {
+        return new OllamaTokenMeter(upstreamBaseUrl, (int) Math.min(Integer.MAX_VALUE, readTimeoutMillis));
+    }
+
+    /**
+     * Wait until no request is being forwarded. A run that ends (timeout, cancel) while a model call is still
+     * streaming would otherwise charge that call to the NEXT run. @return false when calls are still in flight
+     */
+    public boolean awaitIdle(long timeoutMillis) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        synchronized (idle) {
+            while (inFlight.get() > 0) {
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) {
+                    return false;
+                }
+                idle.wait(left);
+            }
+            return true;
+        }
     }
 
     /** The base URL the subject must use instead of Ollama's. */
@@ -77,6 +106,18 @@ public final class OllamaTokenMeter implements AutoCloseable {
     }
 
     private void forward(HttpExchange exchange) throws IOException {
+        inFlight.incrementAndGet();
+        try {
+            forwardCounted(exchange);
+        } finally {
+            synchronized (idle) {
+                inFlight.decrementAndGet();
+                idle.notifyAll();
+            }
+        }
+    }
+
+    private void forwardCounted(HttpExchange exchange) throws IOException {
         boolean modelCall = isModelCall(exchange.getRequestURI().getPath());
         HttpURLConnection connection = null;
         try {
@@ -85,6 +126,7 @@ public final class OllamaTokenMeter implements AutoCloseable {
             connection = (HttpURLConnection) target.openConnection(Proxy.NO_PROXY);
             // Connecting is fast or never; reading is bounded by the subject's own model-call timeout.
             connection.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
+            connection.setReadTimeout(readTimeoutMillis);
             connection.setRequestMethod(exchange.getRequestMethod());
             String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
             if (contentType != null) {

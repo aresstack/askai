@@ -18,7 +18,10 @@ public final class BenchmarkQuestion {
     String purpose;
     /** The research question as a user would ask it. */
     String question;
-    /** The query the subject is started with ({@code research: <query>} for the baseline). */
+    /**
+     * The question's search keywords, for subjects that take a query instead of a question. The baseline is
+     * started with the full {@link #question} ({@code research: <question>}), so it sees every requirement.
+     */
     String query;
     /** The outline sections the research is expected to cover (gap detection is measured against them). */
     List<String> outline = new ArrayList<String>();

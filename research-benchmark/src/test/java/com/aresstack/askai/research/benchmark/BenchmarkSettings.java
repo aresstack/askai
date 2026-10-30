@@ -29,6 +29,11 @@ public final class BenchmarkSettings {
     public final boolean resumeScenario;
     /** Upper bound for the interrupted run to reach its first accepted source before it is cancelled. */
     public final int interruptTimeoutSeconds;
+    /**
+     * How long a cancelled run may take to report its outcome. A run that does not settle in time fails the
+     * resume scenario: continuing next to a still-running run would measure two runs at once.
+     */
+    public final int cancelSettleSeconds;
     /** Timeout of one model call, written into the inference descriptor the subject receives. */
     public final long inferenceTimeoutMillis;
     /** Question ids to run; empty means the whole set. */
@@ -58,6 +63,7 @@ public final class BenchmarkSettings {
         this.runTimeoutSeconds = Math.max(10, integer(properties, used, "runTimeoutSeconds", 300));
         this.resumeScenario = Boolean.parseBoolean(string(properties, used, "resume", "true"));
         this.interruptTimeoutSeconds = Math.max(10, integer(properties, used, "interruptTimeoutSeconds", 180));
+        this.cancelSettleSeconds = Math.max(1, integer(properties, used, "cancelSettleSeconds", 360));
         this.inferenceTimeoutMillis = Math.max(1000L, longValue(properties, used, "inferenceTimeoutMillis",
                 300_000L));
         this.questionIds = list(string(properties, used, "questions", ""));

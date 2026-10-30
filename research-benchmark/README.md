@@ -32,6 +32,7 @@ Settings are `askai.benchmark.*` system properties; the `benchmark` task forward
 | `runTimeoutSeconds` | 300 | upper bound of one run |
 | `resume` | true | run the resume-after-interruption scenario once per question and model |
 | `interruptTimeoutSeconds` | 180 | wait for the first source before interrupting |
+| `cancelSettleSeconds` | 360 | a cancelled run must report its outcome within this time, otherwise the resume scenario fails instead of running two prompts at once |
 | `inferenceTimeoutMillis` | 300000 | model-call timeout in the subject's inference descriptor |
 | `questions` | all | comma-separated question ids |
 | `reportDir` | `build/reports/research-benchmark` | where reports go |
@@ -58,6 +59,11 @@ Example: `gradlew :research-benchmark:benchmark -Daskai.benchmark.models=gemma4:
   them, otherwise a text heuristic), tool-call success, model calls and tokens, wall time and time to the
   first source, stability across repetitions and models, and resume after interruption (cancel after the
   first accepted source, continue, count duplicate sources and revisited pages).
+- **Input.** The baseline is started with the full question (`research: <question>`). It has no outline
+  input, so its gap detection measures what it reports unprompted.
+- **Environment vs. result.** A run whose session cannot start, or whose browser cannot start, is marked as
+  an environment failure; if every run fails that way, the benchmark skips instead of reporting poor scores.
 - **Tokens.** The subject's inference descriptor points at a recording pass-through in front of Ollama
   (`OllamaTokenMeter`); it relays requests and streams unchanged and sums Ollama's `prompt_eval_count` and
-  `eval_count`. The subject's code is not touched.
+  `eval_count`. The subject's code is not touched. A run's usage is taken only after its last model call has
+  finished, so a call that outlives its run is not charged to the next one.

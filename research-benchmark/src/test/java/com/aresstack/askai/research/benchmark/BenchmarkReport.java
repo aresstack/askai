@@ -257,6 +257,9 @@ public final class BenchmarkReport {
         md.append("- Contradictions and gaps: structured reports when the subject has them, otherwise a text "
                 + "heuristic over the statements (both values named, or one value with a conflict word; a gap "
                 + "keyword in a sentence with a gap marker).\n");
+        md.append("- The subject gets the full question. The baseline has no outline input, so its gap "
+                + "detection measures what it reports unprompted; a subject that takes an outline gets the "
+                + "question's outline.\n");
         md.append("- Tool calls: the run's tool-call count from the progress events; failed = ERROR and "
                 + "PROBLEM_REPORTED events. Model calls and tokens: the recording pass-through in front of Ollama.\n");
     }

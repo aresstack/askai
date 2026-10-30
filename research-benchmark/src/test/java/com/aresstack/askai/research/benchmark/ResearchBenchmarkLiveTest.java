@@ -63,13 +63,14 @@ public class ResearchBenchmarkLiveTest {
 
         int environmentFailures = 0;
         int runs = 0;
-        try (OllamaTokenMeter meter = OllamaTokenMeter.start(settings.ollamaUrl)) {
+        try (OllamaTokenMeter meter = OllamaTokenMeter.start(settings.ollamaUrl,
+                settings.inferenceTimeoutMillis)) {
             for (BenchmarkSubject subject : subjects) {
                 for (String model : models) {
                     for (BenchmarkQuestion question : questions) {
                         for (int repetition = 1; repetition <= settings.repetitions; repetition++) {
                             final int number = repetition;
-                            BenchmarkRunRecord record = measured(meter, () -> {
+                            BenchmarkRunRecord record = measured(meter, settings, () -> {
                                 try (FixtureWorld world = FixtureWorld.start(question, settings.serpResults)) {
                                     BenchmarkRunRecord run = subject.run(question, world, model, meter.baseUrl(),
                                             number, settings);
@@ -78,14 +79,14 @@ public class ResearchBenchmarkLiveTest {
                                 }
                             });
                             runs++;
-                            if (record.getFailure().startsWith("session could not be created")) {
+                            if (record.isEnvironmentFailure()) {
                                 environmentFailures++;
                             }
                             report.add(scorer.score(question, record));
                             log(record);
                         }
                         if (settings.resumeScenario) {
-                            BenchmarkRunRecord record = measured(meter, () -> {
+                            BenchmarkRunRecord record = measured(meter, settings, () -> {
                                 try (FixtureWorld world = FixtureWorld.start(question, settings.serpResults)) {
                                     BenchmarkRunRecord run = subject.runInterrupted(question, world, model,
                                             meter.baseUrl(), settings);
@@ -103,8 +104,8 @@ public class ResearchBenchmarkLiveTest {
         File file = report.write();
         System.out.println("[benchmark] report: " + file.getAbsolutePath());
         // Without an installed browser no session can start; that is the environment, not a result.
-        skipUnless(environmentFailures < runs, "no research session could be created (is a browser installed "
-                + "for channel '" + settings.browserChannel + "'?); report: " + file.getAbsolutePath());
+        skipUnless(environmentFailures < runs, "no run had a working environment (is a browser installed for "
+                + "channel '" + settings.browserChannel + "'?); report: " + file.getAbsolutePath());
         assertTrue("the report was written", file.isFile());
         assertFalse("the report is not empty", report.render().isEmpty());
     }
@@ -117,10 +118,22 @@ public class ResearchBenchmarkLiveTest {
         assumeTrue("SKIPPED: " + reason, condition);
     }
 
-    /** Run one measurement and attach the model usage the meter saw during it. */
-    private static BenchmarkRunRecord measured(OllamaTokenMeter meter, Measurement measurement) throws Exception {
+    /**
+     * Run one measurement and attach the model usage the meter saw during it. The final snapshot waits until
+     * the run's last model call has finished (bounded by the model-call timeout), so a call that outlives its
+     * run is charged to that run and not to the next one.
+     */
+    private static BenchmarkRunRecord measured(OllamaTokenMeter meter, BenchmarkSettings settings,
+                                               Measurement measurement) throws Exception {
+        if (!meter.awaitIdle(settings.inferenceTimeoutMillis)) {
+            throw new IllegalStateException("model calls of the previous run are still in flight");
+        }
         OllamaTokenMeter.Usage before = meter.snapshot();
         BenchmarkRunRecord record = measurement.run();
+        if (!meter.awaitIdle(settings.inferenceTimeoutMillis + 10_000L)) {
+            record.failure = (record.failure.isEmpty() ? "" : record.failure + "; ")
+                    + "model calls were still in flight after the run";
+        }
         record.usage = meter.snapshot().minus(before);
         return record;
     }
