@@ -407,6 +407,10 @@ public final class TaskExecutor {
                 return cancelled.get();
             }
 
+            public AtomicLong tokens() {
+                return tokens;
+            }
+
             public boolean isBudgetExhausted() {
                 return initial.getBudget().spend(Math.max(0L, clock.getAsLong() - begin), tokens.get())
                         .isExhausted();

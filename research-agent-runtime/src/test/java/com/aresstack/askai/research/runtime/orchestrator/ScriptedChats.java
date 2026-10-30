@@ -18,6 +18,8 @@ final class ScriptedChats implements RoleChats {
     final List<String> schemas = new CopyOnWriteArrayList<String>();
     final List<List<ChatMessage>> requests = new CopyOnWriteArrayList<List<ChatMessage>>();
     final long tokensPerCall;
+    /** Runs before each answer, e.g. a user action that overlaps the model call. */
+    volatile Runnable beforeAnswer;
 
     ScriptedChats(long tokensPerCall) {
         this.tokensPerCall = tokensPerCall;
@@ -40,6 +42,11 @@ final class ScriptedChats implements RoleChats {
                 requests.add(new ArrayList<ChatMessage>(messages));
                 schemas.add(schema == null ? "" : schema);
                 tokens.addAndGet(tokensPerCall);
+                Runnable hook = beforeAnswer;
+                if (hook != null) {
+                    beforeAnswer = null;
+                    hook.run();
+                }
                 String next = answers.poll();
                 return next == null
                         ? MainModelChatResult.failure(MainModelChatResult.Status.PROVIDER_FAILURE, "script empty")

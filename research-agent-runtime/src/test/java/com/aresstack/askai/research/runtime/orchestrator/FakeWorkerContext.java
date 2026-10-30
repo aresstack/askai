@@ -29,10 +29,12 @@ final class FakeWorkerContext implements WorkerContext {
     private final MainModelChat chat;
     private long clock = 100L;
 
+    final AtomicLong tokens = new AtomicLong();
+
     FakeWorkerContext(ResearchTask task, ResearchRole role) {
         this.task = task;
         this.recorded = task;
-        this.chat = chats.chatFor(role, new AtomicLong());
+        this.chat = chats.chatFor(role, tokens);
     }
 
     /** A completed upstream task of the run with the given artifacts. */
@@ -97,6 +99,10 @@ final class FakeWorkerContext implements WorkerContext {
         List<ResearchTask> all = new ArrayList<ResearchTask>(run);
         all.add(recorded);
         return all;
+    }
+
+    public AtomicLong tokens() {
+        return tokens;
     }
 
     public MainModelChat chat() {

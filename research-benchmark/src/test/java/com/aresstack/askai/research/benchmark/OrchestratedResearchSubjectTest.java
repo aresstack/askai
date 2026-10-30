@@ -123,4 +123,26 @@ public class OrchestratedResearchSubjectTest {
         }
         return task.complete(3L);
     }
+
+    private static OrchestratorRun.Builder run(OrchestratorRun.State state) {
+        return OrchestratorRun.builder("run-1", "q", 1L).state(state)
+                .sections(ResearchOutline.ofQuestion("q").getSections());
+    }
+
+    @Test
+    public void aClosedRunScoresAsTheExpectedSemanticOutcome() {
+        assertEquals("SUFFICIENT_EVIDENCE",
+                OrchestratedResearchSubject.stopReasonOf(run(OrchestratorRun.State.CLOSED).build()));
+        assertEquals("RUN_AWAITING_APPROVAL",
+                OrchestratedResearchSubject.stopReasonOf(run(OrchestratorRun.State.AWAITING_APPROVAL).build()));
+    }
+
+    @Test
+    public void anInterruptionHasSettledOnceTheCycleJournaledIt() {
+        assertFalse(OrchestratedResearchSubject.isSettled(run(OrchestratorRun.State.RUNNING)
+                .journal("Plan approved by the user.").build()));
+        assertTrue(OrchestratedResearchSubject.isSettled(run(OrchestratorRun.State.RUNNING)
+                .journal("Interrupted; continue to resume.").build()));
+        assertTrue(OrchestratedResearchSubject.isSettled(run(OrchestratorRun.State.STOPPED).build()));
+    }
 }

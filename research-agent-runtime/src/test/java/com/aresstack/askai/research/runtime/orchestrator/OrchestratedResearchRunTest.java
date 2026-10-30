@@ -324,4 +324,21 @@ public class OrchestratedResearchRunTest {
         OrchestratorRun run = run(OrchestratorSettings.defaults()).start("q", outline);
         assertTrue(run.getTimeUsedMillis() > 0);
     }
+
+    @Test
+    public void aStopDuringTheEvaluationIsNotOverwrittenByItsDecision() {
+        bothSectionsFindSources();
+        chats.answer(plan());
+        final OrchestratedResearchRun runner = run(OrchestratorSettings.defaults());
+        runner.start("q", outline);
+        chats.answer(round("continue", "{\"id\":\"f1\",\"role\":\"web-researcher\",\"query\":\"more\","
+                + "\"brief\":\"\",\"sections\":[\"loading\"],\"dependsOn\":[]}", ""));
+        chats.beforeAnswer = runner::stop; // the user presses Stop run while the orchestrator decides
+        OrchestratorRun run = runner.approve(new AtomicBoolean());
+        assertEquals(OrchestratorRun.State.STOPPED, run.getState());
+        assertEquals(OrchestratorRun.State.STOPPED, runner.current().getState());
+        assertFalse("the follow-up decided after the stop never runs", worker.executed.contains("run-"
+                + runner.current().getRunId().substring(4) + ".f1"));
+        assertEquals(2, board.tasks().size());
+    }
 }
