@@ -109,6 +109,7 @@ public final class ResearchTask {
                 || transitions.get(0).getTo() != TaskState.SUBMITTED) {
             throw new IllegalArgumentException("task " + taskId + ": history must start with the submission");
         }
+        int requeues = 0;
         for (int i = 1; i < transitions.size(); i++) {
             TaskTransition step = transitions.get(i);
             TaskState previous = transitions.get(i - 1).getTo();
@@ -116,9 +117,18 @@ public final class ResearchTask {
                 throw new IllegalArgumentException("task " + taskId + ": history step " + i + " ("
                         + step.getFrom() + " -> " + step.getTo() + ") breaks the transition rules");
             }
+            if (step.getFrom() == TaskState.WORKING && step.getTo() == TaskState.SUBMITTED) {
+                requeues++;
+            }
         }
-        return new ResearchTask(taskId, phase, role, dependsOn, state, inputs, artifacts, modelSlot,
+        ResearchTask task = new ResearchTask(taskId, phase, role, dependsOn, state, inputs, artifacts, modelSlot,
                 contextSize, budget, retryCount, retryLimit, receipts, transitions, endpoint);
+        // The counter is derived evidence: a store that under-reports it would let a resume bypass the limit.
+        if (requeues != task.retryCount) {
+            throw new IllegalArgumentException("task " + taskId + ": retryCount " + retryCount
+                    + " disagrees with the " + requeues + " re-queues in the history");
+        }
+        return task;
     }
 
     // ---- transitions -------------------------------------------------------------------------------------

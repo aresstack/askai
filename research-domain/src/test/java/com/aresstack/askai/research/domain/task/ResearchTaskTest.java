@@ -227,6 +227,21 @@ public class ResearchTaskTest {
     }
 
     @Test
+    public void restoreRejectsARetryCountThatDisagreesWithTheHistory() {
+        List<TaskTransition> history = Arrays.asList(
+                new TaskTransition(null, TaskState.SUBMITTED, 100L, ""),
+                new TaskTransition(TaskState.SUBMITTED, TaskState.WORKING, 200L, ""),
+                new TaskTransition(TaskState.WORKING, TaskState.SUBMITTED, 300L, "interrupted"));
+        try {
+            ResearchTask.restore("t", "RESEARCH", "writer", null, TaskState.SUBMITTED, null, null, "", 0,
+                    null, 0, 1, null, history, "");
+            fail("under-reported retry count accepted");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("disagrees with the 1 re-queues"));
+        }
+    }
+
+    @Test
     public void restoreRejectsARetryCountAboveTheLimit() {
         List<TaskTransition> history = Collections.singletonList(
                 new TaskTransition(null, TaskState.SUBMITTED, 100L, ""));
