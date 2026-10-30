@@ -89,9 +89,10 @@ public final class OrchestratorSession {
     }
 
     /** The default worker set of lane F: the web research worker over the session's funnel. */
-    public static List<TaskWorker> defaultWorkers(WebAcquisition acquisition, ToolInvoker research) {
+    public static List<TaskWorker> defaultWorkers(WebAcquisition acquisition, ToolInvoker research,
+                                                  OrchestratorSettings settings) {
         List<TaskWorker> workers = new ArrayList<TaskWorker>();
-        workers.add(new WebResearchWorker(acquisition, research));
+        workers.add(new WebResearchWorker(acquisition, research, settings.getEvidenceChars()));
         return workers;
     }
 
@@ -103,8 +104,9 @@ public final class OrchestratorSession {
      * @param maxOutputTokens the agent's model-turn budget (the default output budget of a worker answer)
      */
     public static List<TaskWorker> workers(WebAcquisition acquisition, ToolInvoker research,
-                                           WorkerRoleSettings roles, int maxOutputTokens) {
-        List<TaskWorker> workers = defaultWorkers(acquisition, research);
+                                           OrchestratorSettings settings, WorkerRoleSettings roles,
+                                           int maxOutputTokens) {
+        List<TaskWorker> workers = defaultWorkers(acquisition, research, settings);
         if (roles.isSearchPlanner()) {
             workers.add(new SearchPlannerWorker(roles.getPlannerMaxQueries(), roles.getRepairAttempts(),
                     maxOutputTokens));

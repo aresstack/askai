@@ -66,7 +66,8 @@ Package `runtime.orchestrator`:
   did not complete is cancelled, and `resume` re-queues what an interrupted session left working.
 - `WebResearchWorker` (role `web-researcher`) runs the same `ResearchLoop` over the same
   `WebSearchApplicationService` funnel as `research:`; there is no second acquisition path. Each accepted
-  source becomes a `SOURCE_REFERENCE` artifact on its task.
+  source becomes a `SOURCE_REFERENCE` artifact on its task, and the page passages that match the
+  package's query become a bounded `FINDING` (`ASKAI_ORCHESTRATOR_EVIDENCE_CHARS`), the evaluation's evidence.
 - `OrchestratedResearchRun` is the envelope. Nothing runs before the user approves the plan; follow-ups
   inside the approved sections and roles run without asking, anything beyond them, the round limit and the
   run budget (tokens, minutes, packages) go back to the user (`AWAITING_APPROVAL`). `ask-user` waits for
@@ -79,6 +80,36 @@ Package `runtime.orchestrator`:
 All limits are settings with defaults (`OrchestratorSettings`, plugin: Settings, Research runtime,
 "Orchestrator" row). The research benchmark measures the run as subject `orchestrated-run` next to the
 single-agent baseline.
+
+### Worker roles of lane G
+
+Besides the web researcher the orchestrator can delegate to three more worker roles. Each has its own
+model slot, tool subset and per-request JSON schema; code checks every answer and sends an invalid one
+back once (`ASKAI_WORKER_REPAIR_ATTEMPTS`). Workers read upstream results from the blackboard
+(`WorkerContext.dependencies()` / `runTasks()`); the conventions are in `WorkerArtifacts`.
+
+- `SearchPlannerWorker` (`search-planner`, slot `planner`, no tools): turns one aspect into at most
+  `ASKAI_WORKER_PLANNER_MAX_QUERIES` distinct search queries (empty, overlong, duplicate and already
+  searched queries are refused). A web research package that depends on a planner package searches
+  exactly the planned queries, each as one run of the same funnel, bounded by the package's time budget.
+- `SourceVerifierWorker` (`source-verifier`, slot `verifier`, tool `source_review_context`): one
+  verdict per upstream source (`supports`, `partial`, `off-topic`, `unreliable`, `unreadable`), the claim
+  each supporting source makes, and contradictions between two sources. `off-topic` and `unreliable`
+  are rejections: the `EvidenceMeter` stops counting such a source. The verifier changes nothing in the
+  project's source list.
+- `WriterWorker` (`writer`, slot `synthesis`, tool `source_review_context`): drafts the package's
+  sections from the unrejected upstream sources (verified ones first, at most
+  `ASKAI_WORKER_WRITER_MAX_SOURCES`); every paragraph must cite known source ids, gaps are named per
+  section. Drafts stay on the task (`draft:<section>`); the project document is written only in the DRAFT
+  phase, by the user's transition.
+
+Verifier and writer read the captured content of exactly their sources through `source_review_context`
+with `source_ids`; nothing is fetched outside the research funnel. Each role can be switched off
+(`ASKAI_WORKER_SEARCH_PLANNER`, `ASKAI_WORKER_SOURCE_VERIFIER`, `ASKAI_WORKER_WRITER`; plugin: "Worker
+roles" row); the orchestrator only sees roles that have a worker. The benchmark measures each role as
+its own subject (`orchestrated+search-planner`, `orchestrated+source-verifier`, `orchestrated+writer`)
+next to `orchestrated-run` (all lane G roles off) and the baseline; select subjects with
+`-Daskai.benchmark.subjects=...`.
 
 ## Tests
 

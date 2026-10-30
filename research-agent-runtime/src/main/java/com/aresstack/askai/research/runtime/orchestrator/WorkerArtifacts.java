@@ -174,10 +174,16 @@ public final class WorkerArtifacts {
         return verdicts;
     }
 
-    /** The supported claims a verifier recorded per source id among {@code tasks}. */
+    /**
+     * The supported claims a verifier recorded per source id among {@code tasks}. Only the verifier's findings
+     * count: the web researcher's findings are page excerpts (the orchestrator's evidence), not verified claims.
+     */
     public static Map<String, List<String>> claims(List<ResearchTask> tasks) {
         Map<String, List<String>> claims = new HashMap<String, List<String>>();
         for (ResearchTask task : tasks) {
+            if (!SourceVerifierWorker.ROLE.getId().equals(task.getRole())) {
+                continue;
+            }
             for (TaskArtifact artifact : task.getArtifacts()) {
                 if (artifact.getKind() == TaskArtifact.Kind.FINDING && !artifact.getProjectRef().isEmpty()) {
                     claims.computeIfAbsent(artifact.getProjectRef(), id -> new ArrayList<String>())

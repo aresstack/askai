@@ -36,7 +36,8 @@ public class WorkerChainTest {
         final List<String> searched = new ArrayList<String>();
         WebAcquisition acquisition = new WebAcquisition() {
             public Result acquire(String query, ToolInvoker research,
-                                  Consumer<WebSearchApplicationService.AcceptedSource> accepted) {
+                                  Consumer<WebSearchApplicationService.AcceptedSource> accepted,
+                                  long maxDurationMillis) {
                 searched.add(query);
                 if (query.startsWith("grant")) {
                     accepted.accept(source("src-a", "https://a.test/1", "Grant rate"));
@@ -62,7 +63,8 @@ public class WorkerChainTest {
                         + "percent; applications go through the KfW portal.\",\"sources\":[\"src-a\",\"src-b\"]}]}],"
                         + "\"gaps\":[]}");
         InMemoryTaskBoard board = new InMemoryTaskBoard();
-        List<TaskWorker> workers = OrchestratorSession.workers(acquisition, lane, WorkerRoleSettings.defaults(), 0);
+        List<TaskWorker> workers = OrchestratorSession.workers(acquisition, lane, OrchestratorSettings.defaults(),
+                WorkerRoleSettings.defaults(), 0);
         TaskExecutor executor = new TaskExecutor(board, workers, chats, new ExecutorCapacity() {
             public List<Resource> resourcesOf(TaskWorker worker) {
                 return Collections.singletonList(new Resource("model:local/m", 4));
@@ -136,13 +138,14 @@ public class WorkerChainTest {
         assertEquals(WorkerRoleSettings.DEFAULT_VERIFIER_MAX_SOURCES, settings.getVerifierMaxSources());
 
         List<String> roles = new ArrayList<String>();
-        for (TaskWorker worker : OrchestratorSession.workers(null, null, settings, 0)) {
+        for (TaskWorker worker : OrchestratorSession.workers(null, null, OrchestratorSettings.defaults(), settings, 0)) {
             roles.add(worker.role().getId());
         }
         assertEquals(Arrays.asList("web-researcher", "source-verifier"), roles);
 
         roles.clear();
-        for (TaskWorker worker : OrchestratorSession.workers(null, null, WorkerRoleSettings.defaults(), 0)) {
+        for (TaskWorker worker : OrchestratorSession.workers(null, null, OrchestratorSettings.defaults(),
+                WorkerRoleSettings.defaults(), 0)) {
             roles.add(worker.role().getId());
             assertEquals("only the web researcher needs the browser",
                     worker.role().getId().equals("web-researcher"), worker.needsBrowser());

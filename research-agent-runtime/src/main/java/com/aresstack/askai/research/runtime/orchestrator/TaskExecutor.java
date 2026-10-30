@@ -421,9 +421,10 @@ public final class TaskExecutor {
         } catch (RuntimeException crashed) {
             result = WorkerResult.retryable("worker error: " + crashed);
         }
-        if (cancelled.get() && result.getKind() != WorkerResult.Kind.COMPLETED) {
-            result = WorkerResult.canceled("run stopped");
-        }
+        // The user interrupted the turn: the package stays WORKING with its spending booked, exactly like a
+        // session that died mid-task, so the next approval resumes it within its retry budget (ADR 4.4). An
+        // explicit stop cancels it through cancelOpen instead.
+        final boolean interrupted = cancelled.get() && result.getKind() != WorkerResult.Kind.COMPLETED;
         final long spentMillis = Math.max(0L, clock.getAsLong() - begin);
         final long spentTokens = tokens.get();
         listener.tokensSpent(spentTokens);
@@ -432,6 +433,9 @@ public final class TaskExecutor {
             public ResearchTask apply(ResearchTask task) {
                 ResearchTask spent = task.withSpending(spentMillis, spentTokens);
                 long at = Math.max(clock.getAsLong(), spent.getUpdatedAtMillis());
+                if (interrupted) {
+                    return spent;
+                }
                 switch (outcome.getKind()) {
                     case COMPLETED:
                         return spent.complete(at);
@@ -506,6 +510,16 @@ public final class TaskExecutor {
         }
 
         synchronized ResearchTask update(java.util.function.UnaryOperator<ResearchTask> change) {
+            // A stop cancels the package on the board while the worker still runs: the board's final word stands.
+            for (ResearchTask stored : board.tasks()) {
+                if (stored.getTaskId().equals(task.getTaskId()) && stored.isTerminal() && !task.isTerminal()) {
+                    task = stored;
+                    return stored;
+                }
+            }
+            if (task.isTerminal()) {
+                return task;
+            }
             ResearchTask next = change.apply(task);
             save(next);
             task = next;

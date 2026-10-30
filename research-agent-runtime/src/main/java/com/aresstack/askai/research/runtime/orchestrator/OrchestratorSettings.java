@@ -18,7 +18,8 @@ import java.util.Map;
  *   <li><b>minSourcesPerSection</b>: the deterministic coverage rule per outline section;</li>
  *   <li><b>browserSlots</b>: concurrent browser-bound tasks (one browser generation per session today);</li>
  *   <li><b>decisionRepairAttempts</b>: how often an invalid orchestrator answer is sent back once more;</li>
- *   <li><b>extensionRounds</b>, <b>extensionTasks</b>: what one user approval of an overrun adds.</li>
+ *   <li><b>extensionRounds</b>, <b>extensionTasks</b>: what one user approval of an overrun adds;</li>
+ *   <li><b>evidenceChars</b>: how much of an accepted page a web worker keeps as evidence for the evaluation.</li>
  * </ul>
  */
 public final class OrchestratorSettings {
@@ -37,6 +38,7 @@ public final class OrchestratorSettings {
     public static final String ENV_DECISION_REPAIR_ATTEMPTS = "ASKAI_ORCHESTRATOR_DECISION_REPAIR_ATTEMPTS";
     public static final String ENV_EXTENSION_ROUNDS = "ASKAI_ORCHESTRATOR_EXTENSION_ROUNDS";
     public static final String ENV_EXTENSION_TASKS = "ASKAI_ORCHESTRATOR_EXTENSION_TASKS";
+    public static final String ENV_EVIDENCE_CHARS = "ASKAI_ORCHESTRATOR_EVIDENCE_CHARS";
 
     /** How a research question in RESEARCH/running is handled. */
     public enum Mode {
@@ -81,6 +83,7 @@ public final class OrchestratorSettings {
     public static final int DEFAULT_DECISION_REPAIR_ATTEMPTS = 1;
     public static final int DEFAULT_EXTENSION_ROUNDS = 2;
     public static final int DEFAULT_EXTENSION_TASKS = 4;
+    public static final int DEFAULT_EVIDENCE_CHARS = 600;
 
     private final Mode mode;
     private final int maxRounds;
@@ -96,6 +99,7 @@ public final class OrchestratorSettings {
     private final int decisionRepairAttempts;
     private final int extensionRounds;
     private final int extensionTasks;
+    private final int evidenceChars;
 
     private OrchestratorSettings(Builder b) {
         this.mode = b.mode;
@@ -112,6 +116,7 @@ public final class OrchestratorSettings {
         this.decisionRepairAttempts = b.decisionRepairAttempts;
         this.extensionRounds = b.extensionRounds;
         this.extensionTasks = b.extensionTasks;
+        this.evidenceChars = b.evidenceChars;
     }
 
     public static OrchestratorSettings defaults() {
@@ -142,6 +147,7 @@ public final class OrchestratorSettings {
                 DEFAULT_DECISION_REPAIR_ATTEMPTS));
         b.extensionRounds(positive(environment, ENV_EXTENSION_ROUNDS, DEFAULT_EXTENSION_ROUNDS));
         b.extensionTasks(positive(environment, ENV_EXTENSION_TASKS, DEFAULT_EXTENSION_TASKS));
+        b.evidenceChars(positive(environment, ENV_EVIDENCE_CHARS, DEFAULT_EVIDENCE_CHARS));
         return b.build();
     }
 
@@ -205,6 +211,10 @@ public final class OrchestratorSettings {
         return extensionTasks;
     }
 
+    public int getEvidenceChars() {
+        return evidenceChars;
+    }
+
     private static String value(Map<String, String> environment, String key) {
         return environment == null ? null : environment.get(key);
     }
@@ -243,6 +253,7 @@ public final class OrchestratorSettings {
         private int decisionRepairAttempts = DEFAULT_DECISION_REPAIR_ATTEMPTS;
         private int extensionRounds = DEFAULT_EXTENSION_ROUNDS;
         private int extensionTasks = DEFAULT_EXTENSION_TASKS;
+        private int evidenceChars = DEFAULT_EVIDENCE_CHARS;
 
         private Builder() {
         }
@@ -314,6 +325,11 @@ public final class OrchestratorSettings {
 
         public Builder extensionTasks(int value) {
             this.extensionTasks = requirePositive(value, "extensionTasks");
+            return this;
+        }
+
+        public Builder evidenceChars(int value) {
+            this.evidenceChars = requirePositive(value, "evidenceChars");
             return this;
         }
 

@@ -110,7 +110,8 @@ public class SearchPlannerWorkerTest {
         final List<String> searched = new ArrayList<String>();
         WebAcquisition acquisition = new WebAcquisition() {
             public Result acquire(String query, ToolInvoker research,
-                                  Consumer<WebSearchApplicationService.AcceptedSource> accepted) {
+                                  Consumer<WebSearchApplicationService.AcceptedSource> accepted,
+                                  long maxDurationMillis) {
                 searched.add(query);
                 return new Result(ResearchStopReason.SUFFICIENT_EVIDENCE, "pages 1");
             }
@@ -130,7 +131,8 @@ public class SearchPlannerWorkerTest {
         final List<String> searched = new ArrayList<String>();
         WebAcquisition acquisition = new WebAcquisition() {
             public Result acquire(String query, ToolInvoker research,
-                                  Consumer<WebSearchApplicationService.AcceptedSource> accepted) {
+                                  Consumer<WebSearchApplicationService.AcceptedSource> accepted,
+                                  long maxDurationMillis) {
                 searched.add(query);
                 return new Result(ResearchStopReason.NO_SEMANTIC_MATCHES, "");
             }

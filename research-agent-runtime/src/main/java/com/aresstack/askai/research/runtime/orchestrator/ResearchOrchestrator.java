@@ -221,6 +221,12 @@ public final class ResearchOrchestrator {
                     if (sources <= 8) {
                         sb.append("    source: ").append(oneLine(artifact.getContent(), 200)).append('\n');
                     }
+                } else if (artifact.getKind() == TaskArtifact.Kind.FINDING) {
+                    // Evidence passages are already bounded by the evidence setting when the worker records them.
+                    if (sources <= 8) {
+                        sb.append("      evidence: ").append(oneLine(artifact.getContent(), Integer.MAX_VALUE))
+                                .append('\n');
+                    }
                 } else {
                     sb.append("    ").append(artifact.getKind().name().toLowerCase(java.util.Locale.ROOT))
                             .append(": ").append(oneLine(artifact.getContent(), 300)).append('\n');
