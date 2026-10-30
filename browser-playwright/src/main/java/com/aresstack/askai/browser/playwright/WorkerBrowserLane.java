@@ -149,9 +149,17 @@ final class WorkerBrowserLane {
         if (!running) {
             command.fail(lostException()); // raced the shutdown: the drain may already be over
         }
+        final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
         try {
             return timeoutMillis > 0 ? command.result.get(timeoutMillis, TimeUnit.MILLISECONDS)
                     : command.result.get();
+        } catch (InterruptedException cancelled) {
+            // The worker was cancelled, its command still runs on the owner. The call's deadline must hold
+            // anyway: a stuck call would otherwise block every teardown queued behind it forever.
+            if (timeoutMillis > 0) {
+                watchAfterCancel(command, deadline);
+            }
+            throw cancelled;
         } catch (TimeoutException stuck) {
             terminate("a browser call did not finish within " + timeoutMillis + " ms");
             throw lostException();
@@ -168,6 +176,23 @@ final class WorkerBrowserLane {
             }
             throw new BrowserException("Worker browser call failed: " + cause);
         }
+    }
+
+    private void watchAfterCancel(final Command<?> command, final long deadline) {
+        Thread watchdog = new Thread(new Runnable() {
+            public void run() {
+                long left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                try {
+                    command.result.get(Math.max(1L, left), TimeUnit.MILLISECONDS);
+                } catch (TimeoutException stuck) {
+                    terminate("a cancelled worker's browser call did not finish within its timeout");
+                } catch (InterruptedException | ExecutionException | RuntimeException done) {
+                    // finished (or failed) in time: nothing to do
+                }
+            }
+        }, "worker-browser-" + laneId + "-cancel-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
     }
 
     /** Fire-and-forget task on the owner (teardown of one user context); dropped when the lane is gone. */

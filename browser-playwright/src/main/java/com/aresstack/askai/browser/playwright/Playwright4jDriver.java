@@ -224,14 +224,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 }
             });
         }
-        page.onClose(new Consumer<Page>() {
-            public void accept(Page gone) {
-                // The user closed this worker tab: its later calls fail with the typed marker.
-                if (!driver.closed) {
-                    driver.browserDisconnected = true;
-                }
-            }
-        });
+        page.onClose(driver.activeTabCloseWatcher());
         return driver;
     }
 
@@ -445,6 +438,21 @@ final class Playwright4jDriver implements PlaywrightDriver {
         return hudCommands;
     }
 
+    /**
+     * Worker tabs only: the user closing the ACTIVE page ends the tab (its later calls fail with the typed
+     * marker). A parked challenge page closing — resolved, or closed by {@link #closeParkedChallenge()} — is
+     * not the tab going away.
+     */
+    private Consumer<Page> activeTabCloseWatcher() {
+        return new Consumer<Page>() {
+            public void accept(Page gone) {
+                if (!closed && gone == page) {
+                    browserDisconnected = true;
+                }
+            }
+        };
+    }
+
     /** The one popup policy: close immediately, count it, and never let a dead popup break the session. */
     private Consumer<Page> popupCloser() {
         return new Consumer<Page>() {
@@ -558,6 +566,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
             challengePage = page;
             page = context.newPage();
             page.onPopup(popupCloser());
+            if (!ownsGeneration) {
+                page.onClose(activeTabCloseWatcher());
+            }
             // Bring the challenge to the user's attention exactly ONCE — polls never steal focus again.
             if (captcha.focusTabOnFirstDetection) {
                 try {

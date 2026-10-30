@@ -56,15 +56,20 @@ public final class WorkerBrowsingContext implements AutoCloseable {
                     return backend.call(backendId, tool, arguments);
                 }
             }, timeout);
+            if (reportsClosedBrowser(result)) {
+                throw lost();
+            }
             rememberSite(result);
             return result;
         } catch (BrowserException failed) {
-            String message = failed.getMessage() == null ? "" : failed.getMessage();
-            if (message.contains("BROWSER_CLOSED")) {
-                // In a worker the closed window is not the user's stop of the research: only this worker
-                // lost its user context. Never let the chat-level marker leak into the run's fate.
-                throw new BrowserException(WorkerBrowserLane.LOST_MARKER + " — the worker tab or its browser "
-                        + "window was closed (" + id + ").");
+            if (String.valueOf(failed.getMessage()).contains("BROWSER_CLOSED")) {
+                throw lost();
+            }
+            throw failed;
+        } catch (RuntimeException failed) {
+            // e.g. web_search_prepare surfaces the closed window as an IllegalStateException
+            if (String.valueOf(failed.getMessage()).contains("BROWSER_CLOSED")) {
+                throw lost();
             }
             throw failed;
         } finally {
@@ -108,8 +113,34 @@ public final class WorkerBrowsingContext implements AutoCloseable {
         }
     }
 
+    /**
+     * In a worker the closed window is not the user's stop of the research: only this worker lost its user
+     * context. The chat-level {@code BROWSER_CLOSED} marker must never reach the run's fate — not as an
+     * exception and not as a typed result line (the challenge poll reports it as one).
+     */
+    private BrowserException lost() {
+        return new BrowserException(WorkerBrowserLane.LOST_MARKER + " — the worker tab or its browser "
+                + "window was closed (" + id + ").");
+    }
+
+    private static boolean reportsClosedBrowser(String result) {
+        if (result == null) {
+            return false;
+        }
+        for (String line : result.split("\n")) {
+            if (line.startsWith("BROWSER_CLOSED")) {
+                return true;
+            }
+            if (line.startsWith("URL: ") || line.startsWith("url: ")) {
+                return false; // a page text follows; its content is not a typed status line
+            }
+        }
+        return false;
+    }
+
+    /** The full-page render ({@code URL: …}) and the probe render ({@code url: …}) both name the final URL. */
     private void rememberSite(String result) {
-        if (result != null && result.startsWith("URL: ")) {
+        if (result != null && (result.startsWith("URL: ") || result.startsWith("url: "))) {
             int end = result.indexOf('\n');
             String site = SiteConcurrencyGate.siteOf(end > 0 ? result.substring(5, end) : result.substring(5));
             if (site != null) {

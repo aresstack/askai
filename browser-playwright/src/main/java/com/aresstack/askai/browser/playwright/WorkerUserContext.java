@@ -21,6 +21,9 @@ public final class WorkerUserContext implements AutoCloseable {
     private final String backendId;
     private final List<WorkerBrowsingContext> tabs = new ArrayList<WorkerBrowsingContext>();
     private final WorkerBrowsingContext first;
+    /** Tabs being created right now (counted against the limit before the browser call). */
+    private int reservedTabs;
+    private int tabNumbers = 1;
     private volatile boolean closed;
 
     WorkerUserContext(PlaywrightUserContextPool pool, PlaywrightUserContextPool.LaneSlot slot, String id,
@@ -73,19 +76,29 @@ public final class WorkerUserContext implements AutoCloseable {
                 }
             }
             int limit = pool.limits().maxBrowsingContextsPerUserContext;
-            if (open >= limit) {
+            if (open + reservedTabs >= limit) {
                 throw new BrowserException("Tab limit reached: a worker user context may hold " + limit
                         + " browsing contexts.");
             }
-            number = tabs.size() + 1;
+            reservedTabs++;
+            number = ++tabNumbers;
         }
-        String tabId = lane().call(new WorkerBrowserLane.LaneTask<String>() {
-            public String run(WorkerBrowserBackend backend) throws BrowserException {
-                return backend.newBrowsingContext(backendId);
+        String tabId;
+        try {
+            tabId = lane().call(new WorkerBrowserLane.LaneTask<String>() {
+                public String run(WorkerBrowserBackend backend) throws BrowserException {
+                    return backend.newBrowsingContext(backendId);
+                }
+            }, pool.limits().callTimeoutMillis);
+        } catch (BrowserException | InterruptedException | RuntimeException failed) {
+            synchronized (this) {
+                reservedTabs--;
             }
-        }, pool.limits().callTimeoutMillis);
+            throw failed;
+        }
         WorkerBrowsingContext tab = new WorkerBrowsingContext(this, tabId, id + "/bc" + number);
         synchronized (this) {
+            reservedTabs--;
             if (closed) {
                 closeTab(tabId);
                 requireOpen();

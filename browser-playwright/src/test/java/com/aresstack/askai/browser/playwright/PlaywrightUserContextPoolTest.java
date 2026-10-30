@@ -378,4 +378,127 @@ public class PlaywrightUserContextPoolTest {
         }
         one.close(); // idempotent after the pool is gone
     }
+
+    @Test
+    public void aCancelledWorkerStillGetsItsStuckCallTerminatedAfterTheTimeout() throws Exception {
+        pool = new PlaywrightUserContextPool(new WorkerBrowserLimits(1, 1, 2, 4, 2_000L, 400L, 60_000L));
+        final WorkerUserContext stuck = pool.openChat("chat-a", world.factory()).acquire("worker-1", null, 0);
+        world.hangOnUrl = "https://hang.example/";
+        final AtomicReference<Throwable> outcome = new AtomicReference<Throwable>();
+        Thread worker = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    stuck.firstBrowsingContext().call("web_open", url("https://hang.example/"));
+                } catch (Throwable t) {
+                    outcome.set(t);
+                }
+            }
+        });
+        worker.start();
+        Thread.sleep(100);
+        worker.interrupt(); // the orchestrator cancels the task while the browser call hangs
+        worker.join(2_000);
+        assertTrue(String.valueOf(outcome.get()), outcome.get() instanceof InterruptedException);
+        stuck.close();
+        long deadline = System.currentTimeMillis() + 3_000L;
+        while (world.closed.get() == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertEquals("the call's deadline holds after the cancel: the process is terminated", 1, world.closed.get());
+        assertEquals(0, pool.processCount());
+    }
+
+    @Test
+    public void concurrentTabOpensRespectTheLimitAndGetDistinctIds() throws Exception {
+        pool = new PlaywrightUserContextPool(new WorkerBrowserLimits(1, 1, 2, 4, 2_000L, 5_000L, 60_000L));
+        final WorkerUserContext worker = pool.openChat("chat-a", world.factory()).acquire("worker-1", null, 0);
+        final CountDownLatch go = new CountDownLatch(1);
+        List<Future<String>> opens = new ArrayList<Future<String>>();
+        for (int i = 0; i < 4; i++) {
+            opens.add(workers.submit(new Callable<String>() {
+                public String call() throws Exception {
+                    go.await();
+                    try {
+                        return worker.openBrowsingContext().id();
+                    } catch (BrowserException refused) {
+                        return "refused";
+                    }
+                }
+            }));
+        }
+        go.countDown();
+        Set<String> ids = new HashSet<String>();
+        int refused = 0;
+        for (Future<String> open : opens) {
+            String id = open.get(5, TimeUnit.SECONDS);
+            if ("refused".equals(id)) {
+                refused++;
+            } else {
+                assertTrue("tab ids must be unique: " + id, ids.add(id));
+            }
+        }
+        assertEquals("limit 2 = the first tab plus one more", 1, ids.size());
+        assertEquals(3, refused);
+        assertEquals(2, worker.browsingContexts().size());
+        worker.close();
+    }
+
+    @Test
+    public void aProbedSiteIsTheGateForTheFollowUpNavigation() throws Exception {
+        PlaywrightUserContextPool.Chat chat = pool(3, 1, 1).openChat("chat-a", world.factory());
+        world.navigationMillis = 250L;
+        final List<WorkerUserContext> held = new ArrayList<WorkerUserContext>();
+        for (int i = 0; i < 3; i++) {
+            held.add(chat.acquire("worker-" + i, null, 0));
+            held.get(i).firstBrowsingContext().call("web_probe", url("https://same.example/start-" + i));
+        }
+        world.maxPerHost.clear();
+        final CountDownLatch go = new CountDownLatch(1);
+        List<Future<String>> follows = new ArrayList<Future<String>>();
+        for (final WorkerUserContext uc : held) {
+            follows.add(workers.submit(new Callable<String>() {
+                public String call() throws Exception {
+                    go.await();
+                    Map<String, Object> link = new HashMap<String, Object>();
+                    link.put("link_id", "link-1");
+                    return uc.firstBrowsingContext().call("web_follow", link);
+                }
+            }));
+        }
+        go.countDown();
+        for (Future<String> follow : follows) {
+            follow.get(10, TimeUnit.SECONDS);
+        }
+        assertEquals("the per-site limit also holds for follows after a probe", Integer.valueOf(1),
+                world.maxPerHost.get("same.example"));
+        for (WorkerUserContext uc : held) {
+            uc.close();
+        }
+    }
+
+    @Test
+    public void aClosedWorkerWindowIsNeverReportedAsTheUsersStop() throws Exception {
+        PlaywrightUserContextPool.Chat chat = pool(1, 1, 4).openChat("chat-a", world.factory());
+        try (WorkerUserContext worker = chat.acquire("worker-1", null, 0)) {
+            world.challengeStatus = "BROWSER_CLOSED";
+            try {
+                worker.firstBrowsingContext().call("web_challenge_status", null);
+                fail("the typed status line must not reach the run");
+            } catch (BrowserException expected) {
+                assertTrue(expected.getMessage(), expected.getMessage().startsWith(WorkerBrowserLane.LOST_MARKER));
+            }
+            world.challengeStatus = "NONE";
+            assertEquals("NONE", worker.firstBrowsingContext().call("web_challenge_status", null));
+            world.prepareSeesClosedWindow = true;
+            Map<String, Object> query = new HashMap<String, Object>();
+            query.put("query", "q");
+            try {
+                worker.firstBrowsingContext().call("web_search_prepare", query);
+                fail("the runtime-exception path must be normalized too");
+            } catch (BrowserException expected) {
+                assertTrue(expected.getMessage(), expected.getMessage().startsWith(WorkerBrowserLane.LOST_MARKER));
+                assertFalse(expected.getMessage().contains("BROWSER_CLOSED —"));
+            }
+        }
+    }
 }

@@ -34,6 +34,10 @@ final class FakeWorkerBrowserBackend implements WorkerBrowserBackend {
         /** A navigation to this URL never returns (until the process is terminated). */
         volatile String hangOnUrl;
         volatile boolean failLaunch;
+        /** What web_challenge_status answers (the chat browser's typed status lines). */
+        volatile String challengeStatus = "NONE";
+        /** web_search_prepare fails like the real capture does when the window is gone. */
+        volatile boolean prepareSeesClosedWindow;
 
         WorkerBrowserBackend.Factory factory() {
             return new WorkerBrowserBackend.Factory() {
@@ -114,6 +118,24 @@ final class FakeWorkerBrowserBackend implements WorkerBrowserBackend {
             }
             tabUrl.put(tabId, url);
             return render(url, jar, host);
+        }
+        if ("web_probe".equals(tool)) {
+            String url = String.valueOf(arguments.get("url"));
+            navigate(url, SiteConcurrencyGate.siteOf(url));
+            tabUrl.put(tabId, url);
+            return "url: " + url + "\ntitle: probe\ntext_length: 1";
+        }
+        if ("web_follow".equals(tool)) {
+            String url = tabUrl.get(tabId) + "/next";
+            navigate(url, SiteConcurrencyGate.siteOf(url));
+            tabUrl.put(tabId, url);
+            return render(url, jar, SiteConcurrencyGate.siteOf(url));
+        }
+        if ("web_challenge_status".equals(tool)) {
+            return shared.challengeStatus;
+        }
+        if ("web_search_prepare".equals(tool) && shared.prepareSeesClosedWindow) {
+            throw new IllegalStateException(Playwright4jDriver.BROWSER_CLOSED_MESSAGE);
         }
         if ("web_read".equals(tool)) {
             String url = tabUrl.get(tabId);
