@@ -480,5 +480,6 @@ stacked on another, it is merged after its base.
 - **Not started:** B and B' wait for the decision of 3.5. I (LangChain4j spike, optional) runs separately
   and proposes its result as its own section.
 - **Still open across the items:** the live benchmark against the single-agent baseline (it decides whether
-  the orchestrated mode becomes the default), the capacity measurement of 4.5, default model slots per role
-  (7.2).
+  the orchestrated mode becomes the default), the capacity default of 4.5 (exploratory measurements on the
+  test machine are in `docs/ollama-parallel-inference-benchmark-2026-10-30.md`; the default stays 1 until
+  the owner sets it, open decision 7.3), default model slots per role (7.2).
