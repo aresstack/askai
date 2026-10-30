@@ -133,18 +133,15 @@ Plugin, `research-agent-ui-plugin` (`...research.host`):
 | `SharedWorkerBrowserPool` | the one pool of the plugin. |
 | `ProductiveResearchSessionResources.getBrowserUserContexts()` | where the task executor gets the pool (never null). |
 
-Task executor integration (Lane F, `adr0001/f`), two places once both branches are in `develop`:
+Task executor integration (implemented on `adr0001/browser-wiring`, on top of Lane F's orchestrator):
 
-```java
-// ResearchAgentSession.orchestratorSession(): browser capacity from the pool, the old setting only as fallback
-ExecutorCapacity.fromPort(modelPort, pool.capacity());
-
-// WebAcquisition.acquire(): one lease per task attempt, closed on success, failure, cancel and retry
-try (BrowserUserContextLease lease = pool.acquire(BrowserUserContextRequest.of(workerId, taskId))) {
-    ResearchLoop loop = buildResearchLoop(turn, lease.browser(), budget);
-    ...
-}
-```
+| Place | What happens |
+|---|---|
+| `ProductiveResearchBackendFactory.createSession` | hands the chat's pool to `InProcessResearchSessionBackend.setBrowserUserContexts`, which gives it to every agent session (`ResearchAgentSession.setBrowserUserContexts`). |
+| `ResearchAgentSession.orchestratorSession()` | `OrchestratorSession(..., browserSlots = UserContextWebAcquisition.browserSlots(pool), ...)`: the executor's `browser` capacity is the pool's capacity; without a pool (or capacity 0) the old setting `ASKAI_ORCHESTRATOR_BROWSER_SLOTS` (default 1) applies. |
+| `WebAcquisition` (`UserContextWebAcquisition`, `runtime.browser`) | one lease per search run: `try (lease = pool.acquire(of("web-research", "search-run-N").withAcquireTimeoutMillis(remaining))) { run(lease.browser(), ..., remaining - waited) }`, closed on success, failure, cancel and before a retry. The wait for a free user context is bounded by the package's remaining time (and never longer than the "Wait (s)" setting) and is taken off the time the search run gets; nothing left → `TIME_BUDGET_EXHAUSTED`. No free user context → `MCP_UNAVAILABLE` (retryable package). Cancelling the turn (`ResearchAgentSession.cancel()` → `cancelWaits()`) ends every wait at once as `USER_CANCELLED`; running search runs see the cancel flag as before. Without a pool the run drives the chat browser as before. |
+| `WebSearchApplicationService` (CAPTCHA wait) | a worker's user context that is lost while it waits on a challenge (`USER_CONTEXT_LOST`) ends the wait as `MCP_UNAVAILABLE`, so the lease goes back and the package can be retried; the chat browser (which restarts) keeps waiting as before. |
+| `ResearchAgentSession.buildResearchLoop(turn, browserLane, researchLane, budget)` | the ONE funnel (`ResearchLoop` over `WebSearchApplicationService`, scope fence, reranker, source acceptance) now takes the browser lane as a parameter: the worker's user context or the chat browser. Nothing else of the funnel changes. |
 
 The model capacity (Model resources, ModelPort scheduler) and the browser capacity are separate resources:
 a worker holding a lease holds no model slot and vice versa, so e.g. ten research tasks can browse while
@@ -206,6 +203,8 @@ Capacity = processes x user contexts per process (default 12 leases, 3 operation
 | `PlaywrightUserContextPoolLiveTest` (real Chromium) | cookie AND local-storage isolation, second tab, chat separation, state restore, three navigations at the server at the same time, cleanup. Gated on a Chromium executable. |
 | `ChatBrowserUserContextsLiveTest` (real Chromium, plugin) | leases through the runtime API; parallel workers' pages land in the session's one capture store; the one acceptance makes 3 sources of 4 visits (the page two workers found is one source); lease close; sign-in saved and restored; session close ends everything. |
 | `WorkerUserContextStateStoreTest` | per-chat files, owner-only permissions, atomic replace, no path escape. |
+| `WorkerUserContextExecutionTest` (runtime, real `TaskExecutor` + `WebResearchWorker`) | six packages, pool capacity 3: six leases, six distinct user contexts, three packages browse at the same time, the chat browser is never used, every lease is given back; without a pool (null or unavailable) the runs share the chat browser one after another; a crashing search run still gives its user context back; no free user context is a retryable stop, a cancelled wait a cancel; the productive capacity takes the pool's 4 instead of the setting's 1; a cancelled turn ends a blocked wait within milliseconds, never interrupts a running search run; the wait is bounded by and taken off the package's time. |
+| `SerpChallengeRetryTest.aLostWorkerUserContextEndsTheChallengeWait` | a CAPTCHA wait on a lost user context ends as `MCP_UNAVAILABLE` (without the fix the run polls forever; the test times out). |
 | `CamoufoxChannelTest` (profile tests) | each chat owns its persistent profile and finds it again (a cookie file survives a reopen), chat B never sees chat A's profile, no chat id in the path; a second browser of the same chat gets a temporary profile inside the chat's directory that is deleted on close; a restart waits for the terminated generation's release and gets the chat's own profile; day-old temporary profiles are swept; without a chat there is no shared persistent profile. |
 
 Remaining limitations: the live tests run Chromium (CDP); Camoufox (BiDi) uses the same Playwright calls and
@@ -213,4 +212,9 @@ the BiDi mapping above, but needs the managed Camoufox and was not run in CI. Th
 is tested on the lease level, not with a real Camoufox start. Deleting a chat does not yet delete its
 browser profile (the host has no chat-deleted event for plugins). Each worker browser costs a
 browser process plus a playwright4j driver JVM. The per-site limit for `web_follow`/`web_back` uses the site
-of the page the tab shows. Wiring the pool into the task executor is the two-line change in section 4.
+of the page the tab shows. The orchestrated run (Lane F) uses the pool through `UserContextWebAcquisition`; the serial research
+loop and the manual search keep the chat browser. Pages of a worker are not shown in the chat browser window;
+a CAPTCHA in a worker tab cannot be solved by the user there (the run stops typed, as on the chat browser
+without a visible window). The executor's browser capacity is the pool's capacity, which all chats share: while
+other chats hold the worker browsers, a package of this chat waits (bounded, see above) and holds its model slot
+during that wait; a timed-out wait costs the package one retry.
