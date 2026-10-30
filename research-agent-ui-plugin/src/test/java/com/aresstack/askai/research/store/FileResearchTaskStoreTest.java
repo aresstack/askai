@@ -171,6 +171,62 @@ public class FileResearchTaskStoreTest {
     }
 
     @Test
+    public void idsDifferingOnlyInCaseNeverShareAFile() throws Exception {
+        File dir = tempDir();
+        FileResearchTaskStore store = new FileResearchTaskStore(dir);
+        store.save(submitted("task-A", 1));
+        store.save(submitted("task-a", 2));
+
+        String[] names = dir.list();
+        assertEquals(2, names.length);
+        assertFalse("distinct even on a case-insensitive file system",
+                names[0].equalsIgnoreCase(names[1]));
+        assertEquals(1, store.load("task-A").getRetryLimit());
+        assertEquals(2, store.load("task-a").getRetryLimit());
+        assertEquals(2, store.loadAll().getTasks().size());
+    }
+
+    @Test
+    public void windowsDeviceNamesAreNotUsedAsFileNames() throws Exception {
+        File dir = tempDir();
+        FileResearchTaskStore store = new FileResearchTaskStore(dir);
+        store.save(submitted("con", 1));
+        store.save(submitted("nul.x", 1));
+
+        for (String name : dir.list()) {
+            assertFalse(name, name.toLowerCase().matches("(con|nul)(\\..*)?"));
+        }
+        assertEquals("con", store.load("con").getTaskId());
+        assertEquals("nul.x", store.load("nul.x").getTaskId());
+    }
+
+    @Test
+    public void aMissingOrMalformedBudgetIsRejectedNotTurnedIntoUnlimited() throws Exception {
+        File dir = tempDir();
+        FileResearchTaskStore store = new FileResearchTaskStore(dir);
+
+        com.google.gson.JsonObject missing = FileResearchTaskStore.toJson(submitted("missing", 1));
+        missing.remove("budget");
+        com.google.gson.JsonObject partial = FileResearchTaskStore.toJson(submitted("partial", 1));
+        partial.getAsJsonObject("budget").remove("tokenLimit");
+        com.google.gson.JsonObject nulled = FileResearchTaskStore.toJson(submitted("nulled", 1));
+        nulled.add("budget", com.google.gson.JsonNull.INSTANCE);
+        com.google.gson.JsonObject wrongType = FileResearchTaskStore.toJson(submitted("wrong", 1));
+        wrongType.addProperty("retryLimit", "many");
+        for (com.google.gson.JsonObject json : Arrays.asList(missing, partial, nulled, wrongType)) {
+            Files.write(new File(dir, json.get("taskId").getAsString() + ".json").toPath(),
+                    json.toString().getBytes(StandardCharsets.UTF_8));
+        }
+
+        FileResearchTaskStore.TaskLoadResult result = store.loadAll();
+        assertTrue(result.getTasks().isEmpty());
+        assertEquals(4, result.getRejected().size());
+        assertTrue(result.getRejected().get("missing.json").contains("budget"));
+        assertTrue(result.getRejected().get("partial.json").contains("tokenLimit"));
+        assertNull(store.load("nulled"));
+    }
+
+    @Test
     public void anEmptyOrMissingDirectoryHoldsNoTasks() throws Exception {
         FileResearchTaskStore store = new FileResearchTaskStore(new File(tempDir(), "tasks"));
         assertTrue(store.loadAll().getTasks().isEmpty());

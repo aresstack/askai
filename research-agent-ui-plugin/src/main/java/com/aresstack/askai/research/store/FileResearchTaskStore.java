@@ -76,7 +76,8 @@ public final class FileResearchTaskStore {
             return null;
         }
         try {
-            return fromJson(JsonParser.parseString(StoreIo.readUtf8(file)).getAsJsonObject());
+            ResearchTask task = fromJson(JsonParser.parseString(StoreIo.readUtf8(file)).getAsJsonObject());
+            return task.getTaskId().equals(taskId.trim()) ? task : null;
         } catch (Exception corrupt) {
             return null;
         }
@@ -186,7 +187,7 @@ public final class FileResearchTaskStore {
     }
 
     static ResearchTask fromJson(JsonObject json) {
-        int version = json.has("schemaVersion") ? json.get("schemaVersion").getAsInt() : -1;
+        int version = json.has("schemaVersion") ? (int) number(json, "schemaVersion") : -1;
         if (version != SCHEMA_VERSION) {
             throw new IllegalArgumentException("unsupported task schema version " + version);
         }
@@ -202,7 +203,7 @@ public final class FileResearchTaskStore {
         for (JsonElement element : array(json, "receipts")) {
             JsonObject r = element.getAsJsonObject();
             receipts.add(new TaskReceipt(text(r, "toolName"),
-                    r.has("succeeded") && r.get("succeeded").getAsBoolean(), text(r, "receipt"),
+                    flag(r, "succeeded"), text(r, "receipt"),
                     number(r, "recordedAtMillis")));
         }
         List<TaskTransition> transitions = new ArrayList<TaskTransition>();
@@ -227,11 +228,21 @@ public final class FileResearchTaskStore {
         return new File(dir, safeFileName(taskId) + SUFFIX);
     }
 
-    /** Task ids are chosen by the orchestrator; anything outside {@code [A-Za-z0-9._-]} is encoded. */
+    /**
+     * Task ids are chosen by the orchestrator and are case-sensitive; the file system may not be (Windows).
+     * Only {@code [a-z0-9._-]} is kept as is — upper-case letters and everything else are encoded, so
+     * {@code task-A} and {@code task-a} never share a file. A Windows device name ({@code con}, {@code nul},
+     * {@code com1}, ...) gets its first character encoded for the same reason.
+     */
     static String safeFileName(String taskId) {
+        String id = taskId.trim();
+        boolean deviceName = id.toLowerCase(java.util.Locale.ROOT)
+                .matches("(con|prn|aux|nul|com[0-9]|lpt[0-9])(\\..*)?");
         StringBuilder sb = new StringBuilder();
-        for (char c : taskId.trim().toCharArray()) {
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+        for (char c : id.toCharArray()) {
+            if (deviceName && sb.length() == 0) {
+                sb.append('~').append(String.format("%04x", (int) c));
+            } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
                     || c == '-' || c == '_' || (c == '.' && sb.length() > 0)) {
                 sb.append(c);
             } else {
@@ -257,20 +268,42 @@ public final class FileResearchTaskStore {
         return values;
     }
 
+    // Every field save() writes is REQUIRED on load: a missing budget must not turn into an unlimited one,
+    // a missing artifact list must not drop the task's results. A gap rejects the file instead.
+
     private static JsonObject object(JsonObject json, String key) {
-        return json.has(key) && json.get(key).isJsonObject() ? json.getAsJsonObject(key) : new JsonObject();
+        if (!json.has(key) || !json.get(key).isJsonObject()) {
+            throw new IllegalArgumentException("missing or malformed \"" + key + "\"");
+        }
+        return json.getAsJsonObject(key);
     }
 
     private static JsonArray array(JsonObject json, String key) {
-        return json.has(key) && json.get(key).isJsonArray() ? json.getAsJsonArray(key) : new JsonArray();
+        if (!json.has(key) || !json.get(key).isJsonArray()) {
+            throw new IllegalArgumentException("missing or malformed \"" + key + "\"");
+        }
+        return json.getAsJsonArray(key);
     }
 
     private static String text(JsonObject json, String key) {
-        return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : "";
+        if (!json.has(key) || !json.get(key).isJsonPrimitive() || !json.getAsJsonPrimitive(key).isString()) {
+            throw new IllegalArgumentException("missing or malformed \"" + key + "\"");
+        }
+        return json.get(key).getAsString();
     }
 
     private static long number(JsonObject json, String key) {
-        return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsLong() : 0L;
+        if (!json.has(key) || !json.get(key).isJsonPrimitive() || !json.getAsJsonPrimitive(key).isNumber()) {
+            throw new IllegalArgumentException("missing or malformed \"" + key + "\"");
+        }
+        return json.get(key).getAsLong();
+    }
+
+    private static boolean flag(JsonObject json, String key) {
+        if (!json.has(key) || !json.get(key).isJsonPrimitive() || !json.getAsJsonPrimitive(key).isBoolean()) {
+            throw new IllegalArgumentException("missing or malformed \"" + key + "\"");
+        }
+        return json.get(key).getAsBoolean();
     }
 
     /** What {@link #loadAll()} found: the restored tasks and, per file name, why a file was rejected. */
