@@ -102,7 +102,7 @@ final class AskAiAgentConversationSink implements AgentConversationSink {
     public void updateThinking(String activityId, String text) {
         BubbleTranscriptPanel.ThinkingHandle handle = thinking.get(activityId);
         if (handle != null) {
-            transcript.appendAssistantThinkingDelta(handle, text);
+            transcript.replaceAssistantThinkingText(handle, text);
         }
     }
 
