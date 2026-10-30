@@ -308,6 +308,8 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
 
     /** Collects what the session reports; the run's numbers come from these events. */
     static final class Observer implements ResearchSessionListener {
+        static final String TOOL_FAILURE_LOG = "[web-search] technical failure";
+
         final AtomicLong promptStartedNanos = new AtomicLong();
         final AtomicLong firstSourceNanos = new AtomicLong();
         final CountDownLatch firstSource = new CountDownLatch(1);
@@ -334,6 +336,13 @@ public final class SingleAgentBaselineSubject implements BenchmarkSubject {
                 }
             } else if (type == ResearchBackendEventType.ERROR || type == ResearchBackendEventType.PROBLEM_REPORTED) {
                 failures.incrementAndGet();
+            } else if (type == ResearchBackendEventType.RUN_LOG) {
+                // A failed search or page-open call is caught in WebSearchApplicationService and only logged:
+                // "[web-search] technical failure stage=SEED_SEARCH|PAGE_OPEN ...".
+                String text = firstNonBlank(event.getText(), event.getPublicMessage());
+                if (text.contains(TOOL_FAILURE_LOG)) {
+                    failures.incrementAndGet();
+                }
             } else if (type == ResearchBackendEventType.ASSISTANT_MESSAGE) {
                 String text = firstNonBlank(event.getPublicMessage(), event.getText());
                 if (!text.isEmpty()) {

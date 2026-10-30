@@ -22,6 +22,10 @@ public class SingleAgentBaselineObserverTest {
         observer.onEvent(progress(2, 5)); // progress events may arrive out of order: the maximum counts
         observer.onEvent(ResearchBackendEvent.builder(ResearchBackendEventType.PROBLEM_REPORTED).text("x").build());
         observer.onEvent(ResearchBackendEvent.builder(ResearchBackendEventType.ERROR).text("y").build());
+        observer.onEvent(ResearchBackendEvent.builder(ResearchBackendEventType.RUN_LOG)
+                .text("[web-search] technical failure stage=PAGE_OPEN url=http://x cause=timeout").build());
+        observer.onEvent(ResearchBackendEvent.builder(ResearchBackendEventType.RUN_LOG)
+                .text("[web-search] opened http://x").build());
         observer.onEvent(ResearchBackendEvent.builder(ResearchBackendEventType.ASSISTANT_MESSAGE)
                 .messages("I found three sources.", "").build());
         observer.onEvent(ResearchBackendEvent.builder(ResearchBackendEventType.ASSISTANT_MESSAGE)
@@ -35,7 +39,7 @@ public class SingleAgentBaselineObserverTest {
 
         assertEquals(0, observer.firstSource.getCount());
         assertEquals(7, observer.toolCalls.get());
-        assertEquals(2, observer.failures.get());
+        assertEquals("ERROR, PROBLEM_REPORTED and the logged tool failure", 3, observer.failures.get());
         assertEquals(2, observer.statements.size());
         assertEquals("Only one host was found.", observer.statements.get(1));
         assertTrue(observer.awaitOutcomes(1, 1));

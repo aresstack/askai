@@ -261,7 +261,8 @@ public final class BenchmarkReport {
                 + "detection measures what it reports unprompted; a subject that takes an outline gets the "
                 + "question's outline.\n");
         md.append("- Tool calls: the run's tool-call count from the progress events; failed = ERROR and "
-                + "PROBLEM_REPORTED events. Model calls and tokens: the recording pass-through in front of Ollama.\n");
+                + "PROBLEM_REPORTED events plus logged search/page-open tool failures. Model calls and tokens: "
+                + "the recording pass-through in front of Ollama.\n");
     }
 
     // ------------------------------------------------------------------ formatting
