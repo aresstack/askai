@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.agent;
 
 import com.aresstack.askai.research.backend.ResearchCommandDispatchResult;
+import com.aresstack.askai.research.domain.task.ResearchTask;
 import com.aresstack.askai.research.state.ResearchCommandType;
 import com.aresstack.askai.research.state.oo.ResearchStateIds;
 import com.aresstack.comiccontrols.control.ComicScrollPane;
@@ -21,6 +22,8 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +59,7 @@ public final class ResearchStateView extends JPanel {
             new LinkedHashMap<String, ResearchCommandType>();
 
     private ResearchStateSnapshot snapshot;
+    private List<ResearchTask> tasks = Collections.emptyList();
     private CommandListener commandListener;
 
     public ResearchStateView() {
@@ -92,6 +96,16 @@ public final class ResearchStateView extends JPanel {
         rebuild();
     }
 
+    /**
+     * Render the persisted work packages of the run (ADR 0001, section 4.4) below the timeline. Read-only:
+     * the list shows state, role and retries; it offers no control. Must be called on the EDT.
+     */
+    public void setTasks(List<ResearchTask> tasks) {
+        this.tasks = tasks == null ? Collections.<ResearchTask>emptyList()
+                : Collections.unmodifiableList(new ArrayList<ResearchTask>(tasks));
+        rebuild();
+    }
+
     // ------------------------------------------------------------------ timeline
 
     private void rebuild() {
@@ -112,6 +126,10 @@ public final class ResearchStateView extends JPanel {
             revision.setEnabled(false);
             revision.setFont(revision.getFont().deriveFont(Font.PLAIN, 11f));
             timeline.add(revision);
+        }
+        if (!tasks.isEmpty()) {
+            timeline.add(javax.swing.Box.createVerticalStrut(6));
+            timeline.add(buildTaskList());
         }
         timeline.revalidate();
         timeline.repaint();
@@ -187,6 +205,43 @@ public final class ResearchStateView extends JPanel {
                 dispatch(command);
             }
         });
+    }
+
+    /** The minimal task list: one quiet line per work package, in submission order. */
+    private JComponent buildTaskList() {
+        ComicSectionPanel plate = new ComicSectionPanel(palette);
+        plate.setName("research.state.tasks");
+        plate.setLayout(new BoxLayout(plate, BoxLayout.Y_AXIS));
+        plate.setAccentStripe(palette.getAgentPetrol());
+        JLabel title = new JLabel("TASKS");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 12f));
+        title.setAlignmentX(LEFT_ALIGNMENT);
+        plate.add(title);
+        for (ResearchTask task : tasks) {
+            JComponent line = quietLine(taskLine(task));
+            line.setAlignmentX(LEFT_ALIGNMENT);
+            plate.add(line);
+        }
+        plate.setAlignmentX(LEFT_ALIGNMENT);
+        plate.setMaximumSize(new Dimension(Integer.MAX_VALUE, plate.getPreferredSize().height));
+        return plate;
+    }
+
+    /** {@code "t-2 · source-verifier · working · retry 1/2 · after t-1"}. */
+    static String taskLine(ResearchTask task) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(task.getTaskId()).append(" · ").append(task.getRole())
+                .append(" · ").append(task.getState().wireName());
+        if (task.getRetryCount() > 0) {
+            sb.append(" · retry ").append(task.getRetryCount()).append('/').append(task.getRetryLimit());
+        }
+        if (!task.getDependsOn().isEmpty()) {
+            sb.append(" · after ");
+            for (int i = 0; i < task.getDependsOn().size(); i++) {
+                sb.append(i == 0 ? "" : ", ").append(task.getDependsOn().get(i));
+            }
+        }
+        return sb.toString();
     }
 
     /** The nested plate for the INNER state object — this one is allowed to pop. */
@@ -267,7 +322,15 @@ public final class ResearchStateView extends JPanel {
      * stable seam for tests (the Swing composition may evolve freely underneath it).
      */
     public String renderedText() {
-        return render(snapshot);
+        String text = render(snapshot);
+        if (tasks.isEmpty()) {
+            return text;
+        }
+        StringBuilder sb = new StringBuilder(text).append("\ntasks:\n");
+        for (ResearchTask task : tasks) {
+            sb.append("  ").append(taskLine(task)).append('\n');
+        }
+        return sb.toString();
     }
 
     static String render(ResearchStateSnapshot s) {
