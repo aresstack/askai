@@ -38,6 +38,8 @@ final class WorkerBrowserLane {
     private final String chatKey;
     private final BlockingQueue<Command<?>> queue = new LinkedBlockingQueue<Command<?>>();
     private final CompletableFuture<WorkerBrowserBackend> started = new CompletableFuture<WorkerBrowserBackend>();
+    /** Completes once the browser process is gone (closed, never started, or terminated). */
+    private final CompletableFuture<Void> stopped = new CompletableFuture<Void>();
     private final BooleanSupplier wake = new BooleanSupplier() {
         public boolean getAsBoolean() {
             return !queue.isEmpty() || !running;
@@ -73,6 +75,7 @@ final class WorkerBrowserLane {
                     running = false;
                     lostReason = failed.getMessage();
                     started.completeExceptionally(failed);
+                    stopped.complete(null);
                     return;
                 }
                 backend = launched;
@@ -130,7 +133,13 @@ final class WorkerBrowserLane {
             while ((leftover = queue.poll()) != null) {
                 leftover.fail(lostException());
             }
+            stopped.complete(null);
         }
+    }
+
+    /** Completes when the browser process of this lane is gone; the pool counts the lane until then. */
+    CompletableFuture<Void> stopped() {
+        return stopped;
     }
 
     /**
@@ -241,6 +250,7 @@ final class WorkerBrowserLane {
         if (current != null) {
             current.terminate();
         }
+        stopped.complete(null);
         System.err.println("[browser-workers] lane " + laneId + " of chat " + chatKey + " terminated: " + reason);
     }
 
