@@ -30,6 +30,7 @@ function render(connection, hud) {
     $('status').textContent = connection === 'no-bridge'
         ? 'This browser was not started by AskAI.'
         : connection === 'connected' ? 'Connected to AskAI. No research step yet.' : 'Connecting to AskAI…';
+    $('host').hidden = true;
     $('wait').hidden = true;
     $('controls').hidden = true;
     $('star').hidden = true;
@@ -37,6 +38,8 @@ function render(connection, hud) {
   }
   $('phase').textContent = hud.phase || '—';
   $('status').textContent = hud.status || '';
+  $('host').textContent = hud.host || '';
+  $('host').hidden = hud.terminal || !hud.host;
   // Terminal: the run is over. The browser may stay open, but the HUD offers no controls for a visit that is gone.
   $('controls').hidden = hud.terminal;
   $('star').hidden = hud.terminal;

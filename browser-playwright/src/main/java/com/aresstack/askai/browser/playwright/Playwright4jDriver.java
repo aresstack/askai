@@ -493,7 +493,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * {@link #ADDON_GRACE_MILLIS} of the start, and the fallback is allowed.
      */
     private String renderHudInAddon(com.aresstack.askai.browser.hud.ResearchHudState state) {
-        addonBridge.publish(state);
+        addonBridge.publish(state, pageHost());
         if (addonBridge.addonConnected()) {
             if (!addonConnectedLogged) {
                 addonConnectedLogged = true;
@@ -524,6 +524,16 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     + "detect (set -D" + IN_PAGE_FALLBACK_PROPERTY + "=false to keep the HUD out of the page)");
         }
         return null;
+    }
+
+    /** The host of the current page for the add-on panel; never the full URL (no paths or queries leave here). */
+    private String pageHost() {
+        try {
+            String host = java.net.URI.create(page.url()).getHost();
+            return host == null ? "" : host;
+        } catch (RuntimeException ignored) {
+            return "";
+        }
     }
 
     private static boolean inPageFallbackAllowed() {

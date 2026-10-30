@@ -51,7 +51,8 @@ public class AddonBridgeTest {
     @Test
     public void theAddonReadsThePublishedStateAndBecomesConnected() throws Exception {
         assertFalse(bridge.addonConnected());
-        bridge.publish(new ResearchHudState("WAITING_FOR_USER", "Solve the check", true, 42, false, 3, true));
+        bridge.publish(new ResearchHudState("WAITING_FOR_USER", "Solve the check", true, 42, false, 3, true),
+                "www.bing.com");
         HttpResponse<String> response = send(get("/v1/state?after=0").header("Origin", EXTENSION_ORIGIN)
                 .header("Authorization", "Bearer " + bridge.token()));
         assertEquals(200, response.statusCode());
@@ -65,6 +66,7 @@ public class AddonBridgeTest {
         assertEquals(3, state.get("delay").getAsInt());
         assertTrue(state.get("relevant").getAsBoolean());
         assertFalse(state.get("terminal").getAsBoolean());
+        assertEquals("www.bing.com", state.get("host").getAsString());
         assertTrue(bridge.addonConnected());
     }
 

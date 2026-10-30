@@ -34,11 +34,16 @@ The controls and their commands are the same as the old overlay (`PAUSE`, `RESUM
 `SET_DELAY:<s>`, `SET_RELEVANCE:on|off`), so the research runtime (`WebSearchApplicationService`, `web_hud_render`,
 `web_hud_poll`) is unchanged.
 
+Spec: GitHub issue #23. The panel also shows the host of the page AskAI is on (only the host, never path or query).
+
 ### What a page sees
 
 Nothing of the add-on: no content script, no web-accessible resource, no element, no global, no binding. The add-on
 only has a background page and its own panel page. The live test checks this in a real Camoufox: the page reports
 `hud=false;binding=undefined;root=undefined`.
+
+This removes OUR traces from the page; it does not make an automated browser undetectable. Playwright's own
+evaluations (guards, capture, stages 2 and 3) and every other automation signal stay as they are.
 
 ### Pieces
 
@@ -69,6 +74,10 @@ The add-on's background page talks to a small HTTP server in the AskAI process:
 
 Commands land in the same `HudCommandInbox` the overlay binding fed, so a Skip still reaches the runtime while a
 data command blocks the browser actor.
+
+Contract: the existing browser-neutral types in `browser-api` (`ResearchHudState`, `ResearchHudCommand`) are the
+contract; the add-on only renders the state and sends commands, it has no research logic. One bridge and one token
+per browser start, and every chat has its own browser and profile, so a chat's add-on can only reach its own chat.
 
 Alternatives considered: WebDriver BiDi script channels need raw BiDi access, which Playwright Java does not give us
 (and `script.addPreloadScript` would again run in the page); Native Messaging needs a separately registered host

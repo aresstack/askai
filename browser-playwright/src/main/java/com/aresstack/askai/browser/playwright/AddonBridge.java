@@ -49,6 +49,7 @@ final class AddonBridge implements AutoCloseable {
     private final Object lock = new Object();
     private long version;
     private ResearchHudState state;
+    private String host = "";
     private volatile long lastContactMillis;
     private volatile String addonVersion;
     private volatile long servedVersion;
@@ -111,8 +112,14 @@ final class AddonBridge implements AutoCloseable {
 
     /** Publish a new HUD state; a held poll returns it at once. */
     void publish(ResearchHudState next) {
+        publish(next, "");
+    }
+
+    /** Publish a new HUD state together with the host of the page AskAI is on (shown in the panel). */
+    void publish(ResearchHudState next, String pageHost) {
         synchronized (lock) {
             state = next;
+            host = pageHost == null ? "" : pageHost;
             version++;
             lock.notifyAll();
         }
@@ -202,6 +209,7 @@ final class AddonBridge implements AutoCloseable {
         long deadline = System.currentTimeMillis() + POLL_HOLD_MILLIS;
         long currentVersion;
         ResearchHudState current;
+        String currentHost;
         synchronized (lock) {
             while (!closed && (state == null || version <= after)) {
                 long remaining = deadline - System.currentTimeMillis();
@@ -217,6 +225,7 @@ final class AddonBridge implements AutoCloseable {
             }
             currentVersion = version;
             current = state;
+            currentHost = host;
         }
         lastContactMillis = System.currentTimeMillis();
         if (current == null || currentVersion <= after) {
@@ -226,7 +235,9 @@ final class AddonBridge implements AutoCloseable {
         servedVersion = currentVersion;
         JsonObject body = new JsonObject();
         body.addProperty("version", currentVersion);
-        body.add("state", toJson(current));
+        JsonObject json = toJson(current);
+        json.addProperty("host", currentHost);
+        body.add("state", json);
         respond(exchange, 200, GSON.toJson(body));
     }
 
