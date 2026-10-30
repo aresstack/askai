@@ -521,6 +521,8 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         private final ModelResourceScheduler.Grant grant;
         private final AtomicBoolean active = new AtomicBoolean(true);
         final AtomicReference<Call> running = new AtomicReference<Call>();
+        private Call onWire; // the call whose request is at the endpoint, or null
+        private boolean released;
 
         Reservation(String id, ModelSlot slot, String endpointId, String model, int contextTokens,
                     ModelResourceScheduler.Grant grant) {
@@ -566,6 +568,48 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 if (call != null) {
                     call.cancel();
                 }
+                releaseWhenOffTheWire();
+            }
+        }
+
+        /**
+         * Takes the wire for one call: waits while an earlier (aborted) call of this reservation is still
+         * streaming, so a reservation never has two requests at the endpoint. False when the reservation was
+         * closed meanwhile or the waiting thread was interrupted.
+         */
+        synchronized boolean enterWire(Call call) {
+            try {
+                while (onWire != null) {
+                    wait();
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            if (!active.get()) {
+                return false;
+            }
+            onWire = call;
+            return true;
+        }
+
+        /** The transport of {@code call} has really stopped. Idempotent; a no-op for a call off the wire. */
+        synchronized void leaveWire(Call call) {
+            if (onWire == call) {
+                onWire = null;
+                notifyAll();
+                releaseWhenOffTheWire();
+            }
+        }
+
+        /**
+         * A cancel or time-out reports at once, but the scheduler place is handed on only once the stream has
+         * really stopped: otherwise the next call would reach the endpoint while the aborted generation (for
+         * example a slow prefill that has not sent its first chunk) is still running, breaking capacity 1.
+         */
+        private synchronized void releaseWhenOffTheWire() {
+            if (!active.get() && onWire == null && !released) {
+                released = true;
                 grant.release();
             }
         }
@@ -650,6 +694,16 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             OllamaChatOptions extras = new OllamaChatOptions(tools,
                     format.getKind() == OutputFormat.Kind.JSON_SCHEMA ? format.getSchemaJson() : null,
                     options, format.getKind() == OutputFormat.Kind.JSON, () -> aborted.get());
+            if (!reservation.enterWire(this)) {
+                fail(ModelFailure.Kind.RESERVATION_INVALID, "the reservation was closed before the call started");
+                finish();
+                return;
+            }
+            if (terminal.get()) {
+                reservation.leaveWire(this); // aborted while waiting for the wire
+                finish();
+                return;
+            }
             try {
                 OllamaChatCompletion completion = client(baseUrl).streamChat(reservation.model,
                         turns(request.getMessages()), settings().getKeepAlive(), thinkValue(request.getThinking()),
@@ -672,9 +726,11 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                             public void onComplete(OllamaChatCompletion completion) {
                             }
                         });
+                reservation.leaveWire(this); // the stream has ended: free the wire before any callback
                 reachability.put(reservation.endpointId, Boolean.TRUE);
                 complete(completion, reservation, Duration.ofNanos(System.nanoTime() - started));
             } catch (OllamaRequestException failure) {
+                reservation.leaveWire(this);
                 if (aborted.get()) {
                     return; // cancel or time-out already delivered the terminal callback
                 }
@@ -686,10 +742,12 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                     fail(ModelFailure.Kind.PROVIDER_ERROR, failure.getMessage());
                 }
             } catch (RuntimeException unexpected) {
+                reservation.leaveWire(this);
                 if (!aborted.get()) {
                     fail(ModelFailure.Kind.PROVIDER_ERROR, String.valueOf(unexpected.getMessage()));
                 }
             } finally {
+                reservation.leaveWire(this); // idempotent; covers an Error thrown out of the stream
                 finish();
             }
         }

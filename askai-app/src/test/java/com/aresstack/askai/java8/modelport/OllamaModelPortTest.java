@@ -213,7 +213,7 @@ public class OllamaModelPortTest {
 
     // ------------------------------------------------------------------ helpers
 
-    private static final class Recorder implements ChatListener {
+    private static class Recorder implements ChatListener {
         final StringBuilder thinking = new StringBuilder();
         final StringBuilder content = new StringBuilder();
         final AtomicReference<ChatResult> result = new AtomicReference<ChatResult>();
@@ -407,6 +407,45 @@ public class OllamaModelPortTest {
         gate = null;
         Recorder next = new Recorder().await0(port, request(JUDGE).build());
         assertNull("the place was freed for the next call", next.failure.get());
+    }
+
+    @Test
+    public void aCancelledCallKeepsItsPlaceUntilItsStreamHasReallyStopped() throws Exception {
+        answers.add("{\"message\":{\"role\":\"assistant\",\"content\":\"he\"},\"done\":false}\n"
+                + done("llo", ""));
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch hold = new CountDownLatch(1);
+        Recorder first = new Recorder() {
+            @Override
+            public void onContentDelta(String delta) {
+                entered.countDown();
+                // the transport is still busy (like a slow prefill): an interrupt does not end it
+                while (hold.getCount() > 0) {
+                    try {
+                        hold.await();
+                    } catch (InterruptedException ignored) {
+                        // keep holding the stream
+                    }
+                }
+            }
+        };
+        ModelCall call = port.chat(request(JUDGE).build(), first);
+        assertTrue(entered.await(10, TimeUnit.SECONDS));
+        call.cancel();
+        first.await();
+        assertEquals("the cancel is reported at once", ModelFailure.Kind.CANCELLED, first.failure.get().getKind());
+
+        Recorder next = new Recorder();
+        port.chat(request(JUDGE).build(), next);
+        Thread.sleep(300);
+        assertEquals("capacity 1: the next call waits while the aborted stream still runs", 1, bodies.size());
+        assertEquals(1, next.done.getCount());
+
+        hold.countDown();
+        next.await();
+        assertNull("the place was handed on once the stream stopped", next.failure.get());
+        assertEquals(2, bodies.size());
+        assertEquals(1, maxConcurrent.get());
     }
 
     @Test
