@@ -330,6 +330,15 @@ public final class WriterWorker implements TaskWorker {
                 gaps.merge(section, description, (a, b) -> a + "; " + b);
             }
         }
+        // Every requested section is accounted for: drafted, or named as a gap. A silently dropped or empty
+        // section would read as "covered" downstream.
+        for (String section : sections) {
+            List<Paragraph> paragraphs = drafted.get(section);
+            if ((paragraphs == null || paragraphs.isEmpty()) && !gaps.containsKey(section)) {
+                throw new WorkerAnswerException("section " + section + (paragraphs == null ? " is missing" : " has no "
+                        + "paragraphs") + "; draft it from the sources or name it under \"gaps\"");
+            }
+        }
         return new Draft(drafted, gaps);
     }
 
