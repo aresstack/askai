@@ -6,6 +6,7 @@ import com.aresstack.askai.agent.model.port.ModelPort;
 import com.aresstack.askai.agent.model.port.ModelSlot;
 import com.aresstack.askai.agent.model.port.ThinkingMode;
 import com.aresstack.askai.browser.search.inference.StructuredInferencePort;
+import com.aresstack.askai.research.runtime.role.ResearchRole;
 import com.aresstack.askai.browser.search.inference.StructuredInferenceRequest;
 import com.aresstack.askai.browser.search.inference.StructuredInferenceResult;
 import com.aresstack.askai.browser.search.inference.StructuredInferenceStatus;
@@ -27,6 +28,7 @@ import java.time.Duration;
 public final class PortStructuredInferenceClient implements StructuredInferencePort {
 
     private final ModelSlot slot;
+    private final int contextTokens;
     private final Duration timeout;
     private final BlockingModelCall calls;
 
@@ -37,12 +39,31 @@ public final class PortStructuredInferenceClient implements StructuredInferenceP
      *                platform default
      */
     public PortStructuredInferenceClient(ModelPort port, ModelSlot slot, Duration timeout) {
+        this(port, slot, 0, timeout);
+    }
+
+    /**
+     * @param contextTokens the role's context size per call, 0 for the slot default (a platform setting)
+     */
+    public PortStructuredInferenceClient(ModelPort port, ModelSlot slot, int contextTokens, Duration timeout) {
         if (port == null || slot == null) {
             throw new IllegalArgumentException("port and slot must not be null");
         }
+        if (contextTokens < 0) {
+            throw new IllegalArgumentException("context tokens must be >= 0");
+        }
         this.slot = slot;
+        this.contextTokens = contextTokens;
         this.timeout = timeout;
         this.calls = new BlockingModelCall(port);
+    }
+
+    /** The transport of the SERP layout-repair role: its slot and its context size (ADR 0001, 4.1). */
+    public static PortStructuredInferenceClient forRole(ModelPort port, ResearchRole role, Duration timeout) {
+        if (role == null) {
+            throw new IllegalArgumentException("role must not be null");
+        }
+        return new PortStructuredInferenceClient(port, role.getSlot(), role.getContextTokens(), timeout);
     }
 
     @Override
@@ -56,6 +77,7 @@ public final class PortStructuredInferenceClient implements StructuredInferenceP
                 .temperature(request.temperature < 0 || Double.isNaN(request.temperature)
                         ? null : request.temperature)
                 .maxOutputTokens(Math.max(0, request.maximumOutputTokens))
+                .contextTokens(contextTokens)
                 .timeout(timeout);
         if (!request.systemPrompt.trim().isEmpty()) {
             chat.message(ModelMessage.system(request.systemPrompt));

@@ -40,10 +40,25 @@ public final class ResearchAgentSession {
      * the agent surfaces an honest, retryable {@code MODEL_UNAVAILABLE} rather than a static fake dialogue.
      */
     private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat mainModelChat;
-    /** The scope sweep's transport (probe generator, advice chooser): the {@code scope} model slot. */
-    private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat scopeModelChat;
-    /** The page readiness judge's transport: the {@code judge} model slot. */
-    private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat judgeModelChat;
+    /**
+     * One hot-swappable transport per model role (ADR 0001, 4.1), keyed by role id, slot and context size and
+     * bound to them: the conversation, the scope sweep's generator and chooser, the readiness judge, and any
+     * role a later caller asks for through {@link #roleChats()}. A reload swaps all of them, a cancel aborts
+     * all of them.
+     */
+    private final java.util.Map<String, RoleTransport> roleChats = new java.util.LinkedHashMap<String, RoleTransport>();
+
+    /** A role and the transport built for it. */
+    private static final class RoleTransport {
+        final com.aresstack.askai.research.runtime.role.ResearchRole role;
+        final com.aresstack.askai.research.runtime.team.ReloadableMainModelChat chat;
+
+        RoleTransport(com.aresstack.askai.research.runtime.role.ResearchRole role,
+                      com.aresstack.askai.research.runtime.team.ReloadableMainModelChat chat) {
+            this.role = role;
+            this.chat = chat;
+        }
+    }
     /**
      * The host's model port (ADR 0001, 3.2): the ONLY way this runtime reaches a model. Null when the host
      * offers none (an older host or a test without models); every model role is then honestly unavailable.
@@ -177,12 +192,14 @@ public final class ResearchAgentSession {
         // The model-backed TeamAgent is created for EVERY session, BEFORE (and independent of) the browser:
         // the conversation runs on the central main model even while the browser stays STOPPED. It must NOT
         // live under hasBrowser() or the research loop.
-        this.mainModelChat = new com.aresstack.askai.research.runtime.team.ReloadableMainModelChat(
-                buildModelChat(com.aresstack.askai.research.runtime.inference.ResearchModelSlots.CONVERSATION));
-        this.scopeModelChat = new com.aresstack.askai.research.runtime.team.ReloadableMainModelChat(
-                buildModelChat(com.aresstack.askai.research.runtime.inference.ResearchModelSlots.SCOPE));
-        this.judgeModelChat = new com.aresstack.askai.research.runtime.team.ReloadableMainModelChat(
-                buildModelChat(com.aresstack.askai.research.runtime.inference.ResearchModelSlots.JUDGE));
+        this.mainModelChat = roleChat(com.aresstack.askai.research.runtime.role.ResearchRoles.CONVERSATION);
+        for (com.aresstack.askai.research.runtime.role.ResearchRole worker
+                : com.aresstack.askai.research.runtime.role.ResearchRoles.workers()) {
+            // The layout repair runs over its own structured-inference transport (buildInferencePort).
+            if (worker != com.aresstack.askai.research.runtime.role.ResearchRoles.SERP_LAYOUT_REPAIR) {
+                roleChat(worker);
+            }
+        }
         // The assembler reads the session's LIVE working language per turn: a set_language between turns
         // changes the next turn's context, never the history.
         this.teamAgent = new com.aresstack.askai.research.runtime.team.ResearchTeamAgent(mainModelChat,
@@ -366,7 +383,8 @@ public final class ResearchAgentSession {
      * {@code MODEL_UNAVAILABLE}. A later valid descriptor is swapped in via {@link ReloadableMainModelChat}.
      */
     private com.aresstack.askai.research.runtime.team.MainModelChat buildModelChat(
-            com.aresstack.askai.agent.model.port.ModelSlot slot) {
+            com.aresstack.askai.research.runtime.role.ResearchRole role) {
+        com.aresstack.askai.agent.model.port.ModelSlot slot = role.getSlot();
         if (!environment.hasInference()) {
             System.err.println("[research-agent] no inference descriptor — model slot " + slot + " unavailable");
             // Prefer the actionable reason the host passed (e.g. "No main model is selected. Choose a chat
@@ -387,7 +405,7 @@ public final class ResearchAgentSession {
             com.aresstack.askai.agent.model.inference.InferenceConfigurationDocument document =
                     com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
                             .load(environment.inferenceConfigPath);
-            return new com.aresstack.askai.research.runtime.team.PortMainModelChat(modelPort, slot,
+            return com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(modelPort, role,
                     callTimeout(document));
         } catch (java.io.IOException ex) {
             System.err.println("[research-agent] main-model descriptor unusable ("
@@ -395,6 +413,49 @@ public final class ResearchAgentSession {
                     + " — model slot " + slot + " starts in MODEL_UNAVAILABLE");
             return new com.aresstack.askai.research.runtime.team.UnavailableMainModelChat(
                     "main-model descriptor unusable: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * The transport of {@code role}: created on first use (bound to the role's slot and context size) and
+     * then reused, so the reload and the cancel reach it. Transports are keyed by role id, slot and context
+     * size, so a role with a context override ({@link com.aresstack.askai.research.runtime.role.ResearchRole
+     * #withContextTokens}) gets its own transport instead of silently reusing the default one.
+     */
+    private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat roleChat(
+            com.aresstack.askai.research.runtime.role.ResearchRole role) {
+        String key = role.getId() + "@" + role.getSlot().getName() + "#" + role.getContextTokens();
+        synchronized (roleChats) {
+            RoleTransport transport = roleChats.get(key);
+            if (transport == null) {
+                transport = new RoleTransport(role,
+                        new com.aresstack.askai.research.runtime.team.ReloadableMainModelChat(buildModelChat(role)));
+                roleChats.put(key, transport);
+            }
+            return transport.chat;
+        }
+    }
+
+    /**
+     * The session's productive {@link com.aresstack.askai.research.runtime.role.RoleChatFactory}: every role
+     * reaches the model only through its own transport over the host's model port, hot-reloaded and cancelled
+     * with the session. The seam the orchestrator and the task executor (ADR 0001, 4.2) run their roles on.
+     */
+    public com.aresstack.askai.research.runtime.role.RoleChatFactory roleChats() {
+        return new com.aresstack.askai.research.runtime.role.RoleChatFactory() {
+            public com.aresstack.askai.research.runtime.team.MainModelChat chatFor(
+                    com.aresstack.askai.research.runtime.role.ResearchRole role) {
+                if (role == null) {
+                    throw new IllegalArgumentException("role must not be null");
+                }
+                return roleChat(role);
+            }
+        };
+    }
+
+    private java.util.List<RoleTransport> roleTransports() {
+        synchronized (roleChats) {
+            return new java.util.ArrayList<RoleTransport>(roleChats.values());
         }
     }
 
@@ -422,9 +483,9 @@ public final class ResearchAgentSession {
                     com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
                             .load(environment.inferenceConfigPath);
             System.err.println("[research-agent] SERP layout repair ready on model slot "
-                    + com.aresstack.askai.research.runtime.inference.ResearchModelSlots.LAYOUT_REPAIR);
-            return new com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient(modelPort,
-                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.LAYOUT_REPAIR,
+                    + com.aresstack.askai.research.runtime.role.ResearchRoles.SERP_LAYOUT_REPAIR.getSlot());
+            return com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient.forRole(modelPort,
+                    com.aresstack.askai.research.runtime.role.ResearchRoles.SERP_LAYOUT_REPAIR,
                     callTimeout(document));
         } catch (java.io.IOException ex) {
             System.err.println("[research-agent] inference descriptor unusable ("
@@ -451,28 +512,18 @@ public final class ResearchAgentSession {
             // set at this turn boundary: the agent's conversation history, proposed/confirmed scope and
             // pending turn are untouched — only the client underneath changes.
             java.time.Duration timeout = callTimeout(document);
-            this.inferencePort = new com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient(
-                    modelPort, com.aresstack.askai.research.runtime.inference.ResearchModelSlots.LAYOUT_REPAIR,
-                    timeout);
-            swapPortChat(mainModelChat,
-                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.CONVERSATION, timeout);
-            swapPortChat(scopeModelChat,
-                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.SCOPE, timeout);
-            swapPortChat(judgeModelChat,
-                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.JUDGE, timeout);
+            this.inferencePort = com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient.forRole(
+                    modelPort, com.aresstack.askai.research.runtime.role.ResearchRoles.SERP_LAYOUT_REPAIR, timeout);
+            for (RoleTransport transport : roleTransports()) {
+                transport.chat.swap(com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(
+                        modelPort, transport.role, timeout));
+            }
             System.err.println("[research-agent] main model + inference reloaded: " + document.getModel());
             return true;
         } catch (java.io.IOException ex) {
             System.err.println("[research-agent] inference reload failed, keeping the last good config: "
                     + ex.getMessage());
             return false;
-        }
-    }
-
-    private void swapPortChat(com.aresstack.askai.research.runtime.team.ReloadableMainModelChat chat,
-                              com.aresstack.askai.agent.model.port.ModelSlot slot, java.time.Duration timeout) {
-        if (chat != null) {
-            chat.swap(new com.aresstack.askai.research.runtime.team.PortMainModelChat(modelPort, slot, timeout));
         }
     }
 
@@ -613,14 +664,8 @@ public final class ResearchAgentSession {
         cancelled.set(true);
         // Abort any in-flight model call so a pause/cancel or a session/tab close returns promptly instead of
         // waiting out the full model timeout; the aborted call surfaces as an honest non-OK turn.
-        if (mainModelChat != null) {
-            mainModelChat.cancelInFlight();
-        }
-        if (scopeModelChat != null) {
-            scopeModelChat.cancelInFlight();
-        }
-        if (judgeModelChat != null) {
-            judgeModelChat.cancelInFlight();
+        for (RoleTransport transport : roleTransports()) {
+            transport.chat.cancelInFlight();
         }
         com.aresstack.askai.browser.search.inference.StructuredInferencePort inference = inferencePort;
         if (inference instanceof com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) {
@@ -803,7 +848,8 @@ public final class ResearchAgentSession {
                     com.aresstack.askai.research.runtime.scope.ScopeAdviceWire
                             .parseRequest(requestJson);
             result = new com.aresstack.askai.research.runtime.scope.MainModelScopeAdviceChooser(
-                    scopeModelChat, parsed.settings).choose(parsed.request);
+                    roleChat(com.aresstack.askai.research.runtime.role.ResearchRoles.SCOPE_ADVICE_CHOOSER),
+                    parsed.settings).choose(parsed.request);
         } catch (IllegalArgumentException malformedRequest) {
             result = com.aresstack.askai.research.domain.scope.ScopeAdviceChooser.ChoiceResult
                     .failure(com.aresstack.askai.research.domain.scope.ScopeAdviceChooser
@@ -836,7 +882,8 @@ public final class ResearchAgentSession {
                     com.aresstack.askai.research.runtime.scope.ProbeGenerationWire
                             .parseRequest(requestJson);
             result = new com.aresstack.askai.research.runtime.scope.MainModelScopeProbeGenerator(
-                    scopeModelChat, parsed.settings).generate(parsed.request);
+                    roleChat(com.aresstack.askai.research.runtime.role.ResearchRoles.SCOPE_PROBE_GENERATOR),
+                    parsed.settings).generate(parsed.request);
         } catch (IllegalArgumentException malformedRequest) {
             result = com.aresstack.askai.research.domain.scope.ScopeProbeGenerator
                     .ProbeGenerationResult.failure(
@@ -1079,7 +1126,9 @@ public final class ResearchAgentSession {
                             new com.aresstack.askai.research.runtime.acquire.PageReadinessModel() {
                                 public String complete(String system, String user) {
                                     com.aresstack.askai.research.runtime.team.MainModelChatResult r =
-                                            judgeModelChat.complete(java.util.Arrays.asList(
+                                            roleChat(com.aresstack.askai.research.runtime.role
+                                                    .ResearchRoles.PAGE_READINESS_JUDGE).complete(
+                                                    java.util.Arrays.asList(
                                                     com.aresstack.askai.research.runtime.team.ChatMessage
                                                             .system(system),
                                                     com.aresstack.askai.research.runtime.team.ChatMessage
@@ -1699,8 +1748,10 @@ public final class ResearchAgentSession {
                             }, cancelled, loadBrowserSearchSettings());
             // The MANDATORY local reranker was built and readiness-checked at session/new; inject it so
             // every organic candidate is scored before any web_open. (Non-browser turns never reach here.)
+            // The loop resolves its scorer exactly like the manual search: the user's "use AI reranker"
+            // setting decides between BM25 (default) and the model reranker of the session language.
             if (reranker != null) {
-                loop.setReranker(reranker);
+                loop.setReranker(rerankerFor(sessionLanguage.code()));
             }
             // Inject the session's chosen initial-search strategy (null → keep the default browser path).
             // On the API-provider path inference is irrelevant; on the browser path weave the productive

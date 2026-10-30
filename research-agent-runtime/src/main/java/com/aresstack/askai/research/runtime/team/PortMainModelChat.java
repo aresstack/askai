@@ -7,6 +7,7 @@ import com.aresstack.askai.agent.model.port.ModelPort;
 import com.aresstack.askai.agent.model.port.ModelSlot;
 import com.aresstack.askai.agent.model.port.OutputFormat;
 import com.aresstack.askai.research.runtime.inference.BlockingModelCall;
+import com.aresstack.askai.research.runtime.role.ResearchRole;
 
 import java.time.Duration;
 import java.util.List;
@@ -27,6 +28,7 @@ public final class PortMainModelChat implements MainModelChat {
 
     private final ModelPort port;
     private final ModelSlot slot;
+    private final int contextTokens;
     private final Duration timeout;
     private final BlockingModelCall calls;
 
@@ -37,17 +39,41 @@ public final class PortMainModelChat implements MainModelChat {
      *                platform default
      */
     public PortMainModelChat(ModelPort port, ModelSlot slot, Duration timeout) {
+        this(port, slot, 0, timeout);
+    }
+
+    /**
+     * @param contextTokens the role's context size per call, 0 for the slot default (a platform setting)
+     */
+    public PortMainModelChat(ModelPort port, ModelSlot slot, int contextTokens, Duration timeout) {
         if (port == null || slot == null) {
             throw new IllegalArgumentException("port and slot must not be null");
         }
+        if (contextTokens < 0) {
+            throw new IllegalArgumentException("context tokens must be >= 0");
+        }
         this.port = port;
         this.slot = slot;
+        this.contextTokens = contextTokens;
         this.timeout = timeout;
         this.calls = new BlockingModelCall(port);
     }
 
+    /** The transport of one research role: its slot and its context size (ADR 0001, 4.1). */
+    public static PortMainModelChat forRole(ModelPort port, ResearchRole role, Duration timeout) {
+        if (role == null) {
+            throw new IllegalArgumentException("role must not be null");
+        }
+        return new PortMainModelChat(port, role.getSlot(), role.getContextTokens(), timeout);
+    }
+
     public ModelSlot getSlot() {
         return slot;
+    }
+
+    /** The context size sent with every call; 0 = the slot default. */
+    public int getContextTokens() {
+        return contextTokens;
     }
 
     @Override
@@ -85,6 +111,7 @@ public final class PortMainModelChat implements MainModelChat {
                 .outputFormat(format)
                 .temperature(temperature < 0 || Double.isNaN(temperature) ? null : temperature)
                 .maxOutputTokens(Math.max(0, maxOutputTokens))
+                .contextTokens(contextTokens)
                 .timeout(timeout);
         for (ChatMessage message : messages) {
             request.message(toModelMessage(message));

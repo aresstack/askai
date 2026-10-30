@@ -4,6 +4,9 @@ import com.aresstack.askai.agent.model.reranker.MiniJson;
 import com.aresstack.askai.research.domain.scope.ScopeAdviceCandidate;
 import com.aresstack.askai.research.domain.scope.ScopeAdviceChooser;
 import com.aresstack.askai.research.runtime.team.ChatMessage;
+import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
+import com.aresstack.askai.research.runtime.role.ResearchRole;
+import com.aresstack.askai.research.runtime.role.RoleOutput;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.runtime.team.MainModelChatResult;
 
@@ -22,6 +25,17 @@ import java.util.Map;
  * complete".
  */
 public final class MainModelScopeAdviceChooser implements ScopeAdviceChooser {
+
+    /**
+     * The role (ADR 0001, 4.1): the scope slot, no tools, a schema built per request (the allowed candidate
+     * ids are the request's), strictly validated afterwards.
+     */
+    public static final ResearchRole ROLE = ResearchRole.builder("scope-advice-chooser", ResearchModelSlots.SCOPE)
+            .purpose("chooses at most one prepared clarification candidate for the scoping dialogue")
+            .systemPrompt(systemPrompt())
+            .output(RoleOutput.schemaPerRequest("MainModelScopeAdviceChooser.validate"))
+            .build();
+
 
     /** All behavior-limiting knobs explicit — wired from settings by the host, never constants. */
     public static final class ChooserSettings {
@@ -48,7 +62,7 @@ public final class MainModelScopeAdviceChooser implements ScopeAdviceChooser {
     @Override
     public ChoiceResult choose(ChoiceRequest request) {
         MainModelChatResult call = model.completeJson(
-                Arrays.asList(ChatMessage.system(systemPrompt()),
+                Arrays.asList(ChatMessage.system(ROLE.getSystemPrompt()),
                         ChatMessage.user(userPrompt(request))),
                 settings.temperature, settings.maxOutputTokens, responseSchema(request));
         if (!call.isOk()) {
