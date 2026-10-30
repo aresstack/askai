@@ -47,7 +47,10 @@ final class ConceptToolActivityFormatter {
 
     private enum Kind { CARDS, OFFER, EXCLUDE, MOVE, EDIT, RESOLVE, READ, PROBE, ENDPOINT }
 
-    /** The status of one action kind within the turn. */
+    /**
+     * One action kind within the turn. {@code pending}/{@code noChange}/{@code rejected} describe the
+     * LATEST round of that kind; {@code confirmed}, the names and the count accumulate the results.
+     */
     private static final class Step {
         boolean pending;
         boolean confirmed;
@@ -55,7 +58,12 @@ final class ConceptToolActivityFormatter {
         boolean rejected;
         String requestedLabel;
         int count = -1;
+        /** The host receipt batch the next ADDED/MOVED lines belong to (its head line). */
+        String batch = "";
+        /** Distinct labels, for display. */
         final Set<String> names = new LinkedHashSet<String>();
+        /** batch|label: equal labels under different parents count apart, a replayed line does not. */
+        final Set<String> receiptKeys = new LinkedHashSet<String>();
         final Set<String> alreadyPresent = new LinkedHashSet<String>();
         final Set<String> suppressed = new LinkedHashSet<String>();
     }
@@ -150,6 +158,8 @@ final class ConceptToolActivityFormatter {
             openRounds.put(round, kind);
             Step step = touch(kind);
             step.pending = true;
+            step.noChange = false;
+            step.rejected = false;
             if (kind == Kind.EXCLUDE) {
                 Matcher topic = QUOTED_TOPIC.matcher(action.group(3));
                 if (topic.find()) {
@@ -225,17 +235,19 @@ final class ConceptToolActivityFormatter {
             String receipt = line.substring("concept_add_cards -> ".length());
             Step step = touch(Kind.CARDS);
             if (receipt.startsWith("ADDED: ")) {
-                step.names.add(receipt.substring("ADDED: ".length()).trim());
-                step.confirmed = true;
-                step.pending = false;
+                addReceipt(step, receipt.substring("ADDED: ".length()));
+                step.rejected = false;
             } else if (receipt.startsWith("ALREADY_PRESENT: ")) {
                 step.alreadyPresent.add(receipt.substring("ALREADY_PRESENT: ".length()).trim());
             } else if (receipt.startsWith("SUPPRESSED_BY_SCOPE: ")) {
                 step.suppressed.add(receipt.substring("SUPPRESSED_BY_SCOPE: ".length()).trim());
             } else if (receipt.startsWith("APPLIED")) {
+                step.batch = receipt;
                 step.confirmed = true;
                 step.pending = false;
+                step.rejected = false;
             } else if (receipt.startsWith("NO_CHANGE")) {
+                step.batch = receipt;
                 step.noChange = true;
                 step.pending = false;
             }
@@ -245,9 +257,10 @@ final class ConceptToolActivityFormatter {
             String receipt = line.substring("concept_move_leaf -> ".length());
             Step step = touch(Kind.MOVE);
             if (receipt.startsWith("MOVED: ")) {
-                step.names.add(receipt.substring("MOVED: ".length()).trim());
-                step.confirmed = true;
-                step.pending = false;
+                addReceipt(step, receipt.substring("MOVED: ".length()));
+                step.rejected = false;
+            } else if (receipt.startsWith("APPLIED")) {
+                step.batch = receipt;
             } else if (receipt.startsWith("NO_CHANGE")) {
                 step.noChange = true;
                 step.pending = false;
@@ -305,10 +318,26 @@ final class ConceptToolActivityFormatter {
     }
 
     private static String statusLine(Kind kind, Step step, boolean german) {
+        String line = resultOrStatusLine(kind, step, german);
+        boolean hasResult = step.confirmed || !step.names.isEmpty();
+        if (line == null || !hasResult || kind == Kind.READ || kind == Kind.PROBE) {
+            return line;
+        }
+        // An earlier success must not hide the latest round of the same kind.
+        if (step.pending) {
+            return line + (german ? " (weiterer Schritt läuft …)" : " (another step running …)");
+        }
+        if (step.rejected) {
+            return line + (german ? " (weiterer Schritt nicht übernommen)" : " (a further step was not applied)");
+        }
+        return line;
+    }
+
+    private static String resultOrStatusLine(Kind kind, Step step, boolean german) {
         switch (kind) {
             case CARDS:
                 if (!step.names.isEmpty()) {
-                    int n = step.names.size();
+                    int n = step.receiptKeys.size();
                     String text = german
                             ? "Konzept erweitert – " + n + (n == 1 ? " Themenbereich" : " Themenbereiche")
                                     + " hinzugefügt: " + nameList(step.names)
@@ -414,7 +443,7 @@ final class ConceptToolActivityFormatter {
         switch (kind) {
             case CARDS:
                 if (!step.names.isEmpty()) {
-                    int n = step.names.size();
+                    int n = step.receiptKeys.size();
                     return german ? n + (n == 1 ? " Themenbereich" : " Themenbereiche") + " hinzugefügt"
                             : n + (n == 1 ? " topic area" : " topic areas") + " added";
                 }
@@ -506,6 +535,14 @@ final class ConceptToolActivityFormatter {
             return Kind.PROBE;
         }
         return null;
+    }
+
+    private static void addReceipt(Step step, String label) {
+        String name = label.trim();
+        step.names.add(name);
+        step.receiptKeys.add(step.batch + "|" + name);
+        step.confirmed = true;
+        step.pending = false;
     }
 
     private Step touch(Kind kind) {
