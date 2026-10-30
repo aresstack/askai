@@ -113,7 +113,9 @@ public final class OrchestratedResearchRun {
                     .addTime(clock.getAsLong() - planStart).updatedAt(clock.getAsLong())
                     .state(OrchestratorRun.State.FAILED).waitingReason(unavailable.getMessage())
                     .journal("Planning failed: " + unavailable.getMessage()).build();
-            save(run);
+            if (!save(run)) {
+                return current();
+            }
             listener.visible("The research plan could not be made: " + unavailable.getMessage()
                     + " Ask again to retry.");
             return run;
@@ -124,7 +126,9 @@ public final class OrchestratedResearchRun {
                 .waitingReason("The plan needs your approval.")
                 .journal("Plan proposed with " + plan.getTasks().size() + " work package(s).")
                 .build();
-        save(run);
+        if (!save(run)) {
+            return current(); // stopped or superseded while planning
+        }
         listener.visible(describePlan(run));
         return run;
     }
@@ -286,8 +290,10 @@ public final class OrchestratedResearchRun {
         try {
             decision = orchestrator.evaluate(run, tasks, evidence, roleInfos(), evaluated, maxFollowUps);
         } catch (ResearchOrchestrator.UnavailableException unavailable) {
-            save(run.toBuilder().addTokens(orchestratorTokens.get() - tokensBefore)
-                    .addTime(clock.getAsLong() - decisionStart).build());
+            if (!save(run.toBuilder().addTokens(orchestratorTokens.get() - tokensBefore)
+                    .addTime(clock.getAsLong() - decisionStart).build())) {
+                return false;
+            }
             waitFor(current(), new ArrayList<PlannedTask>(), "The orchestrator could not decide ("
                     + unavailable.getMessage() + "). Approve to retry, or stop the run.");
             return false;
@@ -303,7 +309,9 @@ public final class OrchestratedResearchRun {
                 .updatedAt(now)
                 .journal(roundSummary(run.getRoundsUsed() + 1, decision, evidence));
         run = next.build();
-        save(run);
+        if (!save(run)) {
+            return false; // the user stopped the run while the orchestrator decided
+        }
         listener.log("orchestrator round " + run.getRoundsUsed() + ": " + decision.getAction().wireName()
                 + ", " + decision.getFollowUps().size() + " follow-up(s); measurements "
                 + (evidence.isSufficient() ? "sufficient" : "not sufficient (" + evidence.insufficiencyReason()
@@ -311,8 +319,11 @@ public final class OrchestratedResearchRun {
         switch (decision.getAction()) {
             case CLOSE:
                 if (evidence.isSufficient()) {
-                    finish(run, OrchestratorRun.State.CLOSED,
-                            "Closed: sufficient by the orchestrator's verdict and the measurements.");
+                    if (finish(run, OrchestratorRun.State.CLOSED,
+                            "Closed: sufficient by the orchestrator's verdict and the measurements.").getState()
+                            != OrchestratorRun.State.CLOSED) {
+                        return false;
+                    }
                     listener.visible("The research looks sufficient: " + evidence.getDistinctSources()
                             + " sources on " + evidence.getDistinctHosts() + " hosts, every section covered. "
                             + (decision.getQualityNote().isEmpty() ? "" : decision.getQualityNote() + " ")
@@ -372,6 +383,9 @@ public final class OrchestratedResearchRun {
                     + run.remainingTasks() + " remain in the approved budget.");
             return false;
         }
+        if (!stillRunning(run)) {
+            return false;
+        }
         executor.submit(run, followUps, settings);
         save(run.toBuilder().spent(run.getRoundsUsed(), run.getTasksSubmitted() + followUps.size(),
                         run.getTokensUsed(), run.getTimeUsedMillis())
@@ -420,7 +434,9 @@ public final class OrchestratedResearchRun {
         OrchestratorRun waiting = run.toBuilder().state(OrchestratorRun.State.AWAITING_APPROVAL)
                 .updatedAt(clock.getAsLong()).pending(pending, reason).journal("Waiting for approval: " + reason)
                 .build();
-        save(waiting);
+        if (!save(waiting)) {
+            return current();
+        }
         StringBuilder message = new StringBuilder("The research run needs your approval. ").append(reason);
         for (PlannedTask task : pending) {
             message.append("\n- ").append(task.getId()).append(" (").append(task.getRole()).append("): ")
@@ -433,8 +449,7 @@ public final class OrchestratedResearchRun {
     private OrchestratorRun finish(OrchestratorRun run, OrchestratorRun.State state, String line) {
         OrchestratorRun finished = run.toBuilder().state(state).updatedAt(clock.getAsLong())
                 .pending(new ArrayList<PlannedTask>(), "").journal(line).build();
-        save(finished);
-        return finished;
+        return save(finished) ? finished : current();
     }
 
     private static void collectScope(List<PlannedTask> tasks, Set<String> sections, Set<String> roles) {
@@ -452,10 +467,33 @@ public final class OrchestratedResearchRun {
         return infos;
     }
 
-    private void save(OrchestratorRun run) {
+    /**
+     * Persists {@code run} unless the user overtook it meanwhile: a stop (or a close) made the stored record
+     * final, or a newer run superseded it. A decision computed from an older snapshot, e.g. an evaluation
+     * that returned after the user pressed Stop, never overwrites that; the caller ends its cycle instead.
+     *
+     * @return false when the write was refused
+     */
+    private boolean save(OrchestratorRun run) {
         synchronized (lock) {
+            OrchestratorRun stored = board.currentRun();
+            if (stored != null && stored.getRunId().equals(run.getRunId())) {
+                if (stored.getState().isFinal()) {
+                    return false;
+                }
+            } else if (stored != null && stored.getCreatedAtMillis() > run.getCreatedAtMillis()) {
+                return false;
+            }
             board.saveRun(run);
+            return true;
         }
+    }
+
+    /** True while {@code run} is still the stored, running record (no stop and no new run since). */
+    private boolean stillRunning(OrchestratorRun run) {
+        OrchestratorRun stored = current();
+        return stored != null && stored.getRunId().equals(run.getRunId())
+                && stored.getState() == OrchestratorRun.State.RUNNING;
     }
 
     /** Books tokens a task spent on the current run (called from worker threads). */

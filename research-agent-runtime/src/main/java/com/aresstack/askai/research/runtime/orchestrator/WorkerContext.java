@@ -66,4 +66,10 @@ public interface WorkerContext {
      * True once the task's own budget (time or tokens) is spent; a worker ends its attempt with what it has.
      */
     boolean isBudgetExhausted();
+
+    /**
+     * The task's token account: model calls a worker makes outside {@link #chat()} (e.g. the search run's
+     * layout repair) are metered onto it, so they count against the task and the run budget.
+     */
+    java.util.concurrent.atomic.AtomicLong tokens();
 }

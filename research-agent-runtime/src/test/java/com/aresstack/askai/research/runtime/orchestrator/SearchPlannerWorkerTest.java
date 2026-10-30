@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
@@ -111,7 +112,7 @@ public class SearchPlannerWorkerTest {
         WebAcquisition acquisition = new WebAcquisition() {
             public Result acquire(String query, ToolInvoker research,
                                   Consumer<WebSearchApplicationService.AcceptedSource> accepted,
-                                  long maxDurationMillis) {
+                                  long maxDurationMillis, AtomicLong tokens) {
                 searched.add(query);
                 return new Result(ResearchStopReason.SUFFICIENT_EVIDENCE, "pages 1");
             }
@@ -132,7 +133,7 @@ public class SearchPlannerWorkerTest {
         WebAcquisition acquisition = new WebAcquisition() {
             public Result acquire(String query, ToolInvoker research,
                                   Consumer<WebSearchApplicationService.AcceptedSource> accepted,
-                                  long maxDurationMillis) {
+                                  long maxDurationMillis, AtomicLong tokens) {
                 searched.add(query);
                 return new Result(ResearchStopReason.NO_SEMANTIC_MATCHES, "");
             }

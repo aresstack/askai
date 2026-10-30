@@ -47,6 +47,10 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
     /** Questions the simulated user answers. */
     static final int ANSWERS = 1;
     static final String ANSWER = "Use your own judgement within the question as asked.";
+    /** The journal line the cycle writes when a cancelled turn interrupts it. */
+    static final String INTERRUPTED_JOURNAL = "Interrupted";
+    /** The semantic outcome the question set expects of a run that ended sufficient (the baseline's word). */
+    static final String SUFFICIENT = "SUFFICIENT_EVIDENCE";
 
     /** Lane G: the worker roles that can be measured one by one on top of the orchestrator. */
     public enum Role {
@@ -178,13 +182,13 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
             }
             // ---- interruption: the user cancels the running turn; the run stays RUNNING on its record ----
             session.resources.getBackend().cancel(session.handle);
-            if (!awaitNoWorkingTask(driver, settings.cancelSettleSeconds)) {
+            if (!awaitInterruptionSettled(driver, settings.cancelSettleSeconds)) {
                 record.wallMillis = (System.nanoTime() - start) / 1_000_000L;
                 collect(session, record, world, false, settings.cancelSettleSeconds, driver);
                 record.resume = new BenchmarkRunRecord.ResumeOutcome(
                         session.resources.getRepository().find(SourceQuery.all()).size(), false, "", false, 0, 0,
-                        record.wallMillis, "a work package was still running " + settings.cancelSettleSeconds
-                        + " s after the cancel; the continuation was not submitted");
+                        record.wallMillis, "the interrupted cycle did not settle within "
+                        + settings.cancelSettleSeconds + " s after the cancel; the continuation was not submitted");
                 return record;
             }
             List<ResearchSourceRecord> before = session.resources.getRepository().find(SourceQuery.all());
@@ -289,21 +293,27 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
         return session.observer.firstSource.getCount() == 0;
     }
 
-    private static boolean awaitNoWorkingTask(Driver driver, int timeoutSeconds) throws InterruptedException {
+    /**
+     * A cancelled turn reports no completion, and an interrupted package deliberately stays {@code working} on
+     * the blackboard until the next approval resumes it. The cycle's own end is the signal: it journals the
+     * interruption on the run record (or the run left {@code running} for another reason).
+     */
+    static boolean awaitInterruptionSettled(Driver driver, int timeoutSeconds) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
         while (System.nanoTime() < deadline) {
-            boolean working = false;
-            for (ResearchTask task : driver.board.tasks()) {
-                working |= task.getState() == TaskState.WORKING;
-            }
-            if (!working) {
-                // The executor books a cancelled package back as submitted; give the turn its end, too.
-                Thread.sleep(500);
+            OrchestratorRun run = driver.board.currentRun();
+            if (run == null || isSettled(run)) {
                 return true;
             }
             Thread.sleep(200);
         }
         return false;
+    }
+
+    static boolean isSettled(OrchestratorRun run) {
+        List<String> journal = run.getJournal();
+        return run.getState() != OrchestratorRun.State.RUNNING
+                || (!journal.isEmpty() && journal.get(journal.size() - 1).startsWith(INTERRUPTED_JOURNAL));
     }
 
     private void collect(SingleAgentBaselineSubject.Session session, BenchmarkRunRecord record,
@@ -325,11 +335,15 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
             record.stopReason = "NO_RUN";
             return;
         }
-        record.stopReason = "RUN_" + run.getState().name()
-                + (run.getWaitingReason() == null || run.getWaitingReason().isEmpty() ? "" : " (" + run.getWaitingReason() + ")")
-                + " decisions=" + String.join("/", driver.decisions)
-                + " rounds=" + run.getRoundsUsed() + " packages=" + run.getTasksSubmitted();
+        // The scorer compares the semantic outcome; the diagnostics go to the benchmark log.
+        record.stopReason = stopReasonOf(run);
         record.evidenceSufficient = run.getState() == OrchestratorRun.State.CLOSED;
+        System.out.println("[benchmark] " + NAME + " " + record.getQuestionId() + ": run "
+                + run.getState().wireName()
+                + (run.getWaitingReason() == null || run.getWaitingReason().isEmpty() ? ""
+                : " (" + run.getWaitingReason() + ")")
+                + ", decisions " + String.join("/", driver.decisions) + ", rounds " + run.getRoundsUsed()
+                + ", packages " + run.getTasksSubmitted() + ", tokens " + run.getTokensUsed());
         record.reportedGaps = describe(run.getOpenGaps());
         record.reportedContradictions = describe(run.getContradictions());
         if (role != null) {
@@ -418,6 +432,11 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
             }
         }
         return owned;
+    }
+
+    /** A closed run ended sufficient (the envelope closes only on sufficient measurements). */
+    static String stopReasonOf(OrchestratorRun run) {
+        return run.getState() == OrchestratorRun.State.CLOSED ? SUFFICIENT : "RUN_" + run.getState().name();
     }
 
     private static List<String> describe(List<RoundDecision.Finding> findings) {
