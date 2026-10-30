@@ -171,6 +171,31 @@ public record CamoufoxLaunch(Map<String, String> environment, JsonObject fingerp
     }
 
     /**
+     * AskAI: this launch with one more unpacked add-on directory in {@code CAMOU_CONFIG.addons}, which Camoufox loads
+     * at startup like the bundled ones (the AskAI Research add-on, docs/research-browser-addon.md). The
+     * {@code CAMOU_CONFIG_1..n} chunks are rebuilt from the fingerprint; every other variable stays as it is.
+     */
+    public CamoufoxLaunch withAddon(Path addon) {
+        return withAddon(addon, System.getProperty("os.name"));
+    }
+
+    CamoufoxLaunch withAddon(Path addon, String hostOs) {
+        JsonObject config = fingerprint.deepCopy();
+        JsonArray addons = new JsonArray();
+        JsonElement existing = config.get("addons");
+        if (existing != null && existing.isJsonArray()) addons.addAll(existing.getAsJsonArray());
+        addons.add(addon.toAbsolutePath().toString());
+        config.add("addons", addons);
+        Map<String, String> next = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : environment.entrySet()) {
+            if (!entry.getKey().startsWith("CAMOU_CONFIG_")) next.put(entry.getKey(), entry.getValue());
+        }
+        int chunk = hostOs.toLowerCase(Locale.ROOT).startsWith("windows") ? 2047 : 32767;
+        next.putAll(chunks("CAMOU_CONFIG_", GSON.toJson(config), chunk));
+        return new CamoufoxLaunch(next, config, prefs, args, proxy);
+    }
+
+    /**
      * Every character above US-ASCII as a JSON unicode escape (uppercase hex, as Jackson's ESCAPE_NON_ASCII wrote
      * it). Outside string literals JSON is pure ASCII, so escaping the serialized text is the same as escaping the
      * strings in it.

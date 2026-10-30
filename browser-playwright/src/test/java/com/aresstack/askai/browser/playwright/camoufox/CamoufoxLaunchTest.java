@@ -80,6 +80,37 @@ class CamoufoxLaunchTest {
     }
 
     @Test
+    void withAddonAppendsTheAddonAndRechunksOnlyTheFingerprint() throws Exception {
+        Path browser = bundle("camoufox.exe");
+        CamoufoxLaunch launch = CamoufoxLaunch.builtIn(CamoufoxLaunch.defaultProfile(),
+                browser.resolve("camoufox.exe"), temporary.resolve("runtime"), "Windows 11");
+        Path addon = temporary.resolve("profile").resolve("askai-research-addon");
+
+        CamoufoxLaunch withAddon = launch.withAddon(addon, "Windows 11");
+
+        StringBuilder joined = new StringBuilder();
+        for (int part = 1; withAddon.environment().containsKey("CAMOU_CONFIG_" + part); part++) {
+            assertTrue(withAddon.environment().get("CAMOU_CONFIG_" + part).length() <= 2047);
+            joined.append(withAddon.environment().get("CAMOU_CONFIG_" + part));
+        }
+        JsonObject config = JsonParser.parseString(joined.toString()).getAsJsonObject();
+        assertEquals(2, config.getAsJsonArray("addons").size());
+        assertEquals(browser.resolve("addons").resolve("UBO").toString(),
+                config.getAsJsonArray("addons").get(0).getAsString(), "the bundled add-ons stay first");
+        assertEquals(addon.toAbsolutePath().toString(), config.getAsJsonArray("addons").get(1).getAsString());
+        assertEquals(config, withAddon.fingerprint());
+        // Apart from the add-on list the fingerprint is unchanged.
+        config.remove("addons");
+        JsonObject before = launch.fingerprint().deepCopy();
+        before.remove("addons");
+        assertEquals(before, config);
+        assertEquals(launch.environment().get("CAMOU_PREFS_1"), withAddon.environment().get("CAMOU_PREFS_1"));
+        assertEquals(launch.prefs(), withAddon.prefs());
+        assertEquals(launch.args(), withAddon.args());
+        assertEquals(1, launch.fingerprint().getAsJsonArray("addons").size(), "the original launch is untouched");
+    }
+
+    @Test
     void linuxLaunchUsesTheBundledWindowsFonts() throws Exception {
         Path browser = bundle("camoufox");
         Files.createDirectories(browser.resolve("fontconfig/windows"));
