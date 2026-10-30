@@ -4,7 +4,7 @@
 
 Empirical measurements of parallel text generation with Ollama, relevant to AskAI's Research Agent, multi-worker execution and model/endpoint resource scheduling.
 
-**Status:** Exploratory benchmark; **not** a finalized tuning decision. Numbers are measurements on one machine and workload, not generally valid model capacities. A ten-request Llama 3.1 8B run produced the highest **single-run observed** throughput, but its repeat showed substantial variation; the exact optimum (and Gemma's exact saturation threshold) has **not** been determined.
+**Status:** Exploratory benchmark; **not** a finalized tuning decision. Numbers are measurements on one machine and workload, not generally valid model capacities. Twelve-request Llama 3.1 8B runs produced the highest **observed and repeated** aggregate throughput in this series (~758 tokens/s); the exact optimum (and Gemma's exact saturation threshold) has **not** been determined.
 
 Related: [ADR 0001](../adr/0001-research-agent-architecture-after-java-21.md), especially its model/endpoint resource scheduler.
 
@@ -17,7 +17,7 @@ Related: [ADR 0001](../adr/0001-research-agent-architecture-after-java-21.md), e
 - **Generation settings:** `num_ctx=8192`, `num_predict=512`, `temperature=0.2`, `stream=false`, `keep_alive=10m`. One identical English prompt about GPU inference batching for each request.
 - **Server options:** `OLLAMA_NUM_PARALLEL` set to the intended test slot count before starting the server; `OLLAMA_FLASH_ATTENTION=1`; `OLLAMA_KV_CACHE_TYPE=q8_0`. Tests used the configured model directory `X:\ollama`.
 - **Metric:** Aggregate output throughput = sum of generated tokens / elapsed batch wall time. The per-worker token rates are separate measurements. A displayed `100% GPU` in `ollama ps` indicates GPU model placement, **not** an independent measurement of the GPU's utilization or free VRAM.
-- **Comparability:** Each configuration uses a different number of simultaneously running requests. Warm-up and request launch timings were checked. Only Gemma at 20 slots and Llama at 10 slots have two recorded asynchronous runs; other configurations have one run each.
+- **Comparability:** Each configuration uses a different number of simultaneously running requests. Warm-up and request launch timings were checked. Gemma at 20 slots and Llama at 10 and 12 slots have two recorded asynchronous runs; other configurations have one run each.
 
 Example invocation (the existing script takes `-Model` and `-Requests`):
 
@@ -85,20 +85,22 @@ Mean aggregate throughput at 20 requests across the two runs: **1,016.66 tokens/
 | 8 | 144.16 | 4,066 | 6.36 | **639.74** | **4.44×** | 6.24 | 8/8 | 7.2 ms | 9.5 GB |
 | 10, run 1 | 141.03 | 5,060 | 8.50 | **595.15** | **4.22×** | 8.18 | 10/10 | 8.2 ms | 10 GB |
 | 10, run 2 | 147.13 | 5,120 | 7.23 | **708.46** | **4.82×** | 7.21 | 10/10 | 7.7 ms | 10 GB |
+| 12, run 1 | 126.22 | 6,077 | 8.01 | **758.46** | **6.01×** | 7.90 | 12/12 | 10.9 ms | 11 GB |
+| 12, run 2 | 126.59 | 6,099 | 8.05 | **757.51** | **5.98×** | 7.92 | 12/12 | 9.3 ms | 11 GB |
 | 16 | 137.14 | 8,174 | 21.40 | **382.04** | **2.79×** | 21.34 | 16/16 | 11.0 ms | 14 GB |
 
-All runs showed **100% GPU** and `CONTEXT 8192` in `ollama ps`. The second ten-request baseline produced **475 output tokens**, unlike the typical 512-token baseline. This is worth noting when interpreting the per-run speedup metric.
+All runs showed **100% GPU** and `CONTEXT 8192` in `ollama ps`. The second ten-request baseline produced **475 output tokens**, unlike the typical 512-token baseline. Both twelve-request single baselines produced 512 tokens, but were slower (126.22 and 126.59 tokens/s) than the earlier eight-/ten-request baselines. This is worth noting when comparing speedup multiples across configurations.
 
-Some responses completed before the 512-token cap: the four-request batch generated 2,030 output tokens, the eight-request batch 4,066, the first ten-request batch 5,060 (one response with 504 tokens and one with 460), and the sixteen-request batch 8,174. The second ten-request batch generated the full 5,120 tokens.
+Some responses completed before the 512-token cap: the four-request batch generated 2,030 output tokens, the eight-request batch 4,066, the first ten-request batch 5,060 (one response with 504 tokens and one with 460), the two twelve-request batches 6,077 and 6,099, and the sixteen-request batch 8,174. The second ten-request batch generated the full 5,120 tokens.
 
 **Observations:**
 
 - At **four** simultaneous requests, aggregate throughput was **3.01×** its single-request baseline; at **eight**, it was **4.44×**.
 - Two **ten-request** runs yielded **595.15** and **708.46 tokens/s** respectively. Their arithmetic mean was **651.81 tokens/s**, only ~**1.9%** above the single eight-request observation of **639.74 tokens/s**. However, the individual ten-request results differ by approximately **19% relative to the lower run**, so comparing the mean with a single eight-request run cannot establish a winner.
-- The **highest individual measured throughput** was **708.46 tokens/s** at ten concurrent requests, not eight. This does **not** demonstrate that ten is consistently faster than eight.
+- **Twelve** concurrent requests achieved **758.46** and **757.51 tokens/s** in two consecutive measurements; mean **757.99 tokens/s**, a difference of approximately **0.13%** between the runs. This is approximately **18.5%** higher than the single eight-request measurement (**639.74 tokens/s**), and is the strongest and most repeatable throughput result for Llama in this series. Compared to a single-request baseline in the same runs, the measured speedup was approximately **6×**.
 - At **sixteen**, aggregate throughput fell to **382.04 tokens/s**, and mean worker latency increased to **21.34 s**, versus **6.24 s** at eight. This is a large regression, but only one sixteen-request run was recorded.
-- `ollama ps` sizes were **7.2 GB (4)**, **9.5 GB (8)**, **10 GB (10)**, and **14 GB (16)** on a 16 GB VRAM GPU. Increased memory pressure **might** contribute to the regression; actual VRAM pressure was not measured, and `ollama ps` size must not be equated with total GPU memory use.
-- Llama shows a strong concurrency benefit similar to Gemma, but its exact optimal slot count remains unknown. **The measured high-throughput region is around eight to ten concurrent requests**, with inconclusive ranking due to measurement variance.
+- `ollama ps` sizes were **7.2 GB (4)**, **9.5 GB (8)**, **10 GB (10)**, **11 GB (12)**, and **14 GB (16)** on a 16 GB VRAM GPU. Increased memory pressure **might** contribute to the regression; actual VRAM pressure was not measured, and `ollama ps` size must not be equated with total GPU memory use.
+- Llama shows a strong concurrency benefit similar to Gemma, but its exact optimal slot count remains unknown. **Twelve slots is the current best measured configuration**, while sixteen slots sharply underperform. Do not treat 12 as a proven global optimum.
 
 ### Comparison at eight concurrent requests
 
@@ -120,7 +122,7 @@ Some responses completed before the 512-token cap: the four-request batch genera
 
 ## Limits and future experiments (not planned for this session)
 
-- **Llama sweet spot unresolved:** Four slots gave 3.01×, eight gave 4.44×, and ten gave 4.22× or 4.82× in two runs; sixteen regressed substantially. Repeat the 8- and 10-request tests several times under comparable conditions, and optionally sample 6 and 12, to distinguish a genuine throughput optimum from run-to-run variance. No further tests are required for the current architectural note.
+- **Llama sweet spot unresolved:** Four slots gave 3.01×, eight gave 4.44×, ten gave 4.22× or 4.82× across two runs, and twelve gave approximately 6× across two highly consistent runs; sixteen regressed substantially. If optimizing later, consider a few repeated trials between 12 and 16 (e.g. 13–14), alongside controlled repeats at eight and ten. No additional tests are required for the present architectural note.
 - **Gemma saturation threshold unresolved:** Repeat 16, 20, 24 with multiple runs and compare medians as well as worker latency.
 - **GPT-OSS threshold unresolved:** Test 3–4 slots if more precision becomes useful; the 2-versus-8 results already show that eight is disadvantageous under current conditions.
 - Measure actual VRAM use (e.g., `nvidia-smi`), prompt-processing time, output generation time, time-to-first-token and p50/p95 latencies; `ollama ps` is not a VRAM utilization trace.
