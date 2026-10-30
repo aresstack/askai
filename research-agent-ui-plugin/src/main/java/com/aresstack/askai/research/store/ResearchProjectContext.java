@@ -78,4 +78,9 @@ public final class ResearchProjectContext {
     public FileResearchScopeDraftStore getScopeDraftStore() {
         return scopeDraftStore;
     }
+
+    /** The persisted task model of this project (ADR 0001, section 4.4). */
+    public FileResearchTaskStore getTaskStore() {
+        return store.tasks();
+    }
 }
