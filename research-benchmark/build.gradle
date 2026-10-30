@@ -1,0 +1,63 @@
+// ADR 0001, work item H: the research benchmark harness. Test sources and fixtures ONLY — no main source
+// set, nothing in the product depends on this module. It measures a research subject (today: the single
+// in-process agent as the BASELINE; later the orchestrator and the new worker roles of lanes F and G) on a
+// fixed question set with expected outcomes, inside a local fixture world (SERP engine + content hosts on
+// loopback), and writes one Markdown report per run.
+//
+// `test` runs the model-free unit tests (fixtures, scorer, report, token meter, fixture world). The live
+// benchmark is the separate `benchmark` task: it needs a reachable Ollama, an installed rerank-capable local
+// model and a browser, and skips with a readable reason otherwise.
+
+dependencies {
+    // The productive host wiring the baseline is driven through (ProductiveResearchBackendFactory →
+    // ProductiveResearchSessionResources → ResearchSessionBackend), exactly as the MVP end-to-end test does.
+    testImplementation project(':research-agent-ui-plugin')
+    testImplementation project(':research-agent-runtime')
+    // The plugin compiles these against the host (compileOnly); a test outside the host provides them.
+    testImplementation project(':mcp-runtime-api')
+    testImplementation project(':mcp-solon-runtime')
+    testImplementation project(':agent-model-runtime-api')
+    testImplementation project(':agent-workspace-api')
+    testImplementation project(':agent-plugin-pf4j-api')
+    // The baseline's mandatory reranker: the real local model runtime, started in-process as the host does.
+    testImplementation project(':local-model-runtime')
+    testImplementation 'org.pf4j:pf4j:3.15.0'
+    // Fixture files and the token meter's response parsing (Gson is the house JSON library, ADR 3.1).
+    testImplementation 'com.google.code.gson:gson:2.13.1'
+    testImplementation 'junit:junit:4.13.2'
+    testRuntimeOnly 'org.slf4j:slf4j-nop:2.0.17'
+}
+
+// Every askai.benchmark.* system property of the Gradle invocation reaches the benchmark JVM, so a run is
+// configured from the command line (-Daskai.benchmark.models=gemma4:e2b,gpt-oss:20b and so on); the
+// defaults live in BenchmarkSettings.
+def forwardBenchmarkProperties = { Test task ->
+    task.doFirst {
+        System.getProperties().each { key, value ->
+            if (key.toString().startsWith('askai.benchmark.')) {
+                task.systemProperty key.toString(), value.toString()
+            }
+        }
+    }
+}
+
+test {
+    useJUnit()
+    exclude '**/*LiveTest*'
+}
+
+tasks.register('benchmark', Test) {
+    description = 'Runs the live research benchmark (needs Ollama, a local reranker and a browser; skips otherwise).'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/*LiveTest*'
+    // A benchmark is a measurement, never an up-to-date check.
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
+    }
+    forwardBenchmarkProperties(it)
+}
