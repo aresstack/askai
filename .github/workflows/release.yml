@@ -128,4 +128,7 @@ jobs:
             fi
             sleep $((attempt * 5 + RANDOM % 5))
           done
-          exit 1
+          # Every branch overwrites this one rolling release. Losing the race to builds of other branches
+          # (or GitHub answering 5xx meanwhile) leaves the newest of them published, which is what "rolling"
+          # means; it must not turn this branch's successful build red.
+          echo "::warning::Could not overwrite the rolling snapshot release; a concurrent build of another branch published it."
