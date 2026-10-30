@@ -189,6 +189,35 @@ public class ConceptToolActivityFormatterTest {
     }
 
     @Test
+    public void equalNamesUnderDifferentParentsCountApart() {
+        String[] lines = {
+                "concept round 1: add_cards parent=[\"A\"] names=[\"Overview\"]",
+                "concept_add_cards -> APPLIED revision=1", "concept_add_cards -> ADDED: Overview",
+                "concept round 1 -> APPLIED revision=1",
+                "concept round 2: add_cards parent=[\"B\"] names=[\"Overview\"]",
+                "concept_add_cards -> APPLIED revision=2", "concept_add_cards -> ADDED: Overview",
+                "concept round 2 -> APPLIED revision=2"};
+        ConceptToolActivityFormatter formatter = fed(lines);
+        assertEquals("• Concept extended – 2 topic areas added: Overview", formatter.body(false));
+        for (String line : lines) {
+            formatter.accept(line); // a replay stays idempotent
+        }
+        assertEquals("2 topic areas added", formatter.summary(false));
+    }
+
+    @Test
+    public void aLaterFailureOfTheSameKindStaysVisible() {
+        ConceptToolActivityFormatter formatter = fed(
+                "concept round 1: offer suggestions=4", "offer_searches -> OFFERED 4 tags",
+                "concept round 1 -> OFFERED",
+                "concept round 2: offer suggestions=2");
+        assertEquals("• 4 search suggestions prepared (another step running …)", formatter.body(false));
+        formatter.accept("concept round 2 -> REJECTED Error: empty query");
+        assertEquals("• 4 search suggestions prepared (a further step was not applied)", formatter.body(false));
+        assertEquals("4 search suggestions", formatter.summary(false));
+    }
+
+    @Test
     public void endpointLossEndsEveryPendingStep() {
         ConceptToolActivityFormatter formatter = fed(ADD_CARDS,
                 "concept concept endpoint unavailable — keeping the last answer (timeout)");
