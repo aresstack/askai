@@ -1,7 +1,8 @@
 package com.aresstack.askai.browser.playwright.camoufox;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -72,7 +73,6 @@ public final class CamoufoxInstaller {
     }
 
     private static final String MARKER = ".argos-verified";
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static CamoufoxInstaller shared;
     /** File locks belong to the JVM, so installers of one root in this process queue here first. */
     private static final java.util.concurrent.ConcurrentHashMap<Path, Object> ROOT_LOCKS =
@@ -287,17 +287,24 @@ public final class CamoufoxInstaller {
     private void verifyTree(Path tree) throws IOException {
         Path manifestFile = tree.resolve(CamoufoxDistribution.MANIFEST);
         if (!Files.isRegularFile(manifestFile)) throw new IOException("archive lacks " + CamoufoxDistribution.MANIFEST);
-        JsonNode manifest = MAPPER.readTree(manifestFile.toFile());
-        if (!distribution.release().equals(manifest.path("release").asText())
-                || !distribution.revision().equals(manifest.path("revision").asText())
-                || !target.equals(manifest.path("target").asText())) {
+        JsonObject manifest;
+        try {
+            JsonElement parsed = CamoufoxLaunch.parse(Files.readString(manifestFile));
+            manifest = parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject();
+        } catch (JsonParseException invalid) {
+            throw new IOException(CamoufoxDistribution.MANIFEST + " is not valid JSON", invalid);
+        }
+        if (!distribution.release().equals(CamoufoxLaunch.text(manifest.get("release")))
+                || !distribution.revision().equals(CamoufoxLaunch.text(manifest.get("revision")))
+                || !target.equals(CamoufoxLaunch.text(manifest.get("target")))) {
             throw new IOException("archive is not " + distribution.name() + " for " + target);
         }
         if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
-            for (JsonNode file : manifest.path("executables")) {
-                Path path = tree.resolve(file.asText()).normalize();
+            for (JsonElement entry : CamoufoxLaunch.array(manifest, "executables")) {
+                String file = CamoufoxLaunch.text(entry);
+                Path path = tree.resolve(file).normalize();
                 if (!path.startsWith(tree) || !Files.isRegularFile(path)) {
-                    throw new IOException("manifest names a missing executable: " + file.asText());
+                    throw new IOException("manifest names a missing executable: " + file);
                 }
                 Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rwxr-xr-x"));
             }
