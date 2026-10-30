@@ -15,7 +15,8 @@ import java.util.Set;
 /**
  * Measures a run's evidence from the BLACKBOARD alone: the {@code SOURCE_REFERENCE} artifacts its tasks
  * recorded (project ref = the accepted source id, content = the page URL, optionally followed by a space and the
- * page title) and the sections each task serves.
+ * page title) and the sections each task serves. A source a verifier package rejected
+ * ({@link WorkerArtifacts.Verdict#isRejected()}) does not count.
  * Pure code, no model: the same tasks always give the same snapshot.
  *
  * <p>A source counts for every section of the task that accepted it; a duplicate acceptance (the same source
@@ -48,6 +49,14 @@ public final class EvidenceMeter {
         Set<String> allSources = new HashSet<String>();
         Set<String> allHosts = new HashSet<String>();
         int openQuestions = 0;
+        // Lane G: a source the verifier rejected (off-topic, unreliable) is no evidence, wherever it came from.
+        java.util.List<ResearchTask> owned = new java.util.ArrayList<ResearchTask>();
+        for (ResearchTask task : tasks) {
+            if (run.owns(task.getTaskId())) {
+                owned.add(task);
+            }
+        }
+        Set<String> rejected = WorkerArtifacts.rejectedSources(owned);
         for (ResearchTask task : tasks) {
             if (!run.owns(task.getTaskId())) {
                 continue;
@@ -69,6 +78,9 @@ public final class EvidenceMeter {
                 }
                 String sourceId = artifact.getProjectRef().isEmpty() ? artifact.getContent()
                         : artifact.getProjectRef();
+                if (rejected.contains(sourceId)) {
+                    continue;
+                }
                 String host = hostOf(artifact.getContent());
                 allSources.add(sourceId);
                 if (!host.isEmpty()) {

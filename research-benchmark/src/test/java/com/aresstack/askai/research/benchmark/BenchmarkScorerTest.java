@@ -119,6 +119,38 @@ public class BenchmarkScorerTest {
         assertFalse(BenchmarkScorer.contentWords("the and with").iterator().hasNext());
     }
 
+    /** Lane G: the verifier's rejections are scored against the planted distractors. */
+    @Test
+    public void theVerifierRejectionsAreScoredAgainstThePlantedDistractors() {
+        BenchmarkQuestion question = question("q4-distractors");
+        BenchmarkRunRecord record = finished(question, "RUN_CLOSED", "q4-datasheet", "q4-band", "q4-study");
+        record.roles = new BenchmarkRunRecord.RoleObservation();
+        record.roles.verifierPackages = 1;
+        record.roles.verifiedSources = 3;
+        record.roles.rejectedUrls.add(record.acceptedSources.get(1).url);
+        Map<String, BenchmarkQuestion.Page> byUrl = new HashMap<String, BenchmarkQuestion.Page>();
+        for (BenchmarkRunRecord.AcceptedSource source : record.acceptedSources) {
+            byUrl.put(source.url, question.page(source.getPageId()));
+        }
+        record.resolvePages(byUrl::get);
+
+        BenchmarkScorer.RunScores scores = scorer.score(question, record);
+
+        assertEquals(2.0 / 3.0, scores.sourcePrecision, 1e-9);
+        assertEquals(1, scores.distractorsRejected);
+        assertEquals(0, scores.relevantRejected);
+        assertEquals("precision after verification leaves the rejected distractor out", 1.0,
+                scores.verifiedPrecision, 1e-9);
+    }
+
+    @Test
+    public void withoutAVerifierThereIsNoPrecisionAfterVerification() {
+        BenchmarkQuestion question = question("q4-distractors");
+        BenchmarkRunRecord record = finished(question, "RUN_CLOSED", "q4-datasheet");
+        record.roles = new BenchmarkRunRecord.RoleObservation();
+        assertNull(scorer.score(question, record).verifiedPrecision);
+    }
+
     private BenchmarkQuestion question(String id) {
         return set.select(Collections.singletonList(id)).get(0);
     }

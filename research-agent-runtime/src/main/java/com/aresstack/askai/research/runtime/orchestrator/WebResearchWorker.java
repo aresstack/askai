@@ -9,6 +9,8 @@ import com.aresstack.askai.research.runtime.role.ResearchRole;
 import com.aresstack.askai.research.runtime.role.RoleOutput;
 import com.aresstack.askai.research.runtime.role.RoleToolCatalog;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -59,31 +61,62 @@ public final class WebResearchWorker implements TaskWorker {
 
     @Override
     public WorkerResult execute(ResearchTask task, final WorkerContext context) {
-        String query = context.query();
-        if (query.isEmpty()) {
-            return WorkerResult.failed("the package has no query");
+        // Lane G: a package that depends on a search planner searches the planned queries instead of its own
+        // (SEQUENTIAL inside the package chain); every query is one run of the same funnel.
+        List<String> queries = WorkerArtifacts.plannedQueries(context.dependencies());
+        if (queries.isEmpty()) {
+            if (context.query().isEmpty()) {
+                return WorkerResult.failed("the package has no query");
+            }
+            queries = java.util.Collections.singletonList(context.query());
         }
         final AtomicInteger accepted = new AtomicInteger();
-        context.log("search: " + query);
-        WebAcquisition.Result result = acquisition.acquire(query, context.permitted(research),
-                new Consumer<WebSearchApplicationService.AcceptedSource>() {
-                    public void accept(WebSearchApplicationService.AcceptedSource source) {
-                        if (source.getSourceId() == null || source.getSourceId().isEmpty()) {
-                            return;
+        List<String> lines = new ArrayList<String>();
+        WorkerResult outcome = null;
+        for (int i = 0; i < queries.size(); i++) {
+            if (i > 0 && (context.isCancelled() || context.isBudgetExhausted())) {
+                lines.add((queries.size() - i) + " planned quer" + (queries.size() - i == 1 ? "y" : "ies")
+                        + " not searched (" + (context.isCancelled() ? "run stopped" : "task budget spent") + ")");
+                break;
+            }
+            String query = queries.get(i);
+            int before = accepted.get();
+            context.log("search: " + query);
+            WebAcquisition.Result result = acquisition.acquire(query, context.permitted(research),
+                    new Consumer<WebSearchApplicationService.AcceptedSource>() {
+                        public void accept(WebSearchApplicationService.AcceptedSource source) {
+                            if (source.getSourceId() == null || source.getSourceId().isEmpty()) {
+                                return;
+                            }
+                            accepted.incrementAndGet();
+                            String title = source.getPageTitle() == null ? "" : source.getPageTitle().trim();
+                            context.artifact(TaskArtifact.Kind.SOURCE_REFERENCE,
+                                    source.getPageUrl() + (title.isEmpty() ? "" : " " + title), source.getSourceId());
+                            context.receipt("source_accept", true, "accepted " + source.getSourceId()
+                                    + (source.isDuplicate() ? " (duplicate)" : ""));
                         }
-                        accepted.incrementAndGet();
-                        String title = source.getPageTitle() == null ? "" : source.getPageTitle().trim();
-                        context.artifact(TaskArtifact.Kind.SOURCE_REFERENCE,
-                                source.getPageUrl() + (title.isEmpty() ? "" : " " + title), source.getSourceId());
-                        context.receipt("source_accept", true, "accepted " + source.getSourceId()
-                                + (source.isDuplicate() ? " (duplicate)" : ""));
-                    }
-                });
-        ResearchStopReason reason = result.getStopReason();
-        String line = "search run stopped: " + reason + ", " + accepted.get() + " source(s) accepted"
-                + (result.getSummary().isEmpty() ? "" : "; " + result.getSummary());
-        context.artifact(TaskArtifact.Kind.TEXT, line, "");
-        return map(reason, line);
+                    });
+            ResearchStopReason reason = result.getStopReason();
+            String line = (queries.size() > 1 ? "\"" + query + "\": " : "") + "search run stopped: " + reason + ", "
+                    + (accepted.get() - before) + " source(s) accepted"
+                    + (result.getSummary().isEmpty() ? "" : "; " + result.getSummary());
+            context.artifact(TaskArtifact.Kind.TEXT, line, "");
+            lines.add(line);
+            WorkerResult mapped = map(reason, line);
+            if (mapped.getKind() == WorkerResult.Kind.FAILED || mapped.getKind() == WorkerResult.Kind.CANCELED) {
+                return mapped; // the configuration or the user ends the package, whatever is left
+            }
+            if (outcome == null || mapped.getKind() == WorkerResult.Kind.COMPLETED) {
+                outcome = mapped;
+            }
+        }
+        if (queries.size() == 1 || outcome == null) {
+            return outcome == null ? WorkerResult.canceled("run stopped") : outcome;
+        }
+        String summary = queries.size() + " planned queries, " + accepted.get() + " source(s) accepted: "
+                + String.join("; ", lines);
+        return outcome.getKind() == WorkerResult.Kind.COMPLETED ? WorkerResult.completed(summary)
+                : WorkerResult.retryable(summary);
     }
 
     static WorkerResult map(ResearchStopReason reason, String line) {

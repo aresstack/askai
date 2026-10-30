@@ -4,7 +4,6 @@ import org.junit.Test;
 
 import java.io.File;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertFalse;
@@ -45,8 +44,7 @@ public class ResearchBenchmarkLiveTest {
     private void run(BenchmarkSettings settings, OllamaProbe ollama, List<String> models,
                      BenchmarkQuestionSet questionSet, List<BenchmarkQuestion> questions,
                      LocalRerankerRuntime reranker) throws Exception {
-        List<BenchmarkSubject> subjects = Arrays.<BenchmarkSubject>asList(new SingleAgentBaselineSubject(reranker),
-                new OrchestratedResearchSubject(reranker));
+        List<BenchmarkSubject> subjects = select(reranker, settings.subjects);
         BenchmarkScorer scorer = new BenchmarkScorer(settings);
 
         BenchmarkReport report = new BenchmarkReport(Instant.now(), settings, questionSet.getVersion());
@@ -109,6 +107,32 @@ public class ResearchBenchmarkLiveTest {
                 + "channel '" + settings.browserChannel + "'?); report: " + file.getAbsolutePath());
         assertTrue("the report was written", file.isFile());
         assertFalse("the report is not empty", report.render().isEmpty());
+    }
+
+    /**
+     * The baseline, the orchestrator alone and the orchestrator with each lane G role, filtered by
+     * {@code askai.benchmark.subjects} (empty = all).
+     */
+    static List<BenchmarkSubject> select(LocalRerankerRuntime reranker, List<String> names) {
+        List<BenchmarkSubject> all = new java.util.ArrayList<BenchmarkSubject>();
+        all.add(new SingleAgentBaselineSubject(reranker));
+        all.addAll(OrchestratedResearchSubject.all(reranker));
+        if (names.isEmpty()) {
+            return all;
+        }
+        List<BenchmarkSubject> chosen = new java.util.ArrayList<BenchmarkSubject>();
+        List<String> known = new java.util.ArrayList<String>();
+        for (BenchmarkSubject subject : all) {
+            known.add(subject.name());
+            if (names.contains(subject.name())) {
+                chosen.add(subject);
+            }
+        }
+        if (chosen.size() != names.size()) {
+            throw new IllegalArgumentException(BenchmarkSettings.PREFIX + "subjects names an unknown subject: "
+                    + names + "; known: " + known);
+        }
+        return chosen;
     }
 
     /** Skip with the reason, printed too: Gradle's console shows a skip but not its message. */

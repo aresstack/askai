@@ -191,12 +191,16 @@ public final class ResearchToolPolicy {
                         // falling back to the window alone.
                         String requestId = call.getString("search_request_id");
                         String wantedRequestId = requestId == null ? "" : requestId.trim();
+                        // Id scoping (ADR 0001 lane G): a worker role that verifies or writes from the
+                        // sources its upstream packages accepted reads exactly those, nothing else.
+                        java.util.Set<String> wantedIds = sourceIds(call.getString("source_ids"));
                         List<ResearchSourceRecord> reviewable = new ArrayList<ResearchSourceRecord>();
                         for (ResearchSourceRecord record : ctx.sourceRepository().find(SourceQuery.all())) {
                             boolean requestMatches = wantedRequestId.isEmpty()
                                     || record.getSearchRequestId().isEmpty()
                                     || wantedRequestId.equals(record.getSearchRequestId());
-                            if (isReviewable(record) && requestMatches
+                            boolean idMatches = wantedIds.isEmpty() || wantedIds.contains(record.getSourceId());
+                            if (isReviewable(record) && requestMatches && idMatches
                                     && (capturedThrough <= 0L
                                             || record.getCapturedAt() <= capturedThrough)
                                     && (capturedSince <= 0L
@@ -245,7 +249,22 @@ public final class ResearchToolPolicy {
                                 + "the lower edge of \"the new sources\" of one search"),
                 McpToolParameter.string("search_request_id", false,
                         "Only sources found by THIS manual-search request (empty = no id scoping; "
-                                + "untagged legacy sources fall back to the time window)"));
+                                + "untagged legacy sources fall back to the time window)"),
+                McpToolParameter.string("source_ids", false,
+                        "Only these source ids, comma separated (empty = no id filter)"));
+    }
+
+    /** The comma-separated ids of {@code source_review_context}'s {@code source_ids}; empty = no filter. */
+    static java.util.Set<String> sourceIds(String value) {
+        java.util.Set<String> ids = new java.util.LinkedHashSet<String>();
+        if (value != null) {
+            for (String id : value.split(",")) {
+                if (!id.trim().isEmpty()) {
+                    ids.add(id.trim());
+                }
+            }
+        }
+        return ids;
     }
 
     private static void appendSource(StringBuilder sb, ResearchSourceRecord record,

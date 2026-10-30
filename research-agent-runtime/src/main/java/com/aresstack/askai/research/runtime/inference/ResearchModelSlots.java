@@ -21,6 +21,12 @@ public final class ResearchModelSlots {
     public static final ModelSlot LAYOUT_REPAIR = ModelSlot.of("layout-repair");
     /** The research orchestrator: plans, evaluates and re-plans an orchestrated run (ADR 0001, 4.2). */
     public static final ModelSlot ORCHESTRATOR = ModelSlot.of("orchestrator");
+    /** The search planner: turns one aspect into distinct search queries (ADR 0001, 4.1, lane G). */
+    public static final ModelSlot PLANNER = ModelSlot.of("planner");
+    /** The source verifier: judges accepted sources against the brief, finds contradictions (lane G). */
+    public static final ModelSlot VERIFIER = ModelSlot.of("verifier");
+    /** The writer: drafts cited section text from verified sources (ADR 3.2 names it "synthesis"; lane G). */
+    public static final ModelSlot SYNTHESIS = ModelSlot.of("synthesis");
 
     private ResearchModelSlots() {
     }

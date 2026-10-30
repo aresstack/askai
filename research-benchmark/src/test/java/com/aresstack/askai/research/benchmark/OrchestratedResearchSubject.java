@@ -2,10 +2,16 @@ package com.aresstack.askai.research.benchmark;
 
 import com.aresstack.askai.research.capture.VisitedCapture;
 import com.aresstack.askai.research.domain.task.ResearchTask;
+import com.aresstack.askai.research.domain.task.TaskArtifact;
 import com.aresstack.askai.research.domain.task.TaskState;
 import com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun;
 import com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings;
 import com.aresstack.askai.research.runtime.orchestrator.RoundDecision;
+import com.aresstack.askai.research.runtime.orchestrator.SearchPlannerWorker;
+import com.aresstack.askai.research.runtime.orchestrator.SourceVerifierWorker;
+import com.aresstack.askai.research.runtime.orchestrator.WorkerArtifacts;
+import com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings;
+import com.aresstack.askai.research.runtime.orchestrator.WriterWorker;
 import com.aresstack.askai.research.runtime.service.ResearchServiceCommand;
 import com.aresstack.askai.research.search.ResearchServiceCommandWire;
 import com.aresstack.askai.research.sources.ResearchSourceRecord;
@@ -42,36 +48,87 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
     static final int ANSWERS = 1;
     static final String ANSWER = "Use your own judgement within the question as asked.";
 
-    private final LocalRerankerRuntime reranker;
+    /** Lane G: the worker roles that can be measured one by one on top of the orchestrator. */
+    public enum Role {
+        SEARCH_PLANNER("search-planner", WorkerRoleSettings.ENV_SEARCH_PLANNER,
+                "the search planner writes distinct queries that dependent web packages search"),
+        SOURCE_VERIFIER("source-verifier", WorkerRoleSettings.ENV_SOURCE_VERIFIER,
+                "the source verifier judges accepted sources; rejected ones stop counting as evidence"),
+        WRITER("writer", WorkerRoleSettings.ENV_WRITER,
+                "the writer drafts cited section text from the sources (scored as the run's statements)");
 
+        final String id;
+        final String env;
+        final String what;
+
+        Role(String id, String env, String what) {
+            this.id = id;
+            this.env = env;
+            this.what = what;
+        }
+    }
+
+    private final LocalRerankerRuntime reranker;
+    /** The one lane G role switched on, or null for the orchestrator alone (lane F's measurement). */
+    private final Role role;
+
+    /** The orchestrator alone: every lane G role off, so lane F's numbers stay comparable. */
     public OrchestratedResearchSubject(LocalRerankerRuntime reranker) {
+        this(reranker, null);
+    }
+
+    /** The orchestrator plus exactly one lane G worker role. */
+    public OrchestratedResearchSubject(LocalRerankerRuntime reranker, Role role) {
         this.reranker = reranker;
+        this.role = role;
+    }
+
+    /** The orchestrator alone and the orchestrator with each lane G role, in report order. */
+    public static List<BenchmarkSubject> all(LocalRerankerRuntime reranker) {
+        List<BenchmarkSubject> subjects = new ArrayList<BenchmarkSubject>();
+        subjects.add(new OrchestratedResearchSubject(reranker));
+        for (Role each : Role.values()) {
+            subjects.add(new OrchestratedResearchSubject(reranker, each));
+        }
+        return subjects;
     }
 
     @Override
     public String name() {
-        return NAME;
+        return role == null ? NAME : "orchestrated+" + role.id;
     }
 
     @Override
     public String description() {
+        if (role != null) {
+            return "lane G: the orchestrated run of `" + NAME + "` plus one worker role: " + role.what
+                    + " (every other lane G role off)";
+        }
         return "lane F: orchestrator role plans work packages, the deterministic executor runs them through the "
                 + "same web research funnel, the envelope measures sufficiency (product defaults, the simulated "
-                + "user approves the plan and " + EXTENSIONS + " overrun)";
+                + "user approves the plan and " + EXTENSIONS + " overrun; lane G roles off)";
     }
 
     static Map<String, String> environment() {
+        return environment(null);
+    }
+
+    /** The orchestrated mode, and of the lane G roles only {@code role} (none when null). */
+    static Map<String, String> environment(Role role) {
         Map<String, String> env = new HashMap<String, String>();
         env.put(OrchestratorSettings.ENV_MODE, OrchestratorSettings.Mode.ORCHESTRATED.wireName());
+        for (Role each : Role.values()) {
+            env.put(each.env, each == role ? "on" : "off");
+        }
         return env;
     }
 
     @Override
     public BenchmarkRunRecord run(BenchmarkQuestion question, FixtureWorld world, String model, String modelBaseUrl,
                                   int repetition, BenchmarkSettings settings) throws Exception {
-        BenchmarkRunRecord record = new BenchmarkRunRecord(NAME, model, question.getId(), repetition);
+        BenchmarkRunRecord record = new BenchmarkRunRecord(name(), model, question.getId(), repetition);
         try (SingleAgentBaselineSubject.Session session = SingleAgentBaselineSubject.Session.open(question, world,
-                model, modelBaseUrl, settings, reranker, record, environment())) {
+                model, modelBaseUrl, settings, reranker, record, environment(role))) {
             if (session == null) {
                 return record;
             }
@@ -90,9 +147,9 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
     @Override
     public BenchmarkRunRecord runInterrupted(BenchmarkQuestion question, FixtureWorld world, String model,
                                              String modelBaseUrl, BenchmarkSettings settings) throws Exception {
-        BenchmarkRunRecord record = new BenchmarkRunRecord(NAME, model, question.getId(), 0);
+        BenchmarkRunRecord record = new BenchmarkRunRecord(name(), model, question.getId(), 0);
         try (SingleAgentBaselineSubject.Session session = SingleAgentBaselineSubject.Session.open(question, world,
-                model, modelBaseUrl, settings, reranker, record, environment())) {
+                model, modelBaseUrl, settings, reranker, record, environment(role))) {
             if (session == null) {
                 return record;
             }
@@ -249,8 +306,8 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
         return false;
     }
 
-    private static void collect(SingleAgentBaselineSubject.Session session, BenchmarkRunRecord record,
-                                FixtureWorld world, boolean finished, int timeoutSeconds, Driver driver) {
+    private void collect(SingleAgentBaselineSubject.Session session, BenchmarkRunRecord record,
+                         FixtureWorld world, boolean finished, int timeoutSeconds, Driver driver) {
         session.collect(record, world, finished, timeoutSeconds);
         OrchestratorRun run = driver.board.currentRun();
         record.pagesVisited = record.visitedUrls.size();
@@ -275,6 +332,92 @@ public final class OrchestratedResearchSubject implements BenchmarkSubject {
         record.evidenceSufficient = run.getState() == OrchestratorRun.State.CLOSED;
         record.reportedGaps = describe(run.getOpenGaps());
         record.reportedContradictions = describe(run.getContradictions());
+        if (role != null) {
+            observeRoles(record, run, driver.board.tasks());
+        }
+    }
+
+    /**
+     * Lane G: what the worker roles did, from the run's task record. The verifier's contradictions join the
+     * structured findings; the writer's drafts (citations stripped) become the run's statements, because they
+     * are the run's answer.
+     */
+    static void observeRoles(BenchmarkRunRecord record, OrchestratorRun run, List<ResearchTask> tasks) {
+        BenchmarkRunRecord.RoleObservation roles = new BenchmarkRunRecord.RoleObservation();
+        if (record.reportedContradictions == null) {
+            record.reportedContradictions = new ArrayList<String>();
+        }
+        Map<String, String> urlBySource = new HashMap<String, String>();
+        List<String> drafts = new ArrayList<String>();
+        for (ResearchTask task : tasks) {
+            if (!run.owns(task.getTaskId())) {
+                continue;
+            }
+            for (TaskArtifact artifact : task.getArtifacts()) {
+                if (artifact.getKind() == TaskArtifact.Kind.SOURCE_REFERENCE) {
+                    urlBySource.put(artifact.getProjectRef(), artifact.getContent().trim().split("\\s+", 2)[0]);
+                }
+            }
+        }
+        for (ResearchTask task : tasks) {
+            if (!run.owns(task.getTaskId())) {
+                continue;
+            }
+            boolean rolePackage = true;
+            if (SearchPlannerWorker.ROLE.getId().equals(task.getRole())) {
+                roles.plannerPackages++;
+            } else if (SourceVerifierWorker.ROLE.getId().equals(task.getRole())) {
+                roles.verifierPackages++;
+            } else if (WriterWorker.ROLE.getId().equals(task.getRole())) {
+                roles.writerPackages++;
+            } else {
+                rolePackage = false;
+            }
+            if (rolePackage && task.isTerminal() && task.getState() != TaskState.COMPLETED) {
+                roles.rolePackagesFailed++;
+            }
+            for (TaskArtifact artifact : task.getArtifacts()) {
+                String ref = artifact.getProjectRef();
+                if (artifact.getKind() == TaskArtifact.Kind.TEXT && WorkerArtifacts.PLANNED_QUERY_REF.equals(ref)) {
+                    roles.plannedQueries++;
+                } else if (artifact.getKind() == TaskArtifact.Kind.TEXT && ref.startsWith(WorkerArtifacts.DRAFT_PREFIX)) {
+                    for (String paragraph : artifact.getContent().split("\n\n")) {
+                        if (!paragraph.trim().isEmpty()) {
+                            roles.draftParagraphs++;
+                            drafts.add(paragraph.replaceAll("\\s*\\[[^\\]]*\\]\\s*$", "").trim());
+                        }
+                    }
+                } else if (artifact.getKind() == TaskArtifact.Kind.VERDICT
+                        && ref.startsWith(WorkerArtifacts.CONTRADICTION_PREFIX)) {
+                    roles.verifierContradictions++;
+                    record.reportedContradictions.add(ref.substring(WorkerArtifacts.CONTRADICTION_PREFIX.length())
+                            + ": " + artifact.getContent());
+                }
+            }
+        }
+        Map<String, WorkerArtifacts.Verdict> verdicts = WorkerArtifacts.verdicts(ownedBy(run, tasks));
+        roles.verifiedSources = verdicts.size();
+        for (Map.Entry<String, WorkerArtifacts.Verdict> verdict : verdicts.entrySet()) {
+            String url = urlBySource.get(verdict.getKey());
+            if (verdict.getValue().isRejected() && url != null) {
+                roles.rejectedUrls.add(url);
+            }
+        }
+        if (!drafts.isEmpty()) {
+            record.statements.clear();
+            record.statements.addAll(drafts);
+        }
+        record.roles = roles;
+    }
+
+    private static List<ResearchTask> ownedBy(OrchestratorRun run, List<ResearchTask> tasks) {
+        List<ResearchTask> owned = new ArrayList<ResearchTask>();
+        for (ResearchTask task : tasks) {
+            if (run.owns(task.getTaskId())) {
+                owned.add(task);
+            }
+        }
+        return owned;
     }
 
     private static List<String> describe(List<RoundDecision.Finding> findings) {

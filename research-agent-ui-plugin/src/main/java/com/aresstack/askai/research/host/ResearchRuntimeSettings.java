@@ -454,6 +454,30 @@ public final class ResearchRuntimeSettings {
     public static final int DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION =
             com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MIN_SOURCES_PER_SECTION;
 
+    // ADR 0001 lane G: the new worker roles (each on by default inside the orchestrated mode) and their limits.
+    public static final String KEY_WORKER_SEARCH_PLANNER = "research.orchestrator.worker.searchPlanner";
+    public static final String KEY_WORKER_SOURCE_VERIFIER = "research.orchestrator.worker.sourceVerifier";
+    public static final String KEY_WORKER_WRITER = "research.orchestrator.worker.writer";
+    public static final String KEY_WORKER_PLANNER_MAX_QUERIES = "research.orchestrator.worker.plannerMaxQueries";
+    public static final String KEY_WORKER_VERIFIER_MAX_SOURCES = "research.orchestrator.worker.verifierMaxSources";
+    public static final String KEY_WORKER_WRITER_MAX_SOURCES = "research.orchestrator.worker.writerMaxSources";
+    public static final int DEFAULT_WORKER_PLANNER_MAX_QUERIES =
+            com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.DEFAULT_PLANNER_MAX_QUERIES;
+    public static final int DEFAULT_WORKER_VERIFIER_MAX_SOURCES =
+            com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.DEFAULT_VERIFIER_MAX_SOURCES;
+    public static final int DEFAULT_WORKER_WRITER_MAX_SOURCES =
+            com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.DEFAULT_WRITER_MAX_SOURCES;
+
+    public static boolean loadWorkerRole(WorkspaceStateStore store, String key) {
+        return store == null || store.getBoolean(key, true);
+    }
+
+    public static void saveWorkerRole(WorkspaceStateStore store, String key, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(key, enabled);
+        }
+    }
+
     public static boolean loadOrchestratorEnabled(WorkspaceStateStore store) {
         return store != null && store.getBoolean(KEY_ORCHESTRATOR_ENABLED, false);
     }
@@ -491,6 +515,21 @@ public final class ResearchRuntimeSettings {
         env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MIN_SOURCES_PER_SECTION,
                 String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
                         DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_SEARCH_PLANNER,
+                loadWorkerRole(store, KEY_WORKER_SEARCH_PLANNER) ? "on" : "off");
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_SOURCE_VERIFIER,
+                loadWorkerRole(store, KEY_WORKER_SOURCE_VERIFIER) ? "on" : "off");
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_WRITER,
+                loadWorkerRole(store, KEY_WORKER_WRITER) ? "on" : "off");
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_PLANNER_MAX_QUERIES,
+                String.valueOf(loadPositiveInt(store, KEY_WORKER_PLANNER_MAX_QUERIES,
+                        DEFAULT_WORKER_PLANNER_MAX_QUERIES)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_VERIFIER_MAX_SOURCES,
+                String.valueOf(loadPositiveInt(store, KEY_WORKER_VERIFIER_MAX_SOURCES,
+                        DEFAULT_WORKER_VERIFIER_MAX_SOURCES)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_WRITER_MAX_SOURCES,
+                String.valueOf(loadPositiveInt(store, KEY_WORKER_WRITER_MAX_SOURCES,
+                        DEFAULT_WORKER_WRITER_MAX_SOURCES)));
         return env;
     }
 
