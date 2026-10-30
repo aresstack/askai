@@ -3,8 +3,10 @@ package com.aresstack.askai.java8.plugin.host;
 import com.aresstack.askai.mcp.api.McpEndpointDefinition;
 import com.aresstack.askai.mcp.api.McpEndpointHandle;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
+import com.aresstack.askai.mcp.api.McpToolClientFactory;
 import com.aresstack.askai.mcp.api.McpToolContribution;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
+import com.aresstack.askai.mcp.solon.SolonMcpToolClientFactory;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshot;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshotProvider;
@@ -39,14 +41,15 @@ import java.util.Map;
 /**
  * The app-level owner of the host runtime services handed to agent plugins via
  * {@code AgentHostContext.getService}: the Solon MCP server runtime (LAZY — the loopback HTTP server only
- * starts when a plugin actually registers an endpoint, i.e. when the productive research mode is used) and
- * the model/NLP/speech services. The research agent and the browser run inside the plugin now, so there is
- * no tool-client factory and no agent connector any more. One instance per application; {@link #shutdown()}
- * stops the MCP runtime if it was ever started.
+ * starts when a plugin actually registers an endpoint, i.e. when the productive research mode is used), the
+ * MCP tool-client factory (ADR 0001: MCP stays the tool protocol) and the model/NLP/speech services. There is
+ * no agent connector. One instance per application; {@link #shutdown()} stops the MCP runtime if it was ever
+ * started.
  */
 public final class AgentRuntimeServices {
 
     private final LazyRegistry registry = new LazyRegistry();
+    private final McpToolClientFactory toolClients = new SolonMcpToolClientFactory();
     /** Publishes the mandatory per-session reranker snapshot from the local model runtime. */
     private final RerankerConfigurationSnapshotProvider rerankerSnapshots;
     /** Lists the installed rerank-capable models for the EXPLICIT selection in the settings UI. */
@@ -191,6 +194,7 @@ public final class AgentRuntimeServices {
     public Map<Class<?>, Object> asServiceMap() {
         Map<Class<?>, Object> services = new LinkedHashMap<Class<?>, Object>();
         services.put(McpServerRegistry.class, registry);
+        services.put(McpToolClientFactory.class, toolClients);
         if (rerankerSnapshots != null) {
             services.put(RerankerConfigurationSnapshotProvider.class, rerankerSnapshots);
         }
