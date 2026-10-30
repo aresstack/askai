@@ -30,6 +30,7 @@ public interface ConversationSurface {
 
     void startThinking(String activityId, String title);
 
+    /** Shows {@code text} as the bubble's FULL current body (replaces, never appends). */
     void updateThinking(String activityId, String text);
 
     void finishThinking(String activityId, String summary);

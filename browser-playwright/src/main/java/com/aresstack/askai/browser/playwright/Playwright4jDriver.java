@@ -60,8 +60,32 @@ final class Playwright4jDriver implements PlaywrightDriver {
     private Page challengePage;
     /** Research HUD: the command binding is registered ONCE on the context (survives navigation). */
     private boolean hudBindingRegistered;
-    /** Control plane: filled by the binding on the owner thread, drained on any thread (never via the actor). */
+    /**
+     * Control plane: filled by the in-page binding on the owner thread or by the research add-on's bridge thread,
+     * drained on any thread (never via the actor).
+     */
     private final HudCommandInbox hudCommands = new HudCommandInbox();
+    /**
+     * Camoufox only: the bridge to the AskAI Research add-on, which shows the HUD in the browser UI instead of the
+     * page (docs/research-browser-addon.md); null when the add-on is off or could not be prepared.
+     */
+    private AddonBridge addonBridge;
+    /** When the browser was started: the add-on gets {@link #ADDON_GRACE_MILLIS} to connect before the fallback. */
+    private long launchedMillis;
+    /** The fallback overlay was put into a page; it is removed once the add-on takes over. */
+    private boolean inPageHudUsed;
+    private boolean addonConnectedLogged;
+    private boolean fallbackLogged;
+
+    /** System property: {@code false} starts Camoufox without the AskAI Research add-on. */
+    static final String ADDON_PROPERTY = "askai.browser.researchAddon";
+    /**
+     * System property: {@code false} keeps the HUD out of the page even when the add-on is missing (no in-page
+     * overlay at all, the HUD then only exists in the add-on).
+     */
+    static final String IN_PAGE_FALLBACK_PROPERTY = "askai.browser.hud.inPageFallback";
+    /** How long a fresh browser's add-on may take to connect before the HUD falls back to the page. */
+    static final long ADDON_GRACE_MILLIS = 15_000L;
     /** How many popups the close-immediately policy handled — observable proof the event dispatched. */
     private final java.util.concurrent.atomic.AtomicInteger popupsClosed =
             new java.util.concurrent.atomic.AtomicInteger();
@@ -122,6 +146,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         Browser browser = null;
         BrowserContext context = null;
         CamoufoxProvisioning.ProfileLease profile = null;
+        AddonBridge bridge = null;
         boolean camoufox = CamoufoxProvisioning.CHANNEL.equals(channel);
         // Which step of the chain was running when it failed — a visible window with a failed start
         // (browser up, CDP/context not) reads very differently from a driver that never came up.
@@ -145,6 +170,22 @@ final class Playwright4jDriver implements PlaywrightDriver {
             stage = "BROWSER_LAUNCH";
             if (camoufox) {
                 profile = CamoufoxProvisioning.leaseProfile(profileKey);
+                if (!"false".equalsIgnoreCase(System.getProperty(ADDON_PROPERTY))) {
+                    stage = "ADDON_PREPARE";
+                    try {
+                        bridge = AddonBridge.start();
+                        Path addon = ResearchAddon.install(profile.directory(), bridge.clientConfig());
+                        camoufoxLaunch = camoufoxLaunch.withAddon(addon);
+                    } catch (java.io.IOException | RuntimeException addonFailed) {
+                        // The browser still starts; the HUD then falls back to the in-page overlay.
+                        System.err.println("[browser-mcp] research add-on not prepared: " + firstLine(addonFailed));
+                        if (bridge != null) {
+                            bridge.close();
+                            bridge = null;
+                        }
+                    }
+                    stage = "BROWSER_LAUNCH";
+                }
                 context = playwright.firefox().launchPersistentContext(profile.directory(),
                         camoufoxOptions(camoufoxExecutable, camoufoxLaunch, headless));
                 browser = context.browser();
@@ -172,6 +213,11 @@ final class Playwright4jDriver implements PlaywrightDriver {
             final Playwright4jDriver driver = new Playwright4jDriver(playwright, browser, context, page,
                     consent, captcha, timeoutMillis);
             driver.profileLease = profile;
+            if (bridge != null) {
+                bridge.deliverTo(driver.hudCommands);
+                driver.addonBridge = bridge;
+            }
+            driver.launchedMillis = System.currentTimeMillis();
             page.onPopup(driver.popupCloser());
             // Dispatched during the idle pump: the user closing the window becomes a TYPED condition
             // instead of an anonymous 'Target closed' that no classifier recognized.
@@ -192,6 +238,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
         } catch (RuntimeException | java.io.IOException ex) {
             long elapsedMillis = (System.nanoTime() - startedNanos) / 1_000_000L;
             closeQuietly(context, browser, playwright);
+            if (bridge != null) {
+                bridge.close();
+            }
             if (profile != null) {
                 profile.close();
             }
@@ -422,6 +471,16 @@ final class Playwright4jDriver implements PlaywrightDriver {
         if (!ownsGeneration) {
             return "unsupported"; // the HUD binding lives on the chat's own context, never in a worker tab
         }
+        com.aresstack.askai.browser.hud.ResearchHudState state =
+                com.aresstack.askai.browser.hud.ResearchHudState.parse(stateLine);
+        if (addonBridge != null) {
+            String viaAddon = renderHudInAddon(state);
+            if (viaAddon != null) {
+                return viaAddon;
+            }
+        } else if (!inPageFallbackAllowed()) {
+            return "unsupported";
+        }
         try {
             if (!hudBindingRegistered) {
                 // Buffer overlay button commands; registered on the CONTEXT so it survives navigations.
@@ -434,12 +493,65 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 hudBindingRegistered = true;
             }
             page.evaluate(ResearchHudOverlay.installScript()); // idempotent
-            page.evaluate(ResearchHudOverlay.renderScript(
-                    com.aresstack.askai.browser.hud.ResearchHudState.parse(stateLine)));
+            page.evaluate(ResearchHudOverlay.renderScript(state));
+            inPageHudUsed = true;
             return "rendered";
         } catch (RuntimeException ex) {
             return "error"; // a HUD failure must never take the visit down
         }
+    }
+
+    /**
+     * The HUD through the research add-on: the state is always published (a late add-on shows the current one at
+     * once). Returns null when the HUD has to fall back to the in-page overlay: the add-on did not connect within
+     * {@link #ADDON_GRACE_MILLIS} of the start, and the fallback is allowed.
+     */
+    private String renderHudInAddon(com.aresstack.askai.browser.hud.ResearchHudState state) {
+        addonBridge.publish(state, pageHost());
+        if (addonBridge.addonConnected()) {
+            if (!addonConnectedLogged) {
+                addonConnectedLogged = true;
+                System.err.println("[browser-mcp] research add-on connected (version "
+                        + addonBridge.addonVersion() + "): HUD shown in the browser UI, not in the page");
+            }
+            if (inPageHudUsed) {
+                // The add-on came up after the fallback: take the overlay out of the current page again.
+                inPageHudUsed = false;
+                try {
+                    page.evaluate(ResearchHudOverlay.removeScript());
+                } catch (RuntimeException ignored) {
+                    // gone with the page anyway
+                }
+            }
+            return "rendered-addon";
+        }
+        if (System.currentTimeMillis() - launchedMillis < ADDON_GRACE_MILLIS) {
+            return "pending-addon";
+        }
+        if (!inPageFallbackAllowed()) {
+            return "addon-missing";
+        }
+        if (!fallbackLogged) {
+            fallbackLogged = true;
+            System.err.println("[browser-mcp] WARNING research add-on did not connect within "
+                    + (ADDON_GRACE_MILLIS / 1000L) + " s: falling back to the in-page HUD overlay, which pages can "
+                    + "detect (set -D" + IN_PAGE_FALLBACK_PROPERTY + "=false to keep the HUD out of the page)");
+        }
+        return null;
+    }
+
+    /** The host of the current page for the add-on panel; never the full URL (no paths or queries leave here). */
+    private String pageHost() {
+        try {
+            String host = java.net.URI.create(page.url()).getHost();
+            return host == null ? "" : host;
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    private static boolean inPageFallbackAllowed() {
+        return !"false".equalsIgnoreCase(System.getProperty(IN_PAGE_FALLBACK_PROPERTY));
     }
 
     @Override
@@ -480,6 +592,11 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 }
             }
         };
+    }
+
+    /** The research add-on's bridge, or null (Chrome/Edge, add-on off or not prepared). */
+    AddonBridge addonBridge() {
+        return addonBridge;
     }
 
     /** How many popups were closed so far. Thread-safe counter read — touches no Playwright state. */
@@ -642,6 +759,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
             return; // a worker tab: the user context and the browser stay with the worker browser
         }
         closeQuietly(context, browser, playwright);
+        if (addonBridge != null) {
+            addonBridge.close();
+        }
         if (profileLease != null) {
             profileLease.close();
         }
@@ -665,9 +785,13 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         final Playwright toCut = playwright;
         final CamoufoxProvisioning.ProfileLease lease = profileLease;
+        final AddonBridge bridgeToClose = addonBridge;
         Thread cutter = new Thread(new Runnable() {
             public void run() {
                 closeQuietly(null, null, toCut);
+                if (bridgeToClose != null) {
+                    bridgeToClose.close();
+                }
                 if (lease != null) {
                     try {
                         lease.close();

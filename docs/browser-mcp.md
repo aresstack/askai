@@ -79,7 +79,9 @@ Playwright Java is not thread-safe and dispatches its events only while the owni
 Playwright call. `BrowserSessionActor` creates Playwright and everything below it on ONE dedicated owner
 thread and runs every command there; callers block on a future. While idle the owner pumps the Playwright
 event loop (route interception, HUD bindings, popup close). The HUD command poll (`web_hud_poll`) drains its
-inbox directly on the caller's thread, so a Skip is deliverable while a data call blocks the owner. The
+inbox directly on the caller's thread, so a Skip is deliverable while a data call blocks the owner. With Camoufox
+the HUD is shown by the AskAI Research add-on instead of an in-page overlay (docs/research-browser-addon.md);
+its commands land in the same inbox. The
 plugin's `LazyRestartableBrowserRuntime` adds its own owner thread per research session: created STOPPED,
 started on the first command, kept warm for the idle keep-alive after a browsing phase (settings: "Idle
 stop (s)", default 300; 0 = stopped right away), replaced on failure.
