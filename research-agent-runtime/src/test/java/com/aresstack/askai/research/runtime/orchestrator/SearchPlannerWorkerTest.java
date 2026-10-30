@@ -112,7 +112,8 @@ public class SearchPlannerWorkerTest {
         WebAcquisition acquisition = new WebAcquisition() {
             public Result acquire(String query, ToolInvoker research,
                                   Consumer<WebSearchApplicationService.AcceptedSource> accepted,
-                                  long maxDurationMillis, AtomicLong tokens) {
+                                  long maxDurationMillis, AtomicLong tokens,
+                                  java.util.function.BooleanSupplier exhausted) {
                 searched.add(query);
                 return new Result(ResearchStopReason.SUFFICIENT_EVIDENCE, "pages 1");
             }
@@ -133,7 +134,8 @@ public class SearchPlannerWorkerTest {
         WebAcquisition acquisition = new WebAcquisition() {
             public Result acquire(String query, ToolInvoker research,
                                   Consumer<WebSearchApplicationService.AcceptedSource> accepted,
-                                  long maxDurationMillis, AtomicLong tokens) {
+                                  long maxDurationMillis, AtomicLong tokens,
+                                  java.util.function.BooleanSupplier exhausted) {
                 searched.add(query);
                 return new Result(ResearchStopReason.NO_SEMANTIC_MATCHES, "");
             }

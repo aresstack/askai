@@ -37,7 +37,8 @@ public class WorkerChainTest {
         WebAcquisition acquisition = new WebAcquisition() {
             public Result acquire(String query, ToolInvoker research,
                                   Consumer<WebSearchApplicationService.AcceptedSource> accepted,
-                                  long maxDurationMillis, AtomicLong tokens) {
+                                  long maxDurationMillis, AtomicLong tokens,
+                                  java.util.function.BooleanSupplier exhausted) {
                 searched.add(query);
                 if (query.startsWith("grant")) {
                     accepted.accept(source("src-a", "https://a.test/1", "Grant rate"));
