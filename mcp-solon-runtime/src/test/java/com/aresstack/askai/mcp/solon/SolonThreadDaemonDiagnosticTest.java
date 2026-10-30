@@ -30,6 +30,29 @@ public class SolonThreadDaemonDiagnosticTest {
         System.out.println("=== NON-DAEMON after boot ===");
         dump();
 
+        // CLIENT lifecycle: a used Solon MCP tool client spawns a NON-daemon unnamed scheduler
+        // ("pool-N-thread-1"). McpToolClient.close() must release it — the GUI leaked exactly these
+        // (LazyRestartableBrowserRuntime closed the client only when it was java.io.Closeable, which
+        // McpToolClient is not) and the JVM could not exit after browser-sidecar use.
+        java.util.Set<String> poolsBefore = aliveNonDaemonPoolThreads();
+        com.aresstack.askai.mcp.api.McpToolClient client = new SolonMcpToolClientFactory()
+                .connect(runtime.endpointUrl(handle), "streamable");
+        try {
+            client.callTool("ping", new java.util.HashMap<String, Object>());
+        } catch (com.aresstack.askai.mcp.api.McpToolClient.McpToolCallException ex) {
+            throw new AssertionError("ping over the tool client failed: " + ex.getMessage(), ex);
+        }
+        java.util.Set<String> poolsDuring = aliveNonDaemonPoolThreads();
+        poolsDuring.removeAll(poolsBefore);
+        System.out.println("=== client pool threads spawned: " + poolsDuring + " ===");
+        client.close();
+        for (int i = 0; i < 50 && !aliveNonDaemonPoolThreads(poolsDuring).isEmpty(); i++) {
+            try { Thread.sleep(100); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+        }
+        org.junit.Assert.assertTrue("McpToolClient.close() must release the client's non-daemon scheduler "
+                        + "threads, still alive: " + aliveNonDaemonPoolThreads(poolsDuring),
+                aliveNonDaemonPoolThreads(poolsDuring).isEmpty());
+
         runtime.unregisterEndpoint(handle);
         runtime.shutdown();
 

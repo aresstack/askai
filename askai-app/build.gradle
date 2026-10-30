@@ -58,7 +58,7 @@ dependencies {
     implementation 'org.jodd:jodd-lagarto:6.0.6'
     // JSON for versioned audio-profile import/export (Slice 3). Gson stays the app's JSON library for
     // its own files; Jackson is ollama4j's and confined to the Ollama adapter.
-    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation "com.google.code.gson:gson:${gsonVersion}"
 
     // Decode audio formats accepted by file transcription. vorbis/flac/aac are discovered via Java Sound
     // SPI (META-INF/services, kept in the fat jar by mergeServiceFiles below), so they stay runtime-only.
