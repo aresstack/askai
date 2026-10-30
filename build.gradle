@@ -10,6 +10,10 @@ allprojects {
     }
 }
 
+// ONE Gson version for every module that declares Gson (ADR 0001, section 3.1). It is the version Playwright
+// Java brings into the research plugin's lib/, so the plugin and the host resolve the same Gson.
+ext.gsonVersion = '2.14.0'
+
 subprojects {
     apply plugin: 'java'
 
