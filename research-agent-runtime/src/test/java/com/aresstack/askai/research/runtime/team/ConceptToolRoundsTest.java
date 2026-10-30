@@ -1010,4 +1010,86 @@ public class ConceptToolRoundsTest {
                 ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
         assertTrue(trace.toString(), trace.toString().contains("EXCLUDED (terminal)"));
     }
+
+    /**
+     * Scoping regression (Meerschweinchen): the visible answer spelled "add_cards: …" while the action
+     * channel said none. That is never a finished turn: the loop repairs it, the model sends the action
+     * through conceptAction, the host executes it and only the clean final answer reaches the user.
+     */
+    @Test
+    public void anActionSpelledInTheVisibleAnswerIsRepairedNotTreatedAsDone() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung und Sozialverhalten\","
+                + "\"Ernährung und Futter\"]", "added 2 cards revision=1");
+        turns.script.add(turn("Ich lege die Bereiche an.", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung und Sozialverhalten\",\"Ernährung und Futter\"]}"));
+        turns.script.add(turn("Ich habe Haltung und Ernährung angelegt.", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(
+                turn("add_cards:\\n    - Haltung und Sozialverhalten\\n    - Ernährung und Futter\\n"
+                        + "    offer: Welche spezifischen Aspekte?", "{\"type\":\"none\"}"),
+                turns, tool, 4, 2, true, null, traceSink);
+
+        assertEquals("Ich habe Haltung und Ernährung angelegt.",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertTrue("the repair names the contradiction",
+                turns.feedbackSeen.get(0).contains("ACTION WRITTEN AS TEXT"));
+        assertTrue("and that nothing was executed", turns.feedbackSeen.get(0).contains("NICHTS wurde ausgeführt"));
+        assertTrue("the action then went through the structured channel", tool.calls.contains(
+                "add_cards parent=[] names=[\"Haltung und Sozialverhalten\",\"Ernährung und Futter\"]"));
+        assertTrue(trace.toString(), trace.toString().contains(
+                "visible answer spells the action \"add_cards\" while conceptAction is none — NOT executed"));
+        assertTrue(trace.contains("round 1 -> APPLIED revision=1"));
+    }
+
+    /** Hasenhaltung regression: a bare "none" as the visible answer is a leak, not a reply. */
+    @Test
+    public void aBareNoneAsTheVisibleAnswerIsRepaired() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        turns.script.add(turn("Worum genau soll es bei der Hasenhaltung gehen?", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("none", "{\"type\":\"none\"}"),
+                turns, tool, 4, 2, true, null, traceSink);
+
+        assertEquals("Worum genau soll es bei der Hasenhaltung gehen?",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertEquals(1, turns.feedbackSeen.size());
+    }
+
+    /** Without repair budget the leaked text still never reaches the user, and nothing is claimed. */
+    @Test
+    public void withoutRepairBudgetTheHostAnswersHonestlyInsteadOfShowingTheLeak() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+
+        TeamAgentResult result = ConceptToolRounds.run(
+                turn("add_cards:\\n- Haltung", "{\"type\":\"none\"}"), turns, tool, 4, 0, true, null,
+                traceSink);
+
+        String visible = ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage();
+        assertEquals(TeamAgentPlaybook.conceptActionLeakAnswer(true, false), visible);
+        assertTrue("the host answer says nothing changed", visible.contains("nichts geändert"));
+        assertTrue("no follow-up inference", turns.feedbackSeen.isEmpty());
+        assertTrue("no concept call", tool.calls.isEmpty());
+    }
+
+    /** Prompt-contamination guard: an instruction placeholder never becomes a card. */
+    @Test
+    public void aPlaceholderCopiedFromTheInstructionsIsRefusedBeforeTheHost() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        turns.script.add(turn("Welche Bereiche der Hasenhaltung interessieren dich?", "{\"type\":\"none\"}"));
+
+        TeamAgentResult result = ConceptToolRounds.run(turn("lege an",
+                "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<area 1>\",\"<area 2>\"]}"),
+                turns, tool, 4, 2, true, null, traceSink);
+
+        assertEquals("Welche Bereiche der Hasenhaltung interessieren dich?",
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        assertTrue("the placeholder never reached the host", tool.calls.isEmpty());
+        assertTrue(trace.toString(), trace.contains("round 1 -> REFUSED (placeholder copied from the instructions)"));
+        assertTrue(turns.feedbackSeen.get(0).contains("placeholder in <angle brackets>"));
+    }
 }

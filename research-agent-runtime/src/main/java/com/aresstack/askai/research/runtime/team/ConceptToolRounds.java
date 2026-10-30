@@ -51,6 +51,10 @@ public final class ConceptToolRounds {
         void intermediate(ScopingAssistantOutput output);
     }
 
+    /** An example placeholder of the instructions ({@code <area 1>}, {@code <topic>}). */
+    private static final java.util.regex.Pattern PLACEHOLDER =
+            java.util.regex.Pattern.compile("<[^<>\"]{1,40}>");
+
     private ConceptToolRounds() {
     }
 
@@ -181,6 +185,34 @@ public final class ConceptToolRounds {
                     // Observable: the model CHOSE none — distinguishable from an absent field.
                     trace.line("concept action: NONE");
                 }
+                // The scoping regression (Meerschweinchen gate): the visible answer SPELLED the
+                // action ("add_cards: - Haltung … offer: …") while the action channel said none.
+                // Parseable JSON, nothing executed, internal instructions shown to the user — never
+                // a finished turn. Repaired like a rejected action (same error budget); without
+                // budget the host states honestly that nothing was executed from that text.
+                String leak = VisibleAssistantMessageValidator.actionLeakIn(output.getAssistantMessage());
+                if (leak != null) {
+                    String channel = output.isConceptActionExplicitNone() ? "none" : "absent";
+                    rejected.add("(text only) " + leak + " — written into assistantMessage, NOT executed");
+                    if (!budgetExhausted && repairs < maxRepairAttempts) {
+                        repairs++;
+                        trace.line("visible answer spells the action \"" + leak + "\" while conceptAction is "
+                                + channel + " — NOT executed, repair turn (repairs=" + repairs + "/"
+                                + maxRepairAttempts + ")");
+                        if (intermediateSink != null) {
+                            intermediateSink.intermediate(output);
+                        }
+                        result = turn.run(withProbeMeaning(TeamAgentPlaybook.conceptReceipts(
+                                conceptRevision, applied, noChange, rejected, currentConcept,
+                                germanFeedback) + TeamAgentPlaybook.conceptActionWrittenAsText(leak,
+                                germanFeedback), probeMeaningReminder));
+                        continue;
+                    }
+                    trace.line("visible answer spells the action \"" + leak + "\" while conceptAction is "
+                            + channel + " — no repair budget left, host answer replaces the text");
+                    return syntheticAnswer(TeamAgentPlaybook.conceptActionLeakAnswer(germanFeedback,
+                            !applied.isEmpty()), result);
+                }
                 // GROUNDING (live-gate 2): a finished turn whose scopePatch failed validation
                 // would leave the visible answer claiming a change the application refused
                 // ("Das ist notiert" over a rejected excludeFacet). A broken patch is repaired
@@ -252,14 +284,15 @@ public final class ConceptToolRounds {
                     } catch (ToolInvoker.EndpointUnavailable dead) {
                         trace.line("wrap-up offer lost — endpoint unavailable");
                     }
-                    return closeProbeTurn(withMoveTruth(result, mode, movedReceipt,
+                    return withoutActionLeak(closeProbeTurn(withMoveTruth(result, mode, movedReceipt,
                             !applied.isEmpty(), moveOutcome, germanFeedback, trace),
-                            probeReceiptText, germanFeedback, trace);
+                            probeReceiptText, germanFeedback, trace), !applied.isEmpty(), germanFeedback,
+                            trace);
                 }
                 trace.line("tool budget exhausted — dropping the further conceptAction");
-                return closeProbeTurn(withMoveTruth(result, mode, movedReceipt,
+                return withoutActionLeak(closeProbeTurn(withMoveTruth(result, mode, movedReceipt,
                         !applied.isEmpty(), moveOutcome, germanFeedback, trace),
-                        probeReceiptText, germanFeedback, trace);
+                        probeReceiptText, germanFeedback, trace), !applied.isEmpty(), germanFeedback, trace);
             }
             rounds++;
             String feedback;
@@ -294,6 +327,17 @@ public final class ConceptToolRounds {
                         "You already executed exactly this action in this turn — do not "
                                 + "repeat it. Finish with your final answer, or perform a "
                                 + "genuinely different REQUESTED action.", germanFeedback);
+            } else if (hasPlaceholder(action)) {
+                // Prompt-contamination guard: the instructions show their examples with
+                // <placeholders>; a placeholder copied into an action is never the user's topic
+                // and never reaches the host.
+                repairs++;
+                rejected.add(action.describe() + " — placeholder from the instructions");
+                trace.line("round " + rounds + ": " + action.describe());
+                trace.line("round " + rounds + " -> REFUSED (placeholder copied from the "
+                        + "instructions)");
+                feedback = TeamAgentPlaybook.conceptToolRejected(
+                        TeamAgentPlaybook.placeholderCopied(), germanFeedback);
             } else if (action.getType() == ConceptAction.Type.MOVE) {
                 // The dedicated generator owns the model side of moves exclusively (gate
                 // ruling: two competing paths produced invalid rounds and a false close) —
@@ -547,6 +591,32 @@ public final class ConceptToolRounds {
         ScopingAssistantOutputParser.Result synthetic =
                 ScopingAssistantOutputParser.parse(json.toString());
         return synthetic.isOk() ? TeamAgentResult.ok(synthetic.getOutput(), null) : fallback;
+    }
+
+    /** True when the action carries an example placeholder of the instructions in any field. */
+    static boolean hasPlaceholder(ConceptAction action) {
+        String suggestions = action.getType() == ConceptAction.Type.OFFER ? action.getSuggestionsJson() : null;
+        return PLACEHOLDER.matcher(action.describe()).find()
+                || (suggestions != null && PLACEHOLDER.matcher(suggestions).find());
+    }
+
+    /**
+     * The last line of defence for a turn that closes without a further inference (budget spent): a visible
+     * answer that spells an action as text is replaced by the honest host answer instead of reaching the user.
+     */
+    private static TeamAgentResult withoutActionLeak(TeamAgentResult result, boolean appliedAny,
+                                                     boolean german, Trace trace) {
+        if (result == null || !result.isOk() || !(result.getOutput() instanceof ScopingAssistantOutput)) {
+            return result;
+        }
+        String leak = VisibleAssistantMessageValidator.actionLeakIn(
+                ((ScopingAssistantOutput) result.getOutput()).getAssistantMessage());
+        if (leak == null) {
+            return result;
+        }
+        trace.line("visible answer spells the action \"" + leak + "\" at the budget close — host answer "
+                + "replaces the text");
+        return syntheticAnswer(TeamAgentPlaybook.conceptActionLeakAnswer(german, appliedAny), result);
     }
 
     /** The whole-concept read used to ground the receipts in the persisted state. */

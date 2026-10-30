@@ -21,7 +21,7 @@ public class ScopingConceptPromptTest {
         // user-named areas as ONE typed list (four one-by-one rounds once cost "Debugging"
         // its place in the budget).
         assertTrue(with.contains("{\"type\":\"add_cards\",\"parent\":[],\"names\":"
-                + "[\"Grundlagen\","));
+                + "[\"<area 1>\","));
         assertFalse("the single add is no longer taught",
                 with.contains("{\"type\":\"add\","));
         assertTrue("named areas outrank offers and own ideas",
@@ -62,8 +62,8 @@ public class ScopingConceptPromptTest {
         // platform owns ids, facets and the concept-conflict check ("military drill": one
         // command, one effect, one reply, then maybe a NEW command in a LATER turn.)
         assertTrue(with.contains("THE EXCLUSION COMMAND"));
-        assertTrue(with.contains("ESP-IDF möchte ich doch nicht behandeln"));
-        assertTrue(with.contains("{\"type\": \"exclude\", \"topic\": \"ESP-IDF\"}"));
+        assertTrue(with.contains("<Z> möchte ich doch nicht behandeln"));
+        assertTrue(with.contains("{\"type\": \"exclude\", \"topic\": \"<Z>\"}"));
         assertTrue(with.contains("No id, no scopePatch, no concept edit"));
         assertTrue(with.contains("INFORM_AND_ASK_REMOVE"));
         assertTrue("removal only in a LATER user turn",
@@ -75,7 +75,7 @@ public class ScopingConceptPromptTest {
         // Safety slice after the slice-2 gate: rename stays; remove/rewrite left the contract
         // (a natural rewrite wish became a branch-vaporising remove, and "PlatformIO möchte
         // ich nicht behandeln" became a remove instead of the exclusion).
-        assertTrue(with.contains("{\"type\": \"rename\", \"path\": [\"FreeRTOS\", \"Setup\"]"));
+        assertTrue(with.contains("{\"type\": \"rename\", \"path\": [\"<card>\", \"<child card>\"]"));
         assertTrue("a rename is pinned as non-destructive",
                 with.contains("A rename is NEVER a deletion"));
         assertFalse("the model cannot be TAUGHT a remove action",
@@ -97,15 +97,15 @@ public class ScopingConceptPromptTest {
                 with.contains("no partial adds standing in for a rewrite"));
         // Gate 4: the two identity spaces, pinned with the exact live confusion pair.
         assertTrue(with.contains("TWO IDENTITY SPACES"));
-        assertTrue(with.contains("[\"ESP32 und FreeRTOS Setup\"]"));
-        assertTrue(with.contains("\"esp32-setup\""));
+        assertTrue(with.contains("[\"<card name>\"]"));
+        assertTrue(with.contains("\"<facet-id>\""));
         assertFalse("the both-channels demand is gone for good",
                 with.contains("BOTH artifacts in the SAME answer"));
         // Gate 8b: the in-band suggestions field starved under the grammar — with the action
         // channel the suggestions are a COMMAND, shown with a worked example.
         assertTrue(with.contains("THE SEARCH OFFER COMMAND"));
         assertTrue(with.contains("{\"type\": \"offer\", \"suggestions\": ["));
-        assertTrue(with.contains("\"query\": \"FreeRTOS ESP32 Grundlagen Tutorial\""));
+        assertTrue(with.contains("\"query\": \"<topic> basics overview\""));
         assertTrue(with.contains("they are HOW the user explores"));
         assertTrue(with.contains("leave the searchSuggestions field empty"));
         // Gate 9: the broad first turn skipped the offer — the drill spells out the sequence
@@ -124,7 +124,7 @@ public class ScopingConceptPromptTest {
         assertTrue(with.contains("recorded AUTOMATICALLY from the user's first message"));
         assertFalse("gate 5: the model tried 'setMission without mission' although the host had"
                 + " already seeded it", with.contains("setMission"));
-        assertTrue(with.contains("Task Notifications"));
+        assertTrue(with.contains("\"names\":[\"<subtopic>\"]"));
         assertTrue(with.contains("{\"type\":\"none\"}"));
         assertTrue("no handle field in the model contract", !with.contains("\"handle\""));
         assertTrue("no branch payloads in the model contract", !with.contains("branchJson"));
@@ -217,5 +217,29 @@ public class ScopingConceptPromptTest {
                 .forPhase("scoping").getSystemPrompt().contains("conceptAction"));
         assertFalse(PhaseAssistantProfileRegistry.defaults(false, false)
                 .forPhase("scoping").getSystemPrompt().contains("conceptAction"));
+    }
+
+    /**
+     * Scoping regression (Hasenhaltung): gemma copied the ESP32/FreeRTOS examples of this prompt into the
+     * concept of an unrelated topic. The examples keep their SHAPE (small models need it for the format)
+     * but carry no topic any more — only placeholders that the concept loop refuses to execute.
+     */
+    @Test
+    public void theScopingPromptCarriesNoDomainExamplesOnlyPlaceholders() {
+        for (boolean offers : new boolean[] {false, true}) {
+            for (boolean concept : new boolean[] {false, true}) {
+                String prompt = TeamAgentPlaybook.scopingSystemPrompt(offers, concept).toLowerCase(java.util.Locale.ROOT);
+                for (String domain : new String[] {"esp32", "esp-idf", "freertos", "arduino", "praxisprojekte"}) {
+                    assertFalse(domain + " in prompt(offers=" + offers + ", concept=" + concept + ")",
+                            prompt.contains(domain));
+                }
+            }
+        }
+        String with = TeamAgentPlaybook.scopingSystemPrompt(true, true);
+        assertTrue("the examples are declared as shape only", with.contains("EXAMPLES SHOW THE SHAPE ONLY"));
+        assertTrue("the batch shape a small model needs stays",
+                with.contains("{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<area 1>\""));
+        assertTrue("a bare topic gets the topic's own areas",
+                with.contains("When the user only names a topic, the first cards are the main areas of THAT topic"));
     }
 }
