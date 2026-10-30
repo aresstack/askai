@@ -19,17 +19,38 @@ import java.util.List;
  */
 final class PlaywrightRenderedPageSource implements RenderedPageSource {
 
-    /** All browser access goes through the actor — never directly at the Playwright-backed session. */
-    private final BrowserSessionActor actor;
+    /** How the source reaches the session: through the actor, or directly on a worker browser's owner thread. */
+    interface SessionAccess {
+        <T> T on(BrowserSessionActor.PlaywrightSessionTask<T> task) throws BrowserException;
+    }
 
-    PlaywrightRenderedPageSource(BrowserSessionActor actor) {
-        this.actor = actor;
+    /** All browser access goes through the owner thread — never directly from a foreign thread. */
+    private final SessionAccess actor;
+
+    PlaywrightRenderedPageSource(final BrowserSessionActor actor) {
+        this.actor = new SessionAccess() {
+            public <T> T on(BrowserSessionActor.PlaywrightSessionTask<T> task) throws BrowserException {
+                return actor.onPlaywrightSession(task);
+            }
+        };
+    }
+
+    /**
+     * For a worker browsing context: the tool call that reaches this source already runs on the worker
+     * browser's owner thread, so the session is used directly.
+     */
+    PlaywrightRenderedPageSource(final PlaywrightBrowserSession session) {
+        this.actor = new SessionAccess() {
+            public <T> T on(BrowserSessionActor.PlaywrightSessionTask<T> task) throws BrowserException {
+                return task.run(session);
+            }
+        };
     }
 
     public EngineCapture capture(final String query, final PageEvaluator evaluator) {
         final List<Captured> pages = new ArrayList<Captured>();
         try {
-            PlaywrightBrowserSession.EngineNavigation nav = actor.onPlaywrightSession(
+            PlaywrightBrowserSession.EngineNavigation nav = actor.on(
                     new BrowserSessionActor.PlaywrightSessionTask<PlaywrightBrowserSession.EngineNavigation>() {
                         public PlaywrightBrowserSession.EngineNavigation run(
                                 PlaywrightBrowserSession session) throws BrowserException {

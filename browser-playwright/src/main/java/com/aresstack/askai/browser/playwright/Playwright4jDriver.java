@@ -80,11 +80,24 @@ final class Playwright4jDriver implements PlaywrightDriver {
 
     /** The per-navigation deadline ({@code navigationCommitTimeoutMillis}) — explicit on every navigate. */
     private final int navigationTimeoutMillis;
+    /**
+     * False for a worker browsing context ({@link #inBrowsingContext}): the driver then owns only its page;
+     * the user context, the browser and Playwright belong to the worker browser that created it.
+     */
+    private final boolean ownsGeneration;
 
     private Playwright4jDriver(Playwright playwright, Browser browser, BrowserContext context, Page page,
                                com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha,
                                int navigationTimeoutMillis) {
+        this(playwright, browser, context, page, consent, captcha, navigationTimeoutMillis, true);
+    }
+
+    private Playwright4jDriver(Playwright playwright, Browser browser, BrowserContext context, Page page,
+                               com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
+                               com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha,
+                               int navigationTimeoutMillis, boolean ownsGeneration) {
+        this.ownsGeneration = ownsGeneration;
         this.playwright = playwright;
         this.browser = browser;
         this.context = context;
@@ -189,6 +202,37 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     + ", after " + elapsedMillis + " ms): " + firstLine(ex)
                     + (report == null ? "" : " (full report: " + report + ")"));
         }
+    }
+
+    /**
+     * A driver for ONE browsing context (tab) of a worker user context, created by the worker browser on its
+     * owner thread (which becomes this driver's owner). It owns only {@code page}: {@link #close()} closes the
+     * page (and a parked challenge tab), never the user context, the browser or Playwright. The Research HUD
+     * belongs to the chat's own browser and is not rendered in worker tabs.
+     */
+    static Playwright4jDriver inBrowsingContext(Browser browser, BrowserContext userContext, Page page,
+                                                int timeoutMillis,
+                                                com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
+                                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha) {
+        final Playwright4jDriver driver = new Playwright4jDriver(null, browser, userContext, page, consent,
+                captcha, timeoutMillis, false);
+        page.onPopup(driver.popupCloser());
+        if (browser != null) {
+            browser.onDisconnected(new Consumer<Browser>() {
+                public void accept(Browser gone) {
+                    driver.browserDisconnected = true;
+                }
+            });
+        }
+        page.onClose(new Consumer<Page>() {
+            public void accept(Page gone) {
+                // The user closed this worker tab: its later calls fail with the typed marker.
+                if (!driver.closed) {
+                    driver.browserDisconnected = true;
+                }
+            }
+        });
+        return driver;
     }
 
     @Override
@@ -366,6 +410,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
         owner.check();
         if (closed) {
             return "closed";
+        }
+        if (!ownsGeneration) {
+            return "unsupported"; // the HUD binding lives on the chat's own context, never in a worker tab
         }
         try {
             if (!hudBindingRegistered) {
@@ -565,6 +612,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
             page.close();
         } catch (RuntimeException ignored) {
         }
+        if (!ownsGeneration) {
+            return; // a worker tab: the user context and the browser stay with the worker browser
+        }
         closeQuietly(context, browser, playwright);
         if (profileLease != null) {
             profileLease.close();
@@ -584,6 +634,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         closed = true;
         browserDisconnected = true;
+        if (!ownsGeneration) {
+            return; // the worker browser cuts its own connection; a tab has nothing of its own to cut
+        }
         final Playwright toCut = playwright;
         final CamoufoxProvisioning.ProfileLease lease = profileLease;
         Thread cutter = new Thread(new Runnable() {

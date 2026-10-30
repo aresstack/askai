@@ -46,6 +46,8 @@ public final class ProductiveResearchSessionResources {
     private final BrowserBridgeEndpoint browserBridge;
     /** The LAZY, restartable browser runtime (STOPPED until the first browser command); owned here. */
     private final BrowserRuntimePort browser;
+    /** Worker user contexts of this chat (parallel research workers); owned here, closed with the session. */
+    private volatile com.aresstack.askai.research.runtime.browser.BrowserUserContextPool browserUserContexts;
     private final InProcessResearchSessionBackend backend;
     /** The session's immutable settings snapshot (A2c); set once by the factory right after creation. */
     private volatile com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot searchProfile;
@@ -364,6 +366,22 @@ public final class ProductiveResearchSessionResources {
         return browser;
     }
 
+    void setBrowserUserContexts(com.aresstack.askai.research.runtime.browser.BrowserUserContextPool pool) {
+        this.browserUserContexts = pool;
+    }
+
+    /**
+     * Isolated browser user contexts for parallel research workers of this chat (never null; without a
+     * worker browser every acquire fails readably). Separate from {@link #getBrowser()}, the chat's own
+     * browser, which keeps serving the serial research path unchanged.
+     */
+    public com.aresstack.askai.research.runtime.browser.BrowserUserContextPool getBrowserUserContexts() {
+        com.aresstack.askai.research.runtime.browser.BrowserUserContextPool pool = browserUserContexts;
+        return pool != null ? pool
+                : com.aresstack.askai.research.runtime.browser.BrowserUserContextPool.unavailable(
+                        "no worker browser is configured for this session");
+    }
+
     /**
      * End the current browsing phase: stop the browser but keep the TeamAgent and session alive. A
      * later research run lazily starts a fresh browser generation. Called when a research run finishes.
@@ -635,6 +653,13 @@ public final class ProductiveResearchSessionResources {
         }
         if (botControlEndpoint != null) {
             botControlEndpoint.close();
+        }
+        if (browserUserContexts instanceof AutoCloseable) {
+            try {
+                ((AutoCloseable) browserUserContexts).close(); // every worker lease and worker browser of this chat
+            } catch (Exception ignored) {
+                // best-effort teardown
+            }
         }
         if (browserBridge != null) {
             browserBridge.close();

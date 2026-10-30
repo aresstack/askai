@@ -154,6 +154,73 @@ public final class ProductiveResearchBackendFactory {
         }
     }
 
+    // Worker browser limits (settings; the defaults are the named fallbacks in ResearchRuntimeSettings).
+    private volatile int workerBrowserProcesses = ResearchRuntimeSettings.DEFAULT_WORKER_BROWSER_PROCESSES;
+    private volatile int workerUserContextsPerProcess =
+            ResearchRuntimeSettings.DEFAULT_WORKER_USER_CONTEXTS_PER_PROCESS;
+    private volatile int workerTabsPerUserContext = ResearchRuntimeSettings.DEFAULT_WORKER_TABS_PER_USER_CONTEXT;
+    private volatile int workerPerSite = ResearchRuntimeSettings.DEFAULT_WORKER_PER_SITE;
+    private volatile int workerAcquireTimeoutSeconds = ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS;
+
+    /** The worker-browser limits: processes, user contexts per process, tabs, per-site and acquire wait. */
+    public void setWorkerBrowserLimits(int processes, int userContextsPerProcess, int tabsPerUserContext,
+                                       int perSite, int acquireTimeoutSeconds) {
+        if (processes > 0) {
+            this.workerBrowserProcesses = processes;
+        }
+        if (userContextsPerProcess > 0) {
+            this.workerUserContextsPerProcess = userContextsPerProcess;
+        }
+        if (tabsPerUserContext > 0) {
+            this.workerTabsPerUserContext = tabsPerUserContext;
+        }
+        if (perSite > 0) {
+            this.workerPerSite = perSite;
+        }
+        if (acquireTimeoutSeconds > 0) {
+            this.workerAcquireTimeoutSeconds = acquireTimeoutSeconds;
+        }
+    }
+
+    /** The current worker-browser limits; call timeout and idle stop are the chat browser's two settings. */
+    com.aresstack.askai.browser.playwright.WorkerBrowserLimits workerBrowserLimits() {
+        return new com.aresstack.askai.browser.playwright.WorkerBrowserLimits(workerBrowserProcesses,
+                workerUserContextsPerProcess, workerTabsPerUserContext, workerPerSite,
+                workerAcquireTimeoutSeconds * 1000L, browserToolTimeoutSeconds * 1000L,
+                browserIdleStopSeconds * 1000L);
+    }
+
+    /**
+     * The session's worker user contexts: a scope of the plugin's shared worker browser pool, bound to this
+     * chat and to its capture store. An unreadable browser config yields an unavailable pool (acquire fails
+     * readably), never a session that cannot start.
+     */
+    private com.aresstack.askai.research.runtime.browser.BrowserUserContextPool workerUserContexts(
+            String sessionKey, File browserConfigFile, CaptureStore captures) {
+        try {
+            String extra = System.getProperty(LazyRestartableBrowserRuntime.BROWSER_ARGS_PROPERTY, "").trim();
+            com.aresstack.askai.browser.playwright.PlaywrightBrowserRuntime.Options options =
+                    new com.aresstack.askai.browser.playwright.PlaywrightBrowserRuntime.Options(
+                            config.getBrowserChannel(), config.isHeadless(), config.isAllowPrivateNetworks(),
+                            LazyRestartableBrowserRuntime.argument(extra, "--search-url="),
+                            com.aresstack.askai.browser.playwright.PlaywrightBrowserRuntime.loadBrowserConfig(
+                                    browserConfigFile.getAbsolutePath()),
+                            "host-port".equalsIgnoreCase(
+                                    LazyRestartableBrowserRuntime.argument(extra, "--domain-key-mode=")));
+            com.aresstack.askai.browser.playwright.PlaywrightUserContextPool pool =
+                    SharedWorkerBrowserPool.get(workerBrowserLimits());
+            return new ChatBrowserUserContexts(pool.openChat(sessionKey, options), captures,
+                    new WorkerUserContextStateStore(
+                            com.aresstack.askai.browser.playwright.PlaywrightUserContextPool.defaultStateDirectory(),
+                            sessionKey), sessionKey);
+        } catch (java.io.IOException | RuntimeException unavailable) {
+            System.err.println("[browser-workers] worker user contexts unavailable for " + sessionKey + ": "
+                    + unavailable.getMessage());
+            return com.aresstack.askai.research.runtime.browser.BrowserUserContextPool.unavailable(
+                    String.valueOf(unavailable.getMessage()));
+        }
+    }
+
     // Review-context bounds (served to the runtime via source_review_context; settings, not constants).
     private volatile int reviewMaxSources = ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES;
     private volatile int reviewMaxCharsPerSource = ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_CHARS;
@@ -949,6 +1016,9 @@ public final class ProductiveResearchBackendFactory {
                     acceptance, projectContext, control, bridge,
                     browser, backend, service);
             resources.setSearchProfile(profile);
+            // Parallel research workers: isolated browser user contexts of THIS chat, their pages recorded
+            // into the SAME capture store as the session browser's (one source process for all workers).
+            resources.setBrowserUserContexts(workerUserContexts(sessionKey, browserConfigFile, captures));
             // Z3b-3: the sweep needs the SAME frozen embedding world the knowledge pipeline got.
             resources.setEmbeddingDescriptor(embeddingDescriptor);
             if (botControl != null) {
