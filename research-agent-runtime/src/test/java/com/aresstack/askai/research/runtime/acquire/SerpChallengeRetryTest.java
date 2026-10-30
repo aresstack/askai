@@ -117,4 +117,66 @@ public class SerpChallengeRetryTest {
         assertEquals("an honestly empty retry ends honestly",
                 ResearchStopReason.NO_RELEVANT_PATHS, reason);
     }
+
+    /**
+     * A worker's user context that is lost while it waits on a CAPTCHA never answers again (unlike the chat
+     * browser, which restarts): the wait ends technically, so the worker gives its lease back and the package
+     * can be retried, instead of polling a dead user context until the user cancels the turn.
+     */
+    @Test(timeout = 10_000L)
+    public void aLostWorkerUserContextEndsTheChallengeWait() {
+        final ChallengedThenEmptyStrategy strategy = new ChallengedThenEmptyStrategy();
+        ToolInvoker lost = new ToolInvoker() {
+            public String call(String tool, Map<String, Object> args) throws EndpointUnavailable {
+                throw new EndpointUnavailable("USER_CONTEXT_LOST — worker browser w1 was terminated");
+            }
+        };
+        final long[] now = {0L};
+        WebSearchApplicationService service = new WebSearchApplicationService(lost,
+                ResearchRunBudget.defaults(), new ResearchRunProgress(),
+                new ResearchLoopClock() {
+                    public long currentTimeMillis() {
+                        return now[0];
+                    }
+
+                    public void sleepMillis(long millis) {
+                        now[0] += Math.max(1L, millis);
+                    }
+                },
+                new ResearchLoopListener() {
+                    public void status(String message) {
+                    }
+
+                    public void progress(ResearchRunProgress p, ResearchRunActivity activity) {
+                    }
+
+                    public void phaseReady(ResearchStopReason reason) {
+                    }
+
+                    public void attention(String reason, String family, String url, boolean resolved) {
+                    }
+                },
+                new AtomicBoolean(false), strategy, null, null,
+                new com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver(),
+                new SourceAcceptancePort() {
+                    public String accept(String captureId) {
+                        return "";
+                    }
+
+                    public void park(String url, String title, String excerpt, double score) {
+                    }
+                },
+                0L, 1L,
+                new WebSearchApplicationService.AcceptedSourceListener() {
+                    public ResearchStopReason onAccepted(WebSearchApplicationService.AcceptedSource source,
+                                                         WebSearchApplicationService.ToolBudget budget) {
+                        return null;
+                    }
+                },
+                true, 1, 48);
+
+        assertEquals("a technical, retryable end — not the user's cancel, not an endless wait",
+                ResearchStopReason.MCP_UNAVAILABLE, service.execute("puten preise"));
+        assertEquals("no second search on a dead user context", 1, strategy.calls);
+    }
 }

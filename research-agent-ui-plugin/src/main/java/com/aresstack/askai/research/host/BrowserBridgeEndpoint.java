@@ -63,6 +63,25 @@ public final class BrowserBridgeEndpoint {
             return;
         }
         handle = registry.registerEndpoint(new McpEndpointDefinition(endpointId, "Browser"));
+        List<McpToolContribution> tools = buildTools();
+        invoker.setTools(tools);
+        registry.updateTools(handle, tools);
+    }
+
+    /**
+     * Serve the bridge tool set ONLY in-process through {@link #toolInvoker()} — same tools, same
+     * {@code capture_id} convention, same capture store — without publishing an MCP endpoint. A research
+     * worker's browsing context uses this: its pages enter the session's sources exactly like the session
+     * browser's, and no per-tab endpoint shows up for external clients. Idempotent.
+     */
+    public void openInProcess() {
+        if (closed || handle != null) {
+            return;
+        }
+        invoker.setTools(buildTools());
+    }
+
+    private List<McpToolContribution> buildTools() {
         List<McpToolContribution> tools = new ArrayList<McpToolContribution>();
         tools.add(passThrough("web_search", "Search the web via the configured provider.",
                 McpToolParameter.string("query", true, "The search query")));
@@ -105,8 +124,7 @@ public final class BrowserBridgeEndpoint {
         // deliverable even while a data command (probe/read/open) blocks the browser owner thread.
         tools.add(controlPassThrough("web_hud_poll",
                 "Drain the HUD commands the user triggered in the overlay (PAUSE/RESUME/SKIP/…), or empty."));
-        invoker.setTools(tools);
-        registry.updateTools(handle, tools);
+        return tools;
     }
 
     /** Unregister the bridge (invalidates its token). Idempotent. */

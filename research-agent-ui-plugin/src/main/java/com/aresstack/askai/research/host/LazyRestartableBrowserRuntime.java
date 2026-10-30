@@ -130,7 +130,16 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
      */
     public LazyRestartableBrowserRuntime(ResearchRuntimeConfig config, String browserConfigPath,
                                          int callTimeoutSeconds, int idleStopSeconds) {
-        this(inProcessStarter(config, browserConfigPath), Math.max(0, callTimeoutSeconds) * 1000L,
+        this(config, browserConfigPath, callTimeoutSeconds, idleStopSeconds, null);
+    }
+
+    /**
+     * @param chatKey the chat this browser belongs to: every generation reopens THIS chat's persistent browser
+     *                profile, so sign-ins survive restarts but never travel to another chat (null = temporary)
+     */
+    public LazyRestartableBrowserRuntime(ResearchRuntimeConfig config, String browserConfigPath,
+                                         int callTimeoutSeconds, int idleStopSeconds, String chatKey) {
+        this(inProcessStarter(config, browserConfigPath, chatKey), Math.max(0, callTimeoutSeconds) * 1000L,
                 Math.max(0, idleStopSeconds) * 1000L);
     }
 
@@ -497,7 +506,7 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
 
     /** The productive starter: start the Playwright browser in-process (blocks until it is ready). */
     private static SidecarStarter inProcessStarter(final ResearchRuntimeConfig config,
-                                                   final String browserConfigPath) {
+                                                   final String browserConfigPath, final String chatKey) {
         return new SidecarStarter() {
             public Sidecar start() throws BrowserRuntimeException {
                 final PlaywrightBrowserRuntime runtime;
@@ -507,7 +516,7 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
                             config.getBrowserChannel(), config.isHeadless(), config.isAllowPrivateNetworks(),
                             argument(extra, "--search-url="),
                             PlaywrightBrowserRuntime.loadBrowserConfig(browserConfigPath),
-                            "host-port".equalsIgnoreCase(argument(extra, "--domain-key-mode="))));
+                            "host-port".equalsIgnoreCase(argument(extra, "--domain-key-mode=")), chatKey));
                 } catch (PlaywrightBrowserRuntime.StartFailure notReady) {
                     throw new BrowserRuntimeException("browser failed to start: " + notReady.readiness(), true);
                 } catch (Exception failure) {
