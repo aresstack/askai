@@ -51,9 +51,14 @@ public final class ConceptToolRounds {
         void intermediate(ScopingAssistantOutput output);
     }
 
-    /** An example placeholder of the instructions ({@code <area 1>}, {@code <topic>}). */
-    private static final java.util.regex.Pattern PLACEHOLDER =
-            java.util.regex.Pattern.compile("<[^<>\"]{1,40}>");
+    /**
+     * Exactly the placeholders the instructions use ({@code <area 1>}, {@code <topic>}, …). Deliberately a
+     * closed list: legitimate angle-bracket names a user researches ({@code <h1>}, {@code vector<int>}) pass.
+     */
+    private static final java.util.regex.Pattern PLACEHOLDER = java.util.regex.Pattern.compile(
+            "<(topic|area \\d+|Bereich \\d+|card|child card|card name|subtopic|new name|new parent|term"
+                    + "|term \\d+|leaf \\d+|facet-id|direction|first direction|second direction"
+                    + "|third direction|core aspect|practical aspect|X|Y|Z)>");
 
     private ConceptToolRounds() {
     }
@@ -200,7 +205,12 @@ public final class ConceptToolRounds {
                                 + channel + " — NOT executed, repair turn (repairs=" + repairs + "/"
                                 + maxRepairAttempts + ")");
                         if (intermediateSink != null) {
-                            intermediateSink.intermediate(output);
+                            if (probedThisTurn && hasCommittableScopePatch(output)) {
+                                // The post-probe sensor lock covers this replaced output too.
+                                trace.line("post-probe sensor lock: intermediate scope patch suppressed");
+                            } else {
+                                intermediateSink.intermediate(output);
+                            }
                         }
                         result = turn.run(withProbeMeaning(TeamAgentPlaybook.conceptReceipts(
                                 conceptRevision, applied, noChange, rejected, currentConcept,
@@ -268,6 +278,16 @@ public final class ConceptToolRounds {
                         probeReceiptText, germanFeedback, trace);
             }
             if (budgetExhausted) {
+                if (action != null && action.getType() == ConceptAction.Type.OFFER
+                        && !offeredThisTurn && hasPlaceholder(action)) {
+                    // The contamination guard covers the over-budget offer as well: an
+                    // instruction placeholder never becomes a clickable search tag.
+                    trace.line("wrap-up offer REFUSED (placeholder copied from the instructions)");
+                    return withoutActionLeak(closeProbeTurn(withMoveTruth(result, mode, movedReceipt,
+                            !applied.isEmpty(), moveOutcome, germanFeedback, trace),
+                            probeReceiptText, germanFeedback, trace), !applied.isEmpty(), germanFeedback,
+                            trace);
+                }
                 if (action != null && action.getType() == ConceptAction.Type.OFFER
                         && !offeredThisTurn) {
                     // Gate finding: the first broad turn regularly EXHAUSTS the budget building

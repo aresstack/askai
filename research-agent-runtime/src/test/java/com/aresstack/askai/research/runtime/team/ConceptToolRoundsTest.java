@@ -1092,4 +1092,40 @@ public class ConceptToolRoundsTest {
         assertTrue(trace.toString(), trace.contains("round 1 -> REFUSED (placeholder copied from the instructions)"));
         assertTrue(turns.feedbackSeen.get(0).contains("placeholder in <angle brackets>"));
     }
+
+    /** The placeholder guard is a closed list: angle-bracket names a user researches still go through. */
+    @Test
+    public void legitimateAngleBracketNamesAreNoPlaceholders() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"<h1>\",\"std::vector<int>\"]",
+                "added 2 cards revision=1");
+        turns.script.add(turn("Angelegt.", "{\"type\":\"none\"}"));
+
+        ConceptToolRounds.run(turn("lege an",
+                "{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<h1>\",\"std::vector<int>\"]}"),
+                turns, tool, 4, 2, true, null, traceSink);
+
+        assertTrue(tool.calls.toString(),
+                tool.calls.contains("add_cards parent=[] names=[\"<h1>\",\"std::vector<int>\"]"));
+    }
+
+    /** An over-budget wrap-up offer with an instruction placeholder never becomes a search tag. */
+    @Test
+    public void aWrapUpOfferWithAPlaceholderIsNotExecuted() throws Exception {
+        ScriptedTurns turns = new ScriptedTurns();
+        ScriptedTool tool = new ScriptedTool();
+        tool.byDescription.put("add_cards parent=[] names=[\"Haltung\"]", "added revision=1");
+        turns.script.add(turn("Fertig.", "{\"type\":\"offer\",\"suggestions\":[{\"query\":"
+                + "\"<topic> basics overview\",\"purpose\":\"x\"}]}"));
+
+        ConceptToolRounds.run(turn("lege an", "{\"type\":\"add_cards\",\"parent\":[],"
+                + "\"names\":[\"Haltung\"]}"), turns, tool, 1, 2, true, null, traceSink);
+
+        for (String call : tool.calls) {
+            assertTrue("no offer reached the host: " + tool.calls, !call.startsWith("offer"));
+        }
+        assertTrue(trace.toString(), trace.contains(
+                "wrap-up offer REFUSED (placeholder copied from the instructions)"));
+    }
 }
