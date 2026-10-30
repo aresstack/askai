@@ -70,6 +70,75 @@ test {
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// ADR 0001, work item I: the LangChain4j SPIKE. One worker role (the search planner of lane G) is built a
+// second time with LangChain4j core, through a ChatModel adapter over the host's model port. The spike is its
+// own source set: LangChain4j (and the Jackson it brings) is on NEITHER the plugin's runtimeClasspath NOR its
+// lib/, so pluginDistribution and the host-API guard above are untouched. It becomes a product dependency only
+// by an ADR decision on the measured evidence (`langchain4jSpikeTest`, `langchain4jSpikeLive`).
+// ---------------------------------------------------------------------------------------------------------
+ext.langchain4jVersion = '1.22.0'
+
+sourceSets {
+    langchain4jSpike {
+        java.srcDir 'src/langchain4jSpike/java'
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    langchain4jSpikeTest {
+        java.srcDir 'src/langchain4jSpikeTest/java'
+        compileClasspath += sourceSets.langchain4jSpike.output + sourceSets.langchain4jSpike.compileClasspath
+        runtimeClasspath += sourceSets.langchain4jSpike.output + sourceSets.langchain4jSpike.runtimeClasspath
+    }
+}
+
+dependencies {
+    langchain4jSpikeImplementation "dev.langchain4j:langchain4j:${langchain4jVersion}"
+    // What the host provides at runtime, provided here for compiling and testing outside the host.
+    langchain4jSpikeImplementation project(':agent-model-runtime-api')
+    langchain4jSpikeImplementation project(':mcp-runtime-api')
+    langchain4jSpikeImplementation project(':research-domain')
+    langchain4jSpikeImplementation "com.google.code.gson:gson:${gsonVersion}"
+    langchain4jSpikeTestImplementation 'junit:junit:4.13.2'
+    // The live comparison drives both twins through the platform's own model port on ollama4j (as the
+    // benchmark does); the spike only constructs it, ollama4j stays inside askai-app.
+    langchain4jSpikeTestImplementation project(':askai-app')
+    langchain4jSpikeTestRuntimeOnly 'org.slf4j:slf4j-nop:2.0.17'
+}
+
+// The model-free comparison (scripted port): part of `check`, so CI runs it.
+tasks.register('langchain4jSpikeTest', Test) {
+    description = 'Runs the LangChain4j spike comparison against a scripted model port (no Ollama needed).'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.langchain4jSpikeTest.output.classesDirs
+    classpath = sourceSets.langchain4jSpikeTest.runtimeClasspath
+    exclude '**/*LiveTest*'
+}
+check.dependsOn tasks.named('langchain4jSpikeTest')
+
+// The live comparison on the owner's machine; skips with a readable reason without Ollama or the models.
+tasks.register('langchain4jSpikeLive', Test) {
+    description = 'Runs both search-planner twins live through the model port (needs Ollama; skips otherwise).'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.langchain4jSpikeTest.output.classesDirs
+    classpath = sourceSets.langchain4jSpikeTest.runtimeClasspath
+    include '**/*LiveTest*'
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
+    }
+    doFirst {
+        System.getProperties().each { key, value ->
+            if (key.toString().startsWith('askai.spike.')) {
+                systemProperty key.toString(), value.toString()
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Commit 9: real PF4J plugin artifact + dev-install plumbing.
 //
 // The plugin JAR carries ONLY this module's own classes plus the generated META-INF/extensions.idx. The
