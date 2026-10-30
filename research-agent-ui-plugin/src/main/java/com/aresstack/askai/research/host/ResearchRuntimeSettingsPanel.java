@@ -62,6 +62,12 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField browserToolTimeout = ComicControls.textField(4);
     private final JTextField browserIdleStop = ComicControls.textField(4);
     private final JTextField searchMaxErrors = ComicControls.textField(4);
+    // Worker browsers (parallel research workers): separate from the model capacity.
+    private final JTextField workerProcesses = ComicControls.textField(3);
+    private final JTextField workerUserContexts = ComicControls.textField(3);
+    private final JTextField workerTabs = ComicControls.textField(3);
+    private final JTextField workerPerSite = ComicControls.textField(3);
+    private final JTextField workerAcquireTimeout = ComicControls.textField(4);
     // Review-context bounds: how many sources one review reads, and how much of each.
     private final JTextField reviewMaxSources = ComicControls.textField(4);
     private final JTextField reviewMaxChars = ComicControls.textField(6);
@@ -199,6 +205,18 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         orchestratorLimits.add(javax.swing.Box.createHorizontalStrut(10));
         orchestratorLimits.add(labelled("Sources/section", orchestratorSectionSources));
         form.add(row("Orchestrator:", orchestratorLimits));
+        JPanel workerLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        workerLimits.setOpaque(false);
+        workerLimits.add(labelled("Processes", workerProcesses));
+        workerLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        workerLimits.add(labelled("User contexts/process", workerUserContexts));
+        workerLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        workerLimits.add(labelled("Tabs/user context", workerTabs));
+        workerLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        workerLimits.add(labelled("Per site", workerPerSite));
+        workerLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        workerLimits.add(labelled("Wait (s)", workerAcquireTimeout));
+        form.add(row("Worker browsers:", workerLimits));
         JPanel workerRoles = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         workerRoles.setOpaque(false);
         workerRoles.add(workerSearchPlanner);
@@ -520,6 +538,25 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "How long the browser stays open after a search without a new browser command before it "
                         + "is stopped. Keeping it warm saves the browser start (about 10 s) on the next "
                         + "search; 0 = stop right after each search.");
+        bindLimit(workerProcesses, ResearchRuntimeSettings.KEY_WORKER_BROWSER_PROCESSES,
+                ResearchRuntimeSettings.DEFAULT_WORKER_BROWSER_PROCESSES,
+                "Worker browser processes for parallel research workers, over all chats. This is also how many "
+                        + "browser operations run at the same time. Independent of the model capacity "
+                        + "(AI models > Model resources). Each process costs a browser plus a driver JVM.");
+        bindLimit(workerUserContexts, ResearchRuntimeSettings.KEY_WORKER_USER_CONTEXTS_PER_PROCESS,
+                ResearchRuntimeSettings.DEFAULT_WORKER_USER_CONTEXTS_PER_PROCESS,
+                "Isolated user contexts (own cookies and sign-ins, one per worker) one worker browser hosts. "
+                        + "Workers in the same process take turns on its browser.");
+        bindLimit(workerTabs, ResearchRuntimeSettings.KEY_WORKER_TABS_PER_USER_CONTEXT,
+                ResearchRuntimeSettings.DEFAULT_WORKER_TABS_PER_USER_CONTEXT,
+                "Tabs (browsing contexts) one worker may hold open in its user context.");
+        bindLimit(workerPerSite, ResearchRuntimeSettings.KEY_WORKER_PER_SITE,
+                ResearchRuntimeSettings.DEFAULT_WORKER_PER_SITE,
+                "Worker browser operations against the same site at the same time, over all workers and "
+                        + "chats. Search engines count as one site.");
+        bindLimit(workerAcquireTimeout, ResearchRuntimeSettings.KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS,
+                "How long a worker waits for a free user context before its task fails.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
                 "How many sources one review reads at most (newest first).");

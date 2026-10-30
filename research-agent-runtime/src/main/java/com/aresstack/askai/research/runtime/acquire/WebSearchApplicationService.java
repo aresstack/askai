@@ -1679,6 +1679,9 @@ public final class WebSearchApplicationService {
             if (cancelled.get() || browserClosedByUser) {
                 return ResearchStopReason.USER_CANCELLED;
             }
+            if (browserGone) {
+                return ResearchStopReason.MCP_UNAVAILABLE;
+            }
             long tickStart = clock.currentTimeMillis();
             clock.sleepMillis(challengeProbeIntervalMillis);
             waitedForUserMillis += Math.max(0, clock.currentTimeMillis() - tickStart);
@@ -1701,7 +1704,14 @@ public final class WebSearchApplicationService {
             // Deliberately WITHOUT the budget gate: polling the user's pending challenge must never
             // exhaust a tool budget or count as research work.
             applyChallengeLines(callBrowser("web_challenge_status", args()));
-        } catch (ToolInvoker.EndpointUnavailable | ToolInvoker.ToolFailure ignored) {
+        } catch (ToolInvoker.EndpointUnavailable gone) {
+            // A worker's user context that is gone never answers again (the chat browser would restart): end
+            // the wait technically so the worker gives its lease back and the package can be retried.
+            if (gone.getMessage() != null && gone.getMessage().contains(
+                    com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition.USER_CONTEXT_LOST)) {
+                browserGone = true;
+            }
+        } catch (ToolInvoker.ToolFailure ignored) {
             // The probe is best-effort; the next tick retries. (A BROWSER_CLOSED failure has already
             // flipped browserClosedByUser inside callBrowser — the gates end the run as the user's.)
         }
@@ -1743,6 +1753,9 @@ public final class WebSearchApplicationService {
             probeChallengesIfDue(frontier);
             if (browserClosedByUser) {
                 return ResearchStopReason.USER_CANCELLED; // the window close IS the user's answer
+            }
+            if (browserGone) {
+                return ResearchStopReason.MCP_UNAVAILABLE; // a lost worker user context never answers again
             }
         }
         return cancelled.get() ? ResearchStopReason.USER_CANCELLED : null;

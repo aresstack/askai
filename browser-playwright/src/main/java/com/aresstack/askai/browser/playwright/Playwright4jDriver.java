@@ -80,11 +80,24 @@ final class Playwright4jDriver implements PlaywrightDriver {
 
     /** The per-navigation deadline ({@code navigationCommitTimeoutMillis}) — explicit on every navigate. */
     private final int navigationTimeoutMillis;
+    /**
+     * False for a worker browsing context ({@link #inBrowsingContext}): the driver then owns only its page;
+     * the user context, the browser and Playwright belong to the worker browser that created it.
+     */
+    private final boolean ownsGeneration;
 
     private Playwright4jDriver(Playwright playwright, Browser browser, BrowserContext context, Page page,
                                com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha,
                                int navigationTimeoutMillis) {
+        this(playwright, browser, context, page, consent, captcha, navigationTimeoutMillis, true);
+    }
+
+    private Playwright4jDriver(Playwright playwright, Browser browser, BrowserContext context, Page page,
+                               com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
+                               com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha,
+                               int navigationTimeoutMillis, boolean ownsGeneration) {
+        this.ownsGeneration = ownsGeneration;
         this.playwright = playwright;
         this.browser = browser;
         this.context = context;
@@ -97,9 +110,10 @@ final class Playwright4jDriver implements PlaywrightDriver {
     /**
      * Launch the full chain. @param requestAllowed null = no interception; otherwise every browser-side
      * request URL is checked and aborted when not allowed (cheap best-effort SSRF net below the
-     * authoritative post-navigation URL-policy check in the session).
+     * authoritative post-navigation URL-policy check in the session). @param profileKey the chat whose persistent
+     * Camoufox profile this browser uses (null = a temporary profile; see {@link CamoufoxProvisioning#leaseProfile}).
      */
-    static Playwright4jDriver launch(String channel, boolean headless, int timeoutMillis,
+    static Playwright4jDriver launch(String channel, boolean headless, int timeoutMillis, String profileKey,
                                      final Predicate<String> requestAllowed,
                                      com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
                                      com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha)
@@ -130,7 +144,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             playwright = Playwright.create(new Playwright.CreateOptions().setEnv(env));
             stage = "BROWSER_LAUNCH";
             if (camoufox) {
-                profile = CamoufoxProvisioning.leaseProfile();
+                profile = CamoufoxProvisioning.leaseProfile(profileKey);
                 context = playwright.firefox().launchPersistentContext(profile.directory(),
                         camoufoxOptions(camoufoxExecutable, camoufoxLaunch, headless));
                 browser = context.browser();
@@ -189,6 +203,30 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     + ", after " + elapsedMillis + " ms): " + firstLine(ex)
                     + (report == null ? "" : " (full report: " + report + ")"));
         }
+    }
+
+    /**
+     * A driver for ONE browsing context (tab) of a worker user context, created by the worker browser on its
+     * owner thread (which becomes this driver's owner). It owns only {@code page}: {@link #close()} closes the
+     * page (and a parked challenge tab), never the user context, the browser or Playwright. The Research HUD
+     * belongs to the chat's own browser and is not rendered in worker tabs.
+     */
+    static Playwright4jDriver inBrowsingContext(Browser browser, BrowserContext userContext, Page page,
+                                                int timeoutMillis,
+                                                com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
+                                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha) {
+        final Playwright4jDriver driver = new Playwright4jDriver(null, browser, userContext, page, consent,
+                captcha, timeoutMillis, false);
+        page.onPopup(driver.popupCloser());
+        if (browser != null) {
+            browser.onDisconnected(new Consumer<Browser>() {
+                public void accept(Browser gone) {
+                    driver.browserDisconnected = true;
+                }
+            });
+        }
+        page.onClose(driver.activeTabCloseWatcher());
+        return driver;
     }
 
     @Override
@@ -367,6 +405,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
         if (closed) {
             return "closed";
         }
+        if (!ownsGeneration) {
+            return "unsupported"; // the HUD binding lives on the chat's own context, never in a worker tab
+        }
         try {
             if (!hudBindingRegistered) {
                 // Buffer overlay button commands; registered on the CONTEXT so it survives navigations.
@@ -396,6 +437,21 @@ final class Playwright4jDriver implements PlaywrightDriver {
     @Override
     public HudCommandInbox hudInbox() {
         return hudCommands;
+    }
+
+    /**
+     * Worker tabs only: the user closing the ACTIVE page ends the tab (its later calls fail with the typed
+     * marker). A parked challenge page closing — resolved, or closed by {@link #closeParkedChallenge()} — is
+     * not the tab going away.
+     */
+    private Consumer<Page> activeTabCloseWatcher() {
+        return new Consumer<Page>() {
+            public void accept(Page gone) {
+                if (!closed && gone == page) {
+                    browserDisconnected = true;
+                }
+            }
+        };
     }
 
     /** The one popup policy: close immediately, count it, and never let a dead popup break the session. */
@@ -511,6 +567,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
             challengePage = page;
             page = context.newPage();
             page.onPopup(popupCloser());
+            if (!ownsGeneration) {
+                page.onClose(activeTabCloseWatcher());
+            }
             // Bring the challenge to the user's attention exactly ONCE — polls never steal focus again.
             if (captcha.focusTabOnFirstDetection) {
                 try {
@@ -565,6 +624,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
             page.close();
         } catch (RuntimeException ignored) {
         }
+        if (!ownsGeneration) {
+            return; // a worker tab: the user context and the browser stay with the worker browser
+        }
         closeQuietly(context, browser, playwright);
         if (profileLease != null) {
             profileLease.close();
@@ -584,6 +646,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         closed = true;
         browserDisconnected = true;
+        if (!ownsGeneration) {
+            return; // the worker browser cuts its own connection; a tab has nothing of its own to cut
+        }
         final Playwright toCut = playwright;
         final CamoufoxProvisioning.ProfileLease lease = profileLease;
         Thread cutter = new Thread(new Runnable() {

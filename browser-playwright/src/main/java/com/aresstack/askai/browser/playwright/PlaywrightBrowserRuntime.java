@@ -45,6 +45,7 @@ public final class PlaywrightBrowserRuntime implements AutoCloseable {
         final String searchUrlTemplate;
         final LegacyBrowserSearchSettings settings;
         final boolean hostPortDomainKeys;
+        final String profileKey;
 
         /**
          * @param channel              {@code camoufox} (default, also for null), {@code chrome} or {@code msedge}
@@ -58,6 +59,15 @@ public final class PlaywrightBrowserRuntime implements AutoCloseable {
          */
         public Options(String channel, boolean headless, boolean allowPrivateNetworks, String searchUrlTemplate,
                        LegacyBrowserSearchSettings settings, boolean hostPortDomainKeys) {
+            this(channel, headless, allowPrivateNetworks, searchUrlTemplate, settings, hostPortDomainKeys, null);
+        }
+
+        /**
+         * @param profileKey the chat this browser belongs to: Camoufox keeps that chat's OWN persistent profile
+         *                   (sign-ins never travel between chats); null = a temporary profile, deleted on close
+         */
+        public Options(String channel, boolean headless, boolean allowPrivateNetworks, String searchUrlTemplate,
+                       LegacyBrowserSearchSettings settings, boolean hostPortDomainKeys, String profileKey) {
             this.channel = channel;
             this.headless = headless;
             this.allowPrivateNetworks = allowPrivateNetworks;
@@ -65,6 +75,7 @@ public final class PlaywrightBrowserRuntime implements AutoCloseable {
                     ? null : searchUrlTemplate.trim();
             this.settings = settings == null ? LegacyBrowserSearchDefaults.create() : settings;
             this.hostPortDomainKeys = hostPortDomainKeys;
+            this.profileKey = profileKey == null || profileKey.trim().isEmpty() ? null : profileKey;
         }
     }
 
@@ -111,7 +122,7 @@ public final class PlaywrightBrowserRuntime implements AutoCloseable {
                 public BrowserSession get() {
                     BrowserSession session = PlaywrightSessionFactory.create(channel, options.headless,
                             options.allowPrivateNetworks, options.searchUrlTemplate, BrowserLimits.defaults(),
-                            options.settings);
+                            options.settings, options.profileKey);
                     created.set(session);
                     return session;
                 }

@@ -45,6 +45,7 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
     private final com.aresstack.askai.agent.model.port.ModelPort modelPort;
     /** ADR 0001 lane F: the project's blackboard handed to every agent of this backend, or null. */
     private volatile com.aresstack.askai.research.runtime.orchestrator.TaskBoard taskBoard;
+    private volatile com.aresstack.askai.research.runtime.browser.BrowserUserContextPool browserUserContexts;
     private final Map<String, Session> sessions = new ConcurrentHashMap<String, Session>();
 
     /**
@@ -163,6 +164,11 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
         this.taskBoard = board;
     }
 
+    /** The chat's worker browser user contexts the orchestrated run's web research workers browse in. */
+    public void setBrowserUserContexts(com.aresstack.askai.research.runtime.browser.BrowserUserContextPool pool) {
+        this.browserUserContexts = pool;
+    }
+
     private Session resolve(ResearchSessionHandle handle) {
         return handle == null ? null : sessions.get(handle.getSessionId());
     }
@@ -217,6 +223,7 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
                 ResearchAgentSession created = new ResearchAgentSession(
                         ResearchAgentEnvironment.from(environment), research, browser, service, modelPort);
                 created.setTaskBoard(taskBoard);
+                created.setBrowserUserContexts(browserUserContexts);
                 created.open();
                 agent = created;
                 if (browser == null) {
