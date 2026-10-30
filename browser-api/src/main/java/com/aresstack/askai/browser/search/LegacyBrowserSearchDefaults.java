@@ -114,6 +114,15 @@ public final class LegacyBrowserSearchDefaults {
                 3);     // maximumPageReadinessRetries: scan→handle→re-scan attempts before parking
     }
 
+    /**
+     * Capture retries after a mid-capture DOM change: 0. Measured on Bing the SERP mutates continuously
+     * (lazy images, ads, related searches): the retries never reached a consistent state and cost about
+     * 15 s per search (docs/search-performance-analysis.md) — so capture once and flag the change.
+     */
+    public static final int DEFAULT_CAPTURE_RETRIES = 0;
+    /** Settle wait before a capture retry (only used when retries are allowed). */
+    public static final int DEFAULT_CAPTURE_SETTLE_MILLIS = 300;
+
     private static SearchPageAnalysisSettings analysis() {
         return new SearchPageAnalysisSettings(
                 Arrays.asList(
@@ -146,6 +155,8 @@ public final class LegacyBrowserSearchDefaults {
                 600,    // maximumCapturedContainers
                 50,     // maximumLinksPerContainer
                 3,      // maximumStructureSignatureDepth
+                DEFAULT_CAPTURE_RETRIES,       // maximumCaptureRetries
+                DEFAULT_CAPTURE_SETTLE_MILLIS, // captureSettleMillis
                 5,      // linkHarvestMinimumStructuredCandidates — below this, external links are harvested
                 20,     // linkHarvestMaximumCandidates
                 // linkHarvestExcludedDomains: Bing's page furniture links microsoft.com legal/consent

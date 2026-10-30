@@ -178,6 +178,10 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
                         ResearchRuntimeSettings.KEY_BROWSER_TOOL_TIMEOUT_SECONDS,
                         ResearchRuntimeSettings.DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS));
+        factory.setBrowserIdleStopSeconds(
+                ResearchRuntimeSettings.loadNonNegativeInt(hostContext.getStateStore(),
+                        ResearchRuntimeSettings.KEY_BROWSER_IDLE_STOP_SECONDS,
+                        ResearchRuntimeSettings.DEFAULT_BROWSER_IDLE_STOP_SECONDS));
         factory.setReviewContextLimits(
                 ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
                         ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,

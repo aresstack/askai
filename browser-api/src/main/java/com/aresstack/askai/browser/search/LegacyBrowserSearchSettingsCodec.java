@@ -132,6 +132,8 @@ public final class LegacyBrowserSearchSettingsCodec {
                 String.valueOf(s.analysis.maximumLinksPerContainer));
         m.put("analysis.maximumStructureSignatureDepth",
                 String.valueOf(s.analysis.maximumStructureSignatureDepth));
+        m.put("analysis.maximumCaptureRetries", String.valueOf(s.analysis.maximumCaptureRetries));
+        m.put("analysis.captureSettleMillis", String.valueOf(s.analysis.captureSettleMillis));
         m.put("analysis.linkHarvestMinimumStructuredCandidates",
                 String.valueOf(s.analysis.linkHarvestMinimumStructuredCandidates));
         m.put("analysis.linkHarvestMaximumCandidates",
@@ -316,6 +318,8 @@ public final class LegacyBrowserSearchSettingsCodec {
                         r.intValue("analysis.maximumCapturedContainers"),
                         r.intValue("analysis.maximumLinksPerContainer"),
                         r.intValue("analysis.maximumStructureSignatureDepth"),
+                        r.intValue("analysis.maximumCaptureRetries"),
+                        r.intValue("analysis.captureSettleMillis"),
                         r.intValue("analysis.linkHarvestMinimumStructuredCandidates"),
                         r.intValue("analysis.linkHarvestMaximumCandidates"),
                         r.list("analysis.linkHarvestExcludedDomains")),

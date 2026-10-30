@@ -107,6 +107,7 @@ public final class ProductiveResearchBackendFactory {
     private volatile int searchMaxMinutes = ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_MINUTES;
     private volatile int browserToolTimeoutSeconds =
             ResearchRuntimeSettings.DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS;
+    private volatile int browserIdleStopSeconds = ResearchRuntimeSettings.DEFAULT_BROWSER_IDLE_STOP_SECONDS;
     private volatile int searchMaxErrors = ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_ERRORS;
 
     /** The user's search limits: completion target + the safety limits (pages/tools/minutes/errors). */
@@ -143,6 +144,13 @@ public final class ProductiveResearchBackendFactory {
     public void setBrowserToolTimeoutSeconds(int seconds) {
         if (seconds > 0) {
             this.browserToolTimeoutSeconds = seconds;
+        }
+    }
+
+    /** Idle keep-alive of a browser generation after a browsing phase (seconds; 0 = stop right away). */
+    public void setBrowserIdleStopSeconds(int seconds) {
+        if (seconds >= 0) {
+            this.browserIdleStopSeconds = seconds;
         }
     }
 
@@ -624,9 +632,10 @@ public final class ProductiveResearchBackendFactory {
         // command (usually minutes later, after scoping) finds it installed. Spawns no browser.
         CamoufoxPrefetch.startOnce(config.getBrowserChannel());
         // The per-call browser timeout (settings) bounds every data call of this runtime: a hung call
-        // terminates the generation and the command is retried once on a fresh one (see the runtime).
+        // terminates the generation and the command is retried once on a fresh one. The idle keep-alive
+        // (settings) keeps the generation warm after a browsing phase so the next search skips the start.
         final BrowserRuntimePort browser = new LazyRestartableBrowserRuntime(config,
-                browserConfigFile.getAbsolutePath(), browserToolTimeoutSeconds);
+                browserConfigFile.getAbsolutePath(), browserToolTimeoutSeconds, browserIdleStopSeconds);
         try {
             // 3. Host endpoints for this session+generation (the bridge forwards through the lazy runtime).
             bridge = new BrowserBridgeEndpoint(registry, browser, captures, sessionKey, generationId);

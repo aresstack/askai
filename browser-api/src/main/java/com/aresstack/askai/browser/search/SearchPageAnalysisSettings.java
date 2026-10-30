@@ -51,6 +51,13 @@ public final class SearchPageAnalysisSettings {
     public final int maximumCapturedContainers;
     public final int maximumLinksPerContainer;
     public final int maximumStructureSignatureDepth;
+    /**
+     * Capture consistency policy: how often a capture whose DOM fingerprint changed DURING the capture is
+     * retried — each retry is a FULL capture (seconds on a big SERP); 0 = capture once and flag the
+     * inconsistency — and how long to settle before each retry (milliseconds).
+     */
+    public final int maximumCaptureRetries;
+    public final int captureSettleMillis;
 
     /**
      * The SERP-as-JSON safety net: when the structured block extraction yields FEWER candidates than
@@ -69,6 +76,7 @@ public final class SearchPageAnalysisSettings {
      */
     public final java.util.List<String> linkHarvestExcludedDomains;
 
+    /** The pre-capture-policy signature (fixtures): the default retry policy applies. */
     public SearchPageAnalysisSettings(java.util.List<String> noResultsTexts,
                                       int maximumCandidateContainers, int minimumContainerTextCharacters,
                                       int minimumNonLinkTextCharacters, int minimumRepeatedSiblingCount,
@@ -86,6 +94,41 @@ public final class SearchPageAnalysisSettings {
                                       int textLengthSaturationCharacters, int maximumContainerDomDepth,
                                       int maximumCapturedContainers, int maximumLinksPerContainer,
                                       int maximumStructureSignatureDepth,
+                                      int linkHarvestMinimumStructuredCandidates,
+                                      int linkHarvestMaximumCandidates,
+                                      java.util.List<String> linkHarvestExcludedDomains) {
+        this(noResultsTexts, maximumCandidateContainers, minimumContainerTextCharacters,
+                minimumNonLinkTextCharacters, minimumRepeatedSiblingCount, minimumResultStructuralConfidence,
+                maximumNavigationLinkDensity, internalLinkWeight, externalLinkWeight, sameHostPenalty,
+                sameRegistrableDomainPenalty, subdomainPenalty, unknownDomainPenalty, repeatedBlockWeight,
+                nonLinkTextWeight, titleLinkWeight, snippetPresenceWeight, headingLinkWeight,
+                semanticMainWeight, navigationRolePenalty, resultBlockSimilarityThreshold,
+                minimumDiscriminatingSignalFamilies, fullPageAreaRatio, textLengthSaturationCharacters,
+                maximumContainerDomDepth, maximumCapturedContainers, maximumLinksPerContainer,
+                maximumStructureSignatureDepth, LegacyBrowserSearchDefaults.DEFAULT_CAPTURE_RETRIES,
+                LegacyBrowserSearchDefaults.DEFAULT_CAPTURE_SETTLE_MILLIS,
+                linkHarvestMinimumStructuredCandidates, linkHarvestMaximumCandidates,
+                linkHarvestExcludedDomains);
+    }
+
+    public SearchPageAnalysisSettings(java.util.List<String> noResultsTexts,
+                                      int maximumCandidateContainers, int minimumContainerTextCharacters,
+                                      int minimumNonLinkTextCharacters, int minimumRepeatedSiblingCount,
+                                      double minimumResultStructuralConfidence,
+                                      double maximumNavigationLinkDensity, double internalLinkWeight,
+                                      double externalLinkWeight, double sameHostPenalty,
+                                      double sameRegistrableDomainPenalty, double subdomainPenalty,
+                                      double unknownDomainPenalty, double repeatedBlockWeight,
+                                      double nonLinkTextWeight, double titleLinkWeight,
+                                      double snippetPresenceWeight, double headingLinkWeight,
+                                      double semanticMainWeight, double navigationRolePenalty,
+                                      double resultBlockSimilarityThreshold,
+                                      int minimumDiscriminatingSignalFamilies,
+                                      double fullPageAreaRatio,
+                                      int textLengthSaturationCharacters, int maximumContainerDomDepth,
+                                      int maximumCapturedContainers, int maximumLinksPerContainer,
+                                      int maximumStructureSignatureDepth,
+                                      int maximumCaptureRetries, int captureSettleMillis,
                                       int linkHarvestMinimumStructuredCandidates,
                                       int linkHarvestMaximumCandidates,
                                       java.util.List<String> linkHarvestExcludedDomains) {
@@ -117,6 +160,8 @@ public final class SearchPageAnalysisSettings {
         this.maximumCapturedContainers = maximumCapturedContainers;
         this.maximumLinksPerContainer = maximumLinksPerContainer;
         this.maximumStructureSignatureDepth = maximumStructureSignatureDepth;
+        this.maximumCaptureRetries = maximumCaptureRetries;
+        this.captureSettleMillis = captureSettleMillis;
         this.linkHarvestMinimumStructuredCandidates = linkHarvestMinimumStructuredCandidates;
         this.linkHarvestMaximumCandidates = linkHarvestMaximumCandidates;
         this.linkHarvestExcludedDomains = java.util.Collections.unmodifiableList(

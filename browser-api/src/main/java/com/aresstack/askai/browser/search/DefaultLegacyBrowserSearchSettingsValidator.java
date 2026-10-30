@@ -111,6 +111,8 @@ public final class DefaultLegacyBrowserSearchSettingsValidator
         atLeast(v, "analysis.maximumLinksPerContainer", s.analysis.maximumLinksPerContainer, 1);
         atLeast(v, "analysis.maximumStructureSignatureDepth",
                 s.analysis.maximumStructureSignatureDepth, 1);
+        atLeast(v, "analysis.maximumCaptureRetries", s.analysis.maximumCaptureRetries, 0);
+        atLeast(v, "analysis.captureSettleMillis", s.analysis.captureSettleMillis, 0);
 
         // --- visual analysis
         ratio(v, "visual.backgroundSimilarityThreshold",

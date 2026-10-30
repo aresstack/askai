@@ -77,7 +77,11 @@ public interface BrowserRuntimePort {
     /** Throw the current (possibly broken) generation away and start a fresh one. */
     void restart() throws BrowserRuntimeException;
 
-    /** Stop the current browser phase: close the browser and end the browser runtime; the runtime returns to STOPPED. */
+    /**
+     * End the current browser phase. A runtime with an idle keep-alive keeps the generation warm and stops it
+     * only after the idle period passed without a new command (a new command cancels the pending stop);
+     * without one the browser is closed right away and the runtime returns to STOPPED.
+     */
     void stop();
 
     boolean isReady();

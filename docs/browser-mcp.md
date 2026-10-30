@@ -20,6 +20,10 @@
   sidecar process: the generation is terminated off the owner thread (the Playwright connection is cut, which
   fails the stuck call and ends the driver child) and the command is retried once on a fresh generation; a
   wedged owner thread is abandoned behind a bounded wait, so neither a command nor the session close can hang.
+- SERP capture consistency is a setting: `analysis.maximumCaptureRetries` (default 0) and
+  `analysis.captureSettleMillis`. Measured on Bing the SERP mutates continuously, so the former two fixed
+  retries never settled and cost ~15 s per search; by default a mid-capture change is now flagged
+  (`DOM_CHANGED_DURING_CAPTURE`) instead of re-captured.
 
 ## How the Playwright backend works (MCP-P005, resolved)
 
@@ -77,7 +81,8 @@ thread and runs every command there; callers block on a future. While idle the o
 event loop (route interception, HUD bindings, popup close). The HUD command poll (`web_hud_poll`) drains its
 inbox directly on the caller's thread, so a Skip is deliverable while a data call blocks the owner. The
 plugin's `LazyRestartableBrowserRuntime` adds its own owner thread per research session: created STOPPED,
-started on the first command, stopped when the browsing phase ends, replaced on failure.
+started on the first command, kept warm for the idle keep-alive after a browsing phase (settings: "Idle
+stop (s)", default 300; 0 = stopped right away), replaced on failure.
 
 ## Capability probing
 

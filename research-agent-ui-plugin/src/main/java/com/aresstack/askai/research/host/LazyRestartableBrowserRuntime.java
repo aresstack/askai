@@ -9,9 +9,12 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * A lazy, restartable owner of ONE browser generation. It is created STOPPED (no browser, no Playwright, no
@@ -35,6 +38,11 @@ import java.util.concurrent.TimeoutException;
  * is abandoned (it is a daemon and ends with its call) and a fresh owner takes over, so neither a command
  * nor {@link #close()} can hang the session forever. A FIRST start stays unbounded on purpose: it may
  * legitimately include the one-time Camoufox download.</p>
+ *
+ * <p>IDLE KEEP-ALIVE: {@link #stop()} ends a browsing phase, but with an idle keep-alive configured (the
+ * settings value; 0 = the historic stop-right-away) the generation stays WARM and is stopped only after
+ * that period passed without a new data call — the next search then skips the browser start (Playwright
+ * driver child + browser launch, about 10 s). Any data call voids a pending idle stop.</p>
  */
 public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
 
@@ -89,6 +97,13 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
     private final SidecarStarter starter;
     /** Bound of one DATA call and of the recovery waits, in milliseconds; 0 = unbounded. */
     private final long callTimeoutMillis;
+    /** Idle keep-alive after {@link #stop()} in milliseconds; 0 = stop right away. */
+    private final long idleStopMillis;
+    /** Lazily created single daemon timer for the idle stop. */
+    private volatile ScheduledExecutorService idleTimer;
+    private volatile ScheduledFuture<?> pendingIdleStop;
+    /** Bumped by every data call and every stop(): an armed idle stop fires only for its own token. */
+    private final AtomicLong idleToken = new AtomicLong();
     /** Replaced only when a wedged owner thread is abandoned (see {@link #abandonOwner}). */
     private volatile ExecutorService owner;
     /** Bumped when an owner is abandoned: tasks of an older epoch must never publish into the new one. */
@@ -111,19 +126,26 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
      * @param browserConfigPath  absolute path of the versioned browser-search config document for this
      *                           session (null = the central defaults)
      * @param callTimeoutSeconds the per-call browser timeout from the settings (0 = unbounded)
+     * @param idleStopSeconds    the idle keep-alive after a browsing phase from the settings (0 = stop right away)
      */
     public LazyRestartableBrowserRuntime(ResearchRuntimeConfig config, String browserConfigPath,
-                                         int callTimeoutSeconds) {
-        this(inProcessStarter(config, browserConfigPath), Math.max(0, callTimeoutSeconds) * 1000L);
+                                         int callTimeoutSeconds, int idleStopSeconds) {
+        this(inProcessStarter(config, browserConfigPath), Math.max(0, callTimeoutSeconds) * 1000L,
+                Math.max(0, idleStopSeconds) * 1000L);
     }
 
     LazyRestartableBrowserRuntime(SidecarStarter starter) {
-        this(starter, 0L);
+        this(starter, 0L, 0L);
     }
 
     LazyRestartableBrowserRuntime(SidecarStarter starter, long callTimeoutMillis) {
+        this(starter, callTimeoutMillis, 0L);
+    }
+
+    LazyRestartableBrowserRuntime(SidecarStarter starter, long callTimeoutMillis, long idleStopMillis) {
         this.starter = starter;
         this.callTimeoutMillis = Math.max(0L, callTimeoutMillis);
+        this.idleStopMillis = Math.max(0L, idleStopMillis);
         this.owner = newOwner();
     }
 
@@ -150,6 +172,8 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
     @Override
     public String execute(final String tool, final Map<String, Object> arguments)
             throws BrowserRuntimeException {
+        idleToken.incrementAndGet(); // a data call voids any pending idle stop
+        cancelPendingIdleStop();
         ensureStarted();
         try {
             return callOnOwner(tool, arguments);
@@ -236,9 +260,32 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         if (closed) {
             return;
         }
+        if (idleStopMillis <= 0L) {
+            stopNow();
+            return;
+        }
+        // Keep the generation WARM: the stop fires after the idle period without a new data call (each
+        // data call bumps the token, so an older armed stop finds a stale token and does nothing).
+        final long token = idleToken.incrementAndGet();
+        cancelPendingIdleStop();
+        try {
+            pendingIdleStop = idleTimer().schedule(new Runnable() {
+                public void run() {
+                    if (token == idleToken.get() && !closed) {
+                        System.err.println("[browser] idle for " + (idleStopMillis / 1000L)
+                                + " s without a browser command — stopping the browser generation");
+                        stopNow();
+                    }
+                }
+            }, idleStopMillis, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException timerGone) {
+            stopNow();
+        }
+    }
+
+    /** Fire-and-forget stop on the owner (the RUN_OUTCOME handler calls stop() on the EDT — never block). */
+    private void stopNow() {
         final long epoch = ownerEpoch;
-        // Fire-and-forget: the RUN_OUTCOME handler calls this on the EDT, so it must NOT block. The owner
-        // thread tears the generation down in order (a later start queues behind it).
         try {
             owner.submit(new Runnable() {
                 public void run() {
@@ -250,6 +297,27 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         }
     }
 
+    private void cancelPendingIdleStop() {
+        ScheduledFuture<?> pending = pendingIdleStop;
+        if (pending != null) {
+            pending.cancel(false);
+            pendingIdleStop = null;
+        }
+    }
+
+    private synchronized ScheduledExecutorService idleTimer() {
+        if (idleTimer == null) {
+            idleTimer = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+                public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "browser-idle-stop");
+                    t.setDaemon(true);
+                    return t;
+                }
+            });
+        }
+        return idleTimer;
+    }
+
     @Override
     public void close() {
         boolean alreadyClosed;
@@ -259,6 +327,11 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         }
         if (alreadyClosed) {
             return;
+        }
+        cancelPendingIdleStop();
+        ScheduledExecutorService timer = idleTimer;
+        if (timer != null) {
+            timer.shutdownNow();
         }
         final long epoch = ownerEpoch;
         ExecutorService executor = owner;

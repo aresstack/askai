@@ -60,6 +60,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField searchMaxToolCalls = ComicControls.textField(4);
     private final JTextField searchMaxMinutes = ComicControls.textField(4);
     private final JTextField browserToolTimeout = ComicControls.textField(4);
+    private final JTextField browserIdleStop = ComicControls.textField(4);
     private final JTextField searchMaxErrors = ComicControls.textField(4);
     // Review-context bounds: how many sources one review reads, and how much of each.
     private final JTextField reviewMaxSources = ComicControls.textField(4);
@@ -159,6 +160,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
         searchLimits.add(labelled("Minutes", searchMaxMinutes));
         searchLimits.add(labelled("Tool timeout (s)", browserToolTimeout));
+        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        searchLimits.add(labelled("Idle stop (s)", browserIdleStop));
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
         searchLimits.add(labelled("Errors", searchMaxErrors));
         form.add(row("Search limits:", searchLimits));
@@ -418,6 +421,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "Timeout per browser call in seconds. Must cover the whole search-engine phase "
                         + "(several engines and result pages, sequential with evaluation) — too small "
                         + "is misread as 'browser dead' and aborts every search.");
+        bindNonNegativeLimit(browserIdleStop, ResearchRuntimeSettings.KEY_BROWSER_IDLE_STOP_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_BROWSER_IDLE_STOP_SECONDS,
+                "How long the browser stays open after a search without a new browser command before it "
+                        + "is stopped. Keeping it warm saves the browser start (about 10 s) on the next "
+                        + "search; 0 = stop right after each search.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
                 "How many sources one review reads at most (newest first).");
@@ -636,6 +644,40 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
      * persisted on Enter and focus-lost, and a non-numeric/non-positive entry resets to the persisted
      * value instead of silently storing something broken. Applies to NEW sessions like its neighbours.
      */
+    /** Like {@link #bindLimit} but 0 is a legal value (e.g. "stop right away"). */
+    private void bindNonNegativeLimit(final JTextField field, final String key, final int fallback,
+                                      String tooltip) {
+        field.setText(String.valueOf(
+                ResearchRuntimeSettings.loadNonNegativeInt(store, key, fallback)));
+        field.setToolTipText(tooltip);
+        final Runnable persist = new Runnable() {
+            public void run() {
+                try {
+                    int value = Integer.parseInt(field.getText().trim());
+                    if (value >= 0) {
+                        ResearchRuntimeSettings.saveNonNegativeInt(store, key, value);
+                        return;
+                    }
+                } catch (NumberFormatException invalid) {
+                    // fall through to the reset below
+                }
+                field.setText(String.valueOf(
+                        ResearchRuntimeSettings.loadNonNegativeInt(store, key, fallback)));
+            }
+        };
+        field.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                persist.run();
+            }
+        });
+        field.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persist.run();
+            }
+        });
+    }
+
     private void bindLimit(final JTextField field, final String key, final int fallback, String tooltip) {
         field.setText(String.valueOf(
                 ResearchRuntimeSettings.loadPositiveInt(store, key, fallback)));

@@ -181,10 +181,36 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_BROWSER_TOOL_TIMEOUT_SECONDS =
             "research.search.browserToolTimeoutSeconds";
     public static final int DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS = 300;
+    /**
+     * How long a browser generation stays warm after a browsing phase ended without a new browser command,
+     * before it is stopped (seconds). Keeping it warm saves the browser start (Playwright driver + browser
+     * launch, about 10 s) on the next search; 0 = stop right after each search (the historic behaviour).
+     */
+    public static final String KEY_BROWSER_IDLE_STOP_SECONDS = "research.search.browserIdleStopSeconds";
+    public static final int DEFAULT_BROWSER_IDLE_STOP_SECONDS = 300;
     public static final int DEFAULT_SEARCH_MAX_ERRORS = 3;
     /** How many sources one post-search review may read, and how much of each. */
     public static final int DEFAULT_REVIEW_MAX_SOURCES = 12;
     public static final int DEFAULT_REVIEW_MAX_CHARS = 1_200;
+
+    /** A persisted NON-NEGATIVE integer (0 is a legal value); unset, unparsable or negative → the default. */
+    public static int loadNonNegativeInt(WorkspaceStateStore store, String key, int fallback) {
+        if (store == null) {
+            return fallback;
+        }
+        try {
+            int value = Integer.parseInt(store.get(key, String.valueOf(fallback)).trim());
+            return value >= 0 ? value : fallback;
+        } catch (NumberFormatException invalid) {
+            return fallback;
+        }
+    }
+
+    public static void saveNonNegativeInt(WorkspaceStateStore store, String key, int value) {
+        if (store != null && value >= 0) {
+            store.put(key, String.valueOf(value));
+        }
+    }
 
     /** A persisted positive integer; unset, unparsable or non-positive values fall back to the default. */
     public static int loadPositiveInt(WorkspaceStateStore store, String key, int fallback) {

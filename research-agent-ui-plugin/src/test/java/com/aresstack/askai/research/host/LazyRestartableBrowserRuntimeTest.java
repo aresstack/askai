@@ -425,4 +425,62 @@ public class LazyRestartableBrowserRuntimeTest {
             }
         }
     }
+
+    @Test
+    public void stopWithAnIdleKeepAliveKeepsTheGenerationWarmForTheNextCommand() throws Exception {
+        CountingStarter starter = new CountingStarter();
+        LazyRestartableBrowserRuntime runtime = new LazyRestartableBrowserRuntime(starter, 0L, 10_000L);
+        try {
+            runtime.execute("web_search", NO_ARGS);
+            FakeSidecar first = starter.last;
+            runtime.stop(); // the browsing phase ends — the generation stays warm
+            Thread.sleep(100);
+            assertTrue("warm: still READY", runtime.isReady());
+            assertFalse(first.closed);
+            assertEquals("the next search skips the browser start", "gen1:web_open",
+                    runtime.execute("web_open", NO_ARGS));
+            assertEquals(1, starter.starts.get());
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    public void anIdleGenerationIsStoppedAfterTheKeepAliveAndTheNextCommandStartsFresh() throws Exception {
+        CountingStarter starter = new CountingStarter();
+        LazyRestartableBrowserRuntime runtime = new LazyRestartableBrowserRuntime(starter, 0L, 200L);
+        try {
+            runtime.execute("web_search", NO_ARGS);
+            FakeSidecar first = starter.last;
+            runtime.stop();
+            long deadline = System.currentTimeMillis() + 5000L;
+            while (!first.closed && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+            assertTrue("stopped after the idle period", first.closed);
+            assertFalse(runtime.isReady());
+            assertEquals("gen2:web_search", runtime.execute("web_search", NO_ARGS));
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    public void aCommandDuringTheKeepAliveVoidsThePendingIdleStop() throws Exception {
+        CountingStarter starter = new CountingStarter();
+        LazyRestartableBrowserRuntime runtime = new LazyRestartableBrowserRuntime(starter, 0L, 400L);
+        try {
+            runtime.execute("web_search", NO_ARGS);
+            FakeSidecar first = starter.last;
+            runtime.stop();
+            Thread.sleep(200);
+            runtime.execute("web_open", NO_ARGS); // activity: the armed idle stop is void
+            Thread.sleep(400); // well past the ORIGINAL idle deadline
+            assertFalse("the generation survived the voided idle stop", first.closed);
+            assertTrue(runtime.isReady());
+            assertEquals(1, starter.starts.get());
+        } finally {
+            runtime.close();
+        }
+    }
 }

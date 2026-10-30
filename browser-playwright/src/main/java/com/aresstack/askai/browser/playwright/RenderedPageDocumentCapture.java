@@ -25,8 +25,9 @@ import java.util.Map;
  * Captures the rendered page as one NEUTRAL {@link RenderedPageDocument}: a single in-page script
  * measures the container hierarchy, text/link statistics, geometry, visibility and computed colors
  * in ONE DOM pass (structure and geometry from the same state), guarded by a cheap DOM fingerprint
- * before and after — on a mismatch the capture settles briefly and is recaptured (bounded, at most
- * {@link #MAX_RECAPTURES} times) and otherwise marked inconsistent, never silently mixed. All limits come from {@link SearchPageAnalysisSettings}; the script writes
+ * before and after — on a mismatch the capture settles briefly and is recaptured (bounded by the
+ * {@code maximumCaptureRetries} setting; default 0 = capture once) and otherwise marked inconsistent,
+ * never silently mixed. All limits come from {@link SearchPageAnalysisSettings}; the script writes
  * nothing into the page, navigates nowhere and opens nothing.
  *
  * <p>Link enrichment happens Java-side: static search-redirect resolution (the resolved DIRECT URL
@@ -48,11 +49,6 @@ final class RenderedPageDocumentCapture {
     interface SettleDelay {
         void settle(long millis);
     }
-
-    /** Bounded recaptures after a mid-capture DOM change — never a full search retry. */
-    static final int MAX_RECAPTURES = 2;
-    /** The settle wait BEFORE each recapture, giving late layout mutations time to finish. */
-    static final long SETTLE_MILLIS = 300;
 
     private final SearchPageAnalysisSettings limits;
     private final SettleDelay settleDelay;
@@ -81,9 +77,11 @@ final class RenderedPageDocumentCapture {
         Object raw = page.evaluate(captureScript());
         RenderedPageFingerprint after = fingerprint(page);
         // The DOM changed DURING capture: bounded settle + FULL fresh recapture (fingerprint taken
-        // anew after the settle — the retry must describe ONE state, not straddle the mutation).
-        for (int recapture = 0; !before.matches(after) && recapture < MAX_RECAPTURES; recapture++) {
-            settleDelay.settle(SETTLE_MILLIS);
+        // anew after the settle — the retry must describe ONE state, not straddle the mutation). The
+        // bound is a SETTING: on continuously mutating SERPs (Bing) retries never settle and only cost time.
+        for (int recapture = 0; !before.matches(after) && recapture < limits.maximumCaptureRetries;
+             recapture++) {
+            settleDelay.settle(limits.captureSettleMillis);
             before = fingerprint(page);
             raw = page.evaluate(captureScript());
             after = fingerprint(page);

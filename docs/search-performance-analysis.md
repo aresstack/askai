@@ -1,6 +1,13 @@
 # Search performance: where the time goes with Camoufox
 
 Status: analysis (2026-10-29), measured on `develop@523699ea` (PR #50). No code changed by this document.
+
+Update 2026-10-30: options 1 and 2 are implemented on `develop` — the browser generation stays warm after a
+search for the idle keep-alive setting ("Idle stop (s)", default 300 s) instead of stopping on every
+terminal event, and the capture retries are a setting (`analysis.maximumCaptureRetries`, default 0 = capture
+once and flag the change). Since the Java 21 return the "sidecar start" below is the in-process
+`PlaywrightBrowserRuntime.start` (driver child JVM + browser launch); its cost is unchanged, it is just paid
+once per idle period now.
 The measurements were taken with temporary timing lines in the sidecar (not committed) and a scratch
 test that drives `BrowserSessionActor` → `SearchLayoutRepairTools.prepare` exactly as the sidecar wires it,
 plus one standalone start of the sidecar jar. Configuration: the user's `browser-config.json` (Bing,

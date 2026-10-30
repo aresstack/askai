@@ -91,11 +91,11 @@ public class RenderedPageDocumentCaptureTest {
         page.result = result(
                 Arrays.asList(container("container-0001", "", 0, "body", "s")),
                 java.util.Collections.<Map<String, Object>>emptyList());
-        RenderedPageDocument document = capture.capture(page,
+        RenderedPageDocument document = retrying(2, 300).capture(page,
                 new PublicSuffixDomainKeyResolver(), 1L);
         assertEquals("one settled recapture must have run", 2, page.captureRuns);
         assertEquals("exactly one settle before the recapture", 1, settles.size());
-        assertEquals(RenderedPageDocumentCapture.SETTLE_MILLIS, settles.get(0).longValue());
+        assertEquals(300L, settles.get(0).longValue());
         assertTrue("a healed capture carries no consistency warning",
                 document.captureWarnings.isEmpty());
     }
@@ -109,11 +109,10 @@ public class RenderedPageDocumentCaptureTest {
         page.result = result(
                 Arrays.asList(container("container-0001", "", 0, "body", "s")),
                 java.util.Collections.<Map<String, Object>>emptyList());
-        RenderedPageDocument document = capture.capture(page,
+        RenderedPageDocument document = retrying(2, 300).capture(page,
                 new PublicSuffixDomainKeyResolver(), 1L);
-        assertEquals("initial capture + the bounded recaptures",
-                1 + RenderedPageDocumentCapture.MAX_RECAPTURES, page.captureRuns);
-        assertEquals(RenderedPageDocumentCapture.MAX_RECAPTURES, settles.size());
+        assertEquals("initial capture + the bounded recaptures", 1 + 2, page.captureRuns);
+        assertEquals(2, settles.size());
         assertTrue(describe(document.captureWarnings).contains("DOM_CHANGED_DURING_CAPTURE"));
     }
 
@@ -274,5 +273,38 @@ public class RenderedPageDocumentCaptureTest {
         org.junit.Assert.assertFalse("no user-facing raw textContent excerpt remains",
                 script.contains("clean(el.textContent)"));
         org.junit.Assert.assertFalse(script.contains("clean(ctx.containerEl.textContent)"));
+    }
+
+    /** A capture with an explicit retry policy, built through the codec like a persisted document. */
+    private RenderedPageDocumentCapture retrying(int retries, int settleMillis) {
+        java.util.Map<String, String> values = new java.util.HashMap<String, String>(
+                com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.toValues(
+                        LegacyBrowserSearchDefaults.create()));
+        values.put("analysis.maximumCaptureRetries", String.valueOf(retries));
+        values.put("analysis.captureSettleMillis", String.valueOf(settleMillis));
+        return new RenderedPageDocumentCapture(
+                com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.fromValues(values)
+                        .settings.analysis,
+                new RenderedPageDocumentCapture.SettleDelay() {
+                    public void settle(long millis) {
+                        settles.add(millis);
+                    }
+                });
+    }
+
+    @Test
+    public void theDefaultPolicyCapturesOnceAndFlagsAMidCaptureChange() {
+        // The default (measured on Bing: the SERP mutates continuously, retries never settled and cost
+        // ~15 s per search): capture ONCE, never settle, and say honestly that the DOM moved.
+        assertEquals(0, LegacyBrowserSearchDefaults.create().analysis.maximumCaptureRetries);
+        FakeRunner page = new FakeRunner("https://www.bing.com/search?q=x", "SERP",
+                Arrays.asList("f1", "f2", "f3", "f4"));
+        page.result = result(
+                Arrays.asList(container("container-0001", "", 0, "body", "s")),
+                java.util.Collections.<Map<String, Object>>emptyList());
+        RenderedPageDocument document = capture.capture(page, new PublicSuffixDomainKeyResolver(), 1L);
+        assertEquals("exactly one capture", 1, page.captureRuns);
+        assertTrue("no settle without retries", settles.isEmpty());
+        assertTrue(describe(document.captureWarnings).contains("DOM_CHANGED_DURING_CAPTURE"));
     }
 }
