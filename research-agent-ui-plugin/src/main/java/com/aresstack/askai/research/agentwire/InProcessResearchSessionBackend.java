@@ -41,6 +41,8 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
     private final ToolInvoker research;
     private final ToolInvoker browser;   // null => honestly absent (MCP-P005), never faked
     private final ToolInvoker service;   // null => no internal service lane
+    /** The host's model port (ADR 0001, 3.2); null => every model role is honestly unavailable. */
+    private final com.aresstack.askai.agent.model.port.ModelPort modelPort;
     private final Map<String, Session> sessions = new ConcurrentHashMap<String, Session>();
 
     /**
@@ -52,6 +54,17 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
      */
     public InProcessResearchSessionBackend(Map<String, String> baseEnvironment, ToolInvoker research,
                                            ToolInvoker browser, ToolInvoker service) {
+        this(baseEnvironment, research, browser, service, null);
+    }
+
+    /**
+     * @param modelPort the host's model port every model role of the agent calls, or null when the host
+     *                  offers none
+     */
+    public InProcessResearchSessionBackend(Map<String, String> baseEnvironment, ToolInvoker research,
+                                           ToolInvoker browser, ToolInvoker service,
+                                           com.aresstack.askai.agent.model.port.ModelPort modelPort) {
+        this.modelPort = modelPort;
         this.baseEnvironment = baseEnvironment == null
                 ? new LinkedHashMap<String, String>() : new LinkedHashMap<String, String>(baseEnvironment);
         this.research = research;
@@ -195,7 +208,7 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
             environment.put("ASKAI_PROJECT_ID", request.getProjectId());
             try {
                 ResearchAgentSession created = new ResearchAgentSession(
-                        ResearchAgentEnvironment.from(environment), research, browser, service);
+                        ResearchAgentEnvironment.from(environment), research, browser, service, modelPort);
                 created.open();
                 agent = created;
                 if (browser == null) {

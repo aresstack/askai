@@ -1,13 +1,23 @@
 package com.aresstack.askai.browser.playwright.camoufox;
 
-import com.fasterxml.jackson.core.json.JsonWriteFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -27,57 +37,60 @@ import java.util.Map;
  *
  * @param environment only the Camoufox keys; the caller adds them to the inherited process environment
  * @param fingerprint the joined {@code CAMOU_CONFIG} object (for the window size real input needs)
- * @param proxy the launch.json {@code proxy} node, missing for the built-in profile
+ * @param proxy the launch.json {@code proxy} element, {@link JsonNull} when absent and for the built-in profile
  */
-public record CamoufoxLaunch(Map<String, String> environment, JsonNode fingerprint, Map<String, Object> prefs,
-                             List<String> args, JsonNode proxy) {
+public record CamoufoxLaunch(Map<String, String> environment, JsonObject fingerprint, Map<String, Object> prefs,
+                             List<String> args, JsonElement proxy) {
 
     static final String DEFAULT_PROFILE = "/camoufox/default-launch.json";
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    /** Compact and without Gson's HTML escaping, so the environment carries the JSON as Argos wrote it. */
+    private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
     /** An explicitly configured launch.json; a missing or invalid file is an error, never a silent fallback. */
     public static CamoufoxLaunch fromFile(Path file) throws IOException {
-        JsonNode launch;
+        JsonElement launch;
         try {
-            launch = MAPPER.readTree(Files.readString(file));
+            launch = parse(Files.readString(file));
         } catch (NoSuchFileException missing) {
             throw new IllegalStateException("BROWSER_LAUNCH_CONFIG / browser.launch-config names " + file
                     + ", which does not exist. Remove the setting to use the built-in Camoufox profile.");
-        } catch (IOException invalid) {
+        } catch (IOException | JsonParseException invalid) {
             throw new IllegalArgumentException("Camoufox launch options " + file + " are not valid JSON: "
                     + invalid.getClass().getSimpleName());
         }
-        if (launch == null || !launch.isObject()) {
+        if (launch == null || !launch.isJsonObject()) {
             throw new IllegalArgumentException("Camoufox launch options " + file + " must be a JSON object.");
         }
-        JsonNode variables = launch.path("env");
-        if (!variables.isObject() || !variables.has("CAMOU_CONFIG_1")) {
+        JsonObject options = launch.getAsJsonObject();
+        JsonElement variables = options.get("env");
+        if (variables == null || !variables.isJsonObject() || !variables.getAsJsonObject().has("CAMOU_CONFIG_1")) {
             throw new IllegalArgumentException("Official Camoufox fingerprint file requires env.CAMOU_CONFIG_1");
         }
         Map<String, String> environment = new LinkedHashMap<>();
-        variables.fields().forEachRemaining(entry -> {
+        for (Map.Entry<String, JsonElement> entry : variables.getAsJsonObject().entrySet()) {
             if (!entry.getKey().startsWith("CAMOU_") && !entry.getKey().startsWith("FONTCONFIG")) {
                 throw new IllegalArgumentException("Unexpected fingerprint environment key: " + entry.getKey());
             }
-            if (!entry.getValue().isTextual()) {
+            if (!isString(entry.getValue())) {
                 throw new IllegalArgumentException("Invalid fingerprint environment value: " + entry.getKey());
             }
-            environment.put(entry.getKey(), entry.getValue().asText());
-        });
+            environment.put(entry.getKey(), entry.getValue().getAsString());
+        }
         StringBuilder json = new StringBuilder();
         for (int part = 1; environment.containsKey("CAMOU_CONFIG_" + part); part++) {
             json.append(environment.get("CAMOU_CONFIG_" + part));
         }
-        JsonNode fingerprint;
+        JsonObject fingerprint;
         try {
-            fingerprint = MAPPER.readTree(json.toString());
-        } catch (IOException unreadable) {
-            fingerprint = MAPPER.createObjectNode();
+            JsonElement joined = parse(json.toString());
+            fingerprint = joined.isJsonObject() ? joined.getAsJsonObject() : new JsonObject();
+        } catch (IOException | JsonParseException unreadable) {
+            fingerprint = new JsonObject();
         }
-        JsonNode preferences = launch.has("firefoxUserPrefs") ? launch.get("firefoxUserPrefs")
-                : launch.path("firefox_user_prefs");
-        return new CamoufoxLaunch(environment, fingerprint, prefs(preferences), args(launch.path("args")),
-                launch.path("proxy"));
+        JsonObject preferences = options.has("firefoxUserPrefs") ? object(options, "firefoxUserPrefs")
+                : object(options, "firefox_user_prefs");
+        JsonElement proxy = options.has("proxy") ? options.get("proxy") : JsonNull.INSTANCE;
+        return new CamoufoxLaunch(environment, fingerprint, prefs(preferences), args(array(options, "args")), proxy);
     }
 
     /**
@@ -99,62 +112,77 @@ public record CamoufoxLaunch(Map<String, String> environment, JsonNode fingerpri
         return builtIn(localized(defaultProfile(), language), executable, runtimeDir, System.getProperty("os.name"));
     }
 
-    static ObjectNode localized(ObjectNode profile, Locale language) {
+    static JsonObject localized(JsonObject profile, Locale language) {
         String tag = language.toLanguageTag();
         String primary = language.getLanguage();
         if (primary.isEmpty() || "und".equals(tag)) return profile;
         String accept = tag.equals(primary) ? primary + ",en-US;q=0.7,en;q=0.3"
                 : tag + "," + primary + ";q=0.8,en-US;q=0.5,en;q=0.3";
-        ObjectNode prefs = profile.has("firefoxUserPrefs") && profile.get("firefoxUserPrefs").isObject()
-                ? (ObjectNode) profile.get("firefoxUserPrefs") : profile.putObject("firefoxUserPrefs");
-        prefs.put("intl.locale.requested", tag);
-        prefs.put("intl.accept_languages", accept);
-        ObjectNode config = profile.has("config") && profile.get("config").isObject()
-                ? (ObjectNode) profile.get("config") : profile.putObject("config");
-        config.put("locale:language", primary);
-        if (!language.getCountry().isEmpty()) config.put("locale:region", language.getCountry());
-        config.put("locale:all", accept.replaceAll(";q=[0-9.]+", ""));
-        config.put("headers.Accept-Language", accept);
+        JsonObject prefs = putObject(profile, "firefoxUserPrefs");
+        prefs.addProperty("intl.locale.requested", tag);
+        prefs.addProperty("intl.accept_languages", accept);
+        JsonObject config = putObject(profile, "config");
+        config.addProperty("locale:language", primary);
+        if (!language.getCountry().isEmpty()) config.addProperty("locale:region", language.getCountry());
+        config.addProperty("locale:all", accept.replaceAll(";q=[0-9.]+", ""));
+        config.addProperty("headers.Accept-Language", accept);
         return profile;
     }
 
-    static ObjectNode defaultProfile() throws IOException {
+    static JsonObject defaultProfile() throws IOException {
         try (InputStream in = CamoufoxLaunch.class.getResourceAsStream(DEFAULT_PROFILE)) {
             if (in == null) throw new IllegalStateException(DEFAULT_PROFILE + " missing from the browser-playwright jar");
-            return (ObjectNode) MAPPER.readTree(in);
+            return parse(new InputStreamReader(in, StandardCharsets.UTF_8)).getAsJsonObject();
         }
     }
 
-    static CamoufoxLaunch builtIn(ObjectNode profile, Path executable, Path runtimeDir, String hostOs)
+    static CamoufoxLaunch builtIn(JsonObject profile, Path executable, Path runtimeDir, String hostOs)
             throws IOException {
         Path browserDir = executable.toAbsolutePath().getParent();
-        ObjectNode config = profile.path("config").deepCopy();
-        ArrayNode addons = config.putArray("addons");
-        for (JsonNode name : profile.path("bundledAddons")) {
-            Path addon = browserDir.resolve("addons").resolve(name.asText());
+        JsonObject config = object(profile, "config").deepCopy();
+        JsonArray addons = new JsonArray();
+        config.add("addons", addons);
+        for (JsonElement entry : array(profile, "bundledAddons")) {
+            String name = text(entry);
+            Path addon = browserDir.resolve("addons").resolve(name);
             if (!Files.isDirectory(addon)) {
-                throw new IllegalStateException("The built-in Camoufox profile loads the add-on " + name.asText()
+                throw new IllegalStateException("The built-in Camoufox profile loads the add-on " + name
                         + ", which this Camoufox does not ship in " + addon.getParent() + ". Use the Argos Camoufox "
                         + "distribution, or name your own launch.json in BROWSER_LAUNCH_CONFIG.");
             }
             addons.add(addon.toString());
         }
         boolean windows = hostOs.toLowerCase(Locale.ROOT).startsWith("windows");
-        Map<String, Object> prefs = prefs(profile.path("firefoxUserPrefs"));
+        Map<String, Object> prefs = prefs(object(profile, "firefoxUserPrefs"));
         Map<String, String> environment = new LinkedHashMap<>();
         // Same chunking as the camoufox launcher (utils.get_env_vars): Windows caps one variable at 2047 chars.
         int chunk = windows ? 2047 : 32767;
-        environment.putAll(chunks("CAMOU_CONFIG_", MAPPER.writeValueAsString(config), chunk));
+        environment.putAll(chunks("CAMOU_CONFIG_", GSON.toJson(config), chunk));
         // Prefs Gecko reads during startup only apply through settings/camoufox.cfg (utils.get_pref_env_vars),
         // ASCII-escaped because autoconfig reads the environment through the ANSI code page on Windows.
         if (!prefs.isEmpty()) {
-            String json = MAPPER.writer().with(JsonWriteFeature.ESCAPE_NON_ASCII.mappedFeature()).writeValueAsString(prefs);
+            String json = escapeNonAscii(GSON.toJson(prefs));
             environment.putAll(chunks("CAMOU_PREFS_", json, chunk));
         }
         if (!windows) {
             environment.put("FONTCONFIG_FILE", fontconfig(browserDir, fontOs(config), runtimeDir).toString());
         }
-        return new CamoufoxLaunch(environment, config, prefs, args(profile.path("args")), MAPPER.missingNode());
+        return new CamoufoxLaunch(environment, config, prefs, args(array(profile, "args")), JsonNull.INSTANCE);
+    }
+
+    /**
+     * Every character above US-ASCII as a JSON unicode escape (uppercase hex, as Jackson's ESCAPE_NON_ASCII wrote
+     * it). Outside string literals JSON is pure ASCII, so escaping the serialized text is the same as escaping the
+     * strings in it.
+     */
+    static String escapeNonAscii(String json) {
+        StringBuilder escaped = new StringBuilder(json.length());
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c < 0x80) escaped.append(c);
+            else escaped.append(String.format(Locale.ROOT, "\\u%04X", (int) c));
+        }
+        return escaped.toString();
     }
 
     /** {@code CAMOU_CONFIG_1..n}: the JSON split at {@code size} characters, never inside a surrogate pair. */
@@ -170,8 +198,8 @@ public record CamoufoxLaunch(Map<String, String> environment, JsonNode fingerpri
         return parts;
     }
 
-    private static String fontOs(JsonNode config) {
-        String platform = config.path("navigator.platform").asText("").toLowerCase(Locale.ROOT);
+    private static String fontOs(JsonObject config) {
+        String platform = text(config.get("navigator.platform")).toLowerCase(Locale.ROOT);
         if (platform.startsWith("win")) return "windows";
         if (platform.startsWith("mac")) return "macos";
         return "linux";
@@ -192,8 +220,11 @@ public record CamoufoxLaunch(Map<String, String> environment, JsonNode fingerpri
         Path groups = fonts.resolve("groups.json");
         String key = switch (os) { case "windows" -> "win"; case "macos" -> "mac"; default -> "lin"; };
         if (Files.isRegularFile(groups)) {
-            for (JsonNode group : MAPPER.readTree(groups.toFile()).path("readBy").path(key)) {
-                if (Files.isDirectory(fonts.resolve(group.asText()))) dirs.add(fonts.resolve(group.asText()).toString());
+            JsonElement groupsJson = parse(Files.readString(groups));
+            JsonObject readBy = groupsJson.isJsonObject() ? object(groupsJson.getAsJsonObject(), "readBy") : new JsonObject();
+            for (JsonElement entry : array(readBy, key)) {
+                String group = text(entry);
+                if (Files.isDirectory(fonts.resolve(group))) dirs.add(fonts.resolve(group).toString());
             }
         }
         if (dirs.isEmpty()) dirs.add(Files.isDirectory(fonts.resolve(os)) ? fonts.resolve(os).toString() : fonts.toString());
@@ -221,21 +252,71 @@ public record CamoufoxLaunch(Map<String, String> environment, JsonNode fingerpri
         return target;
     }
 
-    private static Map<String, Object> prefs(JsonNode preferences) {
+    private static Map<String, Object> prefs(JsonObject preferences) {
         Map<String, Object> prefs = new LinkedHashMap<>();
-        preferences.fields().forEachRemaining(entry -> {
-            JsonNode value = entry.getValue();
-            if (value.isBoolean()) prefs.put(entry.getKey(), value.asBoolean());
-            else if (value.isIntegralNumber()) prefs.put(entry.getKey(), value.asInt());
-            else if (value.isTextual()) prefs.put(entry.getKey(), value.asText());
+        for (Map.Entry<String, JsonElement> entry : preferences.entrySet()) {
+            JsonElement value = entry.getValue();
+            JsonPrimitive primitive = value.isJsonPrimitive() ? value.getAsJsonPrimitive() : null;
+            if (primitive != null && primitive.isBoolean()) prefs.put(entry.getKey(), primitive.getAsBoolean());
+            else if (primitive != null && primitive.isNumber() && primitive.getAsString().matches("-?[0-9]+")) {
+                prefs.put(entry.getKey(), primitive.getAsInt());
+            } else if (primitive != null && primitive.isString()) prefs.put(entry.getKey(), primitive.getAsString());
             else throw new IllegalArgumentException("Unsupported Firefox pref: " + entry.getKey());
-        });
+        }
         return prefs;
     }
 
-    private static List<String> args(JsonNode values) {
+    private static List<String> args(JsonArray values) {
         List<String> args = new ArrayList<>();
-        values.forEach(value -> args.add(value.asText()));
+        values.forEach(value -> args.add(text(value)));
         return args;
+    }
+
+    /**
+     * Strict JSON (no comments, no single quotes, no trailing content), as the Jackson reader this code had
+     * before; Gson's own entry points parse leniently.
+     */
+    static JsonElement parse(String json) throws IOException {
+        return parse(new StringReader(json));
+    }
+
+    static JsonElement parse(Reader json) throws IOException {
+        JsonReader reader = new JsonReader(json);
+        reader.setStrictness(Strictness.STRICT);
+        JsonElement element = JsonParser.parseReader(reader);
+        if (reader.peek() != JsonToken.END_DOCUMENT) {
+            throw new JsonParseException("trailing content after the JSON document");
+        }
+        return element;
+    }
+
+    /** The object member {@code key}, or an empty object when it is missing or not an object. */
+    static JsonObject object(JsonObject parent, String key) {
+        JsonElement value = parent.get(key);
+        return value != null && value.isJsonObject() ? value.getAsJsonObject() : new JsonObject();
+    }
+
+    /** The array member {@code key}, or an empty array when it is missing or not an array. */
+    static JsonArray array(JsonObject parent, String key) {
+        JsonElement value = parent.get(key);
+        return value != null && value.isJsonArray() ? value.getAsJsonArray() : new JsonArray();
+    }
+
+    /** A primitive's text, otherwise {@code ""} (missing, null, object, array). */
+    static String text(JsonElement value) {
+        return value != null && value.isJsonPrimitive() ? value.getAsString() : "";
+    }
+
+    private static boolean isString(JsonElement value) {
+        return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isString();
+    }
+
+    /** The object member {@code key}; a missing or non-object member is replaced by a new object. */
+    private static JsonObject putObject(JsonObject parent, String key) {
+        JsonElement value = parent.get(key);
+        if (value != null && value.isJsonObject()) return value.getAsJsonObject();
+        JsonObject created = new JsonObject();
+        parent.add(key, created);
+        return created;
     }
 }

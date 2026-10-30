@@ -98,7 +98,7 @@ public class ScopeSweepEndToEndLiveTest {
         System.err.println("[sweep-live] anchor vectors reconciled: " + anchorVectors.size()
                 + " @ " + embedder.modelFingerprint());
 
-        // --- the real in-process agent session, main model via the real inference descriptor ----
+        // --- the real in-process agent session, main model via the inference descriptor + model port ----
         ContributionToolInvoker research = new ContributionToolInvoker(Collections.singletonList(
                 McpToolContribution.of("research_status", "Current research state.",
                         new McpToolHandler() {
@@ -113,7 +113,10 @@ public class ScopeSweepEndToEndLiveTest {
                 + "\"timeoutMillis\":300000}").getBytes(Charset.forName("UTF-8")));
         java.util.Map<String, String> env = new java.util.LinkedHashMap<String, String>();
         env.put("ASKAI_INFERENCE_CONFIG", inferenceConfig.getAbsolutePath());
-        InProcessResearchSessionBackend backend = new InProcessResearchSessionBackend(env, research, null, null);
+        // The model roles reach the model through the host's port (ADR 0001, 3.2), here over the local Ollama.
+        InProcessResearchSessionBackend backend = new InProcessResearchSessionBackend(env, research, null, null,
+                com.aresstack.askai.java8.modelport.CentralModelDirectories.fixedModelPort(OLLAMA, chatModel,
+                        java.time.Duration.ofMinutes(5)));
 
         final BackendScopeProbeGenerator[] activeGenerator = {null};
         final com.aresstack.askai.research.scope.BackendScopeAdviceChooser[] activeChooser =

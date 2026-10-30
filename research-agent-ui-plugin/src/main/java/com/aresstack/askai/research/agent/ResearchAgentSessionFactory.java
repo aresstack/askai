@@ -214,6 +214,9 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
         // regex fallback). Looked up leniently; the knowledge worker never scans a store or reads global settings.
         factory.setNlpConfigurationSnapshotProvider(hostContext.getService(
                 com.aresstack.askai.agent.model.nlp.NlpConfigurationSnapshotProvider.class));
+        // The host's model port (ADR 0001, 3.2): every model role of the agent calls it by slot; looked up
+        // leniently, an older host without it leaves the roles honestly unavailable.
+        factory.setModelPort(hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class));
         java.io.File sessionDirectory =
                 hostContext.getPluginPathService().getWorkspaceDirectory(request.getSessionId());
         final ProductiveResearchSessionResources resources;

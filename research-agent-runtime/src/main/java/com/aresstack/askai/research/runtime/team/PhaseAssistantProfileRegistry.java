@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.runtime.team;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -16,6 +17,22 @@ public final class PhaseAssistantProfileRegistry {
 
     /** The existing repository phase id for the first phase; reuse it, do not invent a new taxonomy. */
     public static final String SCOPING_PHASE_ID = "scoping";
+    /** The research phase (product name "Sources"). */
+    public static final String RESEARCH_PHASE_ID = "research";
+    /** The document phase (product name "Document"). */
+    public static final String DRAFT_PHASE_ID = "draft";
+    /**
+     * The legacy finalization phase: persisted old sessions may still report it; it works on the same one
+     * canonical document as DRAFT and therefore gets the same prompt.
+     */
+    public static final String FINALIZATION_PHASE_ID = "finalization";
+
+    /** What every research-phase assistant may read (never a write tool: the user owns every write). */
+    private static final String[] RESEARCH_READ_TOOLS = {
+            "research_status", "artifact_read", "source_list", "source_review_context", "concept_read"};
+    /** The document phases additionally read the canonical document. */
+    private static final String[] DRAFT_READ_TOOLS = {
+            "research_status", "artifact_read", "source_list", "concept_read", "document_read"};
 
     private final Map<String, PhaseAssistantProfile> byPhaseId;
     private final PhaseAssistantProfile fallback;
@@ -39,7 +56,8 @@ public final class PhaseAssistantProfileRegistry {
 
     /**
      * The default registry: a productive SCOPING profile (least privilege — no capabilities/tools yet, writes
-     * only the research-brief artifact) plus a neutral fallback for every other phase.
+     * only the research-brief artifact), the RESEARCH, DRAFT and legacy FINALIZATION profiles (read-only tool
+     * subsets, no writable artifact), plus a neutral fallback for every other phase (today OUTLINE).
      */
     public static PhaseAssistantProfileRegistry defaults() {
         return defaults(false);
@@ -75,7 +93,30 @@ public final class PhaseAssistantProfileRegistry {
                 PhaseContextPolicy.OWN_PHASE_CHAT_AND_LATEST_ARTIFACTS);
         Map<String, PhaseAssistantProfile> profiles = new LinkedHashMap<String, PhaseAssistantProfile>();
         profiles.put(SCOPING_PHASE_ID, scoping);
+        profiles.put(RESEARCH_PHASE_ID, readOnlyProfile(RESEARCH_PHASE_ID,
+                TeamAgentPlaybook.researchSystemPrompt(), RESEARCH_READ_TOOLS));
+        profiles.put(DRAFT_PHASE_ID, readOnlyProfile(DRAFT_PHASE_ID,
+                TeamAgentPlaybook.draftSystemPrompt(), DRAFT_READ_TOOLS));
+        profiles.put(FINALIZATION_PHASE_ID, readOnlyProfile(FINALIZATION_PHASE_ID,
+                TeamAgentPlaybook.draftSystemPrompt(), DRAFT_READ_TOOLS));
         return new PhaseAssistantProfileRegistry(profiles, fallback);
+    }
+
+    /** A phase profile with the generic output contract, the given read tools and no writable artifact. */
+    private static PhaseAssistantProfile readOnlyProfile(String phaseId, String systemPrompt, String[] tools) {
+        DefaultPhaseOutputContract contract = new DefaultPhaseOutputContract();
+        return new PhaseAssistantProfile(phaseId,
+                PhaseAssistantProfile.conversationRole(phaseId, systemPrompt, contract, Arrays.asList(tools)),
+                contract, "", Collections.<String>emptyList(),
+                PhaseContextPolicy.OWN_PHASE_CHAT_AND_LATEST_ARTIFACTS);
+    }
+
+    /** Every registered profile in registration order, the fallback last (the conversation role overview). */
+    public java.util.List<PhaseAssistantProfile> all() {
+        java.util.List<PhaseAssistantProfile> all = new java.util.ArrayList<PhaseAssistantProfile>(
+                byPhaseId.values());
+        all.add(fallback);
+        return Collections.unmodifiableList(all);
     }
 
     /**

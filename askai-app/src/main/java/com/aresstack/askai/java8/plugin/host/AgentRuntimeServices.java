@@ -3,8 +3,10 @@ package com.aresstack.askai.java8.plugin.host;
 import com.aresstack.askai.mcp.api.McpEndpointDefinition;
 import com.aresstack.askai.mcp.api.McpEndpointHandle;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
+import com.aresstack.askai.mcp.api.McpToolClientFactory;
 import com.aresstack.askai.mcp.api.McpToolContribution;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
+import com.aresstack.askai.mcp.solon.SolonMcpToolClientFactory;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshot;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshotProvider;
@@ -39,14 +41,15 @@ import java.util.Map;
 /**
  * The app-level owner of the host runtime services handed to agent plugins via
  * {@code AgentHostContext.getService}: the Solon MCP server runtime (LAZY — the loopback HTTP server only
- * starts when a plugin actually registers an endpoint, i.e. when the productive research mode is used) and
- * the model/NLP/speech services. The research agent and the browser run inside the plugin now, so there is
- * no tool-client factory and no agent connector any more. One instance per application; {@link #shutdown()}
- * stops the MCP runtime if it was ever started.
+ * starts when a plugin actually registers an endpoint, i.e. when the productive research mode is used), the
+ * MCP tool-client factory (ADR 0001: MCP stays the tool protocol) and the model/NLP/speech services. There is
+ * no agent connector. One instance per application; {@link #shutdown()} stops the MCP runtime if it was ever
+ * started.
  */
 public final class AgentRuntimeServices {
 
     private final LazyRegistry registry = new LazyRegistry();
+    private final McpToolClientFactory toolClients = new SolonMcpToolClientFactory();
     /** Publishes the mandatory per-session reranker snapshot from the local model runtime. */
     private final RerankerConfigurationSnapshotProvider rerankerSnapshots;
     /** Lists the installed rerank-capable models for the EXPLICIT selection in the settings UI. */
@@ -64,6 +67,12 @@ public final class AgentRuntimeServices {
     /** Speech output (read-aloud) with an installed Piper model voice; inactive → plugin default voice. */
     private final com.aresstack.askai.agent.model.speech.SpeechSynthesisPort speechSynthesis =
             new com.aresstack.askai.java8.tts.PiperReadAloudService();
+
+    /**
+     * The model port v2 (ADR 0001, 3.2 and 4.5): chat with tools, schema output, streaming, cancel, model
+     * slots and the resource scheduler, on the app's one Ollama client. Null without a central config.
+     */
+    private final com.aresstack.askai.java8.modelport.OllamaModelPort modelPort;
 
     /** The embedding descriptor request timeout (local runtime; probe + calls). */
     private static final long EMBEDDING_TIMEOUT_MILLIS = 60_000L;
@@ -110,13 +119,18 @@ public final class AgentRuntimeServices {
         // central config to know what to publish and is only useful alongside the snapshot providers.
         this.activeSessions = centralConfig == null ? null
                 : new LocalActiveResearchSessionRegistry(inferenceSnapshots, rerankerSnapshots, centralConfig);
+        this.modelPort = centralConfig == null ? null
+                : com.aresstack.askai.java8.modelport.CentralModelDirectories.productivePort(centralConfig,
+                        localModelRuntime,
+                        com.aresstack.askai.java8.modelport.ModelPortSettingsRepository.inConfigurationDirectory());
         System.err.println("[agent-runtime] localRuntime=" + (localModelRuntime != null)
                 + " centralConfig=" + (centralConfig != null)
                 + " reranker.snapshotProvider.published=" + (rerankerSnapshots != null)
                 + " embedding.published=" + (embeddingSnapshots != null)
                 + " inference.published=" + (inferenceSnapshots != null)
                 + " nlp.catalog.published=" + (nlpCatalog != null)
-                + " nlp.snapshotProvider.published=" + (nlpSnapshots != null));
+                + " nlp.snapshotProvider.published=" + (nlpSnapshots != null)
+                + " modelPort.published=" + (modelPort != null));
     }
 
     /**
@@ -180,6 +194,7 @@ public final class AgentRuntimeServices {
     public Map<Class<?>, Object> asServiceMap() {
         Map<Class<?>, Object> services = new LinkedHashMap<Class<?>, Object>();
         services.put(McpServerRegistry.class, registry);
+        services.put(McpToolClientFactory.class, toolClients);
         if (rerankerSnapshots != null) {
             services.put(RerankerConfigurationSnapshotProvider.class, rerankerSnapshots);
         }
@@ -201,11 +216,17 @@ public final class AgentRuntimeServices {
         if (activeSessions != null) {
             services.put(ActiveResearchSessionRegistry.class, activeSessions);
         }
+        if (modelPort != null) {
+            services.put(com.aresstack.askai.agent.model.port.ModelPort.class, modelPort);
+        }
         services.put(com.aresstack.askai.agent.model.speech.SpeechSynthesisPort.class, speechSynthesis);
         return services;
     }
 
     public void shutdown() {
+        if (modelPort != null) {
+            modelPort.close();
+        }
         registry.shutdown();
         // FINAL app teardown: also stop the process-global Solon server so its non-daemon HTTP-Dispatcher
         // thread dies and the JVM exits naturally. Without this the app hangs on close once research booted

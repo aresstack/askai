@@ -106,7 +106,9 @@ AskAI runs on Java 21 again and everything that used to be a side process now li
   `research.acp` became `research.agentwire`.
 - Removed modules: `acp-client-api`, `acp-solon-client`, `acp-demo-agent`; removed ports `McpToolClient`,
   `McpToolClientFactory`, `SolonMcpToolClientFactory` (no MCP client is needed in-process; the loopback MCP
-  server stays for external clients such as bot control).
+  server stays for external clients such as bot control). ADR 0001 (section 3.3, work item A) brought the
+  MCP client port back from feacb5e0 for external MCP servers; the ACP modules are subject to the open
+  decision in ADR 0001, section 3.5.
 - Runtime settings keep only the browser channel, headless mode and the development loopback policy; the
   agent-Java/agent-jar/sidecar-jar fields and `researchRuntimeDist` are gone. `:askai-app:fatJar` and
   `:research-agent-ui-plugin:pluginDistribution` produce everything.

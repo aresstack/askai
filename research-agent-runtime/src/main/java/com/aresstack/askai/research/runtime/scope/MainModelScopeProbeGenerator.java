@@ -5,6 +5,9 @@ import com.aresstack.askai.research.domain.scope.ScopeAnchor;
 import com.aresstack.askai.research.domain.scope.ScopeCalibrationProbe;
 import com.aresstack.askai.research.domain.scope.ScopeProbe;
 import com.aresstack.askai.research.domain.scope.ScopeProbeGenerator;
+import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
+import com.aresstack.askai.research.runtime.role.ResearchRole;
+import com.aresstack.askai.research.runtime.role.RoleOutput;
 import com.aresstack.askai.research.runtime.team.ChatMessage;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.runtime.team.MainModelChatResult;
@@ -32,6 +35,16 @@ import java.util.Set;
  * and redundancy is the selector's.
  */
 public final class MainModelScopeProbeGenerator implements ScopeProbeGenerator {
+
+    /**
+     * The role (ADR 0001, 4.1): the scope slot, no tools, a schema built per request (its list lengths and
+     * anchor ids depend on the request), strictly validated afterwards.
+     */
+    public static final ResearchRole ROLE = ResearchRole.builder("scope-probe-generator", ResearchModelSlots.SCOPE)
+            .purpose("generates broad probes and neighbourhood controls for the scope sweep")
+            .systemPrompt(systemPrompt())
+            .output(RoleOutput.schemaPerRequest("MainModelScopeProbeGenerator.validate"))
+            .build();
 
     /** All behavior-limiting knobs explicit — wired from settings by the host, never constants. */
     public static final class GeneratorSettings {
@@ -65,7 +78,7 @@ public final class MainModelScopeProbeGenerator implements ScopeProbeGenerator {
     public ProbeGenerationResult generate(ProbeGenerationRequest request) {
         List<ScopeAnchor> negotiated = negotiatedAnchorsOf(request);
         MainModelChatResult call = model.completeJson(
-                Arrays.asList(ChatMessage.system(systemPrompt()),
+                Arrays.asList(ChatMessage.system(ROLE.getSystemPrompt()),
                         ChatMessage.user(userPrompt(request, negotiated))),
                 settings.temperature, settings.maxOutputTokens,
                 responseSchema(request, negotiated));
