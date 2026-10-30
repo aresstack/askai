@@ -1295,12 +1295,17 @@ public final class AskAiFrame extends JFrame {
         contentPanel.add(withFooter(configPanel), CONNECTIONS_VIEW);
         // Central AI-model selection (reranker + embeddings) owned by AskAI for all plugins. The reranker
         // catalog needs the local runtime; when there is none, the panel simply offers no rerank models.
-        contentPanel.add(withFooter(new AiModelsPanel(model,
+        // Below it: the model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
+        javax.swing.JPanel aiModelsScreen = new javax.swing.JPanel(new java.awt.BorderLayout());
+        aiModelsScreen.add(new AiModelsPanel(model,
                 askAiService.localRuntimeManager() == null ? null
                         : new com.aresstack.askai.java8.localmodels.LocalRerankerModelCatalog(
                                 askAiService.localRuntimeManager()),
                 nlpModelCatalog,
-                (VirtualOllamaContainerService) ollamaService)), AI_MODELS_VIEW);
+                (VirtualOllamaContainerService) ollamaService), java.awt.BorderLayout.NORTH);
+        aiModelsScreen.add(new ModelResourcesPanel(com.aresstack.askai.java8.modelport.ModelPortSettingsRepository
+                .inConfigurationDirectory()), java.awt.BorderLayout.CENTER);
+        contentPanel.add(withFooter(aiModelsScreen), AI_MODELS_VIEW);
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
         contentPanel.add(withFooter(new ProxyPanel(configurationRepository)), NETWORK_VIEW);
         contentPanel.add(withFooter(new OllamaAboutPanel())

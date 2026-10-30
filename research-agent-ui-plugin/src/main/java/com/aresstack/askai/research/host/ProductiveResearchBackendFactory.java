@@ -169,6 +169,8 @@ public final class ProductiveResearchBackendFactory {
 
     /** OPTIONAL host NLP snapshot provider; resolves the session's selected sentence model (else regex). */
     private volatile com.aresstack.askai.agent.model.nlp.NlpConfigurationSnapshotProvider nlpSnapshots;
+    /** The host's model port (ADR 0001, 3.2), handed to the in-process agent; null when the host has none. */
+    private volatile com.aresstack.askai.agent.model.port.ModelPort modelPort;
 
     public ProductiveResearchBackendFactory(McpServerRegistry registry, ResearchRuntimeConfig config,
                                             long generationId,
@@ -235,6 +237,14 @@ public final class ProductiveResearchBackendFactory {
     }
 
     /** The host NLP snapshot provider; the session resolves its selected sentence model through it (else regex). */
+    /**
+     * The host's model port (ADR 0001, 3.2): every model role of the in-process agent calls it. Optional; a
+     * host without one leaves the roles honestly unavailable.
+     */
+    public void setModelPort(com.aresstack.askai.agent.model.port.ModelPort modelPort) {
+        this.modelPort = modelPort;
+    }
+
     public void setNlpConfigurationSnapshotProvider(
             com.aresstack.askai.agent.model.nlp.NlpConfigurationSnapshotProvider provider) {
         this.nlpSnapshots = provider;
@@ -934,7 +944,7 @@ public final class ProductiveResearchBackendFactory {
             // The agent runs in-process: its three tool lanes dispatch straight to the endpoints' current
             // contributions (the same tools the MCP server publishes to external clients).
             backend = new InProcessResearchSessionBackend(baseEnv, control.toolInvoker(),
-                    bridge.toolInvoker(), service.toolInvoker());
+                    bridge.toolInvoker(), service.toolInvoker(), modelPort);
 
             // The UI-facing repository only REFRESHES an open view on a successful update (Save/Exclude/star)
             // so the outline tab re-checks its staleness — it never triggers a rebuild (issue #29).

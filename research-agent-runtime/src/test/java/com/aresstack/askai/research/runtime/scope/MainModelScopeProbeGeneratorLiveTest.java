@@ -1,13 +1,13 @@
 package com.aresstack.askai.research.runtime.scope;
 
-import com.aresstack.askai.agent.model.inference.InferenceEndpointDescriptor;
 import com.aresstack.askai.research.domain.scope.ScopeAnchor;
 import com.aresstack.askai.research.domain.scope.ScopeCalibrationProbe;
 import com.aresstack.askai.research.domain.scope.ScopeProbe;
 import com.aresstack.askai.research.domain.scope.ScopeProbeGenerator.ProbeGenerationRequest;
 import com.aresstack.askai.research.domain.scope.ScopeProbeGenerator.ProbeGenerationResult;
 import com.aresstack.askai.research.runtime.scope.MainModelScopeProbeGenerator.GeneratorSettings;
-import com.aresstack.askai.research.runtime.team.HttpMainModelChatClient;
+import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
+import com.aresstack.askai.research.runtime.team.PortMainModelChat;
 
 import org.junit.Assume;
 import org.junit.Test;
@@ -76,8 +76,9 @@ public class MainModelScopeProbeGeneratorLiveTest {
                                 ScopeAnchor.Membership.OUT)),
                 TARGET_BROAD);
         MainModelScopeProbeGenerator generator = new MainModelScopeProbeGenerator(
-                new HttpMainModelChatClient(new InferenceEndpointDescriptor(
-                        model, BASE_URL, "/api/chat", TIMEOUT_MILLIS)),
+                new PortMainModelChat(com.aresstack.askai.java8.modelport.CentralModelDirectories.fixedModelPort(
+                        BASE_URL, model, java.time.Duration.ofMillis(TIMEOUT_MILLIS)),
+                        ResearchModelSlots.SCOPE, java.time.Duration.ofMillis(TIMEOUT_MILLIS)),
                 new GeneratorSettings(0.7d, MAX_OUTPUT_TOKENS, CONTROLS_PER_ANCHOR));
 
         long startedAt = System.nanoTime();
