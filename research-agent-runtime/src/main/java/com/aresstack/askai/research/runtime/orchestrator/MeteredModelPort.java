@@ -18,12 +18,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * accounting of one task (or of the orchestrator itself) against its budget. Usage the platform does not know
  * counts as zero; the wall-time budget still applies. Nothing else is changed.
  */
-final class MeteredModelPort implements ModelPort {
+public final class MeteredModelPort implements ModelPort {
 
     private final ModelPort delegate;
     private final AtomicLong tokens;
 
-    MeteredModelPort(ModelPort delegate, AtomicLong tokens) {
+    public MeteredModelPort(ModelPort delegate, AtomicLong tokens) {
         this.delegate = delegate;
         this.tokens = tokens;
     }
