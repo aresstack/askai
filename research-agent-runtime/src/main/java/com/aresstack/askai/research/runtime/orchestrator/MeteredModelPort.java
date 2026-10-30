@@ -22,10 +22,20 @@ public final class MeteredModelPort implements ModelPort {
 
     private final ModelPort delegate;
     private final AtomicLong tokens;
+    private final java.util.function.BooleanSupplier exhausted;
 
     public MeteredModelPort(ModelPort delegate, AtomicLong tokens) {
+        this(delegate, tokens, null);
+    }
+
+    /**
+     * @param exhausted true once the account's budget is spent; every further call then fails fast as
+     *                  {@link ModelFailure.Kind#CANCELLED} instead of reaching the model (null: never)
+     */
+    public MeteredModelPort(ModelPort delegate, AtomicLong tokens, java.util.function.BooleanSupplier exhausted) {
         this.delegate = delegate;
         this.tokens = tokens;
+        this.exhausted = exhausted;
     }
 
     @Override
@@ -35,12 +45,37 @@ public final class MeteredModelPort implements ModelPort {
 
     @Override
     public ModelCall chat(SlotReservation reservation, ChatRequest request, ChatListener listener) {
+        if (isExhausted()) {
+            return refused(listener);
+        }
         return delegate.chat(reservation, request, metered(listener));
     }
 
     @Override
     public ModelCall chat(ChatRequest request, ChatListener listener) {
+        if (isExhausted()) {
+            return refused(listener);
+        }
         return delegate.chat(request, metered(listener));
+    }
+
+    private boolean isExhausted() {
+        return exhausted != null && exhausted.getAsBoolean();
+    }
+
+    /** The budget is spent: the call ends at once with an honest failure and never reaches the model. */
+    private static ModelCall refused(ChatListener listener) {
+        listener.onFailed(new ModelFailure(ModelFailure.Kind.CANCELLED, "the task's budget is spent"));
+        return new ModelCall() {
+            @Override
+            public void cancel() {
+            }
+
+            @Override
+            public boolean isDone() {
+                return true;
+            }
+        };
     }
 
     @Override

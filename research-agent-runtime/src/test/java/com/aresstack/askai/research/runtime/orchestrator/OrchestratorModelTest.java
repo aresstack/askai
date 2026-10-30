@@ -127,7 +127,7 @@ public class OrchestratorModelTest {
     @Test
     public void theWebWorkerBoundsItsSearchRunByTheTasksRemainingTime() {
         final java.util.concurrent.atomic.AtomicLong passed = new java.util.concurrent.atomic.AtomicLong(-1);
-        WebResearchWorker worker = new WebResearchWorker((query, research, accepted, maxDurationMillis, tokens) -> {
+        WebResearchWorker worker = new WebResearchWorker((query, research, accepted, maxDurationMillis, tokens, exhausted) -> {
             passed.set(maxDurationMillis);
             return new WebAcquisition.Result(
                     com.aresstack.askai.research.runtime.loop.ResearchStopReason.NO_SEMANTIC_MATCHES, "");
@@ -164,5 +164,53 @@ public class OrchestratorModelTest {
         assertFalse(excerpt, excerpt.contains("Welcome"));
         assertTrue(WebResearchWorker.excerpt(page, "battery capacity mAh", 40).length() <= 40);
         assertEquals("", WebResearchWorker.excerpt("  ", "q", 100));
+    }
+
+    @Test
+    public void aSpentAccountRefusesFurtherModelCallsWithoutReachingTheModel() {
+        final java.util.concurrent.atomic.AtomicInteger reached = new java.util.concurrent.atomic.AtomicInteger();
+        com.aresstack.askai.agent.model.port.ModelPort port = new com.aresstack.askai.agent.model.port.ModelPort() {
+            public java.util.concurrent.CompletableFuture<com.aresstack.askai.agent.model.port.resource.SlotReservation>
+                    reserve(com.aresstack.askai.agent.model.port.resource.SlotRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            public com.aresstack.askai.agent.model.port.ModelCall chat(
+                    com.aresstack.askai.agent.model.port.resource.SlotReservation reservation,
+                    com.aresstack.askai.agent.model.port.ChatRequest request,
+                    com.aresstack.askai.agent.model.port.ChatListener listener) {
+                reached.incrementAndGet();
+                return null;
+            }
+
+            public com.aresstack.askai.agent.model.port.ModelCall chat(
+                    com.aresstack.askai.agent.model.port.ChatRequest request,
+                    com.aresstack.askai.agent.model.port.ChatListener listener) {
+                reached.incrementAndGet();
+                return null;
+            }
+
+            public com.aresstack.askai.agent.model.port.resource.ResourceSnapshot resources() {
+                return null;
+            }
+        };
+        final java.util.concurrent.atomic.AtomicBoolean spent = new java.util.concurrent.atomic.AtomicBoolean();
+        MeteredModelPort metered = new MeteredModelPort(port, new java.util.concurrent.atomic.AtomicLong(), spent::get);
+        final java.util.List<com.aresstack.askai.agent.model.port.ModelFailure> failures =
+                new java.util.ArrayList<com.aresstack.askai.agent.model.port.ModelFailure>();
+        com.aresstack.askai.agent.model.port.ChatListener listener = new com.aresstack.askai.agent.model.port.ChatListener() {
+            public void onCompleted(com.aresstack.askai.agent.model.port.ChatResult result) {
+            }
+
+            public void onFailed(com.aresstack.askai.agent.model.port.ModelFailure failure) {
+                failures.add(failure);
+            }
+        };
+        metered.chat(null, listener);
+        assertEquals(1, reached.get());
+        spent.set(true);
+        assertTrue(metered.chat(null, listener).isDone());
+        assertEquals("the spent account never reaches the model", 1, reached.get());
+        assertEquals(com.aresstack.askai.agent.model.port.ModelFailure.Kind.CANCELLED, failures.get(0).getKind());
     }
 }
