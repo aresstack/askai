@@ -96,6 +96,16 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField scopeCheckNoveltyGap = ComicControls.textField(4);
     private final JTextField scopeCheckNoveltyWeight = ComicControls.textField(4);
     private final JTextField scopeCheckDuplicateCeiling = ComicControls.textField(4);
+    /** ADR 0001 lane F: orchestrated research opt-in (default OFF = the single autonomous loop). */
+    private final JCheckBox orchestratorEnabled = ComicControls.checkBox(
+            "Orchestrated research: plan, approve, rounds of work packages (applies to new sessions)", false);
+    private final JTextField orchestratorMaxRounds = ComicControls.textField(3);
+    private final JTextField orchestratorMaxTasks = ComicControls.textField(3);
+    private final JTextField orchestratorTasksPerRound = ComicControls.textField(3);
+    private final JTextField orchestratorTokenBudget = ComicControls.textField(7);
+    private final JTextField orchestratorTimeBudget = ComicControls.textField(4);
+    private final JTextField orchestratorTaskRetries = ComicControls.textField(3);
+    private final JTextField orchestratorSectionSources = ComicControls.textField(3);
     /** AI reranker opt-in (default OFF = lexical BM25 scoring, no model load). */
     private final JCheckBox useAiReranker = ComicControls.checkBox(
             "Use the AI reranker (semantic model instead of BM25; applies to new sessions)", false);
@@ -171,6 +181,23 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
         searchLimits.add(labelled("Errors", searchMaxErrors));
         form.add(row("Search limits:", searchLimits));
+        form.add(row("", orchestratorEnabled));
+        JPanel orchestratorLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        orchestratorLimits.setOpaque(false);
+        orchestratorLimits.add(labelled("Rounds", orchestratorMaxRounds));
+        orchestratorLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        orchestratorLimits.add(labelled("Packages", orchestratorMaxTasks));
+        orchestratorLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        orchestratorLimits.add(labelled("Per round", orchestratorTasksPerRound));
+        orchestratorLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        orchestratorLimits.add(labelled("Tokens", orchestratorTokenBudget));
+        orchestratorLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        orchestratorLimits.add(labelled("Minutes", orchestratorTimeBudget));
+        orchestratorLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        orchestratorLimits.add(labelled("Retries", orchestratorTaskRetries));
+        orchestratorLimits.add(javax.swing.Box.createHorizontalStrut(10));
+        orchestratorLimits.add(labelled("Sources/section", orchestratorSectionSources));
+        form.add(row("Orchestrator:", orchestratorLimits));
         JPanel workerLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         workerLimits.setOpaque(false);
         workerLimits.add(labelled("Processes", workerProcesses));
@@ -347,6 +374,37 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.saveLanguage(ResearchRuntimeSettingsPanel.this.store, code);
             }
         });
+        orchestratorEnabled.setSelected(ResearchRuntimeSettings.loadOrchestratorEnabled(store));
+        orchestratorEnabled.setToolTipText("Off: a research question runs the single autonomous search loop. "
+                + "On: the orchestrator proposes a plan of work packages; nothing runs until you approve it, "
+                + "and anything beyond the approved plan or budget comes back to you.");
+        orchestratorEnabled.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveOrchestratorEnabled(ResearchRuntimeSettingsPanel.this.store,
+                        orchestratorEnabled.isSelected());
+            }
+        });
+        bindLimit(orchestratorMaxRounds, ResearchRuntimeSettings.KEY_ORCHESTRATOR_MAX_ROUNDS,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_MAX_ROUNDS,
+                "Evaluation rounds of one approved run before it comes back to you.");
+        bindLimit(orchestratorMaxTasks, ResearchRuntimeSettings.KEY_ORCHESTRATOR_MAX_TASKS,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_MAX_TASKS,
+                "Work packages of one approved run (plan plus follow-ups).");
+        bindLimit(orchestratorTasksPerRound, ResearchRuntimeSettings.KEY_ORCHESTRATOR_TASKS_PER_ROUND,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_TASKS_PER_ROUND,
+                "How many follow-up packages one round may propose.");
+        bindNonNegativeLimit(orchestratorTokenBudget, ResearchRuntimeSettings.KEY_ORCHESTRATOR_TOKEN_BUDGET,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_TOKEN_BUDGET,
+                "Token budget of one approved run (orchestrator and workers); 0 = not limited.");
+        bindNonNegativeLimit(orchestratorTimeBudget, ResearchRuntimeSettings.KEY_ORCHESTRATOR_TIME_BUDGET_MINUTES,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_TIME_BUDGET_MINUTES,
+                "Time budget of one approved run in minutes; 0 = not limited.");
+        bindNonNegativeLimit(orchestratorTaskRetries, ResearchRuntimeSettings.KEY_ORCHESTRATOR_TASK_RETRIES,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_TASK_RETRIES,
+                "How often a work package is retried after a technical failure or an interruption.");
+        bindLimit(orchestratorSectionSources, ResearchRuntimeSettings.KEY_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
+                "Accepted sources every outline section needs before the run may close.");
         useAiReranker.setSelected(ResearchRuntimeSettings.loadUseAiReranker(store));
         useAiReranker.setToolTipText("Off: search hits are scored lexically with BM25 — fast, "
                 + "no model. On: the configured cross-encoder model scores them semantically.");

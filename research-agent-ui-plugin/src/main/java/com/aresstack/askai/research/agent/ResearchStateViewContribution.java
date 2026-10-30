@@ -57,16 +57,26 @@ public final class ResearchStateViewContribution implements ArtifactViewContribu
                                 .Status.DISPATCH_FAILED, detail);
             }
         });
+        // ADR 0001 lane F: approving or stopping the orchestrated run is the USER's decision, sent as a typed
+        // service command; the run itself never leaves a waiting state on its own.
+        view.setRunControlListener(new ResearchStateView.RunControlListener() {
+            public void decide(String decision) {
+                research.submitOrchestratorDecision(decision);
+            }
+        });
         final Runnable refresh = new Runnable() {
             public void run() {
                 // Snapshot is read on the caller thread but applied to Swing via the UiExecutor.
                 final ResearchStateSnapshot snapshot = research.currentResearchSnapshot();
                 final java.util.List<com.aresstack.askai.research.domain.task.ResearchTask> tasks =
                         research.currentResearchTasks();
+                final com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun run =
+                        research.currentOrchestratorRun();
                 uiExecutor.execute(new Runnable() {
                     public void run() {
                         view.setSnapshot(snapshot);
                         view.setTasks(tasks);
+                        view.setRun(run);
                     }
                 });
             }

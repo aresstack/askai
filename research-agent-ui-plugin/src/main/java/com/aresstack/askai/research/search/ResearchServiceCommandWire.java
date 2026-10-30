@@ -90,6 +90,17 @@ public final class ResearchServiceCommandWire {
         return sb.toString();
     }
 
+    /**
+     * ADR 0001 lane F: an orchestrator command of the USER ({@code orchestrator_start}, {@code _approve},
+     * {@code _stop}, {@code _answer}); {@code text} is the question or the answer, empty otherwise. Like every
+     * service command it never transitions the host state machine.
+     */
+    public static String orchestrator(String type, String text) {
+        StringBuilder sb = new StringBuilder(MARKER).append(type);
+        appendEncoded(sb, "query", text);
+        return sb.toString();
+    }
+
     private static void appendEncoded(StringBuilder sb, String key, String value) {
         if (value == null || value.isEmpty()) {
             return;

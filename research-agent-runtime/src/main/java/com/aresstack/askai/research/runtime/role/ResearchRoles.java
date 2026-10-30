@@ -60,13 +60,28 @@ public final class ResearchRoles {
         return Collections.unmodifiableList(roles);
     }
 
-    /** Every role of a session: one conversation role per phase profile of {@code profiles}, then the workers. */
+    /**
+     * The roles of the orchestrated run (ADR 0001, 4.2, lane F): the orchestrator and the worker roles it
+     * delegates to. Kept apart from {@link #workers()}, which lists the single agent's tool-free roles.
+     */
+    public static List<ResearchRole> orchestration() {
+        List<ResearchRole> roles = new ArrayList<ResearchRole>();
+        roles.add(com.aresstack.askai.research.runtime.orchestrator.ResearchOrchestrator.ROLE);
+        roles.add(com.aresstack.askai.research.runtime.orchestrator.WebResearchWorker.ROLE);
+        return Collections.unmodifiableList(roles);
+    }
+
+    /**
+     * Every role of a session: one conversation role per phase profile of {@code profiles}, then the workers,
+     * then the orchestration roles.
+     */
     public static List<ResearchRole> all(PhaseAssistantProfileRegistry profiles) {
         List<ResearchRole> roles = new ArrayList<ResearchRole>();
         for (PhaseAssistantProfile profile : profiles.all()) {
             roles.add(profile.getRole());
         }
         roles.addAll(workers());
+        roles.addAll(orchestration());
         return Collections.unmodifiableList(roles);
     }
 }

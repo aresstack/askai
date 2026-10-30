@@ -450,6 +450,74 @@ public final class ResearchRuntimeSettings {
      */
     public static final String KEY_USE_AI_RERANKER = "research.runtime.useAiReranker";
 
+    // ---- ADR 0001 lane F: the orchestrated research run (limits are settings, never constants) ----------
+
+    /** "Orchestrated research" (default OFF = the single autonomous research loop). */
+    public static final String KEY_ORCHESTRATOR_ENABLED = "research.orchestrator.enabled";
+    public static final String KEY_ORCHESTRATOR_MAX_ROUNDS = "research.orchestrator.maxRounds";
+    public static final String KEY_ORCHESTRATOR_MAX_TASKS = "research.orchestrator.maxTasks";
+    public static final String KEY_ORCHESTRATOR_TASKS_PER_ROUND = "research.orchestrator.maxTasksPerRound";
+    public static final String KEY_ORCHESTRATOR_TOKEN_BUDGET = "research.orchestrator.tokenBudget";
+    public static final String KEY_ORCHESTRATOR_TIME_BUDGET_MINUTES = "research.orchestrator.timeBudgetMinutes";
+    public static final String KEY_ORCHESTRATOR_TASK_RETRIES = "research.orchestrator.taskRetryLimit";
+    public static final String KEY_ORCHESTRATOR_MIN_SOURCES_PER_SECTION =
+            "research.orchestrator.minSourcesPerSection";
+    // The defaults are the runtime's (OrchestratorSettings), so host and agent never disagree.
+    public static final int DEFAULT_ORCHESTRATOR_MAX_ROUNDS =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MAX_ROUNDS;
+    public static final int DEFAULT_ORCHESTRATOR_MAX_TASKS =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MAX_TASKS;
+    public static final int DEFAULT_ORCHESTRATOR_TASKS_PER_ROUND =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MAX_TASKS_PER_ROUND;
+    public static final int DEFAULT_ORCHESTRATOR_TOKEN_BUDGET = (int)
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_TOKEN_BUDGET;
+    public static final int DEFAULT_ORCHESTRATOR_TIME_BUDGET_MINUTES =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_TIME_BUDGET_MINUTES;
+    public static final int DEFAULT_ORCHESTRATOR_TASK_RETRIES =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_TASK_RETRY_LIMIT;
+    public static final int DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MIN_SOURCES_PER_SECTION;
+
+    public static boolean loadOrchestratorEnabled(WorkspaceStateStore store) {
+        return store != null && store.getBoolean(KEY_ORCHESTRATOR_ENABLED, false);
+    }
+
+    public static void saveOrchestratorEnabled(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_ORCHESTRATOR_ENABLED, enabled);
+        }
+    }
+
+    /**
+     * The orchestrated run's settings as the agent's {@code ASKAI_ORCHESTRATOR_*} hand-off (the same mechanism
+     * as the search limits). Values the user never set travel as their defaults.
+     */
+    public static java.util.Map<String, String> loadOrchestratorEnvironment(WorkspaceStateStore store) {
+        java.util.Map<String, String> env = new java.util.LinkedHashMap<String, String>();
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MODE,
+                loadOrchestratorEnabled(store) ? "orchestrated" : "loop");
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MAX_ROUNDS,
+                String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_MAX_ROUNDS, DEFAULT_ORCHESTRATOR_MAX_ROUNDS)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MAX_TASKS,
+                String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_MAX_TASKS, DEFAULT_ORCHESTRATOR_MAX_TASKS)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MAX_TASKS_PER_ROUND,
+                String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_TASKS_PER_ROUND,
+                        DEFAULT_ORCHESTRATOR_TASKS_PER_ROUND)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_TOKEN_BUDGET,
+                String.valueOf(loadNonNegativeInt(store, KEY_ORCHESTRATOR_TOKEN_BUDGET,
+                        DEFAULT_ORCHESTRATOR_TOKEN_BUDGET)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_TIME_BUDGET_MINUTES,
+                String.valueOf(loadNonNegativeInt(store, KEY_ORCHESTRATOR_TIME_BUDGET_MINUTES,
+                        DEFAULT_ORCHESTRATOR_TIME_BUDGET_MINUTES)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_TASK_RETRY_LIMIT,
+                String.valueOf(loadNonNegativeInt(store, KEY_ORCHESTRATOR_TASK_RETRIES,
+                        DEFAULT_ORCHESTRATOR_TASK_RETRIES)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MIN_SOURCES_PER_SECTION,
+                String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
+                        DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION)));
+        return env;
+    }
+
     public static boolean loadUseAiReranker(WorkspaceStateStore store) {
         return store != null && store.getBoolean(KEY_USE_AI_RERANKER, false);
     }

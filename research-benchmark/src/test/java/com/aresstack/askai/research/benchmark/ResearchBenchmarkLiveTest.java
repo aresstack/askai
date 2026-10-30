@@ -45,7 +45,8 @@ public class ResearchBenchmarkLiveTest {
     private void run(BenchmarkSettings settings, OllamaProbe ollama, List<String> models,
                      BenchmarkQuestionSet questionSet, List<BenchmarkQuestion> questions,
                      LocalRerankerRuntime reranker) throws Exception {
-        List<BenchmarkSubject> subjects = Arrays.<BenchmarkSubject>asList(new SingleAgentBaselineSubject(reranker));
+        List<BenchmarkSubject> subjects = Arrays.<BenchmarkSubject>asList(new SingleAgentBaselineSubject(reranker),
+                new OrchestratedResearchSubject(reranker));
         BenchmarkScorer scorer = new BenchmarkScorer(settings);
 
         BenchmarkReport report = new BenchmarkReport(Instant.now(), settings, questionSet.getVersion());

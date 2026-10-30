@@ -4,6 +4,7 @@ import com.aresstack.askai.research.backend.ResearchCommandDispatchResult;
 import com.aresstack.askai.research.domain.task.ResearchTask;
 import com.aresstack.askai.research.state.ResearchCommandType;
 import com.aresstack.askai.research.state.oo.ResearchStateIds;
+import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.control.ComicScrollPane;
 import com.aresstack.comiccontrols.control.ComicSectionPanel;
 import com.aresstack.comiccontrols.theme.ComicPalette;
@@ -61,6 +62,13 @@ public final class ResearchStateView extends JPanel {
     private ResearchStateSnapshot snapshot;
     private List<ResearchTask> tasks = Collections.emptyList();
     private CommandListener commandListener;
+    private com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun run;
+    private RunControlListener runControlListener;
+
+    /** ADR 0001 lane F: the user's decisions on the orchestrated run ("approve" or "stop"). */
+    public interface RunControlListener {
+        void decide(String decision);
+    }
 
     public ResearchStateView() {
         super(new BorderLayout(0, 6));
@@ -106,6 +114,18 @@ public final class ResearchStateView extends JPanel {
         rebuild();
     }
 
+    /** Wire the run controls; without a listener the run plate is read-only. */
+    public void setRunControlListener(RunControlListener listener) {
+        this.runControlListener = listener;
+        rebuild();
+    }
+
+    /** Render the project's orchestrated run (or none). Must be called on the EDT. */
+    public void setRun(com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun run) {
+        this.run = run;
+        rebuild();
+    }
+
     // ------------------------------------------------------------------ timeline
 
     private void rebuild() {
@@ -126,6 +146,10 @@ public final class ResearchStateView extends JPanel {
             revision.setEnabled(false);
             revision.setFont(revision.getFont().deriveFont(Font.PLAIN, 11f));
             timeline.add(revision);
+        }
+        if (run != null) {
+            timeline.add(javax.swing.Box.createVerticalStrut(6));
+            timeline.add(buildRunPlate());
         }
         if (!tasks.isEmpty()) {
             timeline.add(javax.swing.Box.createVerticalStrut(6));
@@ -205,6 +229,93 @@ public final class ResearchStateView extends JPanel {
                 dispatch(command);
             }
         });
+    }
+
+    /**
+     * The orchestrated run: its state, what it has spent against the approved envelope, why it waits, and
+     * the user's two decisions. The run never moves on its own past a waiting state; these buttons (or a
+     * new question) are the only way on.
+     */
+    private JComponent buildRunPlate() {
+        ComicSectionPanel plate = new ComicSectionPanel(palette);
+        plate.setName("research.state.run");
+        plate.setLayout(new BoxLayout(plate, BoxLayout.Y_AXIS));
+        plate.setAccentStripe(palette.getAgentPetrol());
+        JLabel title = new JLabel("ORCHESTRATED RUN");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 12f));
+        title.setAlignmentX(LEFT_ALIGNMENT);
+        plate.add(title);
+        for (String line : runLines(run)) {
+            JComponent label = quietLine(line);
+            label.setAlignmentX(LEFT_ALIGNMENT);
+            plate.add(label);
+        }
+        com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun.State state = run.getState();
+        if (runControlListener != null && !state.isFinal()
+                && state != com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun.State.AWAITING_INPUT) {
+            JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+            buttons.setOpaque(false);
+            buttons.setAlignmentX(LEFT_ALIGNMENT);
+            String approveLabel = state == com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun.State
+                    .PLAN_PROPOSED ? "Approve plan" : state == com.aresstack.askai.research.runtime.orchestrator
+                    .OrchestratorRun.State.RUNNING ? "Continue" : "Approve";
+            ComicButton approve = new ComicButton(approveLabel);
+            approve.setName("research.state.run.approve");
+            approve.addActionListener(new java.awt.event.ActionListener() {
+                public void actionPerformed(java.awt.event.ActionEvent event) {
+                    runControlListener.decide("approve");
+                }
+            });
+            ComicButton stop = new ComicButton(state == com.aresstack.askai.research.runtime.orchestrator
+                    .OrchestratorRun.State.PLAN_PROPOSED ? "Reject plan" : "Stop run");
+            stop.setName("research.state.run.stop");
+            stop.addActionListener(new java.awt.event.ActionListener() {
+                public void actionPerformed(java.awt.event.ActionEvent event) {
+                    runControlListener.decide("stop");
+                }
+            });
+            buttons.add(approve);
+            buttons.add(javax.swing.Box.createHorizontalStrut(8));
+            buttons.add(stop);
+            plate.add(buttons);
+        }
+        plate.setAlignmentX(LEFT_ALIGNMENT);
+        plate.setMaximumSize(new Dimension(Integer.MAX_VALUE, plate.getPreferredSize().height));
+        return plate;
+    }
+
+    /** The run plate's text lines (English, user-readable). */
+    static List<String> runLines(com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun run) {
+        List<String> lines = new ArrayList<String>();
+        lines.add(run.getState().wireName() + " · " + run.getQuestion());
+        StringBuilder spent = new StringBuilder("rounds ").append(run.getRoundsUsed()).append('/')
+                .append(run.getMaxRounds()).append(" · packages ").append(run.getTasksSubmitted()).append('/')
+                .append(run.getMaxTasks()).append(" · tokens ").append(run.getTokensUsed());
+        if (run.getTokenBudget() > 0) {
+            spent.append('/').append(run.getTokenBudget());
+        }
+        spent.append(" · minutes ").append(run.getTimeUsedMillis() / 60_000L);
+        if (run.getTimeBudgetMillis() > 0) {
+            spent.append('/').append(run.getTimeBudgetMillis() / 60_000L);
+        }
+        lines.add(spent.toString());
+        if (run.getState().isWaitingForUser() && !run.getWaitingReason().isEmpty()) {
+            lines.add("waiting: " + run.getWaitingReason());
+        }
+        for (com.aresstack.askai.research.runtime.orchestrator.PlannedTask pending : run.getPending()) {
+            lines.add("pending " + pending.getId() + " · " + pending.getRole() + " · " + pending.getQuery());
+        }
+        if (run.getState() == com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun.State
+                .PLAN_PROPOSED) {
+            for (com.aresstack.askai.research.runtime.orchestrator.PlannedTask planned : run.getPlan()) {
+                lines.add("plan " + planned.getId() + " · " + planned.getRole() + " · " + planned.getQuery());
+            }
+        }
+        if (run.getState() == com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun.State
+                .AWAITING_INPUT) {
+            lines.add("Answer the question in the chat to continue.");
+        }
+        return lines;
     }
 
     /** The minimal task list: one quiet line per work package, in submission order. */

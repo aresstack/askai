@@ -25,6 +25,9 @@ dependencies {
     // consumed behind the existing SearchProvider seam via a thin adapter. File-based config + AES-GCM
     // secrets live in the module; the runtime never carries provider credentials.
     implementation project(':web-search-providers')
+    // ADR 0001 lane F: the orchestrated run's decision codec and run record are Gson (the house JSON library,
+    // ADR 3.1), on the root's single Gson version.
+    implementation "com.google.code.gson:gson:${gsonVersion}"
 
     // The E2E tests drive the PRODUCTIVE plugin wiring (factory, endpoints, in-process backend) and the
     // live local runtimes; the plugin itself depends on this module (a test-only cycle, no task cycle).
