@@ -145,8 +145,11 @@ public class ProductiveCommandBridgeTest {
         Fx fx = new Fx();
         // The model-backed TeamAgent now LEADS the conversation: a user turn is FORWARDED to the agent (not
         // swallowed by a host-side scoping dialogue), and a plain turn commits nothing on its own.
-        int afterActivate = fx.backend.prompts.size(); // activate() sent the greeting bootstrap turn
+        int afterActivate = fx.backend.prompts.size();
+        assertEquals("a new chat stays empty: no bootstrap turn, no model call", 0, afterActivate);
         fx.session.submitPrompt("just a question");
+        assertEquals("the first message starts the scoping before the turn reaches the agent",
+                ResearchStateIds.RUNNING, fx.resources.currentState().getStateId());
         assertEquals("the user turn reaches the agent", afterActivate + 1, fx.backend.prompts.size());
         assertEquals("just a question", fx.backend.prompts.get(fx.backend.prompts.size() - 1));
         assertEquals("a plain turn commits no scope", ResearchStateIds.SCOPING,
@@ -170,7 +173,7 @@ public class ProductiveCommandBridgeTest {
     @Test
     public void aValidatedScopeProposalFromTheAgentCommitsScopeAndStartsResearch() {
         Fx fx = new Fx();
-        int afterActivate = fx.backend.prompts.size(); // the greeting bootstrap turn
+        int afterActivate = fx.backend.prompts.size(); // no bootstrap turn: 0
         // The runtime TeamAgent proposes a validated scope (as it arrives over the ACP "scope" wire line and
         // is mapped to a SCOPE_PROPOSAL event): the host RE-VALIDATES against its own state machine, commits
         // the model-confirmed scope and advances to the outline approval gate. The model never confirmed it

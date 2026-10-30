@@ -135,14 +135,6 @@ public final class ResearchTeamAgent {
         return greeted;
     }
 
-    /**
-     * The session opened with the user's own message: no model greeting is produced, and none is produced
-     * later either — the first answer is the reply to that message.
-     */
-    public void markGreeted() {
-        greeted = true;
-    }
-
     public boolean hasPendingTurn() {
         return pendingUserTurn != null;
     }

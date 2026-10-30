@@ -404,21 +404,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             restoreProjectMetadata();
             // Show the last PERSISTED visualization (possibly stale) — never regenerate on open (issue #29).
             restorePersistedVisualization();
-            // The greeting depends ONLY on the state: greet exactly once, when the scope state is still fresh
-            // (SCOPING/NEW). A restored session whose state already advanced past NEW is NOT greeted again —
-            // its prior greeting comes back from the persisted chat transcript instead (no double greeting).
+            // A fresh chat (SCOPING/NEW) stays EMPTY: no bootstrap turn, no model call. The former greeting
+            // asked for a topic the user was about to name anyway, cost a model call on every new chat and sat
+            // in the context of the real first turn. The scoping starts with the user's first message (see
+            // startScopingOnFirstMessage).
             com.aresstack.askai.research.state.oo.ResearchStateMemento current =
                     productiveResources.currentState();
             boolean freshState =
                     com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(current.getPhaseId())
                     && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW.equals(current.getStateId());
-            if (freshState) {
-                // The model-backed TeamAgent (runtime process) OWNS the greeting: send ONE bootstrap turn so
-                // its model-generated greeting arrives as an assistant message. On success the runtime signals
-                // GREETING_DONE and the host advances the state one step (see handleGreetingDone).
-                beginAgentTurn(); // busy + preempt visualizer; cleared by the greeting turn's terminal event
-                backend.submitPrompt(handle, new ResearchPrompt("", ""));
-            } else {
+            if (!freshState) {
                 // Restored session: the conversation text comes back from the persisted transcript, but the
                 // interactive buttons do not. Re-derive the decision buttons from the live state
                 // (non-persisted, so they never duplicate/accumulate across restarts), and bring back the
@@ -983,6 +978,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 technicalLog("stale decision tombstone superseded by a substantive turn");
             }
             echoUserMessage(text);
+            startScopingOnFirstMessage();
             // KISS (live-gate 4): the mission is bookkeeping, not intelligence — the user's
             // FIRST message IS the mission until they restate it. No model turn ever begs
             // for setMission again.
@@ -1062,7 +1058,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * non-fresh state and never greets again (the persisted chat shows the prior greeting instead). Idempotent
      * and only meaningful while still at SCOPING/NEW.
      */
-    private void handleGreetingDone() {
+    /**
+     * SCOPING/NEW → SCOPING/RUNNING when the user sends the first message of a fresh chat — synchronously,
+     * BEFORE the turn reaches the runtime, so the turn's concept writes (bound to SCOPING/running) are allowed
+     * and the runtime answers the topic directly. Also the handler of a runtime's GREETING_DONE signal.
+     */
+    private void startScopingOnFirstMessage() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return;
         }
@@ -1994,7 +1995,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 handleScopeProposal(event.getText(), event.getTechnicalDetail());
                 break;
             case GREETING_DONE:
-                handleGreetingDone();
+                startScopingOnFirstMessage();
                 break;
             case SCOPE_UPDATE:
                 applyScopeUpdate(event.getText());

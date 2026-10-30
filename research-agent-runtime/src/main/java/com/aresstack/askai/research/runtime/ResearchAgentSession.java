@@ -834,35 +834,26 @@ public final class ResearchAgentSession {
         }
         // Productive conversation: the model-backed TeamAgent LEADS the greeting, scoping and outline dialog.
         // Apply any pending central-model reload at this turn boundary (never mid-request), mirror the live
-        // host state, then greet on the first turn / respond on later turns. The host stays the state
+        // host state, then respond. The host stays the state
         // authority — this only reads research_status and speaks the model's own words.
         applyPendingModelReload(ctx);
         com.aresstack.askai.research.runtime.team.TeamAgentStateView view = readStateView(ctx);
         reconcileConfirmedScope(view);
-        // The greeting depends ONLY on the host state: greet solely when the scope state is still fresh
-        // (SCOPING/NEW). A restored session (fresh process, but the host state already advanced past NEW)
-        // responds directly and is never greeted again — the prior greeting comes from the persisted chat.
+        // No greeting turn: a fresh chat stays empty until the user writes, and the first answer replies to
+        // the user's topic directly. The host starts the scoping (SCOPING/NEW → running) on the first message;
+        // a host that has not yet done so gets the one-step signal here. An empty turn on a fresh state (an
+        // older host's bootstrap) costs no model call.
         boolean freshState = "scoping".equalsIgnoreCase(view.getPhaseId())
                 && "new".equalsIgnoreCase(view.getStateId());
-        com.aresstack.askai.research.runtime.team.TeamAgentResult result;
-        if (!teamAgent.hasGreeted() && freshState && !text.trim().isEmpty()) {
-            // The user opened the chat WITH their topic: a model greeting first would answer a
-            // question nobody asked (second live acceptance: "Hallo! Worüber möchtest du …" above
-            // the real answer). The state still advances one step, exactly as after a greeting.
-            teamAgent.markGreeted();
-            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
-            emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text), view.getPhaseId());
-        } else if (!teamAgent.hasGreeted() && freshState) {
-            result = teamAgent.greet(view);
-            emitTeamAgentResult(ctx, result, view.getPhaseId());
-            if (result.isOk()) {
-                // Signal the host to advance the scope state one step, so this greeting is never repeated.
-                ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
-            }
-        } else {
-            emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text),
-                    view.getPhaseId());
+        if (freshState && text.trim().isEmpty()) {
+            return cancelled.get()
+                    ? AgentTurnOutcome.CANCELLED
+                    : AgentTurnOutcome.END_TURN;
         }
+        if (freshState) {
+            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
+        }
+        emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text), view.getPhaseId());
         return cancelled.get()
                 ? AgentTurnOutcome.CANCELLED
                 : AgentTurnOutcome.END_TURN;
