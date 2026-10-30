@@ -205,6 +205,7 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 - [docs/research-agent-runtime.md](docs/research-agent-runtime.md): the in-process research agent, model slots, roles, orchestrator, task executor and worker roles
 - [docs/adr/0001-research-agent-architecture-after-java-21.md](docs/adr/0001-research-agent-architecture-after-java-21.md): ADR 0001, research agent architecture after the return to Java 21 (proposed), with implementation notes per work item
 - [research-benchmark/README.md](research-benchmark/README.md): the research benchmark harness
+- [docs/langchain4j-spike.md](docs/langchain4j-spike.md): LangChain4j spike result (ADR 0001, work item I)
 - [docs/research-control-mcp.md](docs/research-control-mcp.md): research-control MCP endpoint
 - [docs/research-bot-control.md](docs/research-bot-control.md): headless bot control
 - [docs/research-chatgpt-connector.md](docs/research-chatgpt-connector.md): ChatGPT connector (German)

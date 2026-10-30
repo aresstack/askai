@@ -479,8 +479,13 @@ stacked on another, it is merged after its base.
   only without a pool), and `UserContextWebAcquisition` leases one user context per search run.
 - **L, documentation** (this note). `docs/research-mvp.md`, `docs/research-agent-runtime.md`,
   `docs/mcp-runtime.md` and the module table in `README.md` describe the state above.
-- **Not started:** B and B' wait for the decision of 3.5. I (LangChain4j spike, optional) runs separately
-  and proposes its result as its own section.
+- **I, LangChain4j spike** (PR #16, optional). The search planner built a second time with LangChain4j
+  1.22.0 (`AiServices`, an `OutputGuardrail` for the repair round) over a `ChatModel` adapter on the host
+  model port, in a separate plugin source set that is neither on the plugin's runtime classpath nor in its
+  `lib/`. `SearchPlannerTwinTest` pins identical requests to the port for both twins. Results and a proposed
+  section 3.4.1 (not applied; the decision stays with the owner) are in `docs/langchain4j-spike.md`; the live
+  comparison runs with `gradlew :research-agent-ui-plugin:langchain4jSpikeLive -Daskai.spike.models=...`.
+- **Not started:** B and B' wait for the decision of 3.5.
 - **Still open across the items:** the live benchmark against the single-agent baseline (it decides whether
   the orchestrated mode becomes the default), the capacity default of 4.5 (exploratory measurements on the
   test machine are in `docs/ollama-parallel-inference-benchmark-2026-10-30.md`; the default stays 1 until
