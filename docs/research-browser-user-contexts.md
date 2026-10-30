@@ -23,7 +23,7 @@ and its `userContext` parameter) is one tab inside it.
 | Topic | Finding |
 |---|---|
 | Browser per chat | One `LazyRestartableBrowserRuntime` per research session (chat), started on the first browser command, stopped after the idle time (`ProductiveResearchBackendFactory.createSession`). |
-| Profile | `CamoufoxProvisioning.leaseProfile()`: ONE persistent profile `browser-profiles/camoufox` for the first session that locks it; every concurrently running session gets a temporary profile, deleted on close. There is no per-chat persistent profile. Unchanged by this work. |
+| Profile | `CamoufoxProvisioning.leaseProfile()`: ONE persistent profile `browser-profiles/camoufox` for the first session that locks it; every concurrently running session gets a temporary profile, deleted on close. There is no per-chat persistent profile, so a sign-in made in one chat showed up in the next chat that got the profile. **Changed by this work, see decision 8.** |
 | Playwright / BiDi | Official Playwright Java 1.62 API on playwright4j (Core JS driver on GraalJS in a child JVM). Camoufox = Firefox over WebDriver BiDi (`moz-firefox` channel), started with `launchPersistentContext`. Chrome/Edge use CDP. |
 | Objects | `Playwright4jDriver`: Playwright → Browser → ONE BrowserContext → ONE Page (+ one parked challenge tab). |
 | Threading | `BrowserSessionActor`: one owner thread runs every command and pumps events while idle. `LazyRestartableBrowserRuntime`: one more single-thread owner. Every browser command of a chat is serialized. |
@@ -47,8 +47,8 @@ What Playwright actually supports (checked in the bundled Playwright Core 1.62 d
 
 ## 3. Architecture decisions
 
-1. **The chat browser stays untouched.** The persistent profile, the HUD, the serial research loop and the
-   manual search keep running on `LazyRestartableBrowserRuntime` exactly as before.
+1. **The chat browser keeps its role.** The HUD, the serial research loop and the manual search keep running
+   on `LazyRestartableBrowserRuntime` exactly as before; only its profile is now per chat (decision 8).
 2. **Worker browsers (lanes) for workers.** Each worker browser is one Playwright instance on its own owner
    thread with one NON-persistent browser process (Camoufox with the same fingerprint, prefs and executable
    as the chat browser, or Chrome/Edge). Playwright gives it a throw-away profile, deleted on close.
@@ -70,16 +70,28 @@ What Playwright actually supports (checked in the bundled Playwright Core 1.62 d
    `SourceAcceptanceService` (duplicate detection by canonical URL). No second source management.
 7. **No second browser implementation.** Worker tabs reuse `Playwright4jDriver` (new page-scoped mode),
    `PlaywrightBrowserSession`, `BrowserToolSet`, `PlaywrightRenderedPageSource` and the bridge.
+8. **One persistent profile per chat.** The chat browser of chat X always opens chat X's own Camoufox profile
+   `browser-profiles/chats/<first 16 hex digits of sha256(chat id)>/camoufox` (owner-only permissions on
+   POSIX; no chat id in the path). `ProductiveResearchBackendFactory` hands the chat id to
+   `LazyRestartableBrowserRuntime`, which passes it on every generation via
+   `PlaywrightBrowserRuntime.Options.profileKey` → `CamoufoxProvisioning.leaseProfile(chatKey)`. Cookies,
+   consent answers and sign-ins survive restarts of the app and of the browser, but never reach another chat.
+   A file lock guards the profile: a second browser of the SAME chat (a restart overlapping the old
+   generation) gets a temporary profile inside that chat's directory, deleted on close. Without a chat id
+   (capability check, tests) the browser gets a temporary profile; the old app-wide profile
+   `browser-profiles/camoufox` is no longer used (it stays on disk, nothing deletes it, so no sign-in of an
+   unknown chat is handed to a new one). Worker user contexts stay non-persistent; a worker that asks for a
+   state key keeps its sign-in in `browser-profiles/worker-state/<chat hash>/`, also per chat.
 
 ```text
 AskAI
-├── Chat A ── chat browser (persistent profile, unchanged, serial research path)
+├── Chat A ── chat browser (chat A's own persistent profile, serial research path)
 │   ├── worker browser w1 (process, own owner thread)
 │   │   ├── user context uc1  (worker 1: own cookies/storage)  ── tab bc1, tab bc2
 │   │   └── user context uc2  (worker 4)                       ── tab bc1
 │   └── worker browser w2
 │       └── user context uc3  (worker 2)                       ── tab bc1
-└── Chat B ── chat browser
+└── Chat B ── chat browser (chat B's own persistent profile)
     └── worker browser w3
         └── user context uc4  (worker 1 of chat B)             ── tab bc1
 all pages of chat A's workers ──► chat A's CaptureStore ──► source_accept / scope / approvals
@@ -191,8 +203,11 @@ Capacity = processes x user contexts per process (default 12 leases, 3 operation
 | `PlaywrightUserContextPoolLiveTest` (real Chromium) | cookie AND local-storage isolation, second tab, chat separation, state restore, three navigations at the server at the same time, cleanup. Gated on a Chromium executable. |
 | `ChatBrowserUserContextsLiveTest` (real Chromium, plugin) | leases through the runtime API; parallel workers' pages land in the session's one capture store; the one acceptance makes 3 sources of 4 visits (the page two workers found is one source); lease close; sign-in saved and restored; session close ends everything. |
 | `WorkerUserContextStateStoreTest` | per-chat files, owner-only permissions, atomic replace, no path escape. |
+| `CamoufoxChannelTest` (profile tests) | each chat owns its persistent profile and finds it again (a cookie file survives a reopen), chat B never sees chat A's profile, no chat id in the path; a second browser of the same chat gets a temporary profile inside the chat's directory that is deleted on close; without a chat there is no shared persistent profile. |
 
 Remaining limitations: the live tests run Chromium (CDP); Camoufox (BiDi) uses the same Playwright calls and
-the BiDi mapping above, but needs the managed Camoufox and was not run in CI. Each worker browser costs a
+the BiDi mapping above, but needs the managed Camoufox and was not run in CI. The per-chat Camoufox profile
+is tested on the lease level, not with a real Camoufox start. Deleting a chat does not yet delete its
+browser profile (the host has no chat-deleted event for plugins). Each worker browser costs a
 browser process plus a playwright4j driver JVM. The per-site limit for `web_follow`/`web_back` uses the site
 of the page the tab shows. Wiring the pool into the task executor is the two-line change in section 4.

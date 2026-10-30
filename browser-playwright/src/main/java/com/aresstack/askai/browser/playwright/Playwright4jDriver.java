@@ -110,9 +110,10 @@ final class Playwright4jDriver implements PlaywrightDriver {
     /**
      * Launch the full chain. @param requestAllowed null = no interception; otherwise every browser-side
      * request URL is checked and aborted when not allowed (cheap best-effort SSRF net below the
-     * authoritative post-navigation URL-policy check in the session).
+     * authoritative post-navigation URL-policy check in the session). @param profileKey the chat whose persistent
+     * Camoufox profile this browser uses (null = a temporary profile; see {@link CamoufoxProvisioning#leaseProfile}).
      */
-    static Playwright4jDriver launch(String channel, boolean headless, int timeoutMillis,
+    static Playwright4jDriver launch(String channel, boolean headless, int timeoutMillis, String profileKey,
                                      final Predicate<String> requestAllowed,
                                      com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
                                      com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha)
@@ -143,7 +144,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             playwright = Playwright.create(new Playwright.CreateOptions().setEnv(env));
             stage = "BROWSER_LAUNCH";
             if (camoufox) {
-                profile = CamoufoxProvisioning.leaseProfile();
+                profile = CamoufoxProvisioning.leaseProfile(profileKey);
                 context = playwright.firefox().launchPersistentContext(profile.directory(),
                         camoufoxOptions(camoufoxExecutable, camoufoxLaunch, headless));
                 browser = context.browser();

@@ -712,7 +712,8 @@ public final class ProductiveResearchBackendFactory {
         // terminates the generation and the command is retried once on a fresh one. The idle keep-alive
         // (settings) keeps the generation warm after a browsing phase so the next search skips the start.
         final BrowserRuntimePort browser = new LazyRestartableBrowserRuntime(config,
-                browserConfigFile.getAbsolutePath(), browserToolTimeoutSeconds, browserIdleStopSeconds);
+                browserConfigFile.getAbsolutePath(), browserToolTimeoutSeconds, browserIdleStopSeconds,
+                sessionKey);
         try {
             // 3. Host endpoints for this session+generation (the bridge forwards through the lazy runtime).
             bridge = new BrowserBridgeEndpoint(registry, browser, captures, sessionKey, generationId);

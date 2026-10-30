@@ -5,20 +5,24 @@ import com.aresstack.askai.browser.playwright.camoufox.CamoufoxInstaller;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.stream.Stream;
 
 /**
  * Where AskAI keeps the managed Camoufox (the Argos distribution: pinned, patched, SHA-256 verified) and its
- * browser profile, under the same app directory as the logs: {@code <APPDATA>/.askai-java8/browser} and
- * {@code <APPDATA>/.askai-java8/browser-profiles}. The download happens once; later starts only verify.
+ * browser profiles (one per chat), under the same app directory as the logs: {@code <APPDATA>/.askai-java8/browser}
+ * and {@code <APPDATA>/.askai-java8/browser-profiles/chats}. The download happens once; later starts only verify.
  *
  * <p>While the installer runs, a progress line {@value #PROGRESS_MARKER} goes to STDERR every few seconds:
  * the host restarts its readiness timeout on each one, so the one-time download never counts as a hung
@@ -76,18 +80,29 @@ final class CamoufoxProvisioning {
     }
 
     /**
-     * The browser profile for this browser runtime. One persistent profile (cookies, consent answers survive) owned
-     * by the first browser runtime that locks it; a concurrent research session gets a temporary profile that is
-     * deleted on {@link ProfileLease#close()} — two Firefox processes can never share one profile.
+     * The browser profile of ONE chat's browser runtime. Each chat owns its own persistent profile (cookies,
+     * consent answers and sign-ins survive restarts) under {@code browser-profiles/chats/<sha256(chat) prefix>/}
+     * — a sign-in made in chat A never shows up in chat B. The profile is locked while a browser uses it; a
+     * second browser of the SAME chat (a restart overlapping the old generation) gets a temporary profile that
+     * is deleted on {@link ProfileLease#close()}, since two Firefox processes can never share one profile.
+     * Without a chat key (capability probe, tests) the browser always gets a temporary profile: there is no
+     * app-wide shared profile any more.
      */
-    static ProfileLease leaseProfile() {
-        return leaseProfile(appDirectory().resolve("browser-profiles"));
+    static ProfileLease leaseProfile(String chatKey) {
+        return leaseProfile(appDirectory().resolve("browser-profiles"), chatKey);
     }
 
-    static ProfileLease leaseProfile(Path profiles) {
+    static ProfileLease leaseProfile(Path profiles, String chatKey) {
         try {
-            Files.createDirectories(profiles);
-            FileChannel channel = FileChannel.open(profiles.resolve(CHANNEL + ".lock"),
+            if (chatKey == null || chatKey.trim().isEmpty()) {
+                Path scratch = profiles.resolve("temporary");
+                Files.createDirectories(scratch);
+                return new ProfileLease(Files.createTempDirectory(scratch, CHANNEL + "-"), null, null, true);
+            }
+            Path chat = chatProfileDirectory(profiles, chatKey);
+            Files.createDirectories(chat);
+            restrictToOwner(chat);
+            FileChannel channel = FileChannel.open(chat.resolve(CHANNEL + ".lock"),
                     StandardOpenOption.CREATE, StandardOpenOption.WRITE);
             FileLock lock;
             try {
@@ -96,14 +111,36 @@ final class CamoufoxProvisioning {
                 lock = null;
             }
             if (lock != null) {
-                Path persistent = profiles.resolve(CHANNEL);
+                Path persistent = chat.resolve(CHANNEL);
                 Files.createDirectories(persistent);
                 return new ProfileLease(persistent, channel, lock, false);
             }
             channel.close();
-            return new ProfileLease(Files.createTempDirectory(profiles, CHANNEL + "-session-"), null, null, true);
+            return new ProfileLease(Files.createTempDirectory(chat, CHANNEL + "-session-"), null, null, true);
         } catch (IOException failed) {
             throw new UncheckedIOException("Camoufox profile unavailable under " + profiles, failed);
+        }
+    }
+
+    /** {@code <profiles>/chats/<first 16 hex digits of sha256(chat key)>}: no chat id in a path name. */
+    static Path chatProfileDirectory(Path profiles, String chatKey) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(chatKey.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 8; i++) {
+                hex.append(String.format("%02x", hash[i] & 0xff));
+            }
+            return profiles.resolve("chats").resolve(hex.toString());
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private static void restrictToOwner(Path directory) {
+        try {
+            Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
+        } catch (UnsupportedOperationException | IOException notPosix) {
+            // Windows: the per-user %APPDATA% ACL protects the profile.
         }
     }
 
@@ -122,6 +159,10 @@ final class CamoufoxProvisioning {
 
         Path directory() {
             return directory;
+        }
+
+        boolean isTemporary() {
+            return temporary;
         }
 
         @Override
