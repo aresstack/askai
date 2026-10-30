@@ -1699,8 +1699,10 @@ public final class ResearchAgentSession {
                             }, cancelled, loadBrowserSearchSettings());
             // The MANDATORY local reranker was built and readiness-checked at session/new; inject it so
             // every organic candidate is scored before any web_open. (Non-browser turns never reach here.)
+            // The loop resolves its scorer exactly like the manual search: the user's "use AI reranker"
+            // setting decides between BM25 (default) and the model reranker of the session language.
             if (reranker != null) {
-                loop.setReranker(reranker);
+                loop.setReranker(rerankerFor(sessionLanguage.code()));
             }
             // Inject the session's chosen initial-search strategy (null → keep the default browser path).
             // On the API-provider path inference is irrelevant; on the browser path weave the productive
