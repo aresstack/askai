@@ -166,8 +166,27 @@ public class LayoutRepairMcpIntegrationTest {
     }
 
     @Test
-    public void aiUnavailableEndsInExtractionFailedOverMcp() throws Exception {
+    public void aiUnavailableFallsBackToTheHarvestedLinksOverMcp() throws Exception {
         LegacyBrowserSearchSettings settings = RepairBridgeFixtures.lowConfidenceAiEnabled();
+        ContributionToolInvoker browser = registerTools(tools(settings, new AtomicLong(1000L)::get));
+        ScriptedPort port = new ScriptedPort(
+                StructuredInferenceResult.of(StructuredInferenceStatus.UNAVAILABLE, "no adapter"));
+        try {
+            McpLayoutRepairClient client =
+                    new McpLayoutRepairClient(browser, coordinator(settings, port));
+            McpLayoutRepairClient.Result result = client.searchWithRepair("berlin",
+                    CancellationSignal.NONE, 2000L, countingBudget(new AtomicInteger()));
+            assertEquals(McpLayoutRepairClient.Outcome.ORGANIC_RESULTS, result.status);
+            assertEquals(3, result.candidates.size());
+            assertEquals("https://site0.example.org/page", result.candidates.get(0).resolvedTargetUrl);
+        } finally {
+            browser.close();
+        }
+    }
+
+    @Test
+    public void aiUnavailableEndsInExtractionFailedOverMcp() throws Exception {
+        LegacyBrowserSearchSettings settings = RepairBridgeFixtures.lowConfidenceAiEnabledWithoutHarvest();
         ContributionToolInvoker browser = registerTools(tools(settings, new AtomicLong(1000L)::get));
         ScriptedPort port = new ScriptedPort(
                 StructuredInferenceResult.of(StructuredInferenceStatus.UNAVAILABLE, "no adapter"));
