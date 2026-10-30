@@ -49,13 +49,15 @@ dependencies {
 test {
     useJUnit()
     doFirst {
-        // Scope live-gate model override: -Daskai.live.main.model=gemma4:e2b runs the generator/
-        // sweep gates against a SPECIFIC installed model instead of the first chat model found.
-        if (System.getProperty('askai.live.main.model') != null) {
-            systemProperty 'askai.live.main.model', System.getProperty('askai.live.main.model')
-        }
-        if (System.getProperty('askai.live.probe.target') != null) {
-            systemProperty 'askai.live.probe.target', System.getProperty('askai.live.probe.target')
+        // The live-gate switches (-Daskai.live.main.model=gemma4:e2b, -Daskai.live.probe.target=20,
+        // -Daskai.live.repeat=3, ...) are system properties of the GRADLE JVM; the forked test JVM
+        // sees none of them unless they are forwarded. Every askai.live.* property is forwarded by
+        // prefix, so a new switch can never be lost silently again — askai.live.repeat once was, and
+        // the triple repetition of ScopingConceptLiveTest never ran (every log line said "#1").
+        System.properties.each { key, value ->
+            if (key.toString().startsWith('askai.live.')) {
+                systemProperty key.toString(), value.toString()
+            }
         }
     }
 }

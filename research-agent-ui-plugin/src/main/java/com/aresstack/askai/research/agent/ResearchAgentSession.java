@@ -3133,6 +3133,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private int turnsWithoutNewCards;
     /** The ephemeral fence block, recomputed once per user turn — NEVER persisted state. */
     private volatile String conversationPolicyBlock = "";
+    /** The stage behind that block, or null while no policy is projected (no scope system). */
+    private volatile ConversationPolicyProjection.Stage conversationPolicyStage;
 
     /** The concept side of the fence fingerprint: epoch + working revision (or a marker). */
     private String conceptStamp() {
@@ -3160,6 +3162,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 scopeCoordinator();
         if (service == null || coordinator == null || !coordinator.isUsable()) {
             conversationPolicyBlock = "";
+            conversationPolicyStage = null;
             return;
         }
         java.util.Set<String> ids =
@@ -3218,6 +3221,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 ConversationPolicyProjection.stageOf(inputs);
         conversationPolicyBlock =
                 ConversationPolicyProjection.hintBlock(stage, calibrationWeak);
+        conversationPolicyStage = stage;
         technicalLog(ConversationPolicyProjection.logLine(stage, inputs));
     }
 
@@ -3652,6 +3656,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (coordinator == null || !coordinator.isUsable() || handle == null
                 || productiveResources == null || productiveResources.isClosed()) {
             return null; // no scope system — the tool answers honestly
+        }
+        // The probe is the CLOSURE-CHECK sensor (AP3 drill). The prompt says so, but the PR #19
+        // live acceptance saw gemma4:e2b probe in the FIRST turn of both topics, and the sensor
+        // lock then turned the whole opening answer into a probe summary. Machinery now: outside
+        // CLOSURE_CHECK the host refuses the measurement before any embedding runs, with a
+        // teaching rejection the loop hands back to the model (a REJECTED round, no lock).
+        ConversationPolicyProjection.Stage stage = conversationPolicyStage;
+        if (stage != null && stage != ConversationPolicyProjection.Stage.CLOSURE_CHECK) {
+            technicalLog("scope_probe -> PROBE_REFUSED stage=" + stage.name()
+                    + " (the probe is the closure-check sensor only)");
+            return ConversationPolicyProjection.probeRefusal(stage);
         }
         com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor descriptor =
                 productiveResources.getEmbeddingDescriptor();
