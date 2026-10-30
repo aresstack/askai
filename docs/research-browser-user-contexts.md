@@ -77,7 +77,10 @@ What Playwright actually supports (checked in the bundled Playwright Core 1.62 d
    `PlaywrightBrowserRuntime.Options.profileKey` → `CamoufoxProvisioning.leaseProfile(chatKey)`. Cookies,
    consent answers and sign-ins survive restarts of the app and of the browser, but never reach another chat.
    A file lock guards the profile: a second browser of the SAME chat (a restart overlapping the old
-   generation) gets a temporary profile inside that chat's directory, deleted on close. Without a chat id
+   generation) gets a temporary profile inside that chat's directory, deleted on close. After a hung call the
+   old generation releases the lock on a background thread once its browser has exited; the restarted
+   generation waits up to 15 s for that release instead of starting without the chat's sign-ins. Temporary
+   profiles a crash left behind are swept after a day. Without a chat id
    (capability check, tests) the browser gets a temporary profile; the old app-wide profile
    `browser-profiles/camoufox` is no longer used (it stays on disk, nothing deletes it, so no sign-in of an
    unknown chat is handed to a new one). Worker user contexts stay non-persistent; a worker that asks for a
@@ -166,7 +169,7 @@ only two of them talk to GPT-OSS 20B.
 | User contexts/process | `research.browser.workers.maxUserContextsPerProcess` | 4 |
 | Tabs/user context | `research.browser.workers.maxTabsPerUserContext` | 4 |
 | Per site (operations on one host at once; search engines count as one) | `research.browser.workers.maxConcurrentPerSite` | 2 |
-| Wait (s) for a free user context | `research.browser.workers.acquireTimeoutSeconds` | 120 |
+| Wait (s) for a free user context | `research.browser.workers.acquireTimeoutSeconds` | 120 (upper bound; a caller may ask for less, e.g. a package's remaining time) |
 | Per-call timeout | existing "Tool timeout (s)" | 300 |
 | Idle stop of a worker browser | existing "Idle stop (s)" | 300 |
 
@@ -200,7 +203,7 @@ Capacity = processes x user contexts per process (default 12 leases, 3 operation
 | `ChatBrowserUserContextsLiveTest` (real Chromium, plugin) | leases through the runtime API; parallel workers' pages land in the session's one capture store; the one acceptance makes 3 sources of 4 visits (the page two workers found is one source); lease close; sign-in saved and restored; session close ends everything. |
 | `WorkerUserContextStateStoreTest` | per-chat files, owner-only permissions, atomic replace, no path escape. |
 | `WorkerUserContextExecutionTest` (runtime, real `TaskExecutor` + `WebResearchWorker`) | six packages, pool capacity 3: six leases, six distinct user contexts, three packages browse at the same time, the chat browser is never used, every lease is given back; without a pool (null or unavailable) the runs share the chat browser one after another; a crashing search run still gives its user context back; no free user context is a retryable stop, a cancelled wait a cancel; the productive capacity takes the pool's 4 instead of the setting's 1. |
-| `CamoufoxChannelTest` (profile tests) | each chat owns its persistent profile and finds it again (a cookie file survives a reopen), chat B never sees chat A's profile, no chat id in the path; a second browser of the same chat gets a temporary profile inside the chat's directory that is deleted on close; without a chat there is no shared persistent profile. |
+| `CamoufoxChannelTest` (profile tests) | each chat owns its persistent profile and finds it again (a cookie file survives a reopen), chat B never sees chat A's profile, no chat id in the path; a second browser of the same chat gets a temporary profile inside the chat's directory that is deleted on close; a restart waits for the terminated generation's release and gets the chat's own profile; day-old temporary profiles are swept; without a chat there is no shared persistent profile. |
 
 Remaining limitations: the live tests run Chromium (CDP); Camoufox (BiDi) uses the same Playwright calls and
 the BiDi mapping above, but needs the managed Camoufox and was not run in CI. The per-chat Camoufox profile

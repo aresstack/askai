@@ -165,7 +165,9 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
     private WorkerUserContext acquire(Chat chat, String label, String storageState, long timeoutMillis)
             throws BrowserException, InterruptedException {
         WorkerBrowserLimits current = limits;
-        long timeout = timeoutMillis > 0 ? timeoutMillis : current.acquireTimeoutMillis;
+        // A caller may wait LESS than the setting (e.g. a package's remaining time), never longer.
+        long timeout = timeoutMillis > 0 ? Math.min(timeoutMillis, current.acquireTimeoutMillis)
+                : current.acquireTimeoutMillis;
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(1L, timeout));
         LaneSlot chosen;
         boolean startIt = false;
