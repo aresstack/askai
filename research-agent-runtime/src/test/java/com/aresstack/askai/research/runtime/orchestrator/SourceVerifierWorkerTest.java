@@ -88,6 +88,29 @@ public class SourceVerifierWorkerTest {
         assertTrue(context.receipts.get(0).isSucceeded());
     }
 
+    /** The host's review-context cap holds sources back; they are read in further calls, not marked unreadable. */
+    @Test
+    public void sourcesTheHostHeldBackAreReadInFurtherCallsNotMarkedUnreadable() {
+        FakeWorkerContext context = context();
+        lane.maxSources(2);
+        context.chats.answer(GOOD);
+
+        WorkerResult result = new SourceVerifierWorker(lane, 8, 1, 0).execute(context.task, context);
+
+        assertEquals(result.toString(), WorkerResult.Kind.COMPLETED, result.getKind());
+        assertEquals(2, lane.calls.size());
+        assertEquals("src-c,src-d", lane.calls.get(1).get("source_ids"));
+        int unreadable = 0;
+        for (TaskArtifact verdict : context.artifacts(TaskArtifact.Kind.VERDICT)) {
+            if (verdict.getContent().startsWith("unreadable")) {
+                unreadable++;
+                assertEquals("only the source without text", "src-d", verdict.getProjectRef());
+            }
+        }
+        assertEquals(1, unreadable);
+        assertTrue(context.chats.requests.get(0).get(1).getContent().contains("cosy living room"));
+    }
+
     @Test
     public void aMissingVerdictIsSentBackThenAccepted() {
         FakeWorkerContext context = context();

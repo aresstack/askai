@@ -124,6 +124,27 @@ public class WriterWorkerTest {
     }
 
     @Test
+    public void everyRequestedSectionIsDraftedOrNamedAsAGap() throws Exception {
+        LinkedHashSet<String> ids = new LinkedHashSet<String>(Arrays.asList("a"));
+        String s1 = "{\"section\":\"s1\",\"paragraphs\":[{\"text\":\"x\",\"sources\":[\"a\"]}]}";
+        try {
+            WriterWorker.read("{\"sections\":[" + s1 + "],\"gaps\":[]}", SECTIONS, ids);
+            fail("s2 dropped silently");
+        } catch (WorkerAnswerException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("section s2 is missing"));
+        }
+        try {
+            WriterWorker.read("{\"sections\":[" + s1 + ",{\"section\":\"s2\",\"paragraphs\":[]}],\"gaps\":[]}",
+                    SECTIONS, ids);
+            fail("s2 empty without a gap");
+        } catch (WorkerAnswerException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("section s2 has no paragraphs"));
+        }
+        WriterWorker.read("{\"sections\":[" + s1 + "],\"gaps\":[{\"section\":\"s2\",\"description\":\"none\"}]}",
+                SECTIONS, ids);
+    }
+
+    @Test
     public void withoutUsableSourcesTheWriterFailsInsteadOfInventing() {
         ResearchTask write = FakeWorkerContext.task("run.write", WriterWorker.ROLE.getId(), "x", SECTIONS);
         FakeWorkerContext context = new FakeWorkerContext(write, WriterWorker.ROLE);

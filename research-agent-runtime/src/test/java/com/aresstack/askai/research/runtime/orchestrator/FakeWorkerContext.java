@@ -133,6 +133,13 @@ final class FakeWorkerContext implements WorkerContext {
         final Map<String, String> texts = new LinkedHashMap<String, String>();
         final List<Map<String, Object>> calls = new ArrayList<Map<String, Object>>();
         volatile boolean down;
+        /** The host's review-context source cap; 0 = none. */
+        int maxSources;
+
+        SourceLane maxSources(int max) {
+            this.maxSources = max;
+            return this;
+        }
 
         SourceLane text(String id, String text) {
             texts.put(id, text);
@@ -149,16 +156,27 @@ final class FakeWorkerContext implements WorkerContext {
             }
             List<String> wanted = Arrays.asList(String.valueOf(args.get("source_ids")).split(","));
             StringBuilder sb = new StringBuilder();
+            int matching = 0;
+            int rendered = 0;
             for (Map.Entry<String, String> source : texts.entrySet()) {
                 if (!wanted.contains(source.getKey())) {
                     continue;
                 }
+                matching++;
+                if (maxSources > 0 && rendered >= maxSources) {
+                    continue;
+                }
+                rendered++;
                 sb.append("--- ").append(source.getKey()).append('\n')
                         .append("title: Title of ").append(source.getKey()).append('\n')
                         .append("url: https://site.test/").append(source.getKey()).append('\n')
                         .append("text: ").append(source.getValue().isEmpty()
                                 ? "(no readable text was captured for this source)" : source.getValue())
                         .append('\n');
+            }
+            if (matching > rendered) {
+                sb.append("(").append(matching - rendered)
+                        .append(" further sources not shown in this review context)\n");
             }
             return sb.length() == 0 ? "No sources to review." : sb.toString();
         }
