@@ -13,8 +13,14 @@ AskAI host (Java 21, Swing) — ONE process
         LazyRestartableBrowserRuntime    PlaywrightBrowserRuntime in-process: playwright4j → GraalJS driver JVM → Camoufox/Chrome/Edge
         InProcessResearchSessionBackend  ResearchSessionBackend port (pure adapter)
           ResearchAgentSession           the research agent, in-process (research-agent-runtime library)
+            roles (ResearchRole)         every model call through the host's ModelPort, one slot per role
             ResearchLoop                 deterministic autonomous loop (36A, backend-agnostic)
               ContributionToolInvoker ×2 in-process lanes → bridge + research endpoints
+            OrchestratedResearchRun      optional (setting, default off): orchestrator role + TaskExecutor
+              workers                    web researcher (same ResearchLoop), search planner, source verifier, writer
+              ProjectTaskBoard           tasks in <project>/tasks/, run record in <project>/orchestrator/run.json
+  AgentRuntimeServices (host)            ModelPort = OllamaModelPort (ollama4j + resource scheduler),
+                                         McpToolClientFactory = SolonMcpToolClientFactory
 ```
 
 Sources persist via `CaptureStore → SourceAcceptanceService → FileResearchSourceRepository`
@@ -29,6 +35,7 @@ Sources persist via `CaptureStore → SourceAcceptanceService → FileResearchSo
 | the research plugin (`lib/`)         | agent library + Playwright/playwright4j/GraalVM 25 jars |
 | Camoufox (downloaded once) or a locally installed Chrome/Edge | the Playwright channel browser |
 | the configured search engines        | `web_search` / `web_search_prepare` |
+| an Ollama server (or the local model runtime) | every model role, through the host's `ModelPort` |
 
 Temporary artifacts: `%TEMP%/playwright4j-driver` (driver package assets, extracted by playwright4j).
 Shutdown order per session: agent session → research endpoint → browser bridge → browser runtime (which
@@ -104,7 +111,46 @@ Environment: Windows, Java 21 installed, Camoufox downloaded (or Chrome installe
 22. A successful switch locks the old generation (`retired`) for new sessions.
 23. Search the transcript/logs of the whole run for the endpoint tokens: zero hits.
 
+## State after ADR 0001 (work items A, C0, C, D, E0, E, F, G, H, J)
+
+ADR 0001 (`docs/adr/0001-research-agent-architecture-after-java-21.md`) is implemented in stacked PRs
+against `develop` (#11, #6, #5, #8, #7, #9, #10, #13, #14; this document is item L). What they add on top of
+the chain above, as built:
+
+- **Model port v2.** All model roles reach a model through the platform's `ModelPort`; ollama4j is the only
+  Ollama client and lives in `askai-app`. Model slots per role, capacity per model and endpoint (default 1),
+  GPU memory budget, residency from `/api/ps`, `keep_alive`; settings panel "Model resources".
+- **Roles.** The five existing model roles are `ResearchRole`s with unchanged prompts; RESEARCH and DRAFT
+  have their own read-only conversation profiles.
+- **Task model.** Work packages are `ResearchTask`s with checked state transitions, persisted per project
+  and resumed after an interruption; the State tab lists them.
+- **Orchestrated run.** Setting "Orchestrated research" (default off): a research orchestrator plans work
+  packages as schema output, the user approves plan and budget, a deterministic task executor runs them
+  (dependencies, capacities, role tool subsets, budgets, retries, resume), and a close is accepted only when
+  the deterministic evidence measurement agrees. `research:` keeps running the single loop. Worker roles:
+  web researcher, search planner, source verifier, writer (settings row "Worker roles"). No worker and no
+  orchestrator switches a phase; the writer's drafts stay on its task.
+- **Benchmark.** `research-benchmark` compares the single-agent baseline with the orchestrated run and each
+  worker role: `gradlew :research-benchmark:benchmark -Daskai.benchmark.models=<model>`. It needs Ollama, a
+  local rerank model and a browser; the live comparison has not been run yet, so whether the orchestrated
+  mode becomes the default is still open.
+- **MCP client port** is back (`McpToolClient`, `McpToolClientFactory`, published by the host) and pinned
+  against the in-process lane by a parity test. One Gson version constant (`ext.gsonVersion`)
+  serves our own JSON code; `browser-playwright` moved from Jackson to Gson, so the plugin `lib/` carries no
+  Jackson.
+- **Parallel browsing** for workers (WebDriver BiDi user contexts per worker, browsing contexts as tabs,
+  worker browsers per chat, settings row "Worker browsers") is PR #12, independent of the lanes and not yet
+  wired into the task executor (see research-agent-runtime.md).
+
+Not part of these items: the ACP question (ADR 3.5 stays open, work item B waits for the owner), the
+LangChain4j spike (item I, optional), per-chat persistent browser profiles.
+
 ## Maturity levels (review framing)
+
+This section was written for the MVP merge review, before the return to Java 21 and before ADR 0001; the
+"NOT yet proven" list below is partly addressed by the section above (model-driven roles, orchestrated
+research with semantic evaluation, task persistence and resume). Semantic research quality is measured by
+the benchmark, not claimed.
 
 Two maturity levels must be read separately; conflating them overstates the second.
 

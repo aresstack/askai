@@ -419,3 +419,66 @@ owner answers "no" to all three ACP questions, B and B' drop out and the ACP mod
 3. The capacity default for the test machine after the measurement protocol of section 4.5 has run.
 4. Whether `SimpleJson` in the app is replaced by Gson (optional cleanup).
 5. Renaming the persisted mode value `ACP` for the productive backend (needs a settings migration).
+
+## 8. Implementation notes
+
+These notes record what each work item of section 6 delivered. They do not change the decision above, its
+status or the open questions of section 7. All items are pull requests against `develop`; where one is
+stacked on another, it is merged after its base.
+
+- **A + J, MCP client port and JSON cleanup** (PR #11). `McpToolClient`, `McpToolClientFactory` and
+  `SolonMcpToolClientFactory` restored from feacb5e0. `ToolTransportParityTest` runs the same contributions
+  in-process and over the loopback server; it found and fixed two bugs of the old client (MCP error results
+  came back as plain text; an unregistered endpoint was reported as a tool error instead of unavailable).
+  `CamoufoxInstaller` and `CamoufoxLaunch` on Gson, Jackson removed from `browser-playwright`, one root
+  constant `ext.gsonVersion = '2.14.0'`; the plugin `lib/` contains no Jackson jar.
+- **C0, model port v2 API** (PR #6). `ModelPort` in `agent-model-runtime-api` (packages `agent.model.port`
+  and `.port.resource`): chat with tools, output format with JSON schema, thinking mode, cancel, model slot
+  and context size per call; endpoint pool, capacity per model and endpoint, residency, slot reservation.
+  No Ollama types; models appear only as opaque handles. `AgentInferencePort` unchanged.
+- **C, model port v2 implementation** (PR #8, contains #6 and #11). `OllamaModelPort` in `askai-app` on
+  ollama4j with `ModelResourceScheduler` (capacity setting default 1, grouping by model, GPU memory budget
+  per endpoint, residency via `/api/ps`, `keep_alive` per call), `model-port.properties` and the panel
+  "Model resources". `AgentRuntimeServices` publishes `ModelPort` and `McpToolClientFactory`. The plugin's
+  two HTTP model clients are replaced by `PortMainModelChat` and `PortStructuredInferenceClient` with slots
+  `conversation`, `scope`, `judge`, `layout-repair` (default: the main model); prompts unchanged;
+  `MockMainModelServer` replaced by `FakeModelPort`. The capacity default stays 1 until the measurement of
+  4.5 has run (open decision 7.3).
+- **D, role interface** (PR #10, stacked on #8). `ResearchRole`, `RoleToolCatalog`, `RoleOutput`,
+  `RoleChatFactory`, `ResearchRoles` in `research-agent-runtime` (package `runtime.role`); the five roles
+  migrated with byte-identical prompts (pinned by SHA-256); per-phase conversation profiles for RESEARCH and
+  DRAFT with read-only tools. Also fixed: the autonomous loop ignored the BM25 reranker setting.
+- **E0, task model API** (PR #5). `ResearchTask`, `TaskState` with the states of 4.4 and one closed
+  transition table, value objects in `research-domain` (package `research.domain.task`). The phase is
+  carried as text, because the phase enum lives in the plugin.
+- **E, task model in the project store** (PR #7, stacked on #5). `FileResearchTaskStore`
+  (`<project>/tasks/<taskId>.json`, Gson, full transition history, invalid files rejected and reported),
+  `ResearchTaskResumption` with the resume rules of 4.4, a read-only task list in the State tab.
+- **H, benchmark harness** (PR #9). Test-only module `research-benchmark`: question set with expected
+  outcomes, fixture world, the metrics of item H, a Markdown report per run; baseline subject = the single
+  in-process agent through the productive wiring. Run with
+  `gradlew :research-benchmark:benchmark -Daskai.benchmark.models=<model>`; it skips without Ollama, a
+  local rerank model and a browser.
+- **F, research orchestrator and task executor** (PR #13, on #10 with #7 and #9). `ResearchOrchestrator`
+  (slot `orchestrator`, schema output per request), deterministic `TaskExecutor` (dependencies, capacities
+  from the model port plus a separate browser capacity, role tool subsets, budgets, retries, resume),
+  `OrchestratedResearchRun` as the envelope of 4.2 (user approves plan and budget, overruns go back to the
+  user, a close is accepted only when `EvidenceMeter` agrees), `WebResearchWorker` over the same
+  `WebSearchApplicationService` funnel. Setting "Orchestrated research" (`research.orchestrator.enabled`),
+  default off; `research:` keeps the single loop. Benchmark subject `orchestrated-run`.
+- **G, new worker roles** (PR #14, stacked on #13). `SearchPlannerWorker` (slot `planner`, no tools),
+  `SourceVerifierWorker` (slot `verifier`, verdicts and contradictions; rejected sources stop counting in the
+  evidence measurement, the source list is untouched), `WriterWorker` (slot `synthesis`, cited section
+  drafts that stay on the task). Settings row "Worker roles"; each role is its own benchmark subject.
+- **Browser parallelism** (PR #12, a separate order, independent of the items above). The browser-slot
+  capacity of 4.5: per research worker a WebDriver BiDi user context (`browser.createUserContext`), browsing
+  contexts as tabs, several worker-browser processes per chat (Playwright Java serializes calls per
+  instance), every page through the session's one capture store and source acceptance. Settings row "Worker
+  browsers". Wiring into the task executor follows once #12 and #13 are on `develop`.
+- **L, documentation** (this note). `docs/research-mvp.md`, `docs/research-agent-runtime.md`,
+  `docs/mcp-runtime.md` and the module table in `README.md` describe the state above.
+- **Not started:** B and B' wait for the decision of 3.5. I (LangChain4j spike, optional) runs separately
+  and proposes its result as its own section.
+- **Still open across the items:** the live benchmark against the single-agent baseline (it decides whether
+  the orchestrated mode becomes the default), the capacity measurement of 4.5, default model slots per role
+  (7.2).
