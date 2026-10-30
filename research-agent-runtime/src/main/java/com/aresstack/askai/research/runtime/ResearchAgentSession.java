@@ -73,6 +73,10 @@ public final class ResearchAgentSession {
     private com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession orchestrator;
     /** The output of the turn running the orchestrated cycle: the worker's search runs report there. */
     private volatile AgentOutput orchestratorTurn;
+    /** The orchestrated run's chats (weakly held: a finished package's chat goes with it), cancelled with the turn. */
+    private final java.util.Set<com.aresstack.askai.research.runtime.team.MainModelChat> orchestratorChatsInFlight =
+            java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(
+                    new java.util.WeakHashMap<com.aresstack.askai.research.runtime.team.MainModelChat, Boolean>()));
     /** When the LAST user search started — the lower edge of "the new sources" its review reads. */
     private volatile long lastManualSearchStartedAt;
     /** The request id of the LAST manual search — the default scope of /review-sources. */
@@ -681,6 +685,11 @@ public final class ResearchAgentSession {
         for (RoleTransport transport : roleTransports()) {
             transport.chat.cancelInFlight();
         }
+        synchronized (orchestratorChatsInFlight) {
+            for (com.aresstack.askai.research.runtime.team.MainModelChat chat : orchestratorChatsInFlight) {
+                chat.cancelInFlight();
+            }
+        }
         com.aresstack.askai.browser.search.inference.StructuredInferencePort inference = inferencePort;
         if (inference instanceof com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) {
             ((com.aresstack.askai.research.runtime.inference.PortStructuredInferenceClient) inference)
@@ -947,9 +956,11 @@ public final class ResearchAgentSession {
                     new com.aresstack.askai.research.runtime.orchestrator.WebAcquisition() {
                         public Result acquire(String query, ToolInvoker permittedResearch,
                                               java.util.function.Consumer<com.aresstack.askai.research.runtime
-                                                      .acquire.WebSearchApplicationService.AcceptedSource> accepted) {
+                                                      .acquire.WebSearchApplicationService.AcceptedSource> accepted,
+                                              long maxDurationMillis) {
                             com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
-                                    buildResearchLoop(orchestratorTurn, permittedResearch, budget);
+                                    buildResearchLoop(orchestratorTurn, permittedResearch,
+                                            boundedBy(budget, maxDurationMillis));
                             loop.setAcceptedSourceObserver(accepted);
                             com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(query);
                             synchronized (visitedAcrossRuns) {
@@ -974,18 +985,45 @@ public final class ResearchAgentSession {
         return orchestrator;
     }
 
-    /** The orchestrated run's role chats: the host's model port with the descriptor's call timeout. */
+    /** The search-run budget with its time limit lowered to a work package's remaining time. */
+    private static com.aresstack.askai.research.runtime.loop.ResearchRunBudget boundedBy(
+            com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget, long maxDurationMillis) {
+        if (maxDurationMillis <= 0 || maxDurationMillis >= budget.getMaxDurationMillis()) {
+            return budget;
+        }
+        return new com.aresstack.askai.research.runtime.loop.ResearchRunBudget(budget.getMaxToolCalls(),
+                budget.getMaxPagesVisited(), budget.getMaxAcceptedSources(), budget.getMaxConsecutiveErrors(),
+                maxDurationMillis, budget.getMinimumAcceptedSources(), budget.getMinimumDistinctHosts());
+    }
+
+    /**
+     * The orchestrated run's role chats: the host's model port with the descriptor's call timeout. Every chat
+     * handed out is registered, so {@link #cancel()} aborts the orchestrator's and the workers' calls in flight
+     * like the session's own role transports.
+     */
     private com.aresstack.askai.research.runtime.orchestrator.RoleChats orchestratorChats() {
+        com.aresstack.askai.research.runtime.orchestrator.RoleChats port;
         if (!environment.hasInference() || modelPort == null) {
-            return com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(null, null);
+            port = com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(null, null);
+        } else {
+            try {
+                port = com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(modelPort,
+                        callTimeout(com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
+                                .load(environment.inferenceConfigPath)));
+            } catch (java.io.IOException unusable) {
+                port = com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(null, null);
+            }
         }
-        try {
-            return com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(modelPort,
-                    callTimeout(com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
-                            .load(environment.inferenceConfigPath)));
-        } catch (java.io.IOException unusable) {
-            return com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(null, null);
-        }
+        final com.aresstack.askai.research.runtime.orchestrator.RoleChats source = port;
+        return new com.aresstack.askai.research.runtime.orchestrator.RoleChats() {
+            public com.aresstack.askai.research.runtime.team.MainModelChat chatFor(
+                    com.aresstack.askai.research.runtime.role.ResearchRole role,
+                    java.util.concurrent.atomic.AtomicLong tokens) {
+                com.aresstack.askai.research.runtime.team.MainModelChat chat = source.chatFor(role, tokens);
+                orchestratorChatsInFlight.add(chat);
+                return chat;
+            }
+        };
     }
 
     /** The approved outline: the first level of the host's concept, or the question alone. */

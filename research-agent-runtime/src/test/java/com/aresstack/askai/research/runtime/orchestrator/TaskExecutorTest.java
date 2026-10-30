@@ -137,6 +137,25 @@ public class TaskExecutorTest {
     }
 
     @Test
+    public void anInterruptedTurnLeavesThePackageResumableNotCancelled() {
+        TaskExecutor executor = executor(1);
+        final AtomicBoolean cancelled = new AtomicBoolean();
+        worker.override = t -> {
+            cancelled.set(true);
+            return WorkerResult.canceled("USER_CANCELLED");
+        };
+        executor.submit(run, Collections.singletonList(task("a")), OrchestratorSettings.defaults());
+        assertEquals(TaskExecutor.Stop.CANCELLED, executor.runReady(run, cancelled, () -> true));
+        assertEquals(TaskState.WORKING, board.tasks().get(0).getState());
+        assertTrue(board.tasks().get(0).getBudget().getTimeUsedMillis() > 0);
+
+        worker.override = null;
+        assertEquals(1, executor.resume(run));
+        executor.runReady(run, new AtomicBoolean(), () -> true);
+        assertEquals(TaskState.COMPLETED, board.tasks().get(0).getState());
+    }
+
+    @Test
     public void aRoleWithoutWorkerIsRejectedBeforeItRuns() {
         TaskExecutor executor = executor(1);
         executor.submit(run, Collections.singletonList(new PlannedTask("x", "source-verifier", "q", "",

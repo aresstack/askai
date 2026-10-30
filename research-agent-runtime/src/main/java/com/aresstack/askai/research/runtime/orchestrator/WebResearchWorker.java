@@ -65,6 +65,9 @@ public final class WebResearchWorker implements TaskWorker {
         }
         final AtomicInteger accepted = new AtomicInteger();
         context.log("search: " + query);
+        // The task's time budget bounds the search run while it runs, not only afterwards.
+        long timeLimit = task.getBudget().getTimeLimitMillis();
+        long remaining = timeLimit <= 0 ? 0L : Math.max(1L, timeLimit - task.getBudget().getTimeUsedMillis());
         WebAcquisition.Result result = acquisition.acquire(query, context.permitted(research),
                 new Consumer<WebSearchApplicationService.AcceptedSource>() {
                     public void accept(WebSearchApplicationService.AcceptedSource source) {
@@ -78,7 +81,7 @@ public final class WebResearchWorker implements TaskWorker {
                         context.receipt("source_accept", true, "accepted " + source.getSourceId()
                                 + (source.isDuplicate() ? " (duplicate)" : ""));
                     }
-                });
+                }, remaining);
         ResearchStopReason reason = result.getStopReason();
         String line = "search run stopped: " + reason + ", " + accepted.get() + " source(s) accepted"
                 + (result.getSummary().isEmpty() ? "" : "; " + result.getSummary());

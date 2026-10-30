@@ -231,6 +231,7 @@ public class OrchestratedResearchRunTest {
         worker.override = task -> {
             if (task.getTaskId().endsWith(".p2")) {
                 cancelled.set(true); // the user pressed Stop on the turn while p2 runs
+                return WorkerResult.canceled("USER_CANCELLED");
             }
             return null;
         };
@@ -246,6 +247,11 @@ public class OrchestratedResearchRunTest {
             p1Runs += id.endsWith(".p1") ? 1 : 0;
         }
         assertEquals("completed work is never re-executed", 1, p1Runs);
+        int p2Runs = 0;
+        for (String id : worker.executed) {
+            p2Runs += id.endsWith(".p2") ? 1 : 0;
+        }
+        assertEquals("the interrupted package runs again instead of staying cancelled", 2, p2Runs);
     }
 
     @Test

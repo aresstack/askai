@@ -123,4 +123,31 @@ public class OrchestratorModelTest {
         assertEquals(WorkerResult.Kind.CANCELED, WebResearchWorker.map(
                 com.aresstack.askai.research.runtime.loop.ResearchStopReason.USER_CANCELLED, "").getKind());
     }
+
+    @Test
+    public void theWebWorkerBoundsItsSearchRunByTheTasksRemainingTime() {
+        final java.util.concurrent.atomic.AtomicLong passed = new java.util.concurrent.atomic.AtomicLong(-1);
+        WebResearchWorker worker = new WebResearchWorker((query, research, accepted, maxDurationMillis) -> {
+            passed.set(maxDurationMillis);
+            return new WebAcquisition.Result(
+                    com.aresstack.askai.research.runtime.loop.ResearchStopReason.NO_SEMANTIC_MATCHES, "");
+        }, null);
+        ResearchTask task = ResearchTask.submit("r.p1", "research", "web-researcher", null,
+                TaskBriefs.inputsOf(new PlannedTask("p1", "web-researcher", "q", "", Arrays.asList("a"), null)),
+                "judge", 0, TaskBudget.of(60_000L, 0), 1, 1L).withSpending(15_000L, 0).start("e", 2L);
+        WorkerContext context = new WorkerContext() {
+            public String query() { return "q"; }
+            public String brief() { return ""; }
+            public com.aresstack.askai.research.runtime.team.MainModelChat chat() { return null; }
+            public com.aresstack.askai.research.runtime.loop.ToolInvoker permitted(
+                    com.aresstack.askai.research.runtime.loop.ToolInvoker lane) { return lane; }
+            public void artifact(TaskArtifact.Kind kind, String content, String ref) { }
+            public void receipt(String tool, boolean ok, String text) { }
+            public void log(String line) { }
+            public boolean isCancelled() { return false; }
+            public boolean isBudgetExhausted() { return false; }
+        };
+        assertEquals(WorkerResult.Kind.COMPLETED, worker.execute(task, context).getKind());
+        assertEquals(45_000L, passed.get());
+    }
 }
