@@ -46,6 +46,8 @@ public final class OrchestratedResearchRun {
     }
 
     private final TaskBoard board;
+    /** True while an approval or an answer runs the cycle; the user may only stop meanwhile. */
+    private final AtomicBoolean executing = new AtomicBoolean();
     private final TaskExecutor executor;
     private final ResearchOrchestrator orchestrator;
     private final AtomicLong orchestratorTokens;
@@ -102,11 +104,13 @@ public final class OrchestratedResearchRun {
         int planCap = Math.min(settings.getMaxTasks(),
                 Math.max(settings.getMaxTasksPerRound(), outline.getSections().size()));
         long tokensBefore = orchestratorTokens.get();
+        long planStart = clock.getAsLong();
         RunPlan plan;
         try {
             plan = orchestrator.plan(run, roleInfos(), planCap);
         } catch (ResearchOrchestrator.UnavailableException unavailable) {
-            run = run.toBuilder().addTokens(orchestratorTokens.get() - tokensBefore).updatedAt(clock.getAsLong())
+            run = run.toBuilder().addTokens(orchestratorTokens.get() - tokensBefore)
+                    .addTime(clock.getAsLong() - planStart).updatedAt(clock.getAsLong())
                     .state(OrchestratorRun.State.FAILED).waitingReason(unavailable.getMessage())
                     .journal("Planning failed: " + unavailable.getMessage()).build();
             save(run);
@@ -114,7 +118,8 @@ public final class OrchestratedResearchRun {
                     + " Ask again to retry.");
             return run;
         }
-        run = run.toBuilder().addTokens(orchestratorTokens.get() - tokensBefore).updatedAt(clock.getAsLong())
+        run = run.toBuilder().addTokens(orchestratorTokens.get() - tokensBefore)
+                .addTime(clock.getAsLong() - planStart).updatedAt(clock.getAsLong())
                 .plan(plan.getRationale(), plan.getTasks())
                 .waitingReason("The plan needs your approval.")
                 .journal("Plan proposed with " + plan.getTasks().size() + " work package(s).")
@@ -130,6 +135,17 @@ public final class OrchestratedResearchRun {
      * approved and the run continues. On a run left {@code running} by an interruption: it resumes.
      */
     public OrchestratorRun approve(AtomicBoolean cancelled) {
+        if (!executing.compareAndSet(false, true)) {
+            return alreadyExecuting();
+        }
+        try {
+            return approveExclusively(cancelled);
+        } finally {
+            executing.set(false);
+        }
+    }
+
+    private OrchestratorRun approveExclusively(AtomicBoolean cancelled) {
         OrchestratorRun run = current();
         if (run == null || run.getState().isFinal() || run.getState() == OrchestratorRun.State.AWAITING_INPUT) {
             return run;
@@ -164,6 +180,26 @@ public final class OrchestratedResearchRun {
 
     /** The user's answer to the orchestrator's question; the run continues with it as context. */
     public OrchestratorRun answer(String answer, AtomicBoolean cancelled) {
+        if (!executing.compareAndSet(false, true)) {
+            return alreadyExecuting();
+        }
+        try {
+            return answerExclusively(answer, cancelled);
+        } finally {
+            executing.set(false);
+        }
+    }
+
+    /**
+     * A second approval or answer while the cycle runs (a double click, Continue on a live run) would resume
+     * packages the running cycle still executes and start a second loop on the same record: refused.
+     */
+    private OrchestratorRun alreadyExecuting() {
+        listener.visible("The research run is already executing. Wait for it, or stop it.");
+        return current();
+    }
+
+    private OrchestratorRun answerExclusively(String answer, AtomicBoolean cancelled) {
         OrchestratorRun run = current();
         if (run == null || run.getState() != OrchestratorRun.State.AWAITING_INPUT) {
             return run;
@@ -204,6 +240,9 @@ public final class OrchestratedResearchRun {
             OrchestratorRun after = current().toBuilder().addTime(clock.getAsLong() - roundStart)
                     .updatedAt(clock.getAsLong()).build();
             save(after);
+            if (after.getState() != OrchestratorRun.State.RUNNING) {
+                return after; // stopped by the user while the packages ran
+            }
             if (stop == TaskExecutor.Stop.CANCELLED || cancelled.get()) {
                 // Interrupted (the user cancelled the turn or the session closes): the run stays RUNNING and
                 // resumes on the next approval; open tasks are re-queued then.
@@ -242,11 +281,13 @@ public final class OrchestratedResearchRun {
         }
         int maxFollowUps = Math.min(settings.getMaxTasksPerRound(), Math.max(1, run.remainingTasks()));
         long tokensBefore = orchestratorTokens.get();
+        long decisionStart = clock.getAsLong();
         RoundDecision decision;
         try {
             decision = orchestrator.evaluate(run, tasks, evidence, roleInfos(), evaluated, maxFollowUps);
         } catch (ResearchOrchestrator.UnavailableException unavailable) {
-            save(run.toBuilder().addTokens(orchestratorTokens.get() - tokensBefore).build());
+            save(run.toBuilder().addTokens(orchestratorTokens.get() - tokensBefore)
+                    .addTime(clock.getAsLong() - decisionStart).build());
             waitFor(current(), new ArrayList<PlannedTask>(), "The orchestrator could not decide ("
                     + unavailable.getMessage() + "). Approve to retry, or stop the run.");
             return false;
@@ -255,7 +296,8 @@ public final class OrchestratedResearchRun {
         OrchestratorRun.Builder next = run.toBuilder()
                 .addTokens(orchestratorTokens.get() - tokensBefore)
                 .spent(run.getRoundsUsed() + 1, run.getTasksSubmitted(), run.getTokensUsed()
-                        + (orchestratorTokens.get() - tokensBefore), run.getTimeUsedMillis())
+                        + (orchestratorTokens.get() - tokensBefore),
+                        run.getTimeUsedMillis() + Math.max(0L, now - decisionStart))
                 .evaluated(evaluated)
                 .findings(decision.getGaps(), decision.getContradictions(), decision.getQualityNote())
                 .updatedAt(now)

@@ -89,9 +89,10 @@ public final class OrchestratorSession {
     }
 
     /** The default worker set of lane F: the web research worker over the session's funnel. */
-    public static List<TaskWorker> defaultWorkers(WebAcquisition acquisition, ToolInvoker research) {
+    public static List<TaskWorker> defaultWorkers(WebAcquisition acquisition, ToolInvoker research,
+                                                  OrchestratorSettings settings) {
         List<TaskWorker> workers = new ArrayList<TaskWorker>();
-        workers.add(new WebResearchWorker(acquisition, research));
+        workers.add(new WebResearchWorker(acquisition, research, settings.getEvidenceChars()));
         return workers;
     }
 

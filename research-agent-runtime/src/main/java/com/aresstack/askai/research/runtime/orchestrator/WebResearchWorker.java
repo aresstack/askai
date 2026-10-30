@@ -36,6 +36,7 @@ public final class WebResearchWorker implements TaskWorker {
 
     private final WebAcquisition acquisition;
     private final com.aresstack.askai.research.runtime.loop.ToolInvoker research;
+    private final int evidenceChars;
 
     /**
      * @param acquisition the session's funnel
@@ -43,8 +44,15 @@ public final class WebResearchWorker implements TaskWorker {
      */
     public WebResearchWorker(WebAcquisition acquisition,
                              com.aresstack.askai.research.runtime.loop.ToolInvoker research) {
+        this(acquisition, research, OrchestratorSettings.DEFAULT_EVIDENCE_CHARS);
+    }
+
+    /** @param evidenceChars how much of an accepted page is kept as the evaluation's evidence (a setting) */
+    public WebResearchWorker(WebAcquisition acquisition,
+                             com.aresstack.askai.research.runtime.loop.ToolInvoker research, int evidenceChars) {
         this.acquisition = acquisition;
         this.research = research;
+        this.evidenceChars = Math.max(1, evidenceChars);
     }
 
     @Override
@@ -80,6 +88,12 @@ public final class WebResearchWorker implements TaskWorker {
                                 source.getPageUrl() + (title.isEmpty() ? "" : " " + title), source.getSourceId());
                         context.receipt("source_accept", true, "accepted " + source.getSourceId()
                                 + (source.isDuplicate() ? " (duplicate)" : ""));
+                        // The orchestrator has no source access: the passages that match the package's query
+                        // are its evidence for gaps, contradictions and quality.
+                        String evidence = excerpt(source.getPage(), query, evidenceChars);
+                        if (!evidence.isEmpty()) {
+                            context.artifact(TaskArtifact.Kind.FINDING, evidence, source.getSourceId());
+                        }
                     }
                 }, remaining);
         ResearchStopReason reason = result.getStopReason();
@@ -87,6 +101,57 @@ public final class WebResearchWorker implements TaskWorker {
                 + (result.getSummary().isEmpty() ? "" : "; " + result.getSummary());
         context.artifact(TaskArtifact.Kind.TEXT, line, "");
         return map(reason, line);
+    }
+
+    /**
+     * The passages of {@code page} that share the most terms with {@code query}, in page order, at most
+     * {@code maxChars} characters; the page start when nothing matches.
+     */
+    static String excerpt(String page, String query, int maxChars) {
+        if (page == null || page.trim().isEmpty()) {
+            return "";
+        }
+        java.util.Set<String> terms = new java.util.HashSet<String>();
+        for (String term : query.toLowerCase(java.util.Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
+            if (term.length() > 2) {
+                terms.add(term);
+            }
+        }
+        String[] passages = page.split("(?<=[.!?])\\s+|\\n+");
+        Integer[] order = new Integer[passages.length];
+        final int[] score = new int[passages.length];
+        for (int i = 0; i < passages.length; i++) {
+            order[i] = i;
+            for (String word : passages[i].toLowerCase(java.util.Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
+                score[i] += terms.contains(word) ? 1 : 0;
+            }
+        }
+        java.util.Arrays.sort(order, (a, b) -> score[b] != score[a] ? score[b] - score[a] : a - b);
+        if (order.length == 0 || score[order[0]] == 0) {
+            String start = page.trim().replaceAll("\\s+", " ");
+            return start.length() <= maxChars ? start : start.substring(0, maxChars);
+        }
+        java.util.TreeSet<Integer> picked = new java.util.TreeSet<Integer>();
+        int length = 0;
+        for (Integer i : order) {
+            String passage = passages[i].trim();
+            if (score[i] == 0 || passage.isEmpty()) {
+                break;
+            }
+            if (length + passage.length() + 1 > maxChars) {
+                if (picked.isEmpty()) {
+                    picked.add(i);
+                }
+                continue;
+            }
+            picked.add(i);
+            length += passage.length() + 1;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Integer i : picked) {
+            sb.append(sb.length() == 0 ? "" : " ").append(passages[i].trim().replaceAll("\\s+", " "));
+        }
+        return sb.length() <= maxChars ? sb.toString() : sb.substring(0, maxChars);
     }
 
     static WorkerResult map(ResearchStopReason reason, String line) {

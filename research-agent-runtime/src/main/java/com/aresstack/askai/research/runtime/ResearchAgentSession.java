@@ -973,7 +973,7 @@ public final class ResearchAgentSession {
             orchestrator = new com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession(board,
                     orchestratorSettings(), orchestratorChats(), modelPort,
                     com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession.defaultWorkers(
-                            acquisition, research),
+                            acquisition, research, orchestratorSettings()),
                     budget.getMinimumAcceptedSources(), budget.getMinimumDistinctHosts(),
                     teamAgent == null ? 0 : teamAgent.getMaxOutputTokens(),
                     new java.util.function.Supplier<com.aresstack.askai.research.runtime.orchestrator.ResearchOutline>() {

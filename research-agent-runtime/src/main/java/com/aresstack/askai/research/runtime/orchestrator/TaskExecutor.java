@@ -478,6 +478,16 @@ public final class TaskExecutor {
         }
 
         synchronized ResearchTask update(java.util.function.UnaryOperator<ResearchTask> change) {
+            // A stop cancels the package on the board while the worker still runs: the board's final word stands.
+            for (ResearchTask stored : board.tasks()) {
+                if (stored.getTaskId().equals(task.getTaskId()) && stored.isTerminal() && !task.isTerminal()) {
+                    task = stored;
+                    return stored;
+                }
+            }
+            if (task.isTerminal()) {
+                return task;
+            }
             ResearchTask next = change.apply(task);
             save(next);
             task = next;

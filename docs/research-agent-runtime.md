@@ -66,7 +66,8 @@ Package `runtime.orchestrator`:
   did not complete is cancelled, and `resume` re-queues what an interrupted session left working.
 - `WebResearchWorker` (role `web-researcher`) runs the same `ResearchLoop` over the same
   `WebSearchApplicationService` funnel as `research:`; there is no second acquisition path. Each accepted
-  source becomes a `SOURCE_REFERENCE` artifact on its task.
+  source becomes a `SOURCE_REFERENCE` artifact on its task, and the page passages that match the
+  package's query become a bounded `FINDING` (`ASKAI_ORCHESTRATOR_EVIDENCE_CHARS`), the evaluation's evidence.
 - `OrchestratedResearchRun` is the envelope. Nothing runs before the user approves the plan; follow-ups
   inside the approved sections and roles run without asking, anything beyond them, the round limit and the
   run budget (tokens, minutes, packages) go back to the user (`AWAITING_APPROVAL`). `ask-user` waits for

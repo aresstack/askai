@@ -150,4 +150,16 @@ public class OrchestratorModelTest {
         assertEquals(WorkerResult.Kind.COMPLETED, worker.execute(task, context).getKind());
         assertEquals(45_000L, passed.get());
     }
+
+    @Test
+    public void theEvidenceExcerptKeepsThePassagesThatMatchTheQuery() {
+        String page = "Welcome to the shop.\nThe battery holds 4,200 mAh according to the maker. Shipping is free.\n"
+                + "Reviews say the battery capacity is closer to 3,800 mAh in tests.";
+        String excerpt = WebResearchWorker.excerpt(page, "battery capacity mAh", 200);
+        assertTrue(excerpt, excerpt.contains("4,200 mAh"));
+        assertTrue(excerpt, excerpt.contains("3,800 mAh"));
+        assertFalse(excerpt, excerpt.contains("Welcome"));
+        assertTrue(WebResearchWorker.excerpt(page, "battery capacity mAh", 40).length() <= 40);
+        assertEquals("", WebResearchWorker.excerpt("  ", "q", 100));
+    }
 }

@@ -267,4 +267,61 @@ public class OrchestratedResearchRunTest {
         assertTrue(worker.executed.isEmpty());
         assertFalse(run.getState().isFinal());
     }
+
+    @Test
+    public void aSecondApprovalWhileTheCycleRunsIsRefused() throws Exception {
+        bothSectionsFindSources();
+        chats.answer(plan());
+        final OrchestratedResearchRun runner = run(OrchestratorSettings.defaults());
+        runner.start("q", outline);
+        final java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        worker.override = task -> {
+            entered.countDown();
+            try {
+                release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            worker.override = null;
+            return null;
+        };
+        chats.answer(round("close", "", ""));
+        Thread first = new Thread(() -> runner.approve(new AtomicBoolean()));
+        first.start();
+        assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        OrchestratorRun during = runner.approve(new AtomicBoolean());
+        assertEquals(OrchestratorRun.State.RUNNING, during.getState());
+        assertTrue(visible.get(visible.size() - 1).contains("already executing"));
+        release.countDown();
+        first.join(5_000L);
+        assertEquals(OrchestratorRun.State.CLOSED, runner.current().getState());
+        assertEquals("no package ran twice", 2, worker.executed.size());
+    }
+
+    @Test
+    public void aStopWhileAPackageRunsKeepsItCancelledAndEndsTheCycle() {
+        bothSectionsFindSources();
+        chats.answer(plan());
+        final OrchestratedResearchRun runner = run(OrchestratorSettings.defaults());
+        runner.start("q", outline);
+        worker.override = task -> {
+            runner.stop(); // the user presses Stop run while p1 works
+            return null;
+        };
+        OrchestratorRun run = runner.approve(new AtomicBoolean());
+        assertEquals(OrchestratorRun.State.STOPPED, run.getState());
+        for (ResearchTask task : board.tasks()) {
+            assertEquals(task.getTaskId(), com.aresstack.askai.research.domain.task.TaskState.CANCELED,
+                    task.getState());
+        }
+        assertEquals(1, worker.executed.size());
+    }
+
+    @Test
+    public void planningTimeCountsAgainstTheRunsTimeBudget() {
+        chats.answer(plan());
+        OrchestratorRun run = run(OrchestratorSettings.defaults()).start("q", outline);
+        assertTrue(run.getTimeUsedMillis() > 0);
+    }
 }
