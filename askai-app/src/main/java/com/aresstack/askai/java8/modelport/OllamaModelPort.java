@@ -157,14 +157,23 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 return settings().capacityOf(model);
             }
 
-            public boolean mayCoexist(String endpointId, String loaded, String next) {
+            public boolean mayCoexist(String endpointId, List<String> loaded, String next) {
                 long budget = settings().memoryBudgetBytes(endpointId);
                 if (budget < 0) {
                     return false; // no budget: no memory planning, so a switch is a deliberate step
                 }
-                long a = residency.lastKnownSize(endpointId, loaded);
-                long b = residency.lastKnownSize(endpointId, next);
-                return a >= 0 && b >= 0 && a + b <= budget;
+                long total = residency.lastKnownSize(endpointId, next);
+                if (total < 0) {
+                    return false;
+                }
+                for (String model : loaded) {
+                    long size = residency.lastKnownSize(endpointId, model);
+                    if (size < 0) {
+                        return false; // an unknown footprint never counts as fitting
+                    }
+                    total += size;
+                }
+                return total <= budget; // the combined footprint, not each pair, must fit
             }
         }, new ModelResourceScheduler.SwitchListener() {
             public void onModelSwitch(String endpointId, String fromModel, String toModel) {

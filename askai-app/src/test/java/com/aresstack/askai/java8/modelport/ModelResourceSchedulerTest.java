@@ -29,11 +29,15 @@ public class ModelResourceSchedulerTest {
 
     private static final ModelSlot JUDGE = ModelSlot.of("judge");
     private static final ModelSlot SYNTHESIS = ModelSlot.of("synthesis");
+    private static final ModelSlot SCOPE_SLOT = ModelSlot.of("scope");
     private static final Duration WAIT = Duration.ofSeconds(30);
 
     private final Map<String, Integer> capacities = new HashMap<String, Integer>();
     private final List<String> switches = new ArrayList<String>();
     private boolean coexist;
+    /** When set (>= 0), coexistence is decided by summed model sizes against this budget instead. */
+    private long memoryBudget = -1L;
+    private final Map<String, Long> sizes = new HashMap<String, Long>();
     private final ModelResourceScheduler scheduler = new ModelResourceScheduler(
             new ModelResourceScheduler.Policy() {
                 public int capacity(String endpointId, String model) {
@@ -41,8 +45,15 @@ public class ModelResourceSchedulerTest {
                     return value == null ? 1 : value;
                 }
 
-                public boolean mayCoexist(String endpointId, String loaded, String next) {
-                    return coexist;
+                public boolean mayCoexist(String endpointId, List<String> loaded, String next) {
+                    if (memoryBudget < 0) {
+                        return coexist;
+                    }
+                    long total = sizes.get(next);
+                    for (String model : loaded) {
+                        total += sizes.get(model);
+                    }
+                    return total <= memoryBudget;
                 }
             }, new ModelResourceScheduler.SwitchListener() {
                 public void onModelSwitch(String endpointId, String fromModel, String toModel) {
@@ -156,6 +167,22 @@ public class ModelResourceSchedulerTest {
         granted(judge);
         granted(synth);
         assertTrue("no switch when both fit", switches.isEmpty());
+    }
+
+    @Test
+    public void theCombinedFootprintOfAllActiveModelsMustFitTheBudget() throws Exception {
+        memoryBudget = 10L;
+        sizes.put("a", 4L);
+        sizes.put("b", 4L);
+        sizes.put("c", 4L);
+        CompletableFuture<ModelResourceScheduler.Grant> a = scheduler.acquire(JUDGE, "ollama", "a", WAIT);
+        CompletableFuture<ModelResourceScheduler.Grant> b = scheduler.acquire(SYNTHESIS, "ollama", "b", WAIT);
+        CompletableFuture<ModelResourceScheduler.Grant> c = scheduler.acquire(SCOPE_SLOT, "ollama", "c", WAIT);
+        granted(a);
+        granted(b);
+        assertFalse("every pair fits, but a + b + c (12) exceeds the budget (10)", c.isDone());
+        a.get().release();
+        granted(c);
     }
 
     @Test

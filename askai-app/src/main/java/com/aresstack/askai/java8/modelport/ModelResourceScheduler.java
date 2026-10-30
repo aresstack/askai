@@ -5,6 +5,7 @@ import com.aresstack.askai.agent.model.port.resource.SlotUnavailableException;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -45,8 +46,12 @@ public final class ModelResourceScheduler implements AutoCloseable {
         /** Maximum concurrent grants of {@code model} on {@code endpointId}; values below 1 count as 1. */
         int capacity(String endpointId, String model);
 
-        /** Whether {@code loaded} and {@code next} may hold places on {@code endpointId} at the same time. */
-        boolean mayCoexist(String endpointId, String loaded, String next);
+        /**
+         * Whether {@code next} may hold a place on {@code endpointId} while ALL of {@code loaded} (the other
+         * models holding places there, never empty, never containing {@code next}) hold theirs: the decision
+         * is about the combined footprint, not about pairs.
+         */
+        boolean mayCoexist(String endpointId, List<String> loaded, String next);
     }
 
     /** Observes model switches (diagnostics). */
@@ -348,12 +353,10 @@ public final class ModelResourceScheduler implements AutoCloseable {
     }
 
     private boolean conflicts(String endpointId, List<String> batch, String model) {
-        for (String loaded : batch) {
-            if (!loaded.equals(model) && !policy.mayCoexist(endpointId, loaded, model)) {
-                return true;
-            }
+        if (batch.isEmpty() || batch.contains(model)) {
+            return false; // the model is already part of the admitted set: no new footprint
         }
-        return false;
+        return !policy.mayCoexist(endpointId, Collections.unmodifiableList(batch), model);
     }
 
     private void complete(List<Admission> admitted) {

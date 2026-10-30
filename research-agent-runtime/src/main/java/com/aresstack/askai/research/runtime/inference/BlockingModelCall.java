@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -49,6 +50,11 @@ public final class BlockingModelCall {
 
     private final ModelPort port;
     private final Set<ModelCall> inFlight = ConcurrentHashMap.newKeySet();
+    /**
+     * Bumped by every {@link #cancelAll()}: a call started before a cancel but registered after it (so the
+     * cancel did not see it) finds a newer generation on registration and cancels itself.
+     */
+    private final AtomicLong cancelGeneration = new AtomicLong();
 
     public BlockingModelCall(ModelPort port) {
         if (port == null) {
@@ -62,6 +68,7 @@ public final class BlockingModelCall {
     }
 
     public Outcome run(ChatRequest request, CancelCheck cancelCheck) {
+        final long generation = cancelGeneration.get();
         final CountDownLatch done = new CountDownLatch(1);
         final AtomicReference<Outcome> outcome = new AtomicReference<Outcome>();
         ModelCall call = port.chat(request, new ChatListener() {
@@ -76,6 +83,9 @@ public final class BlockingModelCall {
             }
         });
         inFlight.add(call);
+        if (cancelGeneration.get() != generation) {
+            call.cancel(); // a cancelAll() ran between the start and the registration of this call
+        }
         try {
             while (!done.await(POLL_MILLIS, TimeUnit.MILLISECONDS)) {
                 if (cancelCheck != null && cancelCheck.isCancelled()) {
@@ -95,6 +105,7 @@ public final class BlockingModelCall {
 
     /** Cancels every call in flight; each then ends with {@link ModelFailure.Kind#CANCELLED}. */
     public void cancelAll() {
+        cancelGeneration.incrementAndGet();
         for (ModelCall call : inFlight) {
             call.cancel();
         }
