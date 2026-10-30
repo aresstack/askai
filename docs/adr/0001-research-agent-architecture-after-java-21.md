@@ -29,7 +29,7 @@ infrastructure and shared APIs; everything about how the agent researches lives 
 | feacb5e0 | Playwright browser in-process inside the plugin (library `browser-playwright`) | accepted |
 | f1cf0df1 | research agent in-process (`ResearchAgentSession`, `ContributionToolInvoker`, `InProcessResearchSessionBackend`); the ACP modules `acp-client-api`, `acp-solon-client`, `acp-demo-agent`, the adapter `AcpResearchSessionBackend` and the MCP client port (`McpToolClient`, `McpToolClientFactory`, `SolonMcpToolClientFactory`) were DELETED | **disputed**: the deletions were not covered by the mandate |
 | 5318f9b9 | per-call browser timeout works in-process (hung call → generation terminated → retry once), research settings tab in English | accepted |
-| PERFHASH | browser idle keep-alive and SERP capture retries as settings (performance options 1 and 2 of the analysis) | accepted, tested (15 + 6 + 59 targeted tests green) |
+| a8d220dd | browser idle keep-alive and SERP capture retries as settings (performance options 1 and 2 of the analysis) | accepted, tested (15 + 6 + 59 targeted tests green) |
 | a2c6ee90 | this ADR, revision 1 | superseded by revision 2 |
 
 The mandate for the Java 21 work was "Java 21 for everything, official ollama4j, no sidecar processes".
@@ -382,7 +382,7 @@ test fixtures; the `ResearchBackendMode.ACP` enum constant (persisted settings v
 mode and should eventually be renamed with a migration; the scheduler depends on Ollama behaviour that is
 observable but not contractual.
 
-## 6. Cost compared to the status quo (develop after PERFHASH)
+## 6. Cost compared to the status quo (develop after a8d220dd)
 
 Kept as is: Slices 1 to 4 (Java 21, ollama4j, model runtime and browser in-process), the in-process agent
 core of Slice 5 (`ResearchAgentSession`, `ContributionToolInvoker`, `InProcessResearchSessionBackend`), the
@@ -404,7 +404,7 @@ plugin `lib/`.
 | H | benchmark harness: question set with expected outcomes; metrics: quality and completeness of sources, share of supported claims, contradiction and gap detection, tool-call success, tokens, wall time, stability on small models, resumption after interruption | 2 | C | low |
 | I | LangChain4j spike: one worker role built twice, compared on size, controllability, reliability with `gpt-oss:20b` and `gemma4:e2b` | 1–2 (optional) | C | low |
 | J | JSON cleanup: `browser-playwright` Jackson → Gson, one Gson version constant | 0.5 | — | low |
-| K | performance patches (idle keep-alive, capture retries) | done (PERFHASH) | — | — |
+| K | performance patches (idle keep-alive, capture retries) | done (a8d220dd) | — | — |
 | L | docs and ADR follow-up (`research-mvp.md`, `research-agent-runtime.md`, `mcp-runtime.md`) | 0.5 | all | low |
 
 Total without the optional spike: about 29 to 40 person-days. Critical path: C → D → F → G, with H before F
