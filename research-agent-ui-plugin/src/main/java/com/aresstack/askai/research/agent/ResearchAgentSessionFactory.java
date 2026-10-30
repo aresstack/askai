@@ -174,6 +174,8 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                         ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_ERRORS));
         factory.setUseAiReranker(
                 ResearchRuntimeSettings.loadUseAiReranker(hostContext.getStateStore()));
+        factory.setOrchestratorEnvironment(
+                ResearchRuntimeSettings.loadOrchestratorEnvironment(hostContext.getStateStore()));
         factory.setBrowserToolTimeoutSeconds(
                 ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
                         ResearchRuntimeSettings.KEY_BROWSER_TOOL_TIMEOUT_SECONDS,

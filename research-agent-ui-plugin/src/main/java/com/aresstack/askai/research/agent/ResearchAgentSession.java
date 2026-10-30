@@ -905,6 +905,34 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private final java.util.concurrent.atomic.AtomicLong playbookMessageIds =
             new java.util.concurrent.atomic.AtomicLong();
 
+    /**
+     * ADR 0001 lane F: the user's decision on the orchestrated run ({@code "approve"} or {@code "stop"}),
+     * sent as a typed service command on a foreground turn, so the busy state and Stop cover the run.
+     */
+    public void submitOrchestratorDecision(String decision) {
+        if (handle == null || productiveResources == null || productiveResources.isClosed()) {
+            return;
+        }
+        String type = "stop".equals(decision) ? "orchestrator_stop" : "orchestrator_approve";
+        technicalLog("orchestrator decision by the user: " + decision);
+        beginAgentTurn();
+        backend.submitPrompt(handle, new ResearchPrompt(
+                com.aresstack.askai.research.search.ResearchServiceCommandWire.orchestrator(type, ""), ""));
+    }
+
+    /** The project's orchestrated run as persisted, or {@code null} (none, or no productive project). */
+    public com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun currentOrchestratorRun() {
+        if (productiveResources == null || productiveResources.getProjectContext() == null) {
+            return null;
+        }
+        try {
+            return new com.aresstack.askai.research.store.ProjectTaskBoard(productiveResources.getProjectContext())
+                    .currentRun();
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
+    }
+
     public void submitPrompt(String text, String activeSectionId) {
         if (handle == null) {
             return;

@@ -44,6 +44,24 @@ public final class ResearchServiceCommand {
      */
     public static final String TYPE_CHOOSE_ADVICE = "choose_advice";
 
+    /**
+     * ADR 0001, lane F: the user starts an orchestrated research run for {@code query} (the orchestrator
+     * plans; nothing runs until the user approves the plan).
+     */
+    public static final String TYPE_ORCHESTRATOR_START = "orchestrator_start";
+
+    /**
+     * The user approves: the proposed plan, the pending follow-ups or overrun, or the resumption of an
+     * interrupted run. The user's decision, never the orchestrator's.
+     */
+    public static final String TYPE_ORCHESTRATOR_APPROVE = "orchestrator_approve";
+
+    /** The user rejects the plan or stops the run; open tasks are canceled. */
+    public static final String TYPE_ORCHESTRATOR_STOP = "orchestrator_stop";
+
+    /** The user answers the orchestrator's question ({@code query} carries the answer). */
+    public static final String TYPE_ORCHESTRATOR_ANSWER = "orchestrator_answer";
+
     private final String type;
     private final String requestId;
     private final String query;

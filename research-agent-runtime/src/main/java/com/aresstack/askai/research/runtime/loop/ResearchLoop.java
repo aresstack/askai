@@ -74,6 +74,18 @@ public final class ResearchLoop {
         this.scopeControl = port;
     }
 
+    /**
+     * Lane F: who else learns about each newly accepted source (the orchestrated run records it as a
+     * source reference of the task that ran this loop). Observation only: it never stops or steers the run.
+     */
+    private java.util.function.Consumer<com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService
+            .AcceptedSource> acceptedSourceObserver;
+
+    public void setAcceptedSourceObserver(java.util.function.Consumer<
+            com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.AcceptedSource> observer) {
+        this.acceptedSourceObserver = observer;
+    }
+
     public void setSourceAcceptancePort(
             com.aresstack.askai.research.runtime.acquire.SourceAcceptancePort port) {
         if (port != null) {
@@ -211,6 +223,9 @@ public final class ResearchLoop {
                                     com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService
                                             .ToolBudget budgetGate) {
                                 // Acceptance already persisted the source (full text) — nothing derived here.
+                                if (acceptedSourceObserver != null && source != null) {
+                                    acceptedSourceObserver.accept(source);
+                                }
                                 return null;
                             }
                         },

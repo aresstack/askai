@@ -130,6 +130,14 @@ public final class ProductiveResearchBackendFactory {
         }
     }
 
+    /** ADR 0001 lane F: the orchestrated run's ASKAI_ORCHESTRATOR_* hand-off (empty = runtime defaults). */
+    private volatile Map<String, String> orchestratorEnvironment = java.util.Collections.emptyMap();
+
+    public void setOrchestratorEnvironment(Map<String, String> environment) {
+        this.orchestratorEnvironment = environment == null ? java.util.Collections.<String, String>emptyMap()
+                : new java.util.LinkedHashMap<String, String>(environment);
+    }
+
     /** "KI-Reranker verwenden" (default OFF → lexical BM25 in the runtime, no model call). */
     private volatile boolean useAiReranker;
 
@@ -860,6 +868,8 @@ public final class ProductiveResearchBackendFactory {
             baseEnv.put("ASKAI_SEARCH_MAX_ERRORS", String.valueOf(searchMaxErrors));
             // "KI-Reranker verwenden": OFF = the runtime scores lexically (BM25, no model call).
             baseEnv.put("ASKAI_USE_AI_RERANKER", String.valueOf(useAiReranker));
+            // "Orchestrated research" and its limits (ADR 0001 lane F).
+            baseEnv.putAll(orchestratorEnvironment);
             InProcessResearchSessionBackend backend = null; // assigned after the endpoints are open
 
             ProductiveResearchSessionResources resources;
@@ -945,6 +955,8 @@ public final class ProductiveResearchBackendFactory {
             // contributions (the same tools the MCP server publishes to external clients).
             backend = new InProcessResearchSessionBackend(baseEnv, control.toolInvoker(),
                     bridge.toolInvoker(), service.toolInvoker(), modelPort);
+            // The orchestrated run's blackboard is this project's store (ADR 0001, 4.3 BLACKBOARD).
+            backend.setTaskBoard(new com.aresstack.askai.research.store.ProjectTaskBoard(projectContext));
 
             // The UI-facing repository only REFRESHES an open view on a successful update (Save/Exclude/star)
             // so the outline tab re-checks its staleness — it never triggers a rebuild (issue #29).

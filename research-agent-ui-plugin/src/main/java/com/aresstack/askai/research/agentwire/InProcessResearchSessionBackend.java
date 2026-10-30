@@ -43,6 +43,8 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
     private final ToolInvoker service;   // null => no internal service lane
     /** The host's model port (ADR 0001, 3.2); null => every model role is honestly unavailable. */
     private final com.aresstack.askai.agent.model.port.ModelPort modelPort;
+    /** ADR 0001 lane F: the project's blackboard handed to every agent of this backend, or null. */
+    private volatile com.aresstack.askai.research.runtime.orchestrator.TaskBoard taskBoard;
     private final Map<String, Session> sessions = new ConcurrentHashMap<String, Session>();
 
     /**
@@ -156,6 +158,11 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
         }
     }
 
+    /** The project store the orchestrated run persists its tasks and run record in. */
+    public void setTaskBoard(com.aresstack.askai.research.runtime.orchestrator.TaskBoard board) {
+        this.taskBoard = board;
+    }
+
     private Session resolve(ResearchSessionHandle handle) {
         return handle == null ? null : sessions.get(handle.getSessionId());
     }
@@ -209,6 +216,7 @@ public final class InProcessResearchSessionBackend implements ResearchSessionBac
             try {
                 ResearchAgentSession created = new ResearchAgentSession(
                         ResearchAgentEnvironment.from(environment), research, browser, service, modelPort);
+                created.setTaskBoard(taskBoard);
                 created.open();
                 agent = created;
                 if (browser == null) {

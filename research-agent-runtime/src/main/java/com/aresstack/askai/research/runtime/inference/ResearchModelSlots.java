@@ -19,6 +19,8 @@ public final class ResearchModelSlots {
     public static final ModelSlot JUDGE = ModelSlot.of("judge");
     /** The model-backed SERP layout repair. */
     public static final ModelSlot LAYOUT_REPAIR = ModelSlot.of("layout-repair");
+    /** The research orchestrator: plans, evaluates and re-plans an orchestrated run (ADR 0001, 4.2). */
+    public static final ModelSlot ORCHESTRATOR = ModelSlot.of("orchestrator");
 
     private ResearchModelSlots() {
     }

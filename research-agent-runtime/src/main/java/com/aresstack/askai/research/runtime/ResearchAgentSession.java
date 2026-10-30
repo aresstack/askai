@@ -64,6 +64,15 @@ public final class ResearchAgentSession {
      * offers none (an older host or a test without models); every model role is then honestly unavailable.
      */
     private final com.aresstack.askai.agent.model.port.ModelPort modelPort;
+    /**
+     * ADR 0001, lane F: the project's blackboard for the orchestrated run (the plugin's project store), or
+     * null when the host hands none (the run then keeps its tasks in memory for the session).
+     */
+    private volatile com.aresstack.askai.research.runtime.orchestrator.TaskBoard taskBoard;
+    /** The orchestrated run of this session, built on first use. */
+    private com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession orchestrator;
+    /** The output of the turn running the orchestrated cycle: the worker's search runs report there. */
+    private volatile AgentOutput orchestratorTurn;
     /** When the LAST user search started — the lower edge of "the new sources" its review reads. */
     private volatile long lastManualSearchStartedAt;
     /** The request id of the LAST manual search — the default scope of /review-sources. */
@@ -155,6 +164,11 @@ public final class ResearchAgentSession {
         this.sessionLanguage = com.aresstack.askai.research.runtime.service.SessionResearchLanguage
                 .fromEnvironment(environment.get("ASKAI_RESEARCH_LANGUAGE"));
         System.err.println("[research-agent] " + environment);
+    }
+
+    /** The project's blackboard for the orchestrated run; set before the first turn. */
+    public void setTaskBoard(com.aresstack.askai.research.runtime.orchestrator.TaskBoard board) {
+        this.taskBoard = board;
     }
 
     private boolean hasBrowser() {
@@ -741,6 +755,26 @@ public final class ResearchAgentSession {
         boolean explicitResearch = text.startsWith("research:");
         String task = explicitResearch ? text.substring("research:".length()).trim() : text.trim();
         if ((explicitResearch || hostIsInResearchRunning()) && !task.isEmpty()) {
+            // ADR 0001, lane F: with the orchestrated mode selected, a plain research question goes to the
+            // orchestrator (plan first, the user approves); "research:" stays the single autonomous loop.
+            if (!explicitResearch && orchestratorSettings().getMode()
+                    == com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.Mode.ORCHESTRATED) {
+                com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun current =
+                        orchestratorSession().current();
+                if (current != null && current.getState()
+                        == com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun.State.AWAITING_INPUT) {
+                    // The run asked the user a question: this message is the answer, not a new question.
+                    orchestratorTurn = ctx;
+                    try {
+                        orchestratorSession().answer(task, cancelled, orchestratorOutput(ctx));
+                    } finally {
+                        orchestratorTurn = null;
+                    }
+                } else {
+                    orchestratorStart(ctx, task);
+                }
+                return cancelled.get() ? AgentTurnOutcome.CANCELLED : AgentTurnOutcome.END_TURN;
+            }
             if (!hasBrowser()) {
                 // An honest, STRUCTURED refusal: the host renders a readable result card from it.
                 ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
@@ -828,6 +862,146 @@ public final class ResearchAgentSession {
         } else if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_CHOOSE_ADVICE
                 .equals(command.getType())) {
             handleChooseAdvice(ctx, command.getRequestId(), command.getRequest());
+        } else if (command.getType().startsWith("orchestrator_")) {
+            handleOrchestratorCommand(ctx, command);
+        }
+    }
+
+    // ------------------------------------------------------------------ ADR 0001 lane F: orchestrated run
+
+    private com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings orchestratorSettings() {
+        return com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.from(environment.values());
+    }
+
+    /**
+     * The user's orchestrator commands (typed service commands, never chat text): start, approve, answer,
+     * stop. Approve and answer run the cycle on this turn, so the turn's busy state and cancel cover it;
+     * a cancel interrupts the run, which then resumes on the next approval.
+     */
+    private void handleOrchestratorCommand(AgentOutput ctx,
+                                           com.aresstack.askai.research.runtime.service.ResearchServiceCommand command) {
+        String type = command.getType();
+        if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_ORCHESTRATOR_START.equals(type)) {
+            orchestratorStart(ctx, command.getQuery());
+            return;
+        }
+        com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession session = orchestratorSession();
+        com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession.Output out = orchestratorOutput(ctx);
+        orchestratorTurn = ctx;
+        try {
+            dispatchOrchestratorCommand(type, command, session, out);
+        } finally {
+            orchestratorTurn = null;
+        }
+    }
+
+    private void dispatchOrchestratorCommand(String type,
+            com.aresstack.askai.research.runtime.service.ResearchServiceCommand command,
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession session,
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession.Output out) {
+        if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_ORCHESTRATOR_APPROVE
+                .equals(type)) {
+            if (!hasBrowser()) {
+                out.log("BROWSER_NOT_AVAILABLE: cannot run the orchestrated research.");
+                return;
+            }
+            session.approve(cancelled, out);
+        } else if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_ORCHESTRATOR_ANSWER
+                .equals(type)) {
+            session.answer(command.getQuery(), cancelled, out);
+        } else if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_ORCHESTRATOR_STOP
+                .equals(type)) {
+            session.stop(out);
+        }
+    }
+
+    private void orchestratorStart(AgentOutput ctx, String question) {
+        if (question == null || question.trim().isEmpty()) {
+            return;
+        }
+        applyPendingModelReload(ctx);
+        orchestratorSession().start(question.trim(), orchestratorOutput(ctx));
+    }
+
+    private com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession.Output orchestratorOutput(
+            final AgentOutput ctx) {
+        return new com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession.Output() {
+            public void visible(String message) {
+                ctx.message(message);
+            }
+
+            public void log(String line) {
+                ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.log(line));
+            }
+        };
+    }
+
+    /** Built on first use from the session's lanes, model port, settings and the project's blackboard. */
+    private synchronized com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession orchestratorSession() {
+        if (orchestrator == null) {
+            com.aresstack.askai.research.runtime.orchestrator.TaskBoard board = taskBoard != null ? taskBoard
+                    : new com.aresstack.askai.research.runtime.orchestrator.InMemoryTaskBoard();
+            final com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget =
+                    com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(environment.values());
+            com.aresstack.askai.research.runtime.orchestrator.WebAcquisition acquisition =
+                    new com.aresstack.askai.research.runtime.orchestrator.WebAcquisition() {
+                        public Result acquire(String query, ToolInvoker permittedResearch,
+                                              java.util.function.Consumer<com.aresstack.askai.research.runtime
+                                                      .acquire.WebSearchApplicationService.AcceptedSource> accepted) {
+                            com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
+                                    buildResearchLoop(orchestratorTurn, permittedResearch, budget);
+                            loop.setAcceptedSourceObserver(accepted);
+                            com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(query);
+                            synchronized (visitedAcrossRuns) {
+                                visitedAcrossRuns.addAll(loop.getProgress().getVisitedCanonicalUrls());
+                            }
+                            return new Result(reason, "pages " + loop.getProgress().getPagesVisited()
+                                    + ", hosts " + loop.getProgress().getDistinctHosts().size());
+                        }
+                    };
+            orchestrator = new com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession(board,
+                    orchestratorSettings(), orchestratorChats(), modelPort,
+                    com.aresstack.askai.research.runtime.orchestrator.OrchestratorSession.defaultWorkers(
+                            acquisition, research),
+                    budget.getMinimumAcceptedSources(), budget.getMinimumDistinctHosts(),
+                    teamAgent == null ? 0 : teamAgent.getMaxOutputTokens(),
+                    new java.util.function.Supplier<com.aresstack.askai.research.runtime.orchestrator.ResearchOutline>() {
+                        public com.aresstack.askai.research.runtime.orchestrator.ResearchOutline get() {
+                            return readOutline();
+                        }
+                    });
+        }
+        return orchestrator;
+    }
+
+    /** The orchestrated run's role chats: the host's model port with the descriptor's call timeout. */
+    private com.aresstack.askai.research.runtime.orchestrator.RoleChats orchestratorChats() {
+        if (!environment.hasInference() || modelPort == null) {
+            return com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(null, null);
+        }
+        try {
+            return com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(modelPort,
+                    callTimeout(com.aresstack.askai.research.runtime.inference.InferenceConfigurationLoader
+                            .load(environment.inferenceConfigPath)));
+        } catch (java.io.IOException unusable) {
+            return com.aresstack.askai.research.runtime.orchestrator.RoleChats.overPort(null, null);
+        }
+    }
+
+    /** The approved outline: the first level of the host's concept, or the question alone. */
+    private com.aresstack.askai.research.runtime.orchestrator.ResearchOutline readOutline() {
+        if (!conceptToolsAvailable) {
+            return com.aresstack.askai.research.runtime.orchestrator.ResearchOutline.ofQuestion("");
+        }
+        try {
+            java.util.Map<String, Object> args = new java.util.HashMap<String, Object>();
+            args.put("path", "");
+            return com.aresstack.askai.research.runtime.orchestrator.ResearchOutline.fromConceptRead("",
+                    research.call("concept_read", args));
+        } catch (Exception unreadable) {
+            System.err.println("[orchestrator] concept unreadable, planning against the question alone: "
+                    + unreadable.getMessage());
+            return com.aresstack.askai.research.runtime.orchestrator.ResearchOutline.ofQuestion("");
         }
     }
 
@@ -1702,8 +1876,31 @@ public final class ResearchAgentSession {
         {
             final com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget =
                     com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(environment.values());
+            com.aresstack.askai.research.runtime.loop.ResearchLoop loop = buildResearchLoop(ctx, research, budget);
+            com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(task);
+            visitedAcrossRuns.addAll(loop.getProgress().getVisitedCanonicalUrls());
+            // The STRUCTURED outcome is the only basis for the user-facing result card.
+            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                    .outcome(loop.outcome(reason)));
+        }
+    }
+
+    /**
+     * The productive autonomous loop over {@code researchLane}: the single loop's configuration, shared by the
+     * orchestrated run's web research worker so both paths run through the SAME funnel. {@code ctx} receives
+     * the loop's status, progress and attention lines; null routes them to the technical log only.
+     */
+    private com.aresstack.askai.research.runtime.loop.ResearchLoop buildResearchLoop(final AgentOutput turn,
+            ToolInvoker researchLane,
+            final com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget) {
+        final AgentOutput ctx = turn != null ? turn : new AgentOutput() {
+            public void message(String line) {
+                System.err.println("[research-agent] " + line);
+            }
+        };
+        {
             com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
-                    new com.aresstack.askai.research.runtime.loop.ResearchLoop(browser, research, budget,
+                    new com.aresstack.askai.research.runtime.loop.ResearchLoop(browser, researchLane, budget,
                             new com.aresstack.askai.research.runtime.loop.ResearchLoopClock() {
                                 public long currentTimeMillis() {
                                     return System.currentTimeMillis();
@@ -1769,12 +1966,10 @@ public final class ResearchAgentSession {
                                 service));
             }
             // Continuation semantics: a later run of the same session never re-navigates target pages.
-            loop.excludeVisited(visitedAcrossRuns);
-            com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(task);
-            visitedAcrossRuns.addAll(loop.getProgress().getVisitedCanonicalUrls());
-            // The STRUCTURED outcome is the only basis for the user-facing result card.
-            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                    .outcome(loop.outcome(reason)));
+            synchronized (visitedAcrossRuns) {
+                loop.excludeVisited(visitedAcrossRuns);
+            }
+            return loop;
         }
     }
 
