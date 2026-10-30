@@ -44,6 +44,8 @@ public class AddonBridgeTest {
         assertEquals(AddonBridge.PROTOCOL, config.get("protocol").getAsInt());
         assertEquals(bridge.port(), config.get("port").getAsInt());
         assertEquals(64, config.get("token").getAsString().length());
+        // The add-on connects to 127.0.0.1, also on a JVM that prefers IPv6 (where the loopback address is ::1).
+        assertEquals("127.0.0.1", bridge.address().getHostAddress());
     }
 
     @Test

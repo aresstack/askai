@@ -76,8 +76,16 @@ function setConnection(next) {
   }
 }
 
-async function sendCommand(command) {
+// One command at a time, in click order: a dragged delay slider sends several SET_DELAY commands, and AskAI applies
+// them in arrival order, so the last one sent must also be the last one to arrive.
+let commandQueue = Promise.resolve();
+
+function sendCommand(command) {
   if (!bridge || typeof command !== 'string' || command.length === 0 || command.length > 64) return;
+  commandQueue = commandQueue.then(() => postCommand(command));
+}
+
+async function postCommand(command) {
   try {
     await fetch(bridge.base + '/v1/command', {
       method: 'POST',

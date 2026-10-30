@@ -64,7 +64,10 @@ final class AddonBridge implements AutoCloseable {
     static AddonBridge start() throws IOException {
         byte[] secret = new byte[32];
         new SecureRandom().nextBytes(secret);
-        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        // Explicitly IPv4: the add-on connects to 127.0.0.1 (and only has that host permission), while the loopback
+        // address of a JVM with java.net.preferIPv6Addresses=true would be ::1.
+        HttpServer server = HttpServer.create(new InetSocketAddress(
+                InetAddress.getByAddress("localhost", new byte[]{127, 0, 0, 1}), 0), 0);
         AtomicInteger threads = new AtomicInteger();
         // A few threads: one held state poll, a command and a hello may overlap.
         ExecutorService executor = Executors.newFixedThreadPool(4, runnable -> {
@@ -82,6 +85,11 @@ final class AddonBridge implements AutoCloseable {
     /** Where the add-on's commands go: the driver's HUD inbox. */
     void deliverTo(HudCommandInbox target) {
         this.inbox = target;
+    }
+
+    /** The bound address: always 127.0.0.1, the only host the add-on may reach. */
+    InetAddress address() {
+        return server.getAddress().getAddress();
     }
 
     int port() {
