@@ -188,6 +188,30 @@ public final class ResearchRuntimeSettings {
      */
     public static final String KEY_BROWSER_IDLE_STOP_SECONDS = "research.search.browserIdleStopSeconds";
     public static final int DEFAULT_BROWSER_IDLE_STOP_SECONDS = 300;
+
+    // ---- worker browsers: isolated user contexts for parallel research workers. Configured independently of
+    // the model capacity ("Model resources"); call timeout and idle stop reuse the two browser values above.
+    /** Worker browser processes over all chats; also the number of browser operations that run in parallel. */
+    public static final String KEY_WORKER_BROWSER_PROCESSES = "research.browser.workers.maxProcesses";
+    public static final int DEFAULT_WORKER_BROWSER_PROCESSES =
+            com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_MAX_BROWSER_PROCESSES;
+    /** User contexts (one per worker) one worker browser process hosts. */
+    public static final String KEY_WORKER_USER_CONTEXTS_PER_PROCESS =
+            "research.browser.workers.maxUserContextsPerProcess";
+    public static final int DEFAULT_WORKER_USER_CONTEXTS_PER_PROCESS =
+            com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_MAX_USER_CONTEXTS_PER_PROCESS;
+    /** Tabs (browsing contexts) one worker may hold open in its user context. */
+    public static final String KEY_WORKER_TABS_PER_USER_CONTEXT = "research.browser.workers.maxTabsPerUserContext";
+    public static final int DEFAULT_WORKER_TABS_PER_USER_CONTEXT = com.aresstack.askai.browser.playwright
+            .WorkerBrowserLimits.DEFAULT_MAX_BROWSING_CONTEXTS_PER_USER_CONTEXT;
+    /** Worker browser operations against the same site at the same time (search engines count as one). */
+    public static final String KEY_WORKER_PER_SITE = "research.browser.workers.maxConcurrentPerSite";
+    public static final int DEFAULT_WORKER_PER_SITE =
+            com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_MAX_CONCURRENT_PER_SITE;
+    /** How long a worker waits for a free user context (seconds). */
+    public static final String KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS = "research.browser.workers.acquireTimeoutSeconds";
+    public static final int DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS =
+            com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_ACQUIRE_TIMEOUT_SECONDS;
     public static final int DEFAULT_SEARCH_MAX_ERRORS = 3;
     /** How many sources one post-search review may read, and how much of each. */
     public static final int DEFAULT_REVIEW_MAX_SOURCES = 12;

@@ -182,6 +182,22 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 ResearchRuntimeSettings.loadNonNegativeInt(hostContext.getStateStore(),
                         ResearchRuntimeSettings.KEY_BROWSER_IDLE_STOP_SECONDS,
                         ResearchRuntimeSettings.DEFAULT_BROWSER_IDLE_STOP_SECONDS));
+        factory.setWorkerBrowserLimits(
+                ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
+                        ResearchRuntimeSettings.KEY_WORKER_BROWSER_PROCESSES,
+                        ResearchRuntimeSettings.DEFAULT_WORKER_BROWSER_PROCESSES),
+                ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
+                        ResearchRuntimeSettings.KEY_WORKER_USER_CONTEXTS_PER_PROCESS,
+                        ResearchRuntimeSettings.DEFAULT_WORKER_USER_CONTEXTS_PER_PROCESS),
+                ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
+                        ResearchRuntimeSettings.KEY_WORKER_TABS_PER_USER_CONTEXT,
+                        ResearchRuntimeSettings.DEFAULT_WORKER_TABS_PER_USER_CONTEXT),
+                ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
+                        ResearchRuntimeSettings.KEY_WORKER_PER_SITE,
+                        ResearchRuntimeSettings.DEFAULT_WORKER_PER_SITE),
+                ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
+                        ResearchRuntimeSettings.KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS,
+                        ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS));
         factory.setReviewContextLimits(
                 ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
                         ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
