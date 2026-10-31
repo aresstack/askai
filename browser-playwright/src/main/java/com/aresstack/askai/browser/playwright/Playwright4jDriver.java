@@ -75,6 +75,13 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * browser's bridge for a worker tab). Null = no add-on, reads fall back to {@code page.evaluate}.
      */
     private AddonBridge readBridge;
+    /**
+     * The add-on's stable key per page (main page, parked challenge page): it binds each key to exactly one tab, so
+     * a read never lands in another tab that shows the same URL. Unique per JVM, because worker tabs of several
+     * drivers share one worker bridge.
+     */
+    private final Map<Page, String> pageKeys = new java.util.IdentityHashMap<Page, String>();
+    private static final java.util.concurrent.atomic.AtomicLong PAGE_KEYS = new java.util.concurrent.atomic.AtomicLong();
     /** When the browser was started: the add-on gets {@link #ADDON_GRACE_MILLIS} to connect before the fallback. */
     private long launchedMillis;
     /** The fallback overlay was put into a page; it is removed once the add-on takes over. */
@@ -881,7 +888,12 @@ final class Playwright4jDriver implements PlaywrightDriver {
         if (reads == null) {
             return target.evaluate(script);
         }
-        AddonBridge.PageRead read = reads.submitRead(target.url(), script);
+        String key = pageKeys.get(target);
+        if (key == null) {
+            key = "page-" + PAGE_KEYS.incrementAndGet();
+            pageKeys.put(target, key);
+        }
+        AddonBridge.PageRead read = reads.submitRead(key, target.url(), script);
         try {
             if (!read.isDone()) {
                 target.waitForCondition(read::isDone,

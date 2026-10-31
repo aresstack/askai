@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
  * cannot tell (and need not care) where a Skip came from.
  *
  * <p>Page reads go the same way: {@link #submitRead} queues a read-only script for the tab showing a URL, the add-on
- * long-polls {@code GET /v1/read}, runs the script in that tab's isolated content-script world (the page's own
+ * long-polls {@code GET /v1/read}, runs the script in that page's tab's isolated content-script world (the page's own
  * scripts never see it) and posts the structured-clone result to {@code POST /v1/read-result}.</p>
  */
 final class AddonBridge implements AutoCloseable {
@@ -166,13 +166,14 @@ final class AddonBridge implements AutoCloseable {
     }
 
     /**
-     * Queue a read-only page script for the add-on. It runs in the isolated content-script world of the tab whose
-     * URL equals {@code tabUrl}, as {@code (<script>)()}; its structured-clone result arrives as Gson values (Map,
+     * Queue a read-only page script for the add-on. It runs in the isolated content-script world of the tab of
+     * {@code tabKey} (a stable key per Playwright page: its first read binds it to the one unbound tab whose URL
+     * equals {@code tabUrl}, later reads go to that tab only), as {@code (<script>)()}; its structured-clone result arrives as Gson values (Map,
      * List, Double, Boolean, String). The caller waits on {@link PageRead#isDone()} and must {@link PageRead#cancel()}
      * a read it stops waiting for.
      */
-    PageRead submitRead(String tabUrl, String script) {
-        PageRead read = new PageRead("read-" + readIds.incrementAndGet(), tabUrl, script);
+    PageRead submitRead(String tabKey, String tabUrl, String script) {
+        PageRead read = new PageRead("read-" + readIds.incrementAndGet(), tabKey, tabUrl, script);
         synchronized (lock) {
             if (closed) {
                 read.result.completeExceptionally(new PageReadFailed("the research add-on bridge is closed"));
@@ -202,12 +203,14 @@ final class AddonBridge implements AutoCloseable {
     /** One page read handed to the add-on. */
     final class PageRead {
         final String id;
+        final String tabKey;
         final String tabUrl;
         final String script;
         final CompletableFuture<Object> result = new CompletableFuture<Object>();
 
-        private PageRead(String id, String tabUrl, String script) {
+        private PageRead(String id, String tabKey, String tabUrl, String script) {
             this.id = id;
+            this.tabKey = tabKey;
             this.tabUrl = tabUrl;
             this.script = script;
         }
@@ -369,6 +372,7 @@ final class AddonBridge implements AutoCloseable {
         }
         JsonObject body = new JsonObject();
         body.addProperty("id", read.id);
+        body.addProperty("tab", read.tabKey);
         body.addProperty("url", read.tabUrl);
         body.addProperty("script", read.script);
         respond(exchange, 200, GSON.toJson(body));

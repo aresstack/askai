@@ -99,16 +99,57 @@ async function readLoop() {
   }
 }
 
-/** The tab showing exactly this URL; with several, the active one, then the most recently used. */
-async function tabFor(url) {
+// Which tab belongs to which Playwright page: AskAI sends a stable key per page. The first read of a key binds it to
+// the one UNBOUND tab showing the read's URL; every later read of that key goes to exactly that tab, even when other
+// tabs (other worker user contexts) show the same URL. Several unbound candidates are refused (AMBIGUOUS_TAB), never
+// guessed, so a read can never return another tab's DOM.
+const tabByKey = new Map();   // page key -> tab id
+const keyByTab = new Map();   // tab id -> page key
+browser.tabs.onRemoved.addListener(tabId => {
+  const key = keyByTab.get(tabId);
+  if (key !== undefined) {
+    keyByTab.delete(tabId);
+    tabByKey.delete(key);
+  }
+});
+
+// Binding decisions one at a time: two first reads must not both claim the same unbound tab.
+let bindingQueue = Promise.resolve();
+
+function tabFor(key, url) {
+  const next = bindingQueue.then(() => resolveTab(key, url));
+  bindingQueue = next.catch(() => {});
+  return next;
+}
+
+async function resolveTab(key, url) {
   const deadline = Date.now() + TAB_LOOKUP_MS;
   for (;;) {
-    const tabs = (await browser.tabs.query({})).filter(tab => tab.url === url);
-    if (tabs.length > 0) {
-      tabs.sort((a, b) => (Number(b.active) - Number(a.active)) || ((b.lastAccessed || 0) - (a.lastAccessed || 0)));
-      return tabs[0].id;
+    const bound = tabByKey.get(key);
+    if (bound !== undefined) {
+      let tab = null;
+      try {
+        tab = await browser.tabs.get(bound);
+      } catch (e) {
+        tabByKey.delete(key);
+        keyByTab.delete(bound);
+      }
+      // The bound tab may still be committing a navigation; it never falls back to another tab.
+      if (tab && tab.url === url) return tab.id;
+      if (tab && Date.now() > deadline) throw new Error('URL_MISMATCH: the page\'s tab shows ' + tab.url);
+    } else {
+      const candidates = (await browser.tabs.query({}))
+          .filter(tab => tab.url === url && !keyByTab.has(tab.id));
+      if (candidates.length === 1) {
+        tabByKey.set(key, candidates[0].id);
+        keyByTab.set(candidates[0].id, key);
+        return candidates[0].id;
+      }
+      if (candidates.length > 1 && Date.now() > deadline) {
+        throw new Error('AMBIGUOUS_TAB: ' + candidates.length + ' unbound tabs show ' + url);
+      }
+      if (candidates.length === 0 && Date.now() > deadline) throw new Error('NO_TAB: no tab shows ' + url);
     }
-    if (Date.now() > deadline) throw new Error('NO_TAB: no tab shows ' + url);
     await sleep(100);
   }
 }
@@ -116,7 +157,7 @@ async function tabFor(url) {
 async function runRead(read) {
   let result;
   try {
-    const tabId = await tabFor(read.url);
+    const tabId = await tabFor(String(read.tab), read.url);
     // runAt document_start: run at once, also while the page is still loading subresources (as page.evaluate did).
     const values = await browser.tabs.executeScript(tabId, {
       code: '(' + read.script + ')()',

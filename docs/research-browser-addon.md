@@ -125,9 +125,12 @@ AskAI ran with `page.evaluate` now runs in the add-on's isolated content-script 
 | Consent detection | `SearchPageGuards.consentReportScript` | `consentCandidate` |
 | Anchor list | `Playwright4jDriver.state()` | page state after every navigation |
 
-How it runs: `Playwright4jDriver.readPage(page, script)` queues the script on the bridge for the tab's URL. The
-background page fetches it (`GET /v1/read`), finds the tab showing exactly that URL (several: the active one, then
-the most recently used; none within 2 s: `NO_TAB` error), and runs `(<script>)()` with `tabs.executeScript` in that
+How it runs: `Playwright4jDriver.readPage(page, script)` queues the script on the bridge with the page's URL and a
+stable key per Playwright page. The background page fetches it (`GET /v1/read`) and finds the page's tab: the first
+read of a key binds it to the one unbound tab showing that URL, every later read goes to exactly that tab, even when
+other tabs (other worker user contexts) show the same URL. Several unbound candidates fail with `AMBIGUOUS_TAB`, no
+tab within 2 s with `NO_TAB`, a bound tab showing another URL with `URL_MISMATCH`; a read is never redirected to a
+different tab. Then it runs `(<script>)()` with `tabs.executeScript` in that
 tab's top frame at once (`runAt: document_start`). The script runs in the content-script sandbox with Xray vision:
 it sees the DOM, layout and computed styles, but the page's own scripts see neither the script nor its globals, and a
 page that hooks `getBoundingClientRect` or `getComputedStyle` sees no call. The structured-clone result goes back with
@@ -171,3 +174,6 @@ bridge protocol stays the same; the bridge then also accepts `Origin: chrome-ext
   `pageReadsRunInTheAddonAndThePageSeesNone` captures a small result page through the add-on, reads challenge,
   consent and anchors, and checks that the page's own hooked `getBoundingClientRect`/`getComputedStyle` were never
   called (`calls=0`); `withoutTheAddonReadsRunInThePageWorld` is the counter-proof with `page.evaluate`.
+  `workerTabsReadThroughTheWorkerBrowsersAddon` does the same in a worker tab, and
+  `tabsWithTheSameUrlAreReadAsTheirOwnTab` opens the same URL with different content in two worker user contexts and
+  checks that each read comes from its own tab.

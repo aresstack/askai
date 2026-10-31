@@ -58,8 +58,17 @@ public class CamoufoxResearchAddonLiveTest {
                 "1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX")));
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
-            byte[] body = (exchange.getRequestURI().getPath().startsWith("/reads") ? READ_PAGE : PAGE)
-                    .getBytes(StandardCharsets.UTF_8);
+            String path = exchange.getRequestURI().getPath();
+            String cookie = String.valueOf(exchange.getRequestHeaders().getFirst("Cookie"));
+            if (path.startsWith("/as/")) {
+                // A sign-in: this user context's cookie decides what /mine shows.
+                exchange.getResponseHeaders().add("Set-Cookie", "user=" + path.substring(4) + "; Path=/");
+            }
+            String mine = "<!doctype html><html><head><title>mine</title></head><body><ul><li><a href='https://example.org/"
+                    + (cookie.contains("user=") ? cookie.substring(cookie.indexOf("user=") + 5).split(";")[0] : "nobody")
+                    + "'>my page</a></li></ul></body></html>";
+            byte[] body = (path.startsWith("/reads") ? READ_PAGE : path.startsWith("/mine") || path.startsWith("/as/")
+                    ? mine : PAGE).getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
@@ -183,6 +192,32 @@ public class CamoufoxResearchAddonLiveTest {
             assertEquals(3, countExternal(document));
             assertEquals("none", marker);
             assertEquals("calls=0", seen);
+        } finally {
+            worker.close();
+        }
+    }
+
+    @Test
+    public void tabsWithTheSameUrlAreReadAsTheirOwnTab() throws Exception {
+        boolean headless = !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED"));
+        PlaywrightWorkerBrowserBackend worker = PlaywrightWorkerBrowserBackend.launch(
+                new PlaywrightBrowserRuntime.Options(CamoufoxProvisioning.CHANNEL, headless, true, null, null, true),
+                null);
+        try {
+            Playwright4jDriver alice = worker.driverOf(worker.newBrowsingContext(worker.newUserContext(null)));
+            Playwright4jDriver bob = worker.driverOf(worker.newBrowsingContext(worker.newUserContext(null)));
+            alice.open(base + "as/alice");
+            bob.open(base + "as/bob");
+            // Same URL in two user contexts, different content: each read must come from its own tab, whichever
+            // tab Firefox considers active or most recently used.
+            PlaywrightPageState aliceMine = alice.open(base + "mine");
+            PlaywrightPageState bobMine = bob.open(base + "mine");
+            PlaywrightPageState aliceAgain = alice.current();
+            System.err.println("[addon-live] same URL: alice=" + aliceMine.anchors.get(0).href + " bob="
+                    + bobMine.anchors.get(0).href + " alice again=" + aliceAgain.anchors.get(0).href);
+            assertEquals("https://example.org/alice", aliceMine.anchors.get(0).href);
+            assertEquals("https://example.org/bob", bobMine.anchors.get(0).href);
+            assertEquals("https://example.org/alice", aliceAgain.anchors.get(0).href);
         } finally {
             worker.close();
         }
