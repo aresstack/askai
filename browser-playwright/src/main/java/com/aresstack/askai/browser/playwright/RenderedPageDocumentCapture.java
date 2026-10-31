@@ -15,14 +15,11 @@ import com.aresstack.askai.browser.render.RenderedPageViewport;
 import com.aresstack.askai.browser.search.SearchPageAnalysisSettings;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Captures the rendered page as one NEUTRAL {@link RenderedPageDocument}: a single in-page script
@@ -46,16 +43,6 @@ final class RenderedPageDocumentCapture {
         String url();
 
         String title();
-
-        /**
-         * The engine's own redirect answers for opaque result wrappers ({@link SearchRedirectResolver#needsLookup}),
-         * asked once per capture for all of them: wrapper URL to the raw {@code Location} it names, the redirect not
-         * followed; a wrapper without an answer is missing. The default knows none, so such links stay
-         * {@code UNRESOLVED}.
-         */
-        default Map<String, String> redirectLocations(Collection<String> wrapperUrls) {
-            return Collections.emptyMap();
-        }
     }
 
     /** The injectable settle wait between recaptures, so the bounded loop is unit-testable. */
@@ -104,7 +91,7 @@ final class RenderedPageDocumentCapture {
                     + "one consistent state");
         }
         return convert(raw, page.url(), page.title(), after, snapshotGeneration, domainKeys,
-                warnings, page);
+                warnings);
     }
 
     private RenderedPageFingerprint fingerprint(PageScriptRunner page) {
@@ -123,8 +110,7 @@ final class RenderedPageDocumentCapture {
     @SuppressWarnings("unchecked")
     private RenderedPageDocument convert(Object raw, String url, String title,
                                          RenderedPageFingerprint fingerprint, long generation,
-                                         DomainKeyResolver domainKeys, List<String> warnings,
-                                         PageScriptRunner page) {
+                                         DomainKeyResolver domainKeys, List<String> warnings) {
         Map<String, Object> root = raw instanceof Map ? (Map<String, Object>) raw
                 : Collections.<String, Object>emptyMap();
         boolean truncated = bool(root.get("truncated"));
@@ -206,31 +192,13 @@ final class RenderedPageDocumentCapture {
         }
 
         List<RenderedLinkDescriptor> links = new ArrayList<RenderedLinkDescriptor>();
-        // Google's opaque /goto wrappers: only Google's own redirect answer names the target; asked once, for all.
-        Set<String> wrappers = new LinkedHashSet<String>();
-        for (Map<String, Object> l : mapList(root.get("links"))) {
-            String rawHref = str(l.get("href"));
-            if (SearchRedirectResolver.needsLookup(rawHref)) {
-                wrappers.add(rawHref);
-            }
-        }
-        Map<String, String> lookedUp = new HashMap<String, String>();
-        long lookupMillis = 0L;
-        if (!wrappers.isEmpty()) {
-            long asked = System.currentTimeMillis();
-            Map<String, String> answers = page.redirectLocations(wrappers);
-            lookupMillis = System.currentTimeMillis() - asked;
-            for (String wrapper : wrappers) {
-                lookedUp.put(wrapper, SearchRedirectResolver.acceptedLookupTarget(wrapper,
-                        answers == null ? null : answers.get(wrapper)));
-            }
-        }
+        int opaqueWrappers = 0;
         for (Map<String, Object> l : mapList(root.get("links"))) {
             String rawHref = str(l.get("href"));
             SearchRedirectResolver.Resolution resolution = SearchRedirectResolver.resolve(rawHref);
-            String lookupTarget = null;
-            if (resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED) {
-                lookupTarget = lookedUp.get(rawHref);
+            if (resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED
+                    && SearchRedirectResolver.isOpaqueWrapper(rawHref)) {
+                opaqueWrappers++;
             }
             LinkRedirectResolution status;
             String target;
@@ -240,9 +208,8 @@ final class RenderedPageDocumentCapture {
                     target = resolution.getTargetUrl();
                     break;
                 case UNRESOLVED:
-                    status = lookupTarget == null ? LinkRedirectResolution.UNRESOLVED
-                            : LinkRedirectResolution.RESOLVED;
-                    target = lookupTarget == null ? "" : lookupTarget;
+                    status = LinkRedirectResolution.UNRESOLVED;
+                    target = "";
                     break;
                 default:
                     status = LinkRedirectResolution.NOT_A_REDIRECT;
@@ -257,15 +224,9 @@ final class RenderedPageDocumentCapture {
                     bool(l.get("visible")), box(l.get("box")), bool(l.get("insideHeading"))));
         }
 
-        if (!lookedUp.isEmpty()) {
-            int resolved = 0;
-            for (String target : lookedUp.values()) {
-                if (target != null) {
-                    resolved++;
-                }
-            }
-            warnings.add("REDIRECT_LOOKUPS: " + resolved + " of " + lookedUp.size()
-                    + " opaque engine wrappers resolved from the engine's redirect answer in " + lookupMillis + " ms");
+        if (opaqueWrappers > 0) {
+            warnings.add("OPAQUE_REDIRECTS: " + opaqueWrappers + " links are opaque engine wrappers (Google /goto) "
+                    + "whose target is not in the URL; they stay unresolved and are never results");
         }
         String snapshotId = "snap-" + generation + "-"
                 + Integer.toHexString(fingerprint.value.hashCode());

@@ -40,6 +40,15 @@ first does not deliver.
 reaches get a tab, each first start page counts as one opened endpoint, and a fallback endpoint (DuckDuckGo Lite)
 only gets what is left.
 
+Result links that are engine redirect wrappers are resolved before any classification: Bing `/ck/a?u=a1…`, Google
+`/url?q=…` and DuckDuckGo `/l/?uddg=…` carry their target and are replaced by it. Google's current result links,
+`/goto?url=<token>`, do not: the token is opaque and only Google knows the target. They stay `UNRESOLVED`, are never
+a source URL and never a result, and a Google result page made of them reports `OPAQUE_REDIRECTS` in its engine
+attempt instead of an unknown layout. AskAI does not ask Google for these targets (no extra requests, no automated
+clicks): tried live, it took about 1.5 s per link through the browser, and after the first burst of direct requests
+Google answered with a check page instead of a redirect. Bing and DuckDuckGo are not affected; a later resolution
+strategy plugs in at `OpaqueRedirectStrategy`.
+
 The dev/test `--search-url=<template with {query}>` override stays a URL template (local test worlds) and refuses
 a call that names engines.
 

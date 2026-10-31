@@ -201,13 +201,13 @@ final class PlaywrightBrowserSession implements BrowserSession {
                     case NO_ORGANIC_RESULTS:
                         attempts.add(attempt(host, com.aresstack.askai.browser
                                 .LegacySearchAttemptOutcome.NO_ORGANIC_RESULTS,
-                                bounded(firstDiagnostic(extraction))));
+                                bounded(failureDiagnostic(document, extraction))));
                         return CapturedPageVerdict.EMPTY;
                     default:
                         // An ununderstood layout is an extraction FAILURE, never an empty engine.
                         attempts.add(attempt(host, com.aresstack.askai.browser
                                 .LegacySearchAttemptOutcome.EXTRACTION_FAILED,
-                                bounded(firstDiagnostic(extraction))));
+                                bounded(failureDiagnostic(document, extraction))));
                         return CapturedPageVerdict.UNUSABLE;
                 }
             }
@@ -646,6 +646,22 @@ final class PlaywrightBrowserSession implements BrowserSession {
         }
         return new EngineNavigation(providerHosts, attempts, challenges, anyEngineReached,
                 lastFailure);
+    }
+
+    /**
+     * Why a captured result page delivered nothing. When the engine wrapped its results in opaque redirects (Google's
+     * {@code /goto}), that is named first: those links are left unresolved on purpose ({@link OpaqueRedirectStrategy}),
+     * so the empty page is explained instead of looking like an unknown layout.
+     */
+    static String failureDiagnostic(com.aresstack.askai.browser.render.RenderedPageDocument document,
+                                    com.aresstack.askai.browser.search.SearchResultExtractionResult extraction) {
+        String reason = firstDiagnostic(extraction);
+        for (String warning : document.captureWarnings) {
+            if (warning.startsWith("OPAQUE_REDIRECTS:")) {
+                return warning + (reason.isEmpty() ? "" : "; " + reason);
+            }
+        }
+        return reason;
     }
 
     private static String firstDiagnostic(

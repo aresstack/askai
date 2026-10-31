@@ -62,27 +62,28 @@ public class SearchRedirectResolverTest {
     }
 
     @Test
-    public void googlesOpaqueGotoWrapperIsUnresolvedAndMarkedForALookup() {
+    public void googlesOpaqueGotoWrapperIsUnresolvedAndNeverJudgedByGooglesHost() {
         String wrapper = "https://www.google.com/goto?url=CAESABC123&ved=x";
         assertEquals(SearchRedirectResolver.Status.UNRESOLVED, SearchRedirectResolver.resolve(wrapper).getStatus());
         assertEquals("", SearchRedirectResolver.resolve(wrapper).getTargetUrl());
-        org.junit.Assert.assertTrue(SearchRedirectResolver.needsLookup(wrapper));
-        org.junit.Assert.assertFalse(SearchRedirectResolver.needsLookup("https://www.google.com/goto"));
-        org.junit.Assert.assertFalse(SearchRedirectResolver.needsLookup("https://example.com/goto?url=x"));
-        org.junit.Assert.assertFalse(SearchRedirectResolver.needsLookup("https://www.google.com/url?q=https://a.b/"));
+        org.junit.Assert.assertTrue(SearchRedirectResolver.isOpaqueWrapper(wrapper));
+        org.junit.Assert.assertFalse(SearchRedirectResolver.isOpaqueWrapper("https://www.google.com/goto"));
+        org.junit.Assert.assertFalse(SearchRedirectResolver.isOpaqueWrapper("https://example.com/goto?url=x"));
+        org.junit.Assert.assertFalse(SearchRedirectResolver.isOpaqueWrapper("https://www.google.com/url?q=https://a.b/"));
     }
 
     @Test
-    public void onlyAnAbsoluteHttpRedirectAnswerOtherThanTheWrapperIsAccepted() {
+    public void aLaterStrategyMayResolveAWrapperButNeverIntoAnotherWrapperOrANonHttpTarget() {
         String wrapper = "https://www.google.com/goto?url=CAESABC123";
-        assertEquals("https://openjdk.org/projects/jdk/21/",
-                SearchRedirectResolver.acceptedLookupTarget(wrapper, "https://openjdk.org/projects/jdk/21/"));
-        assertEquals("https://www.google.com/sorry/index",
-                SearchRedirectResolver.acceptedLookupTarget(wrapper, "/sorry/index"));
-        org.junit.Assert.assertNull(SearchRedirectResolver.acceptedLookupTarget(wrapper, null));
-        org.junit.Assert.assertNull(SearchRedirectResolver.acceptedLookupTarget(wrapper, " "));
-        org.junit.Assert.assertNull(SearchRedirectResolver.acceptedLookupTarget(wrapper, "javascript:alert(1)"));
-        org.junit.Assert.assertNull(SearchRedirectResolver.acceptedLookupTarget(wrapper,
-                "https://www.google.com/goto?url=again"));
+        SearchRedirectResolver.Resolution known = SearchRedirectResolver.resolve(wrapper,
+                url -> "https://openjdk.org/projects/jdk/21/");
+        assertEquals(SearchRedirectResolver.Status.RESOLVED, known.getStatus());
+        assertEquals("https://openjdk.org/projects/jdk/21/", known.getTargetUrl());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED, SearchRedirectResolver.resolve(wrapper,
+                url -> "https://www.google.com/goto?url=again").getStatus());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED, SearchRedirectResolver.resolve(wrapper,
+                url -> "javascript:alert(1)").getStatus());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve(wrapper, OpaqueRedirectStrategy.DISCARD).getStatus());
     }
 }

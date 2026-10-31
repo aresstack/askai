@@ -384,10 +384,6 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 public String title() {
                     return target.title();
                 }
-
-                public java.util.Map<String, String> redirectLocations(java.util.Collection<String> wrapperUrls) {
-                    return EngineRedirectLookup.locations(wrapperUrls, EngineRedirectLookup.TOTAL_TIMEOUT_MILLIS);
-                }
             }, domainKeys, snapshotGeneration);
             System.err.println(SerpCaptureDiagnostics.summary(document));
             java.nio.file.Path dumpDirectory = SerpCaptureDiagnostics.snapshotDirectory();

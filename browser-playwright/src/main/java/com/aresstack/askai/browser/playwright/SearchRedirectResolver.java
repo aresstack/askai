@@ -13,9 +13,9 @@ import java.util.Locale;
  * <ul>
  * <li>Bing: {@code /ck/a?...&u=a1<base64url(target)>}</li>
  * <li>Google: {@code /url?q=<target>} (also {@code url=} / {@code u=})</li>
- * <li>Google: {@code /goto?url=<opaque token>}: the target is not in the URL, only Google knows it. Statically it is
- * {@code UNRESOLVED}; {@link #needsLookup} marks it for a lookup of Google's own answer (see
- * {@link RenderedPageDocumentCapture}). The wrapper URL itself is never a result link.</li>
+ * <li>Google: {@code /goto?url=<opaque token>}: the target is not in the URL, only Google knows it
+ * ({@link #isOpaqueWrapper}); its treatment is an {@link OpaqueRedirectStrategy}, shipped as
+ * {@link OpaqueRedirectStrategy#DISCARD}: {@code UNRESOLVED}. The wrapper URL itself is never a result link.</li>
  * <li>DuckDuckGo: {@code /l/?uddg=<target>}</li>
  * </ul>
  * A wrapper whose target cannot be extracted safely is {@code UNRESOLVED} — the caller discards it in a
@@ -59,7 +59,12 @@ final class SearchRedirectResolver {
     private SearchRedirectResolver() {
     }
 
+    /** Resolution with the shipped treatment of opaque wrappers, {@link OpaqueRedirectStrategy#DISCARD}. */
     static Resolution resolve(String url) {
+        return resolve(url, OpaqueRedirectStrategy.DISCARD);
+    }
+
+    static Resolution resolve(String url, OpaqueRedirectStrategy opaqueWrappers) {
         String lower = url == null ? "" : url.toLowerCase(Locale.ROOT);
         if (lower.isEmpty() || !lower.startsWith("http")) {
             return new Resolution(Status.NOT_A_REDIRECT, url);
@@ -80,7 +85,10 @@ final class SearchRedirectResolver {
                     ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
         }
         if (isGoogleGoto(host, path, url)) {
-            return new Resolution(Status.UNRESOLVED, "");
+            String target = opaqueWrappers.targetOf(url);
+            return target != null && (target.startsWith("http://") || target.startsWith("https://"))
+                    && !isOpaqueWrapper(target)
+                    ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
         }
         if (host.endsWith("duckduckgo.com") && path.startsWith("/l/")) {
             String target = queryParameter(url, "uddg");
@@ -91,10 +99,10 @@ final class SearchRedirectResolver {
     }
 
     /**
-     * Whether the URL is Google's opaque result wrapper {@code /goto?url=<token>} (2026 SERPs): its target can only be
-     * learnt from Google's own redirect answer, never decoded or guessed from the page.
+     * Whether the URL is Google's opaque result wrapper {@code /goto?url=<token>} (2026 SERPs): its target is not in the
+     * URL and is never decoded or guessed from the page.
      */
-    static boolean needsLookup(String url) {
+    static boolean isOpaqueWrapper(String url) {
         String lower = url == null ? "" : url.toLowerCase(Locale.ROOT);
         if (!lower.startsWith("http")) {
             return false;
@@ -107,28 +115,6 @@ final class SearchRedirectResolver {
         String token = queryParameter(url, "url");
         return (host.equals("google.com") || host.endsWith(".google.com")) && path.equals("/goto")
                 && token != null && !token.isEmpty();
-    }
-
-    /**
-     * The target a wrapper's redirect answer names ({@code Location} of a 3xx), accepted only as an absolute
-     * http(s) URL, resolved against the wrapper when relative. Null for anything else: no answer, no redirect, a
-     * scheme other than http(s), or a redirect back to the same wrapper path (a loop or a consent/"sorry" page).
-     */
-    static String acceptedLookupTarget(String wrapperUrl, String location) {
-        if (location == null || location.trim().isEmpty()) {
-            return null;
-        }
-        try {
-            java.net.URI target = new java.net.URI(wrapperUrl).resolve(location.trim());
-            String scheme = target.getScheme() == null ? "" : target.getScheme().toLowerCase(Locale.ROOT);
-            if (!scheme.equals("http") && !scheme.equals("https") || target.getHost() == null) {
-                return null;
-            }
-            String resolved = target.toString();
-            return needsLookup(resolved) ? null : resolved;
-        } catch (java.net.URISyntaxException | IllegalArgumentException unusable) {
-            return null;
-        }
     }
 
     /** Bing encodes the target as {@code a1} + base64url; anything else is unresolved. */
