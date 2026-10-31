@@ -28,10 +28,15 @@ answered with random, wrong result sets.
 `web_search` takes an optional `engines` parameter (comma-separated catalog ids, in this order, each once). A
 named engine need not be enabled in the settings, but it must exist: a wrong id is refused, never corrected or
 replaced. Without the parameter the engines enabled in the settings search (*Search engines* list; default
-DuckDuckGo, Bing and Google, strategy `ALL_ENABLED`, all three merged). `FIRST_USABLE` still types into all
-enabled engines at once, but uses only the first engine in the list that delivers.
+DuckDuckGo, Bing and Google, strategy `ALL_ENABLED`, all three merged). `FIRST_USABLE` types into the first
+engine only and asks the next one, in a tab of its own, only when the first does not deliver.
 
-The dev/test `--search-url=<template with {query}>` override stays a URL template (local test worlds).
+*Max. engine attempts* (`maximumEngineAttempts`, default 4) is spent before any tab opens: only the engines it
+reaches get a tab, each first start page counts as one opened endpoint, and a fallback endpoint (DuckDuckGo Lite)
+only gets what is left.
+
+The dev/test `--search-url=<template with {query}>` override stays a URL template (local test worlds) and refuses
+a call that names engines.
 
 ## Tests
 
