@@ -274,6 +274,17 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
         }
     }
 
+    /** Tests: the page-scoped driver of a tab, or null. */
+    Playwright4jDriver driverOf(String browsingContextId) {
+        Tab tab = tabs.get(browsingContextId);
+        return tab == null ? null : tab.driver;
+    }
+
+    /** Tests: the page-read bridge of this worker browser, or null without the add-on. */
+    AddonBridge readBridge() {
+        return readBridge;
+    }
+
     @Override
     public void closeBrowsingContext(String browsingContextId) {
         Tab tab = tabs.remove(browsingContextId);

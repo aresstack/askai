@@ -161,6 +161,33 @@ public class CamoufoxResearchAddonLiveTest {
         assertTrue(seen, seen.startsWith("calls=") && !"calls=0".equals(seen));
     }
 
+    @Test
+    public void workerTabsReadThroughTheWorkerBrowsersAddon() throws Exception {
+        boolean headless = !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED"));
+        PlaywrightWorkerBrowserBackend worker = PlaywrightWorkerBrowserBackend.launch(
+                new PlaywrightBrowserRuntime.Options(CamoufoxProvisioning.CHANNEL, headless, true, null, null, true),
+                null);
+        try {
+            assertNotNull("the worker browser gets the add-on", worker.readBridge());
+            String userContext = worker.newUserContext(null);
+            String tab = worker.newBrowsingContext(userContext);
+            Playwright4jDriver tabDriver = worker.driverOf(tab);
+            tabDriver.open(base + "reads");
+            com.aresstack.askai.browser.render.RenderedPageDocument document = tabDriver.captureRenderedPage(
+                    new com.aresstack.askai.browser.domain.HostPortDomainKeyResolver(), 1L);
+            String marker = tabDriver.challengeMarker();
+            tabDriver.pumpEvents(() -> false, 400L);
+            String seen = tabDriver.current().title;
+            System.err.println("[addon-live] worker tab capture: links=" + document.links.size() + " challenge="
+                    + marker + " page sees: " + seen + " addon=" + worker.readBridge().addonVersion());
+            assertEquals(3, countExternal(document));
+            assertEquals("none", marker);
+            assertEquals("calls=0", seen);
+        } finally {
+            worker.close();
+        }
+    }
+
     private static int countExternal(com.aresstack.askai.browser.render.RenderedPageDocument document) {
         int count = 0;
         for (com.aresstack.askai.browser.render.RenderedLinkDescriptor link : document.links) {
