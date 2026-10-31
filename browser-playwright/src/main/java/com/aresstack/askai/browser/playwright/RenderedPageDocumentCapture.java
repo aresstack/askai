@@ -203,6 +203,7 @@ final class RenderedPageDocumentCapture {
 
         List<RenderedLinkDescriptor> links = new ArrayList<RenderedLinkDescriptor>();
         Map<String, String> lookedUp = new HashMap<String, String>();
+        long lookupMillis = 0L;
         for (Map<String, Object> l : mapList(root.get("links"))) {
             String rawHref = str(l.get("href"));
             SearchRedirectResolver.Resolution resolution = SearchRedirectResolver.resolve(rawHref);
@@ -211,8 +212,10 @@ final class RenderedPageDocumentCapture {
                     && SearchRedirectResolver.needsLookup(rawHref)) {
                 // Google's opaque /goto wrapper: only Google's own redirect answer names the target, once per wrapper.
                 if (!lookedUp.containsKey(rawHref)) {
+                    long asked = System.currentTimeMillis();
                     lookedUp.put(rawHref, SearchRedirectResolver.acceptedLookupTarget(rawHref,
                             page.redirectLocation(rawHref)));
+                    lookupMillis += System.currentTimeMillis() - asked;
                 }
                 lookupTarget = lookedUp.get(rawHref);
             }
@@ -241,6 +244,16 @@ final class RenderedPageDocumentCapture {
                     bool(l.get("visible")), box(l.get("box")), bool(l.get("insideHeading"))));
         }
 
+        if (!lookedUp.isEmpty()) {
+            int resolved = 0;
+            for (String target : lookedUp.values()) {
+                if (target != null) {
+                    resolved++;
+                }
+            }
+            warnings.add("REDIRECT_LOOKUPS: " + resolved + " of " + lookedUp.size()
+                    + " opaque engine wrappers resolved from the engine's redirect answer in " + lookupMillis + " ms");
+        }
         String snapshotId = "snap-" + generation + "-"
                 + Integer.toHexString(fingerprint.value.hashCode());
         return new RenderedPageDocument(snapshotId, generation, url, title, viewport, fingerprint,
