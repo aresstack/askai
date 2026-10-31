@@ -142,9 +142,16 @@ public class PlaywrightBrowserSessionTest {
         final List<List<List<String>>> typedFields = new ArrayList<List<List<String>>>();
         final List<String> typedQueries = new ArrayList<String>();
         int closeTabsCalls;
+        final List<List<String>> openedTabSets = new ArrayList<List<String>>();
+        /** The user closed the window: opening tabs fails the way the real driver reports it. */
+        boolean windowClosed;
 
         @Override
-        public List<String> openSearchTabs(List<String> homeUrls) {
+        public List<String> openSearchTabs(List<String> homeUrls) throws BrowserException {
+            if (windowClosed) {
+                throw new BrowserException("BROWSER_CLOSED: the browser window was closed");
+            }
+            openedTabSets.add(new ArrayList<String>(homeUrls));
             tabHomes.clear();
             tabHomes.addAll(homeUrls);
             List<String> loaded = new ArrayList<String>();
@@ -238,6 +245,94 @@ public class PlaywrightBrowserSessionTest {
         assertTrue("no result URL was opened: " + driver.opened, driver.opened.isEmpty());
     }
 
+    /** The endpoint budget is spent before tabs are opened: an engine beyond it gets no tab and is never typed into. */
+    @Test
+    public void onlyTheEnginesTheBudgetReachesGetATab() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        driver.typedResults.put("http://one.test/", resultsPage("http://one.test/search?q=hase", "one"));
+        driver.typedResults.put("http://two.test/", resultsPage("http://two.test/search?q=hase", "two"));
+        driver.typedResults.put("http://three.test/", resultsPage("http://three.test/search?q=hase", "three"));
+        PlaywrightBrowserSession s = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED,
+                com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create()
+                        .navigation.engineSelection.getEntries(), 2);
+        s.setSearchEngines(java.util.Arrays.asList(formEngine("one", "http://one.test/"),
+                formEngine("two", "http://two.test/"), formEngine("three", "http://three.test/")));
+
+        WebSearchResult result = s.search("hase");
+
+        assertEquals(java.util.Collections.singletonList(
+                java.util.Arrays.asList("http://one.test/", "http://two.test/")), driver.openedTabSets);
+        assertEquals("both typed engines are evaluated, the third is never asked", 6, result.getItems().size());
+    }
+
+    /** FIRST_USABLE asks the engines behind the first one only when it does not deliver, so they get no tab ahead. */
+    @Test
+    public void firstUsableTypesOnlyIntoTheFirstEngine() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        driver.typedResults.put("http://one.test/", resultsPage("http://one.test/search?q=hase", "one"));
+        driver.typedResults.put("http://two.test/", resultsPage("http://two.test/search?q=hase", "two"));
+        PlaywrightBrowserSession s = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
+        s.setSearchEngines(java.util.Arrays.asList(formEngine("one", "http://one.test/"),
+                formEngine("two", "http://two.test/")));
+
+        WebSearchResult result = s.search("hase");
+
+        assertEquals(java.util.Collections.singletonList(java.util.Collections.singletonList("http://one.test/")),
+                driver.openedTabSets);
+        assertEquals(3, result.getItems().size());
+    }
+
+    /** A window the user closed ends the search; it is never reported as a missing tab or an engine attempt. */
+    @Test
+    public void aClosedWindowWhileOpeningTheTabsEndsTheSearch() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        driver.windowClosed = true;
+        PlaywrightBrowserSession s = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED);
+        s.setSearchEngines(java.util.Arrays.asList(formEngine("one", "http://one.test/")));
+        try {
+            s.search("hase");
+            fail("the closed window must end the search");
+        } catch (BrowserException closed) {
+            assertTrue(closed.getMessage(), closed.getMessage().contains("BROWSER_CLOSED"));
+        }
+    }
+
+    /** After a search in tabs the session is back on its own page: its links, not those of a closed tab. */
+    @Test
+    public void afterTheSearchTheLinksAreThoseOfTheSessionsOwnPageAgain() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        driver.byUrl.put("http://home.test/", state("http://home.test/", "Home", "home", "About", "http://home.test/about"));
+        driver.typedResults.put("http://one.test/", resultsPage("http://one.test/search?q=hase", "one"));
+        PlaywrightBrowserSession s = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED);
+        s.setSearchEngines(java.util.Arrays.asList(formEngine("one", "http://one.test/")));
+        s.open("http://home.test/");
+
+        s.search("hase");
+
+        List<BrowserLink> links = s.links();
+        assertEquals(1, links.size());
+        assertEquals("http://home.test/about", links.get(0).getUrl());
+    }
+
+    /** A --search-url dev override stands alone: a call that names engines is refused, never silently rerouted. */
+    @Test
+    public void aSearchUrlOverrideRefusesNamedEngines() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        PlaywrightBrowserSession s = session(driver, UrlSafetyPolicy.allowingPrivateNetworks(),
+                BrowserLimits.defaults(), "http://127.0.0.1:9/s?q={query}");
+        try {
+            s.search("hase", java.util.Arrays.asList("bing"));
+            fail("named engines must be refused with a --search-url override");
+        } catch (BrowserException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("--search-url"));
+        }
+        assertTrue("nothing was opened: " + driver.opened, driver.opened.isEmpty());
+    }
+
     /** web_search's optional engines: catalog ids in the given order, each once; a wrong id is refused. */
     @Test
     public void aCallNamesItsEnginesAndAWrongIdIsRefused() throws Exception {
@@ -296,6 +391,15 @@ public class PlaywrightBrowserSessionTest {
     private static PlaywrightBrowserSession session(FakeDriver driver,
             com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode,
             java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry> entries) {
+        return session(driver, mode, entries, com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create()
+                .navigation.maximumEngineAttempts);
+    }
+
+    /** ... and with the given endpoint budget (maximumEngineAttempts). */
+    private static PlaywrightBrowserSession session(FakeDriver driver,
+            com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode,
+            java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry> entries,
+            int maximumEngineAttempts) {
         com.aresstack.askai.browser.search.LegacyBrowserSearchSettings defaults =
                 com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create();
         com.aresstack.askai.browser.search.LegacyBrowserSearchSettings settings =
@@ -303,7 +407,7 @@ public class PlaywrightBrowserSessionTest {
                         new com.aresstack.askai.browser.search.LegacySearchNavigationSettings(
                                 new com.aresstack.askai.browser.search.engine
                                         .BrowserSearchEngineSelection(entries, mode),
-                                defaults.navigation.maximumEngineAttempts,
+                                maximumEngineAttempts,
                                 defaults.navigation.navigationCommitTimeoutMillis,
                                 defaults.navigation.redirectResolutionEnabled,
                                 defaults.navigation.maximumRedirectUrlLength,

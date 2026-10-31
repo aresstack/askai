@@ -784,11 +784,14 @@ final class Playwright4jDriver implements PlaywrightDriver {
         playMerged(plans);
         for (TabTyping plan : plans) {
             disposeQuietly(plan.field);
+        }
+        awaitResultPages(plans);
+        // After the wait: a tab whose Enter started no navigation, or whose result page never loaded, did not submit.
+        for (TabTyping plan : plans) {
             if (plan.failure != null) {
                 outcomes.set(plan.index, "refused: " + plan.failure);
             }
         }
-        awaitResultPages(plans);
         return outcomes;
     }
 
@@ -832,12 +835,12 @@ final class Playwright4jDriver implements PlaywrightDriver {
     public void closeSearchTabs() {
         owner.check();
         for (Page tab : searchTabs) {
+            if (tab == challengePage) {
+                continue; // a parked challenge stays open for the user, still bound to its add-on tab
+            }
             pageKeys.remove(tab);
             navigationCounts.remove(tab);
             tabPointers.remove(tab);
-            if (tab == challengePage) {
-                continue; // a parked challenge stays open for the user
-            }
             try {
                 if (!tab.isClosed()) {
                     tab.close();
@@ -1430,6 +1433,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
     public void closeParkedChallenge() {
         owner.check();
         if (challengePage != null) {
+            pageKeys.remove(challengePage);
+            navigationCounts.remove(challengePage);
+            tabPointers.remove(challengePage);
             try {
                 challengePage.close();
             } catch (RuntimeException ignored) {

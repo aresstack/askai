@@ -121,6 +121,10 @@ final class PlaywrightBrowserSession implements BrowserSession {
         if (engineIds == null) {
             return search(query);
         }
+        if (searchUrlTemplate != null) {
+            throw new BrowserException("This browser runtime searches only its --search-url override; "
+                    + "it does not take the engines " + engineIds + ".");
+        }
         callEngines = selectEngines(engineIds);
         try {
             return search(query);
@@ -273,13 +277,25 @@ final class PlaywrightBrowserSession implements BrowserSession {
      */
     EngineNavigation navigateAndCaptureSearchEngines(String query, CapturedPageConsumer consumer)
             throws BrowserException {
+        List<BrowserLink> linksBefore = currentLinks;
+        boolean hadPage = hasPage;
+        searchTabsUsed = false;
         try {
             return navigateAndCapture(query, consumer);
         } finally {
             searchTabs = null;
             driver.closeSearchTabs(); // a parked challenge tab stays open; the session returns to its own page
+            if (searchTabsUsed) {
+                // The result pages were read in the tabs that are gone now: links and "has a page" are again those
+                // of the page the session is back on, so a follow_link never resolves an id of a closed tab.
+                currentLinks = linksBefore;
+                hasPage = hadPage;
+            }
         }
     }
+
+    /** Whether the running search opened engine tabs (then the session's own page is current again afterwards). */
+    private boolean searchTabsUsed;
 
     /**
      * The engines' tabs of the running search (issue #22, Argos' web_search): every engine that is asked through its
@@ -306,21 +322,16 @@ final class PlaywrightBrowserSession implements BrowserSession {
      * of it. Null when there is no form engine or the driver has no tabs.
      */
     private SearchTabs openAndTypeSearchTabs(
-            java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> engines, String query) {
-        java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> formEngines =
-                new ArrayList<com.aresstack.askai.browser.search.engine.BrowserSearchEngine>();
-        java.util.List<String> homes = new ArrayList<String>();
-        for (com.aresstack.askai.browser.search.engine.BrowserSearchEngine engine : engines) {
-            if (engine.usesSearchForms()
-                    && !domainKeys.resolve(engine.formOf(0).getHomeUrl()).getRegistrableDomain()
-                            .equals(challengeFamily)) {
-                formEngines.add(engine);
-                homes.add(engine.formOf(0).getHomeUrl());
-            }
-        }
+            java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> formEngines, String query)
+            throws BrowserException {
         if (formEngines.isEmpty()) {
             return null;
         }
+        java.util.List<String> homes = new ArrayList<String>();
+        for (com.aresstack.askai.browser.search.engine.BrowserSearchEngine engine : formEngines) {
+            homes.add(engine.formOf(0).getHomeUrl());
+        }
+        searchTabsUsed = true;
         try {
             java.util.List<String> loaded = driver.openSearchTabs(homes);
             java.util.List<java.util.List<String>> fields = new ArrayList<java.util.List<String>>();
@@ -335,9 +346,43 @@ final class PlaywrightBrowserSession implements BrowserSession {
                     + " typed=" + tabs.submitted);
             return tabs;
         } catch (BrowserException noTabs) {
+            if (noTabs.getMessage() != null && noTabs.getMessage().contains("BROWSER_CLOSED")) {
+                throw noTabs; // the user closed the window: that ends the search, it is no missing tab
+            }
             System.err.println("[engines] search tabs unavailable: " + noTabs.getMessage());
             return null;
         }
+    }
+
+    /**
+     * The form engines whose start pages are opened and typed into together before the first result page is read:
+     * with ALL_ENABLED every engine the endpoint budget reaches (each first endpoint counts as one opened endpoint, as
+     * it would in the loop), with FIRST_USABLE only the first one, because the engines behind it are asked only when
+     * it does not deliver. An engine of a challenged family is never asked.
+     */
+    private java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> enginesTypedTogether(
+            java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> engines,
+            com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode) {
+        java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> together =
+                new ArrayList<com.aresstack.askai.browser.search.engine.BrowserSearchEngine>();
+        int budget = settings.navigation.maximumEngineAttempts;
+        for (com.aresstack.askai.browser.search.engine.BrowserSearchEngine engine : engines) {
+            if (budget <= 0) {
+                break;
+            }
+            if (domainKeys.resolve(engine.getEndpointTemplates().get(0)).getRegistrableDomain()
+                    .equals(challengeFamily)) {
+                continue; // the loop records the lock and opens nothing for it
+            }
+            budget--;
+            if (engine.usesSearchForms()) {
+                together.add(engine);
+            }
+            if (mode == com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE) {
+                break;
+            }
+        }
+        return together;
     }
 
     /**
@@ -353,6 +398,15 @@ final class PlaywrightBrowserSession implements BrowserSession {
             String engineHost, List<com.aresstack.askai.browser.LegacySearchEngineAttemptResult> attempts)
             throws BrowserException {
         Integer tab = searchTabs == null ? null : searchTabs.tabOf.get(engine.getId());
+        if (tab == null && endpointIndex == 0) {
+            // Not typed together with the others (FIRST_USABLE asks the next engine only now): its own tab, typed alone.
+            SearchTabs own = openAndTypeSearchTabs(
+                    java.util.Collections.singletonList(engine), query);
+            if (own != null) {
+                searchTabs = own;
+                tab = own.tabOf.get(engine.getId());
+            }
+        }
         if (tab == null) {
             attempts.add(attempt(engineHost,
                     com.aresstack.askai.browser.LegacySearchAttemptOutcome.NAVIGATION_FAILED,
@@ -427,8 +481,12 @@ final class PlaywrightBrowserSession implements BrowserSession {
         boolean anyEngineReached = false;
         BrowserException lastFailure = null;
         int endpointsOpened = 0;
-        // Issue #22: all form engines at once, each in its own tab, typed into side by side (Argos' web_search).
-        searchTabs = openAndTypeSearchTabs(engines, query.trim());
+        // Issue #22: all form engines at once, each in its own tab, typed into side by side (Argos' web_search). Their
+        // first endpoints are opened now, so they are counted against the budget now and not again in the loop.
+        searchTabs = openAndTypeSearchTabs(enginesTypedTogether(engines, mode), query.trim());
+        java.util.Set<String> prepaid = new java.util.HashSet<String>(
+                searchTabs == null ? java.util.Collections.<String>emptySet() : searchTabs.tabOf.keySet());
+        endpointsOpened += prepaid.size();
         for (com.aresstack.askai.browser.search.engine.BrowserSearchEngine engine : engines) {
             // An engine's endpoints are alternative ways to ask the SAME provider: the first one that
             // answers ends this engine's turn, whatever the acquisition mode is. Only whether the NEXT
@@ -451,7 +509,8 @@ final class PlaywrightBrowserSession implements BrowserSession {
             boolean engineRequestedBefore = false;
             for (int endpointIndex = 0; endpointIndex < endpointTemplates.size(); endpointIndex++) {
                 String template = endpointTemplates.get(endpointIndex);
-                if (endpointsOpened >= settings.navigation.maximumEngineAttempts) {
+                boolean alreadyOpened = endpointIndex == 0 && prepaid.remove(engine.getId());
+                if (!alreadyOpened && endpointsOpened >= settings.navigation.maximumEngineAttempts) {
                     break;
                 }
                 String engineHost = com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver
@@ -464,7 +523,9 @@ final class PlaywrightBrowserSession implements BrowserSession {
                             "family locked"));
                     continue;
                 }
-                endpointsOpened++;
+                if (!alreadyOpened) {
+                    endpointsOpened++;
+                }
                 boolean endpointReached = false;
                 // DELIBERATELY SEQUENTIAL: each result page is fetched, captured and fully EVALUATED
                 // (extraction — and behind prepare, the AI judgement) before the NEXT page is requested.
@@ -579,7 +640,7 @@ final class PlaywrightBrowserSession implements BrowserSession {
             if (engineDelivered && mode == com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE) {
                 break; // an engine answered; the ones behind it are the safety net, not extra work
             }
-            if (endpointsOpened >= settings.navigation.maximumEngineAttempts) {
+            if (endpointsOpened >= settings.navigation.maximumEngineAttempts && prepaid.isEmpty()) {
                 break;
             }
         }
