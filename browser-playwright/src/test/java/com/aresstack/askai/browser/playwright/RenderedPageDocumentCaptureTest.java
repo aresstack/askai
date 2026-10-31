@@ -160,6 +160,17 @@ public class RenderedPageDocumentCaptureTest {
         assertTrue(json, json.contains("https://example.org/a"));
     }
 
+    @Test
+    public void theDumpedHtmlLosesScriptsNoscriptAndIframesButKeepsTheResults() {
+        String html = SerpCaptureDiagnostics.sanitizedHtml("<html><head><script>var IG='session';</script>"
+                + "<SCRIPT src=\"a.js\"></SCRIPT></head><body><noscript><img src=x></noscript>"
+                + "<ol id=\"b_results\"><li class=\"b_algo\"><h2><a href=\"https://de.wikipedia.org/\">K</a></h2>"
+                + "</li></ol><iframe src=\"ad\"></iframe><script\ntype=\"module\">\nx()\n</script ></body></html>");
+        assertEquals("<html><head></head><body><ol id=\"b_results\"><li class=\"b_algo\"><h2>"
+                + "<a href=\"https://de.wikipedia.org/\">K</a></h2></li></ol></body></html>", html);
+        assertEquals("", SerpCaptureDiagnostics.sanitizedHtml(null));
+    }
+
     // ------------------------------------------------------------------ fixture helpers
 
     private static Map<String, Object> result(List<Map<String, Object>> containers,

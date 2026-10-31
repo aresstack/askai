@@ -24,12 +24,18 @@ final class SerpCaptureDiagnostics {
     static final String SNAPSHOT_DIR_PROPERTY = "askai.serp.snapshotDir";
     static final String SNAPSHOT_DIR_ENV = "ASKAI_SERP_SNAPSHOT_DIR";
 
-    /** The rendered DOM without scripts (inline script text carries session values, never results). */
-    static final String SANITIZED_HTML_SCRIPT = "() => {\n"
-            + "  const copy = document.documentElement.cloneNode(true);\n"
-            + "  copy.querySelectorAll('script,noscript,iframe').forEach(e => e.remove());\n"
-            + "  return '<!doctype html>\\n' + copy.outerHTML;\n"
-            + "}";
+    /** Elements a dump drops with their content (inline script text carries session values, never results). */
+    private static final java.util.regex.Pattern NOT_PAGE_CONTENT = java.util.regex.Pattern.compile(
+            "<(script|noscript|iframe)\\b[^>]*>.*?</\\1\\s*>|<(script|iframe)\\b[^>]*/>",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
+    /**
+     * The serialized DOM ({@code page.content()}, read by Playwright, no script in the page) without scripts,
+     * noscript and iframes — stripped here in the JVM.
+     */
+    static String sanitizedHtml(String content) {
+        return content == null ? "" : NOT_PAGE_CONTENT.matcher(content).replaceAll("");
+    }
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 

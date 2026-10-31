@@ -360,9 +360,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
             java.nio.file.Path dumpDirectory = SerpCaptureDiagnostics.snapshotDirectory();
             if (dumpDirectory != null) {
                 try {
-                    Object html = target.evaluate(SerpCaptureDiagnostics.SANITIZED_HTML_SCRIPT);
+                    String html = SerpCaptureDiagnostics.sanitizedHtml(target.content());
                     System.err.println("[serp-capture] snapshot written to " + SerpCaptureDiagnostics
-                            .dump(dumpDirectory, document, html == null ? "" : String.valueOf(html)));
+                            .dump(dumpDirectory, document, html));
                 } catch (java.io.IOException | PlaywrightException dumpFailed) {
                     // Diagnostics only: a failed dump never fails the search.
                     System.err.println("[serp-capture] snapshot dump failed: " + dumpFailed);
