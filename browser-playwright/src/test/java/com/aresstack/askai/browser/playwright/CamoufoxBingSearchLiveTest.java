@@ -23,13 +23,15 @@ import static org.junit.Assume.assumeTrue;
  * Issue #22 against the REAL Bing in a real Camoufox: the capture must see the organic result blocks as visible
  * and the mechanical extraction must take them over as structured candidates with external targets — without any
  * AI repair. Bing's own script hides {@code #b_content}; only its bot-detection module reveals it again, which it
- * did for Argos (no page-world scripts) but not for this driver, whose reads still run in the page's own world.
- * Expected to FAIL until those reads and inputs have moved out of the page (add-on content script, real input).
+ * did for Argos (no page-world scripts). Since #26/#27 AskAI runs no script in the page's world either (reads in the
+ * add-on, real input), so this is the acceptance run of issue #22. The test itself stays clean too: its diagnostic
+ * probes are main-world scripts, so they only run with {@code ASKAI_LIVE_BING_DIAG=1} and only AFTER the capture.
  *
  * <p>Opt-in, because it needs the network and the Camoufox download: {@code ASKAI_LIVE_BING=1 gradlew
  * :browser-playwright:test --tests '*CamoufoxBingSearchLiveTest'}; {@code ASKAI_LIVE_BING_QUERY} changes the query,
  * {@code ASKAI_LIVE_CAMOUFOX_HEADED=1} shows the browser, {@code ASKAI_LIVE_BING_ADDON=0} starts without the research
- * add-on, {@code ASKAI_LIVE_BING_QUIET_MS=n} reads nothing from the page for n ms after the navigation.</p>
+ * add-on, {@code ASKAI_LIVE_BING_QUIET_MS=n} reads nothing from the page for n ms after the navigation,
+ * {@code ASKAI_LIVE_BING_DIAG=1} prints the page-world probes after the capture.</p>
  */
 public class CamoufoxBingSearchLiveTest {
 
@@ -107,10 +109,10 @@ public class CamoufoxBingSearchLiveTest {
             // No page read at all until then (Argos' rule): only the Playwright message loop runs.
             driver.pumpEvents(() -> false, quietMillis);
         }
+        boolean diagnostics = "1".equals(System.getenv("ASKAI_LIVE_BING_DIAG"));
         System.err.println("[bing-live] addon=" + (driver.addonBridge() != null) + " quietMs=" + quietMillis
-                + " before capture: " + page().evaluate(BOT_PROBE));
+                + " diag=" + diagnostics);
         RenderedPageDocument document = driver.captureRenderedPage(new PublicSuffixDomainKeyResolver(), 1L);
-        System.err.println("[bing-live] at capture: " + probe());
 
         int blocks = 0;
         int visibleBlocks = 0;
@@ -136,9 +138,11 @@ public class CamoufoxBingSearchLiveTest {
         System.err.println("[bing-live] b_algo=" + blocks + " visible=" + visibleBlocks + " outcome="
                 + extraction.outcome + " candidates=" + extraction.candidates.size() + " structured=" + structured);
 
-        driver.pumpEvents(() -> false, 3000L);
-        System.err.println("[bing-live] 3 s later: " + probe());
-        System.err.println("[bing-live] 3 s later: " + page().evaluate(BOT_PROBE));
+        if (diagnostics) {
+            // Main-world scripts: only after everything above was measured, so they cannot influence it.
+            System.err.println("[bing-live] after capture: " + probe());
+            System.err.println("[bing-live] after capture: " + page().evaluate(BOT_PROBE));
+        }
 
         assertTrue("Bing delivered result blocks (consent or challenge page?): " + blocks, blocks >= 5);
         assertEquals("every Bing result block is captured visible", blocks, visibleBlocks);
