@@ -29,6 +29,8 @@ public class PlaywrightBrowserSessionTest {
     /** Scripted driver: url -> state; open("...") may "redirect" by returning a different final url. */
     private static final class FakeDriver implements PlaywrightDriver {
         final Map<String, PlaywrightPageState> byUrl = new LinkedHashMap<String, PlaywrightPageState>();
+        /** Capture warnings the real capture would add for a page (by URL), e.g. OPAQUE_REDIRECTS. */
+        final Map<String, String> captureWarningByUrl = new LinkedHashMap<String, String>();
         final List<String> opened = new ArrayList<String>();
         final List<PlaywrightPageState> history = new ArrayList<PlaywrightPageState>();
         int closeCalls;
@@ -127,8 +129,21 @@ public class PlaywrightBrowserSessionTest {
                 com.aresstack.askai.browser.domain.DomainKeyResolver domainKeys,
                 long snapshotGeneration) {
             PlaywrightPageState current = history.isEmpty() ? null : history.get(history.size() - 1);
-            return current == null ? null
-                    : SyntheticRenderedDocuments.fromState(current, domainKeys, snapshotGeneration);
+            if (current == null) {
+                return null;
+            }
+            com.aresstack.askai.browser.render.RenderedPageDocument document =
+                    SyntheticRenderedDocuments.fromState(current, domainKeys, snapshotGeneration);
+            String warning = captureWarningByUrl.get(current.url);
+            if (warning == null) {
+                return document;
+            }
+            java.util.List<String> warnings = new java.util.ArrayList<String>(document.captureWarnings);
+            warnings.add(warning);
+            return new com.aresstack.askai.browser.render.RenderedPageDocument(document.snapshotId,
+                    document.snapshotGeneration, document.pageUrl, document.pageTitle, document.viewport,
+                    document.documentFingerprint, document.rootContainerIds, document.containers, document.links,
+                    document.captureTruncated, warnings);
         }
 
         public void close() {
@@ -507,6 +522,40 @@ public class PlaywrightBrowserSessionTest {
                         "http://paged.test/s?q=pf4j&page=2",
                         "http://paged.test/s?q=pf4j&page=3"), driver.opened);
         assertEquals("page 2 delivered its hits despite page 1", 3, result.getItems().size());
+    }
+
+    /**
+     * Live acceptance of #28: Google's result links are opaque {@code /goto} wrappers, discarded by decision. Every
+     * next result page is made of them too, so the engine's pagination ends on the first such page, and the attempt
+     * names the reason instead of an unknown layout.
+     */
+    @Test
+    public void aPageOfOpaqueRedirectsEndsThePaginationAndNamesTheReason() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        driver.byUrl.put("http://paged.test/s?q=pf4j", emptyPage("http://paged.test/s?q=pf4j"));
+        driver.captureWarningByUrl.put("http://paged.test/s?q=pf4j",
+                "OPAQUE_REDIRECTS: 31 links are opaque engine wrappers (Google /goto) whose target is not in the URL; "
+                        + "they stay unresolved and are never results");
+        driver.byUrl.put("http://paged.test/s?q=pf4j&page=2",
+                emptyPage("http://paged.test/s?q=pf4j&page=2"));
+        PlaywrightBrowserSession s = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
+        s.setSearchEngines(java.util.Collections.singletonList(
+                new com.aresstack.askai.browser.search.engine.BrowserSearchEngine("paged", "Paged",
+                        java.util.Collections.singletonList("http://paged.test/s?q={query}"),
+                        java.util.Collections.singletonList("http://paged.test/s?q={query}&page={page}"),
+                        10)));
+
+        WebSearchResult result = s.search("pf4j");
+
+        assertEquals("no further page of opaque redirects is fetched",
+                java.util.Collections.singletonList("http://paged.test/s?q=pf4j"), driver.opened);
+        assertTrue(result.getItems().isEmpty());
+        assertEquals(1, result.getAttempts().size());
+        assertEquals(com.aresstack.askai.browser.LegacySearchAttemptOutcome.EXTRACTION_FAILED,
+                result.getAttempts().get(0).getOutcome());
+        assertTrue(result.getAttempts().get(0).getDiagnosticCode(),
+                result.getAttempts().get(0).getDiagnosticCode().startsWith("OPAQUE_REDIRECTS: 31 links"));
     }
 
     /**

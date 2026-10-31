@@ -205,10 +205,13 @@ final class PlaywrightBrowserSession implements BrowserSession {
                         return CapturedPageVerdict.EMPTY;
                     default:
                         // An ununderstood layout is an extraction FAILURE, never an empty engine.
+                        String why = failureDiagnostic(document, extraction);
                         attempts.add(attempt(host, com.aresstack.askai.browser
-                                .LegacySearchAttemptOutcome.EXTRACTION_FAILED,
-                                bounded(failureDiagnostic(document, extraction))));
-                        return CapturedPageVerdict.UNUSABLE;
+                                .LegacySearchAttemptOutcome.EXTRACTION_FAILED, bounded(why)));
+                        // Results wrapped in opaque redirects (Google /goto) stay so on every next page: asking
+                        // for more pages of them only costs time.
+                        return why.startsWith(OPAQUE_REDIRECTS) ? CapturedPageVerdict.EMPTY
+                                : CapturedPageVerdict.UNUSABLE;
                 }
             }
         });
@@ -648,6 +651,9 @@ final class PlaywrightBrowserSession implements BrowserSession {
                 lastFailure);
     }
 
+    /** The capture warning of a page whose result links are opaque engine wrappers ({@link OpaqueRedirectStrategy}). */
+    static final String OPAQUE_REDIRECTS = "OPAQUE_REDIRECTS:";
+
     /**
      * Why a captured result page delivered nothing. When the engine wrapped its results in opaque redirects (Google's
      * {@code /goto}), that is named first: those links are left unresolved on purpose ({@link OpaqueRedirectStrategy}),
@@ -657,7 +663,7 @@ final class PlaywrightBrowserSession implements BrowserSession {
                                     com.aresstack.askai.browser.search.SearchResultExtractionResult extraction) {
         String reason = firstDiagnostic(extraction);
         for (String warning : document.captureWarnings) {
-            if (warning.startsWith("OPAQUE_REDIRECTS:")) {
+            if (warning.startsWith(OPAQUE_REDIRECTS)) {
                 return warning + (reason.isEmpty() ? "" : "; " + reason);
             }
         }
