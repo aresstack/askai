@@ -78,6 +78,31 @@ public class SearchResultBlockDetectorTest {
     }
 
     @Test
+    public void aLargerClusterOfAdsDoesNotPushOutTheOrganicResults() {
+        // Issue #22 review: six ads of one shape and five organic results of another. The clusters
+        // compete with what is left after the ads are set aside — 0 against 5 — not with 6 against 5.
+        String ad = "li(div(span,span,span),div(a,img,img))";
+        String organic = "li(h2(a),p)";
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1600), SerpDocuments.WHITE,
+                java.util.Arrays.asList("b_ad", "b_ad", "b_ad", "result", "b_ad", "result",
+                        "b_ad", "result", "b_ad", "result", "result"),
+                java.util.Arrays.asList(ad, ad, ad, organic, ad, organic, ad, organic, ad,
+                        organic, organic));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 5, detection.blocks.size());
+        int[] organicIndexes = {3, 5, 7, 9, 10};
+        for (int i = 0; i < 5; i++) {
+            assertEquals("Result " + organicIndexes[i] + " title", detection.blocks.get(i).title);
+            assertEquals(i + 1, detection.blocks.get(i).rank);
+        }
+        assertTrue(detection.rejectionReasons.toString(),
+                detection.rejectionReasons.toString().contains("set aside a second repeated"));
+    }
+
+    @Test
     public void snippetBelongsToItsOwnBlockNotTheNeighbor() {
         SerpDocuments serp = SerpDocuments.builder();
         serp.addResultColumn(3, new RenderedBox(300, 120, 680, 560), SerpDocuments.WHITE);

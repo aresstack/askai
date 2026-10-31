@@ -93,22 +93,39 @@ public final class SearchResultBlockDetector {
         });
 
         List<List<RenderedContainerDescriptor>> clusters = clusterer.cluster(children);
+        // A cluster competes with what is LEFT of it once ads and non-list members are set aside:
+        // six ads must not push five organic results out just because six is more than five.
         List<RenderedContainerDescriptor> resultCluster = null;
+        List<RenderedContainerDescriptor> resultBlocks = null;
+        List<String> resultReasons = null;
+        boolean repeated = false;
         for (List<RenderedContainerDescriptor> cluster : clusters) {
-            if (cluster.size() >= settings.analysis.minimumRepeatedSiblingCount
-                    && (resultCluster == null || cluster.size() > resultCluster.size())) {
+            if (cluster.size() < settings.analysis.minimumRepeatedSiblingCount) {
+                continue;
+            }
+            repeated = true;
+            List<String> memberReasons = new ArrayList<String>();
+            List<RenderedContainerDescriptor> members = listMembers(cluster, memberReasons);
+            if (!members.isEmpty()
+                    && (resultBlocks == null || members.size() > resultBlocks.size())) {
                 resultCluster = cluster;
+                resultBlocks = members;
+                resultReasons = memberReasons;
             }
         }
         if (resultCluster == null) {
-            reasons.add("no repeated block structure: largest cluster of "
-                    + largest(clusters) + " similar siblings is below the required "
-                    + settings.analysis.minimumRepeatedSiblingCount);
+            reasons.add(repeated
+                    ? "no repeated block structure of organic results: every cluster of at least "
+                            + settings.analysis.minimumRepeatedSiblingCount
+                            + " similar siblings consists of ads or non-list elements only"
+                    : "no repeated block structure: largest cluster of "
+                            + largest(clusters) + " similar siblings is below the required "
+                            + settings.analysis.minimumRepeatedSiblingCount);
             return new Detection(Collections.<DetectedResultBlock>emptyList(), reasons);
         }
 
-        reportSetAsideClusters(clusters, resultCluster, reasons);
-        List<RenderedContainerDescriptor> resultBlocks = listMembers(resultCluster, reasons);
+        reportSetAsideClusters(clusters, resultCluster, resultBlocks.size(), reasons);
+        reasons.addAll(resultReasons);
         return new Detection(buildBlocks(document, resultBlocks, resultBlocks.size(), reasons),
                 reasons);
     }
@@ -119,13 +136,14 @@ public final class SearchResultBlockDetector {
      */
     private void reportSetAsideClusters(List<List<RenderedContainerDescriptor>> clusters,
                                         List<RenderedContainerDescriptor> resultCluster,
-                                        List<String> reasons) {
+                                        int resultMembers, List<String> reasons) {
         for (List<RenderedContainerDescriptor> cluster : clusters) {
             if (cluster != resultCluster
                     && cluster.size() >= settings.analysis.minimumRepeatedSiblingCount) {
                 reasons.add("set aside a second repeated block shape of " + cluster.size()
                         + " siblings starting at " + cluster.get(0).containerId
-                        + " (the result list is the larger one of " + resultCluster.size() + ")");
+                        + " (the result list is " + resultCluster.get(0).containerId + "… with "
+                        + resultMembers + " list members)");
             }
         }
     }

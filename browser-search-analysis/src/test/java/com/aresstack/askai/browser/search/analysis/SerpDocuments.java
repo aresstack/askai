@@ -82,6 +82,13 @@ final class SerpDocuments {
     /** As {@link #addResultColumn(int, RenderedBox, RenderedColor)}, one block per class token given. */
     String addResultColumn(RenderedBox columnBox, RenderedColor background,
                            List<String> blockClasses) {
+        return addResultColumn(columnBox, background, blockClasses,
+                Collections.nCopies(blockClasses.size(), "li(h2(a),p)"));
+    }
+
+    /** One block per class token and structure signature given. */
+    String addResultColumn(RenderedBox columnBox, RenderedColor background,
+                           List<String> blockClasses, List<String> blockSignatures) {
         int blocks = blockClasses.size();
         String columnId = nextContainerId();
         bodyChildIds.add(columnId);
@@ -104,7 +111,7 @@ final class SerpDocuments {
                             1.0, false, 0.1, 0.1)
                     .colors(RenderedColor.TRANSPARENT, background, 0, 0)
                     .separation("", 0, "", 4, 8)
-                    .structure(new DomStructureSignature("li(h2(a),p)"), blocks - 1)
+                    .structure(new DomStructureSignature(blockSignatures.get(i)), blocks - 1)
                     .build());
             addLink(blockId, "https://site" + i + ".example.org/page", "Result " + i + " title",
                     DomainClassification.EXTERNAL_DOMAIN, true,
