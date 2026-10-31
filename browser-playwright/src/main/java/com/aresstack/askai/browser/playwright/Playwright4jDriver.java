@@ -628,8 +628,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
     // ------------------------------------------------------------------ search forms (issue #22, Argos' web_search)
 
     /**
-     * The engines' tabs of the running search, in the order they were opened. Each engine is asked in a tab of its
-     * own (Argos' ParallelWebSearch): no tab is brought to the front, real input goes to each tab's browsing context.
+     * The engines' tabs of the running search, at the index of their start page in {@link #openSearchTabs} (null where
+     * no tab could be opened). Each engine is asked in a tab of its own (Argos' ParallelWebSearch): no tab is brought
+     * to the front, real input goes to each tab's browsing context.
      */
     private final List<Page> searchTabs = new ArrayList<Page>();
     /** The page the driver worked on before the search tabs took over; restored by {@link #closeSearchTabs}. */
@@ -647,6 +648,12 @@ final class Playwright4jDriver implements PlaywrightDriver {
     private static final long SUBMIT_NAVIGATION_START_MILLIS = 15_000L;
     /** DOMContentLoaded is enough to read; late resources get a bounded chance (Argos' settleLoad). */
     private static final double SETTLE_LOAD_MILLIS = 5_000d;
+    /** A start page's navigation is only started: this short wait for its commit holds back no other engine. */
+    private static final double START_NAVIGATION_SLICE_MILLIS = 150d;
+    /** How long one look at a start page's load state may wait. */
+    private static final double LOAD_STATE_PROBE_MILLIS = 15d;
+    /** The pause between rounds while no pending start page has committed yet. */
+    private static final double START_PAGE_POLL_MILLIS = 20d;
 
     @Override
     public List<String> openSearchTabs(List<String> homeUrls) throws BrowserException {
@@ -654,45 +661,149 @@ final class Playwright4jDriver implements PlaywrightDriver {
         requireOpen();
         closeSearchTabs();
         pageBeforeSearch = page;
-        List<String> outcomes = new ArrayList<String>();
-        // Fan-out: every start page begins loading before any is waited for, so no engine waits for another.
+        // ONE budget for all engines (Argos' loadTabs): the start pages load side by side against the same deadline.
+        long deadline = System.currentTimeMillis() + navigationTimeoutMillis;
+        List<StartPage> starts = new ArrayList<StartPage>();
         for (String url : homeUrls) {
+            StartPage start = new StartPage();
+            starts.add(start);
+            Page tab;
             try {
-                Page tab = context.newPage(); // never brought to the front: which tab to watch stays the user's choice
-                tab.onPopup(popupCloser());
-                watchNavigations(tab);
-                searchTabs.add(tab);
-                tab.navigate(url, new Page.NavigateOptions()
-                        .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.COMMIT)
-                        .setTimeout(navigationTimeoutMillis));
-                outcomes.add(null);
+                tab = context.newPage(); // never brought to the front: which tab to watch stays the user's choice
             } catch (PlaywrightException failed) {
-                outcomes.add(firstLine(failed));
-            }
-        }
-        for (int i = 0; i < outcomes.size() && i < searchTabs.size(); i++) {
-            if (outcomes.get(i) != null) {
+                start.failure = "tab could not be opened: " + firstLine(failed);
+                searchTabs.add(null); // keeps every later engine at its own index
                 continue;
             }
+            searchTabs.add(tab);
+            start.tab = tab;
             try {
-                searchTabs.get(i).waitForLoadState(com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED,
-                        new Page.WaitForLoadStateOptions().setTimeout(navigationTimeoutMillis));
-                settleLoad(searchTabs.get(i));
+                tab.onPopup(popupCloser());
+                watchNavigations(tab);
+                start.navigationsBefore = navigationCounts.get(tab)[0];
+                // Only STARTED here: at most a short wait for the commit, so an engine that stalls before answering
+                // holds back no other start. On that timeout the navigation keeps running in the browser and is
+                // looked at below with the others.
+                tab.navigate(url, new Page.NavigateOptions()
+                        .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.COMMIT)
+                        .setTimeout(START_NAVIGATION_SLICE_MILLIS));
+                start.committed = true;
+            } catch (com.microsoft.playwright.TimeoutError stillLoading) {
+                // committed later; polled below
             } catch (PlaywrightException failed) {
-                outcomes.set(i, firstLine(failed));
+                start.failure = firstLine(failed); // this engine only; the others go on
             }
         }
-        while (outcomes.size() < homeUrls.size()) {
-            outcomes.add("tab could not be opened");
+        awaitStartPages(starts, deadline);
+        List<String> outcomes = new ArrayList<String>();
+        for (StartPage start : starts) {
+            outcomes.add(start.failure);
         }
         return outcomes;
+    }
+
+    /** One engine's start page while it loads beside the others. */
+    private static final class StartPage {
+        Page tab;
+        int navigationsBefore;
+        boolean committed;
+        long domContentLoadedAt;
+        boolean loaded;
+        String failure;
+
+        boolean pending() {
+            return failure == null && !loaded;
+        }
+    }
+
+    /**
+     * Polls every pending start page in turn until each has loaded or failed, or the shared deadline is over: commit
+     * (protocol event), DOMContentLoaded, then load or {@link #SETTLE_LOAD_MILLIS} after DOMContentLoaded. Every check
+     * is a short wait, so no engine waits for another engine's page; a failure ends only that engine's start.
+     */
+    private void awaitStartPages(List<StartPage> starts, long deadline) {
+        while (true) {
+            boolean pending = false;
+            boolean waited = false;
+            Page idle = null;
+            for (StartPage start : starts) {
+                if (!start.pending()) {
+                    continue;
+                }
+                long now = System.currentTimeMillis();
+                if (now > deadline) {
+                    start.failure = "the start page did not load within the " + navigationTimeoutMillis
+                            + " ms all engines share";
+                    continue;
+                }
+                try {
+                    if (!start.committed) {
+                        start.committed = navigationCounts.get(start.tab)[0] > start.navigationsBefore;
+                        if (!start.committed) {
+                            pending = true;
+                            idle = start.tab;
+                            continue;
+                        }
+                    }
+                    if (start.domContentLoadedAt == 0) {
+                        waited = true;
+                        if (!reached(start.tab, com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED)) {
+                            pending = true;
+                            continue;
+                        }
+                        start.domContentLoadedAt = System.currentTimeMillis();
+                        String committedUrl = start.tab.url();
+                        if (isBrowserErrorPage(committedUrl)) {
+                            start.failure = "the start page could not be loaded (" + committedUrl + ")";
+                            continue;
+                        }
+                    }
+                    waited = true;
+                    if (reached(start.tab, com.microsoft.playwright.options.LoadState.LOAD)
+                            || System.currentTimeMillis() - start.domContentLoadedAt > SETTLE_LOAD_MILLIS) {
+                        start.loaded = true;
+                    } else {
+                        pending = true;
+                    }
+                } catch (PlaywrightException failed) {
+                    start.failure = firstLine(failed);
+                }
+            }
+            if (!pending) {
+                return;
+            }
+            if (!waited && idle != null) {
+                try {
+                    idle.waitForTimeout(START_PAGE_POLL_MILLIS); // lets the protocol events of all tabs arrive
+                } catch (PlaywrightException closed) {
+                    // the next round reports the closed tab
+                }
+            }
+        }
+    }
+
+    /** A load state check that waits only {@link #LOAD_STATE_PROBE_MILLIS}. */
+    private static boolean reached(Page target, com.microsoft.playwright.options.LoadState state) {
+        try {
+            target.waitForLoadState(state, new Page.WaitForLoadStateOptions().setTimeout(LOAD_STATE_PROBE_MILLIS));
+            return true;
+        } catch (com.microsoft.playwright.TimeoutError notYet) {
+            return false;
+        }
+    }
+
+    /** The browser's own page for a navigation that failed after its start (no server answer). */
+    static boolean isBrowserErrorPage(String url) {
+        return url != null && (url.startsWith("chrome-error:") || url.startsWith("about:neterror")
+                || url.startsWith("about:certerror"));
     }
 
     @Override
     public PlaywrightPageState useSearchTab(int index) throws BrowserException {
         owner.check();
         requireOpen();
-        if (index < 0 || index >= searchTabs.size() || searchTabs.get(index).isClosed()) {
+        if (index < 0 || index >= searchTabs.size() || searchTabs.get(index) == null
+                || searchTabs.get(index).isClosed()) {
             throw new BrowserException("Search tab " + index + " is not open.");
         }
         page = searchTabs.get(index); // reads, guards and clicks now work on this tab; it is NOT brought to the front
@@ -707,7 +818,8 @@ final class Playwright4jDriver implements PlaywrightDriver {
     public PlaywrightPageState openInSearchTab(int index, String url) throws BrowserException {
         owner.check();
         requireOpen();
-        if (index < 0 || index >= searchTabs.size() || searchTabs.get(index).isClosed()) {
+        if (index < 0 || index >= searchTabs.size() || searchTabs.get(index) == null
+                || searchTabs.get(index).isClosed()) {
             throw new BrowserException("Search tab " + index + " is not open.");
         }
         page = searchTabs.get(index);
@@ -744,7 +856,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         for (int i = 0; i < searchTabs.size(); i++) {
             List<String> selectors = i < searchBoxSelectors.size() ? searchBoxSelectors.get(i) : null;
             Page tab = searchTabs.get(i);
-            if (selectors == null || tab.isClosed() || typed.isEmpty()) {
+            if (selectors == null || tab == null || tab.isClosed() || typed.isEmpty()) {
                 outcomes.add("skipped");
                 continue;
             }
@@ -835,7 +947,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
     public void closeSearchTabs() {
         owner.check();
         for (Page tab : searchTabs) {
-            if (tab == challengePage) {
+            if (tab == null || tab == challengePage) {
                 continue; // a parked challenge stays open for the user, still bound to its add-on tab
             }
             pageKeys.remove(tab);
@@ -1644,6 +1756,11 @@ final class Playwright4jDriver implements PlaywrightDriver {
     /** Tool errors carry the reason, never a multi-line driver stack trace. */
     private static String firstLine(Throwable ex) {
         String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+        // Playwright wraps driver errors as "Error {\n  message='...'": the message line is the useful one.
+        int wrapped = message.startsWith("Error {") ? message.indexOf("message='") : -1;
+        if (wrapped > 0) {
+            message = message.substring(wrapped + "message='".length());
+        }
         int newline = message.indexOf('\n');
         return newline > 0 ? message.substring(0, newline).trim() : message.trim();
     }

@@ -20,9 +20,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 
@@ -70,16 +73,87 @@ public class SearchTabsFixtureLiveTest {
                 + "</script></body></html>";
     }
 
-    @Test
-    public void allEngineTabsAreTypedIntoAtTheSameTimeWithRealInput() throws Exception {
+    /** The browser to test with, or the test is skipped where that browser is missing. */
+    private static String gatedChannel() {
         String channel = System.getenv().getOrDefault("ASKAI_TEST_BROWSER_CHANNEL", "chrome");
-        boolean camoufox = CamoufoxProvisioning.CHANNEL.equals(channel);
-        if (camoufox) {
+        if (CamoufoxProvisioning.CHANNEL.equals(channel)) {
             assumeTrue("set ASKAI_LIVE_CAMOUFOX=1 for the real Camoufox", "1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX")));
         } else {
             PlaywrightReadiness readiness = new PlaywrightCapabilityProbe().probe(channel);
             assumeTrue("SKIPPED (environment-gated live test): " + readiness.render(), readiness.isReady());
         }
+        return channel;
+    }
+
+    /**
+     * Review of #28: the start pages load independently. One engine answers late, one not within the budget, one
+     * refuses the connection; the fast engine behind them is asked at once, every engine keeps its own tab index, and
+     * the whole start takes one shared budget, not one per engine.
+     */
+    @Test
+    public void aDelayedEngineHoldsBackNoOtherStartPage() throws Exception {
+        String channel = gatedChannel();
+        final long slowMillis = 2_500L;
+        final int budgetMillis = 5_000;
+        final Map<String, Long> asked = new ConcurrentHashMap<String, Long>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        // One thread per request: a stalling engine must not stall the test server's other engines.
+        server.setExecutor(Executors.newCachedThreadPool(task -> {
+            Thread thread = new Thread(task, "delayed-engine");
+            thread.setDaemon(true);
+            return thread;
+        }));
+        for (final String engine : Arrays.asList("slow", "stuck", "fast")) {
+            server.createContext("/" + engine + "/", exchange -> {
+                asked.putIfAbsent(engine, System.currentTimeMillis());
+                try {
+                    if ("slow".equals(engine)) {
+                        Thread.sleep(slowMillis);
+                    } else if ("stuck".equals(engine)) {
+                        Thread.sleep(budgetMillis * 2L);
+                    }
+                } catch (InterruptedException stopped) {
+                    Thread.currentThread().interrupt();
+                }
+                respond(exchange, "<!doctype html><html><head><title>" + engine + " start</title></head>"
+                        + "<body><form><input name='q'></form></body></html>");
+            });
+        }
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        int refusingPort;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
+            refusingPort = probe.getLocalPort(); // closed again: connecting to it is refused
+        }
+
+        LegacyBrowserSearchSettings settings = LegacyBrowserSearchDefaults.create();
+        driver = Playwright4jDriver.launch(channel, !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED")),
+                budgetMillis, null, null, settings.consent, settings.captcha);
+        driver.open(base + "/fast/front");
+        asked.clear();
+
+        long started = System.currentTimeMillis();
+        List<String> loaded = driver.openSearchTabs(Arrays.asList(
+                base + "/slow/", base + "/stuck/", "http://127.0.0.1:" + refusingPort + "/", base + "/fast/"));
+        long took = System.currentTimeMillis() - started;
+        System.err.println("[search-tabs] start pages " + loaded + " in " + took + " ms; fast engine asked after "
+                + (asked.get("fast") - started) + " ms");
+
+        assertNull("the late engine still loads within the budget: " + loaded, loaded.get(0));
+        assertNotNull("the engine that never answers in time fails on its own: " + loaded, loaded.get(1));
+        assertNotNull("the refused connection fails on its own: " + loaded, loaded.get(2));
+        assertNull("the fast engine loads although engines before it are slow or broken: " + loaded, loaded.get(3));
+        assertTrue("the fast engine was asked without waiting for the slow ones (" + (asked.get("fast") - started)
+                + " ms)", asked.get("fast") - started < slowMillis);
+        assertTrue("one budget for all engines, not one per engine: " + took + " ms", took < budgetMillis + 2_000L);
+        assertTrue("each engine keeps its own tab index", driver.useSearchTab(3).url.endsWith("/fast/"));
+        assertTrue("each engine keeps its own tab index", driver.useSearchTab(0).url.endsWith("/slow/"));
+        driver.closeSearchTabs();
+    }
+
+    @Test
+    public void allEngineTabsAreTypedIntoAtTheSameTimeWithRealInput() throws Exception {
+        String channel = gatedChannel();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         final List<String> engines = Arrays.asList("one", "two", "three");
         for (final String engine : engines) {
