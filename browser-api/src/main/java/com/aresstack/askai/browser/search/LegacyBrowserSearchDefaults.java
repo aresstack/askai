@@ -27,8 +27,8 @@ public final class LegacyBrowserSearchDefaults {
     }
 
     /**
-     * The engines a fresh installation searches with: DuckDuckGo first, Bing behind it, and only until
-     * one of them delivers. Bing is a safety net, not the obligatory first browser visit it used to be.
+     * The engines a fresh installation searches with, as Argos' web_search does: DuckDuckGo, Bing and Google, all
+     * three at once (each in a tab of its own, typed into at the same time), and what they found merged.
      */
     public static com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engineSelection() {
         return new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection(
@@ -38,14 +38,17 @@ public final class LegacyBrowserSearchDefaults {
                                         .DUCKDUCKGO, true),
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
-                                        .BING, true)),
-                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
+                                        .BING, true),
+                        new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
+                                com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
+                                        .GOOGLE, true)),
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED);
     }
 
     private static LegacySearchNavigationSettings navigation() {
         return new LegacySearchNavigationSettings(
                 engineSelection(),
-                3,          // maximumEngineAttempts: engine ENDPOINTS opened per search
+                4,          // maximumEngineAttempts: engine ENDPOINTS opened per search (3 engines + DDG Lite)
                 20_000,     // navigationCommitTimeoutMillis (previously BrowserLimits.defaults())
                 true,       // redirectResolutionEnabled
                 2_048,      // maximumRedirectUrlLength

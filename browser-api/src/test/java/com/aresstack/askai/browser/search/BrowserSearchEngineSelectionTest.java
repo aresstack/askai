@@ -101,15 +101,18 @@ public class BrowserSearchEngineSelectionTest {
                 idsOf(decoded.settings.navigation.engineSelection));
     }
 
-    /** The shipped default is the product decision: DuckDuckGo first, Bing behind it, one at a time. */
+    /**
+     * The shipped default is the product decision, Argos' web_search (issue #22): DuckDuckGo, Bing and Google, all
+     * three typed into at once, and what they found merged.
+     */
     @Test
-    public void theDefaultAsksDuckDuckGoFirstAndBingOnlyIfNeeded() {
+    public void theDefaultAsksAllThreeEnginesAtOnce() {
         BrowserSearchEngineSelection shipped =
                 LegacyBrowserSearchDefaults.create().navigation.engineSelection;
 
-        assertEquals(EngineAcquisitionMode.FIRST_USABLE, shipped.getMode());
+        assertEquals(EngineAcquisitionMode.ALL_ENABLED, shipped.getMode());
         assertEquals(Arrays.asList(BrowserSearchEngineCatalog.DUCKDUCKGO,
-                BrowserSearchEngineCatalog.BING), idsOf(shipped));
+                BrowserSearchEngineCatalog.BING, BrowserSearchEngineCatalog.GOOGLE), idsOf(shipped));
     }
 
     private static List<String> idsOf(BrowserSearchEngineSelection selection) {

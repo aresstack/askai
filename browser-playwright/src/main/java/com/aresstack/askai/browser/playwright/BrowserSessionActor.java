@@ -205,6 +205,15 @@ final class BrowserSessionActor implements BrowserSession {
         });
     }
 
+    public WebSearchResult search(final String query, final java.util.List<String> engineIds)
+            throws BrowserException {
+        return call(new SessionTask<WebSearchResult>() {
+            public WebSearchResult run(BrowserSession s) throws BrowserException {
+                return s.search(query, engineIds);
+            }
+        });
+    }
+
     public BrowserPageSnapshot open(final String url) throws BrowserException {
         return call(new SessionTask<BrowserPageSnapshot>() {
             public BrowserPageSnapshot run(BrowserSession s) throws BrowserException {

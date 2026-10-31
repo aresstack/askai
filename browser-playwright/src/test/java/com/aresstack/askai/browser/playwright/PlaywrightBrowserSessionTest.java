@@ -134,6 +134,128 @@ public class PlaywrightBrowserSessionTest {
         public void close() {
             closeCalls++;
         }
+
+        // ---- search tabs (issue #22): start pages typed into, never a result URL
+        final List<String> tabHomes = new ArrayList<String>();
+        /** start page -> the result page its search field answers with (absent = no usable field). */
+        final Map<String, PlaywrightPageState> typedResults = new LinkedHashMap<String, PlaywrightPageState>();
+        final List<List<List<String>>> typedFields = new ArrayList<List<List<String>>>();
+        final List<String> typedQueries = new ArrayList<String>();
+        int closeTabsCalls;
+
+        @Override
+        public List<String> openSearchTabs(List<String> homeUrls) {
+            tabHomes.clear();
+            tabHomes.addAll(homeUrls);
+            List<String> loaded = new ArrayList<String>();
+            for (int i = 0; i < homeUrls.size(); i++) {
+                loaded.add(null);
+            }
+            return loaded;
+        }
+
+        @Override
+        public List<String> submitSearchInTabs(List<List<String>> fields, String query) {
+            typedFields.add(fields);
+            typedQueries.add(query);
+            List<String> outcomes = new ArrayList<String>();
+            for (int i = 0; i < tabHomes.size(); i++) {
+                List<String> selectors = i < fields.size() ? fields.get(i) : null;
+                outcomes.add(selectors == null ? "skipped"
+                        : typedResults.containsKey(tabHomes.get(i)) ? "submitted" : "no-search-box");
+            }
+            return outcomes;
+        }
+
+        @Override
+        public PlaywrightPageState useSearchTab(int index) {
+            String home = tabHomes.get(index);
+            PlaywrightPageState shown = typedResults.containsKey(home) ? typedResults.get(home)
+                    : state(home, "Start", "a start page whose field cannot be used");
+            history.add(shown);
+            return shown;
+        }
+
+        @Override
+        public void closeSearchTabs() {
+            closeTabsCalls++;
+        }
+    }
+
+    /** An engine asked through its start page's search field (no result URL), on a test host. */
+    private static com.aresstack.askai.browser.search.engine.BrowserSearchEngine formEngine(String id, String home) {
+        return new com.aresstack.askai.browser.search.engine.BrowserSearchEngine(id, id,
+                java.util.Collections.singletonList(
+                        new com.aresstack.askai.browser.search.engine.BrowserSearchEngine.SearchForm(home,
+                                java.util.Collections.singletonList("input[name=q]"),
+                                java.util.Collections.<String>emptyList())), 10);
+    }
+
+    /**
+     * Issue #22, Argos' web_search: every form engine gets its start page in a tab, the query is typed into ALL of
+     * them in ONE call (side by side), each tab's result page is evaluated, and no result URL is ever opened.
+     */
+    @Test
+    public void formEnginesAreTypedIntoTogetherAndNeverAskedByUrl() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        driver.typedResults.put("http://one.test/", resultsPage("http://one.test/search?q=hase", "one"));
+        driver.typedResults.put("http://two.test/", resultsPage("http://two.test/search?q=hase", "two"));
+        driver.typedResults.put("http://three.test/", resultsPage("http://three.test/search?q=hase", "three"));
+        PlaywrightBrowserSession s = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED);
+        s.setSearchEngines(java.util.Arrays.asList(formEngine("one", "http://one.test/"),
+                formEngine("two", "http://two.test/"), formEngine("three", "http://three.test/")));
+
+        WebSearchResult result = s.search("  hase ");
+
+        assertEquals(java.util.Arrays.asList("http://one.test/", "http://two.test/", "http://three.test/"),
+                driver.tabHomes);
+        assertEquals("all three typed in one go", 1, driver.typedFields.size());
+        assertEquals("hase", driver.typedQueries.get(0));
+        for (List<String> fields : driver.typedFields.get(0)) {
+            assertEquals(java.util.Collections.singletonList("input[name=q]"), fields);
+        }
+        assertTrue("no result URL was opened: " + driver.opened, driver.opened.isEmpty());
+        assertEquals("the three engines' results are merged", 9, result.getItems().size());
+        assertEquals("the tabs are closed after the search", 1, driver.closeTabsCalls);
+    }
+
+    /** A start page whose field cannot be used is reported as such, never answered with a result URL. */
+    @Test
+    public void anUnusableSearchFieldIsReportedAndNoResultUrlIsTried() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        driver.typedResults.put("http://two.test/", resultsPage("http://two.test/search?q=hase", "two"));
+        PlaywrightBrowserSession s = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
+        s.setSearchEngines(java.util.Arrays.asList(formEngine("one", "http://one.test/"),
+                formEngine("two", "http://two.test/")));
+
+        WebSearchResult result = s.search("hase");
+
+        assertEquals(com.aresstack.askai.browser.LegacySearchAttemptOutcome.SEARCH_BOX_UNAVAILABLE,
+                result.getAttempts().get(0).getOutcome());
+        assertEquals("the second engine's typed answer is used", 3, result.getItems().size());
+        assertTrue("no result URL was opened: " + driver.opened, driver.opened.isEmpty());
+    }
+
+    /** web_search's optional engines: catalog ids in the given order, each once; a wrong id is refused. */
+    @Test
+    public void aCallNamesItsEnginesAndAWrongIdIsRefused() throws Exception {
+        java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> selected =
+                PlaywrightBrowserSession.selectEngines(java.util.Arrays.asList("Google", "bing", "google"));
+        assertEquals(2, selected.size());
+        assertEquals("google", selected.get(0).getId());
+        assertEquals("bing", selected.get(1).getId());
+        try {
+            PlaywrightBrowserSession.selectEngines(java.util.Arrays.asList("yahoo"));
+            fail("an unknown engine must be refused");
+        } catch (BrowserException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("Unknown search engine: \"yahoo\""));
+        }
+        assertEquals(java.util.Arrays.asList("duckduckgo", "bing"),
+                BrowserToolSet.engines(java.util.Collections.<String, Object>singletonMap("engines",
+                        "duckduckgo, bing")));
+        assertEquals(null, BrowserToolSet.engines(java.util.Collections.<String, Object>emptyMap()));
     }
 
     private static PlaywrightPageState state(String url, String title, String text, String... links) {

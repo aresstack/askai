@@ -12,7 +12,6 @@ import com.aresstack.askai.browser.search.analysis.LegacySearchResultExtractor;
 import org.junit.After;
 import org.junit.Test;
 
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.Assert.assertEquals;
@@ -111,7 +110,9 @@ public class CamoufoxBingSearchLiveTest {
         // What Bing's SERVER sent (protocol level, no page script): result blocks in the raw document and the request
         // headers, to tell "Bing sends fewer results" from "the page removes them".
         final StringBuilder served = new StringBuilder();
-        page().onResponse(response -> {
+        java.lang.reflect.Field contextField = Playwright4jDriver.class.getDeclaredField("context");
+        contextField.setAccessible(true);
+        ((com.microsoft.playwright.BrowserContext) contextField.get(driver)).onResponse(response -> {
             try {
                 if (response.request().isNavigationRequest() && response.url().contains("/search?")) {
                     String body = response.text();
@@ -137,7 +138,18 @@ public class CamoufoxBingSearchLiveTest {
                 served.append("unreadable: ").append(unreadable.getMessage());
             }
         });
-        driver.open("https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8"));
+        // Issue #22, as Argos' web_search: Bing's start page in a tab, the query typed into its field, Enter. Never a
+        // result URL (opened directly, Bing answered with random result sets).
+        com.aresstack.askai.browser.search.engine.BrowserSearchEngine.SearchForm bing =
+                com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
+                        .byId(com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog.BING).formOf(0);
+        assertEquals("start page", java.util.Collections.singletonList((String) null),
+                driver.openSearchTabs(java.util.Collections.singletonList(bing.getHomeUrl())));
+        java.util.List<String> typed = driver.submitSearchInTabs(
+                java.util.Collections.singletonList(bing.getSearchBoxSelectors()), query);
+        System.err.println("[bing-live] typed: " + typed);
+        assertEquals("the query was typed into Bing's field: " + typed, "submitted", typed.get(0));
+        System.err.println("[bing-live] result page: " + driver.useSearchTab(0).url);
         if (quietMillis > 0) {
             // No page read at all until then (Argos' rule): only the Playwright message loop runs.
             driver.pumpEvents(() -> false, quietMillis);
@@ -171,7 +183,16 @@ public class CamoufoxBingSearchLiveTest {
         SearchResultExtractionResult extraction =
                 new LegacySearchResultExtractor(settings).extract(document, query);
         int structured = 0;
+        int relevant = 0;
+        String[] terms = query.toLowerCase(java.util.Locale.ROOT).split("\\s+");
         for (SearchResultCandidate candidate : extraction.candidates) {
+            String said = (candidate.title + " " + candidate.resolvedTargetUrl).toLowerCase(java.util.Locale.ROOT);
+            for (String term : terms) {
+                if (term.length() > 3 && said.contains(term.substring(0, Math.min(term.length(), 6)))) {
+                    relevant++;
+                    break;
+                }
+            }
             System.err.println("[bing-live] " + candidate.originalRank + " " + candidate.resolvedTargetUrl
                     + (candidate.resultBlockContainerId.isEmpty() ? " (harvested)" : " " + candidate.title));
             if (!candidate.resultBlockContainerId.isEmpty()) {
@@ -180,6 +201,8 @@ public class CamoufoxBingSearchLiveTest {
         }
         System.err.println("[bing-live] page=" + document.pageUrl + " warnings=" + document.captureWarnings);
         System.err.println("[bing-live] served document: " + served);
+        System.err.println("[bing-live] relevant=" + relevant + " of " + extraction.candidates.size()
+                + " candidates name a query term in title or URL");
         System.err.println("[bing-live] b_algo=" + blocks + " visible=" + visibleBlocks + " outcome="
                 + extraction.outcome + " candidates=" + extraction.candidates.size() + " structured=" + structured);
 
@@ -195,5 +218,7 @@ public class CamoufoxBingSearchLiveTest {
                 extraction.outcome);
         assertTrue("the result blocks are taken over as structured candidates: " + structured,
                 structured >= blocks - 1);
+        assertTrue("the results answer the query (" + relevant + " of " + extraction.candidates.size() + ")",
+                relevant * 2 >= extraction.candidates.size());
     }
 }
