@@ -107,17 +107,43 @@ public class SearchResultBlockDetectorTest {
     }
 
     @Test
-    public void aMemberWithoutTheListClassBelowTheThresholdAgainstOneResultIsSetAside() {
-        // The counterpart, shaped like Bing's answer cards: close to some results, but below the
-        // threshold against the least alike one. It is set aside, the results stay in order.
+    public void twoVariantsAdmittedThroughTheRepresentativeBothStay() {
+        // Issue #22, review of 7d19175: four plain results, one result with an extra div and one
+        // "featured" result with a sitelink row. Both variants join the cluster through the plain
+        // representative (0.73 each) although they are only 0.57 alike to each other. The featured
+        // result carries everything every result has, so it stays: six results, not five.
+        String plain = "li(h2(a),p)";
+        String withDiv = "li(h2(a),p,div(span,span))";
+        String withSitelinks = "li(h2(a),p,ul(li,li))";
+        double threshold = LegacyBrowserSearchDefaults.create().analysis.resultBlockSimilarityThreshold;
+        assertTrue(DomStructureClusterer.similarity(new DomStructureSignature(withSitelinks),
+                new DomStructureSignature(plain)) >= threshold);
+        assertTrue(DomStructureClusterer.similarity(new DomStructureSignature(withDiv),
+                new DomStructureSignature(plain)) >= threshold);
+        assertTrue("the variants are below the threshold against each other",
+                DomStructureClusterer.similarity(new DomStructureSignature(withSitelinks),
+                        new DomStructureSignature(withDiv)) < threshold);
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
+                java.util.Arrays.asList("result", "result", "featured", "result", "result", "result"),
+                java.util.Arrays.asList(plain, plain, withSitelinks, withDiv, plain, plain));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 6, detection.blocks.size());
+        for (int i = 0; i < 6; i++) {
+            assertEquals("Result " + i + " title", detection.blocks.get(i).title);
+            assertEquals(i + 1, detection.blocks.get(i).rank);
+        }
+    }
+
+    @Test
+    public void aMemberLackingTheStructureEveryResultSharesIsSetAside() {
+        // The counterpart, shaped like Bing's answer cards: similar enough to join the cluster, but its
+        // heading link sits in a wrapper, so it lacks the li > h2 > a that every result has.
         String result = "li(h2(a),p)";
         String withSitelinks = "li(h2(a),p,ul(li,li))";
         String card = "li(div(h2(a),div,div),p)";
-        double threshold = LegacyBrowserSearchDefaults.create().analysis.resultBlockSimilarityThreshold;
-        assertTrue(DomStructureClusterer.similarity(new DomStructureSignature(card),
-                new DomStructureSignature(result)) >= threshold);
-        assertTrue(DomStructureClusterer.similarity(new DomStructureSignature(card),
-                new DomStructureSignature(withSitelinks)) < threshold);
         SerpDocuments serp = SerpDocuments.builder();
         serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
                 java.util.Arrays.asList("answer", "result", "result", "result", "result", "result"),
@@ -130,7 +156,7 @@ public class SearchResultBlockDetectorTest {
             assertEquals("Result " + (i + 1) + " title", detection.blocks.get(i).title);
         }
         assertTrue(detection.rejectionReasons.toString(),
-                detection.rejectionReasons.toString().contains("below the threshold"));
+                detection.rejectionReasons.toString().contains("li>h2>a"));
     }
 
     @Test

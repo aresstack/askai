@@ -150,10 +150,12 @@ public final class SearchResultBlockDetector {
 
     /**
      * The members of the result list: ads are never results. When most of the cluster shares a class
-     * token, a member without it is set aside only if its SHAPE is also an outlier: its mean
-     * similarity to the class majority lies below that of every majority member. A different class
-     * alone is no evidence — a "featured" variant of an ordinary result keeps its place; an answer
-     * card, built from a bare li/div skeleton, does not. Without a shared class nothing is removed.
+     * token, a member without it stays a result as long as it carries the STRUCTURAL CORE of the list:
+     * every element path (tag below tag, from the block down) that all results with the class have in
+     * common. What it adds or leaves out beyond that core does not matter, so a "featured" variant
+     * with a sitelink row or a source line keeps its place even where the clusterer admitted it only
+     * through the representative. An answer card that lacks part of the core (Bing's {@code b_ans}
+     * cards have no {@code li > h2 > a} title link) does not. Without a shared class nothing is removed.
      */
     private List<RenderedContainerDescriptor> listMembers(
             List<RenderedContainerDescriptor> cluster, List<String> reasons) {
@@ -175,22 +177,29 @@ public final class SearchResultBlockDetector {
                 majority.add(member);
             }
         }
-        // The configured cluster threshold, not exactness: a member without the list's class stays a result as
-        // long as its shape reaches the threshold against EVERY result that carries the class (a variant with an
-        // extra source line, say). It is set aside only when it falls below the threshold against at least one
-        // of them: Bing's answer cards reach the threshold against the closest results only (0.54-0.59 against
-        // the least alike), the results among themselves stay at 0.80 or more.
-        double threshold = settings.analysis.resultBlockSimilarityThreshold;
+        // Not pairwise similarity: the clusterer admits a member through the representative alone, so
+        // two admitted variants may be far apart from each other. What every result shares is the core.
+        Set<String> core = null;
+        for (RenderedContainerDescriptor member : majority) {
+            Set<String> paths = elementPaths(member);
+            if (core == null) {
+                core = new TreeSet<String>(paths);
+            } else {
+                core.retainAll(paths);
+            }
+        }
         List<RenderedContainerDescriptor> members = new ArrayList<RenderedContainerDescriptor>();
         for (RenderedContainerDescriptor member : withoutAds) {
-            double leastAlike = Collections.disjoint(member.classTokens, listClasses)
-                    ? leastSimilarity(member, majority) : 1;
-            if (leastAlike < threshold) {
+            Set<String> missing = new TreeSet<String>();
+            if (Collections.disjoint(member.classTokens, listClasses)) {
+                missing.addAll(core);
+                missing.removeAll(elementPaths(member));
+            }
+            if (!missing.isEmpty()) {
                 reasons.add(member.containerId + ": not part of the result list (class "
                         + member.classTokens + " lacks " + listClasses
-                        + " that the other results carry, and its shape reaches only "
-                        + String.format(java.util.Locale.ROOT, "%.2f", leastAlike)
-                        + " against one of them, below the threshold " + threshold + ")");
+                        + " that the other results carry, and it lacks the structure every one of them has: "
+                        + missing + ")");
             } else {
                 members.add(member);
             }
@@ -198,17 +207,37 @@ public final class SearchResultBlockDetector {
         return members;
     }
 
-    /** The lowest structure similarity of {@code member} to any other member of {@code group}. */
-    private static double leastSimilarity(RenderedContainerDescriptor member,
-                                          List<RenderedContainerDescriptor> group) {
-        double least = 1;
-        for (RenderedContainerDescriptor other : group) {
-            if (other != member) {
-                least = Math.min(least, DomStructureClusterer.similarity(member.structureSignature,
-                        other.structureSignature));
+    /**
+     * The element paths of a block's structure signature, e.g. {@code li(h2(a),p)} gives {@code li},
+     * {@code li>h2}, {@code li>h2>a} and {@code li>p} (presence only, not how often).
+     */
+    static Set<String> elementPaths(RenderedContainerDescriptor block) {
+        Set<String> paths = new TreeSet<String>();
+        String signature = block.structureSignature == null ? null : block.structureSignature.value;
+        if (signature == null) {
+            return paths;
+        }
+        java.util.Deque<String> open = new java.util.ArrayDeque<String>();
+        String current = null;
+        StringBuilder tag = new StringBuilder();
+        for (int i = 0; i <= signature.length(); i++) {
+            char c = i < signature.length() ? signature.charAt(i) : ',';
+            if (Character.isLetterOrDigit(c)) {
+                tag.append(Character.toLowerCase(c));
+                continue;
+            }
+            if (tag.length() > 0) {
+                current = open.isEmpty() ? tag.toString() : open.peek() + ">" + tag;
+                paths.add(current);
+                tag.setLength(0);
+            }
+            if (c == '(' && current != null) {
+                open.push(current);
+            } else if (c == ')' && !open.isEmpty()) {
+                current = open.pop();
             }
         }
-        return least;
+        return paths;
     }
 
     /**
