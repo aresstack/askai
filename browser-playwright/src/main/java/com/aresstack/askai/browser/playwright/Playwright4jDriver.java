@@ -4,6 +4,7 @@ import com.aresstack.askai.browser.BrowserException;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
@@ -116,7 +117,6 @@ final class Playwright4jDriver implements PlaywrightDriver {
     private final boolean camoufox;
     /** Every main-world script passes this gate; in script-free mode it refuses them all (see PageScriptGate). */
     private final PageScriptGate pageScripts;
-
     private Playwright4jDriver(Playwright playwright, Browser browser, BrowserContext context, Page page,
                                com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha,
@@ -424,16 +424,25 @@ final class Playwright4jDriver implements PlaywrightDriver {
     /** A consent probe only measures what is already there: it never waits for a control to appear. */
     private static final double CONSENT_MEASURE_TIMEOUT_MILLIS = 1_000d;
 
-    /** A located consent control: the target it matched and its box when it was measured. */
+    /**
+     * A located consent control: the target it matched, the ELEMENT itself (a handle, so stacked banners with an equal
+     * control at the same spot cannot be mistaken for the clicked one) and its box when it was measured.
+     */
     private static final class ConsentHit {
         final SearchPageGuards.ConsentTarget target;
-        final Locator control;
+        final ElementHandle control;
         final BoundingBox box;
+        /** All matches of the target and how many there were when measured: a click on a covering banner counts. */
+        final Locator matches;
+        final int matchCount;
 
-        ConsentHit(SearchPageGuards.ConsentTarget target, Locator control, BoundingBox box) {
+        ConsentHit(SearchPageGuards.ConsentTarget target, ElementHandle control, BoundingBox box, Locator matches,
+                   int matchCount) {
             this.target = target;
             this.control = control;
             this.box = box;
+            this.matches = matches;
+            this.matchCount = matchCount;
         }
     }
 
@@ -456,16 +465,20 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 if (hit == null) {
                     break;
                 }
-                if (!pointerClickInView(hit.control, hit.box)) {
-                    System.err.println("[browser-mcp] consent control " + hit.target.action
-                            + " could not be clicked with the pointer; no script fallback");
-                    break;
-                }
-                page.waitForTimeout(consent.postClickSettleMillis);
-                if (!controlReacted(hit.control, hit.box)) {
-                    System.err.println("[browser-mcp] consent control " + hit.target.action
-                            + " did not react to the pointer click; no script fallback");
-                    break;
+                try {
+                    if (!pointerClickInView(hit.control, hit.box)) {
+                        System.err.println("[browser-mcp] consent control " + hit.target.action
+                                + " could not be clicked with the pointer; no script fallback");
+                        break;
+                    }
+                    page.waitForTimeout(consent.postClickSettleMillis);
+                    if (!controlReacted(hit)) {
+                        System.err.println("[browser-mcp] consent control " + hit.target.action
+                                + " did not react to the pointer click; no script fallback");
+                        break;
+                    }
+                } finally {
+                    disposeQuietly(hit.control);
                 }
                 lastClicked = "clicked:" + hit.target.action + ":pointer";
             }
@@ -483,14 +496,16 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 if (target.text != null) {
                     matches = matches.filter(new Locator.FilterOptions().setHasText(target.text));
                 }
-                int count = Math.min(matches.count(), CONSENT_MATCHES_PER_TARGET);
+                int total = matches.count();
+                int count = Math.min(total, CONSENT_MATCHES_PER_TARGET);
                 for (int i = 0; i < count; i++) {
-                    Locator control = matches.nth(i);
-                    BoundingBox box = control.boundingBox(
-                            new Locator.BoundingBoxOptions().setTimeout(CONSENT_MEASURE_TIMEOUT_MILLIS));
+                    ElementHandle control = matches.nth(i).elementHandle(
+                            new Locator.ElementHandleOptions().setTimeout(CONSENT_MEASURE_TIMEOUT_MILLIS));
+                    BoundingBox box = control.boundingBox();
                     if (box != null && box.width > 0 && box.height > 0) {
-                        return new ConsentHit(target, control, box);
+                        return new ConsentHit(target, control, box, matches, total);
                     }
+                    disposeQuietly(control);
                 }
             } catch (PlaywrightException unusable) {
                 // An invalid configured selector or a control that went away while measured: try the next target.
@@ -500,49 +515,89 @@ final class Playwright4jDriver implements PlaywrightDriver {
     }
 
     /**
-     * Brings the control into the viewport with real wheel input when it lies outside, then clicks its center with
-     * the human-paced mouse. False when it cannot be brought into view or the click is refused.
+     * When the window height is unknown (Camoufox runs without viewport emulation, so {@code page.viewportSize()} is
+     * null, and the fingerprint only knows the outer window), a control whose center lies below this line is first
+     * wheeled up to {@link #UNKNOWN_WINDOW_ANCHOR}: every real window is at least this tall, so the click target is
+     * then inside it. Asking the page for {@code innerHeight} would be a page script.
      */
-    private boolean pointerClickInView(Locator control, BoundingBox box) {
+    private static final int UNKNOWN_WINDOW_SAFE_Y = 360;
+    private static final int UNKNOWN_WINDOW_ANCHOR = 200;
+    private static final int MAX_SCROLL_ROUNDS = 3;
+
+    /**
+     * Brings the control into the window with real wheel input when it lies (or may lie) outside, then clicks its
+     * center with the human-paced mouse. False when it cannot be brought into view or the click is refused.
+     */
+    private boolean pointerClickInView(ElementHandle control, BoundingBox box) {
         try {
             BoundingBox target = box;
             com.microsoft.playwright.options.ViewportSize viewport = page.viewportSize();
-            double centerY = target.y + target.height / 2;
-            boolean above = centerY < 0;
-            boolean below = viewport != null && centerY >= viewport.height;
-            if (above || below) {
-                int anchor = viewport != null ? viewport.height / 3 : 200;
+            int height = viewport != null && viewport.height > 0 ? viewport.height : 0;
+            int safeBottom = height > 0 ? height : UNKNOWN_WINDOW_SAFE_Y;
+            int anchor = height > 0 ? height / 3 : UNKNOWN_WINDOW_ANCHOR;
+            for (int round = 0; round < MAX_SCROLL_ROUNDS; round++) {
+                double centerY = target.y + target.height / 2;
+                if (centerY >= 0 && centerY < safeBottom) {
+                    break;
+                }
+                // The wheel turns where the pointer rests, which must be inside the window: its last landed spot.
+                page.mouse().move(lastPointerX, lastPointerY);
                 humanPointer().scrollBy((int) Math.round(centerY - anchor));
-                target = control.boundingBox(
-                        new Locator.BoundingBoxOptions().setTimeout(CONSENT_MEASURE_TIMEOUT_MILLIS));
-                if (target == null || target.width <= 0 || target.height <= 0) {
+                BoundingBox moved = control.boundingBox();
+                if (moved == null || moved.width <= 0 || moved.height <= 0) {
                     return false;
                 }
-                centerY = target.y + target.height / 2;
-                if (centerY < 0 || (viewport != null && centerY >= viewport.height)) {
-                    return false;
+                if (Math.abs(moved.y - target.y) < 1) {
+                    // Nothing scrolls (a fixed banner): it is where the page shows it, inside a known window or not.
+                    if (height > 0 && (centerY < 0 || centerY >= height)) {
+                        return false;
+                    }
+                    break;
                 }
+                target = moved;
             }
-            humanPointerClick((int) Math.round(target.x + target.width / 2), (int) Math.round(centerY));
+            humanPointerClick((int) Math.round(target.x + target.width / 2),
+                    (int) Math.round(target.y + target.height / 2));
             return true;
         } catch (RuntimeException refused) {
+            // e.g. "move target out of bounds": the pointer goes back to its last spot inside the window
+            try {
+                page.mouse().move(lastPointerX, lastPointerY);
+            } catch (RuntimeException ignored) {
+                // the page is gone
+            }
             return false;
         }
     }
 
-    /** Whether the click took effect: the control is gone, hidden, or moved (the banner changed or closed). */
-    private boolean controlReacted(Locator control, BoundingBox before) {
+    /**
+     * Whether the click took effect: the clicked element is gone, hidden or moved, or fewer controls of its kind are
+     * left (a stacked banner on top took the click and closed). Read without a page script.
+     */
+    private boolean controlReacted(ConsentHit hit) {
         try {
-            if (control.count() == 0) {
+            if (hit.matches.count() < hit.matchCount) {
                 return true;
             }
-            BoundingBox after = control.boundingBox(
-                    new Locator.BoundingBoxOptions().setTimeout(CONSENT_MEASURE_TIMEOUT_MILLIS));
+        } catch (PlaywrightException unreadable) {
+            // fall through to the element itself
+        }
+        BoundingBox before = hit.box;
+        try {
+            BoundingBox after = hit.control.boundingBox();
             return after == null || after.width <= 0 || after.height <= 0
                     || Math.abs(after.x - before.x) > 2 || Math.abs(after.y - before.y) > 2
                     || Math.abs(after.width - before.width) > 2 || Math.abs(after.height - before.height) > 2;
         } catch (PlaywrightException gone) {
             return true; // detached with its banner
+        }
+    }
+
+    private static void disposeQuietly(ElementHandle handle) {
+        try {
+            handle.dispose();
+        } catch (RuntimeException ignored) {
+            // gone with its page
         }
     }
 

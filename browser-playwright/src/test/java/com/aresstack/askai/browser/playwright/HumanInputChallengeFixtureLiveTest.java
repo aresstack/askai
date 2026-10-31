@@ -46,6 +46,34 @@ public class HumanInputChallengeFixtureLiveTest {
             + "</body></html>";
 
     /**
+     * A consent control BELOW the window (2500 px down, not fixed): the pointer must scroll there with the wheel first.
+     * Camoufox runs without viewport emulation, so the window height comes from its fingerprint. Trusted clicks only.
+     */
+    private static final String CONSENT_BELOW_PAGE = "<!doctype html><html><head><title>Below</title></head><body>"
+            + "<div id='c'>waiting for consent</div><div style='height:2500px'></div>"
+            + "<div id='banner'><button id='ok' style='padding:14px 28px;font-size:16px;' "
+            + "onclick=\"if(!event.isTrusted){return;}document.getElementById('banner').remove();"
+            + "document.getElementById('c').textContent='consent below resolved';\">Accept all</button></div>"
+            + "</body></html>";
+
+    /**
+     * Two stacked banners with the SAME control at the SAME spot: removing the first one puts the second one's button
+     * exactly where the clicked one was. Both must be dismissed (the clicked element is tracked, not its position).
+     */
+    private static final String STACKED_PAGE = "<!doctype html><html><head><title>Stacked</title></head><body>"
+            + stackedBanner("b2", "z-index:8") + stackedBanner("b1", "z-index:9")
+            + "<div id='c'>waiting for consent</div></body></html>";
+
+    private static String stackedBanner(String id, String z) {
+        return "<div id='" + id + "' style='position:fixed;inset:0;background:#fffbe6;" + z + ";"
+                + "display:flex;align-items:center;justify-content:center;'>"
+                + "<button style='padding:14px 28px;font-size:16px;' onclick=\"if(!event.isTrusted){return;}"
+                + "document.getElementById('" + id + "').remove();var c=document.getElementById('c');"
+                + "c.textContent=(c.textContent==='waiting for consent'?'':c.textContent)+'[" + id + "]';\">"
+                + "Accept all</button></div>";
+    }
+
+    /**
      * A CAPTCHA-like page: the DEFAULT challenge phrase is visible and the content is blocked.
      * After ~1.5s the fixture replaces itself with readable content — simulating the HUMAN
      * solving the checkbox; the sidecar only detects, pauses and re-probes, it never solves.
@@ -75,6 +103,8 @@ public class HumanInputChallengeFixtureLiveTest {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/consent", page(CONSENT_PAGE));
         server.createContext("/challenge", page(CHALLENGE_PAGE));
+        server.createContext("/below", page(CONSENT_BELOW_PAGE));
+        server.createContext("/stacked", page(STACKED_PAGE));
         server.start();
         String base = "http://127.0.0.1:" + server.getAddress().getPort();
 
@@ -95,6 +125,27 @@ public class HumanInputChallengeFixtureLiveTest {
             assertFalse("the banner is gone", afterConsent.consentPresent);
             assertTrue(afterConsent.excerpt != null
                     && afterConsent.excerpt.contains("consent resolved content"));
+
+            // ---- consent below the window: real wheel scrolling, then the trusted click ----
+            session.probe(base + "/below");
+            String below = session.dismissConsent();
+            assertTrue("the control below the window was reached and clicked: " + below,
+                    below.startsWith("clicked") && below.contains(":pointer"));
+            BrowserPageReadiness afterBelow = session.probeCurrent();
+            assertTrue(afterBelow.excerpt, afterBelow.excerpt != null
+                    && afterBelow.excerpt.contains("consent below resolved"));
+
+            // ---- stacked banners with the same control at the same spot: both are dismissed ----
+            // One dismiss attempt per call (default): the first call must count as clicked although an equal control
+            // now sits where the clicked one was; the second call takes the next banner.
+            session.probe(base + "/stacked");
+            String first = session.dismissConsent();
+            assertTrue("the first stacked banner counts as dismissed: " + first, first.startsWith("clicked"));
+            String second = session.dismissConsent();
+            assertTrue("the second stacked banner: " + second, second.startsWith("clicked"));
+            BrowserPageReadiness afterStacked = session.probeCurrent();
+            assertTrue(afterStacked.excerpt, afterStacked.excerpt != null
+                    && afterStacked.excerpt.contains("[b1][b2]"));
 
             // ---- challenge: detect → pause (no automation) → the human solves → resume ----
             BrowserPageReadiness blocked = session.probe(base + "/challenge");
