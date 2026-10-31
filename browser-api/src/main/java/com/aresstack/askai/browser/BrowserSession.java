@@ -14,6 +14,18 @@ public interface BrowserSession {
 
     WebSearchResult search(String query) throws BrowserException;
 
+    /**
+     * A search with exactly these engines (catalog ids, in this order) for this one call; {@code null} = the engines
+     * enabled in the settings. A wrong id is refused, never corrected or replaced by another engine. Backends without
+     * engine selection search as {@link #search(String)} does when no selection is given and refuse one otherwise.
+     */
+    default WebSearchResult search(String query, List<String> engineIds) throws BrowserException {
+        if (engineIds == null) {
+            return search(query);
+        }
+        throw new BrowserException("This browser backend cannot choose search engines per call.");
+    }
+
     BrowserPageSnapshot open(String url) throws BrowserException;
 
     BrowserPageSnapshot currentPage() throws BrowserException;

@@ -10,6 +10,7 @@ public final class BrowserSearchEngineCatalog {
 
     public static final String DUCKDUCKGO = "duckduckgo";
     public static final String BING = "bing";
+    public static final String GOOGLE = "google";
     /**
      * The engine a dev/test {@code --search-url=} override installs. It is not part of the catalog: it
      * exists only when someone hands the sidecar an explicit template, and it then REPLACES the
@@ -17,22 +18,37 @@ public final class BrowserSearchEngineCatalog {
      */
     public static final String CUSTOM = "custom";
 
+    /**
+     * Every catalog engine is asked the way a person asks it, as Argos does (issue #22): its regular start page, a
+     * real click into the search field, the query typed key by key, a real Enter; deeper result pages by a real click
+     * on the engine's own "next" control. Selectors are alternatives for layout changes, tried in order.
+     */
     private static final List<BrowserSearchEngine> ENGINES = Collections.unmodifiableList(
             new ArrayList<BrowserSearchEngine>(Arrays.asList(
                     new BrowserSearchEngine(DUCKDUCKGO, "DuckDuckGo", Arrays.asList(
-                            // Server-rendered endpoints of the SAME provider: the plain HTML one first,
+                            // Server-rendered start pages of the SAME provider: the plain HTML one first,
                             // the lite one as its own fallback. One provider to the user.
-                            "https://html.duckduckgo.com/html/?q={query}",
-                            "https://lite.duckduckgo.com/lite/?q={query}"),
-                            // Follow-up result pages address the provider's `s` offset (~30/page).
-                            Arrays.asList(
-                                    "https://html.duckduckgo.com/html/?q={query}&s={offset0}",
-                                    "https://lite.duckduckgo.com/lite/?q={query}&s={offset0}"),
+                            new BrowserSearchEngine.SearchForm("https://html.duckduckgo.com/html/",
+                                    Arrays.asList("input[name=q]"),
+                                    Arrays.asList(".nav-link input[type=submit]:not([value*='Prev' i])"
+                                            + ":not([value*='Vorherig' i]):not([value*='Zurück' i])")),
+                            new BrowserSearchEngine.SearchForm("https://lite.duckduckgo.com/lite/",
+                                    Arrays.asList("input[name=q]"),
+                                    Arrays.asList("input.navbutton[value*='Next' i]",
+                                            "input.navbutton[value*='Nächste' i]",
+                                            "input.navbutton[value*='Weiter' i]"))),
                             30),
                     new BrowserSearchEngine(BING, "Bing", Arrays.asList(
-                            "https://www.bing.com/search?q={query}"),
-                            // Bing pages via `first` (1-based offset of the first result, 10/page).
-                            Arrays.asList("https://www.bing.com/search?q={query}&first={offset1}"),
+                            new BrowserSearchEngine.SearchForm("https://www.bing.com/",
+                                    Arrays.asList("#sb_form_q", "textarea[name=q]", "input[name=q]"),
+                                    Arrays.asList("a.sb_pagN", "a[aria-label='Next page']",
+                                            "a[aria-label='Nächste Seite']"))),
+                            10),
+                    new BrowserSearchEngine(GOOGLE, "Google", Arrays.asList(
+                            new BrowserSearchEngine.SearchForm("https://www.google.com/",
+                                    Arrays.asList("textarea[name=q]", "input[name=q]"),
+                                    Arrays.asList("#pnnext", "a[aria-label='Next page']",
+                                            "a[aria-label='Nächste Seite']"))),
                             10))));
 
     private BrowserSearchEngineCatalog() {

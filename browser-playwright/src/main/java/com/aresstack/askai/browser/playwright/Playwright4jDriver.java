@@ -625,6 +625,526 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
     }
 
+    // ------------------------------------------------------------------ search forms (issue #22, Argos' web_search)
+
+    /**
+     * The engines' tabs of the running search, in the order they were opened. Each engine is asked in a tab of its
+     * own (Argos' ParallelWebSearch): no tab is brought to the front, real input goes to each tab's browsing context.
+     */
+    private final List<Page> searchTabs = new ArrayList<Page>();
+    /** The page the driver worked on before the search tabs took over; restored by {@link #closeSearchTabs}. */
+    private Page pageBeforeSearch;
+    /**
+     * Per page: how many top-level navigations were committed (protocol events only), to wait for the document that
+     * Enter or a "next" click loads: until it is committed, the old page's load state says nothing.
+     */
+    private final Map<Page, int[]> navigationCounts = new java.util.IdentityHashMap<Page, int[]>();
+    /** Per tab: where its pointer rests (BiDi keeps one input state per browsing context). */
+    private final Map<Page, int[]> tabPointers = new java.util.IdentityHashMap<Page, int[]>();
+    /** A search field is only measured, never waited for. */
+    private static final double SEARCH_BOX_MEASURE_TIMEOUT_MILLIS = 1_500d;
+    /** How long the navigation that Enter (or a "next" click) starts may take to commit its new document. */
+    private static final long SUBMIT_NAVIGATION_START_MILLIS = 15_000L;
+    /** DOMContentLoaded is enough to read; late resources get a bounded chance (Argos' settleLoad). */
+    private static final double SETTLE_LOAD_MILLIS = 5_000d;
+
+    @Override
+    public List<String> openSearchTabs(List<String> homeUrls) throws BrowserException {
+        owner.check();
+        requireOpen();
+        closeSearchTabs();
+        pageBeforeSearch = page;
+        List<String> outcomes = new ArrayList<String>();
+        // Fan-out: every start page begins loading before any is waited for, so no engine waits for another.
+        for (String url : homeUrls) {
+            try {
+                Page tab = context.newPage(); // never brought to the front: which tab to watch stays the user's choice
+                tab.onPopup(popupCloser());
+                watchNavigations(tab);
+                searchTabs.add(tab);
+                tab.navigate(url, new Page.NavigateOptions()
+                        .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.COMMIT)
+                        .setTimeout(navigationTimeoutMillis));
+                outcomes.add(null);
+            } catch (PlaywrightException failed) {
+                outcomes.add(firstLine(failed));
+            }
+        }
+        for (int i = 0; i < outcomes.size() && i < searchTabs.size(); i++) {
+            if (outcomes.get(i) != null) {
+                continue;
+            }
+            try {
+                searchTabs.get(i).waitForLoadState(com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED,
+                        new Page.WaitForLoadStateOptions().setTimeout(navigationTimeoutMillis));
+                settleLoad(searchTabs.get(i));
+            } catch (PlaywrightException failed) {
+                outcomes.set(i, firstLine(failed));
+            }
+        }
+        while (outcomes.size() < homeUrls.size()) {
+            outcomes.add("tab could not be opened");
+        }
+        return outcomes;
+    }
+
+    @Override
+    public PlaywrightPageState useSearchTab(int index) throws BrowserException {
+        owner.check();
+        requireOpen();
+        if (index < 0 || index >= searchTabs.size() || searchTabs.get(index).isClosed()) {
+            throw new BrowserException("Search tab " + index + " is not open.");
+        }
+        page = searchTabs.get(index); // reads, guards and clicks now work on this tab; it is NOT brought to the front
+        try {
+            return state();
+        } catch (PlaywrightException ex) {
+            throw asBrowserException("Reading the search tab failed", ex);
+        }
+    }
+
+    @Override
+    public PlaywrightPageState openInSearchTab(int index, String url) throws BrowserException {
+        owner.check();
+        requireOpen();
+        if (index < 0 || index >= searchTabs.size() || searchTabs.get(index).isClosed()) {
+            throw new BrowserException("Search tab " + index + " is not open.");
+        }
+        page = searchTabs.get(index);
+        try {
+            page.navigate(url, new Page.NavigateOptions()
+                    .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
+                    .setTimeout(navigationTimeoutMillis));
+            settleLoad(page);
+            return state();
+        } catch (PlaywrightException ex) {
+            throw asBrowserException("Navigation failed", ex);
+        }
+    }
+
+    /**
+     * Types the query into each listed tab's search field AT THE SAME TIME and presses Enter in each (Argos #79): the
+     * steps of all tabs (pointer path into the field, click, select-all and Backspace, every key, Enter) are planned
+     * with human timing and played as ONE timeline merged by time, so the keys of one tab fall into the pauses of the
+     * others. Every step is real input over WebDriver BiDi to that tab's browsing context; no tab is switched to or
+     * brought to the front, nothing is filled or submitted by script. Then waits for each tab's result page.
+     *
+     * @param searchBoxSelectors per tab (same index as the tabs): the field's selectors in order, or null to leave
+     *                           that tab alone
+     * @return per tab: {@code "submitted"}, {@code "no-search-box"}, {@code "refused: <why>"} or {@code "skipped"}
+     */
+    @Override
+    public List<String> submitSearchInTabs(List<List<String>> searchBoxSelectors, String query) throws BrowserException {
+        owner.check();
+        requireOpen();
+        String typed = query == null ? "" : query.trim().replaceAll("\\s+", " ");
+        List<String> outcomes = new ArrayList<String>();
+        List<TabTyping> plans = new ArrayList<TabTyping>();
+        java.util.Random random = new java.util.Random();
+        for (int i = 0; i < searchTabs.size(); i++) {
+            List<String> selectors = i < searchBoxSelectors.size() ? searchBoxSelectors.get(i) : null;
+            Page tab = searchTabs.get(i);
+            if (selectors == null || tab.isClosed() || typed.isEmpty()) {
+                outcomes.add("skipped");
+                continue;
+            }
+            String refused = null;
+            TabTyping plan = null;
+            for (String selector : selectors) {
+                try {
+                    Locator first = tab.locator(selector).first();
+                    if (first.count() == 0) {
+                        continue;
+                    }
+                    ElementHandle field = first.elementHandle(
+                            new Locator.ElementHandleOptions().setTimeout(SEARCH_BOX_MEASURE_TIMEOUT_MILLIS));
+                    BoundingBox box = inView(tab, field);
+                    if (box == null) {
+                        disposeQuietly(field);
+                        refused = "the search field " + selector + " is not visible in the window";
+                        continue;
+                    }
+                    plan = new TabTyping(i, tab, selector, field);
+                    planTyping(plan, box, typed, 40L + random.nextInt(360), random);
+                    break;
+                } catch (PlaywrightException unusable) {
+                    refused = firstLine(unusable); // a hidden or covered match; an alternative may be the field
+                }
+            }
+            if (plan != null) {
+                plans.add(plan);
+                outcomes.add("submitted");
+            } else {
+                outcomes.add(refused == null ? "no-search-box" : "refused: " + refused);
+            }
+        }
+        if (plans.isEmpty()) {
+            return outcomes;
+        }
+        playMerged(plans);
+        for (TabTyping plan : plans) {
+            disposeQuietly(plan.field);
+        }
+        awaitResultPages(plans);
+        // After the wait: a tab whose Enter started no navigation, or whose result page never loaded, did not submit.
+        for (TabTyping plan : plans) {
+            if (plan.failure != null) {
+                outcomes.set(plan.index, "refused: " + plan.failure);
+            }
+        }
+        return outcomes;
+    }
+
+    @Override
+    public boolean clickNextPage(List<String> selectors) throws BrowserException {
+        owner.check();
+        requireOpen();
+        watchNavigations(page);
+        for (String selector : selectors) {
+            ElementHandle control = null;
+            try {
+                Locator first = page.locator(selector).first();
+                if (first.count() == 0) {
+                    continue;
+                }
+                control = first.elementHandle(
+                        new Locator.ElementHandleOptions().setTimeout(SEARCH_BOX_MEASURE_TIMEOUT_MILLIS));
+                BoundingBox box = control.boundingBox();
+                if (box == null || box.width <= 0 || box.height <= 0) {
+                    continue;
+                }
+                int before = navigationCounts.get(page)[0];
+                // The real, human-paced pointer (wheel scrolling to the pager first): never Locator.click.
+                if (!pointerClickInView(control, box)) {
+                    continue;
+                }
+                awaitNavigation(page, before);
+                return true;
+            } catch (PlaywrightException unusable) {
+                // an alternative selector may be the engine's pager
+            } finally {
+                if (control != null) {
+                    disposeQuietly(control);
+                }
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public void closeSearchTabs() {
+        owner.check();
+        for (Page tab : searchTabs) {
+            if (tab == challengePage) {
+                continue; // a parked challenge stays open for the user, still bound to its add-on tab
+            }
+            pageKeys.remove(tab);
+            navigationCounts.remove(tab);
+            tabPointers.remove(tab);
+            try {
+                if (!tab.isClosed()) {
+                    tab.close();
+                }
+            } catch (RuntimeException ignored) {
+                // already gone
+            }
+        }
+        searchTabs.clear();
+        if (pageBeforeSearch != null) {
+            page = pageBeforeSearch;
+            pageBeforeSearch = null;
+        }
+    }
+
+    /** One tab's planned input: the steps, each at its time after the timeline started. */
+    private static final class TabTyping {
+        final int index;
+        final Page tab;
+        final String selector;
+        final ElementHandle field;
+        final List<long[]> times = new ArrayList<long[]>();
+        final List<Runnable> steps = new ArrayList<Runnable>();
+        String failure;
+        int navigationsBeforeEnter = -1;
+
+        TabTyping(int index, Page tab, String selector, ElementHandle field) {
+            this.index = index;
+            this.tab = tab;
+            this.selector = selector;
+            this.field = field;
+        }
+
+        void at(long millis, Runnable step) {
+            times.add(new long[]{millis, steps.size()});
+            steps.add(step);
+        }
+    }
+
+    /**
+     * The steps of one tab, with the policy's human timing: a pointer path into the field (not its exact centre), a
+     * click, a check that the click put the focus into the field (otherwise select-all would mark the page), select
+     * all and Backspace, the query key by key (Shift held for capitals), a look at the input, Enter.
+     */
+    private void planTyping(final TabTyping plan, BoundingBox box, String typed, long start, java.util.Random random) {
+        final Page tab = plan.tab;
+        int[] from = pointerOf(tab);
+        final int targetX = (int) Math.round(box.x + box.width * (0.25 + random.nextDouble() * 0.4));
+        final int targetY = (int) Math.round(box.y + box.height * (0.35 + random.nextDouble() * 0.3));
+        long t = start;
+        for (final com.aresstack.askai.browser.input.HumanInteractionPolicy.TimedPoint point
+                : humanPolicy.mousePath(from[0], from[1], targetX, targetY)) {
+            plan.at(t, new Runnable() {
+                public void run() {
+                    tab.mouse().move(point.x, point.y);
+                    pointerOf(tab)[0] = point.x;
+                    pointerOf(tab)[1] = point.y;
+                }
+            });
+            t += point.pauseMillis;
+        }
+        t += humanPolicy.preClickPauseMillis();
+        plan.at(t, new Runnable() {
+            public void run() {
+                tab.mouse().down();
+            }
+        });
+        t += 40 + random.nextInt(80);
+        plan.at(t, new Runnable() {
+            public void run() {
+                tab.mouse().up();
+            }
+        });
+        t += humanPolicy.postClickPauseMillis();
+        plan.at(t, new Runnable() {
+            public void run() {
+                // Read through Playwright's selector engine (utility world), no page script.
+                if (tab.locator(plan.selector + ":focus").count() == 0) {
+                    throw new IllegalStateException("the click did not put the focus into the search field"
+                            + " (an overlay or banner may cover it); nothing was typed");
+                }
+            }
+        });
+        t += 80 + random.nextInt(120);
+        plan.at(t, key(tab, "ControlOrMeta+a"));
+        t += 90 + random.nextInt(110);
+        plan.at(t, key(tab, "Backspace"));
+        List<Long> delays = humanPolicy.typingDelaysMillis(typed);
+        for (int i = 0; i < typed.length(); ) {
+            int codePoint = typed.codePointAt(i);
+            String character = new String(Character.toChars(codePoint));
+            t += delays.get(i);
+            plan.at(t, typeCharacter(tab, character));
+            i += Character.charCount(codePoint);
+        }
+        t += humanPolicy.preSubmitPauseMillis();
+        plan.at(t, new Runnable() {
+            public void run() {
+                plan.navigationsBeforeEnter = navigationCounts.get(tab)[0];
+                tab.keyboard().press("Enter");
+            }
+        });
+    }
+
+    /** Plays the steps of all tabs in time order; a tab whose step fails stops, the others go on. */
+    private void playMerged(List<TabTyping> plans) {
+        List<Object[]> timeline = new ArrayList<Object[]>();
+        for (TabTyping plan : plans) {
+            for (long[] time : plan.times) {
+                timeline.add(new Object[]{time[0], plan, plan.steps.get((int) time[1])});
+            }
+        }
+        java.util.Collections.sort(timeline, new java.util.Comparator<Object[]>() {
+            public int compare(Object[] a, Object[] b) {
+                return Long.compare((Long) a[0], (Long) b[0]);
+            }
+        });
+        long started = System.currentTimeMillis();
+        Page clock = plans.get(0).tab;
+        for (Object[] entry : timeline) {
+            TabTyping plan = (TabTyping) entry[1];
+            if (plan.failure != null) {
+                continue;
+            }
+            long wait = (Long) entry[0] - (System.currentTimeMillis() - started);
+            if (wait > 0) {
+                clock.waitForTimeout(wait); // keeps the Playwright message loop running meanwhile
+            }
+            try {
+                ((Runnable) entry[2]).run();
+            } catch (RuntimeException refused) {
+                plan.failure = firstLine(refused);
+                try {
+                    plan.tab.keyboard().up("Shift"); // never leave a tab with Shift held
+                } catch (RuntimeException ignored) {
+                    // the tab is gone
+                }
+            }
+        }
+    }
+
+    /** One named key or chord as real key input. */
+    private static Runnable key(final Page tab, final String chord) {
+        return new Runnable() {
+            public void run() {
+                tab.keyboard().press(chord);
+            }
+        };
+    }
+
+    /** Shifted symbols of the US layout: typed with Shift held, as on a real keyboard (Playwright's type omits it). */
+    private static final String SHIFTED_SYMBOLS = "~!@#$%^&*()_+{}|:\"<>?";
+
+    /**
+     * One character as a real key. Over WebDriver BiDi playwright4j sends any single grapheme ("ä") as a real key
+     * (playwright4j#59); a browser that refuses the key name (Chromium) gets it as inserted text, which CDP delivers
+     * as trusted native input.
+     */
+    private static Runnable typeCharacter(final Page tab, final String character) {
+        return new Runnable() {
+            public void run() {
+                if (" ".equals(character)) {
+                    tab.keyboard().press("Space");
+                    return;
+                }
+                int codePoint = character.codePointAt(0);
+                boolean shift = Character.isUpperCase(codePoint) || SHIFTED_SYMBOLS.indexOf(codePoint) >= 0;
+                if (shift) {
+                    tab.keyboard().down("Shift");
+                }
+                try {
+                    tab.keyboard().press(character);
+                } catch (PlaywrightException refused) {
+                    if (!String.valueOf(refused.getMessage()).contains("Unknown key")) {
+                        throw refused;
+                    }
+                    tab.keyboard().insertText(character);
+                } finally {
+                    if (shift) {
+                        tab.keyboard().up("Shift");
+                    }
+                }
+            }
+        };
+    }
+
+    /**
+     * The field's box once it is inside the window: a field below the safe line is first wheeled up with real input
+     * (the pointer resting inside the window). Null when it has no box or cannot be brought into view.
+     */
+    private BoundingBox inView(Page tab, ElementHandle field) {
+        BoundingBox box = field.boundingBox();
+        com.microsoft.playwright.options.ViewportSize viewport = tab.viewportSize();
+        int height = viewport != null && viewport.height > 0 ? viewport.height : 0;
+        int safeBottom = height > 0 ? height : UNKNOWN_WINDOW_SAFE_Y;
+        int anchor = height > 0 ? height / 3 : UNKNOWN_WINDOW_ANCHOR;
+        for (int round = 0; round < MAX_SCROLL_ROUNDS && box != null; round++) {
+            double centerY = box.y + box.height / 2;
+            if (box.width <= 0 || box.height <= 0) {
+                return null;
+            }
+            if (centerY >= 0 && centerY < safeBottom) {
+                return box;
+            }
+            int[] pointer = pointerOf(tab);
+            tab.mouse().move(pointer[0], pointer[1]);
+            for (com.aresstack.askai.browser.input.HumanInteractionPolicy.ScrollStep step
+                    : humanPolicy.scrollSteps((int) Math.round(centerY - anchor))) {
+                tab.mouse().wheel(0, step.deltaY);
+                tab.waitForTimeout(step.pauseMillis);
+            }
+            BoundingBox moved = field.boundingBox();
+            if (moved == null || Math.abs(moved.y - box.y) < 1) {
+                return null; // nothing scrolls: the field stays outside the window
+            }
+            box = moved;
+        }
+        return box != null && box.y + box.height / 2 >= 0 && box.y + box.height / 2 < safeBottom ? box : null;
+    }
+
+    private int[] pointerOf(Page tab) {
+        int[] pointer = tabPointers.get(tab);
+        if (pointer == null) {
+            pointer = new int[]{8 + new java.util.Random().nextInt(40), 8 + new java.util.Random().nextInt(40)};
+            tabPointers.put(tab, pointer);
+        }
+        return pointer;
+    }
+
+    /** Counts a page's committed top-level navigations (protocol events only). Idempotent. */
+    private void watchNavigations(final Page target) {
+        if (navigationCounts.containsKey(target)) {
+            return;
+        }
+        final int[] count = new int[1];
+        navigationCounts.put(target, count);
+        target.onFrameNavigated(new Consumer<com.microsoft.playwright.Frame>() {
+            public void accept(com.microsoft.playwright.Frame frame) {
+                if (frame == target.mainFrame()) {
+                    count[0]++;
+                }
+            }
+        });
+    }
+
+    /** After Enter in every typed tab: each tab's result page, waited for side by side. */
+    private void awaitResultPages(List<TabTyping> plans) {
+        long deadline = System.currentTimeMillis() + SUBMIT_NAVIGATION_START_MILLIS;
+        for (TabTyping plan : plans) {
+            if (plan.failure != null || plan.navigationsBeforeEnter < 0) {
+                continue;
+            }
+            final int[] count = navigationCounts.get(plan.tab);
+            final int before = plan.navigationsBeforeEnter;
+            long left = deadline - System.currentTimeMillis();
+            try {
+                if (count[0] <= before) {
+                    plan.tab.waitForCondition(() -> count[0] > before,
+                            new Page.WaitForConditionOptions().setTimeout(Math.max(100L, left)));
+                }
+            } catch (PlaywrightException noNavigation) {
+                plan.failure = "Enter started no navigation (the engine did not take the query)";
+            }
+        }
+        for (TabTyping plan : plans) {
+            if (plan.failure != null) {
+                continue;
+            }
+            try {
+                plan.tab.waitForLoadState(com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED,
+                        new Page.WaitForLoadStateOptions().setTimeout(navigationTimeoutMillis));
+                settleLoad(plan.tab);
+            } catch (PlaywrightException slow) {
+                plan.failure = "the result page did not load: " + firstLine(slow);
+            }
+        }
+    }
+
+    /** Waits for the navigation a click started, then for its document; protocol events only. */
+    private void awaitNavigation(Page target, int before) {
+        final int[] count = navigationCounts.get(target);
+        try {
+            if (count[0] <= before) {
+                target.waitForCondition(() -> count[0] > before,
+                        new Page.WaitForConditionOptions().setTimeout(SUBMIT_NAVIGATION_START_MILLIS));
+            }
+            target.waitForLoadState(com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED,
+                    new Page.WaitForLoadStateOptions().setTimeout(navigationTimeoutMillis));
+            settleLoad(target);
+        } catch (PlaywrightException slow) {
+            // reading proceeds with the document that is there
+        }
+    }
+
+    /** Gives late subresources a bounded chance, never a long sleep. */
+    private static void settleLoad(Page target) {
+        try {
+            target.waitForLoadState(com.microsoft.playwright.options.LoadState.LOAD,
+                    new Page.WaitForLoadStateOptions().setTimeout(SETTLE_LOAD_MILLIS));
+        } catch (PlaywrightException slowSubresources) {
+            // reading proceeds with the DOM that is there
+        }
+    }
+
     @Override
     public String renderHud(String stateLine) {
         owner.check();
@@ -859,6 +1379,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
         if (closed || challengePage != null) {
             return false;
         }
+        if (searchTabs.contains(page) && pageBeforeSearch != null) {
+            // An engine's tab shows the challenge: it simply stays open for the user (not closed with the other
+            // search tabs); the search goes on in the other engines' tabs.
+            challengePage = page;
+            page = pageBeforeSearch;
+            if (captcha.focusTabOnFirstDetection) {
+                try {
+                    challengePage.bringToFront();
+                } catch (RuntimeException ignored) {
+                }
+            }
+            return true;
+        }
         try {
             challengePage = page;
             page = context.newPage();
@@ -900,6 +1433,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
     public void closeParkedChallenge() {
         owner.check();
         if (challengePage != null) {
+            pageKeys.remove(challengePage);
+            navigationCounts.remove(challengePage);
+            tabPointers.remove(challengePage);
             try {
                 challengePage.close();
             } catch (RuntimeException ignored) {

@@ -20,6 +20,11 @@ public enum LegacySearchAttemptOutcome {
     CONSENT_UNRESOLVED,
     /** Navigation to the engine failed (unreachable, blocked, policy). */
     NAVIGATION_FAILED,
+    /**
+     * The engine's start page loaded, but its search field could not be found or operated with real input (covered,
+     * no focus). Never answered with a result URL instead (issue #22).
+     */
+    SEARCH_BOX_UNAVAILABLE,
     /** The search was cancelled; no further engine is tried. */
     CANCELLED
 }
