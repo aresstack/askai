@@ -240,14 +240,16 @@ final class SearchPageGuards {
         sb.append("  const hits = texts.filter(t => body.includes(t));\n");
         sb.append("  if (hits.length > 0) {\n");
         // Joined twice: with a space (words in separate block elements) and tight (a word split by inline
-        // markup such as <b>Best</b>ätigen); a phrase matching either form is on screen.
+        // markup such as <b>Best</b>ätigen); a phrase matching either form is on screen. The tight form keeps
+        // the page's own whitespace nodes, so <b>Verify</b> <b>you</b> ... <b>hu</b>man still reads as one phrase.
         sb.append("    let spaced = '', tight = '';\n");
         sb.append("    try {\n");
         sb.append("      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);\n");
         sb.append("      const range = document.createRange();\n");
         sb.append("      for (let n = walker.nextNode(); n; n = walker.nextNode()) {\n");
         sb.append("        const p = n.parentElement;\n");
-        sb.append("        if (!p || !n.nodeValue || !n.nodeValue.trim()) continue;\n");
+        sb.append("        if (!p || !n.nodeValue) continue;\n");
+        sb.append("        if (!n.nodeValue.trim()) { tight += ' '; continue; }\n");
         sb.append("        range.selectNodeContents(n);\n");
         sb.append("        if (!inViewport(range.getBoundingClientRect())) continue;\n");
         sb.append("        const st = window.getComputedStyle(p);\n");

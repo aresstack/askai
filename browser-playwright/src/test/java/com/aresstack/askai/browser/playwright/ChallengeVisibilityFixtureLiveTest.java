@@ -56,7 +56,8 @@ public class ChallengeVisibilityFixtureLiveTest {
 
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         for (String fixture : new String[]{"innoq-footer-friendly-captcha", "bing-one-last-step",
-                "cloudflare-turnstile", "text-only-de", "serp-about-captchas", "phrase-below-the-fold"}) {
+                "cloudflare-turnstile", "text-only-de", "text-only-mixed-inline", "serp-about-captchas",
+                "phrase-below-the-fold"}) {
             server.createContext("/" + fixture, page(resource("challenge/" + fixture + ".html")));
         }
         server.createContext("/blank", page("<!doctype html><html><body></body></html>"));
@@ -84,6 +85,11 @@ public class ChallengeVisibilityFixtureLiveTest {
                 assertTrue("a phrase-only challenge on the first screen must block: " + textOnly.challengeMarker,
                         textOnly.challengeVisible
                                 && textOnly.challengeMarker.equals("visible:text:bestätigen sie, dass sie ein mensch sind"));
+
+                BrowserPageReadiness mixed = probe(session, base + "/text-only-mixed-inline");
+                assertTrue("whitespace between inline elements plus a split word must still block: "
+                        + mixed.challengeMarker, mixed.challengeVisible
+                        && mixed.challengeMarker.equals("visible:text:verify you are human"));
 
                 BrowserPageReadiness belowFold = probe(session, base + "/phrase-below-the-fold");
                 assertFalse("a challenge phrase only below the fold must not block: " + belowFold.challengeMarker,
