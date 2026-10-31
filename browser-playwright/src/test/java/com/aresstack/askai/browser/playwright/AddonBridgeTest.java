@@ -227,6 +227,44 @@ public class AddonBridgeTest {
         }
     }
 
+    @Test
+    public void theChromeExtensionIsAcceptedOnlyWithItsOwnId() throws Exception {
+        bridge.publish(new ResearchHudState("READABLE", "chrome", false, -1, false));
+        assertEquals(200, send(get("/v1/state?after=0").header("Origin", "chrome-extension://" + ResearchAddon.CHROME_ID)
+                .header("Authorization", "Bearer " + bridge.token())).statusCode());
+        // Another extension in the same browser has another id: refused even with the token.
+        assertEquals(403, send(get("/v1/state?after=0").header("Origin", "chrome-extension://" + "a".repeat(32))
+                .header("Authorization", "Bearer " + bridge.token())).statusCode());
+        assertTrue(AddonBridge.extensionOrigin("moz-extension://3f1c2b7e-0000-4000-8000-000000000001"));
+        assertFalse(AddonBridge.extensionOrigin("chrome-extension://" + ResearchAddon.CHROME_ID + ".evil"));
+        assertFalse(AddonBridge.extensionOrigin("https://chrome-extension.example"));
+    }
+
+    @Test
+    public void forChromeTheReadNamesAScriptFileInsteadOfScriptText() throws Exception {
+        java.nio.file.Path extension = java.nio.file.Files.createTempDirectory("askai-addon-test");
+        try {
+            bridge.readScriptsAsFilesIn(extension);
+            AddonBridge.PageRead read = bridge.submitRead("page-1", "https://example.org/", "() => document.title");
+            JsonObject task = JsonParser.parseString(send(get("/v1/read").header("Origin", EXTENSION_ORIGIN)
+                    .header("Authorization", "Bearer " + bridge.token())).body()).getAsJsonObject();
+            assertFalse("MV3 executes files only, no script text travels", task.has("script"));
+            String file = task.get("file").getAsString();
+            assertTrue(file, file.matches("reads/[0-9a-f]{64}\\.js"));
+            assertEquals("(() => document.title)();\n",
+                    java.nio.file.Files.readString(extension.resolve(file)));
+            // The same script again: the same file, written once.
+            assertEquals(file, AddonBridge.writeScriptFile(extension, "() => document.title"));
+            assertTrue(!file.equals(AddonBridge.writeScriptFile(extension, "() => 2")));
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(extension.resolve("reads"))) {
+                assertEquals("no temporary file is left behind", 2L, files.count());
+            }
+            read.cancel();
+        } finally {
+            Playwright4jDriver.deleteTree(extension);
+        }
+    }
+
     private HttpRequest.Builder get(String path) {
         return HttpRequest.newBuilder(uri(path)).timeout(Duration.ofSeconds(30)).GET();
     }

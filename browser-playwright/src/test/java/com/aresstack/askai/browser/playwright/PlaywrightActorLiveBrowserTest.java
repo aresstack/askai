@@ -69,6 +69,9 @@ public class PlaywrightActorLiveBrowserTest {
         String channel = System.getenv().getOrDefault("ASKAI_TEST_BROWSER_CHANNEL", "chrome");
         PlaywrightReadiness readiness = new PlaywrightCapabilityProbe().probe(channel);
         assumeTrue("SKIPPED (environment-gated live test): " + readiness.render(), readiness.isReady());
+        // This test covers the in-page overlay and its binding, i.e. Chrome/Edge WITHOUT the research extension
+        // (switched off or not loadable); the extension path is ChromeResearchExtensionLiveTest.
+        System.setProperty(Playwright4jDriver.ADDON_PROPERTY, "false");
 
         final CountDownLatch bRequested = new CountDownLatch(1);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -186,6 +189,7 @@ public class PlaywrightActorLiveBrowserTest {
                 assertTrue(expected.getMessage().contains("closed"));
             }
             server.stop(0);
+            System.clearProperty(Playwright4jDriver.ADDON_PROPERTY);
         }
     }
 
