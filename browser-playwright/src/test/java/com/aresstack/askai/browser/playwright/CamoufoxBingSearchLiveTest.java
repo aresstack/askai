@@ -33,7 +33,7 @@ import static org.junit.Assume.assumeTrue;
  * add-on, {@code ASKAI_LIVE_BING_QUIET_MS=n} reads nothing from the page for n ms after the navigation,
  * {@code ASKAI_LIVE_BING_DIAG=1} prints the page-world probes after the capture, {@code ASKAI_LIVE_BING_SCROLL=n}
  * turns the real mouse wheel n times (300 px each, human pauses) before the capture, to see whether Bing loads more
- * result blocks while scrolling.</p>
+ * result blocks while scrolling, {@code ASKAI_LIVE_BING_PROFILE=key} uses a persistent chat profile.</p>
  */
 public class CamoufoxBingSearchLiveTest {
 
@@ -102,7 +102,9 @@ public class CamoufoxBingSearchLiveTest {
             System.setProperty(Playwright4jDriver.ADDON_PROPERTY, "false");
         }
         long quietMillis = Long.parseLong(System.getenv().getOrDefault("ASKAI_LIVE_BING_QUIET_MS", "0"));
-        driver = Playwright4jDriver.launch(CamoufoxProvisioning.CHANNEL, headless, 60_000, null, null,
+        // ASKAI_LIVE_BING_PROFILE=<key>: a persistent chat profile (cookies survive between runs), as in the app.
+        String profileKey = System.getenv("ASKAI_LIVE_BING_PROFILE");
+        driver = Playwright4jDriver.launch(CamoufoxProvisioning.CHANNEL, headless, 60_000, profileKey, null,
                 settings.consent, settings.captcha);
         driver.setRenderedCapture(new RenderedPageDocumentCapture(settings.analysis));
 
