@@ -152,7 +152,7 @@ public final class LegacyBrowserSearchDefaults {
                 0.85,   // fullPageAreaRatio
                 600,    // textLengthSaturationCharacters
                 40,     // maximumContainerDomDepth
-                600,    // maximumCapturedContainers
+                1_200,  // maximumCapturedContainers: Bing page 1 hit the old 600 before its result list ended
                 50,     // maximumLinksPerContainer
                 3,      // maximumStructureSignatureDepth
                 DEFAULT_CAPTURE_RETRIES,       // maximumCaptureRetries

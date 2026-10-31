@@ -47,6 +47,28 @@ public class SearchPageMechanicalAnalyzerTest {
     }
 
     @Test
+    public void theBodyRootIsNeverOfferedAsAResultRegion() {
+        // The real capture aggregates the whole page into <body>. The decision validator refuses the
+        // root as FULL_PAGE_SELECTION, so offering it let a small model pick it on every repair
+        // attempt (live: three times container-0001 on Bing, then EXTRACTION_FAILED).
+        SerpDocuments serp = SerpDocuments.builder().withAggregatingBody();
+        serp.addNavigationBar(8);
+        serp.addPlainContainer("div", "", Collections.<String>emptyList(),
+                Collections.<String>emptyList(), new RenderedBox(300, 120, 680, 900),
+                900, 300, 12, 0, 12);
+        RenderedPageDocument document = serp.build();
+        assertTrue("fixture: the body really carries links and text",
+                document.container("container-0001").linkCount > 0);
+
+        SearchPageLayoutResolution resolution = analyzer.analyze(document);
+        for (HeuristicScoreBreakdown candidate : resolution.scoredCandidates) {
+            assertFalse("the root must not be a candidate",
+                    "container-0001".equals(candidate.containerId));
+        }
+        assertFalse("container-0001".equals(resolution.organicResultsContainerId));
+    }
+
+    @Test
     public void leftAlignedResultListBeatsTheCenterPrior() {
         SerpDocuments serp = SerpDocuments.builder();
         serp.addNavigationBar(8);

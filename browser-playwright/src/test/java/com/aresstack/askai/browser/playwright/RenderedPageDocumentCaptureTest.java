@@ -129,6 +129,48 @@ public class RenderedPageDocumentCaptureTest {
         assertTrue(document.captureWarnings.isEmpty());
     }
 
+    @Test
+    public void theCaptureSummaryCountsWhatTheAnalysisCanUseAndTheDumpWritesBothFiles()
+            throws Exception {
+        FakeRunner page = new FakeRunner("https://www.bing.com/search?q=x", "SERP",
+                Arrays.asList("f1", "f1"));
+        page.result = result(
+                Arrays.asList(container("container-0001", "", 0, "body", "s"),
+                        container("container-0002", "container-0001", 0, "li", "r")),
+                Arrays.asList(
+                        link("link-0001", "container-0002",
+                                "https://www.bing.com/ck/a?!&&p=x&u=a1aHR0cHM6Ly9leGFtcGxlLm9yZy9h&ntb=1"),
+                        link("link-0002", "container-0002", "https://www.bing.com/images/search")));
+        RenderedPageDocument document = capture.capture(page,
+                new PublicSuffixDomainKeyResolver(), 3L);
+
+        String summary = SerpCaptureDiagnostics.summary(document);
+        assertTrue(summary, summary.contains("containers=2"));
+        assertTrue(summary, summary.contains("links=2"));
+        assertTrue("only the resolved external target counts: " + summary,
+                summary.contains("visibleExternalLinks=1"));
+        assertTrue(summary, summary.contains("truncated=false"));
+
+        java.nio.file.Path directory = java.nio.file.Files.createTempDirectory("serp-dump");
+        java.nio.file.Path html = SerpCaptureDiagnostics.dump(directory, document,
+                "<!doctype html><html><body>x</body></html>");
+        assertTrue(java.nio.file.Files.exists(html));
+        String json = new String(java.nio.file.Files.readAllBytes(directory.resolve(
+                html.getFileName().toString().replace(".html", ".capture.json"))), "UTF-8");
+        assertTrue(json, json.contains("https://example.org/a"));
+    }
+
+    @Test
+    public void theDumpedHtmlLosesScriptsNoscriptAndIframesButKeepsTheResults() {
+        String html = SerpCaptureDiagnostics.sanitizedHtml("<html><head><script>var IG='session';</script>"
+                + "<SCRIPT src=\"a.js\"></SCRIPT></head><body><noscript><img src=x></noscript>"
+                + "<ol id=\"b_results\"><li class=\"b_algo\"><h2><a href=\"https://de.wikipedia.org/\">K</a></h2>"
+                + "</li></ol><iframe src=\"ad\"></iframe><script\ntype=\"module\">\nx()\n</script ></body></html>");
+        assertEquals("<html><head></head><body><ol id=\"b_results\"><li class=\"b_algo\"><h2>"
+                + "<a href=\"https://de.wikipedia.org/\">K</a></h2></li></ol></body></html>", html);
+        assertEquals("", SerpCaptureDiagnostics.sanitizedHtml(null));
+    }
+
     // ------------------------------------------------------------------ fixture helpers
 
     private static Map<String, Object> result(List<Map<String, Object>> containers,

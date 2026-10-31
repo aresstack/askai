@@ -91,8 +91,11 @@ public final class WebSearchLayoutRepairService {
                 document.documentFingerprint == null ? "" : document.documentFingerprint.value,
                 layoutFingerprint, artifact, diagnostics, nowEpochMillis, entry.expiresAtEpochMillis);
         List<SearchLayoutRepairRequest> requests = Collections.singletonList(request);
+        // The link harvest of this page travels along as the FALLBACK: if every repair fails, the
+        // page's external links are still better than ending a search whose results a human could
+        // read as "technically failed". The repair keeps priority — it yields real result blocks.
         return prepared(WebSearchPreparationStatus.REPAIR_REQUIRED,
-                Collections.<SearchResultCandidate>emptyList(), requests, extraction.diagnostics);
+                attributed(extraction.candidates, engineHost), requests, extraction.diagnostics);
     }
 
     /** Attribute every hit of one page to the engine it came from — provenance, not decoration. */
@@ -212,6 +215,8 @@ public final class WebSearchLayoutRepairService {
         List<String> diagnostics = new ArrayList<String>();
         List<SearchResultCandidate> merged = new ArrayList<SearchResultCandidate>();
         java.util.Set<String> seenTargets = new java.util.LinkedHashSet<String>();
+        List<SearchResultCandidate> fallback = new ArrayList<SearchResultCandidate>();
+        java.util.Set<String> seenFallbackTargets = new java.util.LinkedHashSet<String>();
         boolean sawNoResults = false;
         String firstDeliveringHost = null;
         for (PreparedWebSearchResult result : perEngine) {
@@ -238,6 +243,13 @@ public final class WebSearchLayoutRepairService {
                 continue;
             }
             repairs.addAll(result.repairRequests);
+            if (result.status == WebSearchPreparationStatus.REPAIR_REQUIRED) {
+                for (SearchResultCandidate candidate : result.candidates) {
+                    if (seenFallbackTargets.add(candidate.resolvedTargetUrl)) {
+                        fallback.add(candidate);
+                    }
+                }
+            }
             if (result.status == WebSearchPreparationStatus.NO_ORGANIC_RESULTS) {
                 sawNoResults = true;
             }
@@ -252,8 +264,9 @@ public final class WebSearchLayoutRepairService {
             return prepared(WebSearchPreparationStatus.ORGANIC_RESULTS, merged, repairs, diagnostics);
         }
         if (!repairs.isEmpty()) {
-            return prepared(WebSearchPreparationStatus.REPAIR_REQUIRED,
-                    Collections.<SearchResultCandidate>emptyList(), repairs, diagnostics);
+            // REPAIR_REQUIRED candidates are the harvested fallback, used only if every repair fails.
+            return prepared(WebSearchPreparationStatus.REPAIR_REQUIRED, fallback, repairs,
+                    diagnostics);
         }
         WebSearchPreparationStatus status = sawNoResults
                 ? WebSearchPreparationStatus.NO_ORGANIC_RESULTS : WebSearchPreparationStatus.FAILED;

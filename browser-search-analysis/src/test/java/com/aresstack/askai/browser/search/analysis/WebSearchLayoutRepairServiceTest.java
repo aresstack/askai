@@ -96,6 +96,39 @@ public class WebSearchLayoutRepairServiceTest {
     }
 
     @Test
+    public void aRepairRequiredPageCarriesItsHarvestedLinksAsTheFallback() {
+        // Live on Bing every repair attempt failed and the search ended "technically failed" although
+        // the page listed results: the harvest of the page had been thrown away with the repair ticket.
+        WebSearchLayoutRepairService service = service(lowConf);
+        PreparedWebSearchResult page =
+                service.prepareSingle(columnDocument(null), "q", "engine.example", 1000L);
+
+        assertEquals(WebSearchPreparationStatus.REPAIR_REQUIRED, page.status);
+        assertEquals(1, page.repairRequests.size());
+        assertEquals("the page's external links travel along", 3, page.candidates.size());
+        assertEquals("engine.example", page.candidates.get(0).engineHost);
+
+        PreparedWebSearchResult merged = WebSearchLayoutRepairService.merge(
+                Arrays.asList(page, service.prepareSingle(columnDocument(null), "q",
+                        "engine.example", 1000L)));
+        assertEquals(WebSearchPreparationStatus.REPAIR_REQUIRED, merged.status);
+        assertEquals(2, merged.repairRequests.size());
+        assertEquals("the fallback survives the merge, deduplicated by target",
+                3, merged.candidates.size());
+    }
+
+    @Test
+    public void aRepairRequiredPageWithoutHarvestCarriesNoCandidates() {
+        WebSearchLayoutRepairService service =
+                service(LayoutTestSupport.withoutLinkHarvest(lowConf));
+        PreparedWebSearchResult page =
+                service.prepareSingle(columnDocument(null), "q", "engine.example", 1000L);
+
+        assertEquals(WebSearchPreparationStatus.REPAIR_REQUIRED, page.status);
+        assertTrue(page.candidates.isEmpty());
+    }
+
+    @Test
     public void applyingAValidatedDecisionYieldsRealCandidatesAndConsumesTheAttempt() {
         WebSearchLayoutRepairService service = service(lowConf);
         String[] col = new String[1];
