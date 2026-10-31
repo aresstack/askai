@@ -73,6 +73,18 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * page (docs/research-browser-addon.md); null when the add-on is off or could not be prepared.
      */
     private AddonBridge addonBridge;
+    /**
+     * Camoufox with the add-on: where page reads run (the chat browser's {@link #addonBridge}, or the worker
+     * browser's bridge for a worker tab). Null = no add-on, reads fall back to {@code page.evaluate}.
+     */
+    private AddonBridge readBridge;
+    /**
+     * The add-on's stable key per page (main page, parked challenge page): it binds each key to exactly one tab, so
+     * a read never lands in another tab that shows the same URL. Unique per JVM, because worker tabs of several
+     * drivers share one worker bridge.
+     */
+    private final Map<Page, String> pageKeys = new java.util.IdentityHashMap<Page, String>();
+    private static final java.util.concurrent.atomic.AtomicLong PAGE_KEYS = new java.util.concurrent.atomic.AtomicLong();
     /** When the browser was started: the add-on gets {@link #ADDON_GRACE_MILLIS} before its absence is logged. */
     private long launchedMillis;
     private boolean addonConnectedLogged;
@@ -87,6 +99,11 @@ final class Playwright4jDriver implements PlaywrightDriver {
     static final String IN_PAGE_FALLBACK_PROPERTY = "askai.browser.hud.inPageFallback";
     /** How long a fresh browser's add-on may take to connect before its absence is logged. */
     static final long ADDON_GRACE_MILLIS = 15_000L;
+    /**
+     * How long one page read may take through the add-on. Covers a fresh browser whose add-on is still connecting
+     * (it fetches the queued read once it polls) and a full structured capture of a large page.
+     */
+    static final long PAGE_READ_TIMEOUT_MILLIS = 30_000L;
     /** How many popups the close-immediately policy handled — observable proof the event dispatched. */
     private final java.util.concurrent.atomic.AtomicInteger popupsClosed =
             new java.util.concurrent.atomic.AtomicInteger();
@@ -225,6 +242,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             if (bridge != null) {
                 bridge.deliverTo(driver.hudCommands);
                 driver.addonBridge = bridge;
+                driver.readBridge = bridge;
             }
             driver.launchedMillis = System.currentTimeMillis();
             page.onPopup(driver.popupCloser());
@@ -353,7 +371,8 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         try {
             final Page target = page;
-            return renderedCapture.capture(new RenderedPageDocumentCapture.PageScriptRunner() {
+            com.aresstack.askai.browser.render.RenderedPageDocument document =
+                    renderedCapture.capture(new RenderedPageDocumentCapture.PageScriptRunner() {
                 public Object evaluate(String script) {
                     return readPage(target, script);
                 }
@@ -366,17 +385,22 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     return target.title();
                 }
             }, domainKeys, snapshotGeneration);
+            System.err.println(SerpCaptureDiagnostics.summary(document));
+            java.nio.file.Path dumpDirectory = SerpCaptureDiagnostics.snapshotDirectory();
+            if (dumpDirectory != null) {
+                try {
+                    String html = SerpCaptureDiagnostics.sanitizedHtml(target.content());
+                    System.err.println("[serp-capture] snapshot written to " + SerpCaptureDiagnostics
+                            .dump(dumpDirectory, document, html));
+                } catch (java.io.IOException | PlaywrightException dumpFailed) {
+                    // Diagnostics only: a failed dump never fails the search.
+                    System.err.println("[serp-capture] snapshot dump failed: " + dumpFailed);
+                }
+            }
+            return document;
         } catch (PlaywrightException ex) {
             throw asBrowserException("Structured page capture failed", ex);
         }
-    }
-
-    /**
-     * The one place a page READ runs a script in the page; it passes the script gate, so script-free mode refuses it
-     * (issue #23 stage 2 moves these reads into the research add-on).
-     */
-    private Object readPage(Page target, String script) {
-        return pageScripts.evaluate(target, script, "page-read");
     }
 
     // ------------------------------------------------------------------ SERP guards
@@ -727,6 +751,14 @@ final class Playwright4jDriver implements PlaywrightDriver {
         };
     }
 
+    /**
+     * A worker tab: read its pages through the worker browser's add-on bridge (owned and closed by the worker
+     * browser), or null to keep {@code page.evaluate}.
+     */
+    void readThroughAddon(AddonBridge workerBridge) {
+        this.readBridge = workerBridge;
+    }
+
     /** The research add-on's bridge, or null (Chrome/Edge, add-on off or not prepared). */
     AddonBridge addonBridge() {
         return addonBridge;
@@ -994,6 +1026,44 @@ final class Playwright4jDriver implements PlaywrightDriver {
             }
         }
         return new PlaywrightPageState(url, title, text, anchors);
+    }
+
+    /**
+     * Every read-only page script goes through here. With the research add-on it runs in the tab's isolated
+     * content-script world (docs/research-browser-addon.md): the page's own scripts never see it, and no script of
+     * AskAI is evaluated in the page's world. Only a driver without the add-on (Chrome/Edge, add-on off or not
+     * prepared) still uses {@code page.evaluate}, through {@link PageScriptGate}. Failures surface as {@link PlaywrightException}, so every caller
+     * keeps its existing error handling. While waiting, the Playwright message loop keeps running (route
+     * interception, popups), exactly as during the idle pump.
+     */
+    private Object readPage(Page target, String script) {
+        AddonBridge reads = readBridge;
+        if (reads == null) {
+            // Without the add-on: the main-world fallback passes the script gate (refused in script-free mode).
+            return pageScripts.evaluate(target, script, "page-read");
+        }
+        String key = pageKeys.get(target);
+        if (key == null) {
+            key = "page-" + PAGE_KEYS.incrementAndGet();
+            pageKeys.put(target, key);
+        }
+        AddonBridge.PageRead read = reads.submitRead(key, target.url(), script);
+        try {
+            if (!read.isDone()) {
+                target.waitForCondition(read::isDone,
+                        new Page.WaitForConditionOptions().setTimeout(PAGE_READ_TIMEOUT_MILLIS));
+            }
+            return read.value();
+        } catch (com.microsoft.playwright.TimeoutError timedOut) {
+            throw new PlaywrightException("The research add-on did not answer the page read within "
+                    + (PAGE_READ_TIMEOUT_MILLIS / 1000L) + " s");
+        } catch (AddonBridge.PageReadFailed failed) {
+            throw new PlaywrightException(failed.getMessage());
+        } finally {
+            if (!read.isDone()) {
+                read.cancel();
+            }
+        }
     }
 
     private void requireOpen() throws BrowserException {

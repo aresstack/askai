@@ -127,6 +127,15 @@ final class RepairBridgeFixtures {
 
     /** Settings that force LOW_CONFIDENCE (impossible discriminating-family demand) with AI enabled. */
     static LegacyBrowserSearchSettings lowConfidenceAiEnabled() {
+        return lowConfidenceAiEnabled(true);
+    }
+
+    /** The same, with the link-harvest fallback switched off: a page with nothing to fall back to. */
+    static LegacyBrowserSearchSettings lowConfidenceAiEnabledWithoutHarvest() {
+        return lowConfidenceAiEnabled(false);
+    }
+
+    private static LegacyBrowserSearchSettings lowConfidenceAiEnabled(boolean harvest) {
         LegacyBrowserSearchSettings base = withAiEnabled(LegacyBrowserSearchDefaults.create());
         SearchPageAnalysisSettings a = base.analysis;
         SearchPageAnalysisSettings forced = new SearchPageAnalysisSettings(a.noResultsTexts,
@@ -140,7 +149,8 @@ final class RepairBridgeFixtures {
                 a.resultBlockSimilarityThreshold, 99, a.fullPageAreaRatio,
                 a.textLengthSaturationCharacters, a.maximumContainerDomDepth,
                 a.maximumCapturedContainers, a.maximumLinksPerContainer,
-                a.maximumStructureSignatureDepth, a.linkHarvestMinimumStructuredCandidates,
+                a.maximumStructureSignatureDepth,
+                harvest ? a.linkHarvestMinimumStructuredCandidates : 0,
                 a.linkHarvestMaximumCandidates, a.linkHarvestExcludedDomains);
         return new LegacyBrowserSearchSettings(base.navigation, base.consent, base.captcha,
                 base.readiness, forced, base.visualAnalysis, base.extraction, base.aiLayoutResolver,
