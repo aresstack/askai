@@ -145,6 +145,11 @@ public class SearchPageGuardsTest {
         // Review PR #33: the box of the WHOLE text node is not the phrase's box (a long node that starts on screen
         // and carries the phrase below the fold). Only a range over exactly the phrase's characters is measured.
         assertFalse("the whole text node must not be measured", script.contains("selectNodeContents"));
+        // Second review PR #33: innerText splits block elements with newlines ("verify\nyou are human"); the
+        // pre-filter must collapse whitespace or the spaced walk is never reached.
+        assertTrue(script.contains("const body = norm(bodyText)"));
+        assertTrue(script.contains("replace(/\\s+/g, ' ')"));
+        assertTrue(script.contains(".map(norm)"));
         assertTrue(script.contains("setStart(") && script.contains("setEnd(") && script.contains("getClientRects"));
     }
 

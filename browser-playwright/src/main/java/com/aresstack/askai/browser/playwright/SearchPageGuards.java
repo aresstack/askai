@@ -233,7 +233,11 @@ final class SearchPageGuards {
         sb.append("    } catch (e) { return false; }\n");
         sb.append("  };\n");
         sb.append("  const bodyText = document.body ? (document.body.innerText || '') : '';\n");
-        sb.append("  const body = bodyText.toLowerCase();\n");
+        // Whitespace is collapsed for the phrase pre-filter: innerText separates block elements with newlines
+        // ("verify\nyou are human"), so the raw text would miss a phrase split across blocks before the
+        // spaced/tight walk below ever runs. The configured phrases are normalised the same way.
+        sb.append("  const norm = (t) => String(t).toLowerCase().replace(/\\s+/g, ' ').trim();\n");
+        sb.append("  const body = norm(bodyText);\n");
         // A widget that merely protects an ordinary form (contact, newsletter, comments) on a page that is
         // readable OUTSIDE that form is 'embedded:' — reported, never blocking. A challenge page's own form
         // (#challenge-form, Google's #captcha-form, any form naming challenge/captcha) or a widget on a page
@@ -269,7 +273,7 @@ final class SearchPageGuards {
         // paragraph that starts on the first screen may carry the phrase far below it. The text is indexed twice
         // — spaced (a space between text nodes: words in separate blocks) and tight (inline-split words such as
         // <b>Best</b>ätigen, keeping the page's own whitespace nodes) — and a phrase matching either form counts.
-        sb.append("  const texts = ").append(jsArray(captcha.challengeTexts)).append(";\n");
+        sb.append("  const texts = ").append(jsArray(captcha.challengeTexts)).append(".map(norm).filter(t => t.length > 0);\n");
         sb.append("  const hits = texts.filter(t => body.includes(t));\n");
         sb.append("  if (hits.length > 0) {\n");
         sb.append("    try {\n");

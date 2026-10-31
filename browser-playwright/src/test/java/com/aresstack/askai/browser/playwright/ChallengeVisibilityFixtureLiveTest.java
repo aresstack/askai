@@ -37,7 +37,8 @@ import static org.junit.Assume.assumeTrue;
  *       carries a Friendly Captcha widget ("FriendlyCaptcha") was parked as a CAPTCHA. It must read as READABLE —
  *       with the current defaults AND for a user who keeps the bare word "captcha" in a custom list.</li>
  *   <li>Counter-checks that must still block: Bing "one last step", a Cloudflare Turnstile challenge, a phrase-only
- *       German challenge whose words are split by inline markup, a captcha in the page's own
+ *       German challenge whose words are split by inline markup, a phrase split across block
+ *       elements ({@code innerText} "verify\nyou are human"), a captcha in the page's own
  *       {@code #captcha-form} (Google /sorry/ shape), a captcha form with nothing readable besides it.</li>
  *   <li>Review PR #33: a challenge phrase at the END of one long text node that starts on the first screen is a
  *       hidden artifact (the phrase's own box decides, not the node's); a VISIBLE captcha in an ordinary contact
@@ -60,7 +61,7 @@ public class ChallengeVisibilityFixtureLiveTest {
 
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         for (String fixture : new String[]{"innoq-footer-friendly-captcha", "bing-one-last-step",
-                "cloudflare-turnstile", "text-only-de", "text-only-mixed-inline", "serp-about-captchas",
+                "cloudflare-turnstile", "text-only-de", "text-only-mixed-inline", "text-only-block-split", "serp-about-captchas",
                 "phrase-below-the-fold", "long-text-node-phrase-below", "contact-form-visible-captcha",
                 "google-sorry-captcha-form", "captcha-gate-form"}) {
             server.createContext("/" + fixture, page(resource("challenge/" + fixture + ".html")));
@@ -95,6 +96,11 @@ public class ChallengeVisibilityFixtureLiveTest {
                 assertTrue("whitespace between inline elements plus a split word must still block: "
                         + mixed.challengeMarker, mixed.challengeVisible
                         && mixed.challengeMarker.equals("visible:text:verify you are human"));
+
+                BrowserPageReadiness blockSplit = probe(session, base + "/text-only-block-split");
+                assertTrue("review #33 (2): a phrase split across block elements on the first screen must block: "
+                        + blockSplit.challengeMarker, blockSplit.challengeVisible
+                        && blockSplit.challengeMarker.equals("visible:text:verify you are human"));
 
                 BrowserPageReadiness belowFold = probe(session, base + "/phrase-below-the-fold");
                 assertFalse("a challenge phrase only below the fold must not block: " + belowFold.challengeMarker,
