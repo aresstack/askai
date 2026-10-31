@@ -634,14 +634,17 @@ final class Playwright4jDriver implements PlaywrightDriver {
     private final List<Page> searchTabs = new ArrayList<Page>();
     /** The page the driver worked on before the search tabs took over; restored by {@link #closeSearchTabs}. */
     private Page pageBeforeSearch;
-    /** Per page: how many top-level navigations started (protocol events only), to wait for the one Enter starts. */
+    /**
+     * Per page: how many top-level navigations were committed (protocol events only), to wait for the document that
+     * Enter or a "next" click loads: until it is committed, the old page's load state says nothing.
+     */
     private final Map<Page, int[]> navigationCounts = new java.util.IdentityHashMap<Page, int[]>();
     /** Per tab: where its pointer rests (BiDi keeps one input state per browsing context). */
     private final Map<Page, int[]> tabPointers = new java.util.IdentityHashMap<Page, int[]>();
     /** A search field is only measured, never waited for. */
     private static final double SEARCH_BOX_MEASURE_TIMEOUT_MILLIS = 1_500d;
-    /** How long the navigation that Enter (or a "next" click) starts may take to begin. */
-    private static final long SUBMIT_NAVIGATION_START_MILLIS = 5_000L;
+    /** How long the navigation that Enter (or a "next" click) starts may take to commit its new document. */
+    private static final long SUBMIT_NAVIGATION_START_MILLIS = 15_000L;
     /** DOMContentLoaded is enough to read; late resources get a bounded chance (Argos' settleLoad). */
     private static final double SETTLE_LOAD_MILLIS = 5_000d;
 
@@ -1064,21 +1067,17 @@ final class Playwright4jDriver implements PlaywrightDriver {
         return pointer;
     }
 
-    /** Counts a page's top-level navigation requests (protocol events only). Idempotent. */
+    /** Counts a page's committed top-level navigations (protocol events only). Idempotent. */
     private void watchNavigations(final Page target) {
         if (navigationCounts.containsKey(target)) {
             return;
         }
         final int[] count = new int[1];
         navigationCounts.put(target, count);
-        target.onRequest(new Consumer<com.microsoft.playwright.Request>() {
-            public void accept(com.microsoft.playwright.Request request) {
-                try {
-                    if (request.isNavigationRequest() && request.frame() == target.mainFrame()) {
-                        count[0]++;
-                    }
-                } catch (RuntimeException ignored) {
-                    // a request of a frame that is already gone
+        target.onFrameNavigated(new Consumer<com.microsoft.playwright.Frame>() {
+            public void accept(com.microsoft.playwright.Frame frame) {
+                if (frame == target.mainFrame()) {
+                    count[0]++;
                 }
             }
         });

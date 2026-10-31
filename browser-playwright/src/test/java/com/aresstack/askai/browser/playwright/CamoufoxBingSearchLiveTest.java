@@ -149,7 +149,10 @@ public class CamoufoxBingSearchLiveTest {
                 java.util.Collections.singletonList(bing.getSearchBoxSelectors()), query);
         System.err.println("[bing-live] typed: " + typed);
         assertEquals("the query was typed into Bing's field: " + typed, "submitted", typed.get(0));
-        System.err.println("[bing-live] result page: " + driver.useSearchTab(0).url);
+        String resultUrl = driver.useSearchTab(0).url;
+        System.err.println("[bing-live] result page: " + resultUrl);
+        assertTrue("the tab shows Bing's result page, not its start page: " + resultUrl,
+                resultUrl.contains("/search?"));
         if (quietMillis > 0) {
             // No page read at all until then (Argos' rule): only the Playwright message loop runs.
             driver.pumpEvents(() -> false, quietMillis);
