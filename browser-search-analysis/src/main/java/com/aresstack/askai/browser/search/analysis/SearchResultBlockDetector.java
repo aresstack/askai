@@ -131,9 +131,11 @@ public final class SearchResultBlockDetector {
     }
 
     /**
-     * The members of the result list: ads are never results, and when most of the cluster shares a
-     * class token, a member without it (an answer card or a promotion that merely looks like a
-     * result) is not part of the list either. Without such a shared class nothing is removed.
+     * The members of the result list: ads are never results. When most of the cluster shares a class
+     * token, a member without it is set aside only if its SHAPE is also an outlier: its mean
+     * similarity to the class majority lies below that of every majority member. A different class
+     * alone is no evidence — a "featured" variant of an ordinary result keeps its place; an answer
+     * card, built from a bare li/div skeleton, does not. Without a shared class nothing is removed.
      */
     private List<RenderedContainerDescriptor> listMembers(
             List<RenderedContainerDescriptor> cluster, List<String> reasons) {
@@ -149,17 +151,43 @@ public final class SearchResultBlockDetector {
         if (listClasses.isEmpty()) {
             return withoutAds;
         }
+        List<RenderedContainerDescriptor> majority = new ArrayList<RenderedContainerDescriptor>();
+        for (RenderedContainerDescriptor member : withoutAds) {
+            if (!Collections.disjoint(member.classTokens, listClasses)) {
+                majority.add(member);
+            }
+        }
+        double weakestMajorityFit = Double.MAX_VALUE;
+        for (RenderedContainerDescriptor member : majority) {
+            weakestMajorityFit = Math.min(weakestMajorityFit, meanSimilarity(member, majority));
+        }
         List<RenderedContainerDescriptor> members = new ArrayList<RenderedContainerDescriptor>();
         for (RenderedContainerDescriptor member : withoutAds) {
-            if (Collections.disjoint(member.classTokens, listClasses)) {
+            if (Collections.disjoint(member.classTokens, listClasses)
+                    && meanSimilarity(member, majority) < weakestMajorityFit) {
                 reasons.add(member.containerId + ": not part of the result list (class "
                         + member.classTokens + " lacks " + listClasses
-                        + " that the other results carry)");
+                        + " that the other results carry, and its shape is the least alike)");
             } else {
                 members.add(member);
             }
         }
         return members;
+    }
+
+    /** Mean structure similarity of {@code member} to the others in {@code group}. */
+    private static double meanSimilarity(RenderedContainerDescriptor member,
+                                         List<RenderedContainerDescriptor> group) {
+        double sum = 0;
+        int count = 0;
+        for (RenderedContainerDescriptor other : group) {
+            if (other != member) {
+                sum += DomStructureClusterer.similarity(member.structureSignature,
+                        other.structureSignature);
+                count++;
+            }
+        }
+        return count == 0 ? 1 : sum / count;
     }
 
     /**

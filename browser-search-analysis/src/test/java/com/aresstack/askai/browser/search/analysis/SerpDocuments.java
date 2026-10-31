@@ -72,6 +72,17 @@ final class SerpDocuments {
      * heading link to an external target and explanatory snippet text.
      */
     String addResultColumn(int blocks, RenderedBox columnBox, RenderedColor background) {
+        List<String> classes = new ArrayList<String>();
+        for (int i = 0; i < blocks; i++) {
+            classes.add("result");
+        }
+        return addResultColumn(columnBox, background, classes);
+    }
+
+    /** As {@link #addResultColumn(int, RenderedBox, RenderedColor)}, one block per class token given. */
+    String addResultColumn(RenderedBox columnBox, RenderedColor background,
+                           List<String> blockClasses) {
+        int blocks = blockClasses.size();
         String columnId = nextContainerId();
         bodyChildIds.add(columnId);
         List<String> blockIds = new ArrayList<String>();
@@ -82,7 +93,7 @@ final class SerpDocuments {
             blockIds.add(blockId);
             blockDescriptors.add(RenderedContainerDescriptor.builder(blockId)
                     .hierarchy(columnId, Collections.<String>emptyList(), i, 2)
-                    .semantics("li", "", Arrays.asList("result"), "", "",
+                    .semantics("li", "", Arrays.asList(blockClasses.get(i)), "", "",
                             Collections.<String>emptyList())
                     .text("Result " + i + " title Explanatory snippet text describing the target "
                                     + "page in one or two sentences.",

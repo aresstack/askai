@@ -61,6 +61,23 @@ public class SearchResultBlockDetectorTest {
     }
 
     @Test
+    public void aResultVariantWithAnotherClassButTheSameShapeStaysInTheList() {
+        // Issue #22 review: a class token shared by most results is no reason on its own to drop the
+        // others — six "normal" and four "featured" results of identical shape are ten results.
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
+                java.util.Arrays.asList("normal", "featured", "normal", "normal", "featured",
+                        "normal", "featured", "normal", "featured", "normal"));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 10, detection.blocks.size());
+        for (int i = 0; i < 10; i++) {
+            assertEquals("Result " + i + " title", detection.blocks.get(i).title);
+        }
+    }
+
+    @Test
     public void snippetBelongsToItsOwnBlockNotTheNeighbor() {
         SerpDocuments serp = SerpDocuments.builder();
         serp.addResultColumn(3, new RenderedBox(300, 120, 680, 560), SerpDocuments.WHITE);
