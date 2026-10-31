@@ -129,9 +129,7 @@ public final class SearchPageMechanicalAnalyzer {
                 || containsToken(tokens, "pager")) {
             return SearchPageRegionClassification.PAGINATION;
         }
-        if (containsToken(tokens, "ad") || containsToken(tokens, "ads")
-                || containsToken(tokens, "advert") || containsToken(tokens, "sponsored")
-                || containsToken(tokens, "sponsor")) {
+        if (namedAsAdvertisement(tokens)) {
             return SearchPageRegionClassification.ADVERTISEMENT;
         }
         if (containsToken(tokens, "filter") || containsToken(tokens, "filters")
@@ -139,6 +137,17 @@ public final class SearchPageMechanicalAnalyzer {
             return SearchPageRegionClassification.FILTERS;
         }
         return SearchPageRegionClassification.UNKNOWN;
+    }
+
+    /** An element whose id, class or role names it an ad ("ad", "ads", "advert", "sponsor(ed)"). */
+    static boolean namedAsAdvertisement(RenderedContainerDescriptor c) {
+        return namedAsAdvertisement(nameTokens(c));
+    }
+
+    private static boolean namedAsAdvertisement(String tokens) {
+        return containsToken(tokens, "ad") || containsToken(tokens, "ads")
+                || containsToken(tokens, "advert") || containsToken(tokens, "sponsored")
+                || containsToken(tokens, "sponsor");
     }
 
     private static String nameTokens(RenderedContainerDescriptor c) {

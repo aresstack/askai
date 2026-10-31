@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Detects the repeated RESULT BLOCKS inside the chosen ORGANIC_RESULTS container: descend through
@@ -23,6 +24,11 @@ import java.util.Set;
  * largest cluster of at least the configured repetition count, then resolve each block's primary
  * title link, snippet and sitelinks. A single anchor is never a result; blocks without a
  * qualifying primary link are rejected with a reason (diagnostics).
+ * <p>
+ * Inside the chosen cluster only the members of the list count: an element named as an ad, and an
+ * element that lacks the class every other result of the list carries (Bing's AI answer cards
+ * {@code li.b_ans} between ten {@code li.b_algo}), is set aside with a reason. Structure alone does
+ * not separate them — an answer card is built from the same {@code li}/{@code div} skeleton.
  */
 public final class SearchResultBlockDetector {
 
@@ -101,8 +107,88 @@ public final class SearchResultBlockDetector {
             return new Detection(Collections.<DetectedResultBlock>emptyList(), reasons);
         }
 
-        return new Detection(buildBlocks(document, resultCluster, resultCluster.size(), reasons),
+        reportSetAsideClusters(clusters, resultCluster, reasons);
+        List<RenderedContainerDescriptor> resultBlocks = listMembers(resultCluster, reasons);
+        return new Detection(buildBlocks(document, resultBlocks, resultBlocks.size(), reasons),
                 reasons);
+    }
+
+    /**
+     * A second repeated shape next to the chosen list is worth a line in the diagnostics: when a list
+     * of results is ever split again, the log says so instead of silently showing fewer results.
+     */
+    private void reportSetAsideClusters(List<List<RenderedContainerDescriptor>> clusters,
+                                        List<RenderedContainerDescriptor> resultCluster,
+                                        List<String> reasons) {
+        for (List<RenderedContainerDescriptor> cluster : clusters) {
+            if (cluster != resultCluster
+                    && cluster.size() >= settings.analysis.minimumRepeatedSiblingCount) {
+                reasons.add("set aside a second repeated block shape of " + cluster.size()
+                        + " siblings starting at " + cluster.get(0).containerId
+                        + " (the result list is the larger one of " + resultCluster.size() + ")");
+            }
+        }
+    }
+
+    /**
+     * The members of the result list: ads are never results, and when most of the cluster shares a
+     * class token, a member without it (an answer card or a promotion that merely looks like a
+     * result) is not part of the list either. Without such a shared class nothing is removed.
+     */
+    private List<RenderedContainerDescriptor> listMembers(
+            List<RenderedContainerDescriptor> cluster, List<String> reasons) {
+        List<RenderedContainerDescriptor> withoutAds = new ArrayList<RenderedContainerDescriptor>();
+        for (RenderedContainerDescriptor member : cluster) {
+            if (SearchPageMechanicalAnalyzer.namedAsAdvertisement(member)) {
+                reasons.add(member.containerId + ": advertisement, not an organic result");
+            } else {
+                withoutAds.add(member);
+            }
+        }
+        Set<String> listClasses = sharedClassTokens(withoutAds);
+        if (listClasses.isEmpty()) {
+            return withoutAds;
+        }
+        List<RenderedContainerDescriptor> members = new ArrayList<RenderedContainerDescriptor>();
+        for (RenderedContainerDescriptor member : withoutAds) {
+            if (Collections.disjoint(member.classTokens, listClasses)) {
+                reasons.add(member.containerId + ": not part of the result list (class "
+                        + member.classTokens + " lacks " + listClasses
+                        + " that the other results carry)");
+            } else {
+                members.add(member);
+            }
+        }
+        return members;
+    }
+
+    /**
+     * The most frequent class token(s) of the cluster, provided they mark a clear majority that is
+     * itself a repeated list — otherwise none, and the cluster stays as it is.
+     */
+    private Set<String> sharedClassTokens(List<RenderedContainerDescriptor> members) {
+        Map<String, Integer> counts = new HashMap<String, Integer>();
+        for (RenderedContainerDescriptor member : members) {
+            for (String token : new HashSet<String>(member.classTokens)) {
+                Integer count = counts.get(token);
+                counts.put(token, count == null ? 1 : count + 1);
+            }
+        }
+        int top = 0;
+        for (int count : counts.values()) {
+            top = Math.max(top, count);
+        }
+        Set<String> shared = new TreeSet<String>();
+        if (top == members.size() || top * 2 <= members.size()
+                || top < settings.analysis.minimumRepeatedSiblingCount) {
+            return shared;
+        }
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            if (entry.getValue() == top) {
+                shared.add(entry.getKey());
+            }
+        }
+        return shared;
     }
 
     /**
