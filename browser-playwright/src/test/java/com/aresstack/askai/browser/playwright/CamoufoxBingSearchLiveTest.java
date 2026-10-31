@@ -31,7 +31,9 @@ import static org.junit.Assume.assumeTrue;
  * :browser-playwright:test --tests '*CamoufoxBingSearchLiveTest'}; {@code ASKAI_LIVE_BING_QUERY} changes the query,
  * {@code ASKAI_LIVE_CAMOUFOX_HEADED=1} shows the browser, {@code ASKAI_LIVE_BING_ADDON=0} starts without the research
  * add-on, {@code ASKAI_LIVE_BING_QUIET_MS=n} reads nothing from the page for n ms after the navigation,
- * {@code ASKAI_LIVE_BING_DIAG=1} prints the page-world probes after the capture.</p>
+ * {@code ASKAI_LIVE_BING_DIAG=1} prints the page-world probes after the capture, {@code ASKAI_LIVE_BING_SCROLL=n}
+ * turns the real mouse wheel n times (300 px each, human pauses) before the capture, to see whether Bing loads more
+ * result blocks while scrolling.</p>
  */
 public class CamoufoxBingSearchLiveTest {
 
@@ -109,9 +111,20 @@ public class CamoufoxBingSearchLiveTest {
             // No page read at all until then (Argos' rule): only the Playwright message loop runs.
             driver.pumpEvents(() -> false, quietMillis);
         }
+        int wheelTurns = Integer.parseInt(System.getenv().getOrDefault("ASKAI_LIVE_BING_SCROLL", "0"));
+        if (wheelTurns > 0) {
+            // Real wheel input (WebDriver BiDi input actions), no page script: the pointer rests inside the window.
+            com.microsoft.playwright.Page target = page();
+            target.mouse().move(300, 300);
+            for (int turn = 0; turn < wheelTurns; turn++) {
+                target.mouse().wheel(0, 300);
+                driver.pumpEvents(() -> false, 350L + (turn % 3) * 120L);
+            }
+            driver.pumpEvents(() -> false, 1500L);
+        }
         boolean diagnostics = "1".equals(System.getenv("ASKAI_LIVE_BING_DIAG"));
         System.err.println("[bing-live] addon=" + (driver.addonBridge() != null) + " quietMs=" + quietMillis
-                + " diag=" + diagnostics);
+                + " wheelTurns=" + wheelTurns + " diag=" + diagnostics);
         RenderedPageDocument document = driver.captureRenderedPage(new PublicSuffixDomainKeyResolver(), 1L);
 
         int blocks = 0;
