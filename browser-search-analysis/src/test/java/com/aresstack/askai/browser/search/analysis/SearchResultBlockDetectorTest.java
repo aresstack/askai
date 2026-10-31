@@ -5,6 +5,7 @@ import com.aresstack.askai.browser.render.LinkRedirectResolution;
 import com.aresstack.askai.browser.render.RenderedBox;
 import com.aresstack.askai.browser.render.RenderedPageDocument;
 import com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults;
+import com.aresstack.askai.browser.render.DomStructureSignature;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -75,6 +76,61 @@ public class SearchResultBlockDetectorTest {
         for (int i = 0; i < 10; i++) {
             assertEquals("Result " + i + " title", detection.blocks.get(i).title);
         }
+    }
+
+    @Test
+    public void aResultVariantWithAnotherClassAndASmallExtraElementStaysInTheList() {
+        // Issue #22, second review: the majority shares one class and one identical shape; one
+        // legitimate result carries another class AND an extra source line. Its shape is not the
+        // majority's, but it reaches the cluster threshold against every one of them, so it stays.
+        String plain = "li(h2(a),p)";
+        String withSource = "li(h2(a),p,cite)";
+        DomStructureSignature a = new DomStructureSignature(plain);
+        DomStructureSignature b = new DomStructureSignature(withSource);
+        double threshold = LegacyBrowserSearchDefaults.create().analysis.resultBlockSimilarityThreshold;
+        double similarity = DomStructureClusterer.similarity(a, b);
+        assertTrue("the variant differs from the majority (" + similarity + ")", similarity < 1);
+        assertTrue("but stays above the threshold (" + similarity + ")", similarity >= threshold);
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
+                java.util.Arrays.asList("result", "result", "result", "result", "result-with-source",
+                        "result", "result"),
+                java.util.Arrays.asList(plain, plain, plain, plain, withSource, plain, plain));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 7, detection.blocks.size());
+        for (int i = 0; i < 7; i++) {
+            assertEquals("Result " + i + " title", detection.blocks.get(i).title);
+            assertEquals(i + 1, detection.blocks.get(i).rank);
+        }
+    }
+
+    @Test
+    public void aMemberWithoutTheListClassBelowTheThresholdAgainstOneResultIsSetAside() {
+        // The counterpart, shaped like Bing's answer cards: close to some results, but below the
+        // threshold against the least alike one. It is set aside, the results stay in order.
+        String result = "li(h2(a),p)";
+        String withSitelinks = "li(h2(a),p,ul(li,li))";
+        String card = "li(div(h2(a),div,div),p)";
+        double threshold = LegacyBrowserSearchDefaults.create().analysis.resultBlockSimilarityThreshold;
+        assertTrue(DomStructureClusterer.similarity(new DomStructureSignature(card),
+                new DomStructureSignature(result)) >= threshold);
+        assertTrue(DomStructureClusterer.similarity(new DomStructureSignature(card),
+                new DomStructureSignature(withSitelinks)) < threshold);
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
+                java.util.Arrays.asList("answer", "result", "result", "result", "result", "result"),
+                java.util.Arrays.asList(card, result, withSitelinks, result, result, result));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 5, detection.blocks.size());
+        for (int i = 0; i < 5; i++) {
+            assertEquals("Result " + (i + 1) + " title", detection.blocks.get(i).title);
+        }
+        assertTrue(detection.rejectionReasons.toString(),
+                detection.rejectionReasons.toString().contains("below the threshold"));
     }
 
     @Test

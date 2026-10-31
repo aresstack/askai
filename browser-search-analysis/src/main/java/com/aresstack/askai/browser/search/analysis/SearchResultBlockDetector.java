@@ -175,17 +175,22 @@ public final class SearchResultBlockDetector {
                 majority.add(member);
             }
         }
-        double weakestMajorityFit = Double.MAX_VALUE;
-        for (RenderedContainerDescriptor member : majority) {
-            weakestMajorityFit = Math.min(weakestMajorityFit, meanSimilarity(member, majority));
-        }
+        // The configured cluster threshold, not exactness: a member without the list's class stays a result as
+        // long as its shape reaches the threshold against EVERY result that carries the class (a variant with an
+        // extra source line, say). It is set aside only when it falls below the threshold against at least one
+        // of them: Bing's answer cards reach the threshold against the closest results only (0.54-0.59 against
+        // the least alike), the results among themselves stay at 0.80 or more.
+        double threshold = settings.analysis.resultBlockSimilarityThreshold;
         List<RenderedContainerDescriptor> members = new ArrayList<RenderedContainerDescriptor>();
         for (RenderedContainerDescriptor member : withoutAds) {
-            if (Collections.disjoint(member.classTokens, listClasses)
-                    && meanSimilarity(member, majority) < weakestMajorityFit) {
+            double leastAlike = Collections.disjoint(member.classTokens, listClasses)
+                    ? leastSimilarity(member, majority) : 1;
+            if (leastAlike < threshold) {
                 reasons.add(member.containerId + ": not part of the result list (class "
                         + member.classTokens + " lacks " + listClasses
-                        + " that the other results carry, and its shape is the least alike)");
+                        + " that the other results carry, and its shape reaches only "
+                        + String.format(java.util.Locale.ROOT, "%.2f", leastAlike)
+                        + " against one of them, below the threshold " + threshold + ")");
             } else {
                 members.add(member);
             }
@@ -193,19 +198,17 @@ public final class SearchResultBlockDetector {
         return members;
     }
 
-    /** Mean structure similarity of {@code member} to the others in {@code group}. */
-    private static double meanSimilarity(RenderedContainerDescriptor member,
-                                         List<RenderedContainerDescriptor> group) {
-        double sum = 0;
-        int count = 0;
+    /** The lowest structure similarity of {@code member} to any other member of {@code group}. */
+    private static double leastSimilarity(RenderedContainerDescriptor member,
+                                          List<RenderedContainerDescriptor> group) {
+        double least = 1;
         for (RenderedContainerDescriptor other : group) {
             if (other != member) {
-                sum += DomStructureClusterer.similarity(member.structureSignature,
-                        other.structureSignature);
-                count++;
+                least = Math.min(least, DomStructureClusterer.similarity(member.structureSignature,
+                        other.structureSignature));
             }
         }
-        return count == 0 ? 1 : sum / count;
+        return least;
     }
 
     /**
