@@ -151,6 +151,158 @@ public class SearchTabsFixtureLiveTest {
         driver.closeSearchTabs();
     }
 
+    /** A plain start page: a form whose Enter asks {@code /<engine>/results}; {@code script} runs in it. */
+    private static String plainStartPage(String engine, String script) {
+        return "<!doctype html><html><head><title>" + engine + " start</title></head><body>"
+                + "<form action='/" + engine + "/results' method='get'>"
+                + "<input name='q' id='q' style='width:400px;font-size:18px' autocomplete='off'></form>"
+                + "<script>" + script + "</script></body></html>";
+    }
+
+    /** A test server whose engines each answer on a thread of their own, so a stalling engine stalls no other. */
+    private HttpServer threadedServer() throws IOException {
+        HttpServer threaded = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        threaded.setExecutor(Executors.newCachedThreadPool(task -> {
+            Thread thread = new Thread(task, "fixture-engine");
+            thread.setDaemon(true);
+            return thread;
+        }));
+        return threaded;
+    }
+
+    /**
+     * Review of #28, second round (A): the result pages are waited for side by side against one deadline. Two
+     * engines answer Enter with a page that starts (commits) but never finishes; before, each one got the whole
+     * timeout in turn, so they added up. Now the search returns one budget after Enter, the fast engine's result is
+     * there, and only the two hanging engines report their result page as not loaded.
+     */
+    @Test
+    public void hangingResultPagesDoNotAddUpTheirWaits() throws Exception {
+        String channel = gatedChannel();
+        final int budgetMillis = 5_000;
+        final Map<String, Long> asked = new ConcurrentHashMap<String, Long>();
+        server = threadedServer();
+        final List<String> engines = Arrays.asList("hangs", "hangs-too", "fast");
+        for (final String engine : engines) {
+            server.createContext("/" + engine + "/", exchange -> {
+                if (!exchange.getRequestURI().getPath().endsWith("/results")) {
+                    respond(exchange, plainStartPage(engine, ""));
+                    return;
+                }
+                asked.put(engine, System.currentTimeMillis());
+                if ("fast".equals(engine)) {
+                    respond(exchange, "<!doctype html><html><body><p>RESULTS[fast]</p></body></html>");
+                    return;
+                }
+                // Commits (headers and the first bytes arrive), but the document never ends within the budget.
+                exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+                exchange.sendResponseHeaders(200, 0);
+                OutputStream out = exchange.getResponseBody();
+                out.write("<!doctype html><html><body><p>RESULTS[".getBytes(StandardCharsets.UTF_8));
+                out.write(new byte[2048]);
+                out.flush();
+                try {
+                    Thread.sleep(budgetMillis * 3L);
+                } catch (InterruptedException stopped) {
+                    Thread.currentThread().interrupt();
+                }
+                out.close();
+            });
+        }
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        LegacyBrowserSearchSettings settings = LegacyBrowserSearchDefaults.create();
+        driver = Playwright4jDriver.launch(channel, !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED")),
+                budgetMillis, null, null, settings.consent, settings.captcha);
+        driver.open(base + "/fast/front");
+        List<String> homes = new ArrayList<String>();
+        List<List<String>> fields = new ArrayList<List<String>>();
+        for (String engine : engines) {
+            homes.add(base + "/" + engine + "/");
+            fields.add(Arrays.asList("input[name=q]"));
+        }
+        assertEquals(Arrays.asList(null, null, null), driver.openSearchTabs(homes));
+
+        List<String> typed = driver.submitSearchInTabs(fields, "hase");
+        long returned = System.currentTimeMillis();
+        long lastEnter = Collections.max(asked.values());
+        System.err.println("[search-tabs] hanging result pages: " + typed + ", returned " + (returned - lastEnter)
+                + " ms after the last Enter");
+
+        assertTrue("the first hanging engine reports its result page: " + typed, typed.get(0).startsWith("refused:"));
+        assertTrue("the second hanging engine reports its result page: " + typed, typed.get(1).startsWith("refused:"));
+        assertEquals("the fast engine is not held back: " + typed, "submitted", typed.get(2));
+        assertTrue("the fast engine's result page is read", driver.useSearchTab(2).text.contains("RESULTS[fast]"));
+        assertTrue("one budget for all result pages, not one per hanging engine: " + (returned - lastEnter) + " ms",
+                returned - lastEnter < budgetMillis + 2_500L);
+        driver.closeSearchTabs();
+    }
+
+    /**
+     * Review of #28, second round (B): the merged input timeline belongs to no single tab. The FIRST engine's tab
+     * closes itself on its first key; the other engines still get their whole query and Enter.
+     */
+    @Test
+    public void theFirstTabClosingDuringTheInputEndsOnlyItsOwnInput() throws Exception {
+        String channel = gatedChannel();
+        server = threadedServer();
+        final List<String> engines = Arrays.asList("closes", "two", "three");
+        for (final String engine : engines) {
+            server.createContext("/" + engine + "/", exchange -> {
+                String path = exchange.getRequestURI().getPath();
+                if (path.endsWith("/results")) {
+                    String raw = exchange.getRequestURI().getRawQuery();
+                    String q = raw == null ? "" : URLDecoder.decode(raw.substring(raw.indexOf('=') + 1), "UTF-8");
+                    respond(exchange, "<!doctype html><html><body><p>QUERY[" + q + "]</p></body></html>");
+                } else {
+                    respond(exchange, plainStartPage(engine, "closes".equals(engine)
+                            ? "document.getElementById('q').addEventListener('keydown',"
+                            + "()=>console.log('close-me'),{once:true});" : ""));
+                }
+            });
+        }
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        LegacyBrowserSearchSettings settings = LegacyBrowserSearchDefaults.create();
+        driver = Playwright4jDriver.launch(channel, !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED")),
+                30_000, null, null, settings.consent, settings.captcha);
+        driver.open(base + "/two/front");
+        List<String> homes = new ArrayList<String>();
+        List<List<String>> fields = new ArrayList<List<String>>();
+        for (String engine : engines) {
+            homes.add(base + "/" + engine + "/");
+            fields.add(Arrays.asList("input[name=q]"));
+        }
+        assertEquals(Arrays.asList(null, null, null), driver.openSearchTabs(homes));
+        // A script may not close a tab it did not open, so the test closes it: on the tab's first key, from inside
+        // the Playwright event dispatch that runs while the input timeline waits (the moment the user would).
+        java.lang.reflect.Field contextField = Playwright4jDriver.class.getDeclaredField("context");
+        contextField.setAccessible(true);
+        com.microsoft.playwright.BrowserContext context =
+                (com.microsoft.playwright.BrowserContext) contextField.get(driver);
+        for (final com.microsoft.playwright.Page tab : context.pages()) {
+            if (tab.url().contains("/closes/")) {
+                tab.onConsoleMessage(message -> {
+                    if ("close-me".equals(message.text())) {
+                        tab.close();
+                    }
+                });
+            }
+        }
+
+        List<String> typed = driver.submitSearchInTabs(fields, QUERY);
+        System.err.println("[search-tabs] first tab closed during the input: " + typed);
+
+        assertTrue("the closed tab reports its input as refused: " + typed, typed.get(0).startsWith("refused:"));
+        assertEquals("the other engines still got their input: " + typed, Arrays.asList("submitted", "submitted"),
+                typed.subList(1, 3));
+        for (int i = 1; i < 3; i++) {
+            String text = driver.useSearchTab(i).text;
+            assertTrue(engines.get(i) + " got the whole query: " + text, text.contains("QUERY[" + QUERY + "]"));
+        }
+        driver.closeSearchTabs();
+    }
+
     @Test
     public void allEngineTabsAreTypedIntoAtTheSameTimeWithRealInput() throws Exception {
         String channel = gatedChannel();

@@ -663,24 +663,25 @@ final class Playwright4jDriver implements PlaywrightDriver {
         pageBeforeSearch = page;
         // ONE budget for all engines (Argos' loadTabs): the start pages load side by side against the same deadline.
         long deadline = System.currentTimeMillis() + navigationTimeoutMillis;
-        List<StartPage> starts = new ArrayList<StartPage>();
+        List<PendingLoad> starts = new ArrayList<PendingLoad>();
         for (String url : homeUrls) {
-            StartPage start = new StartPage();
-            starts.add(start);
             Page tab;
             try {
                 tab = context.newPage(); // never brought to the front: which tab to watch stays the user's choice
             } catch (PlaywrightException failed) {
-                start.failure = "tab could not be opened: " + firstLine(failed);
+                PendingLoad none = new PendingLoad(null, 0);
+                none.failure = "tab could not be opened: " + firstLine(failed);
+                starts.add(none);
                 searchTabs.add(null); // keeps every later engine at its own index
                 continue;
             }
             searchTabs.add(tab);
-            start.tab = tab;
+            PendingLoad start = null;
             try {
                 tab.onPopup(popupCloser());
                 watchNavigations(tab);
-                start.navigationsBefore = navigationCounts.get(tab)[0];
+                start = new PendingLoad(tab, navigationCounts.get(tab)[0]);
+                starts.add(start);
                 // Only STARTED here: at most a short wait for the commit, so an engine that stalls before answering
                 // holds back no other start. On that timeout the navigation keeps running in the browser and is
                 // looked at below with the others.
@@ -691,93 +692,180 @@ final class Playwright4jDriver implements PlaywrightDriver {
             } catch (com.microsoft.playwright.TimeoutError stillLoading) {
                 // committed later; polled below
             } catch (PlaywrightException failed) {
+                if (start == null) {
+                    start = new PendingLoad(null, 0);
+                    starts.add(start);
+                }
                 start.failure = firstLine(failed); // this engine only; the others go on
             }
         }
-        awaitStartPages(starts, deadline);
+        String overBudget = "the start page did not load within the " + navigationTimeoutMillis
+                + " ms all engines share";
+        awaitLoads(starts, deadline, deadline, navigationCounter(), overBudget, overBudget, pauser());
         List<String> outcomes = new ArrayList<String>();
-        for (StartPage start : starts) {
+        for (PendingLoad start : starts) {
             outcomes.add(start.failure);
         }
         return outcomes;
     }
 
-    /** One engine's start page while it loads beside the others. */
-    private static final class StartPage {
-        Page tab;
-        int navigationsBefore;
+    /**
+     * One tab's page while it loads beside the others: an engine's start page, or the result page its Enter
+     * started. Package-private for the stand-in page tests of {@link #awaitLoads}.
+     */
+    static final class PendingLoad {
+        final Page tab;
+        /** The tab's committed top-level navigations before this load; one more means the new document is there. */
+        final int navigationsBefore;
         boolean committed;
         long domContentLoadedAt;
         boolean loaded;
         String failure;
+
+        PendingLoad(Page tab, int navigationsBefore) {
+            this.tab = tab;
+            this.navigationsBefore = navigationsBefore;
+        }
 
         boolean pending() {
             return failure == null && !loaded;
         }
     }
 
+    /** How a tab's committed navigations are counted ({@link #watchNavigations}: protocol events only). */
+    private java.util.function.ToIntFunction<Page> navigationCounter() {
+        return new java.util.function.ToIntFunction<Page>() {
+            public int applyAsInt(Page tab) {
+                int[] count = navigationCounts.get(tab);
+                return count == null ? 0 : count[0];
+            }
+        };
+    }
+
+    /** Pauses on a still open page: one of the pending tabs, else the page the search started from. */
+    private java.util.function.BiConsumer<List<Page>, Double> pauser() {
+        return new java.util.function.BiConsumer<List<Page>, Double>() {
+            public void accept(List<Page> pending, Double millis) {
+                List<Page> clocks = new ArrayList<Page>(pending);
+                if (pageBeforeSearch != null) {
+                    clocks.add(pageBeforeSearch);
+                }
+                pauseOn(clocks, millis.longValue());
+            }
+        };
+    }
+
     /**
-     * Polls every pending start page in turn until each has loaded or failed, or the shared deadline is over: commit
-     * (protocol event), DOMContentLoaded, then load or {@link #SETTLE_LOAD_MILLIS} after DOMContentLoaded. Every check
-     * is a short wait, so no engine waits for another engine's page; a failure ends only that engine's start.
+     * Waits {@code millis} on the first page of {@code clocks} that is still open, so the protocol events of every
+     * tab keep arriving meanwhile. A clock page that closes during the wait only hands the rest of the wait to the
+     * next open one; no single tab can end the wait for the others.
      */
-    private void awaitStartPages(List<StartPage> starts, long deadline) {
+    static void pauseOn(List<Page> clocks, long millis) {
+        long until = System.currentTimeMillis() + millis;
+        for (Page clock : clocks) {
+            long left = until - System.currentTimeMillis();
+            if (left <= 0) {
+                return;
+            }
+            if (clock == null || clock.isClosed()) {
+                continue;
+            }
+            try {
+                clock.waitForTimeout(left);
+                return;
+            } catch (PlaywrightException closedMeanwhile) {
+                if (!clock.isClosed()) {
+                    break; // not a closed tab: sit out the rest below instead of trying every page
+                }
+            }
+        }
+        sleepQuietly(until - System.currentTimeMillis());
+    }
+
+    private static void sleepQuietly(long millis) {
+        if (millis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Polls every pending load in turn until each has loaded or failed: commit (protocol event, until
+     * {@code commitDeadline}), DOMContentLoaded, then load or {@link #SETTLE_LOAD_MILLIS} after DOMContentLoaded (until
+     * {@code loadDeadline}; a page past DOMContentLoaded is read as it is then). Every check is a short wait, so no
+     * tab waits for another tab's page (no head-of-line blocking), and a failure (closed tab, browser error page,
+     * deadline over) ends only that tab's load. A closed tab is a failure at once, never polled on until a deadline.
+     */
+    static void awaitLoads(List<PendingLoad> loads, long commitDeadline, long loadDeadline,
+                           java.util.function.ToIntFunction<Page> navigations, String noCommit, String notLoaded,
+                           java.util.function.BiConsumer<List<Page>, Double> pause) {
         while (true) {
             boolean pending = false;
             boolean waited = false;
-            Page idle = null;
-            for (StartPage start : starts) {
-                if (!start.pending()) {
-                    continue;
-                }
-                long now = System.currentTimeMillis();
-                if (now > deadline) {
-                    start.failure = "the start page did not load within the " + navigationTimeoutMillis
-                            + " ms all engines share";
+            List<Page> uncommitted = new ArrayList<Page>();
+            for (PendingLoad load : loads) {
+                if (!load.pending()) {
                     continue;
                 }
                 try {
-                    if (!start.committed) {
-                        start.committed = navigationCounts.get(start.tab)[0] > start.navigationsBefore;
-                        if (!start.committed) {
-                            pending = true;
-                            idle = start.tab;
+                    if (load.tab.isClosed()) {
+                        load.failure = "the tab was closed";
+                        continue;
+                    }
+                    long now = System.currentTimeMillis();
+                    if (!load.committed) {
+                        load.committed = navigations.applyAsInt(load.tab) > load.navigationsBefore;
+                        if (!load.committed) {
+                            if (now > commitDeadline) {
+                                load.failure = noCommit;
+                            } else {
+                                pending = true;
+                                uncommitted.add(load.tab);
+                            }
                             continue;
                         }
                     }
-                    if (start.domContentLoadedAt == 0) {
+                    if (now > loadDeadline) {
+                        if (load.domContentLoadedAt > 0) {
+                            load.loaded = true; // read with the DOM that is there
+                        } else {
+                            load.failure = notLoaded;
+                        }
+                        continue;
+                    }
+                    if (load.domContentLoadedAt == 0) {
                         waited = true;
-                        if (!reached(start.tab, com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED)) {
+                        if (!reached(load.tab, com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED)) {
                             pending = true;
                             continue;
                         }
-                        start.domContentLoadedAt = System.currentTimeMillis();
-                        String committedUrl = start.tab.url();
+                        load.domContentLoadedAt = System.currentTimeMillis();
+                        String committedUrl = load.tab.url();
                         if (isBrowserErrorPage(committedUrl)) {
-                            start.failure = "the start page could not be loaded (" + committedUrl + ")";
+                            load.failure = "the page could not be loaded (" + committedUrl + ")";
                             continue;
                         }
                     }
                     waited = true;
-                    if (reached(start.tab, com.microsoft.playwright.options.LoadState.LOAD)
-                            || System.currentTimeMillis() - start.domContentLoadedAt > SETTLE_LOAD_MILLIS) {
-                        start.loaded = true;
+                    if (reached(load.tab, com.microsoft.playwright.options.LoadState.LOAD)
+                            || System.currentTimeMillis() - load.domContentLoadedAt > SETTLE_LOAD_MILLIS) {
+                        load.loaded = true;
                     } else {
                         pending = true;
                     }
                 } catch (PlaywrightException failed) {
-                    start.failure = firstLine(failed);
+                    load.failure = load.tab.isClosed() ? "the tab was closed" : firstLine(failed);
                 }
             }
             if (!pending) {
                 return;
             }
-            if (!waited && idle != null) {
-                try {
-                    idle.waitForTimeout(START_PAGE_POLL_MILLIS); // lets the protocol events of all tabs arrive
-                } catch (PlaywrightException closed) {
-                    // the next round reports the closed tab
-                }
+            if (!waited) {
+                pause.accept(uncommitted, START_PAGE_POLL_MILLIS); // lets the protocol events of all tabs arrive
             }
         }
     }
@@ -1071,7 +1159,6 @@ final class Playwright4jDriver implements PlaywrightDriver {
             }
         });
         long started = System.currentTimeMillis();
-        Page clock = plans.get(0).tab;
         for (Object[] entry : timeline) {
             TabTyping plan = (TabTyping) entry[1];
             if (plan.failure != null) {
@@ -1079,7 +1166,13 @@ final class Playwright4jDriver implements PlaywrightDriver {
             }
             long wait = (Long) entry[0] - (System.currentTimeMillis() - started);
             if (wait > 0) {
-                clock.waitForTimeout(wait); // keeps the Playwright message loop running meanwhile
+                // Any still open tab keeps the Playwright message loop running meanwhile: the timeline belongs to no
+                // single tab, so one tab closing during the input ends only that tab's input.
+                pauseOn(typingClocks(plans), wait);
+            }
+            if (plan.tab.isClosed()) {
+                plan.failure = "the tab was closed during the input";
+                continue;
             }
             try {
                 ((Runnable) entry[2]).run();
@@ -1092,6 +1185,20 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 }
             }
         }
+    }
+
+    /** The tabs still taking input, then the page the search started from. */
+    private List<Page> typingClocks(List<TabTyping> plans) {
+        List<Page> clocks = new ArrayList<Page>();
+        for (TabTyping plan : plans) {
+            if (plan.failure == null && !plan.tab.isClosed()) {
+                clocks.add(plan.tab);
+            }
+        }
+        if (pageBeforeSearch != null) {
+            clocks.add(pageBeforeSearch);
+        }
+        return clocks;
     }
 
     /** One named key or chord as real key input. */
@@ -1198,35 +1305,33 @@ final class Playwright4jDriver implements PlaywrightDriver {
         });
     }
 
-    /** After Enter in every typed tab: each tab's result page, waited for side by side. */
+    /**
+     * After Enter in every typed tab: each tab's result page, polled side by side against ONE deadline (the same
+     * polling as the start pages): a tab whose page hangs holds back no other tab's page, and the tabs do not add
+     * up their waits.
+     */
     private void awaitResultPages(List<TabTyping> plans) {
-        long deadline = System.currentTimeMillis() + SUBMIT_NAVIGATION_START_MILLIS;
+        long started = System.currentTimeMillis();
+        long loadDeadline = started + navigationTimeoutMillis;
+        long commitDeadline = Math.min(started + SUBMIT_NAVIGATION_START_MILLIS, loadDeadline);
+        List<PendingLoad> loads = new ArrayList<PendingLoad>();
+        List<TabTyping> waitedFor = new ArrayList<TabTyping>();
         for (TabTyping plan : plans) {
             if (plan.failure != null || plan.navigationsBeforeEnter < 0) {
                 continue;
             }
-            final int[] count = navigationCounts.get(plan.tab);
-            final int before = plan.navigationsBeforeEnter;
-            long left = deadline - System.currentTimeMillis();
-            try {
-                if (count[0] <= before) {
-                    plan.tab.waitForCondition(() -> count[0] > before,
-                            new Page.WaitForConditionOptions().setTimeout(Math.max(100L, left)));
-                }
-            } catch (PlaywrightException noNavigation) {
-                plan.failure = "Enter started no navigation (the engine did not take the query)";
-            }
+            loads.add(new PendingLoad(plan.tab, plan.navigationsBeforeEnter));
+            waitedFor.add(plan);
         }
-        for (TabTyping plan : plans) {
-            if (plan.failure != null) {
-                continue;
-            }
-            try {
-                plan.tab.waitForLoadState(com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED,
-                        new Page.WaitForLoadStateOptions().setTimeout(navigationTimeoutMillis));
-                settleLoad(plan.tab);
-            } catch (PlaywrightException slow) {
-                plan.failure = "the result page did not load: " + firstLine(slow);
+        awaitLoads(loads, commitDeadline, loadDeadline, navigationCounter(),
+                "Enter started no navigation (the engine did not take the query)",
+                "the result page did not load within the " + navigationTimeoutMillis + " ms all engines share",
+                pauser());
+        for (int i = 0; i < loads.size(); i++) {
+            String failure = loads.get(i).failure;
+            if (failure != null) {
+                waitedFor.get(i).failure = failure.startsWith("Enter started") || failure.startsWith("the result page")
+                        ? failure : "the result page did not load: " + failure;
             }
         }
     }
