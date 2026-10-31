@@ -52,11 +52,13 @@ final class EngineRedirectLookup {
         }
         long deadline = System.currentTimeMillis() + totalTimeoutMillis;
         Map<String, String> answers = new LinkedHashMap<String, String>();
+        Map<String, Integer> outcomes = new java.util.TreeMap<String, Integer>();
         for (Map.Entry<String, CompletableFuture<HttpResponse<Void>>> entry : pending.entrySet()) {
             long left = deadline - System.currentTimeMillis();
             try {
                 HttpResponse<Void> response = entry.getValue().get(Math.max(0L, left), TimeUnit.MILLISECONDS);
                 int status = response.statusCode();
+                outcomes.merge(String.valueOf(status), 1, Integer::sum);
                 if (status >= 300 && status < 400) {
                     response.headers().firstValue("location").ifPresent(location -> answers.put(entry.getKey(), location));
                 }
@@ -64,8 +66,13 @@ final class EngineRedirectLookup {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception unanswered) {
+                Throwable cause = unanswered.getCause() == null ? unanswered : unanswered.getCause();
+                outcomes.merge(cause.getClass().getSimpleName(), 1, Integer::sum);
                 entry.getValue().cancel(true); // late, refused or failed: this wrapper stays unresolved
             }
+        }
+        if (!pending.isEmpty()) {
+            System.err.println("[serp-capture] redirect lookups " + pending.size() + " answered " + outcomes);
         }
         for (CompletableFuture<HttpResponse<Void>> request : pending.values()) {
             request.cancel(true);
