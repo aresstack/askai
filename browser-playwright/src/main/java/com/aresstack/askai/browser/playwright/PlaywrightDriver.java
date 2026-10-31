@@ -55,8 +55,9 @@ interface PlaywrightDriver extends AutoCloseable {
 
     /**
      * @return the challenge marker that matched on the CURRENT page: {@code "visible:<selector>"} /
-     * {@code "visible:text:<text>"} for a blocking challenge, {@code "hidden:<selector>"} for a present-but-
-     * invisible artifact (not blocking), or {@code "none"}. A richer form of {@link #challengePresent}.
+     * {@code "visible:text:<text>"} for a blocking challenge, {@code "embedded:<selector>"} for a visible widget
+     * inside an ordinary form of a readable page (not blocking), {@code "hidden:<selector>"} /
+     * {@code "hidden:text:<text>"} for a present-but-invisible artifact (not blocking), or {@code "none"}. A richer form of {@link #challengePresent}.
      */
     default String challengeMarker() {
         return challengePresent() ? "visible:?" : "none";

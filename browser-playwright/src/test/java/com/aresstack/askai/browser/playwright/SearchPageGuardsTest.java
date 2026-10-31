@@ -142,6 +142,22 @@ public class SearchPageGuardsTest {
                 script.indexOf("'hidden:text:'") > script.indexOf("'visible:text:'"));
         assertFalse("no blocking verdict straight from the whole body text",
                 script.contains("if (body.includes(t)) return 'visible:text:'"));
+        // Review PR #33: the box of the WHOLE text node is not the phrase's box (a long node that starts on screen
+        // and carries the phrase below the fold). Only a range over exactly the phrase's characters is measured.
+        assertFalse("the whole text node must not be measured", script.contains("selectNodeContents"));
+        assertTrue(script.contains("setStart(") && script.contains("setEnd(") && script.contains("getClientRects"));
+    }
+
+    @Test
+    public void aVisibleWidgetInAnOrdinaryFormOfAReadablePageIsEmbeddedNotBlocking() {
+        String script = SearchPageGuards.challengeDetectScript(defaults.captcha);
+        // Review PR #33: a visible captcha in a contact form protects the form, it does not block the page.
+        assertTrue(script.contains("closest('form')"));
+        assertTrue("challenge forms (Google /sorry/ #captcha-form, Cloudflare challenge-form) still block",
+                script.contains("/challenge|captcha/i"));
+        assertTrue(script.contains(">= " + SearchPageGuards.EMBEDDED_MIN_OUTSIDE_CHARS));
+        assertTrue("an embedded widget is reported, never blocking",
+                script.contains("'embedded:'") && !script.contains("'visible:embedded"));
     }
 
     @Test

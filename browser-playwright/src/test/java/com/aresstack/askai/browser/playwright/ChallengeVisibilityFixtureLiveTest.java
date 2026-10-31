@@ -37,7 +37,11 @@ import static org.junit.Assume.assumeTrue;
  *       carries a Friendly Captcha widget ("FriendlyCaptcha") was parked as a CAPTCHA. It must read as READABLE —
  *       with the current defaults AND for a user who keeps the bare word "captcha" in a custom list.</li>
  *   <li>Counter-checks that must still block: Bing "one last step", a Cloudflare Turnstile challenge, a phrase-only
- *       German challenge whose words are split by inline markup.</li>
+ *       German challenge whose words are split by inline markup, a captcha in the page's own
+ *       {@code #captcha-form} (Google /sorry/ shape), a captcha form with nothing readable besides it.</li>
+ *   <li>Review PR #33: a challenge phrase at the END of one long text node that starts on the first screen is a
+ *       hidden artifact (the phrase's own box decides, not the node's); a VISIBLE captcha in an ordinary contact
+ *       form of a readable page is reported as {@code embedded:}, never blocking.</li>
  *   <li>A results page ABOUT CAPTCHAs is no challenge; a challenge phrase quoted only below the fold is a hidden
  *       artifact.</li>
  * </ul>
@@ -57,7 +61,8 @@ public class ChallengeVisibilityFixtureLiveTest {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         for (String fixture : new String[]{"innoq-footer-friendly-captcha", "bing-one-last-step",
                 "cloudflare-turnstile", "text-only-de", "text-only-mixed-inline", "serp-about-captchas",
-                "phrase-below-the-fold"}) {
+                "phrase-below-the-fold", "long-text-node-phrase-below", "contact-form-visible-captcha",
+                "google-sorry-captcha-form", "captcha-gate-form"}) {
             server.createContext("/" + fixture, page(resource("challenge/" + fixture + ".html")));
         }
         server.createContext("/blank", page("<!doctype html><html><body></body></html>"));
@@ -96,6 +101,25 @@ public class ChallengeVisibilityFixtureLiveTest {
                         belowFold.challengeVisible);
                 assertTrue(belowFold.challengeMarker,
                         belowFold.challengeMarker.equals("hidden:text:verify you are human"));
+
+                BrowserPageReadiness longNode = probe(session, base + "/long-text-node-phrase-below");
+                assertFalse("review #33: a long text node that starts on screen but carries the phrase below the "
+                        + "fold must not block: " + longNode.challengeMarker, longNode.challengeVisible);
+                assertTrue(longNode.challengeMarker,
+                        longNode.challengeMarker.equals("hidden:text:verify you are human"));
+
+                BrowserPageReadiness contact = probe(session, base + "/contact-form-visible-captcha");
+                assertFalse("review #33: a visible captcha in an ordinary contact form of a readable page must not "
+                        + "block: " + contact.challengeMarker, contact.challengeVisible);
+                assertTrue(contact.challengeMarker, contact.challengeMarker.startsWith("embedded:"));
+
+                BrowserPageReadiness sorry = probe(session, base + "/google-sorry-captcha-form");
+                assertTrue("a captcha in the page's own #captcha-form must block: " + sorry.challengeMarker,
+                        sorry.challengeVisible);
+
+                BrowserPageReadiness gate = probe(session, base + "/captcha-gate-form");
+                assertTrue("a captcha form with nothing readable besides it must block: " + gate.challengeMarker,
+                        gate.challengeVisible);
 
                 BrowserPageReadiness serp = probe(session, base + "/serp-about-captchas");
                 assertFalse("a results page about CAPTCHAs is no challenge: " + serp.challengeMarker,

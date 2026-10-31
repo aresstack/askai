@@ -188,7 +188,11 @@ final class SearchPageGuards {
      * <ul>
      *   <li>{@code 'visible:<selector>'} — a genuinely visible, blocking challenge widget (laid out, not
      *       display:none/visibility:hidden/opacity~0, real box intersecting the viewport);</li>
-     *   <li>{@code 'visible:text:<marker>'} — a challenge phrase in text that is RENDERED INSIDE THE VIEWPORT;</li>
+     *   <li>{@code 'visible:text:<marker>'} — a challenge phrase whose OWN characters are rendered inside the
+     *       viewport (measured per occurrence, not per text node);</li>
+     *   <li>{@code 'embedded:<selector>'} — a VISIBLE widget that only protects an ordinary form (contact,
+     *       newsletter) on a page with at least {@value #EMBEDDED_MIN_OUTSIDE_CHARS} characters of text outside
+     *       that form — reported, NOT blocking: a captcha in a contact form is no access block;</li>
      *   <li>{@code 'hidden:<selector>'} — a challenge ARTIFACT exists but is invisible or outside the viewport
      *       (e.g. a contact-form recaptcha) — present for diagnostics, but NOT blocking;</li>
      *   <li>{@code 'hidden:text:<marker>'} — a challenge phrase exists only in text outside the viewport or
@@ -200,6 +204,13 @@ final class SearchPageGuards {
      * an article whose footer contact form names its FriendlyCaptcha widget was parked as a CAPTCHA). A real
      * interstitial (Bing "one last step", Cloudflare "verify you are human") always occupies the first screen.
      */
+    /**
+     * Text a page must carry OUTSIDE the form a visible captcha widget sits in for that widget to count as
+     * {@code embedded:} (protecting the form) rather than as a challenge page. Challenge interstitials carry a few
+     * hundred characters at most (Cloudflare ~150, Google's /sorry/ page ~400); the INNOQ article ~4000.
+     */
+    static final int EMBEDDED_MIN_OUTSIDE_CHARS = 1000;
+
     static String challengeDetectScript(CaptchaHandlingSettings captcha) {
         StringBuilder sb = new StringBuilder();
         sb.append("() => {\n");
@@ -221,49 +232,90 @@ final class SearchPageGuards {
         sb.append("      return inViewport(r);\n");
         sb.append("    } catch (e) { return false; }\n");
         sb.append("  };\n");
+        sb.append("  const bodyText = document.body ? (document.body.innerText || '') : '';\n");
+        sb.append("  const body = bodyText.toLowerCase();\n");
+        // A widget that merely protects an ordinary form (contact, newsletter, comments) on a page that is
+        // readable OUTSIDE that form is 'embedded:' — reported, never blocking. A challenge page's own form
+        // (#challenge-form, Google's #captcha-form, any form naming challenge/captcha) or a widget on a page
+        // with little text besides its form stays a blocking challenge.
+        sb.append("  const embedded = (el) => {\n");
+        sb.append("    try {\n");
+        sb.append("      const f = el.closest ? el.closest('form') : null;\n");
+        sb.append("      if (!f) return false;\n");
+        sb.append("      const marks = (f.id || '') + ' ' + (f.getAttribute('class') || '') + ' ' + (f.getAttribute('action') || '');\n");
+        sb.append("      if (/challenge|captcha/i.test(marks)) return false;\n");
+        sb.append("      return bodyText.trim().length - (f.innerText || '').trim().length >= ").append(EMBEDDED_MIN_OUTSIDE_CHARS).append(";\n");
+        sb.append("    } catch (e) { return false; }\n");
+        sb.append("  };\n");
         sb.append("  const selectors = ").append(jsArray(captcha.challengeSelectors)).append(";\n");
         sb.append("  let hidden = null;\n");
+        sb.append("  let embeddedHit = null;\n");
         sb.append("  for (const s of selectors) {\n");
         sb.append("    try {\n");
-        sb.append("      const el = document.querySelector(s);\n");
-        sb.append("      if (!el) continue;\n");
-        sb.append("      if (visible(el)) return 'visible:' + s;\n");
-        sb.append("      if (hidden === null) hidden = s;\n"); // remember the artifact, keep scanning for a visible one
-        sb.append("    } catch (e) {}\n");
-        sb.append("  }\n");
-        // Challenge PHRASES: the cheap whole-body check first (nearly every page stops here); only on a hit is
-        // the text that is actually RENDERED INSIDE THE VIEWPORT collected — text nodes whose element is shown
-        // and whose own box intersects the first screen. A phrase only below the fold or in unrendered text is
-        // a diagnostic artifact ('hidden:text:'), never a blocking challenge.
-        sb.append("  const texts = ").append(jsArray(captcha.challengeTexts)).append(";\n");
-        sb.append("  const body = (document.body ? document.body.innerText : '').toLowerCase();\n");
-        sb.append("  const hits = texts.filter(t => body.includes(t));\n");
-        sb.append("  if (hits.length > 0) {\n");
-        // Joined twice: with a space (words in separate block elements) and tight (a word split by inline
-        // markup such as <b>Best</b>ätigen); a phrase matching either form is on screen. The tight form keeps
-        // the page's own whitespace nodes, so <b>Verify</b> <b>you</b> ... <b>hu</b>man still reads as one phrase.
-        sb.append("    let spaced = '', tight = '';\n");
-        sb.append("    try {\n");
-        sb.append("      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);\n");
-        sb.append("      const range = document.createRange();\n");
-        sb.append("      for (let n = walker.nextNode(); n; n = walker.nextNode()) {\n");
-        sb.append("        const p = n.parentElement;\n");
-        sb.append("        if (!p || !n.nodeValue) continue;\n");
-        sb.append("        if (!n.nodeValue.trim()) { tight += ' '; continue; }\n");
-        sb.append("        range.selectNodeContents(n);\n");
-        sb.append("        if (!inViewport(range.getBoundingClientRect())) continue;\n");
-        sb.append("        const st = window.getComputedStyle(p);\n");
-        sb.append("        if (!st || st.visibility === 'hidden' || parseFloat(st.opacity || '1') < 0.05) continue;\n");
-        sb.append("        spaced += ' ' + n.nodeValue;\n");
-        sb.append("        tight += n.nodeValue;\n");
+        sb.append("      const els = document.querySelectorAll(s);\n");
+        sb.append("      for (let i = 0; i < els.length && i < 20; i++) {\n");
+        sb.append("        if (visible(els[i])) {\n");
+        sb.append("          if (!embedded(els[i])) return 'visible:' + s;\n");
+        sb.append("          if (embeddedHit === null) embeddedHit = s;\n");
+        sb.append("        } else if (hidden === null) {\n");
+        sb.append("          hidden = s;\n");
+        sb.append("        }\n");
         sb.append("      }\n");
         sb.append("    } catch (e) {}\n");
-        sb.append("    spaced = spaced.replace(/\\s+/g, ' ').toLowerCase();\n");
-        sb.append("    tight = tight.replace(/\\s+/g, ' ').toLowerCase();\n");
-        sb.append("    for (const t of hits) {\n");
-        sb.append("      if (spaced.includes(t) || tight.includes(t)) return 'visible:text:' + t;\n");
-        sb.append("    }\n");
         sb.append("  }\n");
+        // Challenge PHRASES: the cheap whole-body check first (nearly every page stops here). Only on a hit is
+        // each occurrence located in the rendered text and measured ITSELF: a Range over exactly the phrase's
+        // characters must have a box inside the viewport. Measuring the whole text node is not enough: a long
+        // paragraph that starts on the first screen may carry the phrase far below it. The text is indexed twice
+        // — spaced (a space between text nodes: words in separate blocks) and tight (inline-split words such as
+        // <b>Best</b>ätigen, keeping the page's own whitespace nodes) — and a phrase matching either form counts.
+        sb.append("  const texts = ").append(jsArray(captcha.challengeTexts)).append(";\n");
+        sb.append("  const hits = texts.filter(t => body.includes(t));\n");
+        sb.append("  if (hits.length > 0) {\n");
+        sb.append("    try {\n");
+        sb.append("      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);\n");
+        sb.append("      const nodes = [];\n");
+        sb.append("      const spaced = { text: '', node: [], off: [] };\n");
+        sb.append("      const tight = { text: '', node: [], off: [] };\n");
+        sb.append("      const push = (acc, ch, ni, oi) => {\n");
+        sb.append("        const ws = /\\s/.test(ch);\n");
+        sb.append("        if (ws && (acc.text.length === 0 || acc.text.endsWith(' '))) return;\n");
+        sb.append("        const low = ws ? ' ' : ch.toLowerCase();\n");
+        sb.append("        for (const c of low) { acc.text += c; acc.node.push(ni); acc.off.push(oi); }\n");
+        sb.append("      };\n");
+        sb.append("      for (let n = walker.nextNode(); n; n = walker.nextNode()) {\n");
+        sb.append("        const p = n.parentElement;\n");
+        sb.append("        const v = n.nodeValue;\n");
+        sb.append("        if (!p || !v) continue;\n");
+        sb.append("        if (!v.trim()) { push(tight, ' ', -1, -1); continue; }\n");
+        sb.append("        const st = window.getComputedStyle(p);\n");
+        sb.append("        if (!st || st.display === 'none' || st.visibility === 'hidden'\n");
+        sb.append("            || parseFloat(st.opacity || '1') < 0.05) continue;\n");
+        sb.append("        const ni = nodes.length;\n");
+        sb.append("        nodes.push(n);\n");
+        sb.append("        push(spaced, ' ', -1, -1);\n");
+        sb.append("        for (let i = 0; i < v.length; i++) { push(spaced, v[i], ni, i); push(tight, v[i], ni, i); }\n");
+        sb.append("      }\n");
+        sb.append("      const range = document.createRange();\n");
+        sb.append("      const phraseOnScreen = (acc, t) => {\n");
+        sb.append("        for (let at = acc.text.indexOf(t); at >= 0; at = acc.text.indexOf(t, at + 1)) {\n");
+        sb.append("          let a = at, b = at + t.length - 1;\n");
+        sb.append("          while (a <= b && acc.node[a] < 0) a++;\n");
+        sb.append("          while (b >= a && acc.node[b] < 0) b--;\n");
+        sb.append("          if (a > b) continue;\n");
+        sb.append("          range.setStart(nodes[acc.node[a]], acc.off[a]);\n");
+        sb.append("          range.setEnd(nodes[acc.node[b]], acc.off[b] + 1);\n");
+        sb.append("          const rects = range.getClientRects();\n");
+        sb.append("          for (let i = 0; i < rects.length; i++) { if (inViewport(rects[i])) return true; }\n");
+        sb.append("        }\n");
+        sb.append("        return false;\n");
+        sb.append("      };\n");
+        sb.append("      for (const t of hits) {\n");
+        sb.append("        if (phraseOnScreen(spaced, t) || phraseOnScreen(tight, t)) return 'visible:text:' + t;\n");
+        sb.append("      }\n");
+        sb.append("    } catch (e) {}\n");
+        sb.append("  }\n");
+        sb.append("  if (embeddedHit !== null) return 'embedded:' + embeddedHit;\n");
         sb.append("  if (hidden !== null) return 'hidden:' + hidden;\n");
         sb.append("  if (hits.length > 0) return 'hidden:text:' + hits[0];\n");
         sb.append("  return 'none';\n");
