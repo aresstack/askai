@@ -667,6 +667,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * Enter or a "next" click loads: until it is committed, the old page's load state says nothing.
      */
     private final Map<Page, int[]> navigationCounts = new java.util.IdentityHashMap<Page, int[]>();
+    /** Per page: the HTTP method of its main frame's last navigation request ({@link #watchNavigations}). */
+    private final Map<Page, String> lastNavigationMethods =
+            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<Page, String>());
     /** Per tab: where its pointer rests (BiDi keeps one input state per browsing context). */
     private final Map<Page, int[]> tabPointers = new java.util.IdentityHashMap<Page, int[]>();
     /** A search field is only measured, never waited for. */
@@ -1024,7 +1027,8 @@ final class Playwright4jDriver implements PlaywrightDriver {
 
     /**
      * Clicks the pager and returns true only when ANOTHER result page is loaded: the click must start a navigation and
-     * the page must then have a different address. A click that lands beside the control (a stale box after a smooth
+     * the page must then have a different address, or the navigation was a form POST (DuckDuckGo HTML/Lite page by
+     * POST under one address; the session then compares the page's results). A click that lands beside the control (a stale box after a smooth
      * scroll, a covering element) or on the current page's own number loads nothing new; before, that was reported as
      * the next page and the same result page was read again as page 3 (Bing "first=11" twice).
      */
@@ -1056,8 +1060,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 }
                 boolean navigated = awaitNavigation(page, before);
                 String pageAfter = page.url();
-                if (navigated && isAnotherPage(pageBefore, pageAfter)) {
-                    return true;
+                if (navigated && (isAnotherPage(pageBefore, pageAfter)
+                        || "POST".equalsIgnoreCase(lastNavigationMethods.get(page)))) {
+                    return true; // a POST pager keeps its address; whether its page is new, the session judges
                 }
                 System.err.println("[browser-mcp] next-page click on " + selector + " loaded no other result page ("
                         + (navigated ? "same address " : "no navigation, still ") + pageAfter + ")");
@@ -1098,6 +1103,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             }
             pageKeys.remove(tab);
             navigationCounts.remove(tab);
+            lastNavigationMethods.remove(tab);
             tabPointers.remove(tab);
             try {
                 if (!tab.isClosed()) {
@@ -1364,6 +1370,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         final int[] count = new int[1];
         navigationCounts.put(target, count);
+        // The method of the main frame's last navigation request (protocol events only): a form that pages by POST
+        // (DuckDuckGo's HTML and Lite endpoints) shows the next result page under the SAME address.
+        target.onRequest(new Consumer<com.microsoft.playwright.Request>() {
+            public void accept(com.microsoft.playwright.Request request) {
+                try {
+                    if (request.isNavigationRequest() && request.frame() == target.mainFrame()) {
+                        lastNavigationMethods.put(target, request.method());
+                    }
+                } catch (RuntimeException ignored) {
+                    // a request of a frame that is already gone
+                }
+            }
+        });
         target.onFrameNavigated(new Consumer<com.microsoft.playwright.Frame>() {
             public void accept(com.microsoft.playwright.Frame frame) {
                 if (frame == target.mainFrame()) {

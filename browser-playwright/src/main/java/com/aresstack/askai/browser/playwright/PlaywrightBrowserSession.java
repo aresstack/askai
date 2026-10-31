@@ -536,9 +536,10 @@ final class PlaywrightBrowserSession implements BrowserSession {
                 // rapid-fire page requests and answers with a CAPTCHA. Never prefetch result pages.
                 com.aresstack.askai.browser.search.engine.BrowserSearchEngine.SearchForm form =
                         engine.formOf(endpointIndex);
-                // Every result page read of this endpoint: a page that comes back (a pager click that loaded nothing
-                // new) is never read and counted again as a further page.
-                java.util.Set<String> resultPagesRead = new java.util.HashSet<String>();
+                // The results of every page read of this endpoint: a page that comes back (a pager click that loaded
+                // nothing new) is never read and counted again as a further page. Judged by its results, not by its
+                // address: DuckDuckGo's HTML and Lite endpoints page by POST under one address.
+                java.util.Set<java.util.Set<String>> resultPagesRead = new java.util.HashSet<java.util.Set<String>>();
                 for (int resultPage = 1; resultPage <= resultPages; resultPage++) {
                     String pageUrl = form != null ? null : engine.pageUrl(endpointIndex, encoded, resultPage);
                     if (form == null && pageUrl == null) {
@@ -591,13 +592,6 @@ final class PlaywrightBrowserSession implements BrowserSession {
                     com.aresstack.askai.browser.domain.DomainIdentity pageIdentity =
                             domainKeys.resolve(page.getUrl());
                     String host = pageIdentity.getHost();
-                    if (!resultPagesRead.add(withoutFragment(page.getUrl()))) {
-                        attempts.add(attempt(host,
-                                com.aresstack.askai.browser.LegacySearchAttemptOutcome.NAVIGATION_FAILED,
-                                "result page " + resultPage + " not reached: the pager returned to "
-                                        + bounded(page.getUrl())));
-                        break; // the same page again is no further page; reading it twice only duplicates hits
-                    }
                     if (driver.challengePresent()) {
                         if (challengeFamily == null && driver.parkChallenge()) {
                             challengeFamily = pageIdentity.getRegistrableDomain();
@@ -634,6 +628,14 @@ final class PlaywrightBrowserSession implements BrowserSession {
                                 "structured page capture unavailable"));
                         break;
                     }
+                    java.util.Set<String> results = externalTargets(document);
+                    if (!results.isEmpty() && !resultPagesRead.add(results)) {
+                        attempts.add(attempt(host,
+                                com.aresstack.askai.browser.LegacySearchAttemptOutcome.NAVIGATION_FAILED,
+                                "result page " + resultPage + " not reached: the pager showed an earlier page again ("
+                                        + bounded(page.getUrl()) + ")"));
+                        break; // the same page again is no further page; reading it twice only duplicates hits
+                    }
                     // The consumer states a FACT — what did this page deliver — and the policy below
                     // decides what that means for the run. A delivering page widens the same answer
                     // with the NEXT page; only an EXPLICITLY empty page ends this engine's pagination.
@@ -661,12 +663,19 @@ final class PlaywrightBrowserSession implements BrowserSession {
                 lastFailure);
     }
 
-    private static String withoutFragment(String url) {
-        if (url == null) {
-            return "";
+    /**
+     * What a result page links to outside the engine: the resolved targets of its external links. Two reads of the same
+     * page give the same set even where the engine's own wrapper or tracking links change per request.
+     */
+    static java.util.Set<String> externalTargets(com.aresstack.askai.browser.render.RenderedPageDocument document) {
+        java.util.Set<String> targets = new java.util.TreeSet<String>();
+        for (com.aresstack.askai.browser.render.RenderedLinkDescriptor link : document.links) {
+            if (link.domainClassification == com.aresstack.askai.browser.domain.DomainClassification.EXTERNAL_DOMAIN
+                    && link.resolvedTargetUrl != null && !link.resolvedTargetUrl.isEmpty()) {
+                targets.add(link.resolvedTargetUrl);
+            }
         }
-        int hash = url.indexOf('#');
-        return hash < 0 ? url : url.substring(0, hash);
+        return targets;
     }
 
     /** The capture warning of a page whose result links are opaque engine wrappers ({@link OpaqueRedirectStrategy}). */

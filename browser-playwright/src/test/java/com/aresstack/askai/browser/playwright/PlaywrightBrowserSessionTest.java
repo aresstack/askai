@@ -492,8 +492,7 @@ public class PlaywrightBrowserSessionTest {
         WebSearchResult result = s.search("hase");
 
         assertEquals("both pager clicks were made", 2, driver.pagerClicks.size());
-        assertEquals("page 2 is read once, never again as page 3", java.util.Arrays.asList(first, second),
-                driver.captured);
+        assertEquals("the third capture is recognised as page 2 again (same results)", 3, driver.captured.size());
         assertEquals("3 hits of page 1 + 2 of page 2", 5, result.getItems().size());
         boolean named = false;
         for (com.aresstack.askai.browser.LegacySearchEngineAttemptResult attempt : result.getAttempts()) {
@@ -501,6 +500,36 @@ public class PlaywrightBrowserSessionTest {
                     && String.valueOf(attempt.getDiagnosticCode()).contains("result page 3 not reached");
         }
         assertTrue("the stalled pager is named: " + result.getAttempts(), named);
+    }
+
+    /**
+     * Codex review of #34: DuckDuckGo's HTML and Lite endpoints page by POST, so page 2 has the SAME address as page 1.
+     * A page with new results is a new page whatever its address; only a page whose results were already read is not.
+     */
+    @Test
+    public void aPostPagerPageWithTheSameAddressButNewResultsIsRead() throws Exception {
+        FakeDriver driver = new FakeDriver();
+        String address = "http://ddg.test/html/";
+        driver.typedResults.put("http://ddg.test/", resultsPage(address, "one"));
+        driver.pagerPages.add(state(address, "Results", "results page",
+                "four guide", "http://target-a.test/four",
+                "five docs", "http://target-b.test/five"));
+        driver.pagerPages.add(state(address, "Results", "results page",
+                "six guide", "http://target-a.test/six"));
+        PlaywrightBrowserSession s = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
+        s.setSearchEngines(java.util.Collections.singletonList(
+                new com.aresstack.askai.browser.search.engine.BrowserSearchEngine("duckduckgo", "DuckDuckGo",
+                        java.util.Collections.singletonList(
+                                new com.aresstack.askai.browser.search.engine.BrowserSearchEngine.SearchForm(
+                                        "http://ddg.test/", java.util.Collections.singletonList("input[name=q]"),
+                                        java.util.Collections.singletonList("input.navbutton"))), 10)));
+
+        WebSearchResult result = s.search("hase");
+
+        assertEquals("all three POST pages are read", java.util.Arrays.asList(address, address, address),
+                driver.captured);
+        assertEquals("3 + 2 + 1 hits", 6, result.getItems().size());
     }
 
     /**

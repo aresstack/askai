@@ -448,6 +448,46 @@ public class SearchTabsFixtureLiveTest {
         assertFalse("the same page again is no next page", driver.clickNextPage(Arrays.asList("a.sb_pagN")));
     }
 
+    /**
+     * Codex review of #34: DuckDuckGo's HTML endpoint pages with a form POST under the same address. Such a click is a
+     * next page although the address stays the same.
+     */
+    @Test
+    public void aPostPagerKeepsItsAddressAndIsStillTheNextPage() throws Exception {
+        String channel = gatedChannel();
+        final List<String> posted = java.util.Collections.synchronizedList(new ArrayList<String>());
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/html/", exchange -> {
+            int offset = 0;
+            if ("POST".equals(exchange.getRequestMethod())) {
+                String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                posted.add(body);
+                offset = Integer.parseInt(body.replaceAll(".*s=(\\d+).*", "$1"));
+            }
+            StringBuilder html = new StringBuilder("<!doctype html><html><head><title>ddg s=" + offset
+                    + "</title></head><body>");
+            for (int i = 0; i < 12; i++) {
+                html.append("<div style='height:200px'><a href='https://example.org/").append(offset + i)
+                        .append("'>Result ").append(offset + i).append("</a></div>");
+            }
+            html.append("<form action='/html/' method='post'><input type='hidden' name='q' value='hase'>")
+                    .append("<input type='hidden' name='s' value='").append(offset + 10).append("'>")
+                    .append("<input type='submit' class='navbutton' value='Next'></form></body></html>");
+            respond(exchange, html.toString());
+        });
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        LegacyBrowserSearchSettings settings = LegacyBrowserSearchDefaults.create();
+        driver = Playwright4jDriver.launch(channel, !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED")),
+                30_000, null, null, settings.consent, settings.captcha);
+        driver.open(base + "/html/");
+
+        assertTrue("the POST page is the next page", driver.clickNextPage(Arrays.asList("input.navbutton[value*='Next' i]")));
+        assertEquals("same address", base + "/html/", driver.current().url);
+        assertEquals(1, posted.size());
+        assertTrue(posted.get(0), posted.get(0).contains("s=10"));
+    }
+
     private static void respond(HttpExchange exchange, String html) throws IOException {
         byte[] body = html.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
