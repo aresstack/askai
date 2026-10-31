@@ -121,11 +121,19 @@ public class CamoufoxBingSearchLiveTest {
                     while (blocks.find()) {
                         count++;
                     }
+                    String dumpDir = System.getenv("ASKAI_SERP_SNAPSHOT_DIR");
+                    if (dumpDir != null && !dumpDir.isEmpty()) {
+                        java.nio.file.Path raw = java.nio.file.Paths.get(dumpDir)
+                                .resolve("served-" + System.currentTimeMillis() + ".html");
+                        java.nio.file.Files.createDirectories(raw.getParent());
+                        java.nio.file.Files.write(raw, body.getBytes(StandardCharsets.UTF_8));
+                        served.append("raw=").append(raw).append(' ');
+                    }
                     served.append("status=").append(response.status()).append(" bytes=").append(body.length())
                             .append(" b_algo=").append(count).append(" request=")
                             .append(response.request().allHeaders());
                 }
-            } catch (RuntimeException unreadable) {
+            } catch (RuntimeException | java.io.IOException unreadable) {
                 served.append("unreadable: ").append(unreadable.getMessage());
             }
         });
