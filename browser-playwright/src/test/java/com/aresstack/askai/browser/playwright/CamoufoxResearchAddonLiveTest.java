@@ -18,7 +18,7 @@ import static org.junit.Assume.assumeTrue;
 /**
  * The AskAI Research add-on in a REAL Camoufox (downloaded on first use like in the app): it loads at the start,
  * connects to its bridge although loopback requests of pages are blocked, fetches the HUD state, and the page
- * never sees a HUD element or binding. Without the add-on the in-page overlay is the fallback.
+ * never sees a HUD element or binding. Without the add-on there is no HUD in the browser, and still nothing in the page.
  *
  * <p>Opt-in, because it needs the Camoufox download: {@code ASKAI_LIVE_CAMOUFOX=1 gradlew :browser-playwright:test
  * --tests '*CamoufoxResearchAddonLiveTest'}. Headed with {@code ASKAI_LIVE_CAMOUFOX_HEADED=1} to see the toolbar
@@ -234,17 +234,18 @@ public class CamoufoxResearchAddonLiveTest {
     }
 
     @Test
-    public void withoutTheAddonTheOverlayIsTheFallback() throws Exception {
+    public void withoutTheAddonNothingIsPutIntoThePage() throws Exception {
+        // Issue #22: Camoufox never falls back to the in-page overlay or the binding; only the log says the HUD is off.
         System.setProperty(Playwright4jDriver.ADDON_PROPERTY, "false");
         driver = launch(null);
         assertEquals(null, driver.addonBridge());
         driver.open(base);
-        assertEquals("rendered", driver.renderHud(new ResearchHudState("READABLE", "fallback", false, -1, false)
-                .render()));
+        assertEquals("addon-missing", driver.renderHud(new ResearchHudState("READABLE", "no add-on", false, -1,
+                false).render()));
         driver.pumpEvents(() -> false, 500L);
         String seen = driver.current().title;
-        System.err.println("[addon-live] fallback page sees: " + seen);
-        assertTrue(seen, seen.startsWith("hud=true;binding=function"));
+        System.err.println("[addon-live] without add-on the page sees: " + seen);
+        assertEquals("hud=false;binding=undefined;root=undefined", seen);
     }
 
     private Playwright4jDriver launch(java.util.function.Predicate<String> requestAllowed) throws Exception {

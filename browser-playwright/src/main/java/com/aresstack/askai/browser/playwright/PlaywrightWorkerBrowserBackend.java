@@ -224,7 +224,7 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
         try {
             Page page = userContext.context.newPage();
             Playwright4jDriver driver = Playwright4jDriver.inBrowsingContext(browser, userContext.context, page,
-                    timeoutMillis, options.settings.consent, options.settings.captcha);
+                    timeoutMillis, options.settings.consent, options.settings.captcha, camoufox);
             driver.setRenderedCapture(new RenderedPageDocumentCapture(options.settings.analysis));
             driver.readThroughAddon(readBridge);
             UrlSafetyPolicy policy = options.allowPrivateNetworks

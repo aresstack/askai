@@ -3,13 +3,16 @@ package com.aresstack.askai.browser.playwright;
 import com.aresstack.askai.browser.search.CaptchaHandlingSettings;
 import com.aresstack.askai.browser.search.ConsentHandlingSettings;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
- * The SERP guard scripts: consent RESOLUTION and manual-challenge detection, adapted from MainframeMate's
- * {@code CookieBannerDismisser} onto Playwright. Both run inside the page via {@code page.evaluate} and are
- * deliberately conservative:
+ * The SERP guards: consent RESOLUTION and manual-challenge detection, adapted from MainframeMate's
+ * {@code CookieBannerDismisser} onto Playwright. Consent controls are located with Playwright locators and clicked
+ * with the real mouse ({@link #consentTargets}); only the read-only report and detection scripts still run in the
+ * page (they move into the research add-on, issue #23 stage 2). All of it is deliberately conservative:
  * <ul>
  * <li>Consent resolution clicks only UNAMBIGUOUS controls — never a "first button in the container" guess.
  *     Priority is minimal consent: <b>REJECT_ALL → ONLY_NECESSARY → ACCEPT_ALL → CLOSE</b>. The accept
@@ -54,78 +57,96 @@ final class SearchPageGuards {
             "[id*='cookie'] [aria-label='Close']", "[id*='consent'] [aria-label='Close']",
             "[class*='cookie'] button[class*='close']", "[class*='consent'] button[class*='close']");
 
+    /** The clickable controls a consent text is looked for in (the same set the report script scans). */
+    static final String BUTTON_SELECTOR =
+            "button, a[role='button'], [class*='btn'], [role='button'], input[type='button'], input[type='submit']";
+
     /**
-     * The consent-RESOLVE script: tries controls in minimal-consent priority order and clicks the first
-     * unambiguous match. Returns {@code 'clicked:<ACTION>:<what>'} (ACTION ∈ REJECT_ALL / ONLY_NECESSARY /
-     * ACCEPT_ALL / CLOSE) or {@code 'none'}. Back-compatible: still starts with {@code 'clicked'}.
+     * One consent control to try: a CSS selector, optionally narrowed by a text pattern (matched by Playwright's
+     * {@code hasText} filter in its own selector engine, never by a page script). {@code action} is one of
+     * REJECT_ALL / ONLY_NECESSARY / ACCEPT_ALL / CLOSE.
      */
-    static String consentDismissScript(ConsentHandlingSettings consent) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("() => {\n");
-        sb.append("  const clickEl = (el) => { if (el && el.offsetParent !== null) { try { el.focus(); } "
-                + "catch(e){} el.click(); return true; } return false; };\n");
-        sb.append("  const bySelector = (arr, action) => { for (const s of arr) { try { "
-                + "if (clickEl(document.querySelector(s))) return 'clicked:' + action + ':' + s; } catch(e){} } "
-                + "return null; };\n");
-        sb.append("  const buttons = document.querySelectorAll(\"button, a[role='button'], [class*='btn'], "
-                + "[role='button'], input[type='button'], input[type='submit']\");\n");
-        sb.append("  const byText = (arr, action) => { for (let i = 0; i < buttons.length && i < 120; i++) { "
-                + "const b = buttons[i]; const txt = (b.innerText || b.value || '').toLowerCase().trim(); "
-                + "if (!txt || b.offsetParent === null) continue; "
-                + "if (arr.some(p => txt === p || txt.startsWith(p))) { if (clickEl(b)) "
-                + "return 'clicked:' + action + ':' + txt; } } return null; };\n");
-        // Priority: minimal consent first, accept only as a fallback, close last.
-        sb.append("  let r;\n");
-        sb.append("  r = bySelector(").append(jsArray(REJECT_SELECTORS)).append(", 'REJECT_ALL'); if (r) return r;\n");
-        sb.append("  r = byText(").append(jsArray(REJECT_TEXTS)).append(", 'REJECT_ALL'); if (r) return r;\n");
-        sb.append("  r = byText(").append(jsArray(ONLY_NECESSARY_TEXTS))
-                .append(", 'ONLY_NECESSARY'); if (r) return r;\n");
-        sb.append("  r = bySelector(").append(jsArray(consent.positiveButtonSelectors))
-                .append(", 'ACCEPT_ALL'); if (r) return r;\n");
-        sb.append("  r = byText(").append(jsArray(consent.positiveButtonTexts))
-                .append(", 'ACCEPT_ALL'); if (r) return r;\n");
-        sb.append("  r = bySelector(").append(jsArray(CLOSE_SELECTORS)).append(", 'CLOSE'); if (r) return r;\n");
-        sb.append("  return 'none';\n");
-        sb.append("}");
-        return sb.toString();
+    static final class ConsentTarget {
+        final String action;
+        final String selector;
+        /** Null for a plain selector target. */
+        final Pattern text;
+        /** What the result line names: the selector or the text phrases. */
+        final String label;
+
+        ConsentTarget(String action, String selector, Pattern text, String label) {
+            this.action = action;
+            this.selector = selector;
+            this.text = text;
+            this.label = label;
+        }
     }
 
     /**
-     * #44: the consent-LOCATE script — the SAME priority chains as the resolve script, but it
-     * returns the matched control's viewport CENTER instead of clicking:
-     * {@code 'locate:<ACTION>:<cx>,<cy>'} or {@code 'none'}. The human-paced pointer then
-     * travels there and clicks like a person would; the JS click stays the fallback.
+     * The consent controls in minimal-consent priority order: <b>REJECT_ALL → ONLY_NECESSARY → ACCEPT_ALL →
+     * CLOSE</b>, selectors before texts within a group (as the old in-page script tried them). The driver locates
+     * each target with Playwright locators, measures it with {@code boundingBox} and clicks it with the real,
+     * human-paced mouse; nothing here is ever run inside the page.
      */
-    static String consentLocateScript(ConsentHandlingSettings consent) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("() => {\n");
-        sb.append("  const pickEl = (el) => { if (el && el.offsetParent !== null) { "
-                + "const r = el.getBoundingClientRect(); if (r.width > 0 && r.height > 0) "
-                + "return Math.round(r.left + r.width / 2) + ',' + "
-                + "Math.round(r.top + r.height / 2); } return null; };\n");
-        sb.append("  const bySelector = (arr, action) => { for (const s of arr) { try { "
-                + "const c = pickEl(document.querySelector(s)); "
-                + "if (c) return 'locate:' + action + ':' + c; } catch(e){} } return null; };\n");
-        sb.append("  const buttons = document.querySelectorAll(\"button, a[role='button'], [class*='btn'], "
-                + "[role='button'], input[type='button'], input[type='submit']\");\n");
-        sb.append("  const byText = (arr, action) => { for (let i = 0; i < buttons.length && i < 120; i++) { "
-                + "const b = buttons[i]; const txt = (b.innerText || b.value || '').toLowerCase().trim(); "
-                + "if (!txt || b.offsetParent === null) continue; "
-                + "if (arr.some(p => txt === p || txt.startsWith(p))) { const c = pickEl(b); "
-                + "if (c) return 'locate:' + action + ':' + c; } } return null; };\n");
-        sb.append("  let r;\n");
-        sb.append("  r = bySelector(").append(jsArray(REJECT_SELECTORS)).append(", 'REJECT_ALL'); if (r) return r;\n");
-        sb.append("  r = byText(").append(jsArray(REJECT_TEXTS)).append(", 'REJECT_ALL'); if (r) return r;\n");
-        sb.append("  r = byText(").append(jsArray(ONLY_NECESSARY_TEXTS))
-                .append(", 'ONLY_NECESSARY'); if (r) return r;\n");
-        sb.append("  r = bySelector(").append(jsArray(consent.positiveButtonSelectors))
-                .append(", 'ACCEPT_ALL'); if (r) return r;\n");
-        sb.append("  r = byText(").append(jsArray(consent.positiveButtonTexts))
-                .append(", 'ACCEPT_ALL'); if (r) return r;\n");
-        sb.append("  r = bySelector(").append(jsArray(CLOSE_SELECTORS)).append(", 'CLOSE'); if (r) return r;\n");
-        sb.append("  return 'none';\n");
-        sb.append("}");
-        return sb.toString();
+    static List<ConsentTarget> consentTargets(ConsentHandlingSettings consent) {
+        List<ConsentTarget> targets = new ArrayList<ConsentTarget>();
+        addSelectors(targets, REJECT_SELECTORS, "REJECT_ALL");
+        addTexts(targets, REJECT_TEXTS, "REJECT_ALL");
+        addTexts(targets, ONLY_NECESSARY_TEXTS, "ONLY_NECESSARY");
+        addSelectors(targets, consent.positiveButtonSelectors, "ACCEPT_ALL");
+        addTexts(targets, consent.positiveButtonTexts, "ACCEPT_ALL");
+        addSelectors(targets, CLOSE_SELECTORS, "CLOSE");
+        return targets;
+    }
+
+    private static void addSelectors(List<ConsentTarget> targets, List<String> selectors, String action) {
+        for (String selector : selectors) {
+            targets.add(new ConsentTarget(action, selector, null, selector));
+        }
+    }
+
+    private static void addTexts(List<ConsentTarget> targets, List<String> phrases, String action) {
+        if (phrases.isEmpty()) {
+            return;
+        }
+        StringBuilder alternatives = new StringBuilder();
+        StringBuilder inputValues = new StringBuilder();
+        for (String phrase : phrases) {
+            if (alternatives.length() > 0) {
+                alternatives.append('|');
+                inputValues.append(", ");
+            }
+            alternatives.append(regexLiteral(phrase));
+            String value = cssString(phrase);
+            inputValues.append("input[type='button'][value^=").append(value).append(" i], ")
+                    .append("input[type='submit'][value^=").append(value).append(" i]");
+        }
+        // Equal to or starting with a phrase, case-insensitive: the old in-page rule (txt === p || startsWith(p)).
+        // CASE_INSENSITIVE only: Playwright passes no other Java flag on to the browser (it becomes the JS flag i).
+        Pattern text = Pattern.compile("^\\s*(?:" + alternatives + ")", Pattern.CASE_INSENSITIVE);
+        String label = String.join("|", phrases);
+        targets.add(new ConsentTarget(action, BUTTON_SELECTOR, text, label));
+        // Input buttons carry their label in the value attribute, which hasText does not see.
+        targets.add(new ConsentTarget(action, inputValues.toString(), null, label));
+    }
+
+    /**
+     * A phrase as a regex literal both Java and JavaScript read the same way: Playwright hands the pattern source to
+     * the browser's selector engine, which knows no {@code \\Q...\\E} quoting.
+     */
+    static String regexLiteral(String phrase) {
+        StringBuilder literal = new StringBuilder();
+        for (char c : phrase.toCharArray()) {
+            if ("\\^$.|?*+()[]{}/-".indexOf(c) >= 0) {
+                literal.append('\\');
+            }
+            literal.append(c);
+        }
+        return literal.toString();
+    }
+
+    private static String cssString(String value) {
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'";
     }
 
     /**

@@ -4,11 +4,17 @@ import com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults;
 import com.aresstack.askai.browser.search.LegacyBrowserSearchSettings;
 import org.junit.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.regex.Pattern;
+
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pins the guard-script policy: consent clicks only UNAMBIGUOUSLY positive controls (no
+ * Pins the guard policy: consent clicks only UNAMBIGUOUS controls, located by Playwright locators (no
  * first-button-in-container guessing — that could hit "Settings" or "Only necessary"), and the
  * challenge detection knows the required texts and selectors. The lists come from the settings
  * (single default origin: LegacyBrowserSearchDefaults) — the guards hold no constants of their own.
@@ -18,9 +24,11 @@ public class SearchPageGuardsTest {
     private final LegacyBrowserSearchSettings defaults = LegacyBrowserSearchDefaults.create();
 
     @Test
-    public void consentScriptHasNoFirstButtonGuessingAndOnlyPositiveTexts() {
-        String script = SearchPageGuards.consentDismissScript(defaults.consent);
-        assertFalse("no dangerous first-button heuristic", script.contains(":first-of-type"));
+    public void consentTargetsHaveNoFirstButtonGuessingAndOnlyPositiveTexts() {
+        for (SearchPageGuards.ConsentTarget target : SearchPageGuards.consentTargets(defaults.consent)) {
+            assertFalse("no dangerous first-button heuristic: " + target.selector,
+                    target.selector.contains(":first-of-type"));
+        }
         for (String selector : defaults.consent.positiveButtonSelectors) {
             assertFalse("selector must be accept-specific: " + selector,
                     selector.contains(":first-of-type"));
@@ -30,25 +38,64 @@ public class SearchPageGuardsTest {
             assertTrue("positive text missing: " + required,
                     defaults.consent.positiveButtonTexts.contains(required));
         }
-        assertTrue(script.contains("clicked"));
     }
 
     @Test
     public void consentResolutionPrefersRejectThenNecessaryThenAcceptThenClose() {
-        String script = SearchPageGuards.consentDismissScript(defaults.consent);
-        int reject = script.indexOf("REJECT_ALL");
-        int necessary = script.indexOf("ONLY_NECESSARY");
-        int accept = script.indexOf("ACCEPT_ALL");
-        int close = script.indexOf("CLOSE");
-        assertTrue("reject tried first", reject >= 0 && reject < necessary);
-        assertTrue("only-necessary before accept", necessary < accept);
-        assertTrue("accept before close (close is last resort)", accept < close);
-        // Unambiguous reject controls (never a first-button guess); the accept terms stay the fallback.
-        assertTrue(script.contains("onetrust-reject-all-handler"));
-        assertTrue(script.contains("reject all"));
-        assertTrue(script.contains("only necessary") || script.contains("nur notwendige"));
-        assertTrue(script.contains("accept all"));
-        assertFalse("still no dangerous first-button heuristic", script.contains(":first-of-type"));
+        List<String> actions = new ArrayList<String>();
+        for (SearchPageGuards.ConsentTarget target : SearchPageGuards.consentTargets(defaults.consent)) {
+            if (actions.isEmpty() || !actions.get(actions.size() - 1).equals(target.action)) {
+                actions.add(target.action);
+            }
+        }
+        assertEquals("minimal consent first, accept only as a fallback, close last",
+                Arrays.asList("REJECT_ALL", "ONLY_NECESSARY", "ACCEPT_ALL", "CLOSE"), actions);
+        SearchPageGuards.ConsentTarget first = SearchPageGuards.consentTargets(defaults.consent).get(0);
+        assertEquals("#onetrust-reject-all-handler", first.selector);
+        assertEquals(null, first.text);
+    }
+
+    @Test
+    public void consentTextsMatchLikeTheOldInPageRule() {
+        Pattern reject = textTarget("REJECT_ALL").text;
+        assertTrue(reject.matcher("Reject all").find());
+        assertTrue("leading whitespace and longer labels still match", reject.matcher("  Reject all cookies").find());
+        assertTrue(reject.matcher("ALLE ABLEHNEN").find());
+        assertFalse("never a phrase in the middle of a label", reject.matcher("Settings: reject all").find());
+        assertFalse(reject.matcher("Settings").find());
+        Pattern accept = textTarget("ACCEPT_ALL").text;
+        assertTrue(accept.matcher("Accept all").find());
+        assertFalse("accept never matches a reject control", accept.matcher("Reject all").find());
+    }
+
+    @Test
+    public void consentTextsAlsoFindInputButtonsByTheirValue() {
+        boolean found = false;
+        for (SearchPageGuards.ConsentTarget target : SearchPageGuards.consentTargets(defaults.consent)) {
+            if ("REJECT_ALL".equals(target.action) && target.text == null
+                    && target.selector.contains("input[type='submit'][value^='reject all' i]")) {
+                found = true;
+            }
+        }
+        assertTrue("input buttons carry their label in value, which hasText does not see", found);
+    }
+
+    @Test
+    public void regexLiteralsAreReadTheSameByJavaAndJavaScript() {
+        assertEquals("i agree \\(cookies\\)", SearchPageGuards.regexLiteral("i agree (cookies)"));
+        assertFalse("no \\Q...\\E quoting, the browser's engine would not understand it",
+                SearchPageGuards.regexLiteral("a.b").contains("\\Q"));
+        assertTrue(Pattern.compile(SearchPageGuards.regexLiteral("a.b+c")).matcher("a.b+c").matches());
+        assertFalse(Pattern.compile(SearchPageGuards.regexLiteral("a.b")).matcher("axb").matches());
+    }
+
+    private SearchPageGuards.ConsentTarget textTarget(String action) {
+        for (SearchPageGuards.ConsentTarget target : SearchPageGuards.consentTargets(defaults.consent)) {
+            if (action.equals(target.action) && target.text != null) {
+                return target;
+            }
+        }
+        throw new AssertionError("no text target for " + action);
     }
 
     @Test
