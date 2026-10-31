@@ -958,7 +958,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     }
                     ElementHandle field = first.elementHandle(
                             new Locator.ElementHandleOptions().setTimeout(SEARCH_BOX_MEASURE_TIMEOUT_MILLIS));
-                    BoundingBox box = inView(tab, field);
+                    BoundingBox box = inView(tab, field, humanPolicy, pointerOf(tab));
                     if (box == null) {
                         disposeQuietly(field);
                         refused = "the search field " + selector + " is not visible in the window";
@@ -1249,8 +1249,15 @@ final class Playwright4jDriver implements PlaywrightDriver {
     /**
      * The field's box once it is inside the window: a field below the safe line is first wheeled up with real input
      * (the pointer resting inside the window). Null when it has no box or cannot be brought into view.
+     *
+     * <p>When the window height is unknown (Camoufox reports no viewport), the safe line {@link #UNKNOWN_WINDOW_SAFE_Y}
+     * is only a guess: a field below it on a page that does not scroll is where the page shows it, because a page that
+     * does not scroll fits into its window. It is taken as it is, like {@link #pointerClickInView} takes such a control
+     * (DuckDuckGo's HTML start page: its field sits at y=372 and the page does not scroll). With a known window height
+     * a field that does not move and stays outside the window is still refused.</p>
      */
-    private BoundingBox inView(Page tab, ElementHandle field) {
+    static BoundingBox inView(Page tab, ElementHandle field,
+                              com.aresstack.askai.browser.input.HumanInteractionPolicy policy, int[] pointer) {
         BoundingBox box = field.boundingBox();
         com.microsoft.playwright.options.ViewportSize viewport = tab.viewportSize();
         int height = viewport != null && viewport.height > 0 ? viewport.height : 0;
@@ -1264,16 +1271,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
             if (centerY >= 0 && centerY < safeBottom) {
                 return box;
             }
-            int[] pointer = pointerOf(tab);
             tab.mouse().move(pointer[0], pointer[1]);
             for (com.aresstack.askai.browser.input.HumanInteractionPolicy.ScrollStep step
-                    : humanPolicy.scrollSteps((int) Math.round(centerY - anchor))) {
+                    : policy.scrollSteps((int) Math.round(centerY - anchor))) {
                 tab.mouse().wheel(0, step.deltaY);
                 tab.waitForTimeout(step.pauseMillis);
             }
             BoundingBox moved = field.boundingBox();
-            if (moved == null || Math.abs(moved.y - box.y) < 1) {
-                return null; // nothing scrolls: the field stays outside the window
+            if (moved == null || moved.width <= 0 || moved.height <= 0) {
+                return null;
+            }
+            if (Math.abs(moved.y - box.y) < 1) {
+                // Nothing scrolls: the page fits its window, so an unknown window shows the field where it is.
+                return height == 0 && centerY >= 0 ? moved : null;
             }
             box = moved;
         }
