@@ -34,6 +34,7 @@ public class CamoufoxBingSearchLiveTest {
 
     @After
     public void stop() {
+        System.clearProperty(Playwright4jDriver.ADDON_PROPERTY);
         if (driver != null) {
             driver.close();
         }
@@ -50,20 +51,22 @@ public class CamoufoxBingSearchLiveTest {
         return (com.microsoft.playwright.Page) field.get(driver);
     }
 
-    /** Where Bing's own scripts touch b_content or visibility — what its reveal waits for. */
-    private static final String SCRIPT_HINTS = "() => {\n"
-            + "  const hits = [];\n"
-            + "  for (const s of document.scripts) {\n"
-            + "    const t = s.textContent || '';\n"
-            + "    for (const key of ['b_content', 'visibility']) {\n"
-            + "      let i = t.indexOf(key);\n"
-            + "      while (i >= 0 && hits.length < 12) {\n"
-            + "        hits.push(key + ': ' + t.substring(Math.max(0, i - 160), i + 160).replace(/\\s+/g, ' '));\n"
-            + "        i = t.indexOf(key, i + 1);\n"
-            + "      }\n"
-            + "    }\n"
-            + "  }\n"
-            + "  return hits.join('\\n  | ');\n"
+    /** What Bing's bot detection (its BD module) decides on: reveal flags, cookies, activation, our traces. */
+    private static final String BOT_PROBE = "() => {\n"
+            + "  const c = document.getElementById('b_content');\n"
+            + "  const cookie = (name) => (document.cookie.split('; ').find((x) => x.startsWith(name + '=')) || '')\n"
+            + "    .substring(0, 120);\n"
+            + "  const rp = performance.getEntriesByType('resource').filter((e) => /\\/rp\\/.*\\.js/.test(e.name));\n"
+            + "  const ua = navigator.userActivation;\n"
+            + "  return 'b_content=' + (c ? c.getAttribute('style') : 'none')\n"
+            + "    + ' visibleBlocks=' + [...document.querySelectorAll('li.b_algo')]\n"
+            + "        .filter((e) => e.checkVisibility({visibilityProperty: true})).length\n"
+            + "    + ' webdriver=' + navigator.webdriver + ' BN=' + (typeof _G !== 'undefined' ? _G.BN : 'no _G')\n"
+            + "    + ' state=' + document.visibilityState + ' focus=' + document.hasFocus()\n"
+            + "    + ' activation=' + (ua ? ua.hasBeenActive + '/' + ua.isActive : 'n/a')\n"
+            + "    + ' rpScripts=' + rp.length + ' url=' + location.href\n"
+            + "    + ' SS=' + cookie('_SS') + ' SRCHHPGUSR=' + cookie('SRCHHPGUSR')\n"
+            + "    + ' askaiGlobals=' + Object.keys(window).filter((k) => /askai|playwright|__pw/i.test(k)).join(',');\n"
             + "}";
 
     private static final String PROBE = "() => {\n"
@@ -88,11 +91,21 @@ public class CamoufoxBingSearchLiveTest {
         String query = System.getenv().getOrDefault("ASKAI_LIVE_BING_QUERY", "Kaninchen Ernährung Futter");
         LegacyBrowserSearchSettings settings = LegacyBrowserSearchDefaults.create();
         boolean headless = !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED"));
+        if ("0".equals(System.getenv("ASKAI_LIVE_BING_ADDON"))) {
+            System.setProperty(Playwright4jDriver.ADDON_PROPERTY, "false");
+        }
+        long quietMillis = Long.parseLong(System.getenv().getOrDefault("ASKAI_LIVE_BING_QUIET_MS", "0"));
         driver = Playwright4jDriver.launch(CamoufoxProvisioning.CHANNEL, headless, 60_000, null, null,
                 settings.consent, settings.captcha);
         driver.setRenderedCapture(new RenderedPageDocumentCapture(settings.analysis, settings.readiness));
 
         driver.open("https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8"));
+        if (quietMillis > 0) {
+            // No page read at all until then (Argos' rule): only the Playwright message loop runs.
+            driver.pumpEvents(() -> false, quietMillis);
+        }
+        System.err.println("[bing-live] addon=" + (driver.addonBridge() != null) + " quietMs=" + quietMillis
+                + " before capture: " + page().evaluate(BOT_PROBE));
         RenderedPageDocument document = driver.captureRenderedPage(new PublicSuffixDomainKeyResolver(), 1L);
         System.err.println("[bing-live] at capture: " + probe());
 
@@ -122,22 +135,7 @@ public class CamoufoxBingSearchLiveTest {
 
         driver.pumpEvents(() -> false, 3000L);
         System.err.println("[bing-live] 3 s later: " + probe());
-        if ("1".equals(System.getenv("ASKAI_LIVE_BING_DIAG"))) {
-            com.microsoft.playwright.Page page = page();
-            System.err.println("[bing-live] reveal scripts: " + page.evaluate(SCRIPT_HINTS));
-            System.err.println("[bing-live] focus=" + page.evaluate("() => document.hasFocus() + '/' "
-                    + "+ document.visibilityState"));
-            page.mouse().move(400, 300);
-            page.mouse().move(420, 320);
-            driver.pumpEvents(() -> false, 1000L);
-            System.err.println("[bing-live] after mouse move: " + probe());
-            page.mouse().wheel(0, 300);
-            driver.pumpEvents(() -> false, 1000L);
-            System.err.println("[bing-live] after wheel: " + probe());
-            page.bringToFront();
-            driver.pumpEvents(() -> false, 5000L);
-            System.err.println("[bing-live] after bringToFront + 5 s: " + probe());
-        }
+        System.err.println("[bing-live] 3 s later: " + page().evaluate(BOT_PROBE));
 
         assertTrue("Bing delivered result blocks (consent or challenge page?): " + blocks, blocks >= 5);
         assertEquals("every Bing result block is captured visible", blocks, visibleBlocks);
