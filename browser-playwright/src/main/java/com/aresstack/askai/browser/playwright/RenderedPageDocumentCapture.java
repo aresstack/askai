@@ -15,11 +15,14 @@ import com.aresstack.askai.browser.render.RenderedPageViewport;
 import com.aresstack.askai.browser.search.SearchPageAnalysisSettings;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Captures the rendered page as one NEUTRAL {@link RenderedPageDocument}: a single in-page script
@@ -45,12 +48,13 @@ final class RenderedPageDocumentCapture {
         String title();
 
         /**
-         * The engine's own redirect answer for an opaque result wrapper ({@link SearchRedirectResolver#needsLookup}):
-         * the raw {@code Location} it names without following it, or null when there is none. The default knows
-         * none, so such a link stays {@code UNRESOLVED}.
+         * The engine's own redirect answers for opaque result wrappers ({@link SearchRedirectResolver#needsLookup}),
+         * asked once per capture for all of them: wrapper URL to the raw {@code Location} it names, the redirect not
+         * followed; a wrapper without an answer is missing. The default knows none, so such links stay
+         * {@code UNRESOLVED}.
          */
-        default String redirectLocation(String wrapperUrl) {
-            return null;
+        default Map<String, String> redirectLocations(Collection<String> wrapperUrls) {
+            return Collections.emptyMap();
         }
     }
 
@@ -202,21 +206,30 @@ final class RenderedPageDocumentCapture {
         }
 
         List<RenderedLinkDescriptor> links = new ArrayList<RenderedLinkDescriptor>();
+        // Google's opaque /goto wrappers: only Google's own redirect answer names the target; asked once, for all.
+        Set<String> wrappers = new LinkedHashSet<String>();
+        for (Map<String, Object> l : mapList(root.get("links"))) {
+            String rawHref = str(l.get("href"));
+            if (SearchRedirectResolver.needsLookup(rawHref)) {
+                wrappers.add(rawHref);
+            }
+        }
         Map<String, String> lookedUp = new HashMap<String, String>();
         long lookupMillis = 0L;
+        if (!wrappers.isEmpty()) {
+            long asked = System.currentTimeMillis();
+            Map<String, String> answers = page.redirectLocations(wrappers);
+            lookupMillis = System.currentTimeMillis() - asked;
+            for (String wrapper : wrappers) {
+                lookedUp.put(wrapper, SearchRedirectResolver.acceptedLookupTarget(wrapper,
+                        answers == null ? null : answers.get(wrapper)));
+            }
+        }
         for (Map<String, Object> l : mapList(root.get("links"))) {
             String rawHref = str(l.get("href"));
             SearchRedirectResolver.Resolution resolution = SearchRedirectResolver.resolve(rawHref);
             String lookupTarget = null;
-            if (resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED
-                    && SearchRedirectResolver.needsLookup(rawHref)) {
-                // Google's opaque /goto wrapper: only Google's own redirect answer names the target, once per wrapper.
-                if (!lookedUp.containsKey(rawHref)) {
-                    long asked = System.currentTimeMillis();
-                    lookedUp.put(rawHref, SearchRedirectResolver.acceptedLookupTarget(rawHref,
-                            page.redirectLocation(rawHref)));
-                    lookupMillis += System.currentTimeMillis() - asked;
-                }
+            if (resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED) {
                 lookupTarget = lookedUp.get(rawHref);
             }
             LinkRedirectResolution status;

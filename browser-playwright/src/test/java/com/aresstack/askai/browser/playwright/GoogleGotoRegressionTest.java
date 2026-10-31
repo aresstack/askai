@@ -155,8 +155,15 @@ public class GoogleGotoRegressionTest {
                 return QUERY + " - Google Suche";
             }
 
-            public String redirectLocation(String wrapperUrl) {
-                return answers.get(SearchRedirectResolver.queryParameter(wrapperUrl, "url"));
+            public Map<String, String> redirectLocations(java.util.Collection<String> wrapperUrls) {
+                Map<String, String> byWrapper = new HashMap<String, String>();
+                for (String wrapper : wrapperUrls) {
+                    String answer = answers.get(SearchRedirectResolver.queryParameter(wrapper, "url"));
+                    if (answer != null) {
+                        byWrapper.put(wrapper, answer);
+                    }
+                }
+                return byWrapper;
             }
         }, new PublicSuffixDomainKeyResolver(), 1L);
     }
