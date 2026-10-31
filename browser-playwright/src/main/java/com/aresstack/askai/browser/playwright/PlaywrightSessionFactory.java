@@ -50,8 +50,7 @@ final class PlaywrightSessionFactory {
                     settings.navigation.navigationCommitTimeoutMillis, profileKey,
                     allowPrivateNetworks ? null : new PrivateTargetRequestFilter(),
                     settings.consent, settings.captcha);
-            driver.setRenderedCapture(new RenderedPageDocumentCapture(settings.analysis,
-                    settings.readiness));
+            driver.setRenderedCapture(new RenderedPageDocumentCapture(settings.analysis));
             return new PlaywrightBrowserSession(driver, policy, limits, searchUrlTemplate, null,
                     settings);
         } catch (BrowserException ex) {

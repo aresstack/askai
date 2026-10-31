@@ -21,12 +21,15 @@ import static org.junit.Assume.assumeTrue;
 
 /**
  * Issue #22 against the REAL Bing in a real Camoufox: the capture must see the organic result blocks as visible
- * (Bing first keeps {@code #b_content} at {@code visibility:hidden}) and the mechanical extraction must take them
- * over as structured candidates with external targets — without any AI repair.
+ * and the mechanical extraction must take them over as structured candidates with external targets — without any
+ * AI repair. Bing's own script hides {@code #b_content}; only its bot-detection module reveals it again, which it
+ * did for Argos (no page-world scripts) but not for this driver, whose reads still run in the page's own world.
+ * Expected to FAIL until those reads and inputs have moved out of the page (add-on content script, real input).
  *
  * <p>Opt-in, because it needs the network and the Camoufox download: {@code ASKAI_LIVE_BING=1 gradlew
  * :browser-playwright:test --tests '*CamoufoxBingSearchLiveTest'}; {@code ASKAI_LIVE_BING_QUERY} changes the query,
- * {@code ASKAI_LIVE_CAMOUFOX_HEADED=1} shows the browser, {@code -Daskai.serp.snapshotDir=...} dumps the page.</p>
+ * {@code ASKAI_LIVE_CAMOUFOX_HEADED=1} shows the browser, {@code ASKAI_LIVE_BING_ADDON=0} starts without the research
+ * add-on, {@code ASKAI_LIVE_BING_QUIET_MS=n} reads nothing from the page for n ms after the navigation.</p>
  */
 public class CamoufoxBingSearchLiveTest {
 
@@ -97,7 +100,7 @@ public class CamoufoxBingSearchLiveTest {
         long quietMillis = Long.parseLong(System.getenv().getOrDefault("ASKAI_LIVE_BING_QUIET_MS", "0"));
         driver = Playwright4jDriver.launch(CamoufoxProvisioning.CHANNEL, headless, 60_000, null, null,
                 settings.consent, settings.captcha);
-        driver.setRenderedCapture(new RenderedPageDocumentCapture(settings.analysis, settings.readiness));
+        driver.setRenderedCapture(new RenderedPageDocumentCapture(settings.analysis));
 
         driver.open("https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8"));
         if (quietMillis > 0) {
