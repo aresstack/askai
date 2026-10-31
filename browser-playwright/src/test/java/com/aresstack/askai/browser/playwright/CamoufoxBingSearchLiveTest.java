@@ -108,6 +108,27 @@ public class CamoufoxBingSearchLiveTest {
                 settings.consent, settings.captcha);
         driver.setRenderedCapture(new RenderedPageDocumentCapture(settings.analysis));
 
+        // What Bing's SERVER sent (protocol level, no page script): result blocks in the raw document and the request
+        // headers, to tell "Bing sends fewer results" from "the page removes them".
+        final StringBuilder served = new StringBuilder();
+        page().onResponse(response -> {
+            try {
+                if (response.request().isNavigationRequest() && response.url().contains("/search?")) {
+                    String body = response.text();
+                    java.util.regex.Matcher blocks = java.util.regex.Pattern
+                            .compile("class=\"[^\"]*\\bb_algo\\b").matcher(body);
+                    int count = 0;
+                    while (blocks.find()) {
+                        count++;
+                    }
+                    served.append("status=").append(response.status()).append(" bytes=").append(body.length())
+                            .append(" b_algo=").append(count).append(" request=")
+                            .append(response.request().allHeaders());
+                }
+            } catch (RuntimeException unreadable) {
+                served.append("unreadable: ").append(unreadable.getMessage());
+            }
+        });
         driver.open("https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8"));
         if (quietMillis > 0) {
             // No page read at all until then (Argos' rule): only the Playwright message loop runs.
@@ -150,6 +171,7 @@ public class CamoufoxBingSearchLiveTest {
             }
         }
         System.err.println("[bing-live] page=" + document.pageUrl + " warnings=" + document.captureWarnings);
+        System.err.println("[bing-live] served document: " + served);
         System.err.println("[bing-live] b_algo=" + blocks + " visible=" + visibleBlocks + " outcome="
                 + extraction.outcome + " candidates=" + extraction.candidates.size() + " structured=" + structured);
 
