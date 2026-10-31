@@ -36,6 +36,10 @@ import java.util.function.Predicate;
  * PERSISTENT context (its profile), whose browser Playwright starts as one unit; and Playwright Java runs one
  * call at a time per Playwright instance. Parallel worker navigation therefore needs several Playwright
  * instances — each one is a worker browser (lane), each lane hosts several user contexts.</p>
+ *
+ * <p>Camoufox worker browsers load the AskAI Research add-on as well, with a bridge of their own that only carries
+ * page reads (no HUD): the tabs' structured capture and SERP guard detection run in the add-on's isolated
+ * content-script world, as in the chat browser (docs/research-browser-addon.md).</p>
  */
 final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
 
@@ -67,13 +71,20 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
     private final Browser browser;
     private final boolean camoufox;
     private final int timeoutMillis;
+    /** Camoufox with the add-on: the page-read bridge of this worker browser, else null. */
+    private final AddonBridge readBridge;
+    /** The temporary directory the add-on was written to (deleted on close), else null. */
+    private final Path addonDirectory;
     private final Map<String, UserContext> userContexts = new LinkedHashMap<String, UserContext>();
     private final Map<String, Tab> tabs = new LinkedHashMap<String, Tab>();
     private long nextId;
     private volatile boolean closed;
 
     private PlaywrightWorkerBrowserBackend(PlaywrightBrowserRuntime.Options options, Playwright playwright,
-                                           Browser browser, boolean camoufox) {
+                                           Browser browser, boolean camoufox, AddonBridge readBridge,
+                                           Path addonDirectory) {
+        this.readBridge = readBridge;
+        this.addonDirectory = addonDirectory;
         this.options = options;
         this.playwright = playwright;
         this.browser = browser;
@@ -98,6 +109,8 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
         String channel = PlaywrightSessionFactory.normalizeChannel(options.channel);
         boolean camoufox = CamoufoxProvisioning.CHANNEL.equals(channel);
         Playwright playwright = null;
+        AddonBridge bridge = null;
+        Path addonDirectory = null;
         try {
             Map<String, String> env = new LinkedHashMap<String, String>();
             env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
@@ -108,6 +121,21 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
             if (camoufox) {
                 CamoufoxLaunch launch = CamoufoxLaunch.builtIn(camoufoxExecutable, CamoufoxProvisioning.browserRoot(),
                         java.util.Locale.getDefault());
+                if (!"false".equalsIgnoreCase(System.getProperty(Playwright4jDriver.ADDON_PROPERTY))) {
+                    try {
+                        bridge = AddonBridge.start();
+                        addonDirectory = java.nio.file.Files.createTempDirectory("askai-worker-addon");
+                        launch = launch.withAddon(ResearchAddon.install(addonDirectory, bridge.clientConfig()));
+                    } catch (java.io.IOException | RuntimeException addonFailed) {
+                        // The worker browser still starts; its tabs then read pages via page.evaluate.
+                        System.err.println("[browser-mcp] research add-on not prepared for a worker browser: "
+                                + firstLine(addonFailed));
+                        if (bridge != null) {
+                            bridge.close();
+                            bridge = null;
+                        }
+                    }
+                }
                 Map<String, String> environment = new java.util.HashMap<String, String>(System.getenv());
                 environment.putAll(launch.environment());
                 Map<String, Object> prefs = new LinkedHashMap<String, Object>(launch.prefs());
@@ -132,8 +160,13 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
                 }
                 browser = playwright.chromium().launch(launchOptions);
             }
-            return new PlaywrightWorkerBrowserBackend(options, playwright, browser, camoufox);
+            return new PlaywrightWorkerBrowserBackend(options, playwright, browser, camoufox, bridge,
+                    addonDirectory);
         } catch (RuntimeException | java.io.IOException failed) {
+            if (bridge != null) {
+                bridge.close();
+            }
+            deleteQuietly(addonDirectory);
             if (playwright != null) {
                 try {
                     playwright.close();
@@ -193,6 +226,7 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
             Playwright4jDriver driver = Playwright4jDriver.inBrowsingContext(browser, userContext.context, page,
                     timeoutMillis, options.settings.consent, options.settings.captcha);
             driver.setRenderedCapture(new RenderedPageDocumentCapture(options.settings.analysis));
+            driver.readThroughAddon(readBridge);
             UrlSafetyPolicy policy = options.allowPrivateNetworks
                     ? UrlSafetyPolicy.allowingPrivateNetworks() : UrlSafetyPolicy.strict();
             PlaywrightBrowserSession session = new PlaywrightBrowserSession(driver, policy, BrowserLimits.defaults(),
@@ -238,6 +272,17 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
         } catch (PlaywrightException ex) {
             throw new BrowserException("Reading the user context state failed: " + firstLine(ex));
         }
+    }
+
+    /** Tests: the page-scoped driver of a tab, or null. */
+    Playwright4jDriver driverOf(String browsingContextId) {
+        Tab tab = tabs.get(browsingContextId);
+        return tab == null ? null : tab.driver;
+    }
+
+    /** Tests: the page-read bridge of this worker browser, or null without the add-on. */
+    AddonBridge readBridge() {
+        return readBridge;
     }
 
     @Override
@@ -307,6 +352,26 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
             playwright.close();
         } catch (RuntimeException ignored) {
         }
+        if (readBridge != null) {
+            readBridge.close();
+        }
+        deleteQuietly(addonDirectory);
+    }
+
+    /** Best effort: a directory still held by a dying browser stays in the temp folder. */
+    private static void deleteQuietly(Path directory) {
+        if (directory == null) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> files = java.nio.file.Files.walk(directory)) {
+            files.sorted(java.util.Comparator.reverseOrder()).forEach(file -> {
+                try {
+                    java.nio.file.Files.deleteIfExists(file);
+                } catch (java.io.IOException ignored) {
+                }
+            });
+        } catch (java.io.IOException | RuntimeException ignored) {
+        }
     }
 
     @Override
@@ -318,11 +383,15 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
         // As the chat browser's emergency path: cut the Playwright connection off the owner thread, which
         // fails the stuck call and ends the driver child (and with it the browser).
         final Playwright toCut = playwright;
+        final AddonBridge bridgeToClose = readBridge;
         Thread cutter = new Thread(new Runnable() {
             public void run() {
                 try {
                     toCut.close();
                 } catch (RuntimeException ignored) {
+                }
+                if (bridgeToClose != null) {
+                    bridgeToClose.close();
                 }
             }
         }, "worker-browser-terminate");

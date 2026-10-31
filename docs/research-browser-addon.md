@@ -1,6 +1,7 @@
 # Research browser add-on
 
-Status: stage 1 implemented (HUD in the add-on). Stages 2 to 4 are planned.
+Status: stage 1 implemented (HUD in the add-on). Page reads (guard detection, SERP capture, anchors) run in the
+add-on (see "Page reads in the add-on"). Consent clicks without JavaScript and the Chrome extension follow.
 
 ## Why
 
@@ -38,12 +39,12 @@ Spec: GitHub issue #23. The panel also shows the host of the page AskAI is on (o
 
 ### What a page sees
 
-Nothing of the add-on: no content script, no web-accessible resource, no element, no global, no binding. The add-on
-only has a background page and its own panel page. The live test checks this in a real Camoufox: the page reports
-`hud=false;binding=undefined;root=undefined`.
+Nothing of the add-on: no registered content script, no web-accessible resource, no element, no global, no binding.
+The add-on only has a background page and its own panel page; page reads run in the isolated content-script world
+(below). The live test checks this in a real Camoufox: the page reports `hud=false;binding=undefined;root=undefined`.
 
-This removes OUR traces from the page; it does not make an automated browser undetectable. Playwright's own
-evaluations (guards, capture, stages 2 and 3) and every other automation signal stay as they are.
+This removes OUR traces from the page; it does not make an automated browser undetectable. Every other automation
+signal stays as it is.
 
 ### Pieces
 
@@ -70,7 +71,9 @@ The add-on's background page talks to a small HTTP server in the AskAI process:
   `Authorization` header without a CORS request that carries its own origin;
 - `GET /v1/state?after=<version>`: long poll (held up to 20 s), returns the newest HUD state as JSON (Gson);
 - `POST /v1/command`: one HUD command; anything outside the known command set is refused (400);
-- `POST /v1/hello`: protocol and add-on version, logged once.
+- `POST /v1/hello`: protocol and add-on version, logged once;
+- `GET /v1/read`: long poll (held up to 20 s), returns the next page read `{id, url, script}`;
+- `POST /v1/read-result`: `{id, ok:true, value}` or `{id, ok:false, error}` for that read (up to 64 MB).
 
 Commands land in the same `HudCommandInbox` the overlay binding fed, so a Skip still reaches the runtime while a
 data command blocks the browser actor.
@@ -105,20 +108,48 @@ Switches (JVM system properties):
 | `-Daskai.browser.researchAddon=false` | Start Camoufox without the add-on (HUD = overlay) |
 | `-Daskai.browser.hud.inPageFallback=false` | Never put the overlay into a page; without add-on there is no HUD in the browser |
 
-Worker browsers (`PlaywrightWorkerBrowserBackend`) have no HUD and are started without the add-on in stage 1.
+Worker browsers (`PlaywrightWorkerBrowserBackend`) have no HUD. They load the add-on for page reads only (see
+below), with a bridge of their own.
 
-## Stage 2: CAPTCHA and consent guards in the add-on
+## Page reads in the add-on
 
-Move `SearchPageGuards` (challenge detection, consent detection and dismissal) into a content script that runs in
-the add-on's isolated world (Xray vision: page prototype hooks do not see it). The background page answers guard
-requests over the bridge; requests are keyed by the tab the add-on reports for the Playwright page (URL plus a
-per-navigation nonce published through the bridge, never through the page). The worker browsers get the add-on too.
-The `page.evaluate` path stays as the fallback for Chrome until stage 4.
+Issue #22 showed why this matters: Bing's bot detection keeps its result list `visibility:hidden` for AskAI's
+Camoufox, while Argos, which never runs scripts in the page's world, gets the revealed page. Every read-only script
+AskAI ran with `page.evaluate` now runs in the add-on's isolated content-script world instead:
 
-## Stage 3: SERP capture in the add-on
+| Read | Script (unchanged) | Used by |
+| --- | --- | --- |
+| Structured SERP capture | `RenderedPageDocumentCapture.captureScript()` | mechanical SERP analysis |
+| DOM fingerprint before/after the capture | `RenderedPageDocumentCapture.FINGERPRINT_SCRIPT` | capture consistency check |
+| Challenge detection | `SearchPageGuards.challengeDetectScript` | `challengePresent`, `challengeMarker`, parked challenge tab |
+| Consent detection | `SearchPageGuards.consentReportScript` | `consentCandidate` |
+| Anchor list | `Playwright4jDriver.state()` | page state after every navigation |
 
-Move `RenderedPageDocumentCapture` and the anchor list into the content script. This touches the same selector and
-capture code as the Bing extraction work, so it starts only after that is settled and is coordinated with it.
+How it runs: `Playwright4jDriver.readPage(page, script)` queues the script on the bridge with the page's URL and a
+stable key per Playwright page. The background page fetches it (`GET /v1/read`) and finds the page's tab: the first
+read of a key binds it to the one unbound tab showing that URL, every later read goes to exactly that tab, even when
+other tabs (other worker user contexts) show the same URL. Several unbound candidates fail with `AMBIGUOUS_TAB`, no
+tab within 2 s with `NO_TAB`, a bound tab showing another URL with `URL_MISMATCH`; a read is never redirected to a
+different tab. Then it runs `(<script>)()` with `tabs.executeScript` in that
+tab's top frame at once (`runAt: document_start`). The script runs in the content-script sandbox with Xray vision:
+it sees the DOM, layout and computed styles, but the page's own scripts see neither the script nor its globals, and a
+page that hooks `getBoundingClientRect` or `getComputedStyle` sees no call. The structured-clone result goes back with
+`POST /v1/read-result`; Java gets the same value shapes as from `page.evaluate` (maps, lists, numbers, booleans,
+strings), so the conversion in `RenderedPageDocumentCapture` and every validation after it are unchanged. While Java
+waits (up to 30 s, which also covers an add-on that is still connecting), the Playwright message loop keeps running.
+A failed or unanswered read fails like a failed `page.evaluate` did (`PlaywrightException`): the capture reports
+"Structured page capture failed", the guards answer `none`. There is no fallback into the page's world while the
+add-on is present.
+
+The scripts stay in Java so the capture and guard logic has one source and the existing tests keep applying to it.
+Only AskAI can queue a read (token and extension origin, as for the HUD), and the scripts only read: they write
+nothing into the page, click nothing and navigate nowhere.
+
+`page.evaluate` is only left for drivers without the add-on: Chrome/Edge (until stage 4) and Camoufox started with
+`-Daskai.browser.researchAddon=false` or with an add-on that could not be prepared.
+
+Not part of the reads: the consent click (`tryDismissConsent`) moves to Playwright Locators and real mouse input in a
+separate change, together with removing the in-page HUD overlay for Camoufox.
 
 ## Stage 4: Chrome extension
 
@@ -127,8 +158,9 @@ bridge protocol stays the same; the bridge then also accepts `Origin: chrome-ext
 
 ## Tests
 
-- Unit: `AddonBridgeTest` (token, origin, long poll, command whitelist), `ResearchAddonTest` (files, `bridge.json`,
-  manifest exposes nothing to pages), `CamoufoxLaunchTest.withAddonAppendsTheAddonAndRechunksOnlyTheFingerprint`.
+- Unit: `AddonBridgeTest` (token, origin, long poll, command whitelist, page reads: round trip, held poll, add-on
+  error, cancel, refused for pages, close), `ResearchAddonTest` (files, `bridge.json`, manifest exposes nothing to
+  pages, one injection point for reads), `CamoufoxLaunchTest.withAddonAppendsTheAddonAndRechunksOnlyTheFingerprint`.
 - Live, real Camoufox (downloads it on first use, like the app):
 
   ```
@@ -138,3 +170,10 @@ bridge protocol stays the same; the bridge then also accepts `Origin: chrome-ext
   On Windows: `set ASKAI_LIVE_CAMOUFOX=1` first. With `ASKAI_LIVE_CAMOUFOX_HEADED=1` and
   `ASKAI_LIVE_CAMOUFOX_HOLD_SECONDS=120` the browser stays open with a running countdown; clicked HUD buttons are
   printed as `[addon-live] commands from the add-on: ...`.
+
+  `pageReadsRunInTheAddonAndThePageSeesNone` captures a small result page through the add-on, reads challenge,
+  consent and anchors, and checks that the page's own hooked `getBoundingClientRect`/`getComputedStyle` were never
+  called (`calls=0`); `withoutTheAddonReadsRunInThePageWorld` is the counter-proof with `page.evaluate`.
+  `workerTabsReadThroughTheWorkerBrowsersAddon` does the same in a worker tab, and
+  `tabsWithTheSameUrlAreReadAsTheirOwnTab` opens the same URL with different content in two worker user contexts and
+  checks that each read comes from its own tab.
