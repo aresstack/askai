@@ -27,9 +27,14 @@ answered with random, wrong result sets.
 
 `web_search` takes an optional `engines` parameter (comma-separated catalog ids, in this order, each once). A
 named engine need not be enabled in the settings, but it must exist: a wrong id is refused, never corrected or
-replaced. Without the parameter the engines enabled in the settings search (*Search engines* list; default
-DuckDuckGo, Bing and Google, strategy `ALL_ENABLED`, all three merged). `FIRST_USABLE` types into the first
-engine only and asks the next one, in a tab of its own, only when the first does not deliver.
+replaced. Without the parameter the engines enabled in the settings search (*Search engines* list).
+
+A fresh installation searches with **Bing alone**; DuckDuckGo and Google are in the list but switched off, so an
+update or new installation does not multiply the engine requests (each engine is one more source of CAPTCHAs and
+blocks). Settings saved before are kept as they are. The strategy stays `ALL_ENABLED`: switch DuckDuckGo and Google
+on and all three are asked at once, each in a tab of its own, typed into at the same time, with their results
+merged. `FIRST_USABLE` types into the first engine only and asks the next one, in a tab of its own, only when the
+first does not deliver.
 
 *Max. engine attempts* (`maximumEngineAttempts`, default 4) is spent before any tab opens: only the engines it
 reaches get a tab, each first start page counts as one opened endpoint, and a fallback endpoint (DuckDuckGo Lite)
