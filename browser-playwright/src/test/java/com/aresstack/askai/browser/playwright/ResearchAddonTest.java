@@ -47,14 +47,31 @@ public class ResearchAddonTest {
         JsonObject manifest = JsonParser.parseString(Files.readString(addon.resolve("manifest.json"))).getAsJsonObject();
         assertEquals(ResearchAddon.ID, manifest.getAsJsonObject("browser_specific_settings")
                 .getAsJsonObject("gecko").get("id").getAsString());
-        // No content script, no web-accessible resource: a visited page has nothing of the add-on to observe.
+        // No registered content script, no web-accessible resource: a visited page has nothing of the add-on to
+        // observe. Page reads are injected on demand into the isolated content-script world, which needs the tab
+        // URLs (tabs) and the host permission for every page (<all_urls>).
         assertFalse(manifest.has("content_scripts"));
         assertFalse(manifest.has("web_accessible_resources"));
-        assertEquals("[\"http://127.0.0.1/*\"]", manifest.get("permissions").toString());
+        assertEquals("[\"http://127.0.0.1/*\",\"tabs\",\"<all_urls>\"]", manifest.get("permissions").toString());
         for (String file : ResearchAddon.FILES) {
             String text = Files.readString(addon.resolve(file));
-            assertFalse(file + " never injects into pages", text.contains("tabs.executeScript")
-                    || text.contains("contentScripts.register") || text.contains("scripting.executeScript"));
+            assertFalse(file + " never registers page scripts", text.contains("contentScripts.register")
+                    || text.contains("scripting.executeScript") || text.contains("wrappedJSObject")
+                    || text.contains("exportFunction"));
+            if (!"background.js".equals(file)) {
+                assertFalse(file + " does not inject", text.contains("tabs.executeScript"));
+            }
         }
+    }
+
+    @Test
+    public void pageReadsRunOnceInTheIsolatedWorldOfTheMatchingTab() throws Exception {
+        Path addon = ResearchAddon.install(temporary.getRoot().toPath(), null);
+        String background = Files.readString(addon.resolve("background.js"));
+        // Exactly one injection point: the read loop, with AskAI's script as code and nothing for other frames.
+        assertEquals(1, background.split("tabs\\.executeScript\\(", -1).length - 1);
+        assertTrue(background.contains("code: '(' + read.script + ')()'"));
+        assertFalse(background.contains("allFrames"));
+        assertTrue(background.contains("tab.url === url"));
     }
 }

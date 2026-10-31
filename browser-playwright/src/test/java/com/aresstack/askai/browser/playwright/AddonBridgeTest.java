@@ -12,12 +12,15 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /** The add-on bridge: only the add-on (token, extension origin) reads the HUD and sends commands. */
 public class AddonBridgeTest {
@@ -131,6 +134,96 @@ public class AddonBridgeTest {
         assertTrue(bridge.addonConnected());
         bridge.close();
         assertFalse(bridge.addonConnected());
+    }
+
+    @Test
+    public void aPageReadTravelsToTheAddonAndItsValueBack() throws Exception {
+        AddonBridge.PageRead read = bridge.submitRead("https://www.bing.com/search?q=kaninchen", "() => 42");
+        HttpResponse<String> fetched = send(get("/v1/read").header("Origin", EXTENSION_ORIGIN)
+                .header("Authorization", "Bearer " + bridge.token()));
+        assertEquals(200, fetched.statusCode());
+        JsonObject task = JsonParser.parseString(fetched.body()).getAsJsonObject();
+        assertEquals("https://www.bing.com/search?q=kaninchen", task.get("url").getAsString());
+        assertEquals("() => 42", task.get("script").getAsString());
+        assertFalse(read.isDone());
+        assertEquals(204, send(post("/v1/read-result", "{\"id\":\"" + task.get("id").getAsString()
+                + "\",\"ok\":true,\"value\":{\"containers\":[{\"id\":\"container-0001\",\"visible\":true,"
+                + "\"textLength\":12}],\"truncated\":false}}")).statusCode());
+        assertTrue(read.isDone());
+        // The same value shapes page.evaluate returned: maps, lists, numbers, booleans, strings.
+        Map<?, ?> value = (Map<?, ?>) read.value();
+        assertEquals(Boolean.FALSE, value.get("truncated"));
+        Map<?, ?> container = (Map<?, ?>) ((List<?>) value.get("containers")).get(0);
+        assertEquals("container-0001", container.get("id"));
+        assertEquals(Boolean.TRUE, container.get("visible"));
+        assertEquals(12, ((Number) container.get("textLength")).intValue());
+        assertEquals(0, bridge.openReadCount());
+    }
+
+    @Test
+    public void aHeldReadPollReturnsAsSoonAsAReadIsSubmitted() throws Exception {
+        CompletableFuture<HttpResponse<String>> held = http.sendAsync(get("/v1/read")
+                .header("Authorization", "Bearer " + bridge.token()).build(), HttpResponse.BodyHandlers.ofString());
+        Thread.sleep(300);
+        assertFalse("nothing queued yet", held.isDone());
+        bridge.submitRead("https://example.org/", "() => document.title");
+        HttpResponse<String> response = held.get(5, TimeUnit.SECONDS);
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("document.title"));
+    }
+
+    @Test
+    public void anAddonErrorFailsTheRead() throws Exception {
+        AddonBridge.PageRead read = bridge.submitRead("https://example.org/", "() => 1");
+        String id = JsonParser.parseString(send(get("/v1/read").header("Authorization", "Bearer " + bridge.token()))
+                .body()).getAsJsonObject().get("id").getAsString();
+        send(post("/v1/read-result", "{\"id\":\"" + id + "\",\"ok\":false,\"error\":\"NO_TAB: no tab shows x\"}"));
+        try {
+            read.value();
+            fail("an error result must fail the read");
+        } catch (AddonBridge.PageReadFailed expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("NO_TAB"));
+        }
+    }
+
+    @Test
+    public void aCancelledReadIsNeverHandedOutAndALateResultIsDropped() throws Exception {
+        AddonBridge.PageRead cancelled = bridge.submitRead("https://example.org/a", "() => 'a'");
+        cancelled.cancel();
+        AddonBridge.PageRead next = bridge.submitRead("https://example.org/b", "() => 'b'");
+        JsonObject task = JsonParser.parseString(send(get("/v1/read")
+                .header("Authorization", "Bearer " + bridge.token())).body()).getAsJsonObject();
+        assertEquals("https://example.org/b", task.get("url").getAsString());
+        assertEquals(204, send(post("/v1/read-result", "{\"id\":\"" + cancelled.id + "\",\"ok\":true,\"value\":1}"))
+                .statusCode());
+        assertFalse(next.isDone());
+        assertEquals(1, bridge.openReadCount());
+    }
+
+    @Test
+    public void aPageCannotFetchOrAnswerReads() throws Exception {
+        AddonBridge.PageRead read = bridge.submitRead("https://example.org/", "() => 1");
+        assertEquals(403, send(get("/v1/read").header("Origin", "https://www.bing.com")
+                .header("Authorization", "Bearer " + bridge.token())).statusCode());
+        assertEquals(403, send(HttpRequest.newBuilder(uri("/v1/read-result")).timeout(Duration.ofSeconds(5))
+                .header("Origin", "https://www.bing.com").header("Authorization", "Bearer " + bridge.token())
+                .POST(HttpRequest.BodyPublishers.ofString("{\"id\":\"" + read.id + "\",\"ok\":true,\"value\":2}")))
+                .statusCode());
+        assertFalse(read.isDone());
+        assertEquals(400, send(post("/v1/read-result", "not json")).statusCode());
+    }
+
+    @Test
+    public void closingFailsOpenReads() {
+        AddonBridge.PageRead read = bridge.submitRead("https://example.org/", "() => 1");
+        bridge.close();
+        assertTrue(read.isDone());
+        try {
+            read.value();
+            fail("a closed bridge cannot answer");
+        } catch (AddonBridge.PageReadFailed expected) {
+            assertTrue(expected.getMessage().contains("closed"));
+        }
     }
 
     private HttpRequest.Builder get(String path) {

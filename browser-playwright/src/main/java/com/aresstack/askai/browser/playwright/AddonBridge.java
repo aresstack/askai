@@ -15,10 +15,16 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.ArrayDeque;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
 /**
@@ -28,6 +34,10 @@ import java.util.regex.Pattern;
  * send commands. The add-on long-polls {@code GET /v1/state?after=<version>} and posts the user's clicks to
  * {@code POST /v1/command}; commands land in the same {@link HudCommandInbox} the in-page overlay fed, so the runtime
  * cannot tell (and need not care) where a Skip came from.
+ *
+ * <p>Page reads go the same way: {@link #submitRead} queues a read-only script for the tab showing a URL, the add-on
+ * long-polls {@code GET /v1/read}, runs the script in that tab's isolated content-script world (the page's own
+ * scripts never see it) and posts the structured-clone result to {@code POST /v1/read-result}.</p>
  */
 final class AddonBridge implements AutoCloseable {
 
@@ -40,6 +50,8 @@ final class AddonBridge implements AutoCloseable {
     private static final Pattern COMMAND = Pattern.compile(
             "PAUSE|RESUME|SKIP|NEXT|SET_DELAY:[0-9]{1,3}|SET_RELEVANCE:(on|off)");
     private static final Gson GSON = new Gson();
+    /** A capture of a large page is a few MB of JSON; anything beyond this is refused. */
+    static final int MAXIMUM_READ_RESULT_BYTES = 64 * 1024 * 1024;
 
     /** Set by the driver once it exists; the browser (and with it the add-on) starts only after that. */
     private volatile HudCommandInbox inbox;
@@ -54,6 +66,11 @@ final class AddonBridge implements AutoCloseable {
     private volatile String addonVersion;
     private volatile long servedVersion;
     private volatile boolean closed;
+    /** Page reads not yet fetched by the add-on, in submit order. Guarded by {@link #lock}. */
+    private final ArrayDeque<PageRead> queuedReads = new ArrayDeque<PageRead>();
+    /** Every read whose result is still open (queued or fetched), by id. Guarded by {@link #lock}. */
+    private final Map<String, PageRead> openReads = new LinkedHashMap<String, PageRead>();
+    private final AtomicLong readIds = new AtomicLong();
 
     private AddonBridge(String token, HttpServer server, ExecutorService executor) {
         this.token = token;
@@ -70,8 +87,8 @@ final class AddonBridge implements AutoCloseable {
         HttpServer server = HttpServer.create(new InetSocketAddress(
                 InetAddress.getByAddress("localhost", new byte[]{127, 0, 0, 1}), 0), 0);
         AtomicInteger threads = new AtomicInteger();
-        // A few threads: one held state poll, a command and a hello may overlap.
-        ExecutorService executor = Executors.newFixedThreadPool(4, runnable -> {
+        // A few threads: a held state poll and a held read poll, plus a command, a read result and a hello may overlap.
+        ExecutorService executor = Executors.newFixedThreadPool(6, runnable -> {
             Thread thread = new Thread(runnable, "askai-addon-bridge-" + threads.incrementAndGet());
             thread.setDaemon(true);
             return thread;
@@ -148,10 +165,90 @@ final class AddonBridge implements AutoCloseable {
         }
     }
 
+    /**
+     * Queue a read-only page script for the add-on. It runs in the isolated content-script world of the tab whose
+     * URL equals {@code tabUrl}, as {@code (<script>)()}; its structured-clone result arrives as Gson values (Map,
+     * List, Double, Boolean, String). The caller waits on {@link PageRead#isDone()} and must {@link PageRead#cancel()}
+     * a read it stops waiting for.
+     */
+    PageRead submitRead(String tabUrl, String script) {
+        PageRead read = new PageRead("read-" + readIds.incrementAndGet(), tabUrl, script);
+        synchronized (lock) {
+            if (closed) {
+                read.result.completeExceptionally(new PageReadFailed("the research add-on bridge is closed"));
+                return read;
+            }
+            openReads.put(read.id, read);
+            queuedReads.add(read);
+            lock.notifyAll();
+        }
+        return read;
+    }
+
+    /** How many reads are queued or running (diagnostics and tests). */
+    int openReadCount() {
+        synchronized (lock) {
+            return openReads.size();
+        }
+    }
+
+    /** A failed or unanswered page read; a RuntimeException so the driver's existing guard handling applies. */
+    static final class PageReadFailed extends RuntimeException {
+        PageReadFailed(String message) {
+            super(message);
+        }
+    }
+
+    /** One page read handed to the add-on. */
+    final class PageRead {
+        final String id;
+        final String tabUrl;
+        final String script;
+        final CompletableFuture<Object> result = new CompletableFuture<Object>();
+
+        private PageRead(String id, String tabUrl, String script) {
+            this.id = id;
+            this.tabUrl = tabUrl;
+            this.script = script;
+        }
+
+        boolean isDone() {
+            return result.isDone();
+        }
+
+        /** The script's value; throws {@link PageReadFailed} when the add-on reported an error. */
+        Object value() {
+            try {
+                return result.get();
+            } catch (ExecutionException failed) {
+                Throwable cause = failed.getCause();
+                throw cause instanceof PageReadFailed ? (PageReadFailed) cause
+                        : new PageReadFailed(String.valueOf(cause));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new PageReadFailed("interrupted while waiting for the page read");
+            }
+        }
+
+        /** Stop waiting: a queued read is never handed out, a late result is dropped. */
+        void cancel() {
+            synchronized (lock) {
+                openReads.remove(id);
+                queuedReads.remove(this);
+            }
+            result.completeExceptionally(new PageReadFailed("page read cancelled"));
+        }
+    }
+
     @Override
     public void close() {
         closed = true;
         synchronized (lock) {
+            for (PageRead read : openReads.values()) {
+                read.result.completeExceptionally(new PageReadFailed("the research add-on bridge was closed"));
+            }
+            openReads.clear();
+            queuedReads.clear();
             lock.notifyAll();
         }
         server.stop(0);
@@ -180,6 +277,11 @@ final class AddonBridge implements AutoCloseable {
                     target.add(command);
                 }
                 respond(exchange, 204, null);
+            } else if ("GET".equals(method) && "/v1/read".equals(path)) {
+                nextRead(exchange);
+            } else if ("POST".equals(method) && "/v1/read-result".equals(path)) {
+                String body = body(exchange, MAXIMUM_READ_RESULT_BYTES);
+                respond(exchange, readResult(body) ? 204 : 400, null);
             } else if ("POST".equals(method) && "/v1/hello".equals(path)) {
                 hello(body(exchange, 1024));
                 respond(exchange, 204, null);
@@ -239,6 +341,67 @@ final class AddonBridge implements AutoCloseable {
         json.addProperty("host", currentHost);
         body.add("state", json);
         respond(exchange, 200, GSON.toJson(body));
+    }
+
+    /** The add-on's held read poll: the oldest queued read, or 204 after {@link #POLL_HOLD_MILLIS}. */
+    private void nextRead(HttpExchange exchange) throws IOException {
+        long deadline = System.currentTimeMillis() + POLL_HOLD_MILLIS;
+        PageRead read;
+        synchronized (lock) {
+            while (!closed && queuedReads.isEmpty()) {
+                long remaining = deadline - System.currentTimeMillis();
+                if (remaining <= 0L) {
+                    break;
+                }
+                try {
+                    lock.wait(remaining);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            read = closed ? null : queuedReads.poll();
+        }
+        lastContactMillis = System.currentTimeMillis();
+        if (read == null) {
+            respond(exchange, 204, null);
+            return;
+        }
+        JsonObject body = new JsonObject();
+        body.addProperty("id", read.id);
+        body.addProperty("url", read.tabUrl);
+        body.addProperty("script", read.script);
+        respond(exchange, 200, GSON.toJson(body));
+    }
+
+    /** {@code {id, ok, value}} or {@code {id, ok:false, error}}; false for a body that is no read result. */
+    private boolean readResult(String body) {
+        JsonObject result;
+        try {
+            result = GSON.fromJson(body, JsonObject.class);
+        } catch (RuntimeException unreadable) {
+            return false;
+        }
+        if (result == null || !result.has("id") || !result.get("id").isJsonPrimitive()) {
+            return false;
+        }
+        PageRead read;
+        synchronized (lock) {
+            read = openReads.remove(result.get("id").getAsString());
+        }
+        if (read == null) {
+            return true; // cancelled or timed out on the Java side: the late result is dropped
+        }
+        boolean ok = result.has("ok") && result.get("ok").isJsonPrimitive() && result.get("ok").getAsBoolean();
+        if (ok) {
+            read.result.complete(result.has("value") ? GSON.fromJson(result.get("value"), Object.class) : null);
+        } else {
+            String error = result.has("error") && result.get("error").isJsonPrimitive()
+                    ? result.get("error").getAsString() : "unknown error";
+            read.result.completeExceptionally(new PageReadFailed("the research add-on could not read the page: "
+                    + error));
+        }
+        return true;
     }
 
     private void hello(String body) {

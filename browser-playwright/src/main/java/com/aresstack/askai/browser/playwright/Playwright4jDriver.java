@@ -70,6 +70,11 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * page (docs/research-browser-addon.md); null when the add-on is off or could not be prepared.
      */
     private AddonBridge addonBridge;
+    /**
+     * Camoufox with the add-on: where page reads run (the chat browser's {@link #addonBridge}, or the worker
+     * browser's bridge for a worker tab). Null = no add-on, reads fall back to {@code page.evaluate}.
+     */
+    private AddonBridge readBridge;
     /** When the browser was started: the add-on gets {@link #ADDON_GRACE_MILLIS} to connect before the fallback. */
     private long launchedMillis;
     /** The fallback overlay was put into a page; it is removed once the add-on takes over. */
@@ -86,6 +91,11 @@ final class Playwright4jDriver implements PlaywrightDriver {
     static final String IN_PAGE_FALLBACK_PROPERTY = "askai.browser.hud.inPageFallback";
     /** How long a fresh browser's add-on may take to connect before the HUD falls back to the page. */
     static final long ADDON_GRACE_MILLIS = 15_000L;
+    /**
+     * How long one page read may take through the add-on. Covers a fresh browser whose add-on is still connecting
+     * (it fetches the queued read once it polls) and a full structured capture of a large page.
+     */
+    static final long PAGE_READ_TIMEOUT_MILLIS = 30_000L;
     /** How many popups the close-immediately policy handled — observable proof the event dispatched. */
     private final java.util.concurrent.atomic.AtomicInteger popupsClosed =
             new java.util.concurrent.atomic.AtomicInteger();
@@ -216,6 +226,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             if (bridge != null) {
                 bridge.deliverTo(driver.hudCommands);
                 driver.addonBridge = bridge;
+                driver.readBridge = bridge;
             }
             driver.launchedMillis = System.currentTimeMillis();
             page.onPopup(driver.popupCloser());
@@ -344,7 +355,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             final Page target = page;
             return renderedCapture.capture(new RenderedPageDocumentCapture.PageScriptRunner() {
                 public Object evaluate(String script) {
-                    return target.evaluate(script);
+                    return readPage(target, script);
                 }
 
                 public String url() {
@@ -580,6 +591,14 @@ final class Playwright4jDriver implements PlaywrightDriver {
         };
     }
 
+    /**
+     * A worker tab: read its pages through the worker browser's add-on bridge (owned and closed by the worker
+     * browser), or null to keep {@code page.evaluate}.
+     */
+    void readThroughAddon(AddonBridge workerBridge) {
+        this.readBridge = workerBridge;
+    }
+
     /** The research add-on's bridge, or null (Chrome/Edge, add-on off or not prepared). */
     AddonBridge addonBridge() {
         return addonBridge;
@@ -641,7 +660,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         try {
             // Only a VISIBLE/blocking challenge counts here (this drives challenge parking) — a hidden
             // artifact ('hidden:…') must never park a readable page.
-            return String.valueOf(page.evaluate(SearchPageGuards.challengeDetectScript(captcha)))
+            return String.valueOf(readPage(page, SearchPageGuards.challengeDetectScript(captcha)))
                     .startsWith("visible");
         } catch (RuntimeException ex) {
             return false;
@@ -655,7 +674,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             return "none";
         }
         try {
-            return String.valueOf(page.evaluate(SearchPageGuards.challengeDetectScript(captcha)));
+            return String.valueOf(readPage(page, SearchPageGuards.challengeDetectScript(captcha)));
         } catch (RuntimeException ex) {
             return "none";
         }
@@ -668,7 +687,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             return "none";
         }
         try {
-            return String.valueOf(page.evaluate(SearchPageGuards.consentReportScript(consent)));
+            return String.valueOf(readPage(page, SearchPageGuards.consentReportScript(consent)));
         } catch (RuntimeException ex) {
             return "none"; // a broken CMP script must never take a probe down
         }
@@ -710,7 +729,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         try {
             // Resolved once the challenge is no longer VISIBLY blocking (a lingering hidden artifact does not count).
-            return String.valueOf(challengePage.evaluate(SearchPageGuards.challengeDetectScript(captcha)))
+            return String.valueOf(readPage(challengePage, SearchPageGuards.challengeDetectScript(captcha)))
                     .startsWith("visible");
         } catch (RuntimeException ex) {
             return false; // an unreadable/closed challenge tab counts as resolved, never blocks forever
@@ -834,7 +853,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         String title = page.title();
         String text = page.innerText("body");
         List<PlaywrightPageState.Anchor> anchors = new ArrayList<PlaywrightPageState.Anchor>();
-        Object raw = page.evaluate(
+        Object raw = readPage(page,
                 "() => Array.from(document.querySelectorAll('a[href]'))"
                         + ".map(a => [String(a.innerText || '').trim(), String(a.href || '')])");
         if (raw instanceof List) {
@@ -847,6 +866,38 @@ final class Playwright4jDriver implements PlaywrightDriver {
             }
         }
         return new PlaywrightPageState(url, title, text, anchors);
+    }
+
+    /**
+     * Every read-only page script goes through here. With the research add-on it runs in the tab's isolated
+     * content-script world (docs/research-browser-addon.md): the page's own scripts never see it, and no script of
+     * AskAI is evaluated in the page's world. Only a driver without the add-on (Chrome/Edge, add-on off or not
+     * prepared) still uses {@code page.evaluate}. Failures surface as {@link PlaywrightException}, so every caller
+     * keeps its existing error handling. While waiting, the Playwright message loop keeps running (route
+     * interception, popups), exactly as during the idle pump.
+     */
+    private Object readPage(Page target, String script) {
+        AddonBridge reads = readBridge;
+        if (reads == null) {
+            return target.evaluate(script);
+        }
+        AddonBridge.PageRead read = reads.submitRead(target.url(), script);
+        try {
+            if (!read.isDone()) {
+                target.waitForCondition(read::isDone,
+                        new Page.WaitForConditionOptions().setTimeout(PAGE_READ_TIMEOUT_MILLIS));
+            }
+            return read.value();
+        } catch (com.microsoft.playwright.TimeoutError timedOut) {
+            throw new PlaywrightException("The research add-on did not answer the page read within "
+                    + (PAGE_READ_TIMEOUT_MILLIS / 1000L) + " s");
+        } catch (AddonBridge.PageReadFailed failed) {
+            throw new PlaywrightException(failed.getMessage());
+        } finally {
+            if (!read.isDone()) {
+                read.cancel();
+            }
+        }
     }
 
     private void requireOpen() throws BrowserException {

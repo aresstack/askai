@@ -32,6 +32,22 @@ public class CamoufoxResearchAddonLiveTest {
             + "+(document.getElementById('__askai-research-hud')!==null)+';binding='+(typeof window.__askaiHudCommand)"
             + "+';root='+(typeof window.__askaiResearchHudRoot);},100);</script></body></html>";
 
+    /**
+     * A small result list whose page counts every call of its OWN getBoundingClientRect / getComputedStyle: a script
+     * evaluated in the page's world (page.evaluate) goes through them, a script in the add-on's isolated world does not.
+     */
+    private static final String READ_PAGE = "<!doctype html><html><head><title>reads</title><script>"
+            + "window.__calls=0;(function(){var r=Element.prototype.getBoundingClientRect;"
+            + "Element.prototype.getBoundingClientRect=function(){window.__calls++;return r.apply(this,arguments);};"
+            + "var c=window.getComputedStyle;window.getComputedStyle=function(){window.__calls++;"
+            + "return c.apply(window,arguments);};})();"
+            + "setInterval(function(){document.title='calls='+window.__calls;},100);</script></head><body>"
+            + "<main><ol id='results'>"
+            + "<li class='r'><h2><a href='https://example.org/one'>One result</a></h2><p>First snippet text.</p></li>"
+            + "<li class='r'><h2><a href='https://example.net/two'>Two result</a></h2><p>Second snippet text.</p></li>"
+            + "<li class='r'><h2><a href='https://example.com/three'>Three result</a></h2><p>Third snippet.</p></li>"
+            + "</ol></main></body></html>";
+
     private HttpServer server;
     private String base;
     private Playwright4jDriver driver;
@@ -42,7 +58,8 @@ public class CamoufoxResearchAddonLiveTest {
                 "1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX")));
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
-            byte[] body = PAGE.getBytes(StandardCharsets.UTF_8);
+            byte[] body = (exchange.getRequestURI().getPath().startsWith("/reads") ? READ_PAGE : PAGE)
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
@@ -83,7 +100,7 @@ public class CamoufoxResearchAddonLiveTest {
         System.err.println("[addon-live] renderHud=" + result + " addonVersion=" + bridge.addonVersion()
                 + " served=" + bridge.servedVersion() + "/" + bridge.publishedVersion());
         assertEquals("the add-on connected and took the HUD", "rendered-addon", result);
-        assertEquals("0.1.0", bridge.addonVersion());
+        assertEquals("0.2.0", bridge.addonVersion());
         assertTrue("the add-on fetched the HUD state", bridge.servedVersion() > 0);
         driver.pumpEvents(() -> false, 500L);
         String seen = driver.current().title;
@@ -101,6 +118,57 @@ public class CamoufoxResearchAddonLiveTest {
                 System.err.println("[addon-live] commands from the add-on: " + commands.replace('\n', ' '));
             }
         }
+    }
+
+    @Test
+    public void pageReadsRunInTheAddonAndThePageSeesNone() throws Exception {
+        driver = launch(url -> !url.startsWith("http://127.0.0.1") || url.startsWith(base));
+        assertNotNull("Camoufox gets the add-on", driver.addonBridge());
+        driver.open(base + "reads");
+        driver.setRenderedCapture(new RenderedPageDocumentCapture(
+                com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create().analysis));
+        long started = System.currentTimeMillis();
+        com.aresstack.askai.browser.render.RenderedPageDocument document = driver.captureRenderedPage(
+                new com.aresstack.askai.browser.domain.HostPortDomainKeyResolver(), 1L);
+        long captureMillis = System.currentTimeMillis() - started;
+        String marker = driver.challengeMarker();
+        String consentCandidate = driver.consentCandidate();
+        driver.pumpEvents(() -> false, 400L);
+        PlaywrightPageState state = driver.current();
+        System.err.println("[addon-live] capture via add-on: containers=" + document.containers.size()
+                + " links=" + document.links.size() + " in " + captureMillis + " ms; challenge=" + marker
+                + " consent=" + consentCandidate + " anchors=" + state.anchors.size() + " page sees: " + state.title);
+        assertEquals("the capture saw the three result links", 3, countExternal(document));
+        assertEquals("none", marker);
+        assertEquals("none", consentCandidate);
+        assertEquals(3, state.anchors.size());
+        assertEquals("no read went through the page's own functions", "calls=0", state.title);
+        assertEquals(0, driver.addonBridge().openReadCount());
+    }
+
+    @Test
+    public void withoutTheAddonReadsRunInThePageWorld() throws Exception {
+        // The counter-proof for the probe above: page.evaluate does go through the page's functions.
+        System.setProperty(Playwright4jDriver.ADDON_PROPERTY, "false");
+        driver = launch(null);
+        driver.open(base + "reads");
+        driver.setRenderedCapture(new RenderedPageDocumentCapture(
+                com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create().analysis));
+        driver.captureRenderedPage(new com.aresstack.askai.browser.domain.HostPortDomainKeyResolver(), 1L);
+        driver.pumpEvents(() -> false, 400L);
+        String seen = driver.current().title;
+        System.err.println("[addon-live] without add-on page sees: " + seen);
+        assertTrue(seen, seen.startsWith("calls=") && !"calls=0".equals(seen));
+    }
+
+    private static int countExternal(com.aresstack.askai.browser.render.RenderedPageDocument document) {
+        int count = 0;
+        for (com.aresstack.askai.browser.render.RenderedLinkDescriptor link : document.links) {
+            if (link.resolvedTargetUrl.startsWith("https://example.")) {
+                count++;
+            }
+        }
+        return count;
     }
 
     @Test
