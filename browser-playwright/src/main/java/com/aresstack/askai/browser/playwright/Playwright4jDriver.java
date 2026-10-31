@@ -355,6 +355,34 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
     }
 
+    /** How long one lookup of a search engine's redirect answer may take before the link stays unresolved. */
+    static final int REDIRECT_LOOKUP_TIMEOUT_MILLIS = 5000;
+
+    /**
+     * Asks the engine for the target of an opaque result wrapper (Google's {@code /goto?url=<token>}) the way a click
+     * on it would: one GET from the tab's own browser context (its cookies, its proxy), the redirect NOT followed, the
+     * target page never loaded. Returns the raw {@code Location} of a 3xx answer, or null. No page script runs.
+     */
+    private static String redirectLocationOf(Page tab, String wrapperUrl) {
+        com.microsoft.playwright.APIResponse answer = null;
+        try {
+            answer = tab.context().request().get(wrapperUrl, com.microsoft.playwright.options.RequestOptions.create()
+                    .setMaxRedirects(0).setTimeout(REDIRECT_LOOKUP_TIMEOUT_MILLIS));
+            int status = answer.status();
+            return status >= 300 && status < 400 ? answer.headers().get("location") : null;
+        } catch (PlaywrightException unanswered) {
+            return null; // the link stays unresolved and is discarded, never classified by Google's host
+        } finally {
+            if (answer != null) {
+                try {
+                    answer.dispose();
+                } catch (PlaywrightException ignored) {
+                    // already gone
+                }
+            }
+        }
+    }
+
     /** Hand in the capture collaborator (built from the analysis settings by the factory). */
     void setRenderedCapture(RenderedPageDocumentCapture capture) {
         this.renderedCapture = capture;
@@ -383,6 +411,10 @@ final class Playwright4jDriver implements PlaywrightDriver {
 
                 public String title() {
                     return target.title();
+                }
+
+                public String redirectLocation(String wrapperUrl) {
+                    return redirectLocationOf(target, wrapperUrl);
                 }
             }, domainKeys, snapshotGeneration);
             System.err.println(SerpCaptureDiagnostics.summary(document));

@@ -43,6 +43,15 @@ final class RenderedPageDocumentCapture {
         String url();
 
         String title();
+
+        /**
+         * The engine's own redirect answer for an opaque result wrapper ({@link SearchRedirectResolver#needsLookup}):
+         * the raw {@code Location} it names without following it, or null when there is none. The default knows
+         * none, so such a link stays {@code UNRESOLVED}.
+         */
+        default String redirectLocation(String wrapperUrl) {
+            return null;
+        }
     }
 
     /** The injectable settle wait between recaptures, so the bounded loop is unit-testable. */
@@ -91,7 +100,7 @@ final class RenderedPageDocumentCapture {
                     + "one consistent state");
         }
         return convert(raw, page.url(), page.title(), after, snapshotGeneration, domainKeys,
-                warnings);
+                warnings, page);
     }
 
     private RenderedPageFingerprint fingerprint(PageScriptRunner page) {
@@ -110,7 +119,8 @@ final class RenderedPageDocumentCapture {
     @SuppressWarnings("unchecked")
     private RenderedPageDocument convert(Object raw, String url, String title,
                                          RenderedPageFingerprint fingerprint, long generation,
-                                         DomainKeyResolver domainKeys, List<String> warnings) {
+                                         DomainKeyResolver domainKeys, List<String> warnings,
+                                         PageScriptRunner page) {
         Map<String, Object> root = raw instanceof Map ? (Map<String, Object>) raw
                 : Collections.<String, Object>emptyMap();
         boolean truncated = bool(root.get("truncated"));
@@ -192,9 +202,20 @@ final class RenderedPageDocumentCapture {
         }
 
         List<RenderedLinkDescriptor> links = new ArrayList<RenderedLinkDescriptor>();
+        Map<String, String> lookedUp = new HashMap<String, String>();
         for (Map<String, Object> l : mapList(root.get("links"))) {
             String rawHref = str(l.get("href"));
             SearchRedirectResolver.Resolution resolution = SearchRedirectResolver.resolve(rawHref);
+            String lookupTarget = null;
+            if (resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED
+                    && SearchRedirectResolver.needsLookup(rawHref)) {
+                // Google's opaque /goto wrapper: only Google's own redirect answer names the target, once per wrapper.
+                if (!lookedUp.containsKey(rawHref)) {
+                    lookedUp.put(rawHref, SearchRedirectResolver.acceptedLookupTarget(rawHref,
+                            page.redirectLocation(rawHref)));
+                }
+                lookupTarget = lookedUp.get(rawHref);
+            }
             LinkRedirectResolution status;
             String target;
             switch (resolution.getStatus()) {
@@ -203,8 +224,9 @@ final class RenderedPageDocumentCapture {
                     target = resolution.getTargetUrl();
                     break;
                 case UNRESOLVED:
-                    status = LinkRedirectResolution.UNRESOLVED;
-                    target = "";
+                    status = lookupTarget == null ? LinkRedirectResolution.UNRESOLVED
+                            : LinkRedirectResolution.RESOLVED;
+                    target = lookupTarget == null ? "" : lookupTarget;
                     break;
                 default:
                     status = LinkRedirectResolution.NOT_A_REDIRECT;

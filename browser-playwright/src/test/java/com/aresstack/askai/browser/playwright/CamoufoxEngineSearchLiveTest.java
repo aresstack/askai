@@ -33,7 +33,9 @@ public class CamoufoxEngineSearchLiveTest {
     @After
     public void stop() {
         if (session != null) {
+            long closing = System.currentTimeMillis();
             session.close();
+            System.err.println("[engine-live] session closed in " + (System.currentTimeMillis() - closing) + " ms");
         }
     }
 
