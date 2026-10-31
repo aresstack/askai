@@ -377,6 +377,77 @@ public class SearchTabsFixtureLiveTest {
         assertEquals("the page before the search is current again", front.url, driver.current().url);
     }
 
+    /**
+     * A Bing-like result page: ten tall result blocks, the pager below them at the bottom of a page far taller than the
+     * window ("2", "3", "Weiter" like Bing's ol of li), smooth scrolling on. {@code deadNext} makes "Weiter" a link to
+     * the page itself, so the click loads nothing new.
+     */
+    private static String pagedResults(int first, boolean deadNext) {
+        StringBuilder html = new StringBuilder("<!doctype html><html><head><title>results first=" + first
+                + "</title><style>html{scroll-behavior:smooth}li.b_algo{height:280px}"
+                + "#pager li{display:inline-block;margin:0 8px}</style></head><body><ol id='b_results'>");
+        for (int i = 0; i < 10; i++) {
+            html.append("<li class='b_algo'><h2><a href='https://example.org/").append(first + i).append("'>Result ")
+                    .append(first + i).append("</a></h2></li>");
+        }
+        html.append("</ol><ul id='pager'>");
+        for (int page = 1; page <= 3; page++) {
+            int offset = (page - 1) * 10 + 1;
+            html.append(offset == first ? "<li><span>" + page + "</span></li>"
+                    : "<li><a href='/serp?first=" + offset + "'>" + page + "</a></li>");
+        }
+        html.append("<li><a class='sb_pagN' title='Nächste Seite' href='")
+                .append(deadNext ? "/serp?first=" + first + "&dead=1" : "/serp?first=" + (first + 10))
+                .append("'>Weiter</a></li></ul><div style='height:120px'></div></body></html>");
+        return html.toString();
+    }
+
+    /**
+     * Live acceptance of #28: Bing's pages 2 and 3 had the same address. With real wheel scrolling to the pager at the
+     * bottom of a long page, every "Weiter" click must load the NEXT result page: first=1, 11, 21, each asked once.
+     */
+    @Test
+    public void everyPagerClickLoadsTheNextResultPage() throws Exception {
+        String channel = gatedChannel();
+        final List<String> asked = java.util.Collections.synchronizedList(new ArrayList<String>());
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/serp", exchange -> {
+            String raw = exchange.getRequestURI().getRawQuery();
+            asked.add(raw);
+            int first = Integer.parseInt(raw.replaceAll(".*first=(\\d+).*", "$1"));
+            respond(exchange, pagedResults(first, false));
+        });
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        LegacyBrowserSearchSettings settings = LegacyBrowserSearchDefaults.create();
+        driver = Playwright4jDriver.launch(channel, !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED")),
+                30_000, null, null, settings.consent, settings.captcha);
+        driver.open(base + "/serp?first=1");
+
+        List<String> pager = Arrays.asList("a.sb_pagN", "a[aria-label='Next page']");
+        assertTrue("page 2 reached", driver.clickNextPage(pager));
+        assertTrue(driver.current().url, driver.current().url.endsWith("first=11"));
+        assertTrue("page 3 reached", driver.clickNextPage(pager));
+        assertTrue("page 3 is not page 2 again: " + driver.current().url, driver.current().url.endsWith("first=21"));
+        assertEquals("each result page asked exactly once", Arrays.asList("first=1", "first=11", "first=21"), asked);
+    }
+
+    /** A "Weiter" that loads the same result page again is no next page: the click reports false, nothing is re-read. */
+    @Test
+    public void aPagerClickThatLoadsNoOtherPageIsNotTheNextPage() throws Exception {
+        String channel = gatedChannel();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/serp", exchange -> respond(exchange, pagedResults(11, true)));
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        LegacyBrowserSearchSettings settings = LegacyBrowserSearchDefaults.create();
+        driver = Playwright4jDriver.launch(channel, !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED")),
+                30_000, null, null, settings.consent, settings.captcha);
+        driver.open(base + "/serp?first=11&dead=1");
+
+        assertFalse("the same page again is no next page", driver.clickNextPage(Arrays.asList("a.sb_pagN")));
+    }
+
     private static void respond(HttpExchange exchange, String html) throws IOException {
         byte[] body = html.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
