@@ -4,9 +4,11 @@ import com.aresstack.askai.browser.BrowserException;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.PlaywrightException;
+import com.microsoft.playwright.options.BoundingBox;
 
 import com.aresstack.askai.browser.playwright.camoufox.CamoufoxLaunch;
 
@@ -58,10 +60,10 @@ final class Playwright4jDriver implements PlaywrightDriver {
     private Page page;
     /** The parked manual-challenge page (kept open for the user), or null. At most one at a time. */
     private Page challengePage;
-    /** Research HUD: the command binding is registered ONCE on the context (survives navigation). */
+    /** Chrome/Edge HUD overlay: the command binding is registered ONCE on the context (survives navigation). */
     private boolean hudBindingRegistered;
     /**
-     * Control plane: filled by the in-page binding on the owner thread or by the research add-on's bridge thread,
+     * Control plane: filled by the research add-on's bridge thread (Camoufox) or the overlay binding (Chrome/Edge),
      * drained on any thread (never via the actor).
      */
     private final HudCommandInbox hudCommands = new HudCommandInbox();
@@ -70,21 +72,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * page (docs/research-browser-addon.md); null when the add-on is off or could not be prepared.
      */
     private AddonBridge addonBridge;
-    /** When the browser was started: the add-on gets {@link #ADDON_GRACE_MILLIS} to connect before the fallback. */
+    /** When the browser was started: the add-on gets {@link #ADDON_GRACE_MILLIS} before its absence is logged. */
     private long launchedMillis;
-    /** The fallback overlay was put into a page; it is removed once the add-on takes over. */
-    private boolean inPageHudUsed;
     private boolean addonConnectedLogged;
-    private boolean fallbackLogged;
+    private boolean addonMissingLogged;
 
     /** System property: {@code false} starts Camoufox without the AskAI Research add-on. */
     static final String ADDON_PROPERTY = "askai.browser.researchAddon";
     /**
-     * System property: {@code false} keeps the HUD out of the page even when the add-on is missing (no in-page
-     * overlay at all, the HUD then only exists in the add-on).
+     * System property: {@code false} keeps the HUD overlay out of Chrome/Edge pages too (no HUD in the browser there).
+     * Camoufox never gets the overlay, whatever this says.
      */
     static final String IN_PAGE_FALLBACK_PROPERTY = "askai.browser.hud.inPageFallback";
-    /** How long a fresh browser's add-on may take to connect before the HUD falls back to the page. */
+    /** How long a fresh browser's add-on may take to connect before its absence is logged. */
     static final long ADDON_GRACE_MILLIS = 15_000L;
     /** How many popups the close-immediately policy handled — observable proof the event dispatched. */
     private final java.util.concurrent.atomic.AtomicInteger popupsClosed =
@@ -109,19 +109,28 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * the user context, the browser and Playwright belong to the worker browser that created it.
      */
     private final boolean ownsGeneration;
+    /**
+     * Camoufox: nothing of AskAI is put into the page — no HUD overlay, no binding; the HUD lives only in the research
+     * add-on. Chrome/Edge keep the overlay until their extension exists (issue #23, stage 4).
+     */
+    private final boolean camoufox;
+    /** Every main-world script passes this gate; in script-free mode it refuses them all (see PageScriptGate). */
+    private final PageScriptGate pageScripts;
 
     private Playwright4jDriver(Playwright playwright, Browser browser, BrowserContext context, Page page,
                                com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha,
-                               int navigationTimeoutMillis) {
-        this(playwright, browser, context, page, consent, captcha, navigationTimeoutMillis, true);
+                               int navigationTimeoutMillis, boolean camoufox) {
+        this(playwright, browser, context, page, consent, captcha, navigationTimeoutMillis, true, camoufox);
     }
 
     private Playwright4jDriver(Playwright playwright, Browser browser, BrowserContext context, Page page,
                                com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha,
-                               int navigationTimeoutMillis, boolean ownsGeneration) {
+                               int navigationTimeoutMillis, boolean ownsGeneration, boolean camoufox) {
         this.ownsGeneration = ownsGeneration;
+        this.camoufox = camoufox;
+        this.pageScripts = PageScriptGate.forBrowser(camoufox);
         this.playwright = playwright;
         this.browser = browser;
         this.context = context;
@@ -177,7 +186,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
                         Path addon = ResearchAddon.install(profile.directory(), bridge.clientConfig());
                         camoufoxLaunch = camoufoxLaunch.withAddon(addon);
                     } catch (java.io.IOException | RuntimeException addonFailed) {
-                        // The browser still starts; the HUD then falls back to the in-page overlay.
+                        // The browser still starts, without a HUD in it: nothing is put into the page instead.
                         System.err.println("[browser-mcp] research add-on not prepared: " + firstLine(addonFailed));
                         if (bridge != null) {
                             bridge.close();
@@ -211,7 +220,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             // A persistent context opens with its first tab already; use it instead of a second one.
             Page page = camoufox && !context.pages().isEmpty() ? context.pages().get(0) : context.newPage();
             final Playwright4jDriver driver = new Playwright4jDriver(playwright, browser, context, page,
-                    consent, captcha, timeoutMillis);
+                    consent, captcha, timeoutMillis, camoufox);
             driver.profileLease = profile;
             if (bridge != null) {
                 bridge.deliverTo(driver.hudCommands);
@@ -258,14 +267,16 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * A driver for ONE browsing context (tab) of a worker user context, created by the worker browser on its
      * owner thread (which becomes this driver's owner). It owns only {@code page}: {@link #close()} closes the
      * page (and a parked challenge tab), never the user context, the browser or Playwright. The Research HUD
-     * belongs to the chat's own browser and is not rendered in worker tabs.
+     * belongs to the chat's own browser and is not rendered in worker tabs. @param camoufox whether the worker
+     * browser is Camoufox (script-free mode applies to it).
      */
     static Playwright4jDriver inBrowsingContext(Browser browser, BrowserContext userContext, Page page,
                                                 int timeoutMillis,
                                                 com.aresstack.askai.browser.search.ConsentHandlingSettings consent,
-                                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha) {
+                                                com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha,
+                                                boolean camoufox) {
         final Playwright4jDriver driver = new Playwright4jDriver(null, browser, userContext, page, consent,
-                captcha, timeoutMillis, false);
+                captcha, timeoutMillis, false, camoufox);
         page.onPopup(driver.popupCloser());
         if (browser != null) {
             browser.onDisconnected(new Consumer<Browser>() {
@@ -344,7 +355,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             final Page target = page;
             return renderedCapture.capture(new RenderedPageDocumentCapture.PageScriptRunner() {
                 public Object evaluate(String script) {
-                    return target.evaluate(script);
+                    return readPage(target, script);
                 }
 
                 public String url() {
@@ -360,6 +371,14 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
     }
 
+    /**
+     * The one place a page READ runs a script in the page; it passes the script gate, so script-free mode refuses it
+     * (issue #23 stage 2 moves these reads into the research add-on).
+     */
+    private Object readPage(Page target, String script) {
+        return pageScripts.evaluate(target, script, "page-read");
+    }
+
     // ------------------------------------------------------------------ SERP guards
 
     // #44: the ONE human-input policy of this driver — every pointer path/pause comes from it.
@@ -373,8 +392,14 @@ final class Playwright4jDriver implements PlaywrightDriver {
 
     /** Human-paced pointer click via Playwright's mouse (many timed moves, exact target). */
     private void humanPointerClick(final int targetX, final int targetY) {
-        com.aresstack.askai.browser.input.HumanPointer pointer =
-                new com.aresstack.askai.browser.input.HumanPointer(humanPolicy,
+        humanPointer().moveAndClick(lastPointerX, lastPointerY, targetX, targetY);
+        lastPointerX = targetX;
+        lastPointerY = targetY;
+    }
+
+    /** The human-input policy over this page's REAL mouse (WebDriver BiDi input actions, trusted events only). */
+    private com.aresstack.askai.browser.input.HumanPointer humanPointer() {
+        return new com.aresstack.askai.browser.input.HumanPointer(humanPolicy,
                         new com.aresstack.askai.browser.input.HumanPointer.PointerDevice() {
                             public void moveTo(int x, int y) {
                                 page.mouse().move(x, y);
@@ -392,9 +417,24 @@ final class Playwright4jDriver implements PlaywrightDriver {
                                 page.waitForTimeout(millis);
                             }
                         });
-        pointer.moveAndClick(lastPointerX, lastPointerY, targetX, targetY);
-        lastPointerX = targetX;
-        lastPointerY = targetY;
+    }
+
+    /** At most this many matches of one consent target are measured (the old in-page scan stopped at 120 buttons). */
+    private static final int CONSENT_MATCHES_PER_TARGET = 20;
+    /** A consent probe only measures what is already there: it never waits for a control to appear. */
+    private static final double CONSENT_MEASURE_TIMEOUT_MILLIS = 1_000d;
+
+    /** A located consent control: the target it matched and its box when it was measured. */
+    private static final class ConsentHit {
+        final SearchPageGuards.ConsentTarget target;
+        final Locator control;
+        final BoundingBox box;
+
+        ConsentHit(SearchPageGuards.ConsentTarget target, Locator control, BoundingBox box) {
+            this.target = target;
+            this.control = control;
+            this.box = box;
+        }
     }
 
     @Override
@@ -406,45 +446,103 @@ final class Playwright4jDriver implements PlaywrightDriver {
         try {
             // Up to maximumDismissAttempts stacked banners; each successful click settles before the
             // next probe, and the caller re-reads the page when anything was clicked at all.
-            // #44: POINTER-FIRST — the control is located (same priority chains) and clicked
-            // with the human-paced mouse; the injected JS click stays the fallback when the
-            // pointer click did not land (animated overlays, moved controls).
+            // Issue #22: the control is located with Playwright locators (its own selector engine, no page script),
+            // measured with boundingBox and clicked with the human-paced REAL mouse. There is no script fallback:
+            // a JS click is exactly what bot detection looks for, so a click that does not land ends the attempt.
+            List<SearchPageGuards.ConsentTarget> targets = SearchPageGuards.consentTargets(consent);
             String lastClicked = "none";
             for (int attempt = 0; attempt < consent.maximumDismissAttempts; attempt++) {
-                String located = String.valueOf(
-                        page.evaluate(SearchPageGuards.consentLocateScript(consent)));
-                if (located.startsWith("locate:")) {
-                    int comma = located.lastIndexOf(',');
-                    int colon = located.lastIndexOf(':');
-                    try {
-                        int x = Integer.parseInt(located.substring(colon + 1, comma).trim());
-                        int y = Integer.parseInt(located.substring(comma + 1).trim());
-                        humanPointerClick(x, y);
-                        page.waitForTimeout(consent.postClickSettleMillis);
-                        String again = String.valueOf(
-                                page.evaluate(SearchPageGuards.consentLocateScript(consent)));
-                        if (!again.equals(located)) {
-                            lastClicked = "clicked:"
-                                    + located.substring("locate:".length(), colon)
-                                    + ":pointer";
-                            continue; // the banner moved on — probe for a stacked one
-                        }
-                        // fall through: the pointer click did not land — JS fallback below
-                    } catch (NumberFormatException malformedCoordinates) {
-                        // fall through to the JS fallback
-                    }
-                }
-                String result = String.valueOf(
-                        page.evaluate(SearchPageGuards.consentDismissScript(consent)));
-                if (!result.startsWith("clicked")) {
+                ConsentHit hit = locateConsentControl(targets);
+                if (hit == null) {
                     break;
                 }
-                lastClicked = result;
+                if (!pointerClickInView(hit.control, hit.box)) {
+                    System.err.println("[browser-mcp] consent control " + hit.target.action
+                            + " could not be clicked with the pointer; no script fallback");
+                    break;
+                }
                 page.waitForTimeout(consent.postClickSettleMillis);
+                if (!controlReacted(hit.control, hit.box)) {
+                    System.err.println("[browser-mcp] consent control " + hit.target.action
+                            + " did not react to the pointer click; no script fallback");
+                    break;
+                }
+                lastClicked = "clicked:" + hit.target.action + ":pointer";
             }
             return lastClicked;
         } catch (RuntimeException ex) {
-            return "none"; // a broken CMP script must never take the search down
+            return "none"; // a broken CMP must never take the search down
+        }
+    }
+
+    /** The first visible control in minimal-consent priority order, or null. Reads nothing with a page script. */
+    private ConsentHit locateConsentControl(List<SearchPageGuards.ConsentTarget> targets) {
+        for (SearchPageGuards.ConsentTarget target : targets) {
+            try {
+                Locator matches = page.locator(target.selector);
+                if (target.text != null) {
+                    matches = matches.filter(new Locator.FilterOptions().setHasText(target.text));
+                }
+                int count = Math.min(matches.count(), CONSENT_MATCHES_PER_TARGET);
+                for (int i = 0; i < count; i++) {
+                    Locator control = matches.nth(i);
+                    BoundingBox box = control.boundingBox(
+                            new Locator.BoundingBoxOptions().setTimeout(CONSENT_MEASURE_TIMEOUT_MILLIS));
+                    if (box != null && box.width > 0 && box.height > 0) {
+                        return new ConsentHit(target, control, box);
+                    }
+                }
+            } catch (PlaywrightException unusable) {
+                // An invalid configured selector or a control that went away while measured: try the next target.
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Brings the control into the viewport with real wheel input when it lies outside, then clicks its center with
+     * the human-paced mouse. False when it cannot be brought into view or the click is refused.
+     */
+    private boolean pointerClickInView(Locator control, BoundingBox box) {
+        try {
+            BoundingBox target = box;
+            com.microsoft.playwright.options.ViewportSize viewport = page.viewportSize();
+            double centerY = target.y + target.height / 2;
+            boolean above = centerY < 0;
+            boolean below = viewport != null && centerY >= viewport.height;
+            if (above || below) {
+                int anchor = viewport != null ? viewport.height / 3 : 200;
+                humanPointer().scrollBy((int) Math.round(centerY - anchor));
+                target = control.boundingBox(
+                        new Locator.BoundingBoxOptions().setTimeout(CONSENT_MEASURE_TIMEOUT_MILLIS));
+                if (target == null || target.width <= 0 || target.height <= 0) {
+                    return false;
+                }
+                centerY = target.y + target.height / 2;
+                if (centerY < 0 || (viewport != null && centerY >= viewport.height)) {
+                    return false;
+                }
+            }
+            humanPointerClick((int) Math.round(target.x + target.width / 2), (int) Math.round(centerY));
+            return true;
+        } catch (RuntimeException refused) {
+            return false;
+        }
+    }
+
+    /** Whether the click took effect: the control is gone, hidden, or moved (the banner changed or closed). */
+    private boolean controlReacted(Locator control, BoundingBox before) {
+        try {
+            if (control.count() == 0) {
+                return true;
+            }
+            BoundingBox after = control.boundingBox(
+                    new Locator.BoundingBoxOptions().setTimeout(CONSENT_MEASURE_TIMEOUT_MILLIS));
+            return after == null || after.width <= 0 || after.height <= 0
+                    || Math.abs(after.x - before.x) > 2 || Math.abs(after.y - before.y) > 2
+                    || Math.abs(after.width - before.width) > 2 || Math.abs(after.height - before.height) > 2;
+        } catch (PlaywrightException gone) {
+            return true; // detached with its banner
         }
     }
 
@@ -455,18 +553,17 @@ final class Playwright4jDriver implements PlaywrightDriver {
             return "closed";
         }
         if (!ownsGeneration) {
-            return "unsupported"; // the HUD binding lives on the chat's own context, never in a worker tab
+            return "unsupported"; // the HUD belongs to the chat's own browser, never to a worker tab
         }
         com.aresstack.askai.browser.hud.ResearchHudState state =
                 com.aresstack.askai.browser.hud.ResearchHudState.parse(stateLine);
-        if (addonBridge != null) {
-            String viaAddon = renderHudInAddon(state);
-            if (viaAddon != null) {
-                return viaAddon;
-            }
-        } else if (!inPageFallbackAllowed()) {
+        if (camoufox) {
+            return renderHudInAddon(state); // Camoufox never gets the overlay or the binding (issue #22)
+        }
+        if (!inPageFallbackAllowed()) {
             return "unsupported";
         }
+        // Chrome/Edge: no extension yet (issue #23, stage 4), so the HUD is still the in-page overlay there.
         try {
             if (!hudBindingRegistered) {
                 // Buffer overlay button commands; registered on the CONTEXT so it survives navigations.
@@ -478,9 +575,8 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 });
                 hudBindingRegistered = true;
             }
-            page.evaluate(ResearchHudOverlay.installScript()); // idempotent
-            page.evaluate(ResearchHudOverlay.renderScript(state));
-            inPageHudUsed = true;
+            pageScripts.evaluate(page, ResearchHudOverlay.installScript(), "hud-overlay"); // idempotent
+            pageScripts.evaluate(page, ResearchHudOverlay.renderScript(state), "hud-overlay");
             return "rendered";
         } catch (RuntimeException ex) {
             return "error"; // a HUD failure must never take the visit down
@@ -488,11 +584,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
     }
 
     /**
-     * The HUD through the research add-on: the state is always published (a late add-on shows the current one at
-     * once). Returns null when the HUD has to fall back to the in-page overlay: the add-on did not connect within
-     * {@link #ADDON_GRACE_MILLIS} of the start, and the fallback is allowed.
+     * The HUD through the research add-on, the only HUD Camoufox has: the state is always published (a late add-on
+     * shows the current one at once). Without a connected add-on there is no HUD in the browser and only the log
+     * says so; nothing is put into the page instead.
      */
     private String renderHudInAddon(com.aresstack.askai.browser.hud.ResearchHudState state) {
+        if (addonBridge == null) {
+            if (!addonMissingLogged) {
+                addonMissingLogged = true;
+                System.err.println("[browser-mcp] research add-on is off or not prepared: no HUD in the browser "
+                        + "(nothing is put into the page)");
+            }
+            return "addon-missing";
+        }
         addonBridge.publish(state, pageHost());
         if (addonBridge.addonConnected()) {
             if (!addonConnectedLogged) {
@@ -500,30 +604,18 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 System.err.println("[browser-mcp] research add-on connected (version "
                         + addonBridge.addonVersion() + "): HUD shown in the browser UI, not in the page");
             }
-            if (inPageHudUsed) {
-                // The add-on came up after the fallback: take the overlay out of the current page again.
-                inPageHudUsed = false;
-                try {
-                    page.evaluate(ResearchHudOverlay.removeScript());
-                } catch (RuntimeException ignored) {
-                    // gone with the page anyway
-                }
-            }
             return "rendered-addon";
         }
         if (System.currentTimeMillis() - launchedMillis < ADDON_GRACE_MILLIS) {
             return "pending-addon";
         }
-        if (!inPageFallbackAllowed()) {
-            return "addon-missing";
-        }
-        if (!fallbackLogged) {
-            fallbackLogged = true;
+        if (!addonMissingLogged) {
+            addonMissingLogged = true;
             System.err.println("[browser-mcp] WARNING research add-on did not connect within "
-                    + (ADDON_GRACE_MILLIS / 1000L) + " s: falling back to the in-page HUD overlay, which pages can "
-                    + "detect (set -D" + IN_PAGE_FALLBACK_PROPERTY + "=false to keep the HUD out of the page)");
+                    + (ADDON_GRACE_MILLIS / 1000L) + " s: no HUD in the browser until it does (nothing is put into "
+                    + "the page)");
         }
-        return null;
+        return "addon-missing";
     }
 
     /** The host of the current page for the add-on panel; never the full URL (no paths or queries leave here). */
@@ -641,7 +733,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         try {
             // Only a VISIBLE/blocking challenge counts here (this drives challenge parking) — a hidden
             // artifact ('hidden:…') must never park a readable page.
-            return String.valueOf(page.evaluate(SearchPageGuards.challengeDetectScript(captcha)))
+            return String.valueOf(readPage(page, SearchPageGuards.challengeDetectScript(captcha)))
                     .startsWith("visible");
         } catch (RuntimeException ex) {
             return false;
@@ -655,7 +747,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             return "none";
         }
         try {
-            return String.valueOf(page.evaluate(SearchPageGuards.challengeDetectScript(captcha)));
+            return String.valueOf(readPage(page, SearchPageGuards.challengeDetectScript(captcha)));
         } catch (RuntimeException ex) {
             return "none";
         }
@@ -668,7 +760,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             return "none";
         }
         try {
-            return String.valueOf(page.evaluate(SearchPageGuards.consentReportScript(consent)));
+            return String.valueOf(readPage(page, SearchPageGuards.consentReportScript(consent)));
         } catch (RuntimeException ex) {
             return "none"; // a broken CMP script must never take a probe down
         }
@@ -710,7 +802,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         try {
             // Resolved once the challenge is no longer VISIBLY blocking (a lingering hidden artifact does not count).
-            return String.valueOf(challengePage.evaluate(SearchPageGuards.challengeDetectScript(captcha)))
+            return String.valueOf(readPage(challengePage, SearchPageGuards.challengeDetectScript(captcha)))
                     .startsWith("visible");
         } catch (RuntimeException ex) {
             return false; // an unreadable/closed challenge tab counts as resolved, never blocks forever
@@ -834,7 +926,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         String title = page.title();
         String text = page.innerText("body");
         List<PlaywrightPageState.Anchor> anchors = new ArrayList<PlaywrightPageState.Anchor>();
-        Object raw = page.evaluate(
+        Object raw = readPage(page,
                 "() => Array.from(document.querySelectorAll('a[href]'))"
                         + ".map(a => [String(a.innerText || '').trim(), String(a.href || '')])");
         if (raw instanceof List) {

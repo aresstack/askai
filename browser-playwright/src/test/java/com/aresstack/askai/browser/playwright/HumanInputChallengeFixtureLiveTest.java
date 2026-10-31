@@ -29,13 +29,17 @@ import static org.junit.Assume.assumeTrue;
  */
 public class HumanInputChallengeFixtureLiveTest {
 
-    /** A consent banner whose accept button matches the DEFAULT positive text markers. */
+    /**
+     * A consent banner whose accept button matches the DEFAULT positive text markers. It only reacts to a TRUSTED
+     * click (issue #22): a script click ({@code el.click()}, untrusted) leaves the banner in place, so passing proves
+     * the real mouse was used.
+     */
     private static final String CONSENT_PAGE = "<!doctype html><html><head><title>Consent</title>"
             + "</head><body>"
             + "<div id='banner' style='position:fixed;inset:0;background:#fffbe6;z-index:9;"
             + "display:flex;align-items:center;justify-content:center;'>"
             + "<button id='ok' style='padding:14px 28px;font-size:16px;' "
-            + "onclick=\"document.getElementById('banner').remove();"
+            + "onclick=\"if(!event.isTrusted){return;}document.getElementById('banner').remove();"
             + "document.getElementById('c').textContent='consent resolved content';\">"
             + "Accept all</button></div>"
             + "<div id='c'>waiting for consent</div>"
@@ -85,7 +89,7 @@ public class HumanInputChallengeFixtureLiveTest {
             String clicked = session.dismissConsent();
             assertTrue("the consent control was clicked: " + clicked,
                     clicked.startsWith("clicked"));
-            assertTrue("the POINTER path landed (no JS-click fallback needed): " + clicked,
+            assertTrue("the POINTER path landed (there is no JS-click fallback anymore): " + clicked,
                     clicked.contains(":pointer"));
             BrowserPageReadiness afterConsent = session.probeCurrent();
             assertFalse("the banner is gone", afterConsent.consentPresent);

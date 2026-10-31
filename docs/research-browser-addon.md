@@ -53,7 +53,7 @@ evaluations (guards, capture, stages 2 and 3) and every other automation signal 
 | Writes the add-on next to the browser profile at every start, with this start's `bridge.json` | `ResearchAddon` |
 | Adds the add-on directory to `CAMOU_CONFIG.addons` (Camoufox loads it like the bundled uBlock Origin) | `CamoufoxLaunch.withAddon` |
 | Local bridge between add-on and Java | `AddonBridge` |
-| Starts bridge and add-on, routes the HUD, falls back to the overlay | `Playwright4jDriver.launch` / `renderHud` |
+| Starts bridge and add-on, routes the HUD (Camoufox: add-on only, never the page) | `Playwright4jDriver.launch` / `renderHud` |
 
 Manifest V2 is deliberate: Firefox keeps supporting it, its persistent background page keeps the long poll alive,
 and its host permission (`http://127.0.0.1/*`) is granted at install, while Manifest V3 host permissions may need a
@@ -88,13 +88,14 @@ Measured in the live test: Playwright's request interception (`PrivateTargetRequ
 requests to loopback) does not touch the add-on's requests, so the bridge works with the filter on, while pages
 still cannot reach loopback.
 
-### Fallback
+### Without the add-on
 
-- **Chrome/Edge channel:** there is no Chrome extension yet; the HUD stays the in-page overlay, as before.
-- **Camoufox, add-on missing:** if the add-on could not be prepared, or has not connected within 15 s of the browser
-  start, the HUD falls back to the in-page overlay and the log says so once:
-  `research add-on did not connect within 15 s: falling back to the in-page HUD overlay, which pages can detect`.
-  If the add-on connects later, the overlay is removed from the current page and the add-on takes over.
+- **Camoufox:** there is no in-page fallback any more (issue #22: pages detect injected scripts and bindings, Bing's
+  bot detection then keeps its results hidden). If the add-on could not be prepared, or has not connected within 15 s
+  of the browser start, there is simply no HUD in the browser and the log says so once:
+  `research add-on did not connect within 15 s: no HUD in the browser until it does (nothing is put into the page)`.
+  The HUD state is still published, so an add-on that connects later shows it at once.
+- **Chrome/Edge channel:** there is no Chrome extension yet; the HUD stays the in-page overlay until stage 4.
 - Before the add-on connects (first seconds after the start) the HUD is only published to the bridge; the add-on
   shows the newest state as soon as it connects.
 
@@ -102,8 +103,18 @@ Switches (JVM system properties):
 
 | Property | Effect |
 | --- | --- |
-| `-Daskai.browser.researchAddon=false` | Start Camoufox without the add-on (HUD = overlay) |
-| `-Daskai.browser.hud.inPageFallback=false` | Never put the overlay into a page; without add-on there is no HUD in the browser |
+| `-Daskai.browser.researchAddon=false` | Start Camoufox without the add-on (no HUD in the browser) |
+| `-Daskai.browser.hud.inPageFallback=false` | Chrome/Edge: keep the overlay out of the page too |
+| `-Daskai.browser.scriptFree=true` | Camoufox: every main-world script (`page.evaluate`) fails before it reaches the page; default off until the page reads run in the add-on (stage 2) |
+
+### Interactions: real input only
+
+AskAI never clicks, focuses or types with a page script. A consent control is located with Playwright locators (CSS
+plus a `hasText` filter, evaluated by Playwright's own selector engine), measured with `boundingBox`, brought into
+view with real wheel input if needed and clicked with the human-paced real mouse (`HumanPointer` over
+`page.mouse()`, WebDriver BiDi input actions, trusted events). If that click does not take effect, the attempt ends;
+there is no script fallback. Every remaining main-world script passes `PageScriptGate`, which a source-scan test
+enforces.
 
 Worker browsers (`PlaywrightWorkerBrowserBackend`) have no HUD and are started without the add-on in stage 1.
 
