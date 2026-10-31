@@ -111,10 +111,15 @@ public class SearchPageGuardsTest {
     public void challengeScriptDetectsTheRequiredTextsAndSelectors() {
         String script = SearchPageGuards.challengeDetectScript(defaults.captcha);
         for (String text : new String[]{"noch ein letzter schritt", "one last step",
-                "verify you are human", "unusual traffic", "complete the challenge", "captcha"}) {
+                "verify you are human", "unusual traffic", "complete the challenge",
+                "bestätigen sie, dass sie ein mensch sind"}) {
             assertTrue("challenge text missing: " + text,
                     defaults.captcha.challengeTexts.contains(text));
         }
+        // The bare word names a widget or a topic, not a challenge page: "FriendlyCaptcha" in INNOQ's footer
+        // contact form parked a readable article as a CAPTCHA.
+        assertFalse("the bare word 'captcha' is no challenge phrase",
+                defaults.captcha.challengeTexts.contains("captcha"));
         for (String selector : new String[]{"iframe[src*='captcha']", "iframe[title*='challenge']",
                 "#challenge-form", "[class*='captcha']", "[id*='captcha']"}) {
             assertTrue("challenge selector missing: " + selector,
@@ -123,6 +128,20 @@ public class SearchPageGuardsTest {
         // Evidence-bearing, visibility-gated vocabulary.
         assertTrue("must distinguish a visible challenge", script.contains("'visible:'"));
         assertTrue("must distinguish a hidden artifact", script.contains("'hidden:'"));
+        assertTrue("must distinguish an off-screen phrase", script.contains("'hidden:text:'"));
+    }
+
+    @Test
+    public void challengePhrasesCountOnlyWhenRenderedInsideTheViewport() {
+        String script = SearchPageGuards.challengeDetectScript(defaults.captcha);
+        // The phrase rule shares the widget rule's visibility contract: the body-wide match only pre-filters,
+        // the blocking verdict needs the phrase in text whose own box intersects the viewport.
+        assertTrue(script.contains("createTreeWalker"));
+        assertTrue(script.contains("getBoundingClientRect"));
+        assertTrue("an off-screen phrase is reported, not blocking",
+                script.indexOf("'hidden:text:'") > script.indexOf("'visible:text:'"));
+        assertFalse("no blocking verdict straight from the whole body text",
+                script.contains("if (body.includes(t)) return 'visible:text:'"));
     }
 
     @Test

@@ -23,7 +23,8 @@ import java.util.regex.Pattern;
  *     generic content fallback — a challenge page is never a readable search result. It NEVER overlaps with
  *     consent (different scripts, different markers).</li>
  * </ul>
- * The scripts are used on SEARCH pages only; visited target pages are captured as-is.
+ * The consent scripts are used on SEARCH pages; the challenge-detection script runs on search pages AND on every
+ * visited target page (the readiness probe), so it must never mistake an ordinary page for a challenge.
  */
 final class SearchPageGuards {
 
@@ -187,16 +188,25 @@ final class SearchPageGuards {
      * <ul>
      *   <li>{@code 'visible:<selector>'} — a genuinely visible, blocking challenge widget (laid out, not
      *       display:none/visibility:hidden/opacity~0, real box intersecting the viewport);</li>
-     *   <li>{@code 'visible:text:<marker>'} — a challenge phrase in the visible body text;</li>
-     *   <li>{@code 'hidden:<selector>'} — a challenge ARTIFACT exists but is invisible (e.g. a contact-form
-     *       recaptcha) — present for diagnostics, but NOT blocking;</li>
+     *   <li>{@code 'visible:text:<marker>'} — a challenge phrase in text that is RENDERED INSIDE THE VIEWPORT;</li>
+     *   <li>{@code 'hidden:<selector>'} — a challenge ARTIFACT exists but is invisible or outside the viewport
+     *       (e.g. a contact-form recaptcha) — present for diagnostics, but NOT blocking;</li>
+     *   <li>{@code 'hidden:text:<marker>'} — a challenge phrase exists only in text outside the viewport or
+     *       not rendered (e.g. "FriendlyCaptcha" in a footer contact form) — diagnostics, NOT blocking;</li>
      *   <li>{@code 'none'} — no artifact at all.</li>
      * </ul>
-     * The visibility gate is the reactree false-positive fix: a hidden recaptcha must never force a user-wait.
+     * Both rules share one visibility contract: what the user does not see on the first screen does not block.
+     * The selector gate is the reactree false-positive fix; the text gate is the same fix for phrases (INNOQ:
+     * an article whose footer contact form names its FriendlyCaptcha widget was parked as a CAPTCHA). A real
+     * interstitial (Bing "one last step", Cloudflare "verify you are human") always occupies the first screen.
      */
     static String challengeDetectScript(CaptchaHandlingSettings captcha) {
         StringBuilder sb = new StringBuilder();
         sb.append("() => {\n");
+        sb.append("  const vw = window.innerWidth || document.documentElement.clientWidth;\n");
+        sb.append("  const vh = window.innerHeight || document.documentElement.clientHeight;\n");
+        sb.append("  const inViewport = (r) => r.width > 0 && r.height > 0\n");
+        sb.append("      && !(r.bottom < 0 || r.right < 0 || r.top > vh || r.left > vw);\n");
         // A real, blocking widget: laid out, not display:none / visibility:hidden / opacity~0, with a box of
         // meaningful size that at least partially intersects the viewport. Tiny badges (invisible-recaptcha
         // score badge) and off-screen/zero-box nodes do NOT count.
@@ -208,10 +218,7 @@ final class SearchPageGuards {
         sb.append("          || parseFloat(st.opacity || '1') < 0.05) return false;\n");
         sb.append("      const r = el.getBoundingClientRect();\n");
         sb.append("      if (r.width < 8 || r.height < 8) return false;\n");
-        sb.append("      const vw = window.innerWidth || document.documentElement.clientWidth;\n");
-        sb.append("      const vh = window.innerHeight || document.documentElement.clientHeight;\n");
-        sb.append("      if (r.bottom < 0 || r.right < 0 || r.top > vh || r.left > vw) return false;\n");
-        sb.append("      return true;\n");
+        sb.append("      return inViewport(r);\n");
         sb.append("    } catch (e) { return false; }\n");
         sb.append("  };\n");
         sb.append("  const selectors = ").append(jsArray(captcha.challengeSelectors)).append(";\n");
@@ -224,11 +231,39 @@ final class SearchPageGuards {
         sb.append("      if (hidden === null) hidden = s;\n"); // remember the artifact, keep scanning for a visible one
         sb.append("    } catch (e) {}\n");
         sb.append("  }\n");
-        // A challenge PHRASE in the visible body text is itself a blocking signal.
+        // Challenge PHRASES: the cheap whole-body check first (nearly every page stops here); only on a hit is
+        // the text that is actually RENDERED INSIDE THE VIEWPORT collected — text nodes whose element is shown
+        // and whose own box intersects the first screen. A phrase only below the fold or in unrendered text is
+        // a diagnostic artifact ('hidden:text:'), never a blocking challenge.
         sb.append("  const texts = ").append(jsArray(captcha.challengeTexts)).append(";\n");
         sb.append("  const body = (document.body ? document.body.innerText : '').toLowerCase();\n");
-        sb.append("  for (const t of texts) { if (body.includes(t)) return 'visible:text:' + t; }\n");
+        sb.append("  const hits = texts.filter(t => body.includes(t));\n");
+        sb.append("  if (hits.length > 0) {\n");
+        // Joined twice: with a space (words in separate block elements) and tight (a word split by inline
+        // markup such as <b>Best</b>ätigen); a phrase matching either form is on screen.
+        sb.append("    let spaced = '', tight = '';\n");
+        sb.append("    try {\n");
+        sb.append("      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);\n");
+        sb.append("      const range = document.createRange();\n");
+        sb.append("      for (let n = walker.nextNode(); n; n = walker.nextNode()) {\n");
+        sb.append("        const p = n.parentElement;\n");
+        sb.append("        if (!p || !n.nodeValue || !n.nodeValue.trim()) continue;\n");
+        sb.append("        range.selectNodeContents(n);\n");
+        sb.append("        if (!inViewport(range.getBoundingClientRect())) continue;\n");
+        sb.append("        const st = window.getComputedStyle(p);\n");
+        sb.append("        if (!st || st.visibility === 'hidden' || parseFloat(st.opacity || '1') < 0.05) continue;\n");
+        sb.append("        spaced += ' ' + n.nodeValue;\n");
+        sb.append("        tight += n.nodeValue;\n");
+        sb.append("      }\n");
+        sb.append("    } catch (e) {}\n");
+        sb.append("    spaced = spaced.replace(/\\s+/g, ' ').toLowerCase();\n");
+        sb.append("    tight = tight.replace(/\\s+/g, ' ').toLowerCase();\n");
+        sb.append("    for (const t of hits) {\n");
+        sb.append("      if (spaced.includes(t) || tight.includes(t)) return 'visible:text:' + t;\n");
+        sb.append("    }\n");
+        sb.append("  }\n");
         sb.append("  if (hidden !== null) return 'hidden:' + hidden;\n");
+        sb.append("  if (hits.length > 0) return 'hidden:text:' + hits[0];\n");
         sb.append("  return 'none';\n");
         sb.append("}");
         return sb.toString();

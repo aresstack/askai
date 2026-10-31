@@ -243,8 +243,17 @@ public final class LegacyBrowserSearchSettingsCodec {
         return m;
     }
 
+    /**
+     * The challenge-text list as it shipped until the bare word "captcha" was removed (the only list ever
+     * shipped). A stored value EXACTLY equal to it is the untouched shipped default, not a user choice.
+     */
+    static final List<String> SHIPPED_CHALLENGE_TEXTS_WITH_BARE_CAPTCHA = java.util.Collections.unmodifiableList(
+            Arrays.asList("noch ein letzter schritt", "one last step", "verify you are human",
+                    "unusual traffic", "complete the challenge", "captcha",
+                    "bestätigen sie, dass sie ein mensch sind"));
+
     public static Decoded fromValues(Map<String, String> values) {
-        Reader r = new Reader(values, toValues(LegacyBrowserSearchDefaults.create()));
+        Reader r = new Reader(liftStaleShippedDefaults(values), toValues(LegacyBrowserSearchDefaults.create()));
         LegacyBrowserSearchSettings settings = new LegacyBrowserSearchSettings(
                 new LegacySearchNavigationSettings(
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection(
@@ -395,6 +404,33 @@ public final class LegacyBrowserSearchSettingsCodec {
         return new Decoded(settings, r.violations);
     }
 
+    /**
+     * Lift values that are an UNTOUCHED old shipped default to the current default — never a heuristic: only an
+     * exact match of a list that once shipped is replaced; any edited list (an added, removed or reordered entry)
+     * is the user's choice and stays exactly as stored. Today this covers {@code captcha.challengeTexts}: the old
+     * list carried the bare word "captcha", which parked readable pages naming a CAPTCHA widget.
+     */
+    static Map<String, String> liftStaleShippedDefaults(Map<String, String> values) {
+        String stored = values.get("captcha.challengeTexts");
+        if (stored == null || !SHIPPED_CHALLENGE_TEXTS_WITH_BARE_CAPTCHA.equals(entries(stored))) {
+            return values;
+        }
+        Map<String, String> lifted = new LinkedHashMap<String, String>(values);
+        lifted.put("captcha.challengeTexts", joinList(LegacyBrowserSearchDefaults.create().captcha.challengeTexts));
+        return lifted;
+    }
+
+    private static List<String> entries(String raw) {
+        List<String> entries = new ArrayList<String>();
+        for (String entry : raw.split("\n")) {
+            String trimmed = entry.trim();
+            if (!trimmed.isEmpty()) {
+                entries.add(trimmed);
+            }
+        }
+        return entries;
+    }
+
     /** SHA-256 over the canonical (sorted) key=value form — stable across JVMs and map orders. */
     public static String digest(LegacyBrowserSearchSettings settings) {
         TreeMap<String, String> sorted = new TreeMap<String, String>(toValues(settings));
@@ -479,17 +515,7 @@ public final class LegacyBrowserSearchSettingsCodec {
         }
 
         List<String> list(String key) {
-            String raw = string(key);
-            List<String> entries = new ArrayList<String>();
-            if (!raw.isEmpty()) {
-                for (String entry : raw.split("\n")) {
-                    String trimmed = entry.trim();
-                    if (!trimmed.isEmpty()) {
-                        entries.add(trimmed);
-                    }
-                }
-            }
-            return entries;
+            return entries(string(key));
         }
 
         int intValue(String key) {
