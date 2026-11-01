@@ -124,8 +124,9 @@ public final class WebSearchApplicationService {
     private Double seedPageRelevanceFloor;
     /**
      * The same idea for the other kind of text: the LOWEST score among the SERP hits the reranker
-     * selected, measured on their title+snippet. A link is judged on its anchor text, which is the same
-     * shape of document — so this, and not the page floor, is the bar a link has to clear. Comparing a
+     * selected, measured on their title+snippet (plus displayed domain and address). A link is judged on
+     * its anchor text, which is the same shape of document — so this, and not the page floor, is the bar
+     * a link has to clear. Comparing a
      * one-line anchor against a floor measured on full page text would compare two different things.
      */
     private Double seedSerpRelevanceFloor;
