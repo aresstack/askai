@@ -639,7 +639,10 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     break;
                 }
                 if (round == MAX_SCROLL_ROUNDS) {
-                    return false; // never click where the control was before it moved out of reach
+                    // The box was measured after the last wheel turn settled (never a pre-scroll position). It is still
+                    // below the safe line on a page that keeps growing (DuckDuckGo's late favicons) or ends there; the
+                    // click goes to that current box, and a point outside the window is refused by the browser.
+                    break;
                 }
                 // The wheel turns where the pointer rests, which must be inside the window: its last landed spot.
                 page.mouse().move(lastPointerX, lastPointerY);
