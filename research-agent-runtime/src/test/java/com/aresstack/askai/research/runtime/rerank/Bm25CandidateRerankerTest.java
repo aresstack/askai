@@ -76,6 +76,24 @@ public class Bm25CandidateRerankerTest {
     }
 
     @Test
+    public void aPercentEncodedAddressMatchesItsDecodedWord() {
+        SearchResultCandidate encoded = new SearchResultCandidate("c-2", "snap",
+                "https://example.test/ratgeber/h%C3%BChner/", "https://example.test/ratgeber/h%C3%BChner/",
+                "Ratgeber", "Alles für den Garten", "example.test", 2, "c", "b", 1.0, 1.0,
+                Collections.<com.aresstack.askai.browser.search.SearchResultSiteLink>emptyList());
+
+        SearchResultRerankingResult result = new Bm25CandidateReranker().rerank("hühner",
+                Arrays.asList(candidate("c-1", "Pasta", "Nudeln kochen"), encoded), null);
+
+        assertEquals(1, result.selected.size());
+        assertEquals("c-2", result.selected.get(0).candidate.candidateId);
+        assertEquals("the hit keeps its address", "https://example.test/ratgeber/h%C3%BChner/",
+                result.selected.get(0).candidate.resolvedTargetUrl);
+        assertEquals("an undecodable address is scored as it stands", "example.test/50%-off",
+                Bm25CandidateReranker.addressWords("https://example.test/50%-off"));
+    }
+
+    @Test
     public void assessScoresArbitraryDocumentsWithoutAModel() {
         LinkedHashMap<String, String> documents = new LinkedHashMap<String, String>();
         documents.put("d-1", "Die Hühnerhaltung im eigenen Garten");

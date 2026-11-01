@@ -159,9 +159,23 @@ public final class Bm25CandidateReranker implements CandidateReranker {
         // JDK 21 page Bing ranked fourth for "Java 21 LTS release" scored zero and was dropped
         // before it ever reached the frontier.
         if (candidate.resolvedTargetUrl != null) {
-            sb.append(candidate.resolvedTargetUrl.replaceFirst("^[a-zA-Z][a-zA-Z0-9+.-]*://", ""));
+            sb.append(addressWords(candidate.resolvedTargetUrl));
         }
         return sb.toString();
+    }
+
+    /**
+     * The address as words: without its scheme and with percent escapes decoded, so "/h%C3%BChner/"
+     * scores as "hühner". Scoring text only — the hit keeps its address. An address that does not
+     * decode is scored as it stands.
+     */
+    static String addressWords(String url) {
+        String address = url.replaceFirst("^[a-zA-Z][a-zA-Z0-9+.-]*://", "");
+        try {
+            return java.net.URLDecoder.decode(address, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException malformed) {
+            return address;
+        }
     }
 
     /** Unicode-aware lower-case word tokens — "Hühner" stays one term (see the query-mangling lesson). */
