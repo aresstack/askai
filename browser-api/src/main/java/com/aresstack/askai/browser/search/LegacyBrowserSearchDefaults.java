@@ -101,9 +101,13 @@ public final class LegacyBrowserSearchDefaults {
                         "[class*='captcha']", "[id*='captcha']",
                         // Bing's "one last step" challenge container
                         "#b_rrsr", "iframe[src*='turnstile']"),
+                // Challenge PHRASES only. The bare word "captcha" was dropped: it names a product or a widget
+                // ("FriendlyCaptcha" in a footer contact form, articles about CAPTCHAs), not a challenge page,
+                // and parked readable pages (INNOQ). Stored profiles still carrying the old shipped list are
+                // lifted by LegacyBrowserSearchSettingsCodec.
                 Arrays.asList(
                         "noch ein letzter schritt", "one last step", "verify you are human",
-                        "unusual traffic", "complete the challenge", "captcha",
+                        "unusual traffic", "complete the challenge",
                         "bestätigen sie, dass sie ein mensch sind"),
                 1_000,  // challengeProbeIntervalMillis (previously ResearchLoop constant)
                 true,   // focusTabOnFirstDetection (bringToFront exactly once)

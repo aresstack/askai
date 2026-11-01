@@ -28,7 +28,7 @@ public final class BrowserPageReadiness {
      * hidden one leaves a readable page READABLE (the reactree false-positive fix).
      */
     public final boolean challengeVisible;
-    /** The marker that matched the challenge ("visible:&lt;sel&gt;" / "hidden:&lt;sel&gt;" / text), or "" when none. */
+    /** The marker that matched the challenge ("visible:&lt;sel&gt;" / "visible:text:&lt;text&gt;" block; "embedded:&lt;sel&gt;" / "hidden:&lt;sel&gt;" / "hidden:text:&lt;text&gt;" do not), or "" when none. */
     public final String challengeMarker;
     /** A consent/cookie banner with a dismissible positive control is present. */
     public final boolean consentPresent;
