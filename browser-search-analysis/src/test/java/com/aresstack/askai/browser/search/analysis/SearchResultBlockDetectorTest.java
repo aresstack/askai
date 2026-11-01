@@ -5,6 +5,7 @@ import com.aresstack.askai.browser.render.LinkRedirectResolution;
 import com.aresstack.askai.browser.render.RenderedBox;
 import com.aresstack.askai.browser.render.RenderedPageDocument;
 import com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults;
+import com.aresstack.askai.browser.render.DomStructureSignature;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -58,6 +59,129 @@ public class SearchResultBlockDetectorTest {
             assertFalse("engine-internal action must never be the primary link",
                     block.primaryLink.resolvedTargetUrl.contains("/translate"));
         }
+    }
+
+    @Test
+    public void aResultVariantWithAnotherClassButTheSameShapeStaysInTheList() {
+        // Issue #22 review: a class token shared by most results is no reason on its own to drop the
+        // others — six "normal" and four "featured" results of identical shape are ten results.
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
+                java.util.Arrays.asList("normal", "featured", "normal", "normal", "featured",
+                        "normal", "featured", "normal", "featured", "normal"));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 10, detection.blocks.size());
+        for (int i = 0; i < 10; i++) {
+            assertEquals("Result " + i + " title", detection.blocks.get(i).title);
+        }
+    }
+
+    @Test
+    public void aResultVariantWithAnotherClassAndASmallExtraElementStaysInTheList() {
+        // Issue #22, second review: the majority shares one class and one identical shape; one
+        // legitimate result carries another class AND an extra source line. Its shape is not the
+        // majority's, but it reaches the cluster threshold against every one of them, so it stays.
+        String plain = "li(h2(a),p)";
+        String withSource = "li(h2(a),p,cite)";
+        DomStructureSignature a = new DomStructureSignature(plain);
+        DomStructureSignature b = new DomStructureSignature(withSource);
+        double threshold = LegacyBrowserSearchDefaults.create().analysis.resultBlockSimilarityThreshold;
+        double similarity = DomStructureClusterer.similarity(a, b);
+        assertTrue("the variant differs from the majority (" + similarity + ")", similarity < 1);
+        assertTrue("but stays above the threshold (" + similarity + ")", similarity >= threshold);
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
+                java.util.Arrays.asList("result", "result", "result", "result", "result-with-source",
+                        "result", "result"),
+                java.util.Arrays.asList(plain, plain, plain, plain, withSource, plain, plain));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 7, detection.blocks.size());
+        for (int i = 0; i < 7; i++) {
+            assertEquals("Result " + i + " title", detection.blocks.get(i).title);
+            assertEquals(i + 1, detection.blocks.get(i).rank);
+        }
+    }
+
+    @Test
+    public void twoVariantsAdmittedThroughTheRepresentativeBothStay() {
+        // Issue #22, review of 7d19175: four plain results, one result with an extra div and one
+        // "featured" result with a sitelink row. Both variants join the cluster through the plain
+        // representative (0.73 each) although they are only 0.57 alike to each other. The featured
+        // result carries everything every result has, so it stays: six results, not five.
+        String plain = "li(h2(a),p)";
+        String withDiv = "li(h2(a),p,div(span,span))";
+        String withSitelinks = "li(h2(a),p,ul(li,li))";
+        double threshold = LegacyBrowserSearchDefaults.create().analysis.resultBlockSimilarityThreshold;
+        assertTrue(DomStructureClusterer.similarity(new DomStructureSignature(withSitelinks),
+                new DomStructureSignature(plain)) >= threshold);
+        assertTrue(DomStructureClusterer.similarity(new DomStructureSignature(withDiv),
+                new DomStructureSignature(plain)) >= threshold);
+        assertTrue("the variants are below the threshold against each other",
+                DomStructureClusterer.similarity(new DomStructureSignature(withSitelinks),
+                        new DomStructureSignature(withDiv)) < threshold);
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
+                java.util.Arrays.asList("result", "result", "featured", "result", "result", "result"),
+                java.util.Arrays.asList(plain, plain, withSitelinks, withDiv, plain, plain));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 6, detection.blocks.size());
+        for (int i = 0; i < 6; i++) {
+            assertEquals("Result " + i + " title", detection.blocks.get(i).title);
+            assertEquals(i + 1, detection.blocks.get(i).rank);
+        }
+    }
+
+    @Test
+    public void aMemberLackingTheStructureEveryResultSharesIsSetAside() {
+        // The counterpart, shaped like Bing's answer cards: similar enough to join the cluster, but its
+        // heading link sits in a wrapper, so it lacks the li > h2 > a that every result has.
+        String result = "li(h2(a),p)";
+        String withSitelinks = "li(h2(a),p,ul(li,li))";
+        String card = "li(div(h2(a),div,div),p)";
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1460), SerpDocuments.WHITE,
+                java.util.Arrays.asList("answer", "result", "result", "result", "result", "result"),
+                java.util.Arrays.asList(card, result, withSitelinks, result, result, result));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 5, detection.blocks.size());
+        for (int i = 0; i < 5; i++) {
+            assertEquals("Result " + (i + 1) + " title", detection.blocks.get(i).title);
+        }
+        assertTrue(detection.rejectionReasons.toString(),
+                detection.rejectionReasons.toString().contains("li>h2>a"));
+    }
+
+    @Test
+    public void aLargerClusterOfAdsDoesNotPushOutTheOrganicResults() {
+        // Issue #22 review: six ads of one shape and five organic results of another. The clusters
+        // compete with what is left after the ads are set aside — 0 against 5 — not with 6 against 5.
+        String ad = "li(div(span,span,span),div(a,img,img))";
+        String organic = "li(h2(a),p)";
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addResultColumn(new RenderedBox(300, 120, 680, 1600), SerpDocuments.WHITE,
+                java.util.Arrays.asList("b_ad", "b_ad", "b_ad", "result", "b_ad", "result",
+                        "b_ad", "result", "b_ad", "result", "result"),
+                java.util.Arrays.asList(ad, ad, ad, organic, ad, organic, ad, organic, ad,
+                        organic, organic));
+
+        SearchResultBlockDetector.Detection detection = detect(serp);
+
+        assertEquals(detection.rejectionReasons.toString(), 5, detection.blocks.size());
+        int[] organicIndexes = {3, 5, 7, 9, 10};
+        for (int i = 0; i < 5; i++) {
+            assertEquals("Result " + organicIndexes[i] + " title", detection.blocks.get(i).title);
+            assertEquals(i + 1, detection.blocks.get(i).rank);
+        }
+        assertTrue(detection.rejectionReasons.toString(),
+                detection.rejectionReasons.toString().contains("set aside a second repeated"));
     }
 
     @Test
