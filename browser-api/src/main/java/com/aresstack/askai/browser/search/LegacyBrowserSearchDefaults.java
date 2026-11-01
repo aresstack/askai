@@ -27,25 +27,30 @@ public final class LegacyBrowserSearchDefaults {
     }
 
     /**
-     * The engines a fresh installation searches with: DuckDuckGo first, Bing behind it, and only until
-     * one of them delivers. Bing is a safety net, not the obligatory first browser visit it used to be.
+     * The engines a fresh installation searches with (Angelo's product decision for issue #22): Bing alone. DuckDuckGo
+     * and Google are in the list but switched off, so an update or a new installation does not multiply the engine
+     * requests (each engine is one more source of CAPTCHAs and blocks). Whoever switches them on gets them asked all
+     * at once ({@code ALL_ENABLED}: each in a tab of its own, typed into at the same time, what they found merged).
      */
     public static com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engineSelection() {
         return new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection(
                 Arrays.asList(
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
-                                        .DUCKDUCKGO, true),
+                                        .BING, true),
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
-                                        .BING, true)),
-                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
+                                        .DUCKDUCKGO, false),
+                        new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
+                                com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
+                                        .GOOGLE, false)),
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED);
     }
 
     private static LegacySearchNavigationSettings navigation() {
         return new LegacySearchNavigationSettings(
                 engineSelection(),
-                3,          // maximumEngineAttempts: engine ENDPOINTS opened per search
+                4,          // maximumEngineAttempts: engine ENDPOINTS opened per search (room for all 3 engines + DDG Lite)
                 20_000,     // navigationCommitTimeoutMillis (previously BrowserLimits.defaults())
                 true,       // redirectResolutionEnabled
                 2_048,      // maximumRedirectUrlLength

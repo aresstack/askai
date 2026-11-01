@@ -83,8 +83,11 @@ public final class BrowserBridgeEndpoint {
 
     private List<McpToolContribution> buildTools() {
         List<McpToolContribution> tools = new ArrayList<McpToolContribution>();
-        tools.add(passThrough("web_search", "Search the web via the configured provider.",
-                McpToolParameter.string("query", true, "The search query")));
+        tools.add(passThrough("web_search", "Search the web via the configured provider: every engine at once, each "
+                        + "in a tab of its own, the query typed into its search field.",
+                McpToolParameter.string("query", true, "The search query"),
+                McpToolParameter.string("engines", false, "Optional: the engines of this call, comma-separated "
+                        + "(duckduckgo, bing, google), in this order. Left out: the engines enabled in the settings.")));
         // A4: the typed two-step SERP layout preparation/repair — pure JSON pass-throughs (capture ids
         // are assigned when the loop later web_opens the resolved candidate urls).
         tools.add(passThrough("web_search_prepare",

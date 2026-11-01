@@ -101,15 +101,46 @@ public class BrowserSearchEngineSelectionTest {
                 idsOf(decoded.settings.navigation.engineSelection));
     }
 
-    /** The shipped default is the product decision: DuckDuckGo first, Bing behind it, one at a time. */
+    /**
+     * The shipped default is Angelo's product decision (issue #22): a fresh installation searches with Bing alone;
+     * DuckDuckGo and Google are listed but switched off.
+     */
     @Test
-    public void theDefaultAsksDuckDuckGoFirstAndBingOnlyIfNeeded() {
+    public void theDefaultSearchesWithBingAlone() {
         BrowserSearchEngineSelection shipped =
                 LegacyBrowserSearchDefaults.create().navigation.engineSelection;
 
-        assertEquals(EngineAcquisitionMode.FIRST_USABLE, shipped.getMode());
-        assertEquals(Arrays.asList(BrowserSearchEngineCatalog.DUCKDUCKGO,
-                BrowserSearchEngineCatalog.BING), idsOf(shipped));
+        assertEquals(Arrays.asList(BrowserSearchEngineCatalog.BING), idsOf(shipped));
+        List<String> listed = new java.util.ArrayList<String>();
+        for (BrowserSearchEngineSelection.Entry entry : shipped.getEntries()) {
+            listed.add(entry.getEngineId() + (entry.isEnabled() ? ":on" : ":off"));
+        }
+        assertEquals("DuckDuckGo and Google stay available, switched off",
+                Arrays.asList(BrowserSearchEngineCatalog.BING + ":on", BrowserSearchEngineCatalog.DUCKDUCKGO + ":off",
+                        BrowserSearchEngineCatalog.GOOGLE + ":off"), listed);
+    }
+
+    /**
+     * Switching the other two on is all it takes to search with all three at once: the default strategy is
+     * ALL_ENABLED (each engine in a tab of its own, typed into at the same time) and the endpoint budget reaches all
+     * three start pages.
+     */
+    @Test
+    public void switchingTheOtherEnginesOnAsksAllThreeAtOnce() {
+        LegacyBrowserSearchSettings defaults = LegacyBrowserSearchDefaults.create();
+        List<BrowserSearchEngineSelection.Entry> allOn = new java.util.ArrayList<BrowserSearchEngineSelection.Entry>();
+        for (BrowserSearchEngineSelection.Entry entry : defaults.navigation.engineSelection.getEntries()) {
+            allOn.add(new BrowserSearchEngineSelection.Entry(entry.getEngineId(), true, entry.getResultPages(),
+                    entry.getDelayMillis()));
+        }
+        BrowserSearchEngineSelection switchedOn =
+                new BrowserSearchEngineSelection(allOn, defaults.navigation.engineSelection.getMode());
+
+        assertEquals(EngineAcquisitionMode.ALL_ENABLED, switchedOn.getMode());
+        assertEquals(Arrays.asList(BrowserSearchEngineCatalog.BING, BrowserSearchEngineCatalog.DUCKDUCKGO,
+                BrowserSearchEngineCatalog.GOOGLE), idsOf(switchedOn));
+        assertTrue("the endpoint budget reaches every start page",
+                defaults.navigation.maximumEngineAttempts >= 3);
     }
 
     private static List<String> idsOf(BrowserSearchEngineSelection selection) {

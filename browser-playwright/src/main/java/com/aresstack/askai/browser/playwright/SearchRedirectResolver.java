@@ -13,6 +13,9 @@ import java.util.Locale;
  * <ul>
  * <li>Bing: {@code /ck/a?...&u=a1<base64url(target)>}</li>
  * <li>Google: {@code /url?q=<target>} (also {@code url=} / {@code u=})</li>
+ * <li>Google: {@code /goto?url=<opaque token>}: the target is not in the URL, only Google knows it
+ * ({@link #isOpaqueWrapper}); its treatment is an {@link OpaqueRedirectStrategy}, shipped as
+ * {@link OpaqueRedirectStrategy#DISCARD}: {@code UNRESOLVED}. The wrapper URL itself is never a result link.</li>
  * <li>DuckDuckGo: {@code /l/?uddg=<target>}</li>
  * </ul>
  * A wrapper whose target cannot be extracted safely is {@code UNRESOLVED} — the caller discards it in a
@@ -56,7 +59,12 @@ final class SearchRedirectResolver {
     private SearchRedirectResolver() {
     }
 
+    /** Resolution with the shipped treatment of opaque wrappers, {@link OpaqueRedirectStrategy#DISCARD}. */
     static Resolution resolve(String url) {
+        return resolve(url, OpaqueRedirectStrategy.DISCARD);
+    }
+
+    static Resolution resolve(String url, OpaqueRedirectStrategy opaqueWrappers) {
         String lower = url == null ? "" : url.toLowerCase(Locale.ROOT);
         if (lower.isEmpty() || !lower.startsWith("http")) {
             return new Resolution(Status.NOT_A_REDIRECT, url);
@@ -76,12 +84,37 @@ final class SearchRedirectResolver {
             return target != null && target.startsWith("http")
                     ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
         }
+        if (isGoogleGoto(host, path, url)) {
+            String target = opaqueWrappers.targetOf(url);
+            return target != null && (target.startsWith("http://") || target.startsWith("https://"))
+                    && !isOpaqueWrapper(target)
+                    ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
+        }
         if (host.endsWith("duckduckgo.com") && path.startsWith("/l/")) {
             String target = queryParameter(url, "uddg");
             return target != null && target.startsWith("http")
                     ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
         }
         return new Resolution(Status.NOT_A_REDIRECT, url);
+    }
+
+    /**
+     * Whether the URL is Google's opaque result wrapper {@code /goto?url=<token>} (2026 SERPs): its target is not in the
+     * URL and is never decoded or guessed from the page.
+     */
+    static boolean isOpaqueWrapper(String url) {
+        String lower = url == null ? "" : url.toLowerCase(Locale.ROOT);
+        if (!lower.startsWith("http")) {
+            return false;
+        }
+        return isGoogleGoto(com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver.hostOf(lower),
+                pathOf(lower), url);
+    }
+
+    private static boolean isGoogleGoto(String host, String path, String url) {
+        String token = queryParameter(url, "url");
+        return (host.equals("google.com") || host.endsWith(".google.com")) && path.equals("/goto")
+                && token != null && !token.isEmpty();
     }
 
     /** Bing encodes the target as {@code a1} + base64url; anything else is unresolved. */

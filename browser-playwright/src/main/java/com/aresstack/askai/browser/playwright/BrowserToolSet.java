@@ -39,7 +39,7 @@ final class BrowserToolSet {
     String call(String tool, Map<String, Object> args) throws BrowserException {
         switch (tool == null ? "" : tool) {
             case "web_search":
-                return search(str(args, "query"));
+                return search(str(args, "query"), engines(args));
             case "web_search_prepare":
                 return repair().prepare(str(args, "query"));
             case "web_search_apply_layout":
@@ -74,8 +74,37 @@ final class BrowserToolSet {
         }
     }
 
-    private String search(String query) throws BrowserException {
-        WebSearchResult result = session.search(query);
+    /**
+     * web_search's optional {@code engines}: catalog ids as a JSON array or a comma-separated string; null when the
+     * call names none (then the engines enabled in the settings search).
+     */
+    static List<String> engines(Map<String, Object> args) {
+        Object value = args == null ? null : args.get("engines");
+        if (value == null) {
+            return null;
+        }
+        List<String> ids = new java.util.ArrayList<String>();
+        if (value instanceof java.util.Collection) {
+            for (Object id : (java.util.Collection<?>) value) {
+                ids.add(id == null ? null : String.valueOf(id));
+            }
+            return ids;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.startsWith("[") && text.endsWith("]")) {
+            text = text.substring(1, text.length() - 1);
+        }
+        for (String part : text.split(",")) {
+            String id = part.trim().replace("\"", "");
+            if (!id.isEmpty()) {
+                ids.add(id);
+            }
+        }
+        return ids;
+    }
+
+    private String search(String query, List<String> engineIds) throws BrowserException {
+        WebSearchResult result = session.search(query, engineIds);
         StringBuilder sb = new StringBuilder();
         // Consumers treat every engine host as transit — never an evidence source.
         for (String providerHost : result.getProviderHosts()) {

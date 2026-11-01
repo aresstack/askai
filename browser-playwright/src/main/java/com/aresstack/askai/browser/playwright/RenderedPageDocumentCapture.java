@@ -192,9 +192,14 @@ final class RenderedPageDocumentCapture {
         }
 
         List<RenderedLinkDescriptor> links = new ArrayList<RenderedLinkDescriptor>();
+        int opaqueWrappers = 0;
         for (Map<String, Object> l : mapList(root.get("links"))) {
             String rawHref = str(l.get("href"));
             SearchRedirectResolver.Resolution resolution = SearchRedirectResolver.resolve(rawHref);
+            if (resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED
+                    && SearchRedirectResolver.isOpaqueWrapper(rawHref)) {
+                opaqueWrappers++;
+            }
             LinkRedirectResolution status;
             String target;
             switch (resolution.getStatus()) {
@@ -219,6 +224,10 @@ final class RenderedPageDocumentCapture {
                     bool(l.get("visible")), box(l.get("box")), bool(l.get("insideHeading"))));
         }
 
+        if (opaqueWrappers > 0) {
+            warnings.add("OPAQUE_REDIRECTS: " + opaqueWrappers + " links are opaque engine wrappers (Google /goto) "
+                    + "whose target is not in the URL; they stay unresolved and are never results");
+        }
         String snapshotId = "snap-" + generation + "-"
                 + Integer.toHexString(fingerprint.value.hashCode());
         return new RenderedPageDocument(snapshotId, generation, url, title, viewport, fingerprint,

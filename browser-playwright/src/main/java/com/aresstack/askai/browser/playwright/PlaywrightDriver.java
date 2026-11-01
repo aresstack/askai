@@ -36,6 +36,52 @@ interface PlaywrightDriver extends AutoCloseable {
         return null;
     }
 
+    // ------------------------------------------------------------------ search forms (issue #22, Argos' web_search)
+    // Every catalog engine is asked like a person asks it: its start page in a tab of its own, the query typed into
+    // the search field with real input, Enter. All engines' tabs are typed into at the same time.
+
+    /**
+     * Opens each start page in a new background tab (never brought to the front), all loads started before any is
+     * waited for. Replaces the tabs of an earlier search.
+     * @return per URL (same index): null when the start page loaded, else why not
+     */
+    default java.util.List<String> openSearchTabs(java.util.List<String> homeUrls) throws BrowserException {
+        throw new BrowserException("SEARCH_TABS_UNSUPPORTED — this driver has no tabs");
+    }
+
+    /**
+     * Types {@code query} into the search field of each tab with a selector list, all tabs at the same time, and
+     * presses Enter in each; waits for each tab's result page. Real input only, no tab switched to.
+     * @param searchBoxSelectors per tab: the field's selectors in order, or null to leave that tab alone
+     * @return per tab: {@code "submitted"}, {@code "no-search-box"}, {@code "refused: <why>"} or {@code "skipped"}
+     */
+    default java.util.List<String> submitSearchInTabs(java.util.List<java.util.List<String>> searchBoxSelectors,
+                                                      String query) throws BrowserException {
+        throw new BrowserException("SEARCH_TABS_UNSUPPORTED — this driver has no tabs");
+    }
+
+    /** Makes the search tab the CURRENT page of every read, guard and click (not brought to the front). */
+    default PlaywrightPageState useSearchTab(int index) throws BrowserException {
+        throw new BrowserException("SEARCH_TABS_UNSUPPORTED — this driver has no tabs");
+    }
+
+    /** Loads another start page of the same engine (its fallback endpoint) in that search tab and makes it current. */
+    default PlaywrightPageState openInSearchTab(int index, String url) throws BrowserException {
+        throw new BrowserException("SEARCH_TABS_UNSUPPORTED — this driver has no tabs");
+    }
+
+    /**
+     * Clicks the engine's own "next result page" control on the CURRENT page with the real pointer and waits for the
+     * page it loads. False when none of the selectors matches a visible control.
+     */
+    default boolean clickNextPage(java.util.List<String> selectors) throws BrowserException {
+        return false;
+    }
+
+    /** Closes the search tabs (a parked challenge tab stays open) and returns to the page before the search. */
+    default void closeSearchTabs() {
+    }
+
     // ------------------------------------------------------------------ search-page guards (SERP only)
     // These stay driver-level so SERP details (consent, challenge DOM) never leak into the research loop.
 

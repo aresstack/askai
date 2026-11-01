@@ -60,4 +60,30 @@ public class SearchRedirectResolverTest {
                 SearchRedirectResolver.Status.NOT_A_REDIRECT,
                 SearchRedirectResolver.resolve("https://www.bing.com/videos/search?q=x").getStatus());
     }
+
+    @Test
+    public void googlesOpaqueGotoWrapperIsUnresolvedAndNeverJudgedByGooglesHost() {
+        String wrapper = "https://www.google.com/goto?url=CAESABC123&ved=x";
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED, SearchRedirectResolver.resolve(wrapper).getStatus());
+        assertEquals("", SearchRedirectResolver.resolve(wrapper).getTargetUrl());
+        org.junit.Assert.assertTrue(SearchRedirectResolver.isOpaqueWrapper(wrapper));
+        org.junit.Assert.assertFalse(SearchRedirectResolver.isOpaqueWrapper("https://www.google.com/goto"));
+        org.junit.Assert.assertFalse(SearchRedirectResolver.isOpaqueWrapper("https://example.com/goto?url=x"));
+        org.junit.Assert.assertFalse(SearchRedirectResolver.isOpaqueWrapper("https://www.google.com/url?q=https://a.b/"));
+    }
+
+    @Test
+    public void aLaterStrategyMayResolveAWrapperButNeverIntoAnotherWrapperOrANonHttpTarget() {
+        String wrapper = "https://www.google.com/goto?url=CAESABC123";
+        SearchRedirectResolver.Resolution known = SearchRedirectResolver.resolve(wrapper,
+                url -> "https://openjdk.org/projects/jdk/21/");
+        assertEquals(SearchRedirectResolver.Status.RESOLVED, known.getStatus());
+        assertEquals("https://openjdk.org/projects/jdk/21/", known.getTargetUrl());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED, SearchRedirectResolver.resolve(wrapper,
+                url -> "https://www.google.com/goto?url=again").getStatus());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED, SearchRedirectResolver.resolve(wrapper,
+                url -> "javascript:alert(1)").getStatus());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve(wrapper, OpaqueRedirectStrategy.DISCARD).getStatus());
+    }
 }
