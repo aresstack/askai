@@ -173,11 +173,15 @@ public class CamoufoxBingSearchLiveTest {
                 + " wheelTurns=" + wheelTurns + " diag=" + diagnostics);
         RenderedPageDocument document = driver.captureRenderedPage(new PublicSuffixDomainKeyResolver(), 1L);
 
+        // Bing's organic results are the li.b_algo items; AI answer cards may carry a div.b_algo of
+        // their own, which is no result.
         int blocks = 0;
         int visibleBlocks = 0;
+        java.util.Set<String> resultBlockIds = new java.util.LinkedHashSet<String>();
         for (RenderedContainerDescriptor container : document.containers) {
-            if (container.classTokens.contains("b_algo")) {
+            if (container.classTokens.contains("b_algo") && "li".equalsIgnoreCase(container.tagName)) {
                 blocks++;
+                resultBlockIds.add(container.containerId);
                 if (container.visible) {
                     visibleBlocks++;
                 }
@@ -186,6 +190,7 @@ public class CamoufoxBingSearchLiveTest {
         SearchResultExtractionResult extraction =
                 new LegacySearchResultExtractor(settings).extract(document, query);
         int structured = 0;
+        java.util.Set<String> takenOver = new java.util.HashSet<String>();
         int relevant = 0;
         String[] terms = query.toLowerCase(java.util.Locale.ROOT).split("\\s+");
         for (SearchResultCandidate candidate : extraction.candidates) {
@@ -200,6 +205,7 @@ public class CamoufoxBingSearchLiveTest {
                     + (candidate.resultBlockContainerId.isEmpty() ? " (harvested)" : " " + candidate.title));
             if (!candidate.resultBlockContainerId.isEmpty()) {
                 structured++;
+                takenOver.add(candidate.resultBlockContainerId);
             }
         }
         System.err.println("[bing-live] page=" + document.pageUrl + " warnings=" + document.captureWarnings);
@@ -219,8 +225,10 @@ public class CamoufoxBingSearchLiveTest {
         assertEquals("every Bing result block is captured visible", blocks, visibleBlocks);
         assertEquals(extraction.diagnostics.toString(), SearchPageAnalysisOutcome.ORGANIC_RESULTS,
                 extraction.outcome);
-        assertTrue("the result blocks are taken over as structured candidates: " + structured,
-                structured >= blocks - 1);
+        java.util.Set<String> missing = new java.util.LinkedHashSet<String>(resultBlockIds);
+        missing.removeAll(takenOver);
+        assertTrue("every Bing result block is taken over as a structured candidate, missing "
+                + missing + " " + extraction.diagnostics, missing.isEmpty());
         assertTrue("the results answer the query (" + relevant + " of " + extraction.candidates.size() + ")",
                 relevant * 2 >= extraction.candidates.size());
     }

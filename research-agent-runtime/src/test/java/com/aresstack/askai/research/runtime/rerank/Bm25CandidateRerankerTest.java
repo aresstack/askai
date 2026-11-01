@@ -13,7 +13,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * The lexical DEFAULT scorer: BM25 over title + snippet, no model, no sidecar. It orders by real
+ * The lexical DEFAULT scorer: BM25 over title, snippet, displayed domain and address, no model, no
+ * sidecar. It orders by real
  * word overlap (umlauts intact), selects only candidates that matched at all, and serves the same
  * relevance-assessment seam the AI reranker does — so "KI-Reranker aus" is a working search, not a
  * degraded one.
@@ -46,6 +47,50 @@ public class Bm25CandidateRerankerTest {
                     !"c-1".equals(selected.candidate.candidateId));
         }
         assertEquals(Bm25CandidateReranker.MODEL_NAME, result.modelName);
+    }
+
+    /**
+     * Bing, "Java 21 LTS release", rank 4: "Latest Releases | Adoptium", a snippet cut off before it
+     * names a version, the breadcrumb "adoptium.net › temurin › releases". Only the address carries
+     * the "21". Scored on title and snippet alone it was a zero match and never reached the frontier.
+     */
+    @Test
+    public void aHitWhoseOnlyMatchIsInItsAddressIsStillSelected() {
+        SearchResultCandidate adoptium = new SearchResultCandidate("c-4", "snap",
+                "https://adoptium.net/temurin/releases/?version=21",
+                "https://adoptium.net/temurin/releases/?version=21", "Latest Releases | Adoptium",
+                "There are multiple different ways to get Eclipse Temurin beyond direct downloads.",
+                "https://adoptium.net › temurin › releases", 4, "c", "b", 1.0, 1.0,
+                Collections.<com.aresstack.askai.browser.search.SearchResultSiteLink>emptyList());
+        List<SearchResultCandidate> candidates = Arrays.asList(
+                candidate("c-1", "Consolidated JDK 21 Release Notes", "Java 21 release notes"),
+                adoptium);
+
+        SearchResultRerankingResult result = new Bm25CandidateReranker().rerank(
+                "Java 21 LTS release", candidates, null);
+
+        assertEquals(SearchResultRerankingOutcome.SUCCESS, result.outcome);
+        assertEquals("both hits are selected", 2, result.selected.size());
+        assertEquals("the hit matching in title and snippet still leads", "c-1",
+                result.selected.get(0).candidate.candidateId);
+    }
+
+    @Test
+    public void aPercentEncodedAddressMatchesItsDecodedWord() {
+        SearchResultCandidate encoded = new SearchResultCandidate("c-2", "snap",
+                "https://example.test/ratgeber/h%C3%BChner/", "https://example.test/ratgeber/h%C3%BChner/",
+                "Ratgeber", "Alles für den Garten", "example.test", 2, "c", "b", 1.0, 1.0,
+                Collections.<com.aresstack.askai.browser.search.SearchResultSiteLink>emptyList());
+
+        SearchResultRerankingResult result = new Bm25CandidateReranker().rerank("hühner",
+                Arrays.asList(candidate("c-1", "Pasta", "Nudeln kochen"), encoded), null);
+
+        assertEquals(1, result.selected.size());
+        assertEquals("c-2", result.selected.get(0).candidate.candidateId);
+        assertEquals("the hit keeps its address", "https://example.test/ratgeber/h%C3%BChner/",
+                result.selected.get(0).candidate.resolvedTargetUrl);
+        assertEquals("an undecodable address is scored as it stands", "example.test/50%-off",
+                Bm25CandidateReranker.addressWords("https://example.test/50%-off"));
     }
 
     @Test
