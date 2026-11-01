@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Detects the repeated RESULT BLOCKS inside the chosen ORGANIC_RESULTS container: descend through
@@ -23,6 +24,11 @@ import java.util.Set;
  * largest cluster of at least the configured repetition count, then resolve each block's primary
  * title link, snippet and sitelinks. A single anchor is never a result; blocks without a
  * qualifying primary link are rejected with a reason (diagnostics).
+ * <p>
+ * Inside the chosen cluster only the members of the list count: an element named as an ad, and an
+ * element that lacks the class every other result of the list carries (Bing's AI answer cards
+ * {@code li.b_ans} between ten {@code li.b_algo}), is set aside with a reason. Structure alone does
+ * not separate them — an answer card is built from the same {@code li}/{@code div} skeleton.
  */
 public final class SearchResultBlockDetector {
 
@@ -87,22 +93,180 @@ public final class SearchResultBlockDetector {
         });
 
         List<List<RenderedContainerDescriptor>> clusters = clusterer.cluster(children);
+        // A cluster competes with what is LEFT of it once ads and non-list members are set aside:
+        // six ads must not push five organic results out just because six is more than five.
         List<RenderedContainerDescriptor> resultCluster = null;
+        List<RenderedContainerDescriptor> resultBlocks = null;
+        List<String> resultReasons = null;
+        boolean repeated = false;
         for (List<RenderedContainerDescriptor> cluster : clusters) {
-            if (cluster.size() >= settings.analysis.minimumRepeatedSiblingCount
-                    && (resultCluster == null || cluster.size() > resultCluster.size())) {
+            if (cluster.size() < settings.analysis.minimumRepeatedSiblingCount) {
+                continue;
+            }
+            repeated = true;
+            List<String> memberReasons = new ArrayList<String>();
+            List<RenderedContainerDescriptor> members = listMembers(cluster, memberReasons);
+            if (!members.isEmpty()
+                    && (resultBlocks == null || members.size() > resultBlocks.size())) {
                 resultCluster = cluster;
+                resultBlocks = members;
+                resultReasons = memberReasons;
             }
         }
         if (resultCluster == null) {
-            reasons.add("no repeated block structure: largest cluster of "
-                    + largest(clusters) + " similar siblings is below the required "
-                    + settings.analysis.minimumRepeatedSiblingCount);
+            reasons.add(repeated
+                    ? "no repeated block structure of organic results: every cluster of at least "
+                            + settings.analysis.minimumRepeatedSiblingCount
+                            + " similar siblings consists of ads or non-list elements only"
+                    : "no repeated block structure: largest cluster of "
+                            + largest(clusters) + " similar siblings is below the required "
+                            + settings.analysis.minimumRepeatedSiblingCount);
             return new Detection(Collections.<DetectedResultBlock>emptyList(), reasons);
         }
 
-        return new Detection(buildBlocks(document, resultCluster, resultCluster.size(), reasons),
+        reportSetAsideClusters(clusters, resultCluster, resultBlocks.size(), reasons);
+        reasons.addAll(resultReasons);
+        return new Detection(buildBlocks(document, resultBlocks, resultBlocks.size(), reasons),
                 reasons);
+    }
+
+    /**
+     * A second repeated shape next to the chosen list is worth a line in the diagnostics: when a list
+     * of results is ever split again, the log says so instead of silently showing fewer results.
+     */
+    private void reportSetAsideClusters(List<List<RenderedContainerDescriptor>> clusters,
+                                        List<RenderedContainerDescriptor> resultCluster,
+                                        int resultMembers, List<String> reasons) {
+        for (List<RenderedContainerDescriptor> cluster : clusters) {
+            if (cluster != resultCluster
+                    && cluster.size() >= settings.analysis.minimumRepeatedSiblingCount) {
+                reasons.add("set aside a second repeated block shape of " + cluster.size()
+                        + " siblings starting at " + cluster.get(0).containerId
+                        + " (the result list is " + resultCluster.get(0).containerId + "… with "
+                        + resultMembers + " list members)");
+            }
+        }
+    }
+
+    /**
+     * The members of the result list: ads are never results. When most of the cluster shares a class
+     * token, a member without it stays a result as long as it carries the STRUCTURAL CORE of the list:
+     * every element path (tag below tag, from the block down) that all results with the class have in
+     * common. What it adds or leaves out beyond that core does not matter, so a "featured" variant
+     * with a sitelink row or a source line keeps its place even where the clusterer admitted it only
+     * through the representative. An answer card that lacks part of the core (Bing's {@code b_ans}
+     * cards have no {@code li > h2 > a} title link) does not. Without a shared class nothing is removed.
+     */
+    private List<RenderedContainerDescriptor> listMembers(
+            List<RenderedContainerDescriptor> cluster, List<String> reasons) {
+        List<RenderedContainerDescriptor> withoutAds = new ArrayList<RenderedContainerDescriptor>();
+        for (RenderedContainerDescriptor member : cluster) {
+            if (SearchPageMechanicalAnalyzer.namedAsAdvertisement(member)) {
+                reasons.add(member.containerId + ": advertisement, not an organic result");
+            } else {
+                withoutAds.add(member);
+            }
+        }
+        Set<String> listClasses = sharedClassTokens(withoutAds);
+        if (listClasses.isEmpty()) {
+            return withoutAds;
+        }
+        List<RenderedContainerDescriptor> majority = new ArrayList<RenderedContainerDescriptor>();
+        for (RenderedContainerDescriptor member : withoutAds) {
+            if (!Collections.disjoint(member.classTokens, listClasses)) {
+                majority.add(member);
+            }
+        }
+        // Not pairwise similarity: the clusterer admits a member through the representative alone, so
+        // two admitted variants may be far apart from each other. What every result shares is the core.
+        Set<String> core = null;
+        for (RenderedContainerDescriptor member : majority) {
+            Set<String> paths = elementPaths(member);
+            if (core == null) {
+                core = new TreeSet<String>(paths);
+            } else {
+                core.retainAll(paths);
+            }
+        }
+        List<RenderedContainerDescriptor> members = new ArrayList<RenderedContainerDescriptor>();
+        for (RenderedContainerDescriptor member : withoutAds) {
+            Set<String> missing = new TreeSet<String>();
+            if (Collections.disjoint(member.classTokens, listClasses)) {
+                missing.addAll(core);
+                missing.removeAll(elementPaths(member));
+            }
+            if (!missing.isEmpty()) {
+                reasons.add(member.containerId + ": not part of the result list (class "
+                        + member.classTokens + " lacks " + listClasses
+                        + " that the other results carry, and it lacks the structure every one of them has: "
+                        + missing + ")");
+            } else {
+                members.add(member);
+            }
+        }
+        return members;
+    }
+
+    /**
+     * The element paths of a block's structure signature, e.g. {@code li(h2(a),p)} gives {@code li},
+     * {@code li>h2}, {@code li>h2>a} and {@code li>p} (presence only, not how often).
+     */
+    static Set<String> elementPaths(RenderedContainerDescriptor block) {
+        Set<String> paths = new TreeSet<String>();
+        String signature = block.structureSignature == null ? null : block.structureSignature.value;
+        if (signature == null) {
+            return paths;
+        }
+        java.util.Deque<String> open = new java.util.ArrayDeque<String>();
+        String current = null;
+        StringBuilder tag = new StringBuilder();
+        for (int i = 0; i <= signature.length(); i++) {
+            char c = i < signature.length() ? signature.charAt(i) : ',';
+            if (Character.isLetterOrDigit(c)) {
+                tag.append(Character.toLowerCase(c));
+                continue;
+            }
+            if (tag.length() > 0) {
+                current = open.isEmpty() ? tag.toString() : open.peek() + ">" + tag;
+                paths.add(current);
+                tag.setLength(0);
+            }
+            if (c == '(' && current != null) {
+                open.push(current);
+            } else if (c == ')' && !open.isEmpty()) {
+                current = open.pop();
+            }
+        }
+        return paths;
+    }
+
+    /**
+     * The most frequent class token(s) of the cluster, provided they mark a clear majority that is
+     * itself a repeated list — otherwise none, and the cluster stays as it is.
+     */
+    private Set<String> sharedClassTokens(List<RenderedContainerDescriptor> members) {
+        Map<String, Integer> counts = new HashMap<String, Integer>();
+        for (RenderedContainerDescriptor member : members) {
+            for (String token : new HashSet<String>(member.classTokens)) {
+                Integer count = counts.get(token);
+                counts.put(token, count == null ? 1 : count + 1);
+            }
+        }
+        int top = 0;
+        for (int count : counts.values()) {
+            top = Math.max(top, count);
+        }
+        Set<String> shared = new TreeSet<String>();
+        if (top == members.size() || top * 2 <= members.size()
+                || top < settings.analysis.minimumRepeatedSiblingCount) {
+            return shared;
+        }
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            if (entry.getValue() == top) {
+                shared.add(entry.getKey());
+            }
+        }
+        return shared;
     }
 
     /**

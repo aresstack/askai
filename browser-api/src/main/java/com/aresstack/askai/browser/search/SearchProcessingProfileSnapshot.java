@@ -78,6 +78,12 @@ public final class SearchProcessingProfileSnapshot {
         switch (document.schemaVersion) {
             case LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION:
                 return document;
+            case 5:
+                // v5 → v6: a frozen profile still carrying the untouched old shipped challenge-text list
+                // (with the bare word "captcha") is lifted to the current list while decoding
+                // (LegacyBrowserSearchSettingsCodec.liftStaleShippedDefaults); an edited list stays as frozen.
+                // The stored digest covered the old list, so it is recomputed like every older migration.
+                return document;
             case 1:
             case 2:
             case 3:

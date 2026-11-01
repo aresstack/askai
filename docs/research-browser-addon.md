@@ -1,7 +1,8 @@
 # Research browser add-on
 
 Status: stage 1 implemented (HUD in the add-on). Page reads (guard detection, SERP capture, anchors) run in the
-add-on (see "Page reads in the add-on"). Consent clicks without JavaScript and the Chrome extension follow.
+add-on (see "Page reads in the add-on"). Consent clicks use real input only. Stage 4: the Chrome/Edge chat browser
+gets the same add-on as a Manifest V3 extension (see "Stage 4: Chrome/Edge extension").
 
 ## Why
 
@@ -98,7 +99,9 @@ still cannot reach loopback.
   of the browser start, there is simply no HUD in the browser and the log says so once:
   `research add-on did not connect within 15 s: no HUD in the browser until it does (nothing is put into the page)`.
   The HUD state is still published, so an add-on that connects later shows it at once.
-- **Chrome/Edge channel:** there is no Chrome extension yet; the HUD stays the in-page overlay until stage 4.
+- **Chrome/Edge channel:** the chat browser gets the extension (stage 4) and behaves like Camoufox: HUD only in the
+  extension, reads in its isolated world. Only when the extension is switched off or could not be loaded does the
+  HUD fall back to the in-page overlay and the reads to `page.evaluate` (the fallback issue #23 asks for).
 - Before the add-on connects (first seconds after the start) the HUD is only published to the bridge; the add-on
   shows the newest state as soon as it connects.
 
@@ -106,8 +109,8 @@ Switches (JVM system properties):
 
 | Property | Effect |
 | --- | --- |
-| `-Daskai.browser.researchAddon=false` | Start Camoufox without the add-on (no HUD in the browser) |
-| `-Daskai.browser.hud.inPageFallback=false` | Chrome/Edge: keep the overlay out of the page too |
+| `-Daskai.browser.researchAddon=false` | Start Camoufox without the add-on (no HUD in the browser); start Chrome/Edge without the extension, as before stage 4 (in-page overlay, `page.evaluate`) |
+| `-Daskai.browser.hud.inPageFallback=false` | Chrome/Edge without the extension: keep the overlay out of the page too |
 | `-Daskai.browser.scriptFree=true` | Camoufox: every main-world script (`page.evaluate`) fails before it reaches the page, i.e. the read fallback of a Camoufox without add-on; with the add-on the reads run in its world and are unaffected. Default off |
 
 ### Interactions: real input only
@@ -156,23 +159,101 @@ The scripts stay in Java so the capture and guard logic has one source and the e
 Only AskAI can queue a read (token and extension origin, as for the HUD), and the scripts only read: they write
 nothing into the page, click nothing and navigate nowhere.
 
-`page.evaluate` is only left for drivers without the add-on: Chrome/Edge (until stage 4) and Camoufox started with
-`-Daskai.browser.researchAddon=false` or with an add-on that could not be prepared. That fallback passes
+`page.evaluate` is only left for drivers without the add-on: Chrome/Edge worker tabs, Chrome/Edge without the
+extension, and Camoufox started with `-Daskai.browser.researchAddon=false` or with an add-on that could not be
+prepared. That fallback passes
 `PageScriptGate`, so `-Daskai.browser.scriptFree=true` refuses it for Camoufox.
 
 Not part of the reads: the consent click (`tryDismissConsent`) uses Playwright Locators and real mouse input, and
 Camoufox has no in-page HUD overlay (see "Interactions: real input only" above).
 
-## Stage 4: Chrome extension
+## Stage 4: Chrome/Edge extension
 
-The same add-on as a Chrome Manifest V3 extension, loaded with `--load-extension` into a persistent context; the
-bridge protocol stays the same; the bridge then also accepts `Origin: chrome-extension://…` next to `moz-extension://`.
+The chat browser on the `chrome` and `msedge` channels gets the add-on as a Manifest V3 extension. The bridge, its
+protocol, the HUD state, the commands and the read scripts are the same as for Firefox; the panel files
+(`panel.html`, `panel.css`, `panel.js`) are shared.
+
+### What the user sees
+
+- a **toolbar button** (pinned, so it is visible without the extensions menu) with the same badge: the countdown in
+  red while AskAI waits for the user, `II` while paused;
+- a click on it opens the **side panel** with the same HUD as the Firefox sidebar; it stays open across navigations.
+  Chrome only opens a side panel on a user gesture, so it is not opened automatically at the start.
+
+### How it is loaded
+
+| Step | Where |
+| --- | --- |
+| Extension sources (Manifest V3: own `manifest.json` and service worker `background.js`, panel shared with Firefox) | `browser-playwright/src/main/resources/askai-addon/chrome/` |
+| Writes the extension with this start's `bridge.json` into a temporary root next to a fresh profile (both deleted on close) | `ResearchAddon.installChrome`, `Playwright4jDriver.launch` |
+| Starts Chrome/Edge with that profile as a persistent context, with `--enable-unsafe-extension-debugging` and without Playwright's `--disable-extensions` | `ChromeResearchExtension.options` |
+| Loads the extension over the DevTools protocol: `Extensions.loadUnpacked` | `ChromeResearchExtension.load` |
+| Pins the toolbar button (`extensions.pinned_extensions` in the fresh profile's `Default/Preferences`) | `ChromeResearchExtension.pinToolbarButton` |
+
+Why this way (measured with Chrome for Testing 153 in the live test and a Node prototype):
+
+- **No `--load-extension`:** branded Chrome ignores that switch since version 137. `Extensions.loadUnpacked` over
+  Playwright's pipe connection is the supported way for automation; it needs `--enable-unsafe-extension-debugging`.
+- **A persistent profile:** Playwright's `browser.newContext()` contexts are off-the-record profiles. Even with the
+  extension allowed there, it can list their tabs but not script them ("No tab with id"), and in split mode its
+  worker does not start at all. So the chat browser runs in its profile's own context, like Camoufox. Worker browsers
+  (`PlaywrightWorkerBrowserBackend`) need one off-the-record context per worker and therefore stay without the
+  extension on Chrome/Edge: their reads keep `page.evaluate`.
+- **The id is fixed** by the public `key` in the manifest (`elobpccbfihfcmjgkadloggolgnnfhnb`), so the bridge
+  accepts exactly `Origin: chrome-extension://elobpccbfihfcmjgkadloggolgnnfhnb` next to `moz-extension://`, and the
+  toolbar pin can name it before the start.
+
+### Differences to Firefox, forced by Manifest V3
+
+- **Reads as files, not as code strings.** An MV3 extension cannot execute script text (no `code`, no `eval` or
+  `new Function` in the isolated world). The bridge therefore writes each read script as
+  `reads/<sha256>.js` (content `(<script>)();`) into the extension directory before queuing the read, and the read
+  carries `file` instead of `script`. The service worker runs exactly that file with
+  `chrome.scripting.executeScript({target: {tabId, frameIds: [0]}, files: [file], world: 'ISOLATED',
+  injectImmediately: true})`, which returns the file's value. It refuses any file outside `reads/`. Tab binding,
+  errors (`NO_TAB`, `AMBIGUOUS_TAB`, `URL_MISMATCH`) and value shapes are the same as with Firefox.
+- **Service worker instead of a persistent page.** The long polls, an extension API call every 20 s and a 30 s alarm
+  keep it running; if Chrome stops it anyway, the next alarm starts it again and the loops resume.
+- **Request interception.** Unlike Firefox, Playwright's `context.route` also sees the extension's requests. The
+  driver lets through exactly the requests to this start's bridge (`http://127.0.0.1:<port>/v1/`) that carry its
+  bearer token (`Playwright4jDriver.fromExtensionWorker`); every other loopback request of a page is still aborted,
+  and the bridge checks token and origin again.
+
+### Fallback
+
+If the extension cannot be prepared or the browser refuses `Extensions.loadUnpacked` (log line
+`research extension not loaded (HUD and page reads stay in the page)`), the browser keeps running without it: the HUD
+is the in-page overlay and the reads use `page.evaluate`, as before stage 4. With
+`-Daskai.browser.researchAddon=false` the chat browser starts exactly as before stage 4 (no persistent profile).
+
+### Not verified yet
+
+Verified on Linux with Chrome for Testing 153 (headless and headed). Branded Chrome and Edge on Windows still need
+the manual acceptance; Edge's toolbar pin preference in particular is unverified (if Edge ignores it, the button sits
+in the extensions menu, the panel works the same).
 
 ## Tests
 
 - Unit: `AddonBridgeTest` (token, origin, long poll, command whitelist, page reads: round trip, held poll, add-on
-  error, cancel, refused for pages, close), `ResearchAddonTest` (files, `bridge.json`, manifest exposes nothing to
-  pages, one injection point for reads), `CamoufoxLaunchTest.withAddonAppendsTheAddonAndRechunksOnlyTheFingerprint`.
+  error, cancel, refused for pages, close; Chrome: only its own extension id, reads as script files),
+  `ResearchAddonTest` (files, `bridge.json`, manifest exposes nothing to pages, one injection point for reads; the same
+  for the Chrome extension, and its manifest key yields `CHROME_ID`), `ChromeResearchExtensionTest` (launch switches,
+  toolbar pin, the request filter lets only token-bearing bridge requests through),
+  `CamoufoxLaunchTest.withAddonAppendsTheAddonAndRechunksOnlyTheFingerprint`.
+- Live, real Chrome/Edge (environment-gated like the other Chrome live tests: runs when the browser of
+  `ASKAI_TEST_BROWSER_CHANNEL`, default `chrome`, is installed):
+
+  ```
+  gradlew :browser-playwright:test --rerun --tests '*ChromeResearchExtensionLiveTest'
+  ```
+
+  With `ASKAI_TEST_BROWSER_CHANNEL=msedge` for Edge, `ASKAI_LIVE_CHROME_HEADED=1` and
+  `ASKAI_LIVE_CHROME_HOLD_SECONDS=120` to look at the toolbar button and the side panel (clicked commands are
+  printed). It checks: the extension connects through the request filter and takes the HUD, the page sees no HUD and
+  no binding, a real click on Skip in the panel reaches the HUD inbox, the reads (capture, challenge, consent, anchors)
+  never call the page's hooked functions (`calls=0`), without the extension the overlay and `page.evaluate` are back,
+  and the temporary profile is gone after close. `PlaywrightActorLiveBrowserTest` covers the overlay binding and
+  therefore runs with the extension switched off.
 - Live, real Camoufox (downloads it on first use, like the app):
 
   ```

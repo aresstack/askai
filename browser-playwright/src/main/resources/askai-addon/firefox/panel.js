@@ -1,9 +1,11 @@
-// The HUD view of the AskAI Research add-on, used as toolbar popup and as sidebar panel. It only renders what the
+// The HUD view of the AskAI Research add-on, used as toolbar popup and sidebar (Firefox) and as side panel (Chrome). It only renders what the
 // background page reports and hands button clicks back to it; it never talks to AskAI or to a page itself.
 'use strict';
 
 const $ = id => document.getElementById(id);
-const port = browser.runtime.connect({name: 'askai-panel'});
+// Shared by the Firefox add-on (browser.*) and the Chrome/Edge extension (chrome.*, side panel).
+const extension = typeof browser !== 'undefined' ? browser : chrome;
+const port = extension.runtime.connect({name: 'askai-panel'});
 let paused = false;
 let relevant = false;
 

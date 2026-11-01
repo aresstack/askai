@@ -55,6 +55,26 @@ public class PageReadinessJudgeTest {
     }
 
     @Test
+    public void aChallengePhraseOnlyBelowTheFoldLeavesTheArticleReadable() {
+        // The INNOQ false positive (run "Java 21 LTS release", 2026-10-31): the 4420-char podcast page names its
+        // footer contact-form widget "FriendlyCaptcha". The guard now reports such an off-screen phrase as a
+        // hidden artifact, and neither judge may turn it into a user-wait.
+        BrowserPageReadiness innoq = new BrowserPageReadiness("https://www.innoq.com/de/podcast/135-java-21/",
+                "Java 21. Alles zum neuen LTS-Release - INNOQ", 4420,
+                "Zum Inhalt springen INNOQ Homepage KONTAKT DE CH EN Leistungen Success Stories Kultur Magazin "
+                        + "Trends Schulungen PODCAST Java 21 Alles zum neuen LTS-Release 19. September 2023 Heute "
+                        + "ist es soweit: Java 21, das neueste LTS-Release, erscheint.",
+                true, false, "hidden:text:captcha", false, "");
+        assertEquals(PageReadinessJudge.Verdict.READABLE, new HeuristicPageReadinessJudge(48).judge(innoq));
+        PageReadinessModel poison = new PageReadinessModel() {
+            public String complete(String system, String user) {
+                return "INTERACTIVE_CHALLENGE"; // must not be consulted for a clearly readable page
+            }
+        };
+        assertEquals(PageReadinessJudge.Verdict.READABLE, new ModelPageReadinessJudge(poison, 48).judge(innoq));
+    }
+
+    @Test
     public void aVisibleChallengeStillBlocksEvenWithPlentyOfText() {
         // The opposite guard: a genuinely visible challenge widget must block regardless of extracted text.
         HeuristicPageReadinessJudge h = new HeuristicPageReadinessJudge(48);

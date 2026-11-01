@@ -6,13 +6,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * The AskAI Research Firefox add-on (sources in {@code src/main/resources/askai-addon/firefox}): written as an
+ * The AskAI Research add-on. Firefox (sources in {@code src/main/resources/askai-addon/firefox}): written as an
  * unpacked add-on directory next to a browser's profile at every start, so Camoufox loads it through
  * {@code CAMOU_CONFIG.addons} like its bundled add-ons. The directory carries the {@code bridge.json} of THIS start
  * (port and token of its {@link AddonBridge}); a stale one from an earlier start is always overwritten.
+ *
+ * <p>Chrome/Edge (stage 4) get the Manifest V3 variant from {@code askai-addon/chrome} ({@link #installChrome}): its
+ * own manifest and service worker, the same panel files as Firefox. Chrome loads it through the DevTools protocol
+ * ({@code Extensions.loadUnpacked}) into the chat browser's profile.</p>
  */
 final class ResearchAddon {
 
@@ -23,6 +29,13 @@ final class ResearchAddon {
     /** Every file of the add-on; the jar cannot be listed, so the set is spelled out here. */
     static final List<String> FILES = List.of(
             "manifest.json", "background.js", "panel.html", "panel.css", "panel.js", "icon.svg");
+    /**
+     * The Chrome extension's id. Fixed by the public {@code key} in its manifest (the id is derived from that key), so
+     * the bridge can accept exactly this extension origin, wherever the extension directory lies.
+     */
+    static final String CHROME_ID = "elobpccbfihfcmjgkadloggolgnnfhnb";
+    /** Every file of the Chrome extension and its resource: own manifest and service worker, the shared panel. */
+    static final Map<String, String> CHROME_FILES = chromeFiles();
 
     private ResearchAddon() {
     }
@@ -33,14 +46,40 @@ final class ResearchAddon {
      * @return the add-on directory, for {@code CamoufoxLaunch.withAddon}
      */
     static Path install(Path parent, String bridgeConfig) throws IOException {
+        Map<String, String> files = new LinkedHashMap<String, String>();
+        for (String file : FILES) {
+            files.put(file, RESOURCES + file);
+        }
+        return write(parent, files, bridgeConfig);
+    }
+
+    /**
+     * Write the Chrome/Edge extension to {@code <parent>/askai-research-addon} with the bridge configuration of this
+     * start. @return the extension directory, for {@code Extensions.loadUnpacked}
+     */
+    static Path installChrome(Path parent, String bridgeConfig) throws IOException {
+        return write(parent, CHROME_FILES, bridgeConfig);
+    }
+
+    private static Map<String, String> chromeFiles() {
+        Map<String, String> files = new LinkedHashMap<String, String>();
+        files.put("manifest.json", "/askai-addon/chrome/manifest.json");
+        files.put("background.js", "/askai-addon/chrome/background.js");
+        for (String shared : List.of("panel.html", "panel.css", "panel.js")) {
+            files.put(shared, RESOURCES + shared);
+        }
+        return java.util.Collections.unmodifiableMap(files);
+    }
+
+    private static Path write(Path parent, Map<String, String> files, String bridgeConfig) throws IOException {
         Path target = parent.resolve(DIRECTORY);
         Files.createDirectories(target);
-        for (String file : FILES) {
-            try (InputStream in = ResearchAddon.class.getResourceAsStream(RESOURCES + file)) {
+        for (Map.Entry<String, String> file : files.entrySet()) {
+            try (InputStream in = ResearchAddon.class.getResourceAsStream(file.getValue())) {
                 if (in == null) {
-                    throw new IllegalStateException(RESOURCES + file + " missing from the browser-playwright jar");
+                    throw new IllegalStateException(file.getValue() + " missing from the browser-playwright jar");
                 }
-                Files.copy(in, target.resolve(file), StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(in, target.resolve(file.getKey()), StandardCopyOption.REPLACE_EXISTING);
             }
         }
         Path config = target.resolve("bridge.json");

@@ -27,10 +27,12 @@ public final class LegacyBrowserSearchConfigDocument {
      * v3 = A4 layout-repair ticket-cache settings; v4 = the AI layout resolver ships productively
      * enabled (the stale disabled shipped default in frozen session profiles is lifted by the typed
      * snapshot migration); v5 = the primary-engine-plus-fallback-templates pair is replaced by an
-     * ORDERED engine selection with an acquisition mode. Older documents decode cleanly: missing keys
-     * fall back to {@link LegacyBrowserSearchDefaults}, which is the migration.
+     * ORDERED engine selection with an acquisition mode; v6 = the shipped challenge-text list no longer
+     * carries the bare word "captcha" (an untouched old shipped list is lifted while decoding, see
+     * {@link LegacyBrowserSearchSettingsCodec#liftStaleShippedDefaults}). Older documents decode cleanly:
+     * missing keys fall back to {@link LegacyBrowserSearchDefaults}, which is the migration.
      */
-    public static final int CURRENT_SCHEMA_VERSION = 5;
+    public static final int CURRENT_SCHEMA_VERSION = 6;
 
     public final int schemaVersion;
     public final long settingsRevision;
