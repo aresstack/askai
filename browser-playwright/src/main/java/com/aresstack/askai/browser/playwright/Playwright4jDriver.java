@@ -546,7 +546,29 @@ final class Playwright4jDriver implements PlaywrightDriver {
      */
     private static final int UNKNOWN_WINDOW_SAFE_Y = 360;
     private static final int UNKNOWN_WINDOW_ANCHOR = 200;
-    private static final int MAX_SCROLL_ROUNDS = 3;
+    private static final int MAX_SCROLL_ROUNDS = 6;
+    /** A box is settled when two measurements this far apart agree (Argos RealInput#stableBox: 50 ms, 10 tries). */
+    private static final int SETTLE_PROBE_MILLIS = 50;
+    private static final int SETTLE_PROBES = 10;
+
+    /** The control's box once it stops moving (smooth scrolling, late layout); null when it is gone. */
+    private BoundingBox settledBox(ElementHandle control) {
+        BoundingBox box = control.boundingBox();
+        for (int probe = 0; probe < SETTLE_PROBES && box != null; probe++) {
+            page.waitForTimeout(SETTLE_PROBE_MILLIS);
+            BoundingBox again = control.boundingBox();
+            if (again == null || sameBox(box, again)) {
+                return again;
+            }
+            box = again;
+        }
+        return box;
+    }
+
+    private static boolean sameBox(BoundingBox a, BoundingBox b) {
+        return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5
+                && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
+    }
 
     /**
      * Brings the control into the window with real wheel input when it lies (or may lie) outside, then clicks its
@@ -559,15 +581,20 @@ final class Playwright4jDriver implements PlaywrightDriver {
             int height = viewport != null && viewport.height > 0 ? viewport.height : 0;
             int safeBottom = height > 0 ? height : UNKNOWN_WINDOW_SAFE_Y;
             int anchor = height > 0 ? height / 3 : UNKNOWN_WINDOW_ANCHOR;
-            for (int round = 0; round < MAX_SCROLL_ROUNDS; round++) {
+            for (int round = 0; ; round++) {
                 double centerY = target.y + target.height / 2;
                 if (centerY >= 0 && centerY < safeBottom) {
                     break;
                 }
+                if (round == MAX_SCROLL_ROUNDS) {
+                    return false; // never click where the control was before it moved out of reach
+                }
                 // The wheel turns where the pointer rests, which must be inside the window: its last landed spot.
                 page.mouse().move(lastPointerX, lastPointerY);
                 humanPointer().scrollBy((int) Math.round(centerY - anchor));
-                BoundingBox moved = control.boundingBox();
+                // Firefox scrolls smoothly: a box read right after the wheel lies mid-animation (Argos RealInput
+                // stableBox), and a click there lands beside the control.
+                BoundingBox moved = settledBox(control);
                 if (moved == null || moved.width <= 0 || moved.height <= 0) {
                     return false;
                 }
@@ -640,6 +667,9 @@ final class Playwright4jDriver implements PlaywrightDriver {
      * Enter or a "next" click loads: until it is committed, the old page's load state says nothing.
      */
     private final Map<Page, int[]> navigationCounts = new java.util.IdentityHashMap<Page, int[]>();
+    /** Per page: the HTTP method of its main frame's last navigation request ({@link #watchNavigations}). */
+    private final Map<Page, String> lastNavigationMethods =
+            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<Page, String>());
     /** Per tab: where its pointer rests (BiDi keeps one input state per browsing context). */
     private final Map<Page, int[]> tabPointers = new java.util.IdentityHashMap<Page, int[]>();
     /** A search field is only measured, never waited for. */
@@ -995,11 +1025,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
         return outcomes;
     }
 
+    /**
+     * Clicks the pager and returns true only when ANOTHER result page is loaded: the click must start a navigation and
+     * the page must then have a different address, or the navigation was a form POST (DuckDuckGo HTML/Lite page by
+     * POST under one address; the session then compares the page's results). A click that lands beside the control (a stale box after a smooth
+     * scroll, a covering element) or on the current page's own number loads nothing new; before, that was reported as
+     * the next page and the same result page was read again as page 3 (Bing "first=11" twice).
+     */
     @Override
     public boolean clickNextPage(List<String> selectors) throws BrowserException {
         owner.check();
         requireOpen();
         watchNavigations(page);
+        String pageBefore = page.url();
         for (String selector : selectors) {
             ElementHandle control = null;
             try {
@@ -1016,10 +1054,22 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 int before = navigationCounts.get(page)[0];
                 // The real, human-paced pointer (wheel scrolling to the pager first): never Locator.click.
                 if (!pointerClickInView(control, box)) {
+                    System.err.println("[browser-mcp] next-page control " + selector
+                            + " could not be brought into the window and clicked; no script fallback");
                     continue;
                 }
-                awaitNavigation(page, before);
-                return true;
+                boolean navigated = awaitNavigation(page, before);
+                String pageAfter = page.url();
+                if (navigated && (isAnotherPage(pageBefore, pageAfter)
+                        || "POST".equalsIgnoreCase(lastNavigationMethods.get(page)))) {
+                    return true; // a POST pager keeps its address; whether its page is new, the session judges
+                }
+                System.err.println("[browser-mcp] next-page click on " + selector + " loaded no other result page ("
+                        + (navigated ? "same address " : "no navigation, still ") + pageAfter + ")");
+                if (navigated) {
+                    // The page was reloaded: the handles of the old document are gone, the next selector re-measures.
+                    pageBefore = pageAfter;
+                }
             } catch (PlaywrightException unusable) {
                 // an alternative selector may be the engine's pager
             } finally {
@@ -1031,6 +1081,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
         return false;
     }
 
+    /** Whether a pager click reached a different result page: the address differs, ignoring only a fragment. */
+    static boolean isAnotherPage(String before, String after) {
+        if (after == null || after.isEmpty() || "about:blank".equals(after)) {
+            return false;
+        }
+        return before == null || !withoutFragment(before).equals(withoutFragment(after));
+    }
+
+    private static String withoutFragment(String url) {
+        int hash = url.indexOf('#');
+        return hash < 0 ? url : url.substring(0, hash);
+    }
+
     @Override
     public void closeSearchTabs() {
         owner.check();
@@ -1040,6 +1103,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             }
             pageKeys.remove(tab);
             navigationCounts.remove(tab);
+            lastNavigationMethods.remove(tab);
             tabPointers.remove(tab);
             try {
                 if (!tab.isClosed()) {
@@ -1306,6 +1370,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         final int[] count = new int[1];
         navigationCounts.put(target, count);
+        // The method of the main frame's last navigation request (protocol events only): a form that pages by POST
+        // (DuckDuckGo's HTML and Lite endpoints) shows the next result page under the SAME address.
+        target.onRequest(new Consumer<com.microsoft.playwright.Request>() {
+            public void accept(com.microsoft.playwright.Request request) {
+                try {
+                    if (request.isNavigationRequest() && request.frame() == target.mainFrame()) {
+                        lastNavigationMethods.put(target, request.method());
+                    }
+                } catch (RuntimeException ignored) {
+                    // a request of a frame that is already gone
+                }
+            }
+        });
         target.onFrameNavigated(new Consumer<com.microsoft.playwright.Frame>() {
             public void accept(com.microsoft.playwright.Frame frame) {
                 if (frame == target.mainFrame()) {
@@ -1346,20 +1423,28 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
     }
 
-    /** Waits for the navigation a click started, then for its document; protocol events only. */
-    private void awaitNavigation(Page target, int before) {
+    /**
+     * Waits for the navigation a click started, then for its document; protocol events only. False when the click
+     * started no navigation at all: then the page shows the same document as before and must not be read as a new one.
+     */
+    private boolean awaitNavigation(Page target, int before) {
         final int[] count = navigationCounts.get(target);
         try {
             if (count[0] <= before) {
                 target.waitForCondition(() -> count[0] > before,
                         new Page.WaitForConditionOptions().setTimeout(SUBMIT_NAVIGATION_START_MILLIS));
             }
+        } catch (PlaywrightException noNavigation) {
+            return count[0] > before;
+        }
+        try {
             target.waitForLoadState(com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED,
                     new Page.WaitForLoadStateOptions().setTimeout(navigationTimeoutMillis));
             settleLoad(target);
         } catch (PlaywrightException slow) {
             // reading proceeds with the document that is there
         }
+        return true;
     }
 
     /** Gives late subresources a bounded chance, never a long sleep. */
