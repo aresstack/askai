@@ -13,6 +13,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayDeque;
@@ -52,6 +55,8 @@ final class AddonBridge implements AutoCloseable {
     private static final Gson GSON = new Gson();
     /** A capture of a large page is a few MB of JSON; anything beyond this is refused. */
     static final int MAXIMUM_READ_RESULT_BYTES = 64 * 1024 * 1024;
+    /** Chrome/Edge: where the read script files live inside the extension directory. */
+    static final String READ_SCRIPT_DIRECTORY = "reads";
 
     /** Set by the driver once it exists; the browser (and with it the add-on) starts only after that. */
     private volatile HudCommandInbox inbox;
@@ -71,6 +76,12 @@ final class AddonBridge implements AutoCloseable {
     /** Every read whose result is still open (queued or fetched), by id. Guarded by {@link #lock}. */
     private final Map<String, PageRead> openReads = new LinkedHashMap<String, PageRead>();
     private final AtomicLong readIds = new AtomicLong();
+    /**
+     * Chrome/Edge (Manifest V3) only: the extension directory into whose {@code reads/} AskAI writes each read script
+     * as a file, because an MV3 extension cannot execute a script given as text. Null for Firefox, which runs the
+     * script text itself.
+     */
+    private volatile Path readScriptDirectory;
 
     private AddonBridge(String token, HttpServer server, ExecutorService executor) {
         this.token = token;
@@ -98,6 +109,15 @@ final class AddonBridge implements AutoCloseable {
         server.setExecutor(executor);
         server.start();
         return bridge;
+    }
+
+    /**
+     * Chrome/Edge: write every read script into {@code <extensionDirectory>/reads/} and name that file in the read
+     * (docs/research-browser-addon.md, stage 4). Files are named by the SHA-256 of their content, so a script that is
+     * read again reuses its file and a file never changes once written.
+     */
+    void readScriptsAsFilesIn(Path extensionDirectory) {
+        this.readScriptDirectory = extensionDirectory;
     }
 
     /** Where the add-on's commands go: the driver's HUD inbox. */
@@ -173,7 +193,19 @@ final class AddonBridge implements AutoCloseable {
      * a read it stops waiting for.
      */
     PageRead submitRead(String tabKey, String tabUrl, String script) {
-        PageRead read = new PageRead("read-" + readIds.incrementAndGet(), tabKey, tabUrl, script);
+        String file = null;
+        Path directory = readScriptDirectory;
+        if (directory != null) {
+            try {
+                file = writeScriptFile(directory, script);
+            } catch (IOException | RuntimeException unwritable) {
+                PageRead failed = new PageRead("read-" + readIds.incrementAndGet(), tabKey, tabUrl, script, null);
+                failed.result.completeExceptionally(new PageReadFailed(
+                        "the read script could not be written for the extension: " + unwritable.getMessage()));
+                return failed;
+            }
+        }
+        PageRead read = new PageRead("read-" + readIds.incrementAndGet(), tabKey, tabUrl, script, file);
         synchronized (lock) {
             if (closed) {
                 read.result.completeExceptionally(new PageReadFailed("the research add-on bridge is closed"));
@@ -184,6 +216,34 @@ final class AddonBridge implements AutoCloseable {
             lock.notifyAll();
         }
         return read;
+    }
+
+    /**
+     * {@code reads/<sha256>.js} with {@code (<script>)();} under the extension directory, written once (to a temporary
+     * name, then moved), so the extension never sees a half-written file. @return the path relative to the extension
+     */
+    static String writeScriptFile(Path extensionDirectory, String script) throws IOException {
+        String code = "(" + script + ")();\n";
+        byte[] bytes = code.getBytes(StandardCharsets.UTF_8);
+        String name;
+        try {
+            name = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)) + ".js";
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+        Path reads = extensionDirectory.resolve(READ_SCRIPT_DIRECTORY);
+        Path target = reads.resolve(name);
+        if (!Files.isRegularFile(target)) {
+            Files.createDirectories(reads);
+            Path temporary = Files.createTempFile(reads, "write-", ".tmp");
+            try {
+                Files.write(temporary, bytes);
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
+        }
+        return READ_SCRIPT_DIRECTORY + "/" + name;
     }
 
     /** How many reads are queued or running (diagnostics and tests). */
@@ -206,13 +266,16 @@ final class AddonBridge implements AutoCloseable {
         final String tabKey;
         final String tabUrl;
         final String script;
+        /** Chrome/Edge: the script's file relative to the extension directory; null for Firefox. */
+        final String file;
         final CompletableFuture<Object> result = new CompletableFuture<Object>();
 
-        private PageRead(String id, String tabKey, String tabUrl, String script) {
+        private PageRead(String id, String tabKey, String tabUrl, String script, String file) {
             this.id = id;
             this.tabKey = tabKey;
             this.tabUrl = tabUrl;
             this.script = script;
+            this.file = file;
         }
 
         boolean isDone() {
@@ -297,16 +360,22 @@ final class AddonBridge implements AutoCloseable {
     /**
      * The bearer token, compared in constant time. A page cannot send it: an Authorization header forces a CORS
      * request, which carries the page's own origin; such a request is refused even before the token is checked.
+     * Extension origins are the Firefox add-on's {@code moz-extension://} and the Chrome/Edge extension's
+     * {@code chrome-extension://<its fixed id>}.
      */
     private boolean authorized(HttpExchange exchange) {
         String origin = exchange.getRequestHeaders().getFirst("Origin");
-        if (origin != null && !origin.startsWith("moz-extension://")) {
+        if (origin != null && !extensionOrigin(origin)) {
             return false;
         }
         String header = exchange.getRequestHeaders().getFirst("Authorization");
         String expected = "Bearer " + token;
         return header != null && MessageDigest.isEqual(
                 header.getBytes(StandardCharsets.UTF_8), expected.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static boolean extensionOrigin(String origin) {
+        return origin.startsWith("moz-extension://") || origin.equals("chrome-extension://" + ResearchAddon.CHROME_ID);
     }
 
     private void state(HttpExchange exchange) throws IOException {
@@ -374,7 +443,11 @@ final class AddonBridge implements AutoCloseable {
         body.addProperty("id", read.id);
         body.addProperty("tab", read.tabKey);
         body.addProperty("url", read.tabUrl);
-        body.addProperty("script", read.script);
+        if (read.file != null) {
+            body.addProperty("file", read.file); // Chrome/Edge: MV3 runs files only, never script text
+        } else {
+            body.addProperty("script", read.script);
+        }
         respond(exchange, 200, GSON.toJson(body));
     }
 

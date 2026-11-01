@@ -64,17 +64,22 @@ final class Playwright4jDriver implements PlaywrightDriver {
     /** Chrome/Edge HUD overlay: the command binding is registered ONCE on the context (survives navigation). */
     private boolean hudBindingRegistered;
     /**
-     * Control plane: filled by the research add-on's bridge thread (Camoufox) or the overlay binding (Chrome/Edge),
+     * Control plane: filled by the research add-on's bridge thread (Camoufox, Chrome/Edge with the extension) or the
+     * overlay binding (Chrome/Edge without it),
      * drained on any thread (never via the actor).
      */
     private final HudCommandInbox hudCommands = new HudCommandInbox();
     /**
-     * Camoufox only: the bridge to the AskAI Research add-on, which shows the HUD in the browser UI instead of the
-     * page (docs/research-browser-addon.md); null when the add-on is off or could not be prepared.
+     * The bridge to the AskAI Research add-on (Camoufox) or extension (Chrome/Edge, stage 4), which shows the HUD in
+     * the browser UI instead of the page (docs/research-browser-addon.md); null when it is off or could not be
+     * prepared or loaded.
      */
     private AddonBridge addonBridge;
+    /** Chrome/Edge with the research extension: the temporary root of profile and extension, deleted on close. */
+    private Path chromeRoot;
     /**
-     * Camoufox with the add-on: where page reads run (the chat browser's {@link #addonBridge}, or the worker
+     * With the add-on (Camoufox) or extension (Chrome/Edge chat browser): where page reads run (the chat browser's
+     * {@link #addonBridge}, or the Camoufox worker
      * browser's bridge for a worker tab). Null = no add-on, reads fall back to {@code page.evaluate}.
      */
     private AddonBridge readBridge;
@@ -173,6 +178,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         BrowserContext context = null;
         CamoufoxProvisioning.ProfileLease profile = null;
         AddonBridge bridge = null;
+        Path chromeRoot = null;
         boolean camoufox = CamoufoxProvisioning.CHANNEL.equals(channel);
         // Which step of the chain was running when it failed — a visible window with a failed start
         // (browser up, CDP/context not) reads very differently from a driver that never came up.
@@ -215,6 +221,41 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 context = playwright.firefox().launchPersistentContext(profile.directory(),
                         camoufoxOptions(camoufoxExecutable, camoufoxLaunch, headless));
                 browser = context.browser();
+            } else if (!"false".equalsIgnoreCase(System.getProperty(ADDON_PROPERTY))) {
+                // Chrome/Edge with the research extension (issue #23, stage 4): a persistent profile of its own per
+                // start, the extension next to it, loaded over the DevTools protocol (ChromeResearchExtension).
+                chromeRoot = java.nio.file.Files.createTempDirectory("askai-chrome-");
+                Path chromeProfile = chromeRoot.resolve(ChromeResearchExtension.PROFILE);
+                Path extension = null;
+                stage = "ADDON_PREPARE";
+                try {
+                    bridge = AddonBridge.start();
+                    extension = ResearchAddon.installChrome(chromeRoot, bridge.clientConfig());
+                    bridge.readScriptsAsFilesIn(extension);
+                    ChromeResearchExtension.pinToolbarButton(chromeProfile);
+                } catch (java.io.IOException | RuntimeException addonFailed) {
+                    System.err.println("[browser-mcp] research extension not prepared: " + firstLine(addonFailed));
+                    if (bridge != null) {
+                        bridge.close();
+                        bridge = null;
+                    }
+                }
+                stage = "BROWSER_LAUNCH";
+                context = playwright.chromium().launchPersistentContext(chromeProfile,
+                        ChromeResearchExtension.options(channel, headless));
+                browser = context.browser();
+                if (bridge != null) {
+                    stage = "ADDON_LOAD";
+                    try {
+                        ChromeResearchExtension.load(browser, extension);
+                    } catch (RuntimeException loadFailed) {
+                        // The browser runs on without the extension: HUD overlay and page.evaluate as before.
+                        System.err.println("[browser-mcp] research extension not loaded (HUD and page reads stay "
+                                + "in the page): " + firstLine(loadFailed));
+                        bridge.close();
+                        bridge = null;
+                    }
+                }
             } else {
                 browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
                         .setChannel(channel)
@@ -225,8 +266,16 @@ final class Playwright4jDriver implements PlaywrightDriver {
             context.setDefaultNavigationTimeout(timeoutMillis);
             context.setDefaultTimeout(timeoutMillis);
             if (requestAllowed != null) {
+                // Chrome/Edge: Playwright's interception also sees the extension service worker's requests (Firefox
+                // does not), so the bridge of THIS start stays reachable for requests with its token; everything
+                // else to loopback is still refused, and the bridge itself checks token and origin again.
+                final String extensionBridge = chromeRoot != null && bridge != null
+                        ? "http://127.0.0.1:" + bridge.port() + "/v1/" : null;
+                final String extensionBearer = bridge != null ? "Bearer " + bridge.token() : null;
                 context.route("**/*", route -> {
-                    if (requestAllowed.test(route.request().url())) {
+                    if (requestAllowed.test(route.request().url())
+                            || extensionBridge != null && fromExtensionWorker(route.request(), extensionBridge,
+                            extensionBearer)) {
                         route.resume();
                     } else {
                         route.abort();
@@ -235,10 +284,12 @@ final class Playwright4jDriver implements PlaywrightDriver {
             }
             stage = "PAGE_CREATE";
             // A persistent context opens with its first tab already; use it instead of a second one.
-            Page page = camoufox && !context.pages().isEmpty() ? context.pages().get(0) : context.newPage();
+            Page page = (camoufox || chromeRoot != null) && !context.pages().isEmpty()
+                    ? context.pages().get(0) : context.newPage();
             final Playwright4jDriver driver = new Playwright4jDriver(playwright, browser, context, page,
                     consent, captcha, timeoutMillis, camoufox);
             driver.profileLease = profile;
+            driver.chromeRoot = chromeRoot;
             if (bridge != null) {
                 bridge.deliverTo(driver.hudCommands);
                 driver.addonBridge = bridge;
@@ -271,6 +322,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             if (profile != null) {
                 profile.close();
             }
+            deleteTree(chromeRoot);
             // The one-line message travels to the host and the chat; the FULL exception (Playwright's
             // multi-line message carries the browser log and call log) goes to a persistent file —
             // start failures are rare, the next one must be diagnosable without a repro.
@@ -1468,13 +1520,15 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         com.aresstack.askai.browser.hud.ResearchHudState state =
                 com.aresstack.askai.browser.hud.ResearchHudState.parse(stateLine);
-        if (camoufox) {
-            return renderHudInAddon(state); // Camoufox never gets the overlay or the binding (issue #22)
+        if (camoufox || addonBridge != null) {
+            // Camoufox never gets the overlay or the binding (issue #22); Chrome/Edge with the research extension
+            // (stage 4) neither: the HUD lives in the extension.
+            return renderHudInAddon(state);
         }
         if (!inPageFallbackAllowed()) {
             return "unsupported";
         }
-        // Chrome/Edge: no extension yet (issue #23, stage 4), so the HUD is still the in-page overlay there.
+        // Chrome/Edge without the extension (switched off, or it could not be loaded): the in-page overlay.
         try {
             if (!hudBindingRegistered) {
                 // Buffer overlay button commands; registered on the CONTEXT so it survives navigations.
@@ -1591,9 +1645,19 @@ final class Playwright4jDriver implements PlaywrightDriver {
         this.readBridge = workerBridge;
     }
 
-    /** The research add-on's bridge, or null (Chrome/Edge, add-on off or not prepared). */
+    /** The research add-on's bridge, or null (switched off, not prepared or not loaded; Chrome/Edge worker tabs). */
     AddonBridge addonBridge() {
         return addonBridge;
+    }
+
+    /** Chrome/Edge with the extension: the temporary root of profile and extension; null otherwise. */
+    Path chromeRoot() {
+        return chromeRoot;
+    }
+
+    /** Tests only: the browser context, e.g. to reach the Chrome extension's service worker. */
+    BrowserContext browserContext() {
+        return context;
     }
 
     /** How many popups were closed so far. Thread-safe counter read — touches no Playwright state. */
@@ -1778,6 +1842,42 @@ final class Playwright4jDriver implements PlaywrightDriver {
         if (profileLease != null) {
             profileLease.close();
         }
+        deleteTree(chromeRoot);
+    }
+
+    /**
+     * A request of the Chrome extension's service worker to its bridge: the exact bridge prefix with this start's
+     * bearer token, which only the extension has (it reads it from its own {@code bridge.json}). A page knows neither.
+     * Deliberately decided on the URL and headers only: asking Playwright for the request's frame from inside the
+     * route handler blocked the interception setup in the live test.
+     */
+    static boolean fromExtensionWorker(com.microsoft.playwright.Request request, String bridgePrefix,
+                                       String bearer) {
+        if (!request.url().startsWith(bridgePrefix)) {
+            return false;
+        }
+        String authorization = request.headers().get("authorization");
+        return authorization != null && java.security.MessageDigest.isEqual(
+                authorization.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                bearer.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** Best effort: the temporary profile and extension of a Chrome/Edge start; null does nothing. */
+    static void deleteTree(Path root) {
+        if (root == null) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> walk = java.nio.file.Files.walk(root)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    java.nio.file.Files.deleteIfExists(path);
+                } catch (java.io.IOException ignored) {
+                    // a file the browser still holds stays in the temp directory
+                }
+            });
+        } catch (java.io.IOException | RuntimeException ignored) {
+            // nothing to clean up, or not readable any more
+        }
     }
 
     @Override
@@ -1799,12 +1899,14 @@ final class Playwright4jDriver implements PlaywrightDriver {
         final Playwright toCut = playwright;
         final CamoufoxProvisioning.ProfileLease lease = profileLease;
         final AddonBridge bridgeToClose = addonBridge;
+        final Path chromeRootToDelete = chromeRoot;
         Thread cutter = new Thread(new Runnable() {
             public void run() {
                 closeQuietly(null, null, toCut);
                 if (bridgeToClose != null) {
                     bridgeToClose.close();
                 }
+                deleteTree(chromeRootToDelete); // best effort: an orphaned browser may still hold its profile
                 if (lease != null) {
                     try {
                         lease.close();
@@ -1879,8 +1981,8 @@ final class Playwright4jDriver implements PlaywrightDriver {
     /**
      * Every read-only page script goes through here. With the research add-on it runs in the tab's isolated
      * content-script world (docs/research-browser-addon.md): the page's own scripts never see it, and no script of
-     * AskAI is evaluated in the page's world. Only a driver without the add-on (Chrome/Edge, add-on off or not
-     * prepared) still uses {@code page.evaluate}, through {@link PageScriptGate}. Failures surface as {@link PlaywrightException}, so every caller
+     * AskAI is evaluated in the page's world. Only a driver without it (switched off, not prepared or not loaded,
+     * Chrome/Edge worker tabs) still uses {@code page.evaluate}, through {@link PageScriptGate}. Failures surface as {@link PlaywrightException}, so every caller
      * keeps its existing error handling. While waiting, the Playwright message loop keeps running (route
      * interception, popups), exactly as during the idle pump.
      */
