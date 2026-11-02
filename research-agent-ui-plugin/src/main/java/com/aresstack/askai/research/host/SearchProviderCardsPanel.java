@@ -28,10 +28,14 @@ import java.awt.event.ActionListener;
  */
 public final class SearchProviderCardsPanel extends JPanel {
 
-    /** Index-aligned with the combo; "" = the legacy browser SERP path. */
-    private static final String[] PROVIDER_IDS = {"", "BRAVE_SEARCH_API", "BRIGHT_DATA", "DATA_FOR_SEO", "SERP_API"};
-    private static final String[] PROVIDER_LABELS =
-            {"Browser (SERP)", "Brave Search API", "Bright Data", "DataForSEO", "SerpApi"};
+    /**
+     * Index-aligned with the combo; "" = the broad multi-engine browser web search (Bing/Google/DuckDuckGo through
+     * the research browser sidecar). GOOGLE_BROWSER is the Google search through Serp4J's own search browser.
+     */
+    private static final String[] PROVIDER_IDS =
+            {"", "GOOGLE_BROWSER", "BRAVE_SEARCH_API", "BRIGHT_DATA", "DATA_FOR_SEO", "SERP_API"};
+    private static final String[] PROVIDER_LABELS = {"Web Search (multi-engine browser)",
+            "Google (Serp4J search browser)", "Brave Search API", "Bright Data", "DataForSEO", "SerpApi"};
 
     private final WorkspaceStateStore store;
     private final JComboBox<String> source = ComicControls.<String>comboBox(PROVIDER_LABELS);
@@ -41,6 +45,8 @@ public final class SearchProviderCardsPanel extends JPanel {
     private final ResearchProviderServices providers;
     private final DataForSeoSettingsDraft dataForSeoDraft;
     private DataForSeoSettingsPanel dataForSeoPanel;
+    private SerpApiSettingsPanel serpApiPanel;
+    private GoogleBrowserSettingsPanel googleBrowserPanel;
 
     public SearchProviderCardsPanel(WorkspaceStateStore store) {
         super(new BorderLayout(6, 6));
@@ -66,10 +72,11 @@ public final class SearchProviderCardsPanel extends JPanel {
         add(top, BorderLayout.NORTH);
 
         cardHost.add(browserCard(), PROVIDER_LABELS[0]);
-        cardHost.add(placeholderCard("Brave Search API"), PROVIDER_LABELS[1]);
-        cardHost.add(placeholderCard("Bright Data"), PROVIDER_LABELS[2]);
-        cardHost.add(dataForSeoCard(), PROVIDER_LABELS[3]);
-        cardHost.add(placeholderCard("SerpApi"), PROVIDER_LABELS[4]);
+        cardHost.add(googleBrowserCard(), PROVIDER_LABELS[1]);
+        cardHost.add(placeholderCard("Brave Search API"), PROVIDER_LABELS[2]);
+        cardHost.add(placeholderCard("Bright Data"), PROVIDER_LABELS[3]);
+        cardHost.add(dataForSeoCard(), PROVIDER_LABELS[4]);
+        cardHost.add(serpApiCard(), PROVIDER_LABELS[5]);
         add(cardHost, BorderLayout.CENTER);
 
         int selected = indexOfProvider(ResearchRuntimeSettings.loadSearchStrategy(store));
@@ -89,6 +96,12 @@ public final class SearchProviderCardsPanel extends JPanel {
         persistSelection();
         if (dataForSeoPanel != null) {
             dataForSeoPanel.save();
+        }
+        if (serpApiPanel != null) {
+            serpApiPanel.save();
+        }
+        if (googleBrowserPanel != null) {
+            googleBrowserPanel.save();
         }
     }
 
@@ -114,9 +127,11 @@ public final class SearchProviderCardsPanel extends JPanel {
         JPanel p = new JPanel();
         p.setLayout(new javax.swing.BoxLayout(p, javax.swing.BoxLayout.Y_AXIS));
         p.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        JLabel l = new JLabel("<html><body style='width:420px'>The initial search runs in the local "
-                + "browser (SERP). The browser-specific search settings (search URL, headless, channel) "
-                + "are in the Runtime tab. This is the default.</body></html>");
+        JLabel l = new JLabel("<html><body style='width:420px'>The broad multi-engine web search: the initial "
+                + "search runs in the local research browser across the configured engines (Bing, Google, "
+                + "DuckDuckGo). Its settings (search URL, headless, channel, engine order) are in the Runtime tab. "
+                + "This is the default. For a quick Google search through Serp4J choose "
+                + "\"Google (Serp4J search browser)\".</body></html>");
         l.setEnabled(false);
         p.add(l);
         return p;
@@ -129,6 +144,22 @@ public final class SearchProviderCardsPanel extends JPanel {
         dataForSeoPanel = new DataForSeoSettingsPanel(
                 dataForSeoDraft, providers.dataForSeoPlayground(), providers.secrets());
         return dataForSeoPanel;
+    }
+
+    private JComponent serpApiCard() {
+        if (providers == null) {
+            return placeholderUnavailable();
+        }
+        serpApiPanel = new SerpApiSettingsPanel(providers.configurationService());
+        return serpApiPanel;
+    }
+
+    private JComponent googleBrowserCard() {
+        if (providers == null) {
+            return placeholderUnavailable();
+        }
+        googleBrowserPanel = new GoogleBrowserSettingsPanel(providers.configurationService());
+        return googleBrowserPanel;
     }
 
     private JComponent placeholderCard(String name) {

@@ -16,6 +16,11 @@ dependencies {
     implementation "com.aresstack:serp4j-provider-brightdata:${serp4jVersion}"
     implementation "com.aresstack:serp4j-provider-dataforseo:${serp4jVersion}"
     implementation "com.aresstack:serp4j-provider-serpapi:${serp4jVersion}"
+    // askai #31: Google web search (Quick Web Search) through Serp4J's own search browser. The Google modules are
+    // published to mavenLocal only (not to Maven Central in 0.x, ADR-016); Playwright runs with the Node driver.
+    implementation "com.aresstack:serp4j-engine-google-browser:${serp4jVersion}"
+    implementation "com.aresstack:serp4j-browser-playwright:${serp4jVersion}"
+    runtimeOnly "com.aresstack:serp4j-browser-playwright-driver-node:${serp4jVersion}"
     api 'com.google.code.gson:gson:2.13.1'
     implementation 'org.asynchttpclient:async-http-client:2.16.0'
 

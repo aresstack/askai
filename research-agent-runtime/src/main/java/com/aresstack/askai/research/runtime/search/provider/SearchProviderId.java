@@ -13,6 +13,8 @@ public enum SearchProviderId {
     DATA_FOR_SEO,
 
     SERP_API,
+    /** Google web search through Serp4J's own search browser (askai #31, Quick Web Search). */
+    GOOGLE_BROWSER,
     AWS_AGENTCORE_WEB_SEARCH,
     AZURE_OPENAI_WEB_SEARCH,
     YANDEX_CLOUD_SEARCH_API,
