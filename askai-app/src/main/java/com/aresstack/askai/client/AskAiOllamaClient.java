@@ -160,6 +160,44 @@ public final class AskAiOllamaClient {
         }
     }
 
+    /**
+     * Load (warm up) a model: an empty {@code POST /api/generate} with {@code keep_alive}, as in ollama-manager.
+     * The official client has no load call, so this is one plain POST read with the library's own mapper.
+     * A purely numeric keep_alive (e.g. {@code -1} = forever) is sent as a number, anything else as a duration.
+     */
+    public void loadModel(String modelName, String keepAlive) throws OllamaRequestException {
+        com.fasterxml.jackson.databind.node.ObjectNode body = Utils.getObjectMapper().createObjectNode();
+        body.put("model", modelName);
+        body.put("prompt", "");
+        body.put("stream", false);
+        String value = keepAlive == null ? "" : keepAlive.trim();
+        if (value.matches("-?\\d+")) {
+            body.put("keep_alive", Integer.parseInt(value));
+        } else if (!value.isEmpty()) {
+            body.put("keep_alive", value);
+        }
+        java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(java.time.Duration.ofSeconds(5)).build();
+        java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder(
+                java.net.URI.create(baseUrl + "/api/generate"))
+                .timeout(java.time.Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
+                .header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body.toString())).build();
+        try {
+            java.net.http.HttpResponse<String> response = http.send(request,
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new OllamaRequestException("Ollama request failed (load " + modelName + "): HTTP "
+                        + response.statusCode());
+            }
+        } catch (java.io.IOException ex) {
+            throw new OllamaRequestException("Ollama request failed (load " + modelName + "): " + ex.getMessage(), ex);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new OllamaRequestException("Ollama request interrupted (load " + modelName + ")", ex);
+        }
+    }
+
     public void unloadModel(String modelName) throws OllamaRequestException {
         try {
             ollama.unloadModel(modelName);
