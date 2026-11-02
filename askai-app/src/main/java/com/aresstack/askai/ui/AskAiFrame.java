@@ -100,10 +100,10 @@ public final class AskAiFrame extends JFrame {
 
     private final ApplicationStateService applicationState;
     private OllamaConfigPanel configPanel;
-    /** Whether the setup wizard opens on its own; see {@link com.aresstack.askai.java8.ui.setup.SetupWizardState}. */
-    private final com.aresstack.askai.java8.ui.setup.SetupWizardState setupWizardState =
-            com.aresstack.askai.java8.ui.setup.SetupWizardState.forAskAi();
-    private com.aresstack.askai.java8.ui.setup.AskAiSetupActions setupActions;
+    /** Whether the setup wizard opens on its own; see {@link com.aresstack.askai.ui.setup.SetupWizardState}. */
+    private final com.aresstack.askai.ui.setup.SetupWizardState setupWizardState =
+            com.aresstack.askai.ui.setup.SetupWizardState.forAskAi();
+    private com.aresstack.askai.ui.setup.AskAiSetupActions setupActions;
     private ChatWorkspacePanel chatWorkspace;
     private com.aresstack.askai.plugin.host.ChatWorkspaceHostPanel chatWorkspaceHost;
     private com.aresstack.askai.plugin.host.WorkspacePluginService pluginService;
@@ -444,8 +444,8 @@ public final class AskAiFrame extends JFrame {
      * settings it greets as a reunion and changes nothing when cancelled.
      */
     private void openSetupWizard(final boolean firstStart) {
-        final com.aresstack.askai.java8.ui.setup.AskAiSetupActions actions = setupActions();
-        com.aresstack.askai.java8.ui.setup.SetupWizardOverlay.show(getRootPane(), actions.currentDraft(), actions,
+        final com.aresstack.askai.ui.setup.AskAiSetupActions actions = setupActions();
+        com.aresstack.askai.ui.setup.SetupWizardOverlay.show(getRootPane(), actions.currentDraft(), actions,
                 com.aresstack.comiccontrols.theme.ComicPalette.defaultPalette(), firstStart, completed -> {
                     if (completed) {
                         setupWizardState.markCompleted();
@@ -454,14 +454,14 @@ public final class AskAiFrame extends JFrame {
     }
 
     /** The wizard's adapter onto AskAI's settings and services (built on first use, then kept). */
-    private com.aresstack.askai.java8.ui.setup.AskAiSetupActions setupActions() {
+    private com.aresstack.askai.ui.setup.AskAiSetupActions setupActions() {
         if (setupActions == null) {
-            com.aresstack.askai.java8.localmodels.LocalModelRuntimeManager local =
+            com.aresstack.askai.localmodels.LocalModelRuntimeManager local =
                     askAiService.localRuntimeManager();
-            setupActions = new com.aresstack.askai.java8.ui.setup.AskAiSetupActions(model, configurationRepository,
+            setupActions = new com.aresstack.askai.ui.setup.AskAiSetupActions(model, configurationRepository,
                     (VirtualOllamaContainerService) ollamaService, local,
-                    local == null ? null : new com.aresstack.askai.java8.localmodels.LocalRerankerModelCatalog(local),
-                    new com.aresstack.askai.java8.localmodels.LocalNlpModelStore(), new Runnable() {
+                    local == null ? null : new com.aresstack.askai.localmodels.LocalRerankerModelCatalog(local),
+                    new com.aresstack.askai.localmodels.LocalNlpModelStore(), new Runnable() {
                         public void run() {
                             catalogRefreshService.refresh(); // new models and selections reach every chat tab
                             if (configPanel != null) {

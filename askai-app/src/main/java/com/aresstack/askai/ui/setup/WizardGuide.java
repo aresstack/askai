@@ -1,4 +1,4 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
 /**
  * Merlin, the setup wizard's companion: his personality as fixed lines per step. Everything here is deterministic so

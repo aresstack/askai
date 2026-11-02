@@ -1,4 +1,4 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
 import org.junit.Test;
 
@@ -32,7 +32,7 @@ public class SetupWizardArtTest {
     @Test
     public void everyCopyHasItsUneditedOriginal() throws IOException {
         File root = repositoryRoot();
-        File copies = new File(root, "askai-app/src/main/resources/com/aresstack/askai/java8/ui/setup/wizard");
+        File copies = new File(root, "askai-app/src/main/resources/com/aresstack/askai/ui/setup/wizard");
         File originals = new File(root, "docs/images/setup-wizard/originals");
         File[] files = copies.listFiles();
         assertNotNull(files);

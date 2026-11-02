@@ -1,4 +1,4 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
 /**
  * One item of the setup wizard's final check: what was checked, whether it works, and why not.

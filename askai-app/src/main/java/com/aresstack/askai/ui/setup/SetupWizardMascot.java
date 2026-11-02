@@ -1,9 +1,9 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
 import javax.imageio.ImageIO;
-import com.aresstack.askai.java8.ui.bubble.BubblePalette;
-import com.aresstack.askai.java8.ui.bubble.BubbleSide;
-import com.aresstack.askai.java8.ui.bubble.SpeechBubblePanel;
+import com.aresstack.askai.ui.bubble.BubblePalette;
+import com.aresstack.askai.ui.bubble.BubbleSide;
+import com.aresstack.askai.ui.bubble.SpeechBubblePanel;
 import com.aresstack.comiccontrols.control.ComicSearchBar;
 import com.aresstack.comiccontrols.theme.ComicPalette;
 

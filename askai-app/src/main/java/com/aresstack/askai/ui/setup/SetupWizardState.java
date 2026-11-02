@@ -1,6 +1,6 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
-import com.aresstack.askai.java8.settings.AskAiPaths;
+import com.aresstack.askai.settings.AskAiPaths;
 
 import java.io.IOException;
 import java.io.InputStream;

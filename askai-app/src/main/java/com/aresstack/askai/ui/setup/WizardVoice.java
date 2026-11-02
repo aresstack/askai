@@ -1,4 +1,4 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
 /**
  * A voice Merlin may speak with (the wizard's replacement for the Enterprise AI Client's {@code ReadAloudControl}).

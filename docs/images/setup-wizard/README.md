@@ -5,7 +5,7 @@ The seven Merlin pictures of the AskAI setup wizard.
 - `originals/` holds the pictures exactly as delivered (1086 × 1448 px, RGB, unedited). Do not edit them;
   every derived version is a copy.
 - The wizard loads the derived copies from
-  `askai-app/src/main/resources/com/aresstack/askai/java8/ui/setup/wizard/`: the same file names, scaled to
+  `askai-app/src/main/resources/com/aresstack/askai/ui/setup/wizard/`: the same file names, scaled to
   480 × 640 px (enough for the largest figure at 2× screen scale) with transparent rounded corners, so the
   dark scene sits on the comic plate as a card.
 

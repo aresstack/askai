@@ -1,4 +1,4 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
 import org.junit.Rule;
 import org.junit.Test;

@@ -1,4 +1,4 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
 /**
  * The voices of the hand-over at the end of the first setup: Merlin's and the chat assistant's (with the

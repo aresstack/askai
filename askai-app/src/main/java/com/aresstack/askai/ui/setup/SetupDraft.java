@@ -1,4 +1,4 @@
-package com.aresstack.askai.java8.ui.setup;
+package com.aresstack.askai.ui.setup;
 
 /**
  * The wizard's working copy of the AskAI settings it edits — the neutral draft that replaces the Enterprise AI

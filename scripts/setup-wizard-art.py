@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, "docs", "images", "setup-wizard", "originals")
-TARGET = os.path.join(ROOT, "askai-app", "src", "main", "resources", "com", "aresstack", "askai", "java8",
+TARGET = os.path.join(ROOT, "askai-app", "src", "main", "resources", "com", "aresstack", "askai",
                       "ui", "setup", "wizard")
 WIDTH, HEIGHT, RADIUS, SUPERSAMPLE = 480, 640, 36, 4
 
