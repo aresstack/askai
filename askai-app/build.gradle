@@ -235,6 +235,8 @@ task runWithDevPlugins(type: JavaExec) {
     dependsOn ':research-agent-ui-plugin:pluginDistribution'
     classpath = sourceSets.main.runtimeClasspath
     mainClass = mainClassName
+    // askai #31: the app is Java 21; launch it with the toolchain, never with whatever JDK runs Gradle.
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
     jvmArgs '-Dfile.encoding=UTF-8' // see `run`: UTF-8 default on every process of the chain
     doFirst {
         // The assembled, immutable plugin directory (…/plugin-dist/research-agent-ui-plugin).
