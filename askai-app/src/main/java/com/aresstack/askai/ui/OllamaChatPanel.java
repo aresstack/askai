@@ -903,9 +903,17 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     }
 
     private TabSessionCloser tabSessionCloser;
+    private final JButton setupWizardButton = new ComicButton("Setup wizard…");
 
     public void setTabSessionCloser(TabSessionCloser closer) {
         this.tabSessionCloser = closer;
+    }
+
+    /** Opens the setup wizard again from Settings &gt; General &gt; "Setup wizard…" (set by the frame). */
+    private Runnable setupWizardOpener;
+
+    public void setSetupWizardOpener(Runnable opener) {
+        this.setupWizardOpener = opener;
     }
 
     /** Release this session's resources when its tab closes: abort the chat, dictation and file work. */
@@ -1212,11 +1220,25 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
      * category).
      */
     private JComponent buildGeneralCard() {
+        JPanel setup = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 4));
+        setup.setBorder(ComicControls.titledBorder("Setup"));
+        setup.add(new JLabel("Walk through network, AI runtime, models, knowledge and voice again."));
+        setupWizardButton.setToolTipText("Opens the setup wizard from the first start");
+        setupWizardButton.addActionListener(event -> {
+            if (setupWizardOpener != null) {
+                setupWizardOpener.run();
+            }
+        });
+        setup.add(setupWizardButton);
+        setup.setAlignmentX(Component.LEFT_ALIGNMENT);
+        setup.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, setup.getPreferredSize().height));
+
         JComponent notifications = buildNotificationsCard();
         notifications.setBorder(BorderFactory.createCompoundBorder(
                 ComicControls.titledBorder("Notifications"), notifications.getBorder()));
         notifications.setAlignmentX(Component.LEFT_ALIGNMENT);
         JPanel card = settingsColumn();
+        card.add(setup);
         card.add(notifications);
         card.add(javax.swing.Box.createVerticalGlue());
         return card;
