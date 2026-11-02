@@ -121,6 +121,13 @@ public class ProductiveModeFactorySmokeTest {
         for (File jar : libSource.listFiles()) {
             Files.copy(jar.toPath(), new File(libTarget, jar.getName()).toPath());
         }
+        // The agent is a thin jar too (askai #31): its lib/ joins the shared lib/ directory.
+        for (File jar : new File(new File(agentJar).getParentFile(), "lib").listFiles()) {
+            File target = new File(libTarget, jar.getName());
+            if (!target.exists()) {
+                Files.copy(jar.toPath(), target.toPath());
+            }
+        }
         String oldDist = System.setProperty("askai.research.runtime.dir", dist.getAbsolutePath());
         String oldJava21 = System.setProperty("askai.research.java21", sidecarJava);
         // The local test engine travels as the EXPLICIT per-run sidecar flag — the persisted

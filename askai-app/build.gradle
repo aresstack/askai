@@ -260,6 +260,10 @@ task researchRuntimeDist(type: Sync) {
     from({ project(':research-agent-runtime').tasks.getByName('researchAgentJar').archiveFile }) {
         rename { 'research-agent-runtime.jar' }
     }
+    dependsOn ':research-agent-runtime:researchAgentLibs'
+    from({ project(':research-agent-runtime').tasks.getByName('researchAgentLibs').destinationDir }) {
+        into 'lib'
+    }
     from({ project(':browser-mcp-server-java21').tasks.getByName('sidecarJar').archiveFile }) {
         rename { 'browser-mcp-sidecar.jar' }
     }

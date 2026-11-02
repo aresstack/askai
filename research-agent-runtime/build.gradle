@@ -21,6 +21,9 @@ dependencies {
     // consumed behind the existing SearchProvider seam via a thin adapter. File-based config + AES-GCM
     // secrets live in the module; the runtime never carries provider credentials.
     implementation project(':web-search-providers')
+    // askai #31: Google via Serp4J on AskAI's own search browser (Playwright + Camoufox in this JVM).
+    implementation project(':serp4j-playwright-google')
+    implementation project(':browser-mcp-server-java21')
     runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
 
     testImplementation project(':acp-client-api')
@@ -38,19 +41,32 @@ dependencies {
 
 mainClassName = 'com.aresstack.askai.research.runtime.ResearchAgentMain'
 
+// Runnable agent distribution: a THIN jar with a Class-Path manifest plus a lib/ directory next to it (askai #31).
+// The agent now runs Playwright itself (search browser); a fat jar loses the Multi-Release attribute and merges
+// META-INF/services, and Truffle in the playwright4j driver child then fails ("Multi-Release classes are not
+// configured correctly"), exactly as documented for the browser sidecar.
+task researchAgentLibs(type: Sync) {
+    group = 'build'
+    description = 'Collects the agent runtime dependencies into build/agent/lib.'
+    from configurations.runtimeClasspath.filter { it.name.endsWith('.jar') }
+    into layout.buildDirectory.dir('agent/lib')
+}
+
 task researchAgentJar(type: Jar) {
     group = 'build'
-    description = 'Runnable external research agent jar (spawned by AskAI / the round-trip test).'
+    description = 'Runnable external research agent jar (thin, with lib/ Class-Path; spawned by AskAI / tests).'
     archiveBaseName = 'research-agent-runtime'
     archiveClassifier = 'all'
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    dependsOn classes
-    // Ensure every runtime dependency jar (including sibling project jars like :web-search-providers) is
-    // actually built before this fat jar tries to expand it — the lazy from{} closure does not infer it.
-    dependsOn configurations.runtimeClasspath
+    destinationDirectory = layout.buildDirectory.dir('agent')
+    dependsOn classes, researchAgentLibs
     from sourceSets.main.output
-    from { configurations.runtimeClasspath.filter { it.name.endsWith('.jar') }.collect { zipTree(it) } }
-    manifest { attributes('Main-Class': mainClassName) }
+    manifest {
+        attributes('Main-Class': mainClassName)
+        attributes('Class-Path': configurations.runtimeClasspath
+                .filter { it.name.endsWith('.jar') }
+                .collect { 'lib/' + it.name }
+                .join(' '))
+    }
 }
 
 test {

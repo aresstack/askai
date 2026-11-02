@@ -246,6 +246,13 @@ public final class ResearchAgentMain {
             this.reranker = buildMandatoryReranker();
             // Fix the initial-search strategy for the whole session here (null → unchanged browser path).
             this.searchStrategy = buildSearchStrategy();
+            if (this.searchStrategy == null) {
+                // askai #31: the browser search is Google via Serp4J on AskAI's own search browser.
+                this.searchStrategy = com.aresstack.askai.research.runtime.search.GoogleSearchBrowserStrategy
+                        .create(ensureSearchBrowser(), java.util.Locale.getDefault());
+                this.searchProviderLabel = providerLabel(
+                        com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER);
+            }
             // OPTIONAL model-backed SERP layout repair over the central main model (honest fallback else).
             this.inferencePort = buildInferencePort();
         }
@@ -555,6 +562,7 @@ public final class ResearchAgentMain {
             case BRAVE_SEARCH_API: return "Brave Search";
             case BRIGHT_DATA: return "Bright Data";
             case SERP_API: return "SerpApi";
+            case GOOGLE_BROWSER: return "Google";
             default: return providerId.name();
         }
     }
@@ -583,6 +591,20 @@ public final class ResearchAgentMain {
             searchProviderRegistry = registry;
         }
         return searchProviderRegistry;
+    }
+
+    /** AskAI's headless search browser (askai #31): one per process, started on the first search. */
+    private com.aresstack.askai.browser.sidecar.SearchBrowser searchBrowser;
+
+    private synchronized com.aresstack.askai.browser.sidecar.SearchBrowser ensureSearchBrowser() {
+        if (searchBrowser == null) {
+            final com.aresstack.askai.browser.sidecar.SearchBrowser browser =
+                    new com.aresstack.askai.browser.sidecar.SearchBrowser(
+                            System.getenv().getOrDefault("ASKAI_SEARCH_BROWSER_CHANNEL", "camoufox"));
+            Runtime.getRuntime().addShutdownHook(new Thread(browser::close, "research-search-browser-close"));
+            searchBrowser = browser;
+        }
+        return searchBrowser;
     }
 
     @Cancel

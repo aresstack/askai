@@ -69,6 +69,13 @@ public class GuiChainReproductionTest {
         for (File jar : new File(new File(sidecarJar).getParentFile(), "lib").listFiles()) {
             Files.copy(jar.toPath(), new File(libTarget, jar.getName()).toPath());
         }
+        // The agent is a thin jar too (askai #31): its lib/ joins the shared lib/ directory.
+        for (File jar : new File(new File(agentJar).getParentFile(), "lib").listFiles()) {
+            File target = new File(libTarget, jar.getName());
+            if (!target.exists()) {
+                Files.copy(jar.toPath(), target.toPath());
+            }
+        }
         String oldDist = System.setProperty("askai.research.runtime.dir", dist.getAbsolutePath());
         String oldJava21 = System.setProperty("askai.research.java21", sidecarJava);
         // Stage the local reranker runtime jar where the real LocalModelRuntimeManager looks for it,
