@@ -104,6 +104,10 @@ public final class AskAiFrame extends JFrame {
 
     private final ApplicationStateService applicationState;
     private OllamaConfigPanel configPanel;
+    /** Whether the setup wizard opens on its own; see {@link com.aresstack.askai.ui.setup.SetupWizardState}. */
+    private final com.aresstack.askai.ui.setup.SetupWizardState setupWizardState =
+            com.aresstack.askai.ui.setup.SetupWizardState.forAskAi();
+    private com.aresstack.askai.ui.setup.AskAiSetupActions setupActions;
     private ChatWorkspacePanel chatWorkspace;
     private com.aresstack.askai.plugin.host.ChatWorkspaceHostPanel chatWorkspaceHost;
     private com.aresstack.askai.plugin.host.WorkspacePluginService pluginService;
@@ -265,6 +269,10 @@ public final class AskAiFrame extends JFrame {
     /** Kept for the existing launcher: builds the frame and makes it visible. */
     public void showFrame() {
         setVisible(true);
+        // First start (or a setup interrupted before): the setup wizard opens over the fresh window.
+        if (setupWizardState.shouldOpenAtStartup()) {
+            javax.swing.SwingUtilities.invokeLater(() -> openSetupWizard(true));
+        }
     }
 
     private void buildUserInterface() {
@@ -429,6 +437,42 @@ public final class AskAiFrame extends JFrame {
      */
     private static javax.swing.JComponent settingsPage(javax.swing.JComponent page) {
         return page;
+    }
+
+    /**
+     * Lays the setup wizard over the whole window. {@code firstStart}: Merlin introduces himself once a runtime
+     * answers and “Finish” plays the hand-over; afterwards the wizard no longer opens on its own. From the
+     * settings it greets as a reunion and changes nothing when cancelled.
+     */
+    private void openSetupWizard(final boolean firstStart) {
+        final com.aresstack.askai.ui.setup.AskAiSetupActions actions = setupActions();
+        com.aresstack.askai.ui.setup.SetupWizardOverlay.show(getRootPane(), actions.currentDraft(), actions,
+                com.aresstack.comiccontrols.theme.ComicPalette.defaultPalette(), firstStart, completed -> {
+                    if (completed) {
+                        setupWizardState.markCompleted();
+                    }
+                });
+    }
+
+    /** The wizard's adapter onto AskAI's settings and services (built on first use, then kept). */
+    private com.aresstack.askai.ui.setup.AskAiSetupActions setupActions() {
+        if (setupActions == null) {
+            com.aresstack.askai.localmodels.LocalModelRuntimeManager local =
+                    askAiService.localRuntimeManager();
+            setupActions = new com.aresstack.askai.ui.setup.AskAiSetupActions(model, configurationRepository,
+                    (VirtualOllamaContainerService) ollamaService, local,
+                    local == null ? null : new com.aresstack.askai.localmodels.LocalRerankerModelCatalog(local),
+                    new com.aresstack.askai.localmodels.LocalNlpModelStore(), new Runnable() {
+                        public void run() {
+                            catalogRefreshService.refresh(); // new models and selections reach every chat tab
+                            if (configPanel != null) {
+                                configPanel.reloadFromModel(); // its Save must not write the old address back
+                            }
+                            refreshConnectionStatus();
+                        }
+                    });
+        }
+        return setupActions;
     }
 
     /** An icon drawn scaled to {@code size} pixels (the 15px stroke glyphs at title-bar size). */
@@ -1035,6 +1079,8 @@ public final class AskAiFrame extends JFrame {
                 () -> activityCoordinator.scopePhaseLabel(activityScope));
         // Tab close ENDS this tab's agent session(s) off-EDT (its ChatSessionId is the scope).
         final com.aresstack.askai.plugin.host.AgentSessionCoordinator closerCoordinator = agentCoordinator;
+        // Settings > General > "Setup wizard…": the first-start wizard, callable again (Merlin greets as a reunion).
+        chat.setSetupWizardOpener(() -> openSetupWizard(false));
         chat.setTabSessionCloser(new OllamaChatPanel.TabSessionCloser() {
             public void closeSessionsForTab(String scope) {
                 closerCoordinator.closeSessionsForScope(scope);

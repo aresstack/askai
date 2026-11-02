@@ -902,9 +902,17 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     }
 
     private TabSessionCloser tabSessionCloser;
+    private final JButton setupWizardButton = new ComicButton("Setup wizard…");
 
     public void setTabSessionCloser(TabSessionCloser closer) {
         this.tabSessionCloser = closer;
+    }
+
+    /** Opens the setup wizard again from Settings &gt; General &gt; "Setup wizard…" (set by the frame). */
+    private Runnable setupWizardOpener;
+
+    public void setSetupWizardOpener(Runnable opener) {
+        this.setupWizardOpener = opener;
     }
 
     /** Release this session's resources when its tab closes: abort the chat, dictation and file work. */
@@ -1191,10 +1199,20 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
      * category).
      */
     private JComponent buildGeneralCard() {
+        ComicForm setup = ComicForm.titled("Setup");
+        setupWizardButton.setToolTipText("Opens the setup wizard from the first start");
+        setupWizardButton.addActionListener(event -> {
+            if (setupWizardOpener != null) {
+                setupWizardOpener.run();
+            }
+        });
+        setup.note("Walk through network, AI runtime, models, knowledge and voice again.");
+        setup.actions(setupWizardButton);
+
         JComponent notifications = buildNotificationsCard();
         JComponent devices = buildAudioDevicesForm();
         ComicForm.alignLabels((ComicForm) notifications, (ComicForm) devices);
-        return ComicForm.stack(notifications, devices);
+        return ComicForm.stack(setup, notifications, devices);
     }
 
     /** Chat: this chat's system prompt and its technical log (both belong to THIS chat only). */

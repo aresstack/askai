@@ -121,6 +121,16 @@ public final class OllamaConfigPanel extends JPanel {
         add(ComicForm.page(endpoint, stt, actions, log), BorderLayout.CENTER);
     }
 
+    /**
+     * Shows the model's current values again, e.g. after the setup wizard saved a new Ollama address, so a later
+     * “Save” here never writes a stale address back.
+     */
+    public void reloadFromModel() {
+        baseUrlField.setText(model.getOllamaBaseUrl());
+        modelRootField.setText(model.getModelRoot().toString());
+        mainModelTimeoutField.setSeconds(model.getAiModelSelections().getMainModelTimeoutSeconds());
+    }
+
     /** Puts the keyboard focus on the Base URL field and selects its text, ready to overwrite. */
     public void focusBaseUrl() {
         SwingUtilities.invokeLater(new Runnable() {
