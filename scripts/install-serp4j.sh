@@ -13,8 +13,12 @@ REF="${1:-${SERP4J_REF:-Develop}}"
 DIR="${2:-${SERP4J_DIR:-$(dirname "$0")/../build/serp4j-src}}"
 REPO="${SERP4J_REPO:-https://github.com/aresstack/Serp4J.git}"
 
-if [ ! -x "$DIR/gradlew" ]; then
-  rm -rf "$DIR"
+if [ -e "$DIR" ]; then
+  if [ ! -f "$DIR/gradlew" ] || ! git -C "$DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+    echo "Existing path is not a usable Serp4J checkout: $DIR" >&2
+    exit 1
+  fi
+else
   git clone --quiet --depth 1 --branch "$REF" "$REPO" "$DIR"
 fi
 
@@ -22,7 +26,7 @@ JH="${SERP4J_JAVA_HOME:-${JAVA_HOME_21_X64:-${JAVA_HOME:-}}}"
 cd "$DIR"
 echo "Serp4J $(git rev-parse --short HEAD 2>/dev/null || echo '?') -> mavenLocal"
 if [ -n "$JH" ]; then
-  JAVA_HOME="$JH" ./gradlew --no-daemon -q publishToMavenLocal
+  JAVA_HOME="$JH" bash "$DIR/gradlew" --no-daemon -q publishToMavenLocal
 else
-  ./gradlew --no-daemon -q publishToMavenLocal
+  bash "$DIR/gradlew" --no-daemon -q publishToMavenLocal
 fi
