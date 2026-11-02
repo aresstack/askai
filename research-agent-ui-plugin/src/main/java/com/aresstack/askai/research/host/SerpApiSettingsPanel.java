@@ -3,6 +3,7 @@ package com.aresstack.askai.research.host;
 import com.aresstack.askai.research.search.config.ProviderConfigurationService;
 import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfiguration;
 import com.aresstack.askai.research.search.serpapi.SerpApiSearchEngine;
+import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.control.ComicControls;
 
 import javax.swing.JCheckBox;
@@ -60,7 +61,7 @@ public final class SerpApiSettingsPanel extends JPanel {
         p.add(row("Location:", location));
         p.add(row("Google domain:", googleDomain));
         p.add(row("", resolveGoto));
-        javax.swing.JButton saveNow = new javax.swing.JButton("Save SerpApi settings");
+        javax.swing.JButton saveNow = new ComicButton("Save SerpApi settings");
         saveNow.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent e) {
                 save();
