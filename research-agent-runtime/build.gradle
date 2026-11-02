@@ -28,6 +28,9 @@ dependencies {
     // ADR 0001 lane F: the orchestrated run's decision codec and run record are Gson (the house JSON library,
     // ADR 3.1), on the root's single Gson version.
     implementation "com.google.code.gson:gson:${gsonVersion}"
+    // askai #31: Google via Serp4J on AskAI's own search browser (Playwright + Camoufox in this JVM).
+    implementation project(':serp4j-playwright-google')
+    implementation project(':browser-playwright')
 
     // The E2E tests drive the PRODUCTIVE plugin wiring (factory, endpoints, in-process backend) and the
     // live local runtimes; the plugin itself depends on this module (a test-only cycle, no task cycle).

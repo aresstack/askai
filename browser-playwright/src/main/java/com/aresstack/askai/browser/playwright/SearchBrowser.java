@@ -5,7 +5,9 @@ import com.aresstack.serp4j.core.error.SearchErrorCategory;
 import com.aresstack.serp4j.core.error.SearchProviderException;
 import com.aresstack.serp4j.core.model.SearchRequest;
 import com.aresstack.serp4j.core.model.SearchResponse;
+import com.aresstack.serp4j.core.port.ProviderDescriptor;
 import com.aresstack.serp4j.core.port.SearchContext;
+import com.aresstack.serp4j.core.port.SearchProvider;
 import com.aresstack.serp4j.playwright.PlaywrightSearchProvider;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
@@ -18,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,6 +44,13 @@ import java.util.concurrent.RejectedExecutionException;
  * </ul>
  */
 public final class SearchBrowser implements AutoCloseable {
+
+    /** Completes the futures of {@link #asSearchProvider}; the browser work itself runs on the owner thread. */
+    private static final ExecutorService WORKERS = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "search-browser-caller");
+        t.setDaemon(true);
+        return t;
+    });
 
     private final String channel;
     private final ExecutorService owner;
@@ -83,6 +93,32 @@ public final class SearchBrowser implements AutoCloseable {
                 return provider.search(request, context, ensureBrowser(provider));
             }
         });
+    }
+
+    /**
+     * The given provider as an ordinary Serp4J {@link SearchProvider} bound to this search browser, so AskAI's
+     * Serp4J search path (the same one Brave, DataForSEO and SerpApi use) can run it. The search itself runs on
+     * the owner thread; the future completes on a worker thread. Closing the returned provider does not close
+     * the search browser, which belongs to AskAI.
+     */
+    public SearchProvider asSearchProvider(final PlaywrightSearchProvider provider) {
+        Objects.requireNonNull(provider, "provider");
+        return new SearchProvider() {
+            public ProviderDescriptor getDescriptor() {
+                return provider.getDescriptor();
+            }
+
+            public CompletableFuture<SearchResponse> search(SearchRequest request, SearchContext context) {
+                Objects.requireNonNull(request, "request");
+                Objects.requireNonNull(context, "context");
+                return CompletableFuture.supplyAsync(() -> SearchBrowser.this.search(provider, request, context),
+                        WORKERS);
+            }
+
+            public void close() {
+                // the search browser belongs to AskAI and outlives this view
+            }
+        };
     }
 
     /** How often the browser was started (1 after the first search, +1 per restart). */
