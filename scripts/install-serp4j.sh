@@ -23,10 +23,11 @@ else
 fi
 
 JH="${SERP4J_JAVA_HOME:-${JAVA_HOME_21_X64:-${JAVA_HOME:-}}}"
-cd "$DIR"
+ROOT_DIR="$(cd "$DIR" && pwd)"
+cd "$ROOT_DIR"
 echo "Serp4J $(git rev-parse --short HEAD 2>/dev/null || echo '?') -> mavenLocal"
 if [ -n "$JH" ]; then
-  JAVA_HOME="$JH" bash "$DIR/gradlew" --no-daemon -q publishToMavenLocal
+  JAVA_HOME="$JH" bash "$ROOT_DIR/gradlew" --no-daemon -q publishToMavenLocal
 else
-  bash "$DIR/gradlew" --no-daemon -q publishToMavenLocal
+  bash "$ROOT_DIR/gradlew" --no-daemon -q publishToMavenLocal
 fi
