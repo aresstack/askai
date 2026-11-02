@@ -32,6 +32,9 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Publish Serp4J to mavenLocal (not on Maven Central yet, see docs/serp4j.md)
+        run: bash scripts/install-serp4j.sh "${SERP4J_REF:-Develop}"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
@@ -100,6 +103,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Publish Serp4J to mavenLocal (not on Maven Central yet, see docs/serp4j.md)
+        run: bash scripts/install-serp4j.sh "${SERP4J_REF:-Develop}"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4

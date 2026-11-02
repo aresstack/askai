@@ -84,7 +84,7 @@ public final class DataForSeoSearchProviderHttpTest {
         config.setUsername(USERNAME);
         config.setPassword(secrets.encrypt(PASSWORD.toCharArray()));
         return new SearchProviderFactory(new Gson(), new AsyncHttpClientFactory(), secrets)
-                .createDataForSeo(config);
+                .createLegacyDataForSeo(config);
     }
 
     private static WebSearchRequest request() {

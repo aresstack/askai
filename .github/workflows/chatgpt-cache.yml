@@ -47,6 +47,9 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Publish Serp4J to mavenLocal (not on Maven Central yet, see docs/serp4j.md)
+        run: bash scripts/install-serp4j.sh "${SERP4J_REF:-Develop}"
+
       - name: Prime project-local Gradle home (deps + wrapper distribution)
         env:
           # The wrapper downloads the Gradle 8.14.6 distribution AND all module/dependency caches here, so the

@@ -43,9 +43,40 @@ public final class AsyncProviderMapping {
                 return SearchEngine.BRAVE;
             case BRIGHT_DATA:
             case DATA_FOR_SEO:
-                return SearchEngine.GOOGLE; // both are Google SERP APIs
+                return SearchEngine.PROVIDER_DEFAULT; // the real engine comes from each result (toRuntimeEngine)
             default:
                 return null;
+        }
+    }
+
+    /**
+     * The runtime engine for the engine a module result reports, or {@code fallback} when the module engine
+     * has no runtime counterpart ({@code MULTI}, {@code SEZNAM}) or is absent.
+     */
+    public static SearchEngine toRuntimeEngine(com.aresstack.askai.research.search.api.SearchEngine moduleEngine,
+                                               SearchEngine fallback) {
+        if (moduleEngine == null) {
+            return fallback;
+        }
+        switch (moduleEngine) {
+            case BRAVE:
+                return SearchEngine.BRAVE;
+            case GOOGLE:
+                return SearchEngine.GOOGLE;
+            case BING:
+                return SearchEngine.BING;
+            case YANDEX:
+                return SearchEngine.YANDEX;
+            case BAIDU:
+                return SearchEngine.BAIDU;
+            case DUCKDUCKGO:
+                return SearchEngine.DUCK_DUCK_GO;
+            case YAHOO:
+                return SearchEngine.YAHOO;
+            case NAVER:
+                return SearchEngine.NAVER;
+            default:
+                return fallback;
         }
     }
 }

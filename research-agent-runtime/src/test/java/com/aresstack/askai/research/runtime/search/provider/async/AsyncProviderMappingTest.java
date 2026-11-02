@@ -30,8 +30,8 @@ public final class AsyncProviderMappingTest {
     @Test
     public void migratedProvidersHaveADefaultEngine() {
         assertEquals(SearchEngine.BRAVE, AsyncProviderMapping.defaultEngine(SearchProviderId.BRAVE_SEARCH_API));
-        assertEquals(SearchEngine.GOOGLE, AsyncProviderMapping.defaultEngine(SearchProviderId.BRIGHT_DATA));
-        assertEquals(SearchEngine.GOOGLE, AsyncProviderMapping.defaultEngine(SearchProviderId.DATA_FOR_SEO));
+        assertEquals(SearchEngine.PROVIDER_DEFAULT, AsyncProviderMapping.defaultEngine(SearchProviderId.BRIGHT_DATA));
+        assertEquals(SearchEngine.PROVIDER_DEFAULT, AsyncProviderMapping.defaultEngine(SearchProviderId.DATA_FOR_SEO));
         assertNull(AsyncProviderMapping.defaultEngine(SearchProviderId.SERP_API));
     }
 }

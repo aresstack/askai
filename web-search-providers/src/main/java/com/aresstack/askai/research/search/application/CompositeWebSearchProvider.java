@@ -150,6 +150,9 @@ public final class CompositeWebSearchProvider
             String host = lower(uri.getHost());
             int port = uri.getPort();
             String path = uri.getPath();
+            // The query string is part of the identity: "?id=1" and "?id=2" are different documents.
+            // Only the fragment is dropped, since it never reaches the server.
+            String query = uri.getRawQuery();
 
             if (path == null || path.isEmpty()) {
                 path = "/";
@@ -166,7 +169,8 @@ public final class CompositeWebSearchProvider
                     + "://"
                     + host
                     + (defaultPort ? "" : ":" + port)
-                    + path;
+                    + path
+                    + (query == null || query.isEmpty() ? "" : "?" + query);
         } catch (URISyntaxException exception) {
             return url.trim().toLowerCase(Locale.ROOT);
         }
