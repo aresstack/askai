@@ -178,6 +178,9 @@ public class InProcessResearchEndToEndTest {
             }
             assertEquals("sources from two distinct hosts: " + origins, 2, origins.size());
 
+            assertEquals("issue #32: no findings artifact is written - accepted sources are the record",
+                    "", resources.getArtifactStore().read("findings").getMarkdown());
+
             // PHASE_READY was an event only: the state did not change until the HOST reacts.
             assertEquals(ResearchStateIds.RUNNING, resources.currentState().getStateId());
             assertTrue(resources.dispatch(ResearchCommandType.REQUEST_EVIDENCE_REVIEW).isAccepted());
