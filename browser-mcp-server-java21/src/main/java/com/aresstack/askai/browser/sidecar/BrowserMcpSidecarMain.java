@@ -142,32 +142,8 @@ public final class BrowserMcpSidecarMain {
      */
     static com.aresstack.askai.browser.search.LegacyBrowserSearchSettings loadBrowserConfig(
             String path) {
-        if (path == null || path.trim().isEmpty()) {
-            return com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create();
-        }
         try {
-            byte[] bytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path.trim()));
-            com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument document =
-                    com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
-                            .parse(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
-            com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.Decoded decoded =
-                    com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec
-                            .fromValues(document.values);
-            if (!decoded.violations.isEmpty()) {
-                throw new IllegalArgumentException("browser config has invalid values:\n"
-                        + new com.aresstack.askai.browser.search.SettingsValidationResult(
-                                decoded.violations).describe());
-            }
-            com.aresstack.askai.browser.search.SettingsValidationResult validation =
-                    new com.aresstack.askai.browser.search.DefaultLegacyBrowserSearchSettingsValidator()
-                            .validate(decoded.settings);
-            if (!validation.isValid()) {
-                throw new IllegalArgumentException("browser config failed validation:\n"
-                        + validation.describe());
-            }
-            System.err.println("[browser-mcp] browser config: revision=" + document.settingsRevision
-                    + " digest=" + document.settingsDigest);
-            return decoded.settings;
+            return readBrowserConfig(path);
         } catch (java.io.IOException ex) {
             System.err.println("[browser-mcp] FATAL: cannot read --browser-config=" + path
                     + ": " + ex.getMessage());
@@ -178,6 +154,41 @@ public final class BrowserMcpSidecarMain {
             System.exit(2);
             throw new IllegalStateException("unreachable");
         }
+    }
+
+    /**
+     * The typed settings of a browser-config document, or the central defaults for a {@code null}/blank path.
+     *
+     * @throws java.io.IOException      the document cannot be read
+     * @throws IllegalArgumentException the document is malformed or invalid (the message says why)
+     */
+    static com.aresstack.askai.browser.search.LegacyBrowserSearchSettings readBrowserConfig(String path)
+            throws java.io.IOException {
+        if (path == null || path.trim().isEmpty()) {
+            return com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create();
+        }
+        byte[] bytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path.trim()));
+        com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument document =
+                com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
+                        .parse(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+        com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.Decoded decoded =
+                com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec
+                        .fromValues(document.values);
+        if (!decoded.violations.isEmpty()) {
+            throw new IllegalArgumentException("browser config has invalid values:\n"
+                    + new com.aresstack.askai.browser.search.SettingsValidationResult(
+                            decoded.violations).describe());
+        }
+        com.aresstack.askai.browser.search.SettingsValidationResult validation =
+                new com.aresstack.askai.browser.search.DefaultLegacyBrowserSearchSettingsValidator()
+                        .validate(decoded.settings);
+        if (!validation.isValid()) {
+            throw new IllegalArgumentException("browser config failed validation:\n"
+                    + validation.describe());
+        }
+        System.err.println("[browser] browser config: revision=" + document.settingsRevision
+                + " digest=" + document.settingsDigest);
+        return decoded.settings;
     }
 
     /**

@@ -7,6 +7,7 @@
 // same BrowserSession port and UrlSafetyPolicy binary the Java-8 host uses — no double compilation, no
 // blurred module boundary, no duplicate classes in the sidecar jar.
 apply plugin: 'application'
+apply plugin: 'java-library'
 
 
 dependencies {
@@ -23,6 +24,8 @@ dependencies {
         exclude group: 'com.microsoft.playwright', module: 'driver'
         exclude group: 'com.microsoft.playwright', module: 'driver-bundle'
     }
+    // askai #31: the search browser hands its Browser to Serp4J PlaywrightSearchProviders (ADR-020).
+    api "com.aresstack:serp4j-playwright:${(findProperty('serp4jVersion') ?: '0.1.0-SNAPSHOT')}"
     implementation 'com.aresstack:playwright4j:0.3.0' // embeds the Core JS package itself (no driver-bundle)
     implementation 'org.noear:solon:3.10.1'
     implementation 'org.noear:solon-boot-jdkhttp:3.10.1'

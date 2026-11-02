@@ -695,14 +695,7 @@ public final class ResearchRuntimeSettings {
      * {@code --search-url} per run (askai.research.sidecar.args) — never a persisted value.
      */
     public List<String> validateProductive() {
-        List<String> problems = new java.util.ArrayList<String>(toRuntimeConfig().validate());
-        if (!sidecarJar.isEmpty() && new java.io.File(sidecarJar).isFile()) {
-            java.io.File lib = new java.io.File(new java.io.File(sidecarJar).getParentFile(), "lib");
-            if (!lib.isDirectory()) {
-                problems.add("sidecar lib directory missing next to the jar: " + lib);
-            }
-        }
-        return problems;
+        return new java.util.ArrayList<String>(toRuntimeConfig().validate());
     }
 
     private static String nullToEmpty(String value) {

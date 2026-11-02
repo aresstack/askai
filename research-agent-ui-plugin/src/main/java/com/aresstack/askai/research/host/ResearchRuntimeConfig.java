@@ -62,8 +62,7 @@ public final class ResearchRuntimeConfig {
         List<String> problems = new ArrayList<String>();
         requireFile(problems, "agent java executable", agentJavaExecutable);
         requireFile(problems, "agent jar", agentJar);
-        requireFile(problems, "sidecar java executable (Java 21)", sidecarJavaExecutable);
-        requireFile(problems, "sidecar jar", sidecarJar);
+        // The browser runs inside AskAI (askai #31): no sidecar java or jar is required any more.
         return problems;
     }
 
