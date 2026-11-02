@@ -20,17 +20,37 @@ public class ComicDurationField extends JPanel {
     private static final long serialVersionUID = 1L;
 
     private static final String[] UNITS = {"seconds", "minutes", "hours"};
+    /** The extra unit entry of a field that may also mean "forever" (Ollama keep_alive {@code -1}). */
+    private static final String INDEFINITELY = "indefinitely";
     private static final String[] SUFFIXES = {"s", "m", "h"};
     private static final long[] FACTORS = {1L, 60L, 3600L};
-    private static final Pattern DURATION = Pattern.compile("\\s*(\\d+)\\s*(ms|s|m|h)?\\s*");
+    private static final Pattern DURATION = Pattern.compile("\\s*(-?\\d+)\\s*(ms|s|m|h)?\\s*");
 
     private final JSpinner amount;
-    private final JComboBox<String> unit = ComicControls.<String>comboBox(UNITS);
+    private final JComboBox<String> unit;
+    private final boolean allowIndefinite;
 
     /** A field allowing 0 … {@code maximum} of the chosen unit. */
     public ComicDurationField(int maximum) {
+        this(maximum, false);
+    }
+
+    /**
+     * A field allowing 0 … {@code maximum} of the chosen unit; with {@code allowIndefinite} the unit
+     * choice also offers "indefinitely" (a negative Ollama duration, e.g. {@code -1m}).
+     */
+    public ComicDurationField(int maximum, boolean allowIndefinite) {
         super(new GridBagLayout());
         setOpaque(false);
+        this.allowIndefinite = allowIndefinite;
+        String[] units = allowIndefinite
+                ? new String[] {UNITS[0], UNITS[1], UNITS[2], INDEFINITELY} : UNITS;
+        unit = ComicControls.<String>comboBox(units);
+        unit.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                amount.setEnabled(isEnabled() && !isIndefinite());
+            }
+        });
         amount = ComicControls.spinner(new SpinnerNumberModel(0, 0, maximum, 1));
         ComicControls.fitColumns(amount, 5);
         GridBagConstraints c = new GridBagConstraints();
@@ -42,13 +62,25 @@ public class ComicDurationField extends JPanel {
         add(unit, c);
     }
 
-    /** The duration in seconds. */
+    /** Whether "indefinitely" is chosen (only possible when the field allows it). */
+    public boolean isIndefinite() {
+        return allowIndefinite && unit.getSelectedIndex() == UNITS.length;
+    }
+
+    /** The duration in seconds; {@code -1} for "indefinitely". */
     public long getSeconds() {
+        if (isIndefinite()) {
+            return -1L;
+        }
         return ((Number) amount.getValue()).longValue() * FACTORS[unit.getSelectedIndex()];
     }
 
     /** Shows {@code seconds} in the largest unit that divides it evenly. */
     public void setSeconds(long seconds) {
+        if (seconds < 0 && allowIndefinite) {
+            unit.setSelectedIndex(UNITS.length);
+            return;
+        }
         int index = 0;
         for (int i = FACTORS.length - 1; i > 0; i--) {
             if (seconds > 0 && seconds % FACTORS[i] == 0) {
@@ -60,8 +92,11 @@ public class ComicDurationField extends JPanel {
         amount.setValue((int) Math.min(Integer.MAX_VALUE, seconds / FACTORS[index]));
     }
 
-    /** The duration in Go/Ollama syntax ({@code 45m}, {@code 2h}, {@code 30s}). */
+    /** The duration in Go/Ollama syntax ({@code 45m}, {@code 2h}, {@code 30s}); {@code -1} for "indefinitely". */
     public String getText() {
+        if (isIndefinite()) {
+            return "-1";
+        }
         return amount.getValue() + SUFFIXES[unit.getSelectedIndex()];
     }
 
@@ -78,6 +113,12 @@ public class ComicDurationField extends JPanel {
             return;
         }
         long value = Long.parseLong(matcher.group(1));
+        if (value < 0) {
+            if (allowIndefinite) {
+                unit.setSelectedIndex(UNITS.length); // any negative Ollama duration = keep forever
+            }
+            return;
+        }
         String suffix = matcher.group(2);
         if (suffix == null) {
             suffix = "s";
@@ -103,7 +144,7 @@ public class ComicDurationField extends JPanel {
     @Override
     public void setEnabled(boolean enabled) {
         super.setEnabled(enabled);
-        amount.setEnabled(enabled);
+        amount.setEnabled(enabled && !isIndefinite());
         unit.setEnabled(enabled);
     }
 

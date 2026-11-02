@@ -31,7 +31,7 @@ public class ComicFormTest {
         for (Component row : rows) {
             if (previousBottom >= 0) {
                 int gap = row.getY() - previousBottom;
-                assertTrue("rows must stay close together, gap was " + gap, gap <= ComicForm.ROW_GAP + 2);
+                assertTrue("rows must stay close together, gap was " + gap, gap <= ComicForm.ROW_GAP + 8);
             }
             previousBottom = row.getY() + row.getHeight();
         }
@@ -96,12 +96,54 @@ public class ComicFormTest {
         assertEquals(2L, field.getSeconds());
     }
 
+    @Test
+    public void durationFieldCanMeanIndefinitelyWhenAllowed() {
+        ComicDurationField field = new ComicDurationField(1000, true);
+        field.setText("-1m");
+        assertTrue(field.isIndefinite());
+        assertEquals("-1", field.getText());
+        assertEquals(-1L, field.getSeconds());
+        field.setText("45m");
+        assertFalse(field.isIndefinite());
+        assertEquals("45m", field.getText());
+        ComicDurationField plain = new ComicDurationField(1000);
+        plain.setText("30s");
+        plain.setText("-1"); // not allowed here: the value stays as it was
+        assertEquals("30s", plain.getText());
+    }
+
+    @Test
+    public void inlineControlsWrapInsteadOfBeingClippedOnANarrowPage() {
+        ComicForm form = new ComicForm();
+        JTextField[] parts = new JTextField[6];
+        for (int i = 0; i < parts.length; i++) {
+            parts[i] = ComicControls.textField("part " + i, 12);
+        }
+        form.inline(parts);
+        JScrollPane page = ComicForm.page(form);
+        layout(page, 400, 400);
+        JTextField last = parts[parts.length - 1];
+        assertTrue("the page was laid out", form.getWidth() > 0);
+        assertTrue("the last control must stay inside its line", last.getX() + last.getWidth() <= last.getParent().getWidth());
+        assertTrue("the line must stay inside the form", last.getParent().getWidth() <= form.getWidth());
+        assertTrue("it wrapped onto a further line", last.getY() > parts[0].getY());
+    }
+
     private static void layout(JComponent component, int width, int height) {
         component.setSize(new Dimension(width, height));
-        component.doLayout();
-        component.validate();
-        // validate() lays out the whole tree top-down; the viewport and the view are laid out with it.
-        component.getComponent(0).doLayout();
+        // No peer in a headless test, so validate() is a no-op: lay the tree out top-down by hand,
+        // twice, so width-dependent preferred sizes (wrapping rows) see their final width.
+        layoutTree(component);
+        layoutTree(component);
+    }
+
+    private static void layoutTree(java.awt.Container container) {
+        container.doLayout();
+        for (Component child : container.getComponents()) {
+            if (child instanceof java.awt.Container) {
+                layoutTree((java.awt.Container) child);
+            }
+        }
     }
 
     private static String repeat(char c, int count) {

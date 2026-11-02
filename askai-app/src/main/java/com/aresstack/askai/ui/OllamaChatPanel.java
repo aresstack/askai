@@ -911,6 +911,10 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     public void disposeSession() {
         stopChat();
         shutdownDictation();
+        // Let go of the application-lifetime voice panel, or this closed chat would stay reachable.
+        if (speechVoicesPanel != null) {
+            speechVoicesPanel.removeVoicesChangedListener(speechVoicesListener);
+        }
         // END (not just pause) THIS tab's agent session so its research run, browser, agent process, model
         // watcher and registry entry are torn down; a fresh tab starts a fresh session, never resumes this one.
         if (tabSessionCloser != null) {
@@ -1413,15 +1417,21 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
      * this chat's voice selectors reload whenever a voice is installed or removed there.
      */
     public void setSpeechVoicesPanel(SpeechOutputModelsPanel panel) {
+        if (speechVoicesPanel != null) {
+            speechVoicesPanel.removeVoicesChangedListener(speechVoicesListener);
+        }
         this.speechVoicesPanel = panel;
         if (panel != null) {
-            panel.addVoicesChangedListener(new Runnable() {
-                public void run() {
-                    refreshSpeechOutputVoices();
-                }
-            });
+            panel.addVoicesChangedListener(speechVoicesListener);
         }
     }
+
+    /** This chat's registration on the shared voice panel — removed again when the chat closes. */
+    private final Runnable speechVoicesListener = new Runnable() {
+        public void run() {
+            refreshSpeechOutputVoices();
+        }
+    };
 
     /**
      * The speech-output "Test" run: speaks the persisted selection IN THIS APP (same classes and

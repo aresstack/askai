@@ -128,21 +128,13 @@ public class ComicForm extends JPanel {
         return spanning(box, false);
     }
 
-    /** Controls as one sentence ("Delete history older than [30] days"), spanning both columns. */
+    /** Controls as one sentence ("Delete history older than [30] days"), spanning both columns; wraps when narrow. */
     public ComicForm inline(JComponent... parts) {
-        JPanel line = new JPanel(new GridBagLayout());
+        JPanel line = new JPanel(new WrapRowLayout(java.awt.FlowLayout.LEFT, INLINE_GAP, 2));
         line.setOpaque(false);
-        GridBagConstraints c = new GridBagConstraints();
-        c.gridy = 0;
-        c.anchor = GridBagConstraints.WEST;
-        for (int i = 0; i < parts.length; i++) {
-            c.insets = new Insets(0, 0, 0, i == parts.length - 1 ? 0 : INLINE_GAP);
-            line.add(parts[i], c);
+        for (JComponent part : parts) {
+            line.add(part);
         }
-        c.weightx = 1;
-        c.fill = GridBagConstraints.HORIZONTAL;
-        c.insets = new Insets(0, 0, 0, 0);
-        line.add(javax.swing.Box.createHorizontalGlue(), c);
         return spanning(line, true);
     }
 

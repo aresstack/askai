@@ -111,6 +111,11 @@ public final class SpeechOutputModelsPanel extends JPanel {
         }
     }
 
+    /** Forgets a listener registered with {@link #addVoicesChangedListener(Runnable)} (a closed chat). */
+    public void removeVoicesChangedListener(Runnable listener) {
+        voicesChangedListeners.remove(listener);
+    }
+
     private void fireVoicesChanged() {
         for (Runnable listener : new java.util.ArrayList<Runnable>(voicesChangedListeners)) {
             listener.run();

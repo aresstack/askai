@@ -44,7 +44,7 @@ public final class AiModelsPanel extends JPanel {
     private final JComboBox<String> nlpSentenceDeCombo = ComicControls.<String>comboBox();
     private final JComboBox<String> nlpSentenceEnCombo = ComicControls.<String>comboBox();
     private final JLabel status = new JLabel(" ");
-    private final ComicDurationField keepAliveField = new ComicDurationField(7 * 24 * 60);
+    private final ComicDurationField keepAliveField = new ComicDurationField(7 * 24 * 60, true);
     private final java.util.List<JComponent> extraSections = new java.util.ArrayList<JComponent>();
     private JPanel pageHost;
 
@@ -75,7 +75,7 @@ public final class AiModelsPanel extends JPanel {
         keepAliveField.setText(model.getDefaultKeepAlive());
         keepAliveField.setToolTipText("Ollama keep_alive: how long a model stays loaded in memory after a"
                 + " request. One global value for every model AskAI calls (chat, embeddings, reranker)."
-                + " Longer = faster follow-up answers, memory stays in use.");
+                + " Longer = faster follow-up answers, memory stays in use; \"indefinitely\" never unloads.");
         keepAliveField.addChangeListener(event -> {
             model.setDefaultKeepAlive(keepAliveField.getText());
             model.saveSettings();
