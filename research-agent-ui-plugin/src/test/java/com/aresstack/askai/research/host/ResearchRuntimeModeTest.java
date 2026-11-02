@@ -125,7 +125,7 @@ public class ResearchRuntimeModeTest {
     @Test
     public void settingsRoundTripThroughTheStore() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "msedge", false)
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "camoufox", false)
                 .save(store);
         ResearchRuntimeSettings loaded = ResearchRuntimeSettings.load(store);
         assertEquals(ResearchBackendMode.ACP, loaded.getMode());
@@ -226,12 +226,12 @@ public class ResearchRuntimeModeTest {
     @Test
     public void panelReadsAndWritesTheSameTypedMapper() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "msedge", false)
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "camoufox", false)
                 .save(store);
         ResearchRuntimeSettingsPanel panel = new ResearchRuntimeSettingsPanel(store);
         ResearchRuntimeSettings fromPanel = panel.currentSettings();
         assertEquals(ResearchBackendMode.ACP, fromPanel.getMode());
-        assertEquals("msedge", fromPanel.getBrowserChannel());
+        assertEquals("camoufox", fromPanel.getBrowserChannel());
         assertEquals(false, fromPanel.isHeadless());
     }
 
