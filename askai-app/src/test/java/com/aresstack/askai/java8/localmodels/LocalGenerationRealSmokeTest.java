@@ -24,12 +24,12 @@ import static org.junit.Assume.assumeTrue;
 
 /**
  * C8 real generation smoke: a small RUNNABLE generation model driven end to end through the PRODUCTIVE
- * pipeline (download -> generation wdmlpack compile + package-backed smoke -> manifest) and the sidecar
- * generation surface: /api/version reports generation linked, /api/generate and /api/chat return real
+ * pipeline (download -> generation wdmlpack compile + package-backed smoke -> manifest) and the local
+ * runtime generation surface: /api/version reports generation linked, /api/generate and /api/chat return real
  * non-empty output through the DirectML runtime, /api/show carries chat/completion, and keep_alive:0
  * unloads the handle.
  *
- * <p>Environment-gated on the assembled sidecar distribution + a Java-21 launcher; opt in with
+ * <p>The runtime runs inside this JVM (askai #49); opt in with
  * {@code -Daskai.local.realModelSmoke=true} so a normal build does not download a model.</p>
  */
 public class LocalGenerationRealSmokeTest {
@@ -54,10 +54,6 @@ public class LocalGenerationRealSmokeTest {
 
     @Test
     public void everyRunnableGenerationFamilyInstallsLoadsAndAnswers() throws Exception {
-        assumeTrue("SKIPPED (infra): -Daskai.local.runtime.dir not set",
-                !System.getProperty("askai.local.runtime.dir", "").isEmpty());
-        assumeTrue("SKIPPED (infra): -Daskai.local.runtime.java (Java 21) not set",
-                !System.getProperty("askai.local.runtime.java", "").isEmpty());
         assumeTrue("SKIPPED: opt in with -Daskai.local.realModelSmoke=true",
                 Boolean.getBoolean("askai.local.realModelSmoke"));
 

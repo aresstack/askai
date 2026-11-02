@@ -6,30 +6,11 @@ import java.io.File;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/** The ready-line contract and the restart-on-boot signal of the local runtime manager. */
+/** The restart-on-boot signal of the local runtime manager. */
 public class LocalModelRuntimeManagerTest {
-
-    @Test
-    public void parsesExactlyTheMachineReadableReadyLine() {
-        LocalModelRuntimeManager.ReadyLine ready = LocalModelRuntimeManager.ReadyLine.parse(
-                "{\"event\":\"ready\",\"baseUrl\":\"http://127.0.0.1:49183\","
-                        + "\"version\":\"askai-local-1\"}");
-        assertEquals("http://127.0.0.1:49183", ready.baseUrl);
-        assertEquals("askai-local-1", ready.version);
-
-        assertNull("stderr-style logs are not the ready line",
-                LocalModelRuntimeManager.ReadyLine.parse("[local-runtime] loaded model"));
-        assertNull(LocalModelRuntimeManager.ReadyLine.parse(
-                "{\"event\":\"other\",\"baseUrl\":\"http://127.0.0.1:1\"}"));
-        assertNull(LocalModelRuntimeManager.ReadyLine.parse(
-                "{\"event\":\"ready\",\"baseUrl\":\"not-a-url\"}"));
-        assertNull(LocalModelRuntimeManager.ReadyLine.parse(null));
-    }
 
     @Test
     public void hasInstalledModelsLooksForManifestDirectories() throws Exception {

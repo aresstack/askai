@@ -1,6 +1,5 @@
 package com.aresstack.askai.localruntime;
 
-import com.aresstack.windirectml.runtime.api.Backend;
 
 import java.nio.file.Path;
 import java.util.Locale;
@@ -29,36 +28,19 @@ public final class LocalModelRuntimeMain {
             System.err.println("usage: --host=127.0.0.1 --port=0 --model-root=<path> --backend=cpu");
             System.exit(2);
         }
-        Backend backend;
-        try {
-            backend = Backend.valueOf(backendArg);
-        } catch (IllegalArgumentException unknown) {
-            System.err.println("[local-runtime] unknown backend '" + backendArg + "', using CPU");
-            backend = Backend.CPU;
-        }
-
-        LocalModelStore store = new LocalModelStore(Path.of(modelRoot));
-        LocalModelEngine engine = new LocalModelEngine(backend);
-        // The productive win-directml generation runtime (directml-inference), linked behind the AskAI
-        // port. /api/version reports features.generation=true and /api/chat + /api/generate run real local
-        // generation through this port.
-        LocalGenerationEngine generationEngine = new LocalGenerationEngine(
-                new com.aresstack.askai.localruntime.generation.DirectMLGenerationRuntimePort(),
-                com.aresstack.askai.localruntime.generation.LocalGenerationBackend.parse(backend.name()));
-        LocalModelRuntimeServer server = new LocalModelRuntimeServer(store, engine, generationEngine);
-        int boundPort = server.start(host, port);
-        Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "local-runtime-shutdown"));
+        LocalModelRuntime runtime = LocalModelRuntime.start(Path.of(modelRoot), backendArg, host, port);
+        Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "local-runtime-shutdown"));
         // Die with the parent (stdin EOF): a hard-killed host must never leave this JVM behind.
         ParentDeathWatchdog.install("local-runtime");
 
-        String baseUrl = "http://" + host + ":" + boundPort;
+        String baseUrl = runtime.baseUrl();
         // The ONE machine-readable ready line on stdout (the host parses exactly this).
         System.out.println(LocalJson.write(Map.of(
                 "event", "ready",
                 "baseUrl", baseUrl,
                 "version", LocalModelRuntimeServer.VERSION)));
         System.out.flush();
-        System.err.println("[local-runtime] ready on " + baseUrl + " backend=" + backend
+        System.err.println("[local-runtime] ready on " + baseUrl + " backend=" + runtime.backend()
                 + " modelRoot=" + modelRoot);
     }
 

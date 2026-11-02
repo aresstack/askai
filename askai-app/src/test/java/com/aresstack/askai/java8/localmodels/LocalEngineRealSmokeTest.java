@@ -25,11 +25,10 @@ import static org.junit.Assume.assumeTrue;
 
 /**
  * C2c real-model smokes for the encoder + reranker families, run STRICTLY through the productive install
- * pipeline (download → catalog compile → package-backed smoke → manifest) and the sidecar HTTP surface.
+ * pipeline (download → catalog compile → package-backed smoke → manifest) and the local runtime HTTP surface.
  *
- * <p>Environment-gated on the assembled sidecar distribution and a Java-21 launcher (infrastructure); it
- * does NOT skip because a model is missing — a missing model is downloaded, and a real infrastructure or
- * inference failure is a visible test failure. Opt in with {@code -Daskai.local.realModelSmoke=true} so a
+ * <p>The runtime runs inside this JVM (askai #49); the test does NOT skip because a model is missing — a
+ * missing model is downloaded, and a real infrastructure or inference failure is a visible test failure. Opt in with {@code -Daskai.local.realModelSmoke=true} so a
  * normal build does not fetch gigabytes. E5-large is loaded LAST and each model is unloaded before the
  * next so the four encoders never sit in memory together.</p>
  */
@@ -41,10 +40,6 @@ public class LocalEngineRealSmokeTest {
 
     @Test
     public void everyEncoderAndTheRerankerRunThroughTheProductiveInstaller() throws Exception {
-        String runtimeDir = System.getProperty("askai.local.runtime.dir", "");
-        String java21 = System.getProperty("askai.local.runtime.java", "");
-        assumeTrue("SKIPPED (infra): -Daskai.local.runtime.dir not set", !runtimeDir.isEmpty());
-        assumeTrue("SKIPPED (infra): -Daskai.local.runtime.java (Java 21) not set", !java21.isEmpty());
         assumeTrue("SKIPPED: opt in with -Daskai.local.realModelSmoke=true",
                 Boolean.getBoolean("askai.local.realModelSmoke"));
 

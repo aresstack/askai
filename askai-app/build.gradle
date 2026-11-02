@@ -2,6 +2,8 @@ apply plugin: 'application'
 
 dependencies {
     implementation project(':ollama4j-java8')
+    // askai #49: the local model runtime (win-directml) runs inside the AskAI JVM, no sidecar process.
+    implementation project(':local-model-runtime-sidecar-java21')
     // Comic UI foundation (issue #36): neutral Java-8 Swing controls — hover menus, comic split
     // pane, shared palette/painters. Deliberately free of AskAI/Research/PF4J types.
     implementation project(':comic-controls')
