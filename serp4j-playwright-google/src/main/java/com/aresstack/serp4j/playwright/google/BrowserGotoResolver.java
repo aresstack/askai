@@ -11,52 +11,86 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.Set;
 
 /**
  * Resolves Google {@code /goto?url=…} result links inside the search browser's context, i.e. with the cookies of the
  * session that produced the result page. Google answers such a link with {@code 302 Location: <target>} only for
  * that session; a cookie-less HTTP client gets a page without redirect ({@code not_a_redirect}). Each link is one
- * request with {@code maxRedirects=0}; the target site itself is never fetched. Links that do not resolve within
+ * request with {@code maxRedirects=0}; the target site itself is never fetched. Organic links come first, then
+ * one retry of those that failed, then sitelinks. Links that do not resolve within
  * the budget stay {@code /goto} and are left to the provider's {@code ResultUrlEnricher}.
  */
 final class BrowserGotoResolver {
 
-    static final Duration PER_LINK_TIMEOUT = Duration.ofSeconds(3);
+    /** Successful answers take 0.1–0.6 s live; a link that hangs longer is retried once at the end. */
+    static final Duration PER_LINK_TIMEOUT = Duration.ofMillis(1500);
     static final Duration TOTAL_BUDGET = Duration.ofSeconds(8);
+
+    /** Marker for a request that failed (timeout, network) and is worth one retry. */
+    private static final String FAILED = "\u0000failed";
 
     private BrowserGotoResolver() {
     }
 
     /**
-     * @param request      the browser context's request API ({@code page.context().request()})
-     * @param page         the parsed result page
+     * Order: organic result links first, then those that failed once again, then sitelinks.
+     *
+     * @param request         the browser context's request API ({@code page.context().request()})
+     * @param page            the parsed result page
      * @param remainingMillis time left for the whole search; the resolution never exceeds it
      */
-    static GoogleSerpPage resolve(final APIRequestContext request, GoogleSerpPage page, final Clock clock,
+    static GoogleSerpPage resolve(APIRequestContext request, GoogleSerpPage page, Clock clock,
                                   double remainingMillis) {
-        final Instant deadline = clock.instant().plusMillis(
+        Instant deadline = clock.instant().plusMillis(
                 (long) Math.max(0, Math.min(TOTAL_BUDGET.toMillis(), remainingMillis)));
-        final Map<String, String> resolved = new HashMap<String, String>();
-        return page.withResolvedUrls(new Function<String, String>() {
-            public String apply(String url) {
-                if (!isGoogleGoto(url)) {
-                    return null;
-                }
-                if (resolved.containsKey(url)) {
-                    return resolved.get(url);
-                }
-                long left = Duration.between(clock.instant(), deadline).toMillis();
-                String target = left <= 0 ? null : fetchLocation(request, url, Math.min(left, PER_LINK_TIMEOUT.toMillis()));
-                resolved.put(url, target);
-                return target;
+        Set<String> organic = new LinkedHashSet<String>();
+        Set<String> siteLinks = new LinkedHashSet<String>();
+        for (GoogleSerpPage.Organic hit : page.getOrganicResults()) {
+            if (isGoogleGoto(hit.getUrl())) {
+                organic.add(hit.getUrl());
             }
+            for (GoogleSerpPage.Link link : hit.getSiteLinks()) {
+                if (isGoogleGoto(link.getUrl())) {
+                    siteLinks.add(link.getUrl());
+                }
+            }
+        }
+        siteLinks.removeAll(organic);
+        Map<String, String> resolved = new HashMap<String, String>();
+        resolveAll(request, organic, resolved, clock, deadline);
+        List<String> retry = new ArrayList<String>();
+        for (String url : organic) {
+            if (FAILED.equals(resolved.get(url))) {
+                retry.add(url);
+            }
+        }
+        resolveAll(request, retry, resolved, clock, deadline);
+        resolveAll(request, siteLinks, resolved, clock, deadline);
+        return page.withResolvedUrls(url -> {
+            String target = resolved.get(url);
+            return FAILED.equals(target) ? null : target;
         });
     }
 
+    private static void resolveAll(APIRequestContext request, Iterable<String> urls, Map<String, String> resolved,
+                                   Clock clock, Instant deadline) {
+        for (String url : urls) {
+            long left = Duration.between(clock.instant(), deadline).toMillis();
+            if (left <= 0) {
+                return;
+            }
+            resolved.put(url, fetchLocation(request, url, Math.min(left, PER_LINK_TIMEOUT.toMillis())));
+        }
+    }
+
+    /** @return the target, {@code null} when Google did not redirect, {@link #FAILED} when the request failed */
     private static String fetchLocation(APIRequestContext request, String url, long timeoutMillis) {
         APIResponse response = null;
         try {
@@ -67,7 +101,7 @@ final class BrowserGotoResolver {
             }
             return targetOf(url, response.headers().get("location"));
         } catch (PlaywrightException e) {
-            return null;
+            return FAILED;
         } finally {
             if (response != null) {
                 try {
