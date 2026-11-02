@@ -25,7 +25,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * The model-free sidecar bridge core: HIGH_CONFIDENCE extracts directly, LOW_CONFIDENCE emits a
+ * The model-free browser runtime bridge core: HIGH_CONFIDENCE extracts directly, LOW_CONFIDENCE emits a
  * bounded cached repair request, and applying a runtime-validated decision re-checks every guard
  * (unknown / expired / consumed / snapshot / fingerprint / invalid) before running the single A3
  * extraction. The service never calls a model.

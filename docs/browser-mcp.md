@@ -5,11 +5,11 @@
 - `:browser-api` (Java 8) — the shared port: `BrowserSession` (search/open/currentPage/links/follow/
   back/close), `BrowserPageSnapshot` (url/title/clean text/truncated — never raw HTML),
   `BrowserLink` (stable per-snapshot ids `link-1..n`), `WebSearchResult`, `UrlSafetyPolicy`,
-  `BrowserLimits`, `BrowserBackendKind { PLAYWRIGHT_SIDECAR, STATIC_HTTP }`.
+  `BrowserLimits`, `BrowserBackendKind { PLAYWRIGHT, STATIC_HTTP }`.
 - `:browser-static-http` (Java 8) — `StaticHttpBrowserSession` (jsoup): static fetch + cleanup only;
   search is honestly unsupported. A separate, visibly limited backend — **never** an automatic
   fallback for the sidecar.
-- `:browser-mcp-server-java21` — the ONE deliberate Java-21 process. The Java-8 host never compiles
+- `:browser-runtime-java21` — the ONE deliberate Java-21 process. The Java-8 host never compiles
   against it and never loads its classes; it only talks MCP to it.
 
 ## How the Playwright backend works (MCP-P005, resolved)
@@ -21,13 +21,13 @@ second **Java** process (`GraalDriverMain`) hosting the Playwright Core JS drive
 
 The default browser is **Camoufox** (`--browser-channel=camoufox`), taken over from
 [Argos](https://github.com/aresstack/argos) with minimal changes (package
-`com.aresstack.askai.browser.sidecar.camoufox`: `CamoufoxDistribution`, `CamoufoxInstaller`,
+`com.aresstack.askai.browser.runtime.camoufox`: `CamoufoxDistribution`, `CamoufoxInstaller`,
 `CamoufoxLaunch`, plus `camoufox/distribution.properties` and the fingerprint profile
 `camoufox/default-launch.json`):
 
 - **One-time download** of Argos' Camoufox distribution `camoufox-156.0.1-beta.36-argos.2`: the
   daijro/camoufox release with the two WebDriver BiDi fixes of daijro/camoufox#952 already applied
-  (not in any Camoufox release yet) plus uBlock Origin. Installed to `%APPDATA%/.askai-java8/browser`.
+  (not in any Camoufox release yet) plus uBlock Origin. Installed to `%APPDATA%/.askai/browser`.
 - **Verification**: archive SHA-256 pinned per platform (Windows x86_64, Linux x86_64), download into a
   `.partial-*` folder, unpack, check manifest and both fixed `omni.ja` entries, then one atomic rename.
   Every start re-checks the marker, the executable and both fixes. Concurrent installs serialize over
@@ -35,7 +35,7 @@ The default browser is **Camoufox** (`--browser-channel=camoufox`), taken over f
 - **Start**: `firefox().launchPersistentContext` with channel `moz-firefox`, the verified executable,
   the fingerprint environment (`CAMOU_CONFIG_1..n`, `CAMOU_PREFS_1..n`) and prefs of the built-in
   profile, and no Playwright emulation (viewport, color scheme ...), exactly as Argos starts it. Profile:
-  `%APPDATA%/.askai-java8/browser-profiles/camoufox`; a concurrent research session gets a temporary
+  `%APPDATA%/.askai/browser-profiles/camoufox`; a concurrent research session gets a temporary
   profile that is deleted on close.
 - **Progress**: while installing, the sidecar prints `camoufox install: ...` lines every 5 s; the host
   restarts its readiness timeout on each one. When a research session starts, the host runs

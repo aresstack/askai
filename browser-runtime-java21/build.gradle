@@ -1,0 +1,41 @@
+// The browsers of AskAI (askai #31/#50): Playwright + Camoufox inside the AskAI JVM — the research browser
+// (InProcessBrowser + BrowserTools) and the headless search browser (SearchBrowser) that hands its Browser to
+// Serp4J providers (ADR-020). No separate process, no MCP server.
+//
+// The shared boundary is the :browser-api jar: the same BrowserSession port and UrlSafetyPolicy the host uses.
+apply plugin: 'java-library'
+
+
+dependencies {
+    implementation project(':browser-api')
+    // Java-8 bytecode consumed by this Java-21 process: the mechanical SERP analysis runs
+    // in-process for web_search (the browser runtime measures AND asks the analysis for judgement).
+    implementation project(':browser-search-analysis')
+    // The official Playwright Java API — but WITHOUT its Node driver artifacts: playwright4j ships a
+    // replacement com.microsoft.playwright.impl.driver.Driver that spawns a second Java process running
+    // the Playwright Core JS driver on GraalJS (no Node.js). Excluding upstream 'driver' is mandatory:
+    // two Driver classes on the fat-jar classpath would make the winner order-dependent.
+    // Keep the API version aligned with the Playwright Core that playwright4j embeds (0.3.0 → 1.62.x).
+    implementation('com.microsoft.playwright:playwright:1.62.0') {
+        exclude group: 'com.microsoft.playwright', module: 'driver'
+        exclude group: 'com.microsoft.playwright', module: 'driver-bundle'
+    }
+    // askai #31: the search browser hands its Browser to Serp4J PlaywrightSearchProviders (ADR-020).
+    api "com.aresstack:serp4j-playwright:${(findProperty('serp4jVersion') ?: '0.1.0-SNAPSHOT')}"
+    implementation 'com.aresstack:playwright4j:0.3.0' // embeds the Core JS package itself (no driver-bundle)
+    // Camoufox distribution/launch code taken over from Argos (com.aresstack.askai.browser.runtime.camoufox)
+    // reads its pins, manifest and fingerprint profile with Jackson, as in Argos.
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.2'
+
+    testImplementation 'junit:junit:4.13.2'
+    // The Camoufox tests come over from Argos unchanged (JUnit 5); the vintage engine keeps the JUnit 4 tests.
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testRuntimeOnly 'org.junit.vintage:junit-vintage-engine:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.11.4'
+}
+
+test {
+    useJUnitPlatform()
+    // The live browser test self-gates on the capability probe (Assume): without an installed
+    // Chrome/Edge it SKIPS with a readable message instead of silently passing or failing the build.
+}

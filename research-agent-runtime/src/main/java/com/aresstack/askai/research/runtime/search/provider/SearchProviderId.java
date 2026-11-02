@@ -13,6 +13,8 @@ public enum SearchProviderId {
     DATA_FOR_SEO,
 
     SERP_API,
+    /** Google in AskAI's own search browser (askai #31: Serp4J serp4j-playwright-google). */
+    GOOGLE_BROWSER,
     AWS_AGENTCORE_WEB_SEARCH,
     AZURE_OPENAI_WEB_SEARCH,
     YANDEX_CLOUD_SEARCH_API,

@@ -19,7 +19,7 @@ import com.aresstack.askai.research.state.oo.ResearchStateTransitionResult;
  * <ul>
  * <li>the ACP research agent process — owned by the {@link AcpResearchSessionBackend} session handle,</li>
  * <li>the research-control MCP endpoint — owned here ({@link ResearchControlEndpoint}),</li>
- * <li>the browser MCP sidecar process (+ its host-side client and bridge endpoint) — owned here,</li>
+ * <li>the browser runtime process (+ its host-side client and bridge endpoint) — owned here,</li>
  * <li>the backend session — owned by whoever called {@code createSession} on the backend port.</li>
  * </ul>
  * The host-side hierarchical state machine held here is the ONLY transition authority: {@link #dispatch}
@@ -27,7 +27,7 @@ import com.aresstack.askai.research.state.oo.ResearchStateTransitionResult;
  * signals PHASE_READY as an event; the HOST decides by dispatching {@code REQUEST_EVIDENCE_REVIEW}.
  *
  * <p>{@link #close()} is idempotent and ordered: backend (agent process) → research-control endpoint →
- * browser bridge endpoint → sidecar client → sidecar process. Stores/repositories are not "closed" — their
+ * browser bridge endpoint → browser runtime client → separate process. Stores/repositories are not "closed" — their
  * contents outlive the session.</p>
  */
 public final class ProductiveResearchSessionResources {
@@ -365,7 +365,7 @@ public final class ProductiveResearchSessionResources {
     }
 
     /**
-     * End the current browsing phase: stop the sidecar/browser but keep the TeamAgent and session alive. A
+     * End the current browsing phase: stop the browser runtime/browser but keep the TeamAgent and session alive. A
      * later research run lazily starts a fresh browser generation. Called when a research run finishes.
      */
     public void stopBrowserPhase() {
@@ -640,7 +640,7 @@ public final class ProductiveResearchSessionResources {
             browserBridge.close();
         }
         if (browser != null) {
-            browser.close(); // stops any running sidecar generation and releases the owner thread
+            browser.close(); // stops any running browser runtime generation and releases the owner thread
         }
     }
 }

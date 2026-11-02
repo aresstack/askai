@@ -658,7 +658,7 @@ public final class ResearchToolPolicy {
      * The atomic leaf move: one leaf, one target parent, one revision, UNCHANGED UUID. Every
      * receipt line mirrors into the technical log; every refusal ({@code SOURCE_NOT_LEAF},
      * {@code TARGET_PARENT_NOT_FOUND}, {@code AMBIGUOUS_*}, {@code TARGET_NAME_COLLISION})
-     * leaves document and sidecar byte-identical.
+     * leaves document and browser runtime byte-identical.
      */
     private static McpToolContribution conceptMoveLeafTool(final ResearchControlContext ctx) {
         return McpToolContribution.of("concept_move_leaf",

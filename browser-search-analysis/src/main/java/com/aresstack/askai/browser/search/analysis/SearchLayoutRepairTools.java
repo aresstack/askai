@@ -13,9 +13,9 @@ import java.util.function.LongSupplier;
 
 /**
  * The transport-agnostic handler logic behind the three MCP repair tools — String in, String out, so
- * the SAME code serves the productive Java-21 sidecar registration and the cross-process integration
+ * the SAME code serves the productive Java-21 browser runtime registration and the cross-process integration
  * test. It stays MODEL-FREE: it captures/extracts mechanically and applies a runtime-validated
- * decision to a cached snapshot; it never calls a model. The clock is injected so the sidecar owns
+ * decision to a cached snapshot; it never calls a model. The clock is injected so the browser runtime owns
  * time and tests stay deterministic.
  */
 public final class SearchLayoutRepairTools {

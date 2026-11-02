@@ -33,9 +33,8 @@ public final class SearchProviderResult {
     }
 
     /**
-     * @param unresolvedRedirects one diagnostic line per provider hit that was found but whose redirect URL
-     *                            (e.g. Google {@code /goto}) could not be resolved; such hits are NOT in
-     *                            {@code hits}, because they must never become verified sources (issue #41)
+     * @param unresolvedRedirects one diagnostic line per hit whose redirect URL (e.g. Google {@code /goto}) could
+     *                            not be resolved; such hits ARE in {@code hits}, marked UNRESOLVED (askai #41)
      */
     public SearchProviderResult(SearchProviderId providerId, SearchEngine searchEngine,
                                 List<SearchHit> hits, String rawResponse, List<String> unresolvedRedirects) {

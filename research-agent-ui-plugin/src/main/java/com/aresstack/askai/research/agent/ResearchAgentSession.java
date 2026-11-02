@@ -294,7 +294,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     /**
      * Surface the lazy browser lifecycle as a transient chat activity: a "Starte Browser…" thinking bubble
-     * when the sidecar starts on the first browser command, finished with "Browser bereit." on READY (or a
+     * when the browser runtime starts on the first browser command, finished with "Browser bereit." on READY (or a
      * visible problem on failure). The runtime fires these on its owner thread; we marshal onto the EDT.
      */
     private void wireBrowserActivity(
@@ -739,7 +739,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             waitingChooser.abortAll("session closed");
         }
         if (productiveResources != null) {
-            productiveResources.close(); // endpoints → sidecar client → sidecar process (idempotent)
+            productiveResources.close(); // endpoints → browser runtime (idempotent)
         }
     }
 
@@ -1722,7 +1722,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * A user web search has TERMINATED (completed/failed): stop the host-owned Playwright browser sidecar so
+     * A user web search has TERMINATED (completed/failed): stop the host-owned Playwright browser runtime so
      * it never lingers open — the same lifecycle the autonomous run gets on RUN_OUTCOME. It is only called on
      * terminal events (a CAPTCHA/challenge wait emits {@code progress}, never {@code completed}/{@code failed}),
      * so an in-flight manual challenge is never cut off.
@@ -3065,7 +3065,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     // ------------------------------------------------------ one-command exclusion facade (gate 4)
 
     /**
-     * One registered concept conflict (ID-sidecar slice): references are
+     * One registered concept conflict (ID-browser runtime slice): references are
      * {@code epoch + nodeId + expectedRevision} — never a stored name path (a rename must not
      * break them). {@code open} implements the ratified candidate/open model: only a conflict
      * whose question was VISIBLY asked (the terminal exclude receipt) is answerable — buttons,
@@ -3090,7 +3090,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * The DiscardedDecisionTombstone (ID-sidecar gate finding): when a raw save/restore
+     * The DiscardedDecisionTombstone (ID-browser runtime gate finding): when a raw save/restore
      * discards an OPEN conflict, the transcript still shows the old removal question — a bare
      * "Ja." afterwards must get a deterministic HOST answer ("the question is stale, nothing
      * changed, the topic stays suppressed"), never a model inference. Consumed on the first
@@ -3231,7 +3231,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return null;
     }
 
-    /** The OPEN conflicts' CURRENT name paths (resolved via the ID sidecar at render time). */
+    /** The OPEN conflicts' CURRENT name paths (resolved via the ID browser runtime at render time). */
     private java.util.Map<String, java.util.List<String>> openConflictPaths() {
         java.util.Map<String, java.util.List<String>> paths =
                 new java.util.LinkedHashMap<String, java.util.List<String>>();

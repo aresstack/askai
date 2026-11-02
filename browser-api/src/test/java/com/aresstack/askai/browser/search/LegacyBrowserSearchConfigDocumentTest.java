@@ -10,8 +10,8 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * The versioned sidecar hand-off document: lossless JSON round trip (prompts with newlines and
- * quotes included), strict parsing with readable errors, and the sidecar subset never carries
+ * The versioned browser runtime hand-off document: lossless JSON round trip (prompts with newlines and
+ * quotes included), strict parsing with readable errors, and the browser runtime subset never carries
  * AI/prompt/reranker configuration into the browser process.
  */
 public class LegacyBrowserSearchConfigDocumentTest {
@@ -33,11 +33,11 @@ public class LegacyBrowserSearchConfigDocumentTest {
     }
 
     @Test
-    public void sidecarSubsetNeverCarriesAiConfiguration() {
-        Map<String, String> subset = LegacyBrowserSearchConfigDocument.sidecarSubset(
+    public void browserSubsetNeverCarriesAiConfiguration() {
+        Map<String, String> subset = LegacyBrowserSearchConfigDocument.browserSubset(
                 LegacyBrowserSearchSettingsCodec.toValues(LegacyBrowserSearchDefaults.create()));
         for (String key : subset.keySet()) {
-            assertFalse("AI key leaked into the sidecar subset: " + key,
+            assertFalse("AI key leaked into the browser subset: " + key,
                     key.startsWith("aiLayoutResolver.") || key.startsWith("reranker."));
         }
         assertTrue(subset.containsKey("consent.enabled"));

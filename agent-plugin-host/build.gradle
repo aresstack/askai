@@ -15,6 +15,10 @@ dependencies {
     // Same rule for the comic-controls design system: the plugin's views use it compileOnly (it is
     // host-provided and excluded from the plugin's lib/), so the test HOST must provide it like askai-app.
     testRuntimeOnly project(':comic-controls')
+    // And for the neutral MCP/ACP ports: the research plugin's in-JVM agent runtime uses them; askai-app
+    // provides them on the host classpath and the plugin excludes them from its lib/.
+    testRuntimeOnly project(':mcp-runtime-api')
+    testRuntimeOnly project(':acp-client-api')
 }
 
 test {

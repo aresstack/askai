@@ -5,7 +5,7 @@ import java.io.File;
 /**
  * The neutral host SPI that publishes the per-session structured-inference descriptor for the productive
  * research path. AskAI's implementation reads the central main model ({@code ai.mainModel}), resolves it to
- * its actual serving endpoint (local runtime sidecar or configured Ollama), and writes an atomic,
+ * its actual serving endpoint (in-process local model runtime or configured Ollama), and writes an atomic,
  * sekret-free {@code inference-config.json} into the session directory — handing the agent only the file
  * path. The agent never selects a model.
  *

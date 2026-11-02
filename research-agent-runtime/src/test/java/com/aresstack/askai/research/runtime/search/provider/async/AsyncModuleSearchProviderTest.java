@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.runtime.search.provider.async;
 
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
 import com.aresstack.askai.research.runtime.search.provider.SearchEngine;
 import com.aresstack.askai.research.runtime.search.provider.SearchHit;
 import com.aresstack.askai.research.runtime.search.provider.SearchProviderAuthenticationException;
@@ -74,7 +75,8 @@ public final class AsyncModuleSearchProviderTest {
     }
 
     @Test
-    public void unresolvedGotoRedirectsNeverBecomeSourceHitsButStayDiagnosable() {
+    public void unresolvedGotoRedirectsStayCandidatesWithTheirStatusAndProviderUrl() {
+        // askai #41 (Angelo 02.11.): a valid hit is never dropped because its redirect is unresolved.
         WebSearchHit unresolved = new WebSearchHit(MODULE_ID, MODULE_ENGINE, 1, "Elastic Search API",
                 "https://www.google.com/goto?url=CAESAAAA", "", com.aresstack.askai.research.search.api.UrlResolution.UNRESOLVED,
                 null, "timeout");
@@ -85,10 +87,33 @@ public final class AsyncModuleSearchProviderTest {
 
         SearchProviderResult result = adapter(fake, 5_000).search(request());
 
-        assertEquals(1, result.getHits().size());
-        assertEquals("pf4j.org", result.getHits().get(0).getDomain()); // no google.com source domain
+        assertEquals("no hit is removed", 2, result.getHits().size());
+        SearchHit kept = result.getHits().get(0);
+        assertEquals(UrlResolutionStatus.UNRESOLVED, kept.getUrlResolution());
+        assertEquals("https://www.google.com/goto?url=CAESAAAA", kept.getUrl()); // the provider URL is kept
+        assertEquals("never classified by the redirect host", "", kept.getDomain());
+        assertEquals("timeout", kept.getResolutionDetail());
+        assertEquals(UrlResolutionStatus.DIRECT, result.getHits().get(1).getUrlResolution());
+        assertEquals("pf4j.org", result.getHits().get(1).getDomain());
         assertEquals(1, result.getUnresolvedRedirects().size());
         assertTrue(result.getUnresolvedRedirects().get(0).contains("timeout"));
+        assertTrue(result.getUnresolvedRedirects().get(0).contains("kept as candidate"));
+    }
+
+    @Test
+    public void aResolvedRedirectKeepsItsOriginalProviderUrl() {
+        WebSearchHit resolved = new WebSearchHit(MODULE_ID, MODULE_ENGINE, 1, "PF4J", "https://pf4j.org/", "",
+                com.aresstack.askai.research.search.api.UrlResolution.RESOLVED,
+                "https://www.google.com/goto?url=CAESBBBB", null);
+        FakeProvider fake = FakeProvider.completedWith(new WebSearchResult(MODULE_ID, MODULE_ENGINE,
+                java.util.Collections.singletonList(resolved), "{}"));
+
+        SearchHit hit = adapter(fake, 5_000).search(request()).getHits().get(0);
+
+        assertEquals(UrlResolutionStatus.RESOLVED, hit.getUrlResolution());
+        assertEquals("https://pf4j.org/", hit.getUrl());
+        assertEquals("https://www.google.com/goto?url=CAESBBBB", hit.getOriginalUrl());
+        assertEquals("pf4j.org", hit.getDomain());
     }
 
     @Test

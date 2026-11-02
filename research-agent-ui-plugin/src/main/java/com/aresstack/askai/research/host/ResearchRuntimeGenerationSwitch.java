@@ -1,9 +1,7 @@
 package com.aresstack.askai.research.host;
 
-import com.aresstack.askai.acp.AcpAgentConnector;
 import com.aresstack.askai.agent.model.reranker.RerankerConfigurationSnapshotProvider;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -17,18 +15,15 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class ResearchRuntimeGenerationSwitch {
 
     private final McpServerRegistry registry;
-    private final McpToolClientFactory toolClients;
-    private final AcpAgentConnector connector;
+    private final InProcessResearchRuntime runtime;
     private final RerankerConfigurationSnapshotProvider rerankerSnapshots;
     private final AtomicLong generationIds = new AtomicLong();
     private volatile ResearchRuntimeGeneration active;
 
-    public ResearchRuntimeGenerationSwitch(McpServerRegistry registry, McpToolClientFactory toolClients,
-                                           AcpAgentConnector connector,
+    public ResearchRuntimeGenerationSwitch(McpServerRegistry registry, InProcessResearchRuntime runtime,
                                            RerankerConfigurationSnapshotProvider rerankerSnapshots) {
         this.registry = registry;
-        this.toolClients = toolClients;
-        this.connector = connector;
+        this.runtime = runtime;
         this.rerankerSnapshots = rerankerSnapshots;
     }
 
@@ -49,9 +44,9 @@ public final class ResearchRuntimeGenerationSwitch {
                     "New research runtime generation is not usable, keeping the current one: " + problems);
         }
         long id = generationIds.incrementAndGet();
-        ResearchRuntimeGeneration next = new ResearchRuntimeGeneration(id,
-                new ProductiveResearchBackendFactory(registry, toolClients, connector, config, id,
-                        rerankerSnapshots));
+        ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(registry, runtime,
+                config, id, rerankerSnapshots);
+        ResearchRuntimeGeneration next = new ResearchRuntimeGeneration(id, factory);
         // b) publish.
         ResearchRuntimeGeneration previous = active;
         active = next;

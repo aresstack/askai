@@ -2,7 +2,9 @@ package com.aresstack.askai.research.runtime.scope;
 
 import com.aresstack.askai.acp.AcpEndpointDescriptor;
 import com.aresstack.askai.acp.AgentLaunchSpec;
-import com.aresstack.askai.acp.solon.SolonAcpAgentConnector;
+import com.aresstack.askai.research.runtime.InProcessResearchAgentConnector;
+import com.aresstack.askai.research.runtime.ResearchRuntimeShared;
+import com.aresstack.askai.research.runtime.host.InProcessHostToolEndpoints;
 import com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor;
 import com.aresstack.askai.mcp.api.McpEndpointDefinition;
 import com.aresstack.askai.mcp.api.McpEndpointHandle;
@@ -10,7 +12,7 @@ import com.aresstack.askai.mcp.api.McpToolCall;
 import com.aresstack.askai.mcp.api.McpToolContribution;
 import com.aresstack.askai.mcp.api.McpToolHandler;
 import com.aresstack.askai.mcp.api.McpToolResult;
-import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
+import com.aresstack.askai.mcp.api.InProcessMcpServerRegistry;
 import com.aresstack.askai.research.acp.AcpResearchSessionBackend;
 import com.aresstack.askai.research.backend.ResearchBackendEvent;
 import com.aresstack.askai.research.backend.ResearchBackendEventType;
@@ -69,28 +71,21 @@ public class ScopeSweepEndToEndLiveTest {
     private static final String OLLAMA = "http://127.0.0.1:11434";
     private static final String EMBED_MODEL = "nomic-embed-text:latest";
 
-    private static SolonMcpServerRuntime runtime; // Solon is a process-global singleton → one per JVM
-
-    private String javaBin;
-    private String agentJar;
+    private static InProcessMcpServerRegistry runtime;
+    private static ResearchRuntimeShared shared;
 
     @Before
     public void resolve() {
-        agentJar = System.getProperty("research.agent.jar");
-        Assume.assumeTrue("agent jar missing", agentJar != null && new File(agentJar).isFile());
-        String home = System.getProperty("acp.java.home", System.getProperty("java.home"));
-        javaBin = home + File.separator + "bin" + File.separator
-                + (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")
-                        ? "java.exe" : "java");
-        Assume.assumeTrue("java missing", new File(javaBin).isFile());
         if (runtime == null) {
-            runtime = new SolonMcpServerRuntime();
+            runtime = new InProcessMcpServerRegistry();
+            shared = new ResearchRuntimeShared("camoufox");
         }
     }
 
     @AfterClass
     public static void shutdownRuntime() {
         if (runtime != null) {
+            shared.close();
             runtime.shutdown();
         }
     }
@@ -132,7 +127,7 @@ public class ScopeSweepEndToEndLiveTest {
         System.err.println("[sweep-live] anchor vectors reconciled: " + anchorVectors.size()
                 + " @ " + embedder.modelFingerprint());
 
-        // --- the real runtime process over ACP, main model via the real inference descriptor ----
+        // --- the research agent in this JVM, main model via the real inference descriptor ----
         McpEndpointHandle endpoint = runtime.registerEndpoint(
                 new McpEndpointDefinition("research.sweeplive", "Research Control"));
         runtime.updateTools(endpoint, Collections.singletonList(
@@ -150,8 +145,8 @@ public class ScopeSweepEndToEndLiveTest {
         java.util.Map<String, String> env = new java.util.LinkedHashMap<String, String>();
         env.put("ASKAI_INFERENCE_CONFIG", inferenceConfig.getAbsolutePath());
         AcpResearchSessionBackend backend = new AcpResearchSessionBackend(
-                new SolonAcpAgentConnector(Duration.ofSeconds(120), null),
-                new AgentLaunchSpec(javaBin, Arrays.asList("-jar", agentJar), env),
+                new InProcessResearchAgentConnector(new InProcessHostToolEndpoints(runtime), shared),
+                new AgentLaunchSpec("in-process", Collections.<String>emptyList(), env),
                 new AcpEndpointDescriptor("research.sweeplive", runtime.endpointUrl(endpoint),
                         "streamable", endpoint.getToken()),
                 null);

@@ -28,6 +28,23 @@ Key verschlüsselt über `ProviderConfigurationService.saveSerpApi(configuration
   DataForSEO aus.
 - In der Research-Runtime ist `SERP_API` jetzt ein migrierter Provider (Auswahl „SerpApi“ in den Sucheinstellungen).
 
+## Google-`/goto`-Treffer: Auflösung erst bei der Navigation (askai #41)
+
+Google liefert organische Treffer oft als `https://www.google.com/goto?url=…`. Für die Google-Suche im Suchbrowser
+(`serp4j-playwright-google`) gilt:
+
+- Während der Suchergebnisbeschaffung wird **keine** `/goto`-URL aufgelöst: keine GET-/HEAD-Anfragen, keine
+  Resolver-Schleife, kein `ResultUrlEnricher`. Je Suche geht genau eine Anfrage an Google (die Trefferseite).
+- Jeder organische Treffer bleibt mit Provider-URL, Titel, Snippet, Breadcrumb und Sitelinks erhalten. Ein
+  `/goto`-Treffer ist `UNRESOLVED`: Recherchekandidat, aber keine verifizierte Zieladresse (wird nicht geparkt).
+- Erst wenn die Recherche den Treffer öffnet, navigiert der Browser die `/goto`-URL und folgt der Weiterleitung.
+  Die Ziel-URL aus dem Browser ist Quellenidentität und Grundlage für die Deduplizierung; die `/goto`-URL bleibt als
+  Provenienz (`AcceptedSource.getOriginalUrl()`, Status `RESOLVED`). Die URL-Sicherheitsprüfung nach dem Redirect
+  greift wie für jede Seite. Bleibt der Browser auf Google, ist die Seite Transit und nie Quelle. Ein
+  Navigationsfehler beendet nur diesen Besuch; der Treffer bleibt im Suchergebnis.
+- Die HTTP-Resolver in Serp4J (`GoogleGotoUrlResolver`, `ResultUrlEnricher`) bleiben für API-Provider wie SerpApi
+  erhalten (`resolveGoogleGotoUrls`); AskAI hat keine eigene zweite Auflösungslogik.
+
 ## Was sich gegenüber der alten Implementierung ändert
 
 - **Engine-Etikett:** Die Engine kommt aus der Serp4J-Antwort (Metadaten und Herkunft je Treffer). Bright Data und
@@ -58,13 +75,12 @@ Serp4J ist noch nicht auf Maven Central. Die Root-`build.gradle` liest deshalb *
 ```bash
 scripts/install-serp4j.sh              # klont Serp4J (Develop) nach build/serp4j-src und publiziert nach ~/.m2
 scripts/install-serp4j.sh Develop ../Serp4J   # oder: vorhandenen Checkout verwenden
-./gradlew build                        # AskAI wie gewohnt (Gradle 7.6.4, JDK 8–17)
+./gradlew build                        # AskAI wie gewohnt (Gradle 8.14.3, JDK 21)
 ```
 
 Serp4Js Gradle braucht JDK 17+ (`SERP4J_JAVA_HOME`, sonst `JAVA_HOME_21_X64`/`JAVA_HOME`). Eine andere Version:
 `./gradlew build -Pserp4jVersion=…`. Die Workflows `release.yml` und `chatgpt-cache.yml` führen das Skript vor dem
-Build aus. Ein Composite Build (`includeBuild`) geht derzeit nicht, weil AskAI Gradle 7.6.4 nutzt und Serp4J
-Gradle 8 mit Kotlin-DSL-Build-Logik. Das Offline-ZIP aus `chatgpt-cache.yml` bringt die Serp4J-Artefakte unter
+Build aus. Ein Composite Build (`includeBuild`) ist noch nicht eingerichtet. Das Offline-ZIP aus `chatgpt-cache.yml` bringt die Serp4J-Artefakte unter
 `.chatgpt/m2` mit; offline: `./gradlew --offline -Dmaven.repo.local=$PWD/.chatgpt/m2/repository build`.
 
 Sobald Serp4J auf Central veröffentlicht ist, entfallen `mavenLocal` und das Skript.

@@ -7,7 +7,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * The runtime's decision for one repair request: either SUBMIT a validated layout back to the sidecar
+ * The runtime's decision for one repair request: either SUBMIT a validated layout back to the browser runtime
  * (from a profile hit or a successful AI resolution) or GIVE_UP so the runtime moves to the next
  * repair request / engine. Carries the typed AI attempt history and whether a profile served it —
  * the diagnostics the research session surfaces.

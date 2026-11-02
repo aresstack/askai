@@ -3,7 +3,7 @@ package com.aresstack.askai.browser.hud;
 /**
  * The state the Research Browser HUD renders over a visited target page: a short phase badge, a one-line human
  * status (the VISIBLE reason — never chain-of-thought), and, while the agent is waiting for the user, a live
- * countdown. Immutable + a line-based {@link #render()}/{@link #parse(String)} so it crosses the sidecar tool
+ * countdown. Immutable + a line-based {@link #render()}/{@link #parse(String)} so it crosses the browser runtime tool
  * boundary as a single string. Slice 1 carries only what the skip/pause/countdown HUD needs.
  */
 public final class ResearchHudState {

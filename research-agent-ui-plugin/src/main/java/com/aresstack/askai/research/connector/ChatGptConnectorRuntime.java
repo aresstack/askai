@@ -42,7 +42,7 @@ public final class ChatGptConnectorRuntime {
         java.io.File base = appData == null || appData.trim().isEmpty()
                 ? new java.io.File(System.getProperty("user.home"))
                 : new java.io.File(appData);
-        return new java.io.File(base, ".askai-java8/chatgpt-connector/oauth-refresh-tokens.json");
+        return new java.io.File(base, ".askai/chatgpt-connector/oauth-refresh-tokens.json");
     }
 
     private ConnectorConfig runningConfig;

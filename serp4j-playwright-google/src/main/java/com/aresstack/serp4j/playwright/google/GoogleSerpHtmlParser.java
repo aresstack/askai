@@ -23,7 +23,7 @@ import java.util.Set;
  * names change; the fixture tests pin the current layout and the provider warns when nothing is recognised.</p>
  *
  * <p>URLs: relative URLs are resolved against {@code https://www.google.com}; classic {@code /url?q=…} wrappers are
- * unwrapped; {@code /goto?url=…} stays as is and is resolved by the provider's {@code ResultUrlEnricher}.</p>
+ * unwrapped; {@code /goto?url=…} stays as is; the host follows it when it opens the hit.</p>
  */
 public final class GoogleSerpHtmlParser {
 

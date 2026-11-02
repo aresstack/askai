@@ -339,8 +339,42 @@ public class ResearchAgentSessionTest {
             };
         }
 
+        /** Developer override FAKE: these tests drive the demo backend, never the productive runtime. */
+        private final WorkspaceStateStore store = new WorkspaceStateStore() {
+            private final java.util.Map<String, String> values = new java.util.HashMap<String, String>(
+                    java.util.Collections.singletonMap("research.runtime.mode", "FAKE"));
+
+            public String get(String key, String defaultValue) {
+                return values.containsKey(key) ? values.get(key) : defaultValue;
+            }
+
+            public boolean getBoolean(String key, boolean defaultValue) {
+                return values.containsKey(key) ? Boolean.parseBoolean(values.get(key)) : defaultValue;
+            }
+
+            public int getInt(String key, int defaultValue) {
+                try {
+                    return values.containsKey(key) ? Integer.parseInt(values.get(key)) : defaultValue;
+                } catch (NumberFormatException invalid) {
+                    return defaultValue;
+                }
+            }
+
+            public void put(String key, String value) {
+                values.put(key, value);
+            }
+
+            public void putBoolean(String key, boolean value) {
+                values.put(key, String.valueOf(value));
+            }
+
+            public void putInt(String key, int value) {
+                values.put(key, String.valueOf(value));
+            }
+        };
+
         public WorkspaceStateStore getStateStore() {
-            return null;
+            return store;
         }
 
         public PluginPathService getPluginPathService() {
