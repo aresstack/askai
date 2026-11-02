@@ -8,6 +8,9 @@ public final class WebSearchHit {
     private final String title;
     private final String url;
     private final String snippet;
+    private final UrlResolution urlResolution;
+    private final String originalUrl;
+    private final String resolutionDetail;
 
     public WebSearchHit(
             SearchProviderId providerId,
@@ -16,6 +19,27 @@ public final class WebSearchHit {
             String title,
             String url,
             String snippet) {
+        this(providerId, searchEngine, rank, title, url, snippet,
+                SearchRedirectUrls.isOpaqueRedirect(url) ? UrlResolution.UNRESOLVED : UrlResolution.DIRECT,
+                null, SearchRedirectUrls.isOpaqueRedirect(url) ? "not_attempted" : null);
+    }
+
+    /**
+     * @param urlResolution    whether {@code url} is usable as a source address; a URL that is still an opaque
+     *                         redirect is always {@link UrlResolution#UNRESOLVED}, whatever is passed
+     * @param originalUrl      the provider URL before resolution, or {@code null}
+     * @param resolutionDetail failure reason for unresolved hits (diagnostics only), or {@code null}
+     */
+    public WebSearchHit(
+            SearchProviderId providerId,
+            SearchEngine searchEngine,
+            int rank,
+            String title,
+            String url,
+            String snippet,
+            UrlResolution urlResolution,
+            String originalUrl,
+            String resolutionDetail) {
 
         this.providerId = requireNonNull(providerId, "providerId");
         this.searchEngine = requireNonNull(searchEngine, "searchEngine");
@@ -23,6 +47,13 @@ public final class WebSearchHit {
         this.title = requireText(title, "title");
         this.url = requireText(url, "url");
         this.snippet = snippet == null ? "" : snippet;
+        UrlResolution resolution = urlResolution == null ? UrlResolution.DIRECT : urlResolution;
+        if (SearchRedirectUrls.isOpaqueRedirect(url)) {
+            resolution = UrlResolution.UNRESOLVED; // a /goto URL is never a verified target
+        }
+        this.urlResolution = resolution;
+        this.originalUrl = originalUrl == null || originalUrl.trim().isEmpty() ? url : originalUrl;
+        this.resolutionDetail = resolutionDetail == null ? "" : resolutionDetail;
     }
 
     public SearchProviderId getProviderId() {
@@ -47,6 +78,20 @@ public final class WebSearchHit {
 
     public String getSnippet() {
         return snippet;
+    }
+
+    public UrlResolution getUrlResolution() {
+        return urlResolution;
+    }
+
+    /** The URL as delivered by the provider (equals {@link #getUrl()} unless a redirect was resolved). */
+    public String getOriginalUrl() {
+        return originalUrl;
+    }
+
+    /** Why an unresolved redirect could not be resolved, or an empty string. */
+    public String getResolutionDetail() {
+        return resolutionDetail;
     }
 
     private static <T> T requireNonNull(

@@ -127,15 +127,24 @@ public final class AsyncModuleSearchProvider implements SearchProvider {
         // configured default is only a fallback. Bright Data / DataForSEO are no longer always "GOOGLE".
         SearchEngine resultEngine = AsyncProviderMapping.toRuntimeEngine(result.getSearchEngine(), searchEngine);
         List<SearchHit> hits = new ArrayList<SearchHit>();
+        List<String> unresolved = new ArrayList<String>();
         int index = 0;
         for (WebSearchHit hit : result.getHits()) {
             index++;
+            if (!hit.getUrlResolution().isUsableSource()) {
+                // Issue #41: an unresolved redirect (Google /goto) is a found hit, but never a verified source
+                // and never classified as google.com. Kept as diagnostic only.
+                unresolved.add("rank " + (hit.getRank() > 0 ? hit.getRank() : index) + " \"" + hit.getTitle()
+                        + "\": redirect not resolved (" + (hit.getResolutionDetail().isEmpty() ? "unknown"
+                        : hit.getResolutionDetail()) + ")");
+                continue;
+            }
             int rank = hit.getRank() > 0 ? hit.getRank() : index;
             SearchEngine hitEngine = AsyncProviderMapping.toRuntimeEngine(hit.getSearchEngine(), resultEngine);
             hits.add(new SearchHit(providerId, hitEngine, request.getQuery(), rank,
                     hit.getUrl(), hit.getTitle(), hit.getSnippet(), domainOf(hit.getUrl()), rank, null));
         }
-        return new SearchProviderResult(providerId, resultEngine, hits, result.getRawResponse());
+        return new SearchProviderResult(providerId, resultEngine, hits, result.getRawResponse(), unresolved);
     }
 
     /** The host of {@code url}, or an empty string when it cannot be parsed — never throws. */

@@ -2,7 +2,9 @@ package com.aresstack.askai.research.search.serp4j;
 
 import com.aresstack.askai.research.search.api.SearchEngine;
 import com.aresstack.askai.research.search.api.SearchProviderId;
+import com.aresstack.askai.research.search.api.UrlResolution;
 import com.aresstack.askai.research.search.api.WebSearchException;
+import com.aresstack.askai.research.search.api.WebSearchHit;
 import com.aresstack.askai.research.search.api.WebSearchRequest;
 import com.aresstack.askai.research.search.api.WebSearchResult;
 import com.aresstack.askai.research.search.http.HttpResponseException;
@@ -15,6 +17,7 @@ import com.aresstack.serp4j.core.model.data.ResultType;
 import com.aresstack.serp4j.core.model.data.SearchData;
 import com.aresstack.serp4j.core.model.data.SearchResultItem;
 import com.aresstack.serp4j.core.model.data.SerpPosition;
+import com.aresstack.serp4j.core.model.ext.Extensions;
 import com.aresstack.serp4j.core.model.ext.RawPayload;
 import com.aresstack.serp4j.core.model.ext.RawPayloadPolicy;
 import com.aresstack.serp4j.core.model.id.ElementId;
@@ -89,6 +92,58 @@ public class Serp4jWebSearchProviderTest {
                 SearchEngine.GOOGLE, new FakeProvider(CompletableFuture.completedFuture(onlyAds)));
 
         assertTrue(adapter.search(WebSearchRequest.builder("java").build()).get().getHits().isEmpty());
+    }
+
+    @Test
+    public void redirectResolutionFromSerp4jExtensionsIsKeptSeparateFromTheHit() throws Exception {
+        String gotoUrl = "https://www.google.com/goto?url=CAESAAAA";
+        SearchResultItem resolved = SearchResultItem.builder(ElementId.of("r1"), ResultType.ORGANIC,
+                "https://www.elastic.co/guide/java-search.html").title("Resolved")
+                .extensions(Extensions.builder().put(Serp4jWebSearchProvider.ORIGINAL_URL, gotoUrl)
+                        .put(Serp4jWebSearchProvider.URL_RESOLUTION, "resolved").build()).build();
+        SearchResultItem failed = SearchResultItem.builder(ElementId.of("r2"), ResultType.ORGANIC, gotoUrl)
+                .title("Failed").extensions(Extensions.builder()
+                        .put(Serp4jWebSearchProvider.ORIGINAL_URL, gotoUrl)
+                        .put(Serp4jWebSearchProvider.URL_RESOLUTION, "timeout").build()).build();
+        SearchResultItem noExtension = SearchResultItem.builder(ElementId.of("r3"), ResultType.ORGANIC,
+                "https://www.google.de/goto?url=CAESBBBB").title("Old Serp4J").build();
+        SearchResultItem direct = SearchResultItem.builder(ElementId.of("r4"), ResultType.ORGANIC,
+                "https://example.org/").title("Direct").build();
+        SearchResponse response = SearchResponse.of(SearchData.builder().result(resolved).result(failed)
+                        .result(noExtension).result(direct).build(),
+                SearchMetadata.forProvider(DFS, SearchEngineId.GOOGLE, SearchVertical.WEB, QueryInfo.of("java")).build());
+        Serp4jWebSearchProvider adapter = new Serp4jWebSearchProvider(SearchProviderId.DATA_FOR_SEO,
+                SearchEngine.GOOGLE, new FakeProvider(CompletableFuture.completedFuture(response)));
+
+        java.util.List<WebSearchHit> hits = adapter.search(WebSearchRequest.builder("java").build()).get().getHits();
+
+        assertEquals(4, hits.size()); // unresolved hits are kept, not dropped
+        assertEquals(UrlResolution.RESOLVED, hits.get(0).getUrlResolution());
+        assertEquals(gotoUrl, hits.get(0).getOriginalUrl());
+        assertEquals(UrlResolution.UNRESOLVED, hits.get(1).getUrlResolution());
+        assertEquals("timeout", hits.get(1).getResolutionDetail());
+        assertFalse(hits.get(1).getUrlResolution().isUsableSource());
+        assertEquals(UrlResolution.UNRESOLVED, hits.get(2).getUrlResolution());
+        assertEquals("not_attempted", hits.get(2).getResolutionDetail());
+        assertEquals(UrlResolution.DIRECT, hits.get(3).getUrlResolution());
+    }
+
+    @Test
+    public void claimedResolutionWithAGotoUrlIsStillUnresolved() {
+        WebSearchHit hit = new WebSearchHit(SearchProviderId.DATA_FOR_SEO,
+                com.aresstack.askai.research.search.api.SearchEngine.GOOGLE, 1, "t",
+                "https://google.com/goto?url=CAES", "", UrlResolution.RESOLVED, null, null);
+        assertEquals(UrlResolution.UNRESOLVED, hit.getUrlResolution());
+    }
+
+    @Test
+    public void onlyExactHttpSchemesCountAsOpaqueRedirects() {
+        assertTrue(com.aresstack.askai.research.search.api.SearchRedirectUrls
+                .isOpaqueRedirect("HTTPS://www.google.com/goto?url=CAES"));
+        assertFalse(com.aresstack.askai.research.search.api.SearchRedirectUrls
+                .isOpaqueRedirect("httpx://www.google.com/goto?url=CAES"));
+        assertFalse(com.aresstack.askai.research.search.api.SearchRedirectUrls
+                .isOpaqueRedirect("https://www.google.com/search?q=goto"));
     }
 
     @Test

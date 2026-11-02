@@ -119,6 +119,11 @@ final class SerpDocuments {
 
     /** A result column whose blocks carry ONLY a title link — no explanatory text anywhere. */
     String addBareResultColumn(int blocks, RenderedBox columnBox) {
+        return addBareResultColumn(blocks, columnBox, new boolean[blocks]);
+    }
+
+    /** Like {@link #addBareResultColumn(int, RenderedBox)}; block i links to an unresolved Google /goto if set. */
+    String addBareResultColumn(int blocks, RenderedBox columnBox, boolean[] unresolvedGoto) {
         String columnId = nextContainerId();
         bodyChildIds.add(columnId);
         List<String> blockIds = new ArrayList<String>();
@@ -140,9 +145,15 @@ final class SerpDocuments {
                     .separation("", 0, "", 4, 8)
                     .structure(new DomStructureSignature("li(h2(a))"), blocks - 1)
                     .build());
-            addRawLink(blockId, "https://bare" + i + ".example.org/",
-                    "https://bare" + i + ".example.org/", LinkRedirectResolution.NOT_A_REDIRECT,
-                    "Result " + i + " title", DomainClassification.EXTERNAL_DOMAIN, true, "");
+            if (unresolvedGoto[i]) {
+                addRawLink(blockId, "https://www.google.com/goto?url=CAES" + i, "",
+                        LinkRedirectResolution.UNRESOLVED, "Result " + i + " title",
+                        DomainClassification.EXTERNAL_DOMAIN, true, "");
+            } else {
+                addRawLink(blockId, "https://bare" + i + ".example.org/",
+                        "https://bare" + i + ".example.org/", LinkRedirectResolution.NOT_A_REDIRECT,
+                        "Result " + i + " title", DomainClassification.EXTERNAL_DOMAIN, true, "");
+            }
         }
         containers.add(RenderedContainerDescriptor.builder(columnId)
                 .hierarchy("container-0001", blockIds, bodyChildIds.size() - 1, 1)

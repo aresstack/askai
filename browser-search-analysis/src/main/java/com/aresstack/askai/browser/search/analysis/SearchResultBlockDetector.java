@@ -2,6 +2,7 @@ package com.aresstack.askai.browser.search.analysis;
 
 import com.aresstack.askai.browser.domain.DomainClassification;
 import com.aresstack.askai.browser.render.RenderedContainerDescriptor;
+import com.aresstack.askai.browser.render.LinkRedirectResolution;
 import com.aresstack.askai.browser.render.RenderedLinkDescriptor;
 import com.aresstack.askai.browser.render.RenderedPageDocument;
 import com.aresstack.askai.browser.search.LegacyBrowserSearchSettings;
@@ -30,10 +31,35 @@ public final class SearchResultBlockDetector {
     public static final class Detection {
         public final List<DetectedResultBlock> blocks;
         public final List<String> rejectionReasons;
+        /**
+         * Result blocks that ARE hits but whose only title link is a redirect without a known target (e.g. Google
+         * {@code /goto}). Never navigation candidates or sources; kept so that "hits found, target not
+         * resolvable" stays distinguishable from "no hits" (issue #41).
+         */
+        public final List<UnresolvedRedirectHit> unresolvedRedirectHits;
 
         Detection(List<DetectedResultBlock> blocks, List<String> rejectionReasons) {
+            this(blocks, rejectionReasons, Collections.<UnresolvedRedirectHit>emptyList());
+        }
+
+        Detection(List<DetectedResultBlock> blocks, List<String> rejectionReasons,
+                  List<UnresolvedRedirectHit> unresolvedRedirectHits) {
             this.blocks = Collections.unmodifiableList(blocks);
             this.rejectionReasons = Collections.unmodifiableList(rejectionReasons);
+            this.unresolvedRedirectHits = Collections.unmodifiableList(unresolvedRedirectHits);
+        }
+    }
+
+    /** A detected hit whose redirect could not be resolved — diagnostic only. */
+    public static final class UnresolvedRedirectHit {
+        public final String containerId;
+        public final String title;
+        public final String rawHref;
+
+        UnresolvedRedirectHit(String containerId, String title, String rawHref) {
+            this.containerId = containerId;
+            this.title = title;
+            this.rawHref = rawHref;
         }
     }
 
@@ -101,8 +127,9 @@ public final class SearchResultBlockDetector {
             return new Detection(Collections.<DetectedResultBlock>emptyList(), reasons);
         }
 
-        return new Detection(buildBlocks(document, resultCluster, resultCluster.size(), reasons),
-                reasons);
+        List<UnresolvedRedirectHit> unresolved = new ArrayList<UnresolvedRedirectHit>();
+        return new Detection(buildBlocks(document, resultCluster, resultCluster.size(), reasons, unresolved),
+                reasons, unresolved);
     }
 
     /**
@@ -134,7 +161,9 @@ public final class SearchResultBlockDetector {
             reasons.add("no named result block survived the structural checks");
             return new Detection(Collections.<DetectedResultBlock>emptyList(), reasons);
         }
-        return new Detection(buildBlocks(document, named, named.size(), reasons), reasons);
+        List<UnresolvedRedirectHit> unresolved = new ArrayList<UnresolvedRedirectHit>();
+        return new Detection(buildBlocks(document, named, named.size(), reasons, unresolved), reasons,
+                unresolved);
     }
 
     /**
@@ -144,7 +173,8 @@ public final class SearchResultBlockDetector {
      */
     private List<DetectedResultBlock> buildBlocks(RenderedPageDocument document,
                                                   List<RenderedContainerDescriptor> blockContainers,
-                                                  int peerCount, List<String> reasons) {
+                                                  int peerCount, List<String> reasons,
+                                                  List<UnresolvedRedirectHit> unresolved) {
         Map<String, List<RenderedLinkDescriptor>> linksByContainer = indexLinks(document);
         Map<String, List<String>> childrenByParent = indexChildren(document);
         List<DetectedResultBlock> blocks = new ArrayList<DetectedResultBlock>();
@@ -159,7 +189,15 @@ public final class SearchResultBlockDetector {
                     subtreeLinks(block.containerId, childrenByParent, linksByContainer);
             PrimaryResultLinkResolver.Primary primary = primaryResolver.resolve(blockLinks);
             if (primary == null) {
-                reasons.add(block.containerId + ": no qualifying primary link");
+                RenderedLinkDescriptor redirect = unresolvedTitleLink(blockLinks);
+                if (redirect != null) {
+                    unresolved.add(new UnresolvedRedirectHit(block.containerId, redirect.visibleText.trim(),
+                            redirect.rawHref));
+                    reasons.add(block.containerId + ": hit found, but its redirect target is not resolvable"
+                            + " — excluded as source");
+                } else {
+                    reasons.add(block.containerId + ": no qualifying primary link");
+                }
                 continue;
             }
             String snippet = snippetExtractor.extract(block, primary.link);
@@ -171,6 +209,17 @@ public final class SearchResultBlockDetector {
                     structuralConfidence(peerCount, snippet)));
         }
         return blocks;
+    }
+
+    /** The block's visible, title-like link that is an unresolved redirect, or null. */
+    private RenderedLinkDescriptor unresolvedTitleLink(List<RenderedLinkDescriptor> blockLinks) {
+        for (RenderedLinkDescriptor link : blockLinks) {
+            if (link.visible && link.redirectResolutionStatus == LinkRedirectResolution.UNRESOLVED
+                    && link.visibleText.trim().length() >= settings.extraction.minimumTitleCharacters) {
+                return link;
+            }
+        }
+        return null;
     }
 
     /**

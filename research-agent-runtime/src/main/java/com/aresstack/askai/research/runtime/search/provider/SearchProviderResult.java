@@ -16,6 +16,7 @@ public final class SearchProviderResult {
     private final SearchEngine searchEngine;
     private final List<SearchHit> hits;
     private final String rawResponse;
+    private final List<String> unresolvedRedirects;
 
     public SearchProviderResult(SearchProviderId providerId, SearchEngine searchEngine,
                                 List<SearchHit> hits) {
@@ -28,6 +29,16 @@ public final class SearchProviderResult {
      */
     public SearchProviderResult(SearchProviderId providerId, SearchEngine searchEngine,
                                 List<SearchHit> hits, String rawResponse) {
+        this(providerId, searchEngine, hits, rawResponse, Collections.<String>emptyList());
+    }
+
+    /**
+     * @param unresolvedRedirects one diagnostic line per provider hit that was found but whose redirect URL
+     *                            (e.g. Google {@code /goto}) could not be resolved; such hits are NOT in
+     *                            {@code hits}, because they must never become verified sources (issue #41)
+     */
+    public SearchProviderResult(SearchProviderId providerId, SearchEngine searchEngine,
+                                List<SearchHit> hits, String rawResponse, List<String> unresolvedRedirects) {
         if (providerId == null) {
             throw new IllegalArgumentException("Provider id must not be null");
         }
@@ -38,6 +49,8 @@ public final class SearchProviderResult {
         this.searchEngine = searchEngine;
         this.hits = Collections.unmodifiableList(new ArrayList<SearchHit>(hits));
         this.rawResponse = rawResponse == null ? "" : rawResponse;
+        this.unresolvedRedirects = unresolvedRedirects == null ? Collections.<String>emptyList()
+                : Collections.unmodifiableList(new ArrayList<String>(unresolvedRedirects));
     }
 
     public SearchProviderId getProviderId() {
@@ -50,6 +63,14 @@ public final class SearchProviderResult {
 
     public List<SearchHit> getHits() {
         return hits;
+    }
+
+    /**
+     * Diagnostics for hits the provider returned whose redirect target is unknown. Non-empty with empty
+     * {@link #getHits()} means "hits found, but no target resolvable" — not "no hits".
+     */
+    public List<String> getUnresolvedRedirects() {
+        return unresolvedRedirects;
     }
 
     /** The provider's raw response body, or an empty string. */

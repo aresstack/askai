@@ -2,6 +2,8 @@ package com.aresstack.askai.research.search.serp4j;
 
 import com.aresstack.askai.research.search.api.SearchEngine;
 import com.aresstack.askai.research.search.api.SearchProviderId;
+import com.aresstack.askai.research.search.api.SearchRedirectUrls;
+import com.aresstack.askai.research.search.api.UrlResolution;
 import com.aresstack.askai.research.search.api.WebSearchException;
 import com.aresstack.askai.research.search.api.WebSearchHit;
 import com.aresstack.askai.research.search.api.WebSearchProvider;
@@ -15,6 +17,7 @@ import com.aresstack.serp4j.core.model.SearchResponse;
 import com.aresstack.serp4j.core.model.data.ResultProvenance;
 import com.aresstack.serp4j.core.model.data.SearchResultItem;
 import com.aresstack.serp4j.core.model.data.SerpPosition;
+import com.aresstack.serp4j.core.model.ext.ExtensionKey;
 import com.aresstack.serp4j.core.model.ext.RawPayload;
 import com.aresstack.serp4j.core.model.ext.RawPayloadPolicy;
 import com.aresstack.serp4j.core.model.id.SearchEngineId;
@@ -47,6 +50,12 @@ import java.util.concurrent.CompletionException;
  * </ul>
  */
 public final class Serp4jWebSearchProvider implements WebSearchProvider {
+
+    /** Serp4J {@code ResultUrlEnricher.ORIGINAL_URL} (serp4j-http-api, Serp4J PR #25); same key, no extra module. */
+    static final ExtensionKey<String> ORIGINAL_URL = ExtensionKey.of("serp4j", "original_url", String.class);
+    /** Serp4J {@code ResultUrlEnricher.URL_RESOLUTION}: {@code resolved} or the failure reason. */
+    static final ExtensionKey<String> URL_RESOLUTION = ExtensionKey.of("serp4j", "url_resolution", String.class);
+    static final String RESOLVED = "resolved";
 
     private final SearchProviderId providerId;
     private final SearchEngine configuredEngine;
@@ -172,8 +181,7 @@ public final class Serp4jWebSearchProvider implements WebSearchProvider {
             if (title.trim().isEmpty()) {
                 title = item.getDisplayUrl().orElse(url);
             }
-            hits.add(new WebSearchHit(providerId, itemEngine(item, responseEngine), rankOf(item, index),
-                    title, url, item.getSnippet().orElse("")));
+            hits.add(toHit(item, url, title, itemEngine(item, responseEngine), rankOf(item, index)));
         }
 
         String raw = "";
@@ -182,6 +190,34 @@ public final class Serp4jWebSearchProvider implements WebSearchProvider {
             raw = payload.getBodyAsText();
         }
         return new WebSearchResult(providerId, responseEngine, hits, raw);
+    }
+
+    /**
+     * Issue #41: hit and navigation target are separate. A hit stays in the list even if its redirect could not be
+     * resolved, but is then marked {@link UrlResolution#UNRESOLVED} and never becomes a verified source.
+     */
+    private WebSearchHit toHit(SearchResultItem item, String url, String title, SearchEngine engine, int rank) {
+        Optional<String> status = item.getExtensions().get(URL_RESOLUTION);
+        Optional<String> original = item.getExtensions().get(ORIGINAL_URL);
+        UrlResolution resolution;
+        String detail = null;
+        if (status.isPresent()) {
+            if (RESOLVED.equals(status.get()) && !SearchRedirectUrls.isOpaqueRedirect(url)) {
+                resolution = UrlResolution.RESOLVED;
+            } else {
+                resolution = UrlResolution.UNRESOLVED;
+                detail = status.get();
+            }
+        } else if (SearchRedirectUrls.isOpaqueRedirect(url)) {
+            // Serp4J older than PR #25, resolution disabled, or a provider without resolver.
+            resolution = UrlResolution.UNRESOLVED;
+            detail = "not_attempted";
+        } else {
+            resolution = original.isPresent() && !original.get().equals(url)
+                    ? UrlResolution.RESOLVED : UrlResolution.DIRECT;
+        }
+        return new WebSearchHit(providerId, engine, rank, title, url, item.getSnippet().orElse(""),
+                resolution, original.orElse(null), detail);
     }
 
     private static int rankOf(SearchResultItem item, int fallback) {
