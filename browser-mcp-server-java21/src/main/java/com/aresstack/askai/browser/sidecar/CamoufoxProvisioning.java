@@ -16,9 +16,10 @@ import java.util.Comparator;
 import java.util.stream.Stream;
 
 /**
- * Where AskAI keeps the managed Camoufox (the Argos distribution: pinned, patched, SHA-256 verified) and its
- * browser profile, under the same app directory as the logs: {@code <APPDATA>/.askai-java8/browser} and
- * {@code <APPDATA>/.askai-java8/browser-profiles}. The download happens once; later starts only verify.
+ * Where AskAI finds the managed Camoufox (the Argos distribution: pinned, patched, SHA-256 verified) and keeps
+ * its browser profile ({@code <APPDATA>/.askai-java8/browser-profiles}). An existing installation (configured,
+ * Argos' or AskAI's own) is reused; a download into {@code <APPDATA>/.askai-java8/browser} happens only when
+ * none exists. Later starts only verify.
  *
  * <p>While the installer runs, a progress line {@value #PROGRESS_MARKER} goes to STDERR every few seconds:
  * the host restarts its readiness timeout on each one, so the one-time download never counts as a hung
@@ -42,11 +43,66 @@ final class CamoufoxProvisioning {
         return Paths.get(appData, ".askai-java8");
     }
 
+    /** Explicit Camoufox location: a browser root that holds the pinned install directory, or that directory. */
+    static final String ROOT_PROPERTY = "askai.camoufox.root";
+    static final String ROOT_ENV = "ASKAI_CAMOUFOX_ROOT";
+
+    /**
+     * Where the Camoufox installation lives. An existing verified installation is always reused and never
+     * downloaded again: first the explicitly configured location ({@value #ROOT_PROPERTY} /
+     * {@value #ROOT_ENV}), then Argos' installation ({@code ~/.argos/browser}), then AskAI's own directory.
+     * Only when none of them holds the pinned distribution is AskAI's own directory the download target.
+     */
     static Path browserRoot() {
+        Path configured = configuredRoot();
+        if (configured != null) {
+            return configured;
+        }
+        for (Path candidate : new Path[]{
+                Paths.get(System.getProperty("user.home"), ".argos", "browser"),
+                appDirectory().resolve("browser")}) {
+            if (installedUnder(candidate)) {
+                return candidate;
+            }
+        }
         return appDirectory().resolve("browser");
     }
 
-    /** The verified Camoufox executable; downloads and installs it first when needed (blocking). */
+    private static Path configuredRoot() {
+        String value = System.getProperty(ROOT_PROPERTY, "").trim();
+        if (value.isEmpty()) {
+            String env = System.getenv(ROOT_ENV);
+            value = env == null ? "" : env.trim();
+        }
+        if (value.isEmpty()) {
+            return null;
+        }
+        Path path = Paths.get(value).toAbsolutePath().normalize();
+        if (installedUnder(path)) {
+            return path;
+        }
+        // The variable may also name the installation directory itself.
+        Path parent = path.getParent();
+        if (parent != null && path.getFileName().toString().equals(installDirectoryName()) && installedUnder(parent)) {
+            return parent;
+        }
+        throw new IllegalStateException("No verified Camoufox " + installDirectoryName() + " under " + path
+                + " (" + ROOT_PROPERTY + " / " + ROOT_ENV + "); nothing is downloaded for a configured location");
+    }
+
+    private static boolean installedUnder(Path root) {
+        return Files.isDirectory(root) && new CamoufoxInstaller(root, CamoufoxDistribution.builtIn(),
+                CamoufoxDistribution.currentTarget()).isInstalled();
+    }
+
+    private static String installDirectoryName() {
+        return CamoufoxDistribution.builtIn().name() + "-" + CamoufoxDistribution.currentTarget();
+    }
+
+    /**
+     * The verified Camoufox executable. An existing installation is reused (see {@link #browserRoot()}); only
+     * when none exists is it downloaded and installed first (blocking).
+     */
     static Path ensureInstalled() {
         CamoufoxInstaller installer = CamoufoxInstaller.shared(browserRoot(), null);
         while (true) {

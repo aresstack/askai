@@ -115,6 +115,11 @@ public final class CamoufoxInstaller {
         return installDirectory().resolve(CamoufoxDistribution.executableName(target));
     }
 
+    /** True when the pinned distribution is already installed and verified under {@link #root()}. */
+    public boolean isInstalled() {
+        return verified(installDirectory());
+    }
+
     public Status status() {
         return new Status(phase, downloaded.get(), size, failure);
     }
