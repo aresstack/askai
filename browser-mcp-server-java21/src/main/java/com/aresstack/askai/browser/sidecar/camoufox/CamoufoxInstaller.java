@@ -38,7 +38,7 @@ import java.util.zip.ZipFile;
 
 /**
  * Installs the pinned Argos Camoufox distribution under {@code <root>/<camoufox-release-revision>-<target>/}
- * ({@code root} is {@code <APPDATA>/.askai-java8/browser} in AskAI) and reuses it afterwards.
+ * ({@code root} is {@code <APPDATA>/.askai/browser} in AskAI) and reuses it afterwards.
  *
  * <p>Download and unpacking happen in {@code <root>/.partial-<random>/}; the folder becomes the install only after
  * the archive's SHA-256, the expected layout and both WebDriver BiDi fixes were verified, by one atomic rename. An

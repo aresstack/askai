@@ -99,7 +99,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
         JLabel sources = new JLabel("<html><i>Downloads: voices from HuggingFace"
                 + " “rhasspy/piper-voices”; the engine once (~21 MB) from the pinned"
                 + " Piper 2023.11.14-2 release on GitHub. Stored under"
-                + " %APPDATA%\\.askai-java8\\tts.<br>"
+                + " %APPDATA%\\.askai\\tts.<br>"
                 + "The 🔊 entries under Models &gt; Setup &gt; Hugging Face are just a"
                 + " shortcut that opens this section.</i></html>");
         JPanel sourcesRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));

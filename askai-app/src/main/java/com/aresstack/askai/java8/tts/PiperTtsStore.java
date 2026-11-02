@@ -10,8 +10,8 @@ import java.util.List;
 
 /**
  * On-disk layout of the Piper speech-output engine and its installed voices:
- * {@code %APPDATA%\.askai-java8\tts\piper\} (engine: piper.exe + espeak data + dlls) and
- * {@code %APPDATA%\.askai-java8\tts\voices\<voiceId>\} (one directory per voice: .onnx + .onnx.json).
+ * {@code %APPDATA%\.askai\tts\piper\} (engine: piper.exe + espeak data + dlls) and
+ * {@code %APPDATA%\.askai\tts\voices\<voiceId>\} (one directory per voice: .onnx + .onnx.json).
  * "Installed" is fail-closed: a voice counts only when BOTH files exist — a half-written directory
  * (crashed download) is invisible and simply reinstalled.
  */

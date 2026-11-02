@@ -386,13 +386,6 @@ public final class AppConfiguration {
     }
 
     private static File defaultDownloadDirectory() {
-        String appData = System.getenv("APPDATA");
-        File baseDirectory;
-        if (appData != null && appData.trim().length() > 0) {
-            baseDirectory = new File(appData, ".askai-java8");
-        } else {
-            baseDirectory = new File(System.getProperty("user.home"), ".askai-java8");
-        }
-        return new File(baseDirectory, "models");
+        return new File(com.aresstack.askai.java8.settings.AskAiPaths.appDirectory().toFile(), "models");
     }
 }

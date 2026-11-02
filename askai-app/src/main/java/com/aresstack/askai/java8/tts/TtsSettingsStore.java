@@ -12,9 +12,9 @@ import java.util.Map;
 import java.util.Properties;
 
 /**
- * The speech-output settings file: {@code %APPDATA%\.askai-java8\askai-tts.properties}, one
+ * The speech-output settings file: {@code %APPDATA%\.askai\askai-tts.properties}, one
  * engine/voice pair PER LANGUAGE ({@code tts.<lang>.engine} / {@code tts.<lang>.voice}). A separate
- * file (not {@code askai-java8.properties}) so the central repository's whole-file rewrites can
+ * file (not {@code askai.properties}) so the central repository's whole-file rewrites can
  * never clobber these keys and vice versa. Reads are cheap and always fresh — callers load per use
  * instead of caching, so a change from the settings dialog is picked up by the very next speak.
  * The short-lived single-selection keys ({@code tts.engine}/{@code tts.voice}) migrate silently

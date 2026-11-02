@@ -185,13 +185,7 @@ public final class CatalogRepository {
     }
 
     private static File defaultCacheFile() {
-        String appData = System.getenv("APPDATA");
-        File base;
-        if (appData != null && appData.trim().length() > 0) {
-            base = new File(appData, ".askai-java8");
-        } else {
-            base = new File(System.getProperty("user.home"), ".askai-java8");
-        }
+        File base = com.aresstack.askai.java8.settings.AskAiPaths.appDirectory().toFile();
         return new File(new File(base, "catalog-cache"), "models-tags-by-type.json");
     }
 

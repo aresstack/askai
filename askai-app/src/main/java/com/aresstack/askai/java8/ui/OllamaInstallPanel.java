@@ -125,7 +125,7 @@ public final class OllamaInstallPanel extends JPanel {
     // Persistent record of downloads whose sidecar could not be written, so a later install (after a
     // restart, with no sidecar) is not silently degraded to a manual import.
     private final DownloadMetadataRecoveryIndex recoveryIndex = new DownloadMetadataRecoveryIndex(
-            new File(new File(System.getProperty("user.home", "."), ".askai-java8"),
+            new File(com.aresstack.askai.java8.settings.AskAiPaths.appDirectory().toFile(),
                     "download-metadata-recovery.json"));
 
     // Curated library quick-picks (a preview of the future Main-tab Libraries facet); values are

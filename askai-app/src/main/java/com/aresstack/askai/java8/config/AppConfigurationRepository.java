@@ -97,7 +97,7 @@ public final class AppConfigurationRepository {
     }
 
     public AppConfigurationRepository() {
-        this.configurationFile = new File(configurationDirectory(), "askai-java8.properties");
+        this.configurationFile = new File(configurationDirectory(), "askai.properties");
     }
 
     public AppConfiguration load() {
@@ -311,11 +311,7 @@ public final class AppConfigurationRepository {
     }
 
     private File configurationDirectory() {
-        String appData = System.getenv("APPDATA");
-        if (appData != null && appData.trim().length() > 0) {
-            return new File(appData, ".askai-java8");
-        }
-        return new File(System.getProperty("user.home"), ".askai-java8");
+        return com.aresstack.askai.java8.settings.AskAiPaths.appDirectory().toFile();
     }
 
     private boolean parseBoolean(String value, boolean fallback) {
