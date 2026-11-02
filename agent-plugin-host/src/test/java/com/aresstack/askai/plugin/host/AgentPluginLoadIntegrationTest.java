@@ -283,8 +283,39 @@ public class AgentPluginLoadIntegrationTest {
             };
         }
 
+        /** The developer-only FAKE mode: this test proves classloading and isolation, not the runtime. */
+        private final java.util.Map<String, String> state = new java.util.HashMap<String, String>(
+                java.util.Collections.singletonMap("research.runtime.mode", "FAKE"));
+
         public WorkspaceStateStore getStateStore() {
-            return null;
+            return new WorkspaceStateStore() {
+                public String get(String key, String defaultValue) {
+                    String value = state.get(key);
+                    return value == null ? defaultValue : value;
+                }
+
+                public boolean getBoolean(String key, boolean defaultValue) {
+                    String value = state.get(key);
+                    return value == null ? defaultValue : Boolean.parseBoolean(value);
+                }
+
+                public int getInt(String key, int defaultValue) {
+                    String value = state.get(key);
+                    return value == null ? defaultValue : Integer.parseInt(value);
+                }
+
+                public void put(String key, String value) {
+                    state.put(key, value);
+                }
+
+                public void putBoolean(String key, boolean value) {
+                    state.put(key, String.valueOf(value));
+                }
+
+                public void putInt(String key, int value) {
+                    state.put(key, String.valueOf(value));
+                }
+            };
         }
 
         public PluginPathService getPluginPathService() {
