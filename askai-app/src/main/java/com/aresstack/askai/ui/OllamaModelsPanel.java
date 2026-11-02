@@ -314,9 +314,13 @@ public final class OllamaModelsPanel extends JPanel {
                             });
                     if (canRerank) {
                         localCard.withUseMenu(useMenu(modelInfo.getDisplayName(),
-                                java.util.EnumSet.of(ModelUsePurpose.RERANKER)));
+                                () -> java.util.EnumSet.of(ModelUsePurpose.RERANKER)));
                     }
-                    localCard.withLoadToggle(loadToggle(modelInfo.getDisplayName(), running != null));
+                    // The local runtime has no empty-prompt warm-up (/api/generate rejects it), so a local model
+                    // only offers Unload while it runs; it is loaded by its first real request.
+                    if (running != null) {
+                        localCard.withLoadToggle(loadToggle(modelInfo.getDisplayName(), true));
+                    }
                     installedCardsPanel.add(localCard);
                     installedCardsPanel.add(Box.createVerticalStrut(6));
                     loadCapabilities(modelInfo.getDisplayName(), localCard);
@@ -346,8 +350,15 @@ public final class OllamaModelsPanel extends JPanel {
                         confirmAndDelete(modelInfo.getDisplayName());
                     }
                 });
-                card.withUseMenu(useMenu(modelInfo.getDisplayName(),
-                        java.util.EnumSet.of(ModelUsePurpose.CHAT, ModelUsePurpose.EMBEDDINGS)));
+                // Embeddings is offered only once /api/show reports the embedding capability (checked at click
+                // time, so it appears as soon as the capabilities have loaded).
+                final OllamaModelCard useCard = card;
+                card.withUseMenu(useMenu(modelInfo.getDisplayName(), () -> useCard.shownCapabilities()
+                        .contains(ModelCapability.EMBEDDING)
+                        || ModelUsePurpose.EMBEDDINGS.isSelected(model.getAiModelSelections(),
+                                modelInfo.getDisplayName())
+                        ? java.util.EnumSet.of(ModelUsePurpose.CHAT, ModelUsePurpose.EMBEDDINGS)
+                        : java.util.EnumSet.of(ModelUsePurpose.CHAT)));
                 card.withLoadToggle(loadToggle(modelInfo.getDisplayName(), running != null));
                 installedCardsPanel.add(card);
                 installedCardsPanel.add(Box.createVerticalStrut(6));
@@ -534,8 +545,9 @@ public final class OllamaModelsPanel extends JPanel {
      * clears the purpose. Chat goes through the chat window so its model selector follows.
      */
     private java.util.function.Supplier<javax.swing.JPopupMenu> useMenu(final String modelName,
-                                                                         final java.util.Set<ModelUsePurpose> purposes) {
+                                                                         final java.util.function.Supplier<java.util.Set<ModelUsePurpose>> offered) {
         return () -> {
+            java.util.Set<ModelUsePurpose> purposes = offered.get();
             javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
             com.aresstack.askai.config.AiModelSelections selections = model.getAiModelSelections();
             for (final ModelUsePurpose purpose : purposes) {

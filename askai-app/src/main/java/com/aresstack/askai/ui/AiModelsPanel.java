@@ -63,6 +63,39 @@ public final class AiModelsPanel extends JPanel {
         buildUserInterface();
         refreshMainModelLabel();
         reloadAvailableModels();
+        // Other writers (e.g. the "Use" menu in the Models view) change the selections too: follow them, so a
+        // later Save here never writes stale values back.
+        model.addAiModelSelectionListener(new com.aresstack.askai.AiModelSelectionListener() {
+            @Override
+            public void onMainModelChanged() {
+                javax.swing.SwingUtilities.invokeLater(() -> refreshMainModelLabel());
+            }
+
+            @Override
+            public void onRerankerOrEmbeddingsChanged() {
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    AiModelSelections current = model.getAiModelSelections();
+                    select(rerankerCombo, current.getRerankerModel());
+                    select(embeddingsCombo, current.getEmbeddingsModel());
+                });
+            }
+        });
+    }
+
+    /** Select {@code value} in {@code combo} (adding it if the list does not hold it yet); "" = none. */
+    private static void select(JComboBox<String> combo, String value) {
+        String target = value == null || value.isEmpty() ? NONE : value;
+        boolean present = false;
+        for (int i = 0; i < combo.getItemCount(); i++) {
+            if (target.equals(combo.getItemAt(i))) {
+                present = true;
+                break;
+            }
+        }
+        if (!present) {
+            combo.addItem(target);
+        }
+        combo.setSelectedItem(target);
     }
 
     private void buildUserInterface() {
