@@ -161,4 +161,32 @@ public class SearchResultBlockDetectorTest {
                         + richConfidence + " vs " + bareConfidence,
                 richConfidence > bareConfidence + 0.2);
     }
+
+    @Test
+    public void onlyUnresolvedGotoHitsAreFoundButNeverSources() {
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addBareResultColumn(3, new RenderedBox(300, 120, 680, 560), new boolean[] {true, true, true});
+        SearchResultBlockDetector.Detection detection = detect(serp);
+        assertTrue("no unresolved /goto may become a navigation candidate", detection.blocks.isEmpty());
+        assertEquals("hits found, targets not resolvable — not 'no hits'", 3,
+                detection.unresolvedRedirectHits.size());
+        assertTrue(detection.unresolvedRedirectHits.get(0).rawHref.contains("/goto?url="));
+        assertTrue(detection.rejectionReasons.toString().contains("redirect target is not resolvable"));
+    }
+
+    @Test
+    public void mixedDirectAndUnresolvedGotoHitsKeepDirectOnesAsSources() {
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addBareResultColumn(4, new RenderedBox(300, 120, 680, 560),
+                new boolean[] {false, true, false, true});
+        SearchResultBlockDetector.Detection detection = detect(serp);
+        assertEquals(2, detection.blocks.size());
+        for (DetectedResultBlock block : detection.blocks) {
+            assertFalse(block.primaryLink.rawHref.contains("/goto"));
+            assertFalse(block.primaryLink.resolvedTargetUrl.contains("google.com"));
+        }
+        assertEquals("ranks stay dense for the direct hits", 2, detection.blocks.get(1).rank);
+        assertEquals(2, detection.unresolvedRedirectHits.size());
+        assertEquals("Result 1 title", detection.unresolvedRedirectHits.get(0).title);
+    }
 }
