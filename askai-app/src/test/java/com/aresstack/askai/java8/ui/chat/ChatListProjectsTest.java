@@ -198,6 +198,28 @@ public class ChatListProjectsTest {
         return -1;
     }
 
+    @Test
+    public void deleteAllEmptiesTheDrawerIncludingOpenChats() throws Exception {
+        final ChatWorkspacePanel workspace = build();
+        onEdt(new Runnable() {
+            public void run() {
+                workspace.openNewChat();
+                workspace.openNewChat(); // several open "(new chat)" rows, as in the bug report
+                workspace.deleteAllChatsConfirmed();
+                List<String> entries = workspace.chatListEntriesForTest();
+                assertFalse(indexContaining(entries, "Oldtimer Preise") >= 0);
+                assertFalse(indexContaining(entries, "Rezept Lasagne") >= 0);
+                int newChats = 0;
+                for (String entry : entries) {
+                    newChats += entry.contains("(new chat)") ? 1 : 0;
+                }
+                assertEquals("only the one fresh replacement chat remains", 1, newChats);
+                assertEquals(1, workspace.openSessionCount());
+            }
+        });
+        assertTrue("the store is empty", store.list().isEmpty());
+    }
+
     // --- helpers ---
 
     private static final class FakeSession implements ChatSessionComponent {

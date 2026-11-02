@@ -1463,22 +1463,55 @@ public final class ChatWorkspacePanel extends JPanel {
         refreshChatList();
     }
 
-    /** Delete EVERY saved chat — only after an explicit confirmation. Open chats stay open. */
+    /**
+     * Delete EVERY chat — only after an explicit confirmation. "All" means what the drawer shows: the
+     * saved records AND the open chats (open-but-unsaved "(new chat)" rows included). Open chats are
+     * closed; {@link #closeSession} leaves exactly one fresh, empty chat so the workspace is never empty.
+     */
     private void deleteAllChats() {
-        List<ChatRecord> chats = historyStore != null ? historyStore.list()
-                : java.util.Collections.<ChatRecord>emptyList();
-        if (chats.isEmpty()) {
+        int count = deletableChatCount();
+        if (count == 0) {
             return;
         }
         int choice = JOptionPane.showConfirmDialog(this,
-                "Delete ALL " + chats.size() + " saved chats? This cannot be undone.",
+                "Delete ALL " + count + " chats? Open chats are closed. This cannot be undone.",
                 "Delete all chats", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
         if (choice != JOptionPane.OK_OPTION) {
             return;
         }
-        for (ChatRecord chat : chats) {
-            historyStore.delete(chat.getId());
-            detachOpenPanelFromDeletedChat(chat.getId());
+        deleteAllChatsConfirmed();
+    }
+
+    /** Number of distinct chats the drawer lists (saved, open, soft-deleted) — the delete-all scope. */
+    private int deletableChatCount() {
+        java.util.Set<String> ids = new java.util.HashSet<String>();
+        if (historyStore != null) {
+            for (ChatRecord record : historyStore.list()) {
+                ids.add(record.getId());
+            }
+        }
+        for (ChatSessionId id : sessionsById.keySet()) {
+            ids.add(id.toString());
+        }
+        ids.addAll(deletedChats.keySet());
+        return ids.size();
+    }
+
+    /** The confirmed delete-all (package-private for tests: no dialog). */
+    void deleteAllChatsConfirmed() {
+        if (historyStore != null) {
+            for (ChatRecord chat : historyStore.list()) {
+                detachOpenPanelFromDeletedChat(chat.getId()); // before closing: no last autosave
+                historyStore.delete(chat.getId());
+            }
+        }
+        deletedChats.clear(); // soft-deleted rows are gone for good too, no undo left
+        for (ChatSessionId id : new ArrayList<ChatSessionId>(sessionsById.keySet())) {
+            ChatSessionComponent session = sessionsById.get(id);
+            if (session instanceof OllamaChatPanel) {
+                ((OllamaChatPanel) session).detachFromPersistedChat();
+            }
+            closeSession(id); // the last close opens one fresh chat
         }
         refreshChatList();
     }
