@@ -26,7 +26,9 @@ subprojects {
     // Java 8; the Java-8 host never compiles against or loads sidecar classes.
     def java21Modules = [
             'browser-mcp-server-java21',
-            'local-model-runtime-sidecar-java21'
+            'local-model-runtime-sidecar-java21',
+            // askai #31 / Serp4J ADR-020: Google provider on serp4j-playwright (in AskAI, not published).
+            'serp4j-playwright-google'
     ]
     if (!(name in java21Modules)) {
         sourceCompatibility = JavaVersion.VERSION_1_8
