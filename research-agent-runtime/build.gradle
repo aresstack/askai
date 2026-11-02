@@ -88,6 +88,10 @@ test {
         if (System.getProperty('askai.live.main.model') != null) {
             systemProperty 'askai.live.main.model', System.getProperty('askai.live.main.model')
         }
+        // askai #48 live check: -Daskai.live.google=camoufox runs a real Google search on the shared search browser.
+        if (System.getProperty('askai.live.google') != null) {
+            systemProperty 'askai.live.google', System.getProperty('askai.live.google')
+        }
         if (System.getProperty('askai.live.probe.target') != null) {
             systemProperty 'askai.live.probe.target', System.getProperty('askai.live.probe.target')
         }
