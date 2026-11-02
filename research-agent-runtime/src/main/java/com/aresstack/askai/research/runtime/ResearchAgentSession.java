@@ -670,6 +670,7 @@ public final class ResearchAgentSession {
             case DATA_FOR_SEO: return "DataForSEO";
             case BRAVE_SEARCH_API: return "Brave Search";
             case BRIGHT_DATA: return "Bright Data";
+            case SERP_API: return "SerpApi";
             default: return providerId.name();
         }
     }

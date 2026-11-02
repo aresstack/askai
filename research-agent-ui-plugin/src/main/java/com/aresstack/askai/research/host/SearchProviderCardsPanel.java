@@ -29,9 +29,9 @@ import java.awt.event.ActionListener;
 public final class SearchProviderCardsPanel extends JPanel {
 
     /** Index-aligned with the combo; "" = the legacy browser SERP path. */
-    private static final String[] PROVIDER_IDS = {"", "BRAVE_SEARCH_API", "BRIGHT_DATA", "DATA_FOR_SEO"};
+    private static final String[] PROVIDER_IDS = {"", "BRAVE_SEARCH_API", "BRIGHT_DATA", "DATA_FOR_SEO", "SERP_API"};
     private static final String[] PROVIDER_LABELS =
-            {"Browser (SERP)", "Brave Search API", "Bright Data", "DataForSEO"};
+            {"Browser (SERP)", "Brave Search API", "Bright Data", "DataForSEO", "SerpApi"};
 
     private final WorkspaceStateStore store;
     private final JComboBox<String> source = ComicControls.<String>comboBox(PROVIDER_LABELS);
@@ -69,6 +69,7 @@ public final class SearchProviderCardsPanel extends JPanel {
         cardHost.add(placeholderCard("Brave Search API"), PROVIDER_LABELS[1]);
         cardHost.add(placeholderCard("Bright Data"), PROVIDER_LABELS[2]);
         cardHost.add(dataForSeoCard(), PROVIDER_LABELS[3]);
+        cardHost.add(placeholderCard("SerpApi"), PROVIDER_LABELS[4]);
         add(cardHost, BorderLayout.CENTER);
 
         int selected = indexOfProvider(ResearchRuntimeSettings.loadSearchStrategy(store));

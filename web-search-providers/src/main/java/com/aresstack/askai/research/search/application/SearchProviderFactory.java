@@ -24,6 +24,8 @@ import com.aresstack.askai.research.search.http.EncryptedBearerAuthentication;
 import com.aresstack.askai.research.search.http.EncryptedHeaderAuthentication;
 import com.aresstack.askai.research.search.security.SecretValueService;
 import com.aresstack.askai.research.search.serp4j.Serp4jProviderFactory;
+import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfiguration;
+import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfigurationValidator;
 import com.google.gson.Gson;
 
 public final class SearchProviderFactory {
@@ -73,6 +75,15 @@ public final class SearchProviderFactory {
         new DataForSeoSearchConfigurationValidator()
                 .validate(configuration);
         return serp4j.createDataForSeo(configuration);
+    }
+
+    /** SerpApi via Serp4J ({@code serp4j-provider-serpapi}, Google or Bing); no AskAI-side implementation. */
+    public WebSearchProvider createSerpApi(
+            SerpApiSearchConfiguration configuration) {
+
+        new SerpApiSearchConfigurationValidator()
+                .validate(configuration);
+        return serp4j.createSerpApi(configuration);
     }
 
     /**

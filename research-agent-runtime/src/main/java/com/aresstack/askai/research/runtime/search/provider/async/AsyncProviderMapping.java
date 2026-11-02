@@ -7,7 +7,7 @@ import com.aresstack.askai.research.runtime.search.provider.SearchProviderId;
  * Pure mapping between the runtime search type-space
  * ({@link SearchProviderId}/{@link SearchEngine}) and the async module's own
  * ({@link com.aresstack.askai.research.search.api.SearchProviderId}/{@link
- * com.aresstack.askai.research.search.api.SearchEngine}). Only the three migrated providers map; anything
+ * com.aresstack.askai.research.search.api.SearchEngine}). Only the migrated providers map; anything
  * else (e.g. the module's {@code COMPOSITE}) returns {@code null} so the caller can skip it.
  */
 public final class AsyncProviderMapping {
@@ -28,6 +28,8 @@ public final class AsyncProviderMapping {
                 return SearchProviderId.BRIGHT_DATA;
             case DATA_FOR_SEO:
                 return SearchProviderId.DATA_FOR_SEO;
+            case SERP_API:
+                return SearchProviderId.SERP_API;
             default:
                 return null; // COMPOSITE and any future module-only ids are not wired into the runtime seam
         }
@@ -43,6 +45,7 @@ public final class AsyncProviderMapping {
                 return SearchEngine.BRAVE;
             case BRIGHT_DATA:
             case DATA_FOR_SEO:
+            case SERP_API:
                 return SearchEngine.PROVIDER_DEFAULT; // the real engine comes from each result (toRuntimeEngine)
             default:
                 return null;

@@ -18,7 +18,7 @@ import java.util.Set;
 
 /**
  * The productive async {@link SearchProviderRegistry}: it fronts a live {@link AsyncSearchGeneration} for
- * the migrated providers (BRAVE / BRIGHT_DATA / DATA_FOR_SEO) and supports hot {@link #reload()} without
+ * the migrated providers (BRAVE / BRIGHT_DATA / DATA_FOR_SEO / SERP_API) and supports hot {@link #reload()} without
  * ever tearing an AsyncHttpClient out from under an in-flight search.
  *
  * <p>Lifecycle rules (all under one monitor):</p>
@@ -41,7 +41,8 @@ public final class AsyncSearchProviderRegistry implements SearchProviderRegistry
 
     /** The provider ids served by the async module; every other catalogued id stays NOT_IMPLEMENTED here. */
     private static final Set<SearchProviderId> MIGRATED = EnumSet.of(
-            SearchProviderId.BRAVE_SEARCH_API, SearchProviderId.BRIGHT_DATA, SearchProviderId.DATA_FOR_SEO);
+            SearchProviderId.BRAVE_SEARCH_API, SearchProviderId.BRIGHT_DATA, SearchProviderId.DATA_FOR_SEO,
+            SearchProviderId.SERP_API);
 
     private final AsyncSearchGenerationFactory factory;
     private final Object lock = new Object();

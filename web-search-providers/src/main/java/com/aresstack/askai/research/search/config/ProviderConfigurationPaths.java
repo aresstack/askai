@@ -47,6 +47,10 @@ public final class ProviderConfigurationPaths {
         return providerDirectory.resolve("dataforseo.json");
     }
 
+    public Path getSerpApiConfigurationFile() {
+        return providerDirectory.resolve("serpapi.json");
+    }
+
     public Path getSecretKeyFile() {
         return providerDirectory.resolve(
                 ".provider-secrets.key");

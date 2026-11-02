@@ -9,6 +9,7 @@ import com.aresstack.askai.research.search.config.HttpTransportConfiguration;
 import com.aresstack.askai.research.search.dataforseo.DataForSeoResultFormat;
 import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchConfiguration;
 import com.aresstack.askai.research.search.security.SecretValueService;
+import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfiguration;
 import com.aresstack.serp4j.core.model.id.ProviderId;
 import com.aresstack.serp4j.core.port.credential.CredentialKey;
 import com.aresstack.serp4j.http.ahc.AhcHttpTransport;
@@ -18,6 +19,8 @@ import com.aresstack.serp4j.provider.brave.BraveSearchProvider;
 import com.aresstack.serp4j.provider.brightdata.BrightDataSearchProvider;
 import com.aresstack.serp4j.provider.dataforseo.DataForSeoFunction;
 import com.aresstack.serp4j.provider.dataforseo.DataForSeoSearchProvider;
+import com.aresstack.serp4j.provider.serpapi.SerpApiSearchOptions;
+import com.aresstack.serp4j.provider.serpapi.SerpApiSearchProvider;
 
 import java.time.Duration;
 
@@ -25,13 +28,15 @@ import java.time.Duration;
  * Builds AskAI's {@link WebSearchProvider}s from the existing AskAI configuration files, backed by the Serp4J
  * provider modules (WP5). AskAI stays the host: it owns configuration, the AES-GCM secrets (resolved through
  * {@link HostCredentialProvider}) and one {@link AhcHttpTransport} per provider instance, which the returned
- * adapter closes. Credentials only ever travel in HTTP headers, as implemented by the Serp4J providers.
+ * adapter closes. Credentials travel in HTTP headers, as implemented by the Serp4J providers; the one exception is
+ * SerpApi, which only accepts {@code api_key} as URL parameter (masked by Serp4J in every log and error text).
  */
 public final class Serp4jProviderFactory {
 
     static final ProviderId BRAVE_ID = ProviderId.of(BraveSearchProvider.PROVIDER_TYPE);
     static final ProviderId BRIGHT_DATA_ID = ProviderId.of(BrightDataSearchProvider.PROVIDER_TYPE);
     static final ProviderId DATA_FOR_SEO_ID = ProviderId.of(DataForSeoSearchProvider.PROVIDER_TYPE);
+    static final ProviderId SERP_API_ID = ProviderId.of(SerpApiSearchProvider.PROVIDER_TYPE);
 
     private final SecretValueService secretValueService;
 
@@ -135,6 +140,52 @@ public final class Serp4jProviderFactory {
                 builder.defaultLanguageCode(configuration.getLanguageCode().trim());
             }
             return new Serp4jWebSearchProvider(SearchProviderId.DATA_FOR_SEO, engine, builder.build(), transport);
+        } catch (RuntimeException failure) {
+            transport.close();
+            throw failure;
+        }
+    }
+
+    public WebSearchProvider createSerpApi(SerpApiSearchConfiguration configuration) {
+        CredentialKey apiKey = CredentialKey.of(SERP_API_ID, SerpApiSearchProvider.API_KEY_SECRET);
+        HostCredentialProvider credentials = HostCredentialProvider.builder(secretValueService)
+                .encrypted(apiKey, configuration.getApiKey())
+                .build();
+        SearchEngine engine = configuration.getSearchEngine() == null
+                ? SearchEngine.GOOGLE : configuration.getSearchEngine().getSearchEngine();
+        SerpApiSearchOptions.Builder options = SerpApiSearchOptions.builder()
+                .timeout(requestTimeout(configuration.getTransport()))
+                .noCache(configuration.isNoCache())
+                .resolveGoogleGotoUrls(configuration.isResolveGoogleGotoUrls());
+        if (hasText(configuration.getBaseUrl())) {
+            options.baseUrl(configuration.getBaseUrl().trim());
+        }
+        if (hasText(configuration.getCountry())) {
+            options.defaultCountry(configuration.getCountry().trim());
+        }
+        if (hasText(configuration.getLanguage())) {
+            options.defaultLanguage(configuration.getLanguage().trim());
+        }
+        if (hasText(configuration.getLocation())) {
+            options.defaultLocation(configuration.getLocation().trim());
+        }
+        if (hasText(configuration.getGoogleDomain())) {
+            options.googleDomain(configuration.getGoogleDomain().trim());
+        }
+        if (configuration.getUrlResolveTimeoutMillis() > 0) {
+            options.urlResolveTimeout(Duration.ofMillis(configuration.getUrlResolveTimeoutMillis()));
+        }
+        AhcHttpTransport transport = transport(configuration.getTransport());
+        try {
+            SerpApiSearchProvider provider = SerpApiSearchProvider.builder()
+                    .id(SERP_API_ID)
+                    .transport(transport)
+                    .credentials(credentials)
+                    .credentialKey(apiKey)
+                    .options(options.build())
+                    .build();
+            // The configured engine (google/bing) is sent per request by Serp4jWebSearchProvider.
+            return new Serp4jWebSearchProvider(SearchProviderId.SERP_API, engine, provider, transport);
         } catch (RuntimeException failure) {
             transport.close();
             throw failure;
