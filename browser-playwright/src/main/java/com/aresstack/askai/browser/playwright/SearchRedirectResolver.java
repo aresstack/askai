@@ -17,6 +17,8 @@ import java.util.Locale;
  * ({@link #isOpaqueWrapper}); its treatment is an {@link OpaqueRedirectStrategy}, shipped as
  * {@link OpaqueRedirectStrategy#DISCARD}: {@code UNRESOLVED}. The wrapper URL itself is never a result link.</li>
  * <li>DuckDuckGo: {@code /l/?uddg=<target>}</li>
+ * <li>Google: {@code /goto?url=CAES...} — an opaque token, never decoded: always {@code UNRESOLVED}
+ * (issue #41). Its HTTP resolution happens in Serp4J for API providers, not in the browser capture.</li>
  * </ul>
  * A wrapper whose target cannot be extracted safely is {@code UNRESOLVED} — the caller discards it in a
  * controlled way instead of misclassifying it by the engine's host.
@@ -180,6 +182,12 @@ final class SearchRedirectResolver {
     private static String stripQuery(String path) {
         int question = path.indexOf('?');
         return question < 0 ? path : path.substring(0, question);
+    }
+
+    private static boolean isGoogleHost(String host) {
+        String h = host.startsWith("www.") ? host.substring(4) : host;
+        return h.equals("google.com") || h.matches("google\\.(co\\.)?[a-z]{2,3}")
+                || h.matches("google\\.com\\.[a-z]{2}");
     }
 
     private static String firstNonEmpty(String... values) {

@@ -74,6 +74,24 @@ public final class AsyncModuleSearchProviderTest {
     }
 
     @Test
+    public void unresolvedGotoRedirectsNeverBecomeSourceHitsButStayDiagnosable() {
+        WebSearchHit unresolved = new WebSearchHit(MODULE_ID, MODULE_ENGINE, 1, "Elastic Search API",
+                "https://www.google.com/goto?url=CAESAAAA", "", com.aresstack.askai.research.search.api.UrlResolution.UNRESOLVED,
+                null, "timeout");
+        WebSearchHit direct = new WebSearchHit(MODULE_ID, MODULE_ENGINE, 2,
+                "PF4J", "https://pf4j.org/", "");
+        FakeProvider fake = FakeProvider.completedWith(new WebSearchResult(MODULE_ID, MODULE_ENGINE,
+                java.util.Arrays.asList(unresolved, direct), "{}"));
+
+        SearchProviderResult result = adapter(fake, 5_000).search(request());
+
+        assertEquals(1, result.getHits().size());
+        assertEquals("pf4j.org", result.getHits().get(0).getDomain()); // no google.com source domain
+        assertEquals(1, result.getUnresolvedRedirects().size());
+        assertTrue(result.getUnresolvedRedirects().get(0).contains("timeout"));
+    }
+
+    @Test
     public void http401IsAuthentication() {
         assertTranslates(new HttpResponseException(401, "denied"), SearchProviderAuthenticationException.class);
         assertTranslates(new HttpResponseException(403, "denied"), SearchProviderAuthenticationException.class);
