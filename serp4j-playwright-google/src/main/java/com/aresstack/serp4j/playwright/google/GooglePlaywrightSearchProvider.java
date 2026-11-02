@@ -152,6 +152,8 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
         String finalUrl;
         String html;
         Response response;
+        boolean truncated = false;
+        GoogleSerpPage parsed;
         Page page = null;
         try {
             page = openPage(browser);
@@ -160,6 +162,16 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
             awaitResultPage(page, context);
             finalUrl = page.url();
             html = page.content();
+            if (html.length() > PlaywrightSearchSupport.MAX_RAW_HTML_CHARS) {
+                html = html.substring(0, PlaywrightSearchSupport.MAX_RAW_HTML_CHARS);
+                truncated = true;
+            }
+            parsed = parser.parse(html);
+            if (!context.getCancellation().isCancelled()) {
+                // /goto links redirect only for the session that got the result page: resolve them in its context.
+                parsed = BrowserGotoResolver.resolve(page.context().request(), parsed, clock,
+                        PlaywrightSearchSupport.timeoutMillis(context, navigationTimeout, clock.instant()));
+            }
         } catch (PlaywrightException e) {
             throw PlaywrightSearchSupport.translate(id, e, context, clock.instant());
         } finally {
@@ -168,12 +180,6 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
         if (context.getCancellation().isCancelled()) {
             throw new SearchProviderException(id, SearchErrorCategory.CANCELLED, "search was cancelled");
         }
-        boolean truncated = false;
-        if (html.length() > PlaywrightSearchSupport.MAX_RAW_HTML_CHARS) {
-            html = html.substring(0, PlaywrightSearchSupport.MAX_RAW_HTML_CHARS);
-            truncated = true;
-        }
-        GoogleSerpPage parsed = parser.parse(html);
         GoogleObstacle obstacle = GoogleObstacleDetector.fromPage(finalUrl, parsed);
         if (obstacle != GoogleObstacle.NONE) {
             // ADR-016: consent, challenge and sign-in pages are reported, never clicked away.

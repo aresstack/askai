@@ -57,6 +57,29 @@ public final class GoogleSerpPage {
         return pageObstacle;
     }
 
+    /**
+     * A copy whose organic and sitelink URLs are replaced where {@code resolver} returns a non-null URL (a resolved
+     * {@code /goto} link); everything else stays as it is.
+     */
+    GoogleSerpPage withResolvedUrls(java.util.function.Function<String, String> resolver) {
+        List<Organic> organics = new ArrayList<Organic>(organicResults.size());
+        for (Organic o : organicResults) {
+            List<Link> links = new ArrayList<Link>(o.siteLinks.size());
+            for (Link link : o.siteLinks) {
+                links.add(new Link(link.text, resolvedOr(resolver, link.url), link.description));
+            }
+            organics.add(new Organic(o.rank, o.title, resolvedOr(resolver, o.url), o.displayUrl, o.siteName,
+                    o.snippet, o.dateText, o.video, links));
+        }
+        return new GoogleSerpPage(organics, relatedQueries, structureRecognized, nextPage, unrecognizedBlocks,
+                pageObstacle);
+    }
+
+    private static String resolvedOr(java.util.function.Function<String, String> resolver, String url) {
+        String resolved = resolver.apply(url);
+        return resolved == null ? url : resolved;
+    }
+
     @Override
     public String toString() {
         return "GoogleSerpPage{organic=" + organicResults.size() + ", related=" + relatedQueries.size()

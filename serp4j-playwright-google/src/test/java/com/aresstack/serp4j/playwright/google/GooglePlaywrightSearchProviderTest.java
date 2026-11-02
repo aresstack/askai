@@ -130,12 +130,27 @@ class GooglePlaywrightSearchProviderTest {
         }
 
         Browser browser() {
-            BrowserContext context = proxy(BrowserContext.class, (name, args) -> {
+            // /goto links answer without redirect here, so the URLs stay as parsed.
+            com.microsoft.playwright.APIResponse noRedirect = proxy(com.microsoft.playwright.APIResponse.class,
+                    (name, args) -> name.equals("status") ? (Object) 200 : null);
+            com.microsoft.playwright.APIRequestContext request = proxy(
+                    com.microsoft.playwright.APIRequestContext.class, (name, args) -> {
+                        if (name.equals("get")) {
+                            return noRedirect;
+                        }
+                        throw new UnsupportedOperationException(name);
+                    });
+            BrowserContext[] holder = new BrowserContext[1];
+            holder[0] = proxy(BrowserContext.class, (name, args) -> {
                 if (name.equals("newPage")) {
-                    return page();
+                    return page(holder[0]);
+                }
+                if (name.equals("request")) {
+                    return request;
                 }
                 throw new UnsupportedOperationException(name);
             });
+            BrowserContext context = holder[0];
             return proxy(Browser.class, (name, args) -> {
                 switch (name) {
                     case "isConnected":
@@ -151,7 +166,7 @@ class GooglePlaywrightSearchProviderTest {
             });
         }
 
-        private Page page() {
+        private Page page(BrowserContext context) {
             Response response = proxy(Response.class, (name, args) -> {
                 if (name.equals("status")) {
                     return status;
@@ -178,6 +193,8 @@ class GooglePlaywrightSearchProviderTest {
                         return finalUrl;
                     case "content":
                         return html;
+                    case "context":
+                        return context;
                     case "close":
                         pageClosed = true;
                         return null;
