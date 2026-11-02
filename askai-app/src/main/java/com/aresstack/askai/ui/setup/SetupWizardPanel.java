@@ -99,6 +99,8 @@ public final class SetupWizardPanel extends JPanel {
 
     private static final int READING_MILLIS_PER_CHARACTER = 60;
     private static final int MIN_READING_MILLIS = 1800;
+    /** Label of the check {@link SetupActions#finish} reports when the settings could not be written. */
+    static final String SAVING_CHECK = "Saving the settings";
     private static final String SKIP_STEP_HINT = "Go to the next step without a check; your entries stay";
     private static final String SKIP_VOICE_HINT = "Finish without changing the voices; the setup is already saved";
     static final String VOICES_SKIPPED = "Ready. The voices stay as they are; change them later in the chat "
@@ -1190,11 +1192,23 @@ public final class SetupWizardPanel extends JPanel {
                 return;
             }
             setBusy(false);
+            for (SetupCheck check : checks == null ? Collections.<SetupCheck>emptyList() : checks) {
+                if (SAVING_CHECK.equals(check.label()) && !check.isOk()) {
+                    // A failed readiness check never blocks, but unsaved entries must not be lost silently.
+                    fail(step, "Your entries could not be saved: " + check.detail());
+                    return;
+                }
+            }
             then.run();
         });
     }
 
     private void saveVoicesAndClose() {
+        if (!voicesReady()) { // the choice changed while the entries were saved: finish without the voices
+            close();
+            complete();
+            return;
+        }
         setBusy(true);
         setup.saveVoices(collect(), error -> {
             if (closed) {

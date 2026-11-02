@@ -408,7 +408,7 @@ public final class AskAiSetupActions implements SetupActions {
         try {
             save(draft);
         } catch (RuntimeException e) {
-            done.accept(Collections.singletonList(SetupCheck.failed("Saving the settings", message(e))));
+            done.accept(Collections.singletonList(SetupCheck.failed(SetupWizardPanel.SAVING_CHECK, message(e))));
             return;
         }
         background(() -> {

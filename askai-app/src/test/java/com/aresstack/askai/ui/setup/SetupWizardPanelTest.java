@@ -226,6 +226,21 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void aFailedSaveKeepsTheWizardOpen() {
+        Fake fake = new Fake();
+        fake.checks = Collections.singletonList(SetupCheck.failed(SetupWizardPanel.SAVING_CHECK, "disk full"));
+        SetupWizardPanel wizard = wizard(fake);
+        final boolean[] finished = {false};
+        wizard.setOnFinished(() -> finished[0] = true);
+        wizard.jumpTo(SetupWizardPanel.STEP_VOICE);
+
+        wizard.skipButton().doClick();
+
+        assertFalse("unsaved entries must not close the wizard", finished[0]);
+        assertTrue(wizard.errorOf(SetupWizardPanel.STEP_VOICE).contains("disk full"));
+    }
+
+    @Test
     public void finishingAfterJumpingPastTheCheckStillSavesTheEntries() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
