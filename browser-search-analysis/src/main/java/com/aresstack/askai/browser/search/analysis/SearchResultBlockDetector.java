@@ -38,9 +38,9 @@ public final class SearchResultBlockDetector {
         public final List<DetectedResultBlock> blocks;
         public final List<String> rejectionReasons;
         /**
-         * Result blocks that ARE hits but whose only title link is a redirect without a known target (e.g. Google
-         * {@code /goto}). Never navigation candidates or sources; kept so that "hits found, target not
-         * resolvable" stays distinguishable from "no hits" (issue #41).
+         * Result blocks whose primary link is a redirect without a known target (e.g. Google {@code /goto}). Since
+         * askai #41 (lazy resolution) they ARE blocks and become unverified candidates; this list only reports
+         * them for diagnostics.
          */
         public final List<UnresolvedRedirectHit> unresolvedRedirectHits;
 
@@ -56,7 +56,7 @@ public final class SearchResultBlockDetector {
         }
     }
 
-    /** A detected hit whose redirect could not be resolved — diagnostic only. */
+    /** A detected hit whose redirect is not resolved yet — diagnostic only; the block itself is kept. */
     public static final class UnresolvedRedirectHit {
         public final String containerId;
         public final String title;
@@ -353,16 +353,14 @@ public final class SearchResultBlockDetector {
                     subtreeLinks(block.containerId, childrenByParent, linksByContainer);
             PrimaryResultLinkResolver.Primary primary = primaryResolver.resolve(blockLinks);
             if (primary == null) {
-                RenderedLinkDescriptor redirect = unresolvedTitleLink(blockLinks);
-                if (redirect != null) {
-                    unresolved.add(new UnresolvedRedirectHit(block.containerId, redirect.visibleText.trim(),
-                            redirect.rawHref));
-                    reasons.add(block.containerId + ": hit found, but its redirect target is not resolvable"
-                            + " — excluded as source");
-                } else {
-                    reasons.add(block.containerId + ": no qualifying primary link");
-                }
+                reasons.add(block.containerId + ": no qualifying primary link");
                 continue;
+            }
+            if (primary.link.redirectResolutionStatus == LinkRedirectResolution.UNRESOLVED) {
+                unresolved.add(new UnresolvedRedirectHit(block.containerId, primary.link.visibleText.trim(),
+                        primary.link.rawHref));
+                reasons.add(block.containerId + ": redirect target not resolved yet — kept as unverified"
+                        + " candidate (the browser resolves it when it opens the hit)");
             }
             String snippet = snippetExtractor.extract(block, primary.link);
             List<RenderedLinkDescriptor> siteLinks = siteLinks(blockLinks, primary.link);
@@ -373,17 +371,6 @@ public final class SearchResultBlockDetector {
                     structuralConfidence(peerCount, snippet)));
         }
         return blocks;
-    }
-
-    /** The block's visible, title-like link that is an unresolved redirect, or null. */
-    private RenderedLinkDescriptor unresolvedTitleLink(List<RenderedLinkDescriptor> blockLinks) {
-        for (RenderedLinkDescriptor link : blockLinks) {
-            if (link.visible && link.redirectResolutionStatus == LinkRedirectResolution.UNRESOLVED
-                    && link.visibleText.trim().length() >= settings.extraction.minimumTitleCharacters) {
-                return link;
-            }
-        }
-        return null;
     }
 
     /**
@@ -409,10 +396,11 @@ public final class SearchResultBlockDetector {
             if (siteLinks.size() >= settings.extraction.maximumSiteLinksPerResult) {
                 break;
             }
+            String url = LegacySearchResultExtractor.navigationUrlOf(link);
             if (!link.linkId.equals(primary.linkId) && link.visible
-                    && !link.resolvedTargetUrl.isEmpty()
+                    && !url.isEmpty()
                     && link.domainClassification == DomainClassification.EXTERNAL_DOMAIN
-                    && !link.resolvedTargetUrl.equals(primary.resolvedTargetUrl)) {
+                    && !url.equals(LegacySearchResultExtractor.navigationUrlOf(primary))) {
                 siteLinks.add(link);
             }
         }

@@ -236,7 +236,7 @@ public final class WebSearchLayoutRepairService {
                     }
                 }
                 for (SearchResultCandidate candidate : result.candidates) {
-                    if (seenTargets.add(candidate.resolvedTargetUrl)) {
+                    if (seenTargets.add(candidate.navigationUrl())) {
                         merged.add(candidate);
                     }
                 }

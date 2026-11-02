@@ -287,29 +287,32 @@ public class SearchResultBlockDetectorTest {
     }
 
     @Test
-    public void onlyUnresolvedGotoHitsAreFoundButNeverSources() {
+    public void onlyUnresolvedGotoHitsAreAllKeptAsBlocks() {
+        // askai #41 (lazy resolution), same rule as the Google search over Serp4J: a /goto hit is a hit.
         SerpDocuments serp = SerpDocuments.builder();
         serp.addBareResultColumn(3, new RenderedBox(300, 120, 680, 560), new boolean[] {true, true, true});
         SearchResultBlockDetector.Detection detection = detect(serp);
-        assertTrue("no unresolved /goto may become a navigation candidate", detection.blocks.isEmpty());
-        assertEquals("hits found, targets not resolvable — not 'no hits'", 3,
-                detection.unresolvedRedirectHits.size());
-        assertTrue(detection.unresolvedRedirectHits.get(0).rawHref.contains("/goto?url="));
-        assertTrue(detection.rejectionReasons.toString().contains("redirect target is not resolvable"));
+        assertEquals("every /goto hit stays a block", 3, detection.blocks.size());
+        for (DetectedResultBlock block : detection.blocks) {
+            assertEquals(LinkRedirectResolution.UNRESOLVED, block.primaryLink.redirectResolutionStatus);
+            assertTrue(block.primaryLink.rawHref.contains("/goto?url="));
+        }
+        assertEquals("reported for diagnostics", 3, detection.unresolvedRedirectHits.size());
+        assertTrue(detection.rejectionReasons.toString().contains("kept as unverified candidate"));
     }
 
     @Test
-    public void mixedDirectAndUnresolvedGotoHitsKeepDirectOnesAsSources() {
+    public void mixedDirectAndUnresolvedGotoHitsAreAllKeptInTheirOrder() {
         SerpDocuments serp = SerpDocuments.builder();
         serp.addBareResultColumn(4, new RenderedBox(300, 120, 680, 560),
                 new boolean[] {false, true, false, true});
         SearchResultBlockDetector.Detection detection = detect(serp);
-        assertEquals(2, detection.blocks.size());
-        for (DetectedResultBlock block : detection.blocks) {
-            assertFalse(block.primaryLink.rawHref.contains("/goto"));
-            assertFalse(block.primaryLink.resolvedTargetUrl.contains("google.com"));
-        }
-        assertEquals("ranks stay dense for the direct hits", 2, detection.blocks.get(1).rank);
+        assertEquals(4, detection.blocks.size());
+        assertFalse(detection.blocks.get(0).primaryLink.rawHref.contains("/goto"));
+        assertTrue(detection.blocks.get(1).primaryLink.rawHref.contains("/goto"));
+        assertFalse(detection.blocks.get(2).primaryLink.rawHref.contains("/goto"));
+        assertTrue(detection.blocks.get(3).primaryLink.rawHref.contains("/goto"));
+        assertEquals("ranks stay dense", 4, detection.blocks.get(3).rank);
         assertEquals(2, detection.unresolvedRedirectHits.size());
         assertEquals("Result 1 title", detection.unresolvedRedirectHits.get(0).title);
     }
