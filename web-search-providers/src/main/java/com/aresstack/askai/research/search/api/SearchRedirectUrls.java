@@ -24,7 +24,7 @@ public final class SearchRedirectUrls {
             URI uri = URI.create(url.trim());
             String scheme = uri.getScheme();
             String host = uri.getHost();
-            if (scheme == null || host == null || !scheme.toLowerCase(Locale.ROOT).startsWith("http")) {
+            if (scheme == null || host == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
                 return false;
             }
             String path = uri.getRawPath() == null ? "" : uri.getRawPath();
