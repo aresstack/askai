@@ -129,12 +129,13 @@ final class PlaywrightBrowserSession implements BrowserSession {
                             if (items.size() >= settings.navigation.searchResultLimit) {
                                 break;
                             }
-                            if (!seenTargets.add(candidate.resolvedTargetUrl)) {
+                            // askai #41: an unresolved redirect is opened through its raw href.
+                            if (!seenTargets.add(candidate.navigationUrl())) {
                                 continue; // engines repeat hits across result pages — carried once
                             }
                             items.add(new com.aresstack.askai.browser.WebSearchItem(
                                     String.valueOf(items.size() + 1), candidate.title,
-                                    candidate.resolvedTargetUrl, candidate.snippet));
+                                    candidate.navigationUrl(), candidate.snippet));
                         }
                         attempts.add(attempt(host, com.aresstack.askai.browser
                                 .LegacySearchAttemptOutcome.ORGANIC_RESULTS,

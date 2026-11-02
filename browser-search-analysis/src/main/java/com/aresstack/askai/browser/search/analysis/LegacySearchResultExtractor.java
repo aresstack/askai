@@ -1,5 +1,7 @@
 package com.aresstack.askai.browser.search.analysis;
 
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
+import com.aresstack.askai.browser.render.LinkRedirectResolution;
 import com.aresstack.askai.browser.domain.DomainClassification;
 import com.aresstack.askai.browser.render.RenderedContainerDescriptor;
 import com.aresstack.askai.browser.render.RenderedLinkDescriptor;
@@ -193,22 +195,20 @@ public final class LegacySearchResultExtractor {
         List<SearchResultCandidate> candidates = new ArrayList<SearchResultCandidate>();
         Set<String> seenTargets = new HashSet<String>();
         for (DetectedResultBlock block : detection.blocks) {
-            if (!seenTargets.add(block.primaryLink.resolvedTargetUrl)) {
-                diagnostics.add(block.blockContainerId + ": duplicate target "
-                        + block.primaryLink.resolvedTargetUrl);
+            // askai #41: dedup on what the browser will open — the target, or an unresolved redirect's raw href
+            // (an empty target must never swallow every other unresolved hit).
+            String key = navigationUrlOf(block.primaryLink);
+            if (!seenTargets.add(key)) {
+                diagnostics.add(block.blockContainerId + ": duplicate target " + key);
                 continue;
             }
             List<SearchResultSiteLink> siteLinks = new ArrayList<SearchResultSiteLink>();
             for (RenderedLinkDescriptor siteLink : block.siteLinks) {
-                siteLinks.add(new SearchResultSiteLink(siteLink.resolvedTargetUrl,
-                        siteLink.visibleText));
+                siteLinks.add(new SearchResultSiteLink(navigationUrlOf(siteLink), siteLink.visibleText));
             }
-            candidates.add(new SearchResultCandidate(
-                    "candidate-" + candidates.size(), document.snapshotId,
-                    block.primaryLink.resolvedTargetUrl, block.primaryLink.rawHref, block.title,
-                    block.snippet, block.displayedDomain, block.rank, organicContainerId,
-                    block.blockContainerId, block.structuralConfidence, block.primaryLinkConfidence,
-                    siteLinks));
+            candidates.add(candidate("candidate-" + candidates.size(), document.snapshotId, block.primaryLink,
+                    block.title, block.snippet, block.displayedDomain, block.rank, organicContainerId,
+                    block.blockContainerId, block.structuralConfidence, block.primaryLinkConfidence, siteLinks));
         }
         if (candidates.isEmpty()) {
             diagnostics.add("all detected blocks were duplicates — nothing extractable");
@@ -239,31 +239,29 @@ public final class LegacySearchResultExtractor {
                 new ArrayList<SearchResultCandidate>(structured.candidates);
         Set<String> seenTargets = new HashSet<String>();
         for (SearchResultCandidate candidate : structured.candidates) {
-            seenTargets.add(candidate.resolvedTargetUrl);
+            seenTargets.add(candidate.navigationUrl());
         }
         int externalSeen = 0;
         for (RenderedLinkDescriptor link : document.links) {
             if (combined.size() >= settings.analysis.linkHarvestMaximumCandidates) {
                 break;
             }
+            String url = navigationUrlOf(link);
             if (!link.visible
                     || link.domainClassification != DomainClassification.EXTERNAL_DOMAIN
-                    || !(link.resolvedTargetUrl.startsWith("http://")
-                            || link.resolvedTargetUrl.startsWith("https://"))) {
+                    || !(url.startsWith("http://") || url.startsWith("https://"))) {
                 continue;
             }
-            if (isHarvestExcluded(link.resolvedTargetUrl)) {
+            if (link.redirectResolutionStatus != LinkRedirectResolution.UNRESOLVED && isHarvestExcluded(url)) {
                 continue; // SERP chrome: the engine owner's legal/consent pages are never results
             }
             externalSeen++;
             String title = !link.visibleText.trim().isEmpty()
                     ? link.visibleText.trim() : link.nearestHeadingText.trim();
-            if (title.isEmpty() || !seenTargets.add(link.resolvedTargetUrl)) {
+            if (title.isEmpty() || !seenTargets.add(url)) {
                 continue; // nothing to judge it by, or already carried by a structured candidate
             }
-            combined.add(new SearchResultCandidate(
-                    "candidate-" + combined.size(), document.snapshotId,
-                    link.resolvedTargetUrl, link.rawHref, title,
+            combined.add(candidate("candidate-" + combined.size(), document.snapshotId, link, title,
                     link.surroundingTextExcerpt, link.displayedDomainText, combined.size() + 1,
                     "", link.containerId, 0.0, 0.0,
                     java.util.Collections.<SearchResultSiteLink>emptyList()));
@@ -280,6 +278,51 @@ public final class LegacySearchResultExtractor {
                 + externalSeen + " external links; the reranker judges them)");
         return new SearchResultExtractionResult(SearchPageAnalysisOutcome.ORGANIC_RESULTS,
                 structured.snapshotId, structured.layoutConfidence, combined, diagnostics);
+    }
+
+    /**
+     * What the browser opens for a captured link (askai #41): its resolved target, or — for a redirect whose target
+     * is not known yet ({@link LinkRedirectResolution#UNRESOLVED}, e.g. Google {@code /goto}) — its raw href.
+     */
+    static String navigationUrlOf(RenderedLinkDescriptor link) {
+        if (link.redirectResolutionStatus == LinkRedirectResolution.UNRESOLVED) {
+            return link.rawHref == null ? "" : link.rawHref;
+        }
+        return link.resolvedTargetUrl == null ? "" : link.resolvedTargetUrl;
+    }
+
+    /**
+     * The candidate for one primary link, carrying the link's resolution state (askai #41): NOT_A_REDIRECT →
+     * DIRECT, RESOLVED → RESOLVED with the wrapper as original URL, UNRESOLVED → no verified target, the raw
+     * href is the navigation URL and the provenance.
+     */
+    private static SearchResultCandidate candidate(String candidateId, String snapshotId, RenderedLinkDescriptor link,
+                                                   String title, String snippet, String displayedDomain, int rank,
+                                                   String organicContainerId, String blockContainerId,
+                                                   double structuralConfidence, double primaryLinkConfidence,
+                                                   List<SearchResultSiteLink> siteLinks) {
+        UrlResolutionStatus status;
+        String target;
+        String original;
+        switch (link.redirectResolutionStatus) {
+            case UNRESOLVED:
+                status = UrlResolutionStatus.UNRESOLVED;
+                target = "";
+                original = link.rawHref;
+                break;
+            case RESOLVED:
+                status = UrlResolutionStatus.RESOLVED;
+                target = link.resolvedTargetUrl;
+                original = link.rawHref;
+                break;
+            default:
+                status = UrlResolutionStatus.DIRECT;
+                target = link.resolvedTargetUrl;
+                original = "";
+        }
+        return new SearchResultCandidate(candidateId, snapshotId, target, link.rawHref, title, snippet,
+                displayedDomain, rank, organicContainerId, blockContainerId, structuralConfidence,
+                primaryLinkConfidence, siteLinks, "", status, original);
     }
 
     /** True when the link's host ends in one of the configured excluded (chrome) domains. */
