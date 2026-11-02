@@ -26,12 +26,15 @@ public final class InProcessResearchRuntime implements AutoCloseable {
 
     /**
      * The AskAI-wide instance; created on first use and closed when the JVM ends. The search browser channel
-     * comes from {@code ASKAI_SEARCH_BROWSER_CHANNEL} (default camoufox).
+     * comes from {@code -Daskai.research.searchBrowserChannel} or {@code ASKAI_SEARCH_BROWSER_CHANNEL} (default
+     * camoufox).
      */
     public static synchronized InProcessResearchRuntime shared() {
         if (instance == null) {
-            final InProcessResearchRuntime created =
-                    new InProcessResearchRuntime(System.getenv("ASKAI_SEARCH_BROWSER_CHANNEL"));
+            // The system property is the per-run override of local test worlds (a Chromium channel instead of
+            // Camoufox); normal operation sets neither and gets Camoufox.
+            final InProcessResearchRuntime created = new InProcessResearchRuntime(System.getProperty(
+                    "askai.research.searchBrowserChannel", System.getenv("ASKAI_SEARCH_BROWSER_CHANNEL")));
             Runtime.getRuntime().addShutdownHook(new Thread(created::close, "research-runtime-close"));
             instance = created;
         }

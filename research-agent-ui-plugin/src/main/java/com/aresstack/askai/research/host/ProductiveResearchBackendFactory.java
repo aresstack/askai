@@ -856,6 +856,12 @@ public final class ProductiveResearchBackendFactory {
                     String.valueOf(browserToolTimeoutSeconds));
             // "KI-Reranker verwenden": OFF = the runtime scores lexically (BM25, no model call).
             baseEnv.put("ASKAI_USE_AI_RERANKER", String.valueOf(useAiReranker));
+            // Dev/test hand-off for local test worlds (like the former per-run browser flags): a Google-shaped
+            // local result page instead of www.google.com. Never persisted, never set in normal operation.
+            String googleSearchUrl = System.getProperty("askai.research.googleSearchUrl", "").trim();
+            if (!googleSearchUrl.isEmpty()) {
+                baseEnv.put("ASKAI_GOOGLE_SEARCH_URL", googleSearchUrl);
+            }
             // The agent runs inside this JVM: the launch spec only carries its configuration.
             AgentLaunchSpec spec = new AgentLaunchSpec("in-process",
                     java.util.Collections.<String>emptyList(), baseEnv);

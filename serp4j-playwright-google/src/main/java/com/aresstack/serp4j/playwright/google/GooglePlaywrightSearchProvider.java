@@ -79,7 +79,7 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
         this.descriptor = ProviderDescriptor.builder(builder.id, PROVIDER_TYPE, ProviderKind.BROWSER, capabilities())
                 .displayName("Google (AskAI search browser)")
                 .build();
-        this.urlBuilder = new GoogleUrlBuilder(GoogleUrlBuilder.DEFAULT_BASE_URL, builder.defaultLanguage,
+        this.urlBuilder = new GoogleUrlBuilder(builder.baseUrl, builder.defaultLanguage,
                 builder.defaultCountry);
         this.mapper = new GoogleSerpMapper(builder.id);
         this.navigationTimeout = builder.navigationTimeout;
@@ -215,6 +215,7 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
 
     public static final class Builder {
         private ProviderId id = DEFAULT_ID;
+        private String baseUrl = GoogleUrlBuilder.DEFAULT_BASE_URL;
         private String defaultLanguage;
         private String defaultCountry;
         private Duration navigationTimeout = DEFAULT_NAVIGATION_TIMEOUT;
@@ -225,6 +226,15 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
 
         public Builder id(ProviderId id) {
             this.id = Objects.requireNonNull(id, "id");
+            return this;
+        }
+
+        /**
+         * The search endpoint, normally {@link GoogleUrlBuilder#DEFAULT_BASE_URL}. Another value is only meant for
+         * local test worlds that serve a Google-shaped result page (askai #47 in-process end-to-end test).
+         */
+        public Builder baseUrl(String baseUrl) {
+            this.baseUrl = Objects.requireNonNull(baseUrl, "baseUrl");
             return this;
         }
 
