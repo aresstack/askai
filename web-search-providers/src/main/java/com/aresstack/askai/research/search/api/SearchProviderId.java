@@ -5,6 +5,5 @@ public enum SearchProviderId {
     BRIGHT_DATA,
     DATA_FOR_SEO,
     SERP_API,
-    GOOGLE_BROWSER,
     COMPOSITE
 }

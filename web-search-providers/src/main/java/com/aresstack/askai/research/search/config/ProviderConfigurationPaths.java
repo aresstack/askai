@@ -51,10 +51,6 @@ public final class ProviderConfigurationPaths {
         return providerDirectory.resolve("serpapi.json");
     }
 
-    public Path getGoogleBrowserConfigurationFile() {
-        return providerDirectory.resolve("google-browser.json");
-    }
-
     public Path getSecretKeyFile() {
         return providerDirectory.resolve(
                 ".provider-secrets.key");

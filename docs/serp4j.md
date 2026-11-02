@@ -28,30 +28,6 @@ Key verschlüsselt über `ProviderConfigurationService.saveSerpApi(configuration
   DataForSEO aus.
 - In der Research-Runtime ist `SERP_API` jetzt ein migrierter Provider (Auswahl „SerpApi“ in den Sucheinstellungen).
 
-## Google über den Serp4J-Suchbrowser (askai #31)
-
-Die Google-Suche ohne Such-API läuft vollständig in Serp4J (`serp4j-engine-google-browser`, Provider-Typ
-`google-browser`): Serp4J baut die Such-URL (nie `udm=50`), steuert einen eigenen Suchbrowser über seinen
-Browser-Port (`serp4j-browser-playwright` mit Node-Treiber) und parst die Ergebnisseite. AskAI enthält dafür keinen
-HTTP- oder HTML-Parsing-Code, sondern wählt nur den lokalen Browser.
-
-- Konfiguration `google-browser.json` (Beispiel unter `web-search-providers/examples/providers/`): `browserType`
-  (chromium/firefox), `channel` (Standard `msedge`), optional `executablePath`, `headless`, Sprache, Land,
-  `resolveGotoUrls`. Keine Secrets. Auswahl in den Sucheinstellungen als „Google (Serp4J search browser)“.
-- Provider-ID `GOOGLE_BROWSER`; läuft über denselben Pfad wie die API-Provider (`SingleProviderSearchStrategy`), also
-  auch für die manuelle Suche.
-- **Suchbrowser und Research-Browser sind getrennt:** der Suchbrowser ist ein eigener Playwright-Prozess im
-  Research-Agent mit flüchtigem Profil je Suche; der Research-Browser (MCP-Sidecar) öffnet weiterhin die gefundenen
-  Seiten. Der Suchbrowser kann keine Sidecar-Sitzung schließen oder überschreiben.
-- Google-`/goto`-Treffer löst Serp4J per HTTP auf (`serp4j:url_resolution`/`serp4j:original_url`); was nicht
-  auflösbar ist, bleibt wie bei SerpApi/DataForSEO als unaufgelöster Treffer markiert und wird nie Quelle.
-- Consent-/Bot-Check-Seiten ohne Treffer klickt Serp4J nicht weg (ADR-016); die Suche scheitert dann sichtbar mit
-  `BLOCKED`/`google_obstacle`.
-- Die Google-Module veröffentlicht Serp4J nur nach mavenLocal (nicht nach Maven Central); `scripts/install-serp4j.sh`
-  installiert sie mit.
-- Die bisherige Browser-Suche („Web Search (multi-engine browser)“: Bing/Google/DuckDuckGo über den Sidecar mit
-  Layout-Reparatur) bleibt als breite Multi-Engine-Suche erhalten und ist weiterhin der Standard.
-
 ## Was sich gegenüber der alten Implementierung ändert
 
 - **Engine-Etikett:** Die Engine kommt aus der Serp4J-Antwort (Metadaten und Herkunft je Treffer). Bright Data und
