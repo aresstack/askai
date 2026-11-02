@@ -100,6 +100,10 @@ public final class AskAiFrame extends JFrame {
 
     private final ApplicationStateService applicationState;
     private OllamaConfigPanel configPanel;
+    /** Whether the setup wizard opens on its own; see {@link com.aresstack.askai.java8.ui.setup.SetupWizardState}. */
+    private final com.aresstack.askai.java8.ui.setup.SetupWizardState setupWizardState =
+            com.aresstack.askai.java8.ui.setup.SetupWizardState.forAskAi();
+    private com.aresstack.askai.java8.ui.setup.AskAiSetupActions setupActions;
     private ChatWorkspacePanel chatWorkspace;
     private com.aresstack.askai.plugin.host.ChatWorkspaceHostPanel chatWorkspaceHost;
     private com.aresstack.askai.plugin.host.WorkspacePluginService pluginService;
@@ -261,6 +265,10 @@ public final class AskAiFrame extends JFrame {
     /** Kept for the existing launcher: builds the frame and makes it visible. */
     public void showFrame() {
         setVisible(true);
+        // First start (or a setup interrupted before): the setup wizard opens over the fresh window.
+        if (setupWizardState.shouldOpenAtStartup()) {
+            javax.swing.SwingUtilities.invokeLater(() -> openSetupWizard(true));
+        }
     }
 
     private void buildUserInterface() {
@@ -422,7 +430,45 @@ public final class AskAiFrame extends JFrame {
         menu.add(createScreenItem("AI models", AI_MODELS_VIEW));
         menu.add(createScreenItem("Network", NETWORK_VIEW));
         menu.add(createScreenItem("Plugins", PLUGINS_VIEW));
+        menu.addSeparator();
+        // The first-start setup wizard, callable again at any time (Merlin greets as a reunion).
+        JMenuItem setupWizard = new JMenuItem("Setup wizard…");
+        setupWizard.addActionListener(event -> openSetupWizard(false));
+        menu.add(setupWizard);
         return menu;
+    }
+
+    /**
+     * Lays the setup wizard over the whole window. {@code firstStart}: Merlin introduces himself once a runtime
+     * answers and “Finish” plays the hand-over; afterwards the wizard no longer opens on its own. From the
+     * settings it greets as a reunion and changes nothing when cancelled.
+     */
+    private void openSetupWizard(final boolean firstStart) {
+        final com.aresstack.askai.java8.ui.setup.AskAiSetupActions actions = setupActions();
+        com.aresstack.askai.java8.ui.setup.SetupWizardOverlay.show(getRootPane(), actions.currentDraft(), actions,
+                com.aresstack.comiccontrols.theme.ComicPalette.defaultPalette(), firstStart, completed -> {
+                    if (completed) {
+                        setupWizardState.markCompleted();
+                    }
+                });
+    }
+
+    /** The wizard's adapter onto AskAI's settings and services (built on first use, then kept). */
+    private com.aresstack.askai.java8.ui.setup.AskAiSetupActions setupActions() {
+        if (setupActions == null) {
+            com.aresstack.askai.java8.localmodels.LocalModelRuntimeManager local =
+                    askAiService.localRuntimeManager();
+            setupActions = new com.aresstack.askai.java8.ui.setup.AskAiSetupActions(model, configurationRepository,
+                    (VirtualOllamaContainerService) ollamaService, local,
+                    local == null ? null : new com.aresstack.askai.java8.localmodels.LocalRerankerModelCatalog(local),
+                    new com.aresstack.askai.java8.localmodels.LocalNlpModelStore(), new Runnable() {
+                        public void run() {
+                            catalogRefreshService.refresh(); // new models and selections reach every chat tab
+                            refreshConnectionStatus();
+                        }
+                    });
+        }
+        return setupActions;
     }
 
     /** An icon drawn scaled to {@code size} pixels (the 15px stroke glyphs at title-bar size). */
