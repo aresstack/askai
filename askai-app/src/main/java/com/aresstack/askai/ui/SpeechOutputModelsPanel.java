@@ -312,7 +312,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
                         "Use \"" + voice + "\" for " + voice.getLanguage()
                                 + " speech output now?\n\n"
                                 + "You can change this anytime right here under\n"
-                                + "\"Audio & Dictation\" > Speech output · " + voice.getLanguage() + ".",
+                                + "Settings > Chat > \"Audio & Dictation\" > Speech output · " + voice.getLanguage() + ".",
                         "Voice installed", JOptionPane.YES_NO_OPTION,
                         JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION;
             }

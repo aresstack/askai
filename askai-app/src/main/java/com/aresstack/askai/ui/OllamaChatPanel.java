@@ -903,9 +903,17 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     }
 
     private TabSessionCloser tabSessionCloser;
+    private final JButton setupWizardButton = new ComicButton("Setup wizard…");
 
     public void setTabSessionCloser(TabSessionCloser closer) {
         this.tabSessionCloser = closer;
+    }
+
+    /** Opens the setup wizard again from Settings &gt; General &gt; "Setup wizard…" (set by the frame). */
+    private Runnable setupWizardOpener;
+
+    public void setSetupWizardOpener(Runnable opener) {
+        this.setupWizardOpener = opener;
     }
 
     /** Release this session's resources when its tab closes: abort the chat, dictation and file work. */
@@ -931,9 +939,35 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         return new JScrollPane(techDetails);
     }
 
-    /** The category names shown in the Outlook-style navigation list, in display order. */
-    private static final String[] SETTINGS_CATEGORIES = {
-            "General", "Appearance", "Audio & Dictation", "Notifications", "Party", "Technical Details"};
+    /** The application-wide categories (group "SETTINGS"), before the application pages. */
+    private static final String SETTINGS_GENERAL = "General";
+    private static final String SETTINGS_APPEARANCE = "Appearance";
+    /** The chat categories (group "CHAT"): the chat itself and the built-in Party mode. */
+    public static final String SETTINGS_CHAT = "Chat";
+    private static final String SETTINGS_PARTY = "Party";
+    /** The tabs of the "Chat" category. */
+    private static final String CHAT_TAB_CONVERSATION = "Conversation";
+    private static final String CHAT_TAB_AUDIO = "Audio & Dictation";
+    private static final String CHAT_TAB_TECHNICAL = "Technical Details";
+    private static final String[] APP_SETTINGS_CATEGORIES = {SETTINGS_GENERAL, SETTINGS_APPEARANCE};
+    private static final String[] CHAT_SETTINGS_CATEGORIES = {SETTINGS_CHAT, SETTINGS_PARTY};
+
+    /**
+     * The application's own configuration pages (Connections, AI models, Network, Plugins), shared by all
+     * chat tabs: one Swing component each, so it is (re)attached to the settings of whichever tab shows
+     * them. Owned and filled by the workspace; insertion order is the display order after Appearance.
+     */
+    private java.util.Map<String, JComponent> applicationSettingsPages =
+            java.util.Collections.<String, JComponent>emptyMap();
+
+    public void setApplicationSettingsPages(java.util.Map<String, JComponent> pages) {
+        this.applicationSettingsPages = pages == null
+                ? java.util.Collections.<String, JComponent>emptyMap() : pages;
+    }
+
+    private java.awt.CardLayout settingsCardLayout;
+    private JPanel settingsCards;
+    private javax.swing.JTabbedPane chatSettingsTabs;
 
     /**
      * The chat settings dialog content, Outlook-style: a category list on the left selects one
@@ -980,7 +1014,30 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     /** The settings pages for the workspace's main area. */
     public JComponent settingsPagesComponent() {
         ensureSettingsPanes();
+        attachApplicationSettingsPages();
         return settingsPagesPane;
+    }
+
+    /**
+     * Moves the shared application pages into THIS tab's settings (another tab may have shown them last)
+     * and re-shows the selected card, so the page is never missing after switching tabs.
+     */
+    private void attachApplicationSettingsPages() {
+        if (settingsCards == null) {
+            return;
+        }
+        boolean moved = false;
+        for (java.util.Map.Entry<String, JComponent> page : applicationSettingsPages.entrySet()) {
+            if (page.getValue().getParent() != settingsCards) {
+                settingsCards.add(page.getValue(), page.getKey());
+                moved = true;
+            }
+        }
+        String selected = settingsNavigation == null ? null : settingsNavigation.getSelectedValue();
+        if (moved && selected != null) {
+            settingsCardLayout.show(settingsCards, selected);
+            settingsCards.revalidate();
+        }
     }
 
     /** The settings categories in order: the general ones, then the active agent's pages. */
@@ -993,9 +1050,13 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         return names;
     }
 
-    /** Whether a category is one of the general (non-agent) ones. */
-    public static boolean isGeneralSettingsCategory(String category) {
-        return java.util.Arrays.asList(SETTINGS_CATEGORIES).contains(category);
+    /**
+     * Whether a category belongs to the application-wide group ("SETTINGS"): General, Appearance and the
+     * application pages. Everything else (Chat, Party, the chat modes plugins contribute) is the "CHAT" group.
+     */
+    public boolean isApplicationSettingsCategory(String category) {
+        return java.util.Arrays.asList(APP_SETTINGS_CATEGORIES).contains(category)
+                || applicationSettingsPages.containsKey(category);
     }
 
     /** The category whose page is shown. */
@@ -1007,6 +1068,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     /** Show this category's page (no-op for unknown names). */
     public void selectSettingsCategory(String category) {
         ensureSettingsPanes();
+        attachApplicationSettingsPages();
         if (category != null && settingsNavigation != null) {
             settingsNavigation.setSelectedValue(category, true);
         }
@@ -1035,26 +1097,40 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     private void buildSettingsPanes() {
         final java.awt.CardLayout cardLayout = new java.awt.CardLayout();
         final JPanel cards = new JPanel(cardLayout);
+        settingsCardLayout = cardLayout;
+        settingsCards = cards;
         JComponent[] partyCards = buildPartyCards();
-        cards.add(settingsCard(buildGeneralCard()), SETTINGS_CATEGORIES[0]);
-        cards.add(settingsCard(buildAppearanceCard()), SETTINGS_CATEGORIES[1]);
-        cards.add(settingsCard(buildAudioCard()), SETTINGS_CATEGORIES[2]);
-        cards.add(settingsCard(buildNotificationsCard()), SETTINGS_CATEGORIES[3]);
-        // Party: ONE category with its sub-pages as tabs (like the Research Agent page); every tab
-        // scrolls on its own, so the tabbed pane itself is not wrapped in another scroll pane.
+        java.util.List<String> categories = new java.util.ArrayList<String>();
+        // SETTINGS group — application-wide. General carries the notifications (it used to hold only chat
+        // request parameters, which are chat settings and moved to Chat > Conversation).
+        cards.add(settingsCard(buildGeneralCard()), SETTINGS_GENERAL);
+        cards.add(settingsCard(buildAppearanceCard()), SETTINGS_APPEARANCE);
+        categories.addAll(java.util.Arrays.asList(APP_SETTINGS_CATEGORIES));
+        // The application pages (formerly separate screens in the gear menu), shared by all tabs.
+        for (java.util.Map.Entry<String, JComponent> page : applicationSettingsPages.entrySet()) {
+            cards.add(page.getValue(), page.getKey());
+            categories.add(page.getKey());
+        }
+        // CHAT group. Chat: ONE category with its sub-pages as tabs, like Party; every tab scrolls on its
+        // own, so the tabbed pane itself is not wrapped in another scroll pane.
+        javax.swing.JTabbedPane chat = ComicControls.tabbedPane();
+        chat.addTab(CHAT_TAB_CONVERSATION, settingsCard(buildConversationCard()));
+        chat.addTab(CHAT_TAB_AUDIO, settingsCard(buildAudioCard()));
+        // The technical log is already scrollable — no settingsCard wrapper (no double scroll pane).
+        chat.addTab(CHAT_TAB_TECHNICAL, buildTechnicalDetails());
+        chatSettingsTabs = chat;
+        cards.add(chat, SETTINGS_CHAT);
+        // Party: the built-in chat MODE, its sub-pages as tabs.
         javax.swing.JTabbedPane party = ComicControls.tabbedPane();
         party.addTab("Identity & Room", settingsCard(partyCards[0]));
         party.addTab("Network", settingsCard(partyCards[1]));
         party.addTab("Bot", settingsCard(partyCards[2]));
         party.addTab("History", settingsCard(partyCards[3]));
-        cards.add(party, SETTINGS_CATEGORIES[4]);
-        // The technical log is already scrollable — no settingsCard wrapper (no double scroll pane).
-        cards.add(buildTechnicalDetails(), SETTINGS_CATEGORIES[5]);
-
-        java.util.List<String> categories =
-                new java.util.ArrayList<String>(java.util.Arrays.asList(SETTINGS_CATEGORIES));
-        // Agent settings pages: only while an agent session is ACTIVE in this tab; each page gets the
-        // live session so its values stay session-based (two tabs never reconfigure each other).
+        cards.add(party, SETTINGS_PARTY);
+        categories.addAll(java.util.Arrays.asList(CHAT_SETTINGS_CATEGORIES));
+        // Chat modes contributed by plugins (e.g. Research Agent), hooked in dynamically after Party:
+        // only while the agent session is ACTIVE in this tab; each page gets the live session so its
+        // values stay session-based (two tabs never reconfigure each other).
         if (agentSettingsContributions != null && agentSettingsSession != null) {
             com.aresstack.askai.plugin.api.agent.AgentSession session = agentSettingsSession.get();
             if (session != null) {
@@ -1139,8 +1215,37 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         return column;
     }
 
-    /** General: chat request parameters, the system prompt and the transcript colors. */
+    /**
+     * General: application-wide behaviour — currently the desktop notifications (formerly their own
+     * category).
+     */
     private JComponent buildGeneralCard() {
+        JPanel setup = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 4));
+        setup.setBorder(ComicControls.titledBorder("Setup"));
+        setup.add(new JLabel("Walk through network, AI runtime, models, knowledge and voice again."));
+        setupWizardButton.setToolTipText("Opens the setup wizard from the first start");
+        setupWizardButton.addActionListener(event -> {
+            if (setupWizardOpener != null) {
+                setupWizardOpener.run();
+            }
+        });
+        setup.add(setupWizardButton);
+        setup.setAlignmentX(Component.LEFT_ALIGNMENT);
+        setup.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, setup.getPreferredSize().height));
+
+        JComponent notifications = buildNotificationsCard();
+        notifications.setBorder(BorderFactory.createCompoundBorder(
+                ComicControls.titledBorder("Notifications"), notifications.getBorder()));
+        notifications.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JPanel card = settingsColumn();
+        card.add(setup);
+        card.add(notifications);
+        card.add(javax.swing.Box.createVerticalGlue());
+        return card;
+    }
+
+    /** Chat &gt; Conversation: chat request parameters and the system prompt. */
+    private JComponent buildConversationCard() {
         JPanel card = settingsColumn();
 
         JPanel params = partySettingsRow();
@@ -1417,10 +1522,13 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     /** Opens the settings dialog on Audio &amp; Dictation and marks the recommended voice's row. */
     public void openSpeechOutputSettings(String voiceId) {
         if (settingsOpener != null) {
-            settingsOpener.accept(SETTINGS_CATEGORIES[2]);
+            settingsOpener.accept(SETTINGS_CHAT);
         } else {
             openSettingsDialog();
-            selectSettingsCategory(SETTINGS_CATEGORIES[2]);
+            selectSettingsCategory(SETTINGS_CHAT);
+        }
+        if (chatSettingsTabs != null) {
+            chatSettingsTabs.setSelectedIndex(chatSettingsTabs.indexOfTab(CHAT_TAB_AUDIO));
         }
         if (speechVoicesPanel != null) {
             speechVoicesPanel.highlightVoice(voiceId);

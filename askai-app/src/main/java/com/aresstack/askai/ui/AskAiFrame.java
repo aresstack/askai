@@ -69,12 +69,13 @@ public final class AskAiFrame extends JFrame {
     private static final String MODELS_VIEW = "models";
     private static final String ACTIONS_VIEW = "actions";
     private static final String INSTALL_VIEW = "install";
-    private static final String CONNECTIONS_VIEW = "connections";
-    private static final String AI_MODELS_VIEW = "ai-models";
-    private static final String NETWORK_VIEW = "network";
+    /** The application pages inside the Settings (formerly own screens behind the gear menu). */
+    private static final String SETTINGS_CONNECTIONS = "Connections";
+    private static final String SETTINGS_AI_MODELS = "AI models";
+    private static final String SETTINGS_NETWORK = "Network";
+    private static final String SETTINGS_PLUGINS = "Plugins";
     private static final String ABOUT_VIEW = "about";
     private static final String AUDIO_PROCESSING_VIEW = "audio-processing";
-    private static final String PLUGINS_VIEW = "plugins";
 
     private final AskAiModel model;
     private final AppConfigurationRepository configurationRepository;
@@ -346,13 +347,13 @@ public final class AskAiFrame extends JFrame {
 
     /** The Audio screen: drawer with Batch transcription and Audio processing. */
     private static final String AUDIO_SCREEN = "audio-screen";
-    /** The Models screen: drawer with Setup, Installed and Running Models, "Back" in the footer. */
+    /** The Models screen: drawer with Setup and Models (installed + running in one list), "Back" in the footer. */
     private static final String MODELS_SCREEN = "models-screen";
     private static final String PAGE_BATCH = "Batch transcription";
     private static final String PAGE_AUDIO_PROCESSING = "Audio processing";
     private static final String PAGE_SETUP = "Setup";
-    private static final String PAGE_INSTALLED = "Installed";
-    private static final String PAGE_RUNNING = "Running Models";
+    /** Installed and running models in one list; running models on top with a badge (as in ollama-manager). */
+    private static final String PAGE_MODELS = "Models";
     private com.aresstack.askai.ui.chat.DrawerScreen audioScreen;
     private com.aresstack.askai.ui.chat.DrawerScreen modelsScreen;
     /** The last Text/Audio screen — where the Models drawer's "Back" returns to. */
@@ -399,7 +400,7 @@ public final class AskAiFrame extends JFrame {
         return menu;
     }
 
-    /** The models button (cube glyph, the gear's size): Setup / Installed / Running Models as a menu. */
+    /** The models button (cube glyph, the gear's size): Setup / Models as a menu. */
     private javax.swing.JComponent createModelsButton() {
         final com.aresstack.comiccontrols.control.ComicButton models = new com.aresstack.comiccontrols.control.ComicButton(
                 new ScaledIcon(com.aresstack.askai.ui.ChatComposerPanel.createModelsGlyphIcon(), 20));
@@ -407,35 +408,31 @@ public final class AskAiFrame extends JFrame {
         models.setFocusable(false);
         models.setMargin(new java.awt.Insets(0, 0, 0, 0));
         models.setPreferredSize(new Dimension(24, 24));
-        models.setToolTipText("Models: setup, installed, running");
+        models.setToolTipText("Models: setup, installed and running models");
         models.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
         models.addActionListener(event -> showScreen(MODELS_SCREEN)); // the Models drawer
         models.setMaximumSize(models.getPreferredSize());
         return models;
     }
 
-    /** The gear's menu: chat settings first, then the configuration screens. */
-    private javax.swing.JPopupMenu createSettingsMenu() {
-        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
-        JMenuItem chatSettings = new JMenuItem("Chat settings…");
-        chatSettings.addActionListener(event -> {
-            if (chatWorkspace != null) {
-                showScreen(CHAT_VIEW); // the settings live in the chat workspace (drawer + main area)
-                chatWorkspace.openActiveChatSettings();
-            }
-        });
-        menu.add(chatSettings);
-        menu.addSeparator();
-        menu.add(createScreenItem("Connections", CONNECTIONS_VIEW));
-        menu.add(createScreenItem("AI models", AI_MODELS_VIEW));
-        menu.add(createScreenItem("Network", NETWORK_VIEW));
-        menu.add(createScreenItem("Plugins", PLUGINS_VIEW));
-        menu.addSeparator();
-        // The first-start setup wizard, callable again at any time (Merlin greets as a reunion).
-        JMenuItem setupWizard = new JMenuItem("Setup wizard…");
-        setupWizard.addActionListener(event -> openSetupWizard(false));
-        menu.add(setupWizard);
-        return menu;
+    /**
+     * Opens THE Settings — application-wide categories (General, Appearance, Connections, AI models,
+     * Network, Plugins) and the chat categories (Chat, Party, plugin chat modes) — on {@code category}
+     * (null keeps the current page). They live in the chat workspace (drawer + main area).
+     */
+    private void openSettings(String category) {
+        if (chatWorkspace != null) {
+            showScreen(CHAT_VIEW);
+            chatWorkspace.openActiveSettings(category);
+        }
+    }
+
+    /** An application page as a Settings category: scrollable, without the old screen footer. */
+    private static javax.swing.JComponent settingsPage(javax.swing.JComponent page) {
+        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(page);
+        scroll.setBorder(javax.swing.BorderFactory.createEmptyBorder());
+        scroll.getVerticalScrollBar().setUnitIncrement(14);
+        return scroll;
     }
 
     /**
@@ -513,14 +510,11 @@ public final class AskAiFrame extends JFrame {
         gear.setIcon(new ScaledIcon(com.aresstack.askai.ui.ChatComposerPanel.createGearGlyphIcon(), 20));
         gear.setMargin(new java.awt.Insets(0, 0, 0, 0));
         gear.setPreferredSize(new Dimension(24, 24)); // the size of the close chip beside it
-        gear.setToolTipText("Settings and configuration");
+        gear.setToolTipText("Settings");
         gear.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-        // The gear is THE settings menu: the chat settings dialog plus the configuration screens
-        // (formerly the "Configuration" menu). Built per click, so it always wears the current theme.
-        gear.addActionListener(event -> {
-            javax.swing.JPopupMenu menu = createSettingsMenu();
-            menu.show(gear, gear.getWidth() - menu.getPreferredSize().width, gear.getHeight());
-        });
+        // The gear opens THE Settings directly: one place for all settings (the former "Chat settings…"
+        // plus the Connections / AI models / Network / Plugins screens are categories there now).
+        gear.addActionListener(event -> openSettings(null));
         gear.setMaximumSize(gear.getPreferredSize()); // never stretched by the menu-bar layout
         return gear;
     }
@@ -567,7 +561,7 @@ public final class AskAiFrame extends JFrame {
 
     /** Shows the Connections view and puts the cursor in its Base URL field, selected for overwrite. */
     private void openConnectionSettings() {
-        showScreen(CONNECTIONS_VIEW);
+        openSettings(SETTINGS_CONNECTIONS);
         if (configPanel != null) {
             configPanel.focusBaseUrl();
         }
@@ -1081,6 +1075,8 @@ public final class AskAiFrame extends JFrame {
                 () -> activityCoordinator.scopePhaseLabel(activityScope));
         // Tab close ENDS this tab's agent session(s) off-EDT (its ChatSessionId is the scope).
         final com.aresstack.askai.plugin.host.AgentSessionCoordinator closerCoordinator = agentCoordinator;
+        // Settings > General > "Setup wizard…": the first-start wizard, callable again (Merlin greets as a reunion).
+        chat.setSetupWizardOpener(() -> openSetupWizard(false));
         chat.setTabSessionCloser(new OllamaChatPanel.TabSessionCloser() {
             public void closeSessionsForTab(String scope) {
                 closerCoordinator.closeSessionsForScope(scope);
@@ -1289,8 +1285,7 @@ public final class AskAiFrame extends JFrame {
                 useModelInChat(modelName);
             }
         });
-        modelsScreen().addPage(PAGE_INSTALLED, modelsPanel, () -> showModelsPage(true));
-        modelsScreen().addPage(PAGE_RUNNING, modelsPanel, () -> showModelsPage(false));
+        modelsScreen().addPage(PAGE_MODELS, modelsPanel, this::showModelsPage);
         contentPanel.add(withFooter(new OllamaActionsPanel(featureActionService, ollamaService)), ACTIONS_VIEW);
         // Java 8 port: model search with two sources in tabs — HuggingFace (search/analyze/import)
         // and the Ollama Library (scrape ollama.com, pull a tag on the remote server).
@@ -1333,35 +1328,37 @@ public final class AskAiFrame extends JFrame {
                 modelSearchPanel.openLocalProjectorAddOn(modelName);
             }
         });
-        // After a verified encoder attach, re-read Installed Models from /api/show (no local state kept).
+        // After a verified encoder attach, re-read the models from /api/show (no local state kept).
         modelSearchPanel.setAddOnAttachedListener(new Runnable() {
             public void run() {
-                modelsPanel.showInstalled();
+                modelsPanel.showModels();
             }
         });
         this.installSearchPanel = modelSearchPanel;
         this.configPanel = new OllamaConfigPanel(model, ollamaService);
-        contentPanel.add(withFooter(configPanel), CONNECTIONS_VIEW);
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_CONNECTIONS, settingsPage(configPanel));
         // Central AI-model selection (reranker + embeddings) owned by AskAI for all plugins. The reranker
         // catalog needs the local runtime; when there is none, the panel simply offers no rerank models.
-        contentPanel.add(withFooter(new AiModelsPanel(model,
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(new AiModelsPanel(model,
                 askAiService.localRuntimeManager() == null ? null
                         : new com.aresstack.askai.localmodels.LocalRerankerModelCatalog(
                                 askAiService.localRuntimeManager()),
                 nlpModelCatalog,
-                (VirtualOllamaContainerService) ollamaService)), AI_MODELS_VIEW);
+                (VirtualOllamaContainerService) ollamaService)));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
-        contentPanel.add(withFooter(new ProxyPanel(configurationRepository)), NETWORK_VIEW);
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,
+                settingsPage(new ProxyPanel(configurationRepository)));
         contentPanel.add(withFooter(new OllamaAboutPanel())
                 .withCenter(OllamaAboutPanel.createCopyDiagnosticsButton())
                 .withTrailing(new com.aresstack.askai.ui.about.CopyrightFooter()), ABOUT_VIEW);
         // Java2D pipeline editor for audio-processing profiles (shared repository instance).
         this.audioProcessingPanel = new AudioProcessingPanel(audioProfileRepository, applicationState);
         audioScreen().addPage(PAGE_AUDIO_PROCESSING, audioProcessingPanel, null);
-        // Configuration → Plugins: the real PF4J catalog (enable/disable, details), built after the host so
+        // Settings → Plugins: the real PF4J catalog (enable/disable, details), built after the host so
         // pluginService/enablement exist.
-        contentPanel.add(withFooter(new com.aresstack.askai.plugin.host.PluginManagementPanel(
-                pluginService, pluginEnablement, pluginsDirectory)), PLUGINS_VIEW);
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_PLUGINS, settingsPage(
+                new com.aresstack.askai.plugin.host.PluginManagementPanel(
+                        pluginService, pluginEnablement, pluginsDirectory)));
         wireBatchComponent();
         return contentPanel;
     }
@@ -1462,22 +1459,12 @@ public final class AskAiFrame extends JFrame {
         }
     }
 
-    /** Show the Models drawer on the Installed or Running Models page. */
-    private void showModels(boolean installed) {
-        showScreen(MODELS_SCREEN);
-        modelsScreen().select(installed ? PAGE_INSTALLED : PAGE_RUNNING);
-    }
-
-    /** The Installed / Running Models page of the Models drawer was chosen. */
-    private void showModelsPage(boolean installed) {
+    /** The Models page (installed and running models in one list) of the Models drawer was chosen. */
+    private void showModelsPage() {
         if (installSearchPanel != null) {
             installSearchPanel.leaveAddOnMode(); // leaving Setup drops any transient add-on target
         }
-        if (installed) {
-            modelsPanel.showInstalled();
-        } else {
-            modelsPanel.showRunning();
-        }
+        modelsPanel.showModels();
         refreshConnectionStatus();
     }
 }
