@@ -91,8 +91,11 @@ public final class SearchProviderCardsPanel extends JPanel {
         if (dataForSeoPanel != null) {
             dataForSeoPanel.save();
         }
-        if (serpApiPanel != null) {
-            serpApiPanel.save();
+        if (serpApiPanel != null && !serpApiPanel.save()) {
+            // The settings dialog is closing; the card's own status line is no longer visible.
+            javax.swing.JOptionPane.showMessageDialog(null,
+                    "SerpApi settings were not saved:\n" + serpApiPanel.getLastError(),
+                    "SerpApi", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
     }
 

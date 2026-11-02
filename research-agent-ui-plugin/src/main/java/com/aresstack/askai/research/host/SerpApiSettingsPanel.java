@@ -39,6 +39,7 @@ public final class SerpApiSettingsPanel extends JPanel {
     private final JLabel status = new JLabel(" ");
     /** Draft the edits are applied to; an invalid file falls back to defaults so the UI can repair it. */
     private SerpApiSearchConfiguration draft;
+    private String lastError = "";
 
     public SerpApiSettingsPanel(ProviderConfigurationService configurations) {
         super(new BorderLayout());
@@ -59,6 +60,13 @@ public final class SerpApiSettingsPanel extends JPanel {
         p.add(row("Location:", location));
         p.add(row("Google domain:", googleDomain));
         p.add(row("", resolveGoto));
+        javax.swing.JButton saveNow = new javax.swing.JButton("Save SerpApi settings");
+        saveNow.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                save();
+            }
+        });
+        p.add(row("", saveNow));
         p.add(row("", status));
         add(p, BorderLayout.NORTH);
         load();
@@ -96,13 +104,20 @@ public final class SerpApiSettingsPanel extends JPanel {
             } else {
                 configurations.saveSerpApi(c);
             }
+            lastError = "";
             status.setText("Saved.");
             load();
             return true;
         } catch (RuntimeException invalid) {
-            status.setText("Not saved: " + invalid.getMessage());
+            lastError = String.valueOf(invalid.getMessage());
+            status.setText("Not saved: " + lastError);
             return false;
         }
+    }
+
+    /** Reason of the last failed {@link #save()}, empty after a successful one. */
+    public String getLastError() {
+        return lastError;
     }
 
     private void apply(SerpApiSearchConfiguration c) {
