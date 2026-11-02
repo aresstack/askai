@@ -11,7 +11,7 @@ import java.util.Properties;
 
 /**
  * Persists {@link VideoSettings} as a properties file in the AskAI app directory
- * ({@code ~/.askai-java8/video-settings.properties}). The keys mirror the WD4J/corenth
+ * ({@code %APPDATA%/.askai/video-settings.properties}). The keys mirror the WD4J/corenth
  * {@code SettingsService} names ({@code video.backend}, {@code video.vlc.*}, …) so the file is
  * recognizable to anyone coming from the reference. Instance-based with an explicit path so tests
  * can run against a temp file; the app uses {@link #shared()}.

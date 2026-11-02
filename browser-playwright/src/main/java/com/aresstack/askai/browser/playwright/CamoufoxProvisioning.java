@@ -23,8 +23,8 @@ import java.util.stream.Stream;
 
 /**
  * Where AskAI finds the managed Camoufox (the Argos distribution: pinned, patched, SHA-256 verified) and keeps
- * its browser profiles (one per chat, {@code <APPDATA>/.askai-java8/browser-profiles/chats}). An existing
- * installation (configured, Argos' or AskAI's own) is reused; a download into {@code <APPDATA>/.askai-java8/browser}
+ * its browser profiles (one per chat, {@code <APPDATA>/.askai/browser-profiles/chats}). An existing
+ * installation (configured, Argos' or AskAI's own) is reused; a download into {@code <APPDATA>/.askai/browser}
  * happens only when none exists. Later starts only verify.
  *
  * <p>While the installer runs, a progress line {@value #PROGRESS_MARKER} goes to STDERR every few seconds:
@@ -46,7 +46,7 @@ final class CamoufoxProvisioning {
         if (appData == null || appData.trim().isEmpty()) {
             appData = System.getProperty("user.home");
         }
-        return Paths.get(appData, ".askai-java8");
+        return Paths.get(appData, ".askai");
     }
 
     /** Explicit Camoufox location: a browser root that holds the pinned install directory, or that directory. */

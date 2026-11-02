@@ -21,6 +21,8 @@ public final class AskAiJava8App {
 
     public static void main(String[] args) {
         holdDevPluginRunLock();
+        // askai #51: the data of the former .askai-java8 folder moves into .askai before anything reads it.
+        com.aresstack.askai.java8.settings.AppDirectoryMigration.run();
         final AppConfigurationRepository configurationRepository = new AppConfigurationRepository();
         // Must be set before any networking (java.net.InetAddress reads it once, at class init).
         if (configurationRepository.load().getHttpClientConfiguration().isPreferIpv6()) {

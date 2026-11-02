@@ -16,7 +16,7 @@ import java.util.Properties;
  * Record button, and the DSP editor's test panel. Historically the selection lived only in the
  * buried DSP test panel and was NOT persisted at all — it silently reset to the list head on
  * every open, which is how the VLC backend "disappeared" for the user. File:
- * {@code %APPDATA%\.askai-java8\askai-audio.properties}.
+ * {@code %APPDATA%\.askai\askai-audio.properties}.
  */
 public final class AudioPlaybackSettingsStore {
 

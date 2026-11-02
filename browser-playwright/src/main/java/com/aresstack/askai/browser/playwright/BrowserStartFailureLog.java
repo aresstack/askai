@@ -11,7 +11,7 @@ import java.time.OffsetDateTime;
  * Persistent post-mortem for a failed browser start. The browser runtime's stderr only survives as a small ring in
  * the host and a one-line chat message, which cuts Playwright's multi-line exception (browser log, call
  * log) to its first line. Start failures are rare and hard to reproduce, so every one is APPENDED in full
- * to {@code <APPDATA>/.askai-java8/logs/browser-start-failures.log} — the same app directory the host uses
+ * to {@code <APPDATA>/.askai/logs/browser-start-failures.log} — the same app directory the host uses
  * (AskAiPaths), resolved here because the browser runtime cannot depend on the host module.
  *
  * <p>Best effort: a log that cannot be written never masks the start failure itself.</p>
@@ -76,6 +76,6 @@ final class BrowserStartFailureLog {
         if (appData == null || appData.trim().isEmpty()) {
             appData = System.getProperty("user.home");
         }
-        return new File(new File(appData, ".askai-java8"), "logs");
+        return new File(new File(appData, ".askai"), "logs");
     }
 }
