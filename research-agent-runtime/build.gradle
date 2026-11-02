@@ -24,11 +24,13 @@ dependencies {
     // askai #31: Google via Serp4J on AskAI's own search browser (Playwright + Camoufox in this JVM).
     implementation project(':serp4j-playwright-google')
     implementation project(':browser-mcp-server-java21')
+    // askai #48: the runtime runs inside the AskAI JVM: the host's tool registry is called directly and the
+    // research plugin connects through the neutral ACP client port, both without a process or a wire.
+    implementation project(':mcp-runtime-api')
+    implementation project(':acp-client-api')
     runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
 
-    testImplementation project(':acp-client-api')
     testImplementation project(':acp-solon-client')
-    testImplementation project(':mcp-runtime-api')
     testImplementation project(':mcp-solon-runtime')
     // 36C: the live-sidecar integration test drives the PRODUCTIVE capture/acceptance lifecycle
     // (CaptureStore, SourceAcceptanceService, in-memory repository/index) behind the research endpoint.

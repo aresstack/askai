@@ -47,7 +47,14 @@ public final class ProductiveResearchBackendFactory {
 
     private final McpServerRegistry registry;
     private final McpToolClientFactory toolClients;
-    private final AcpAgentConnector connector;
+    private volatile AcpAgentConnector connector;
+    /**
+     * Where the endpoints only the research agent calls (research control, research service, research
+     * browser) are registered: the host registry for an agent process, the in-process registry when the agent
+     * runs in the AskAI JVM (askai #48). The bot-control endpoint for external clients always uses the host
+     * registry.
+     */
+    private volatile McpServerRegistry agentRegistry;
     private final ResearchRuntimeConfig config;
     private final long generationId;
     /** Stored browser-search overrides (canonical codec keys) + their revision, from the host store. */
@@ -219,6 +226,7 @@ public final class ProductiveResearchBackendFactory {
                                             com.aresstack.askai.agent.model.embedding
                                                     .EmbeddingConfigurationSnapshotProvider embeddingSnapshots) {
         this.registry = registry;
+        this.agentRegistry = registry;
         this.toolClients = toolClients;
         this.connector = connector;
         this.config = config;
@@ -230,6 +238,16 @@ public final class ProductiveResearchBackendFactory {
         this.embeddingSnapshots = embeddingSnapshots;
         this.searchStrategy = searchStrategy == null
                 ? SearchStrategySelection.legacyBrowser() : searchStrategy;
+    }
+
+    /**
+     * Runs the research agent of every following session inside the AskAI JVM (askai #48): no agent process,
+     * no stdio, no MCP. The agent calls the session's host tools directly in {@code runtime}'s registry and
+     * uses its shared search browser.
+     */
+    public void runAgentInProcess(InProcessResearchRuntime runtime) {
+        this.agentRegistry = runtime.registry();
+        this.connector = runtime.connector();
     }
 
     /** The session language (ISO code) for the knowledge worker's OpenNLP sentence resolver; empty → English. */
@@ -639,7 +657,7 @@ public final class ProductiveResearchBackendFactory {
                 sidecarConfigFile.getAbsolutePath());
         try {
             // 3. Host endpoints for this session+generation (the bridge forwards through the lazy runtime).
-            bridge = new BrowserBridgeEndpoint(registry, browser, captures, sessionKey, generationId);
+            bridge = new BrowserBridgeEndpoint(agentRegistry, browser, captures, sessionKey, generationId);
             bridge.open();
 
             // The control endpoint needs the live-state context; resources are created first with a
@@ -815,13 +833,13 @@ public final class ProductiveResearchBackendFactory {
                         }
                     };
             control = new com.aresstack.askai.research.mcp.ResearchControlEndpoint(
-                    registry, sessionKey, generationId, controlContext);
+                    agentRegistry, sessionKey, generationId, controlContext);
             // The INTERNAL service endpoint (manual_source_accept + the explicit derived actions, #33)
             // shares the SAME acceptance context but its own namespace — user/host/test operations,
             // never agent tools. The derived actions resolve through the session at call time.
             // The runtime-plumbing endpoint (manual_source_*) — internal runtime->host traffic only.
             service = new com.aresstack.askai.research.mcp.ResearchServiceEndpoint(
-                    registry, sessionKey, generationId, controlContext);
+                    agentRegistry, sessionKey, generationId, controlContext);
 
             // 4. Backend with BOTH endpoint descriptors (structured env hand-off; tokens never logged).
             String agentJava = config.getAgentJavaExecutable();
@@ -942,13 +960,13 @@ public final class ProductiveResearchBackendFactory {
                 System.err.println("[research-bot] bot-control MCP disabled by configuration - "
                         + "this session is GUI-only");
             }
-            String researchUrl = registry.endpointUrl(control.getHandle());
+            String researchUrl = agentRegistry.endpointUrl(control.getHandle());
             AcpEndpointDescriptor researchDescriptor = new AcpEndpointDescriptor(
                     control.getEndpointId(), researchUrl, "streamable", control.getHandle().getToken());
-            String bridgeUrl = registry.endpointUrl(bridge.getHandle());
+            String bridgeUrl = agentRegistry.endpointUrl(bridge.getHandle());
             AcpEndpointDescriptor browserDescriptor = new AcpEndpointDescriptor(
                     bridge.getEndpointId(), bridgeUrl, "streamable", bridge.getHandle().getToken());
-            String serviceUrl = registry.endpointUrl(service.getHandle());
+            String serviceUrl = agentRegistry.endpointUrl(service.getHandle());
             AcpEndpointDescriptor serviceDescriptor = new AcpEndpointDescriptor(
                     service.getEndpointId(), serviceUrl, "streamable", service.getHandle().getToken());
             // Issue #33: DEV hand-off for HEADLESS clients (gates, tests, an MCP-driving AI): the service

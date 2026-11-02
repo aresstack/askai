@@ -194,8 +194,9 @@ public class ResearchRuntimeModeTest {
     }
 
     @Test
-    public void fakeModeCreatesTheFakeBackendWithoutAnyServiceLookup() {
+    public void persistedFakeModeCreatesTheFakeBackendWithoutAnyServiceLookup() {
         FakeHostContext host = new FakeHostContext();
+        host.store.put(ResearchRuntimeSettings.KEY_MODE, ResearchBackendMode.FAKE.name());
         AgentSession session = new ResearchAgentSessionFactory().create(
                 new AgentSessionCreationRequest("s1", "p1", new HashMap<String, String>()), host);
         assertNotNull(session);
@@ -204,18 +205,11 @@ public class ResearchRuntimeModeTest {
     }
 
     @Test
-    public void unmetRequirementsStartTheDemoBackendVisiblyWithoutServiceLookups() {
-        // There is no user-facing mode choice anymore: unmet requirements mean new sessions run the
-        // DEMO backend with a visible startup notice (surfaced in the chat on activate) — and the
-        // host runtime services are never touched.
-        FakeHostContext host = new FakeHostContext();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "", "", "", "chrome", true)
-                .save(host.store);
-        AgentSession session = new ResearchAgentSessionFactory().create(
-                new AgentSessionCreationRequest("s1", "p1", new HashMap<String, String>()), host);
-        assertNotNull(session);
-        assertEquals("no service lookup for a demo start", 0, host.serviceLookups);
-        session.close();
+    public void agentAndSidecarPathsAreNoLongerRequirements() {
+        // askai #48: the research agent and the browsers run inside AskAI; empty java/jar paths of the former
+        // agent and sidecar processes no longer make the productive runtime unavailable.
+        assertTrue(new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "", "", "", "chrome", true)
+                .validateProductive().isEmpty());
     }
 
     @Test

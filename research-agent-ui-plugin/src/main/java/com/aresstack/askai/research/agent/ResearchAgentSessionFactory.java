@@ -164,6 +164,8 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 // selection is published as a per-session snapshot; the agent's implementation is ready.
                 ResearchRuntimeSettings.loadSearchStrategy(hostContext.getStateStore()),
                 embeddingSnapshots);
+        // askai #48: the research agent runs inside the AskAI JVM.
+        factory.runAgentInProcess(com.aresstack.askai.research.host.InProcessResearchRuntime.shared());
         // The knowledge worker's OpenNLP sentence resolver uses the SAME persisted session language ("en"/"de").
         factory.setResearchLanguageCode(ResearchRuntimeSettings.loadLanguage(hostContext.getStateStore()));
         factory.setBotControlMcpEnabled(

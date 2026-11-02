@@ -49,9 +49,11 @@ public final class ResearchRuntimeGenerationSwitch {
                     "New research runtime generation is not usable, keeping the current one: " + problems);
         }
         long id = generationIds.incrementAndGet();
-        ResearchRuntimeGeneration next = new ResearchRuntimeGeneration(id,
-                new ProductiveResearchBackendFactory(registry, toolClients, connector, config, id,
-                        rerankerSnapshots));
+        ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(registry, toolClients,
+                connector, config, id, rerankerSnapshots);
+        // askai #48: the research agent runs inside the AskAI JVM.
+        factory.runAgentInProcess(InProcessResearchRuntime.shared());
+        ResearchRuntimeGeneration next = new ResearchRuntimeGeneration(id, factory);
         // b) publish.
         ResearchRuntimeGeneration previous = active;
         active = next;

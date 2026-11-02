@@ -60,9 +60,8 @@ public final class ResearchRuntimeConfig {
     /** @return all problems (empty = usable). Never throws; the CALLER decides (prepare vs. report). */
     public List<String> validate() {
         List<String> problems = new ArrayList<String>();
-        requireFile(problems, "agent java executable", agentJavaExecutable);
-        requireFile(problems, "agent jar", agentJar);
-        // The browser runs inside AskAI (askai #31): no sidecar java or jar is required any more.
+        // The research agent and the browsers run inside AskAI (askai #31, #48): no java executable or jar of
+        // an agent or sidecar process is required any more.
         return problems;
     }
 

@@ -12,7 +12,7 @@ import java.util.Map;
  * (error results / call exceptions) surface as {@link ToolFailure}; a dead endpoint as
  * {@link EndpointUnavailable}. This is the exact invoker 36C reuses against the live Playwright sidecar.
  */
-public final class SolonToolInvoker implements ToolInvoker, AutoCloseable {
+public final class SolonToolInvoker implements com.aresstack.askai.research.runtime.host.HostToolEndpoint {
 
     /** Fallback request timeout for quick control channels when the caller names none. */
     public static final int DEFAULT_REQUEST_TIMEOUT_SECONDS = 30;
@@ -75,6 +75,23 @@ public final class SolonToolInvoker implements ToolInvoker, AutoCloseable {
             }
             throw new ToolFailure(message);
         }
+    }
+
+    @Override
+    public java.util.List<String> toolNames() {
+        java.util.List<String> names = new java.util.ArrayList<String>();
+        for (org.noear.solon.ai.chat.tool.FunctionTool tool : client.getTools()) {
+            names.add(tool.name());
+        }
+        return names;
+    }
+
+    @Override
+    public com.aresstack.askai.research.runtime.host.HostToolResult callTool(String toolName,
+                                                                           Map<String, Object> args) {
+        ToolResult result = client.callTool(toolName, args);
+        return new com.aresstack.askai.research.runtime.host.HostToolResult(String.valueOf(result),
+                result != null && result.isError());
     }
 
     @Override

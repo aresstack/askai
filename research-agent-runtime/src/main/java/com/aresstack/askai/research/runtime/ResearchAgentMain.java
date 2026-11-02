@@ -10,9 +10,6 @@ import com.agentclientprotocol.sdk.annotation.NewSession;
 import com.agentclientprotocol.sdk.annotation.Prompt;
 import com.agentclientprotocol.sdk.spec.AcpSchema;
 
-import org.noear.solon.ai.chat.tool.FunctionTool;
-import org.noear.solon.ai.chat.tool.ToolResult;
-import org.noear.solon.ai.mcp.client.McpClientProvider;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -33,8 +30,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class ResearchAgentMain {
 
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
+    /** The launch configuration: the process environment stand-alone, the host's map in the AskAI JVM. */
+    private final java.util.Map<String, String> env;
+    /** How the host's tool endpoints are reached: directly in the AskAI JVM, over MCP stand-alone. */
+    private final com.aresstack.askai.research.runtime.host.HostToolEndpoints hostEndpoints;
+    /** JVM-wide resources the host owns in the AskAI JVM (search browser, provider registry); may be null. */
+    private final ResearchRuntimeShared shared;
     private ResearchAgentEnvironment environment;
-    private McpClientProvider researchMcp;
+    private com.aresstack.askai.research.runtime.host.HostToolEndpoint researchMcp;
     private volatile boolean readinessAnnounced;
     /**
      * The session's hot-swappable main-model transport and the single model-backed conversation engine built
@@ -66,9 +69,7 @@ public final class ResearchAgentMain {
      * greeting's language — German, English, German, English across otherwise identical sessions. The host
      * knows the language when it starts this process, so it is session context from the first turn on.
      */
-    private final com.aresstack.askai.research.runtime.service.SessionResearchLanguage sessionLanguage =
-            com.aresstack.askai.research.runtime.service.SessionResearchLanguage.fromEnvironment(
-                    System.getenv("ASKAI_RESEARCH_LANGUAGE"));
+    private final com.aresstack.askai.research.runtime.service.SessionResearchLanguage sessionLanguage;
     /** The host's AUTHORITATIVE scope projection for the next turn (set_scope); empty until one arrives. */
     private final com.aresstack.askai.research.runtime.service.SessionScopeFence scopeFence =
             new com.aresstack.askai.research.runtime.service.SessionScopeFence();
@@ -109,6 +110,28 @@ public final class ResearchAgentMain {
     private final java.util.Set<String> visitedAcrossRuns =
             java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<String>());
 
+    /** The stand-alone agent process: configuration from the process environment, host tools over MCP. */
+    public ResearchAgentMain() {
+        this(System.getenv(), new com.aresstack.askai.research.runtime.host.SolonHostToolEndpoints(), null);
+    }
+
+    /**
+     * The agent inside the AskAI JVM (askai #48).
+     *
+     * @param env           the launch configuration (the variables the host used to hand to the process)
+     * @param hostEndpoints the host's tool endpoints
+     * @param shared        the host-owned JVM-wide resources, or {@code null} to create them per agent
+     */
+    public ResearchAgentMain(java.util.Map<String, String> env,
+                             com.aresstack.askai.research.runtime.host.HostToolEndpoints hostEndpoints,
+                             ResearchRuntimeShared shared) {
+        this.env = java.util.Collections.unmodifiableMap(new java.util.HashMap<String, String>(env));
+        this.hostEndpoints = hostEndpoints;
+        this.shared = shared;
+        this.sessionLanguage = com.aresstack.askai.research.runtime.service.SessionResearchLanguage
+                .fromEnvironment(this.env.get("ASKAI_RESEARCH_LANGUAGE"));
+    }
+
     public static void main(String[] args) {
         System.err.println("[research-agent] starting");
         AcpAgentSupport.create(new ResearchAgentMain())
@@ -137,7 +160,7 @@ public final class ResearchAgentMain {
     @Initialize
     public AcpSchema.InitializeResponse initialize() {
         System.err.println("[research-agent] initialize");
-        environment = ResearchAgentEnvironment.from(System.getenv());
+        environment = ResearchAgentEnvironment.from(env);
         System.err.println("[research-agent] " + environment); // toString never contains tokens
         return AcpSchema.InitializeResponse.ok();
     }
@@ -146,29 +169,23 @@ public final class ResearchAgentMain {
     public AcpSchema.NewSessionResponse newSession() {
         // Real readiness check: connect research MCP, list tools, call research_status. A failure here fails
         // session/new, so the host start is atomic (no half-started session).
-        researchMcp = McpClientProvider.builder()
-                .apiUrl(environment.researchUrl)
-                .channel(environment.researchTransport)
-                .cacheSeconds(0)
-                .initializationTimeout(Duration.ofSeconds(15))
-                .requestTimeout(Duration.ofSeconds(15))
-                .build();
+        researchMcp = hostEndpoints.connect(environment.researchUrl, environment.researchTransport, 15);
         boolean hasStatus = false;
-        for (FunctionTool tool : researchMcp.getTools()) {
-            if ("research_status".equals(tool.name())) {
+        for (String toolName : researchMcp.toolNames()) {
+            if ("research_status".equals(toolName)) {
                 hasStatus = true;
             }
             // Konzeptpapier capability detection: only a host that OFFERS the concept tools gets
             // the concept prompt block and the tool-round loop — against an older host the
             // scoping behaviour stays exactly as before.
-            if ("concept_read".equals(tool.name())) {
+            if ("concept_read".equals(toolName)) {
                 conceptToolsAvailable = true;
             }
         }
         if (!hasStatus) {
             throw new IllegalStateException("research_status is not offered by the research MCP endpoint");
         }
-        ToolResult status = researchMcp.callTool("research_status",
+        com.aresstack.askai.research.runtime.host.HostToolResult status = researchMcp.callTool("research_status",
                 Collections.<String, Object>emptyMap());
         System.err.println("[research-agent] research_status ok: " + status);
 
@@ -182,7 +199,7 @@ public final class ResearchAgentMain {
         this.teamAgent = new com.aresstack.askai.research.runtime.team.ResearchTeamAgent(mainModelChat,
                 com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry.defaults(
                         // Settings checkbox "Immer Suchvorschläge anbieten" (host env hand-off, default off).
-                        "true".equalsIgnoreCase(System.getenv("ASKAI_SCOPING_ALWAYS_SUGGEST")),
+                        "true".equalsIgnoreCase(env.get("ASKAI_SCOPING_ALWAYS_SUGGEST")),
                         conceptToolsAvailable),
                 new com.aresstack.askai.research.runtime.team.PhaseContextAssembler(
                         new com.aresstack.askai.research.runtime.team.PhaseContextAssembler
@@ -219,7 +236,7 @@ public final class ResearchAgentMain {
                         }));
         // The user's "Agent-Antwortbudget (Tokens)" setting (host env hand-off): the per-turn output
         // budget is configuration, never a hidden constant. Unset/invalid → the documented default.
-        String outputBudget = System.getenv("ASKAI_AGENT_MAX_OUTPUT_TOKENS");
+        String outputBudget = env.get("ASKAI_AGENT_MAX_OUTPUT_TOKENS");
         if (outputBudget != null && !outputBudget.trim().isEmpty()) {
             try {
                 teamAgent.setMaxOutputTokens(Integer.parseInt(outputBudget.trim()));
@@ -294,8 +311,8 @@ public final class ResearchAgentMain {
             new com.aresstack.askai.research.runtime.rerank.Bm25CandidateReranker();
 
     /** "KI-Reranker verwenden" (host setting, per spawn): default OFF → lexical BM25, no model. */
-    private static boolean useAiReranker() {
-        return "true".equalsIgnoreCase(System.getenv("ASKAI_USE_AI_RERANKER"));
+    private boolean useAiReranker() {
+        return "true".equalsIgnoreCase(env.get("ASKAI_USE_AI_RERANKER"));
     }
 
     private com.aresstack.askai.research.runtime.rerank.CandidateReranker rerankerFor(String languageCode) {
@@ -486,11 +503,13 @@ public final class ResearchAgentMain {
                                 }
                             });
             this.descriptorWatcher = watcher;
-            Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-                public void run() {
-                    watcher.close();
-                }
-            }, "model-descriptor-watcher-close"));
+            if (shared == null) {
+                Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+                    public void run() {
+                        watcher.close();
+                    }
+                }, "model-descriptor-watcher-close"));
+            }
         } catch (java.io.IOException ex) {
             System.err.println("[research-agent] could not watch the inference descriptor directory: "
                     + ex.getMessage());
@@ -576,6 +595,9 @@ public final class ResearchAgentMain {
     private synchronized
             com.aresstack.askai.research.runtime.search.provider.async.AsyncSearchProviderRegistry
             ensureSearchProviderRegistry() {
+        if (searchProviderRegistry == null && shared != null) {
+            searchProviderRegistry = shared.searchProviderRegistry();
+        }
         if (searchProviderRegistry == null) {
             final com.aresstack.askai.research.runtime.search.provider.async.AsyncSearchProviderRegistry
                     registry = new com.aresstack.askai.research.runtime.search.provider.async
@@ -593,18 +615,39 @@ public final class ResearchAgentMain {
         return searchProviderRegistry;
     }
 
-    /** AskAI's headless search browser (askai #31): one per process, started on the first search. */
+    /**
+     * AskAI's headless search browser (askai #31): in the AskAI JVM the host's one shared instance, stand-alone
+     * one per process. Started on the first search.
+     */
     private com.aresstack.askai.browser.sidecar.SearchBrowser searchBrowser;
 
     private synchronized com.aresstack.askai.browser.sidecar.SearchBrowser ensureSearchBrowser() {
+        if (searchBrowser == null && shared != null) {
+            searchBrowser = shared.searchBrowser();
+        }
         if (searchBrowser == null) {
             final com.aresstack.askai.browser.sidecar.SearchBrowser browser =
                     new com.aresstack.askai.browser.sidecar.SearchBrowser(
-                            System.getenv().getOrDefault("ASKAI_SEARCH_BROWSER_CHANNEL", "camoufox"));
+                            env.getOrDefault("ASKAI_SEARCH_BROWSER_CHANNEL", "camoufox"));
             Runtime.getRuntime().addShutdownHook(new Thread(browser::close, "research-search-browser-close"));
             searchBrowser = browser;
         }
         return searchBrowser;
+    }
+
+    /**
+     * Ends this agent inside the AskAI JVM: per-session watchers and endpoint clients. The shared search
+     * browser and provider registry belong to the host and stay open. Idempotent.
+     */
+    public void close() {
+        cancel();
+        if (descriptorWatcher != null) {
+            descriptorWatcher.close();
+            descriptorWatcher = null;
+        }
+        if (researchMcp != null) {
+            researchMcp.close();
+        }
     }
 
     @Cancel
@@ -876,13 +919,13 @@ public final class ResearchAgentMain {
                     .manualSearchFailed(requestId, "SEARCH_UNAVAILABLE"));
             return;
         }
-        com.aresstack.askai.research.runtime.loop.SolonToolInvoker browser = null;
-        com.aresstack.askai.research.runtime.loop.SolonToolInvoker service = null;
+        com.aresstack.askai.research.runtime.host.HostToolEndpoint browser = null;
+        com.aresstack.askai.research.runtime.host.HostToolEndpoint service = null;
         try {
-            browser = new com.aresstack.askai.research.runtime.loop.SolonToolInvoker(
+            browser = hostEndpoints.connect(
                     environment.browserUrl, environment.browserTransport,
                     browserToolTimeoutSeconds());
-            service = new com.aresstack.askai.research.runtime.loop.SolonToolInvoker(
+            service = hostEndpoints.connect(
                     environment.serviceUrl, environment.serviceTransport,
                     browserToolTimeoutSeconds());
             // Resolve the SAME strategy the loop uses: the session API-provider strategy, else the legacy
@@ -921,7 +964,7 @@ public final class ResearchAgentMain {
             com.aresstack.askai.research.runtime.rerank.CandidateReranker searchReranker =
                     rerankerFor(searchLanguage == null ? sessionLanguage.code() : searchLanguage);
             com.aresstack.askai.research.runtime.loop.ResearchRunBudget searchBudget =
-                    com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(System.getenv());
+                    com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(env);
             com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService acquisition =
                     new com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService(
                             browser,
@@ -1180,8 +1223,8 @@ public final class ResearchAgentMain {
      */
     private com.aresstack.askai.research.runtime.team.TeamAgentStateView readStateView(SyncPromptContext ctx) {
         try {
-            ToolResult status = researchMcp.callTool("research_status",
-                    Collections.<String, Object>emptyMap());
+            com.aresstack.askai.research.runtime.host.HostToolResult status = researchMcp.callTool(
+                    "research_status", Collections.<String, Object>emptyMap());
             String raw = String.valueOf(status);
             ctx.sendMessage(com.aresstack.askai.research.runtime.loop.ResearchRunWire.log("status: " + raw));
             com.aresstack.askai.research.runtime.team.TeamAgentStateView view =
@@ -1432,7 +1475,7 @@ public final class ResearchAgentMain {
                                 .destructiveEditRefusal());
         }
         try {
-            org.noear.solon.ai.chat.tool.ToolResult result = researchMcp.callTool(toolName, args);
+            com.aresstack.askai.research.runtime.host.HostToolResult result = researchMcp.callTool(toolName, args);
             String text = String.valueOf(result);
             // An MCP ERROR result is the tool's REJECTION and must surface as one. The first gate
             // trusted text prefixes only, so every rejection came back classified as APPLIED —
@@ -1527,8 +1570,8 @@ public final class ResearchAgentMain {
     }
 
     /** An integer env hand-off: unset/invalid → the documented default (logged, never fatal). */
-    private static int envInt(String name, int fallback) {
-        String value = System.getenv(name);
+    private int envInt(String name, int fallback) {
+        String value = env.get(name);
         if (value == null || value.trim().isEmpty()) {
             return fallback;
         }
@@ -1633,8 +1676,8 @@ public final class ResearchAgentMain {
      * fetches) legitimately runs for minutes; the old hard-coded 30s was misread as "sidecar dead"
      * and ended every search as "Websuche technisch fehlgeschlagen" with empty sources.
      */
-    private static int browserToolTimeoutSeconds() {
-        String raw = System.getenv("ASKAI_BROWSER_TOOL_TIMEOUT_SECONDS");
+    private int browserToolTimeoutSeconds() {
+        String raw = env.get("ASKAI_BROWSER_TOOL_TIMEOUT_SECONDS");
         try {
             int value = raw == null ? 0 : Integer.parseInt(raw.trim());
             return value > 0 ? value : DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS;
@@ -1647,17 +1690,13 @@ public final class ResearchAgentMain {
         // Turn boundary (idle): apply any pending central-model descriptor reload BEFORE building the loop,
         // so this turn uses the freshly rebuilt inference port; a switch never happens mid-run.
         applyPendingModelReload(ctx);
-        com.aresstack.askai.research.runtime.loop.SolonToolInvoker browser =
-                new com.aresstack.askai.research.runtime.loop.SolonToolInvoker(
-                        environment.browserUrl, environment.browserTransport,
-                        browserToolTimeoutSeconds());
-        com.aresstack.askai.research.runtime.loop.SolonToolInvoker research =
-                new com.aresstack.askai.research.runtime.loop.SolonToolInvoker(
-                        environment.researchUrl, environment.researchTransport,
-                        browserToolTimeoutSeconds());
+        com.aresstack.askai.research.runtime.host.HostToolEndpoint browser = hostEndpoints.connect(
+                environment.browserUrl, environment.browserTransport, browserToolTimeoutSeconds());
+        com.aresstack.askai.research.runtime.host.HostToolEndpoint research = hostEndpoints.connect(
+                environment.researchUrl, environment.researchTransport, browserToolTimeoutSeconds());
         try {
             final com.aresstack.askai.research.runtime.loop.ResearchRunBudget budget =
-                    com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(System.getenv());
+                    com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(env);
             com.aresstack.askai.research.runtime.loop.ResearchLoop loop =
                     new com.aresstack.askai.research.runtime.loop.ResearchLoop(browser, research, budget,
                             new com.aresstack.askai.research.runtime.loop.ResearchLoopClock() {
@@ -1720,7 +1759,7 @@ public final class ResearchAgentMain {
             if (environment.hasService()) {
                 loop.setScopeControl(
                         new com.aresstack.askai.research.runtime.acquire.ServiceSearchScopeControlPort(
-                                new com.aresstack.askai.research.runtime.loop.SolonToolInvoker(
+                                hostEndpoints.connect(
                                         environment.serviceUrl, environment.serviceTransport,
                                         browserToolTimeoutSeconds())));
             }
