@@ -43,18 +43,19 @@ public class ComicHelpButton extends JButton {
         try {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            int diameter = Math.min(getWidth(), getHeight()) - 1;
-            int x = (getWidth() - diameter) / 2;
-            int y = (getHeight() - diameter) / 2;
+            // Exactly the circle of the title bar's close chip (ComicWindowHoldCloseButton): inset 2px,
+            // diameter size - 5, so "?" and "X" sit side by side at the same size.
+            float diameter = Math.min(getWidth(), getHeight()) - 5f;
             boolean hot = getModel().isRollover() || getModel().isPressed();
             g2.setColor(hot ? ThemeColor.of("comic.accentOrange") : ThemeColor.of("comic.navigationBlue"));
-            g2.fill(new Ellipse2D.Double(x, y, diameter, diameter));
+            g2.fill(new Ellipse2D.Float(2f, 2f, diameter, diameter));
             g2.setColor(ThemeColor.of("comic.buttonPlate"));
             Font base = getFont() != null ? getFont() : new Font(Font.SANS_SERIF, Font.PLAIN, 12);
             g2.setFont(base.deriveFont(Font.BOLD, Math.max(12f, diameter * 0.6f)));
             FontMetrics metrics = g2.getFontMetrics();
-            g2.drawString("?", (getWidth() - metrics.stringWidth("?")) / 2,
-                    (getHeight() - metrics.getHeight()) / 2 + metrics.getAscent());
+            float center = 2f + diameter / 2f;
+            g2.drawString("?", Math.round(center - metrics.stringWidth("?") / 2f),
+                    Math.round(center - metrics.getHeight() / 2f + metrics.getAscent()));
         } finally {
             g2.dispose();
         }
@@ -63,9 +64,9 @@ public class ComicHelpButton extends JButton {
     /** Clicks count only inside the circle. */
     @Override
     public boolean contains(int x, int y) {
-        int radius = Math.min(getWidth(), getHeight()) / 2;
-        int dx = x - getWidth() / 2;
-        int dy = y - getHeight() / 2;
+        float radius = (Math.min(getWidth(), getHeight()) - 5f) / 2f;
+        float dx = x - (2f + radius);
+        float dy = y - (2f + radius);
         return dx * dx + dy * dy <= radius * radius;
     }
 }
