@@ -81,7 +81,7 @@ public final class BrightDataSearchProviderHttpTest {
         config.setSynchronousEndpoint(base + "/request");
         config.setApiKey(secrets.encrypt(API_KEY.toCharArray()));
         return new SearchProviderFactory(new Gson(), new AsyncHttpClientFactory(), secrets)
-                .createBrightData(config);
+                .createLegacyBrightData(config);
     }
 
     private static WebSearchRequest request() {

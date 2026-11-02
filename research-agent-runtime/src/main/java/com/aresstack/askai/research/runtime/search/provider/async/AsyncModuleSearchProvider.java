@@ -123,15 +123,19 @@ public final class AsyncModuleSearchProvider implements SearchProvider {
     }
 
     private SearchProviderResult toRuntimeResult(SearchProviderRequest request, WebSearchResult result) {
+        // The engine comes from the module result (Serp4J reports it per response and per item); the
+        // configured default is only a fallback. Bright Data / DataForSEO are no longer always "GOOGLE".
+        SearchEngine resultEngine = AsyncProviderMapping.toRuntimeEngine(result.getSearchEngine(), searchEngine);
         List<SearchHit> hits = new ArrayList<SearchHit>();
         int index = 0;
         for (WebSearchHit hit : result.getHits()) {
             index++;
             int rank = hit.getRank() > 0 ? hit.getRank() : index;
-            hits.add(new SearchHit(providerId, searchEngine, request.getQuery(), rank,
+            SearchEngine hitEngine = AsyncProviderMapping.toRuntimeEngine(hit.getSearchEngine(), resultEngine);
+            hits.add(new SearchHit(providerId, hitEngine, request.getQuery(), rank,
                     hit.getUrl(), hit.getTitle(), hit.getSnippet(), domainOf(hit.getUrl()), rank, null));
         }
-        return new SearchProviderResult(providerId, searchEngine, hits);
+        return new SearchProviderResult(providerId, resultEngine, hits, result.getRawResponse());
     }
 
     /** The host of {@code url}, or an empty string when it cannot be parsed — never throws. */
