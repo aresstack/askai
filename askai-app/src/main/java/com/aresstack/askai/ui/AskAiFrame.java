@@ -69,12 +69,13 @@ public final class AskAiFrame extends JFrame {
     private static final String MODELS_VIEW = "models";
     private static final String ACTIONS_VIEW = "actions";
     private static final String INSTALL_VIEW = "install";
-    private static final String CONNECTIONS_VIEW = "connections";
-    private static final String AI_MODELS_VIEW = "ai-models";
-    private static final String NETWORK_VIEW = "network";
+    /** The application pages inside the Settings (formerly own screens behind the gear menu). */
+    private static final String SETTINGS_CONNECTIONS = "Connections";
+    private static final String SETTINGS_AI_MODELS = "AI models";
+    private static final String SETTINGS_NETWORK = "Network";
+    private static final String SETTINGS_PLUGINS = "Plugins";
     private static final String ABOUT_VIEW = "about";
     private static final String AUDIO_PROCESSING_VIEW = "audio-processing";
-    private static final String PLUGINS_VIEW = "plugins";
 
     private final AskAiModel model;
     private final AppConfigurationRepository configurationRepository;
@@ -406,23 +407,24 @@ public final class AskAiFrame extends JFrame {
         return models;
     }
 
-    /** The gear's menu: chat settings first, then the configuration screens. */
-    private javax.swing.JPopupMenu createSettingsMenu() {
-        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
-        JMenuItem chatSettings = new JMenuItem("Chat settings…");
-        chatSettings.addActionListener(event -> {
-            if (chatWorkspace != null) {
-                showScreen(CHAT_VIEW); // the settings live in the chat workspace (drawer + main area)
-                chatWorkspace.openActiveChatSettings();
-            }
-        });
-        menu.add(chatSettings);
-        menu.addSeparator();
-        menu.add(createScreenItem("Connections", CONNECTIONS_VIEW));
-        menu.add(createScreenItem("AI models", AI_MODELS_VIEW));
-        menu.add(createScreenItem("Network", NETWORK_VIEW));
-        menu.add(createScreenItem("Plugins", PLUGINS_VIEW));
-        return menu;
+    /**
+     * Opens THE Settings — application-wide categories (General, Appearance, Connections, AI models,
+     * Network, Plugins) and the chat categories (Chat, Party, plugin chat modes) — on {@code category}
+     * (null keeps the current page). They live in the chat workspace (drawer + main area).
+     */
+    private void openSettings(String category) {
+        if (chatWorkspace != null) {
+            showScreen(CHAT_VIEW);
+            chatWorkspace.openActiveSettings(category);
+        }
+    }
+
+    /** An application page as a Settings category: scrollable, without the old screen footer. */
+    private static javax.swing.JComponent settingsPage(javax.swing.JComponent page) {
+        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(page);
+        scroll.setBorder(javax.swing.BorderFactory.createEmptyBorder());
+        scroll.getVerticalScrollBar().setUnitIncrement(14);
+        return scroll;
     }
 
     /** An icon drawn scaled to {@code size} pixels (the 15px stroke glyphs at title-bar size). */
@@ -464,14 +466,11 @@ public final class AskAiFrame extends JFrame {
         gear.setIcon(new ScaledIcon(com.aresstack.askai.ui.ChatComposerPanel.createGearGlyphIcon(), 20));
         gear.setMargin(new java.awt.Insets(0, 0, 0, 0));
         gear.setPreferredSize(new Dimension(24, 24)); // the size of the close chip beside it
-        gear.setToolTipText("Settings and configuration");
+        gear.setToolTipText("Settings");
         gear.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-        // The gear is THE settings menu: the chat settings dialog plus the configuration screens
-        // (formerly the "Configuration" menu). Built per click, so it always wears the current theme.
-        gear.addActionListener(event -> {
-            javax.swing.JPopupMenu menu = createSettingsMenu();
-            menu.show(gear, gear.getWidth() - menu.getPreferredSize().width, gear.getHeight());
-        });
+        // The gear opens THE Settings directly: one place for all settings (the former "Chat settings…"
+        // plus the Connections / AI models / Network / Plugins screens are categories there now).
+        gear.addActionListener(event -> openSettings(null));
         gear.setMaximumSize(gear.getPreferredSize()); // never stretched by the menu-bar layout
         return gear;
     }
@@ -518,7 +517,7 @@ public final class AskAiFrame extends JFrame {
 
     /** Shows the Connections view and puts the cursor in its Base URL field, selected for overwrite. */
     private void openConnectionSettings() {
-        showScreen(CONNECTIONS_VIEW);
+        openSettings(SETTINGS_CONNECTIONS);
         if (configPanel != null) {
             configPanel.focusBaseUrl();
         }
@@ -1291,7 +1290,7 @@ public final class AskAiFrame extends JFrame {
         });
         this.installSearchPanel = modelSearchPanel;
         this.configPanel = new OllamaConfigPanel(model, ollamaService);
-        contentPanel.add(withFooter(configPanel), CONNECTIONS_VIEW);
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_CONNECTIONS, settingsPage(configPanel));
         // Central AI-model selection (reranker + embeddings) owned by AskAI for all plugins. The reranker
         // catalog needs the local runtime; when there is none, the panel simply offers no rerank models.
         // Below it: the model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
@@ -1304,19 +1303,21 @@ public final class AskAiFrame extends JFrame {
                 (VirtualOllamaContainerService) ollamaService), java.awt.BorderLayout.NORTH);
         aiModelsScreen.add(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
                 .inConfigurationDirectory()), java.awt.BorderLayout.CENTER);
-        contentPanel.add(withFooter(aiModelsScreen), AI_MODELS_VIEW);
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsScreen));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
-        contentPanel.add(withFooter(new ProxyPanel(configurationRepository)), NETWORK_VIEW);
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,
+                settingsPage(new ProxyPanel(configurationRepository)));
         contentPanel.add(withFooter(new OllamaAboutPanel())
                 .withCenter(OllamaAboutPanel.createCopyDiagnosticsButton())
                 .withTrailing(new com.aresstack.askai.ui.about.CopyrightFooter()), ABOUT_VIEW);
         // Java2D pipeline editor for audio-processing profiles (shared repository instance).
         this.audioProcessingPanel = new AudioProcessingPanel(audioProfileRepository, applicationState);
         audioScreen().addPage(PAGE_AUDIO_PROCESSING, audioProcessingPanel, null);
-        // Configuration → Plugins: the real PF4J catalog (enable/disable, details), built after the host so
+        // Settings → Plugins: the real PF4J catalog (enable/disable, details), built after the host so
         // pluginService/enablement exist.
-        contentPanel.add(withFooter(new com.aresstack.askai.plugin.host.PluginManagementPanel(
-                pluginService, pluginEnablement, pluginsDirectory)), PLUGINS_VIEW);
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_PLUGINS, settingsPage(
+                new com.aresstack.askai.plugin.host.PluginManagementPanel(
+                        pluginService, pluginEnablement, pluginsDirectory)));
         wireBatchComponent();
         return contentPanel;
     }

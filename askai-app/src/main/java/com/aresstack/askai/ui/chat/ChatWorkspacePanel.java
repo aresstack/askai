@@ -218,6 +218,7 @@ public final class ChatWorkspacePanel extends JPanel {
         if (session instanceof OllamaChatPanel) {
             final OllamaChatPanel chat = (OllamaChatPanel) session;
             chat.setSettingsOpener(category -> openSettings(chat, category));
+            chat.setApplicationSettingsPages(applicationSettingsPages);
         }
         cards.add(session.getComponent(), id.toString());
         selectSession(id);
@@ -816,11 +817,27 @@ public final class ChatWorkspacePanel extends JPanel {
         return footer;
     }
 
-    /** Opens the ACTIVE chat's settings (drawer pane + main area); no-op without an active chat panel. */
+    /**
+     * The application's configuration pages (Connections, AI models, Network, Plugins) shown inside the
+     * Settings next to General/Appearance. One shared, ordered map: every chat tab sees the same pages.
+     */
+    private final Map<String, JComponent> applicationSettingsPages = new LinkedHashMap<String, JComponent>();
+
+    /** Registers an application page in the Settings (call before the Settings are first opened). */
+    public void addApplicationSettingsPage(String category, JComponent page) {
+        applicationSettingsPages.put(category, page);
+    }
+
+    /** Opens the Settings (drawer pane + main area) on the current page; no-op without an active chat panel. */
     public void openActiveChatSettings() {
+        openActiveSettings(null);
+    }
+
+    /** Opens the Settings on {@code category} (null keeps the current page); no-op without an active chat. */
+    public void openActiveSettings(String category) {
         ChatSessionComponent active = activeSession();
         if (active instanceof OllamaChatPanel) {
-            openSettings((OllamaChatPanel) active, null);
+            openSettings((OllamaChatPanel) active, category);
         }
     }
 
@@ -936,19 +953,19 @@ public final class ChatWorkspacePanel extends JPanel {
 
     /**
      * The settings categories in the drawer's OWN design — the same rows and group headings as the chat
-     * list (SETTINGS, then the active agent's pages); the selected category is the highlighted row.
+     * list (SETTINGS: application-wide; CHAT: chat, Party, plugin chat modes); the selected category is the highlighted row.
      */
     private void renderSettingsRows(final OllamaChatPanel chat) {
         JPanel rows = new JPanel();
         rows.setLayout(new javax.swing.BoxLayout(rows, javax.swing.BoxLayout.Y_AXIS));
         rows.setOpaque(false);
         String selected = chat.selectedSettingsCategory();
-        boolean agentHeading = false;
+        boolean chatHeading = false;
         rows.add(alignedLeft(groupHeader("SETTINGS")));
         for (final String category : chat.settingsCategories()) {
-            if (!agentHeading && !OllamaChatPanel.isGeneralSettingsCategory(category)) {
-                rows.add(alignedLeft(groupHeader("AGENT")));
-                agentHeading = true;
+            if (!chatHeading && !chat.isApplicationSettingsCategory(category)) {
+                rows.add(alignedLeft(groupHeader("CHAT"))); // Chat, Party and the plugins' chat modes
+                chatHeading = true;
             }
             rows.add(alignedLeft(new ChatHistoryRow(category, "", "", false, category.equals(selected), () -> {
                 chat.selectSettingsCategory(category);
