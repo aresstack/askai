@@ -14,17 +14,18 @@ import java.util.function.Consumer;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /** The wizard's flow against a synchronous fake of {@link SetupActions}: steps, checks, Merlin, finish, cancel. */
 public class SetupWizardPanelTest {
 
     @Test
-    public void startsOnTheNetworkStepAndOnlyGoesOnAfterATestOrASkip() {
+    public void startsOnTheNetworkStepAndNextIsOpenEvenWithoutATest() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
         assertEquals(SetupWizardPanel.STEP_NETWORK, wizard.step());
-        assertFalse(wizard.nextButton().isEnabled());
+        assertTrue("an unchecked step never blocks Next", wizard.nextButton().isEnabled());
         assertTrue("skipping is always possible", wizard.skipButton().isEnabled());
 
         wizard.networkTestButton().doClick();
@@ -61,8 +62,8 @@ public class SetupWizardPanelTest {
         wizard.jumpTo(SetupWizardPanel.STEP_VOICE);
 
         assertFalse(wizard.isDone(SetupWizardPanel.STEP_CHECK));
-        assertFalse(wizard.finishButton().isEnabled());
-        assertFalse(wizard.skipButton().isEnabled());
+        assertTrue("an outdated check is a hint, not a lock", wizard.finishButton().isEnabled());
+        assertTrue(wizard.skipButton().isEnabled());
         assertEquals(SetupWizardPanel.CHECK_OUTDATED, wizard.checkStatusText());
 
         wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
@@ -151,7 +152,7 @@ public class SetupWizardPanelTest {
     }
 
     @Test
-    public void theFinalCheckSavesTheDraftAndBlocksOnAFailure() {
+    public void theFinalCheckSavesTheDraftAndReportsAFailureWithoutBlocking() {
         Fake fake = new Fake();
         fake.checks = Arrays.asList(SetupCheck.ok("AI runtime", "Ollama 0.9.0"),
                 SetupCheck.failed("Chat model", "llama3.2 is not installed"));
@@ -161,7 +162,7 @@ public class SetupWizardPanelTest {
         assertNotNull("the draft was handed over for saving", fake.finished);
         assertEquals("llama3.2", fake.finished.chatModel());
         assertFalse(wizard.isDone(SetupWizardPanel.STEP_CHECK));
-        assertFalse(wizard.nextButton().isEnabled());
+        assertTrue("a failed check is a hint, Next stays open", wizard.nextButton().isEnabled());
         assertTrue(wizard.errorOf(SetupWizardPanel.STEP_CHECK).contains("not installed"));
     }
 
@@ -183,13 +184,60 @@ public class SetupWizardPanelTest {
     }
 
     @Test
-    public void aChosenVoiceMustBeInstalledBeforeFinishing() {
+    public void aChosenButMissingVoiceDoesNotBlockFinishing() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
+        final boolean[] finished = {false};
+        wizard.setOnFinished(() -> finished[0] = true);
         walkToVoice(wizard);
         wizard.voiceGermanChoice().setSelectedItem("Thorsten (German)");
-        assertFalse(wizard.finishButton().isEnabled());
+        assertTrue(wizard.finishButton().isEnabled());
         assertTrue("finishing without voices stays possible", wizard.skipButton().isEnabled());
+
+        wizard.finishButton().doClick();
+
+        assertTrue(finished[0]);
+        assertNull("a voice that is not installed is not stored", fake.savedVoices);
+    }
+
+    @Test
+    public void everyStepCanBePassedWithNextEvenWhenAllChecksFail() {
+        Fake fake = new Fake();
+        fake.networkError = "proxy unreachable";
+        fake.ollamaVersion = null;
+        fake.checks = Collections.singletonList(SetupCheck.failed("AI runtime", "connection refused"));
+        SetupWizardPanel wizard = wizard(fake);
+        final boolean[] finished = {false};
+        wizard.setOnFinished(() -> finished[0] = true);
+        wizard.networkTestButton().doClick();
+        assertFalse(wizard.isDone(SetupWizardPanel.STEP_NETWORK));
+
+        for (int i = SetupWizardPanel.STEP_NETWORK; i < SetupWizardPanel.STEP_VOICE; i++) {
+            assertTrue("Next is open in step " + i, wizard.nextButton().isEnabled());
+            wizard.nextButton().doClick();
+            assertEquals(i + 1, wizard.step());
+        }
+        assertFalse(wizard.isDone(SetupWizardPanel.STEP_CHECK));
+        assertTrue(wizard.finishButton().isEnabled());
+        wizard.finishButton().doClick();
+
+        assertTrue("the wizard closes despite the failed check", finished[0]);
+        assertNotNull("the entries were saved all the same", fake.finished);
+    }
+
+    @Test
+    public void finishingAfterJumpingPastTheCheckStillSavesTheEntries() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        final boolean[] finished = {false};
+        wizard.setOnFinished(() -> finished[0] = true);
+        wizard.jumpTo(SetupWizardPanel.STEP_VOICE);
+        assertNull(fake.finished);
+
+        wizard.skipButton().doClick();
+
+        assertTrue(finished[0]);
+        assertNotNull("skipping the check must not lose the entries", fake.finished);
     }
 
     @Test

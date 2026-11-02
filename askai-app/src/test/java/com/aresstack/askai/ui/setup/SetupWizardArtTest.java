@@ -23,7 +23,7 @@ public class SetupWizardArtTest {
         for (int step = 0; step < SetupWizardPanel.STEP_NAMES.length; step++) {
             SetupWizardMascot.Art art = SetupWizardMascot.Art.load(SetupWizardPanel.mascotResource(step));
             assertNotNull("picture of step " + step, art);
-            assertFalse("AskAI's pictures are full scenes, drawn as cards", art.isCutOut());
+            assertTrue("the step pictures are cut-outs with a transparent background", art.isCutOut());
         }
         assertNotNull(SetupWizardMascot.Art.load(SetupWizardPanel.RUNTIME_INSTALL_MASCOT));
         assertNotNull(SetupWizardMascot.Art.load());
@@ -36,16 +36,22 @@ public class SetupWizardArtTest {
         File originals = new File(root, "docs/images/setup-wizard/originals");
         File[] files = copies.listFiles();
         assertNotNull(files);
-        assertEquals(7, files.length);
+        assertEquals(13, files.length);
         for (File copy : files) {
             File original = new File(originals, copy.getName());
             assertTrue("original of " + copy.getName(), original.isFile());
             BufferedImage image = ImageIO.read(original);
-            assertEquals("original keeps its size", 1086, image.getWidth());
-            assertEquals(1448, image.getHeight());
             BufferedImage scaled = ImageIO.read(copy);
-            assertEquals(480, scaled.getWidth());
-            assertEquals(640, scaled.getHeight());
+            if (copy.getName().startsWith("merlin-")) {
+                assertEquals("original keeps its size", 1024, image.getWidth());
+                assertEquals(1536, image.getHeight());
+                assertEquals(900, scaled.getHeight());
+            } else {
+                assertEquals("original keeps its size", 1086, image.getWidth());
+                assertEquals(1448, image.getHeight());
+                assertEquals(480, scaled.getWidth());
+                assertEquals(640, scaled.getHeight());
+            }
         }
     }
 
