@@ -19,7 +19,7 @@ public final class InProcessResearchRuntime implements AutoCloseable {
     private final ResearchRuntimeShared shared;
     private final AcpAgentConnector connector;
 
-    InProcessResearchRuntime(String searchBrowserChannel) {
+    public InProcessResearchRuntime(String searchBrowserChannel) {
         this.shared = new ResearchRuntimeShared(searchBrowserChannel);
         this.connector = new InProcessResearchAgentConnector(new InProcessHostToolEndpoints(registry), shared);
     }

@@ -6,7 +6,7 @@ package com.aresstack.askai.browser.sidecar;
  * playwright4j's whole point is that no Node.js runtime exists; its equivalent failure mode is a missing
  * driver-bundle (the Playwright Core JS package on the classpath), reported as DRIVER_BUNDLE_NOT_FOUND.
  */
-final class PlaywrightReadiness {
+public final class PlaywrightReadiness {
 
     enum Status {
         READY,
@@ -36,12 +36,12 @@ final class PlaywrightReadiness {
         return detail;
     }
 
-    boolean isReady() {
+    public boolean isReady() {
         return status == Status.READY;
     }
 
     /** Readable single line for tool errors and STDERR logs (never a stack trace). */
-    String render() {
+    public String render() {
         return detail.isEmpty() ? status.name() : status.name() + ": " + detail;
     }
 }

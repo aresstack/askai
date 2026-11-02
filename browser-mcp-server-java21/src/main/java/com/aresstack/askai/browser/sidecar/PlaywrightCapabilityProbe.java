@@ -19,7 +19,7 @@ import java.util.Map;
  * Launchability itself is verified by the actual launch at session start ({@code BROWSER_START_FAILED}).
  * The probe itself NEVER downloads or installs anything.
  */
-final class PlaywrightCapabilityProbe {
+public final class PlaywrightCapabilityProbe {
 
     /** The three environment checks, injectable for classification tests. */
     interface Checks {
@@ -34,7 +34,7 @@ final class PlaywrightCapabilityProbe {
 
     private final Checks checks;
 
-    PlaywrightCapabilityProbe() {
+    public PlaywrightCapabilityProbe() {
         this(new RealChecks());
     }
 
@@ -42,7 +42,7 @@ final class PlaywrightCapabilityProbe {
         this.checks = checks;
     }
 
-    PlaywrightReadiness probe(String channel) {
+    public PlaywrightReadiness probe(String channel) {
         List<String> command;
         try {
             command = checks.driverCommand();

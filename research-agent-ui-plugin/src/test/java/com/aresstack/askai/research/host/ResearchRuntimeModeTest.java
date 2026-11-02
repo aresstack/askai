@@ -125,15 +125,10 @@ public class ResearchRuntimeModeTest {
     @Test
     public void settingsRoundTripThroughTheStore() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "C:/j8/java.exe", "C:/agent.jar",
-                "C:/j21/java.exe", "C:/sidecar.jar", "msedge", false)
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "msedge", false)
                 .save(store);
         ResearchRuntimeSettings loaded = ResearchRuntimeSettings.load(store);
         assertEquals(ResearchBackendMode.ACP, loaded.getMode());
-        assertEquals("C:/j8/java.exe", loaded.getAgentJavaExecutable());
-        assertEquals("C:/agent.jar", loaded.getAgentJar());
-        assertEquals("C:/j21/java.exe", loaded.getSidecarJavaExecutable());
-        assertEquals("C:/sidecar.jar", loaded.getSidecarJar());
         assertEquals("msedge", loaded.getBrowserChannel());
         assertEquals(false, loaded.isHeadless());
     }
@@ -161,32 +156,6 @@ public class ResearchRuntimeModeTest {
     }
 
     @Test
-    public void camoufoxInstallProgressKeepsTheSidecarStartAlive() throws Exception {
-        final java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(1);
-        final java.util.concurrent.atomic.AtomicLong progress = new java.util.concurrent.atomic.AtomicLong();
-        Thread installer = new Thread(new Runnable() {
-            public void run() {
-                try {
-                    for (int i = 0; i < 5; i++) { // 2.5 s of progress, longer than the 1 s timeout
-                        Thread.sleep(500);
-                        progress.set(System.nanoTime());
-                    }
-                    ready.countDown();
-                } catch (InterruptedException ignored) {
-                }
-            }
-        });
-        installer.start();
-        assertTrue(BrowserMcpSidecarProcess.awaitReady(ready, progress, 1));
-        installer.join();
-
-        long start = System.nanoTime();
-        assertEquals("without progress the timeout holds", false, BrowserMcpSidecarProcess.awaitReady(
-                new java.util.concurrent.CountDownLatch(1), new java.util.concurrent.atomic.AtomicLong(), 1));
-        assertTrue(System.nanoTime() - start < java.util.concurrent.TimeUnit.SECONDS.toNanos(3));
-    }
-
-    @Test
     public void unknownPersistedModeLoadsAsFake() {
         MemoryStore store = new MemoryStore();
         store.put(ResearchRuntimeSettings.KEY_MODE, "SOMETHING_ELSE");
@@ -205,27 +174,12 @@ public class ResearchRuntimeModeTest {
     }
 
     @Test
-    public void agentAndSidecarPathsAreNoLongerRequirements() {
-        // askai #48: the research agent and the browsers run inside AskAI; empty java/jar paths of the former
-        // agent and sidecar processes no longer make the productive runtime unavailable.
-        assertTrue(new ResearchRuntimeSettings(ResearchBackendMode.ACP, "", "", "", "", "chrome", true)
-                .validateProductive().isEmpty());
-    }
-
-    @Test
     public void missingHostServiceIsNamedIndividually() throws Exception {
         FakeHostContext host = new FakeHostContext();
-        // Paths pass validation (real temp files), but the host offers no runtime services.
+        // The settings are usable, but the host offers no runtime services.
         File dir = Files.createTempDirectory("askai-mode").toFile();
-        File java8 = touch(dir, "java.exe");
-        File agentJar = touch(dir, "agent.jar");
-        File java21 = touch(dir, "java21.exe");
-        File sidecarJar = touch(dir, "sidecar.jar");
-        assertTrue(new File(dir, "lib").mkdirs()); // the thin sidecar jar needs its sibling lib/
         host.workspaceDir = dir;
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, java8.getAbsolutePath(),
-                agentJar.getAbsolutePath(), java21.getAbsolutePath(), sidecarJar.getAbsolutePath(),
-                "chrome", true).save(host.store);
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "chrome", true).save(host.store);
         try {
             new ResearchAgentSessionFactory().create(
                     new AgentSessionCreationRequest("s1", "p1", new HashMap<String, String>()), host);
@@ -234,34 +188,6 @@ public class ResearchRuntimeModeTest {
             assertTrue("the FIRST missing service is named: " + expected.getMessage(),
                     expected.getMessage().contains("McpServerRegistry"));
             assertTrue(expected.getMessage().contains("no fallback"));
-        }
-    }
-
-    @Test
-    public void completedSettingsNeverComplainAboutTheAgentJava() throws Exception {
-        // Regression (user-reported): Save validated the RAW panel fields and demanded the removed
-        // agent-Java field. Validation must always run on the COMPLETED settings — the agent runs on
-        // AskAI's own JVM.
-        File dir = Files.createTempDirectory("askai-defaults").toFile();
-        File agentJar = touch(dir, "research-agent-runtime.jar");
-        File sidecarJar = touch(dir, "browser-mcp-sidecar.jar");
-        File java21 = touch(dir, "java21.exe");
-        assertTrue(new File(dir, "lib").mkdirs());
-        String oldJava21 = System.setProperty(ResearchRuntimeDefaults.JAVA21_PROPERTY,
-                java21.getAbsolutePath());
-        try {
-            ResearchRuntimeSettings raw = new ResearchRuntimeSettings(ResearchBackendMode.ACP,
-                    "", agentJar.getAbsolutePath(), "", sidecarJar.getAbsolutePath(),
-                    "chrome", true);
-            java.util.List<String> problems =
-                    ResearchRuntimeDefaults.complete(raw).validateProductive();
-            assertTrue("completed settings must be fully usable: " + problems, problems.isEmpty());
-        } finally {
-            if (oldJava21 == null) {
-                System.clearProperty(ResearchRuntimeDefaults.JAVA21_PROPERTY);
-            } else {
-                System.setProperty(ResearchRuntimeDefaults.JAVA21_PROPERTY, oldJava21);
-            }
         }
     }
 
@@ -288,13 +214,11 @@ public class ResearchRuntimeModeTest {
         MemoryStore store = new MemoryStore();
         // camoufox: the one channel installedBrowserChannel never swaps for another installed browser, so the
         // round trip does not depend on whether Edge or Chrome exists on the machine.
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "a", "b", "c", "d", "camoufox", false)
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "camoufox", false)
                 .save(store);
         ResearchRuntimeSettingsPanel panel = new ResearchRuntimeSettingsPanel(store);
         ResearchRuntimeSettings fromPanel = panel.currentSettings();
         assertEquals(ResearchBackendMode.ACP, fromPanel.getMode());
-        assertEquals("a", fromPanel.getAgentJavaExecutable());
-        assertEquals("d", fromPanel.getSidecarJar());
         assertEquals("camoufox", fromPanel.getBrowserChannel());
         assertEquals(false, fromPanel.isHeadless());
     }
@@ -302,7 +226,7 @@ public class ResearchRuntimeModeTest {
     @Test
     public void rerankerSelectionIsPersistedThroughTheSameTypedMapper() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "a", "b", "c", "d", "chrome", true,
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "chrome", true,
                 false, "local/cross-encoder/ms-marco-MiniLM-L-6-v2:latest")
                 .save(store);
         ResearchRuntimeSettings loaded = ResearchRuntimeSettings.load(store);

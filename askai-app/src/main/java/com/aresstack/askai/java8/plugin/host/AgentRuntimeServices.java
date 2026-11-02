@@ -1,14 +1,10 @@
 package com.aresstack.askai.java8.plugin.host;
 
-import com.aresstack.askai.acp.AcpAgentConnector;
-import com.aresstack.askai.acp.solon.SolonAcpAgentConnector;
 import com.aresstack.askai.mcp.api.McpEndpointDefinition;
 import com.aresstack.askai.mcp.api.McpEndpointHandle;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
 import com.aresstack.askai.mcp.api.McpToolContribution;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
-import com.aresstack.askai.mcp.solon.SolonMcpToolClientFactory;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshot;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshotProvider;
@@ -36,29 +32,21 @@ import com.aresstack.askai.java8.localmodels.LocalRerankerConfigurationSnapshotP
 import com.aresstack.askai.java8.localmodels.LocalRerankerModelCatalog;
 
 import java.io.File;
-import java.time.Duration;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * The app-level owner of the host runtime services handed to agent plugins via
- * {@code AgentHostContext.getService}: the Solon MCP server runtime (LAZY — the loopback HTTP server only
- * starts when a plugin actually registers an endpoint, i.e. when the productive research mode is used), the
- * MCP tool-client factory and the ACP agent connector. One instance per application; {@link #shutdown()}
+ * {@code AgentHostContext.getService}: the Solon MCP server runtime for EXTERNAL MCP clients (LAZY — the
+ * loopback HTTP server only starts when a plugin actually registers an endpoint, e.g. the research bot
+ * control) and the model/NLP/speech ports. The research agent itself runs inside this JVM and needs neither
+ * an MCP client nor an ACP connector (askai #48/#50). One instance per application; {@link #shutdown()}
  * stops the MCP runtime if it was ever started.
  */
 public final class AgentRuntimeServices {
 
     private final LazyRegistry registry = new LazyRegistry();
-    private final McpToolClientFactory toolClients = new SolonMcpToolClientFactory();
-    // The agent's STDERR goes to the app console: without it a failed agent start is undiagnosable.
-    private final AcpAgentConnector connector = new SolonAcpAgentConnector(Duration.ofSeconds(180),
-            new java.util.function.Consumer<String>() {
-                public void accept(String line) {
-                    System.err.println("[research-agent] " + line);
-                }
-            });
     /** Publishes the mandatory per-session reranker snapshot from the local model runtime. */
     private final RerankerConfigurationSnapshotProvider rerankerSnapshots;
     /** Lists the installed rerank-capable models for the EXPLICIT selection in the settings UI. */
@@ -192,8 +180,6 @@ public final class AgentRuntimeServices {
     public Map<Class<?>, Object> asServiceMap() {
         Map<Class<?>, Object> services = new LinkedHashMap<Class<?>, Object>();
         services.put(McpServerRegistry.class, registry);
-        services.put(McpToolClientFactory.class, toolClients);
-        services.put(AcpAgentConnector.class, connector);
         if (rerankerSnapshots != null) {
             services.put(RerankerConfigurationSnapshotProvider.class, rerankerSnapshots);
         }

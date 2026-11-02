@@ -1,10 +1,6 @@
-// Java-21 LOCAL MODEL RUNTIME sidecar: AskAI's virtual Ollama container for locally installed
-// models (first capability: cross-encoder RERANKING via win-directml-java). Runs as a separate
-// process started by the Java-8 host; the host only talks the Ollama-compatible HTTP API to it.
-// NOT packed into the AskAI fat jar. Deliberately NOT named "reranker-sidecar": the same container
-// will host embeddings and further locally supported model kinds later.
-apply plugin: 'application'
-
+// AskAI's local model runtime (askai #49/#50): the Ollama-compatible endpoint for locally installed models
+// (reranking, embeddings, generation over win-directml), started by AskAI INSIDE its own JVM on loopback.
+// No sidecar process.
 
 // The pinned win-directml-java runtime from MAVEN CENTRAL (0.1.1 = the release that extracted
 // :directml-model-package, so the published core is self-contained). For local development
@@ -18,9 +14,9 @@ dependencies {
     // The wdmlpack/lifecycle contract (ModelPackageLifecycle, ModelConversionResult, …).
     implementation "com.aresstack:directml-model-package:${directmlVersion}"
     // The published win-directml text-generation runtime (GenerationRuntime + request/result + streaming);
-    // consumed ONLY here, in the Java-21 sidecar. No Java-21/DirectML class reaches the Java-8 host.
+    // consumed ONLY here.
     implementation "com.aresstack:directml-inference:${directmlVersion}"
-    // The neutral model catalog: the sidecar re-resolves repositoryId -> catalog itself (it never trusts
+    // The neutral model catalog: the runtime re-resolves repositoryId -> catalog itself (it never trusts
     // the host-claimed family/capabilities) and applies the SAME manifest trust rules as the host.
     implementation "com.aresstack:directml-model-catalog:${directmlVersion}"
 
@@ -29,37 +25,4 @@ dependencies {
 
 test {
     useJUnit()
-}
-
-mainClassName = 'com.aresstack.askai.localruntime.LocalModelRuntimeMain'
-
-jar {
-    manifest {
-        attributes('Main-Class': mainClassName)
-    }
-}
-
-// Runnable distribution mirroring the browser sidecar: a THIN jar with a Class-Path manifest plus
-// a lib/ directory next to it, so `java -jar` works without repackaging the runtime jars.
-task sidecarLibs(type: Sync) {
-    group = 'build'
-    description = 'Collects the local-runtime sidecar dependencies into build/sidecar/lib.'
-    from configurations.runtimeClasspath.filter { it.name.endsWith('.jar') }
-    into layout.buildDirectory.dir('sidecar/lib')
-}
-
-task sidecarJar(type: Jar) {
-    group = 'build'
-    description = 'Build the runnable Java-21 local model runtime sidecar jar (thin, with lib/ Class-Path).'
-    archiveBaseName = 'local-model-runtime-sidecar'
-    destinationDirectory = layout.buildDirectory.dir('sidecar')
-    dependsOn classes, sidecarLibs
-    from sourceSets.main.output
-    manifest {
-        attributes('Main-Class': mainClassName)
-        attributes('Class-Path': configurations.runtimeClasspath
-                .filter { it.name.endsWith('.jar') }
-                .collect { 'lib/' + it.name }
-                .join(' '))
-    }
 }

@@ -1,8 +1,6 @@
 package com.aresstack.askai.research.agent;
 
-import com.aresstack.askai.acp.AcpAgentConnector;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
 import com.aresstack.askai.plugin.api.agent.AgentHostContext;
 import com.aresstack.askai.plugin.api.agent.AgentSession;
 import com.aresstack.askai.plugin.api.agent.AgentSessionCreationRequest;
@@ -109,8 +107,7 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
     private AgentSession createProductive(ResearchRuntimeSettings settings,
                                           AgentSessionCreationRequest request,
                                           AgentHostContext hostContext) {
-        // Empty fields are completed from the detectable environment (running JVM, assembled
-        // distribution, discovered Java 21) — explicit user values always win.
+        // The browser channel is completed from the detectable environment.
         settings = com.aresstack.askai.research.host.ResearchRuntimeDefaults.complete(settings);
         List<String> problems = settings.validateProductive();
         if (!problems.isEmpty()) {
@@ -118,8 +115,6 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                     + "(no fallback to the fake backend): " + problems);
         }
         McpServerRegistry registry = requireService(hostContext, McpServerRegistry.class);
-        McpToolClientFactory toolClients = requireService(hostContext, McpToolClientFactory.class);
-        AcpAgentConnector connector = requireService(hostContext, AcpAgentConnector.class);
         // Diagnostics: which host services actually reached THIS plugin classloader (a class-identity split
         // across classloaders shows up as present=false even when the host published them).
         System.err.println("[research-runtime] RerankerConfigurationSnapshotProvider present="
@@ -154,7 +149,8 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                                 .EmbeddingConfigurationSnapshotProvider.class);
 
         ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(
-                registry, toolClients, connector, settings.toRuntimeConfig(), generationId,
+                registry, com.aresstack.askai.research.host.InProcessResearchRuntime.shared(),
+                settings.toRuntimeConfig(), generationId,
                 com.aresstack.askai.research.host.LegacyBrowserSearchSettingsStore
                         .loadValues(hostContext.getStateStore()),
                 com.aresstack.askai.research.host.LegacyBrowserSearchSettingsStore
@@ -164,8 +160,6 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 // selection is published as a per-session snapshot; the agent's implementation is ready.
                 ResearchRuntimeSettings.loadSearchStrategy(hostContext.getStateStore()),
                 embeddingSnapshots);
-        // askai #48: the research agent runs inside the AskAI JVM.
-        factory.runAgentInProcess(com.aresstack.askai.research.host.InProcessResearchRuntime.shared());
         // The knowledge worker's OpenNLP sentence resolver uses the SAME persisted session language ("en"/"de").
         factory.setResearchLanguageCode(ResearchRuntimeSettings.loadLanguage(hostContext.getStateStore()));
         factory.setBotControlMcpEnabled(

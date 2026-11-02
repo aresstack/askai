@@ -1,10 +1,5 @@
 package com.aresstack.askai.research.runtime;
 
-import com.agentclientprotocol.sdk.agent.Command;
-import com.agentclientprotocol.sdk.agent.CommandResult;
-import com.agentclientprotocol.sdk.agent.SyncPromptContext;
-import com.agentclientprotocol.sdk.capabilities.NegotiatedCapabilities;
-import com.agentclientprotocol.sdk.spec.AcpSchema;
 import com.aresstack.askai.acp.AcpAgentConnector;
 import com.aresstack.askai.acp.AcpConnection;
 import com.aresstack.askai.acp.AcpConnectionState;
@@ -21,10 +16,8 @@ import com.aresstack.askai.acp.PromptDispatcher;
 import com.aresstack.askai.acp.PromptHandle;
 import com.aresstack.askai.research.runtime.host.HostToolEndpoints;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -113,7 +106,7 @@ public final class InProcessResearchAgentConnector implements AcpAgentConnector 
                         "Connection is not READY (" + state.get() + ").", null);
             }
             try {
-                return new Session(this, agent.newSession().sessionId());
+                return new Session(this, agent.newSession());
             } catch (RuntimeException ex) {
                 throw new AcpException(AcpException.Phase.SESSION, "session/new failed: " + ex.getMessage(), ex);
             }
@@ -162,19 +155,18 @@ public final class InProcessResearchAgentConnector implements AcpAgentConnector 
         public PromptHandle prompt(String text, AcpUpdateListener listener) {
             final String promptId = UUID.randomUUID().toString();
             final PromptDispatcher dispatcher = new PromptDispatcher(sessionId, promptId, listener);
-            final AcpSchema.PromptRequest request = new AcpSchema.PromptRequest(sessionId,
-                    Collections.<AcpSchema.ContentBlock>singletonList(
-                            new AcpSchema.TextContent(text == null ? "" : text)));
-            final SyncPromptContext context = new DirectPromptContext(sessionId, dispatcher);
+            final String request = text == null ? "" : text;
+            final AgentOutput output = new AgentOutput() {
+                public void sendMessage(String message) {
+                    dispatcher.update(AcpUpdate.Kind.MESSAGE, message);
+                }
+            };
             connection.executor.execute(new Runnable() {
                 public void run() {
                     try {
-                        AcpSchema.PromptResponse response = connection.agent.prompt(context, request);
-                        AcpPromptState terminal = response != null
-                                && response.stopReason() == AcpSchema.StopReason.CANCELLED
-                                ? AcpPromptState.CANCELLED : AcpPromptState.COMPLETED;
-                        dispatcher.terminal(terminal, String.valueOf(
-                                response == null ? "" : response.stopReason()));
+                        boolean cancelled = connection.agent.prompt(output, request);
+                        dispatcher.terminal(cancelled ? AcpPromptState.CANCELLED : AcpPromptState.COMPLETED,
+                                cancelled ? "CANCELLED" : "END_TURN");
                     } catch (RuntimeException ex) {
                         dispatcher.terminal(AcpPromptState.FAILED, "prompt failed: " + ex.getMessage());
                     }
@@ -201,142 +193,6 @@ public final class InProcessResearchAgentConnector implements AcpAgentConnector 
         public void close() {
             state.to(AcpSessionState.CLOSING);
             state.to(AcpSessionState.CLOSED);
-        }
-    }
-
-    /**
-     * The agent's view of the host during one prompt: its messages go straight to the prompt's dispatcher.
-     * The research agent only sends messages; client-side file, terminal and permission requests are not part
-     * of the in-process contract.
-     */
-    private static final class DirectPromptContext implements SyncPromptContext {
-        private final String sessionId;
-        private final PromptDispatcher dispatcher;
-
-        DirectPromptContext(String sessionId, PromptDispatcher dispatcher) {
-            this.sessionId = sessionId;
-            this.dispatcher = dispatcher;
-        }
-
-        @Override
-        public void sendUpdate(String sessionId, AcpSchema.SessionUpdate update) {
-            if (update instanceof AcpSchema.AgentMessageChunk) {
-                dispatcher.update(AcpUpdate.Kind.MESSAGE, textOf(((AcpSchema.AgentMessageChunk) update).content()));
-            } else if (update instanceof AcpSchema.AgentThoughtChunk) {
-                dispatcher.update(AcpUpdate.Kind.THOUGHT, textOf(((AcpSchema.AgentThoughtChunk) update).content()));
-            } else {
-                dispatcher.update(AcpUpdate.Kind.OTHER, String.valueOf(update));
-            }
-        }
-
-        private static String textOf(AcpSchema.ContentBlock block) {
-            return block instanceof AcpSchema.TextContent
-                    ? ((AcpSchema.TextContent) block).text() : String.valueOf(block);
-        }
-
-        @Override
-        public String getSessionId() {
-            return sessionId;
-        }
-
-        @Override
-        public void sendMessage(String text) {
-            dispatcher.update(AcpUpdate.Kind.MESSAGE, text);
-        }
-
-        @Override
-        public void sendThought(String text) {
-            dispatcher.update(AcpUpdate.Kind.THOUGHT, text);
-        }
-
-        @Override
-        public NegotiatedCapabilities getClientCapabilities() {
-            return null;
-        }
-
-        private static UnsupportedOperationException unsupported(String what) {
-            return new UnsupportedOperationException(what + " is not offered to the in-process research agent");
-        }
-
-        @Override
-        public AcpSchema.ReadTextFileResponse readTextFile(AcpSchema.ReadTextFileRequest request) {
-            throw unsupported("readTextFile");
-        }
-
-        @Override
-        public AcpSchema.WriteTextFileResponse writeTextFile(AcpSchema.WriteTextFileRequest request) {
-            throw unsupported("writeTextFile");
-        }
-
-        @Override
-        public AcpSchema.RequestPermissionResponse requestPermission(AcpSchema.RequestPermissionRequest request) {
-            throw unsupported("requestPermission");
-        }
-
-        @Override
-        public AcpSchema.CreateTerminalResponse createTerminal(AcpSchema.CreateTerminalRequest request) {
-            throw unsupported("createTerminal");
-        }
-
-        @Override
-        public AcpSchema.TerminalOutputResponse getTerminalOutput(AcpSchema.TerminalOutputRequest request) {
-            throw unsupported("getTerminalOutput");
-        }
-
-        @Override
-        public AcpSchema.ReleaseTerminalResponse releaseTerminal(AcpSchema.ReleaseTerminalRequest request) {
-            throw unsupported("releaseTerminal");
-        }
-
-        @Override
-        public AcpSchema.WaitForTerminalExitResponse waitForTerminalExit(
-                AcpSchema.WaitForTerminalExitRequest request) {
-            throw unsupported("waitForTerminalExit");
-        }
-
-        @Override
-        public AcpSchema.KillTerminalCommandResponse killTerminal(AcpSchema.KillTerminalCommandRequest request) {
-            throw unsupported("killTerminal");
-        }
-
-        @Override
-        public String readFile(String path) {
-            throw unsupported("readFile");
-        }
-
-        @Override
-        public String readFile(String path, Integer line, Integer limit) {
-            throw unsupported("readFile");
-        }
-
-        @Override
-        public Optional<String> tryReadFile(String path) {
-            return Optional.empty();
-        }
-
-        @Override
-        public void writeFile(String path, String content) {
-            throw unsupported("writeFile");
-        }
-
-        @Override
-        public boolean askPermission(String action) {
-            return false;
-        }
-
-        @Override
-        public String askChoice(String question, String... options) {
-            throw unsupported("askChoice");
-        }
-
-        @Override
-        public CommandResult execute(String... command) {
-            throw unsupported("execute");
-        }
-
-        @Override
-        public CommandResult execute(Command command) {
-            throw unsupported("execute");
         }
     }
 }

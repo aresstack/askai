@@ -37,7 +37,7 @@ public final class InProcessBrowser implements AutoCloseable {
     public static InProcessBrowser start(final String channel, final boolean headless,
                                          final boolean allowPrivateNetworks, String browserConfigPath)
             throws IOException {
-        final LegacyBrowserSearchSettings settings = BrowserMcpSidecarMain.readBrowserConfig(browserConfigPath);
+        final LegacyBrowserSearchSettings settings = readBrowserConfig(browserConfigPath);
         BrowserSessionActor session = BrowserSessionActor.start(new Supplier<BrowserSession>() {
             public BrowserSession get() {
                 return PlaywrightSessionFactory.create(channel, headless, allowPrivateNetworks, null,
@@ -82,5 +82,40 @@ public final class InProcessBrowser implements AutoCloseable {
         }
         closed = true;
         tools.close();
+    }
+
+    /**
+     * The typed settings of a browser-config document, or the central defaults for a {@code null}/blank path.
+     *
+     * @throws java.io.IOException      the document cannot be read
+     * @throws IllegalArgumentException the document is malformed or invalid (the message says why)
+     */
+    static com.aresstack.askai.browser.search.LegacyBrowserSearchSettings readBrowserConfig(String path)
+            throws java.io.IOException {
+        if (path == null || path.trim().isEmpty()) {
+            return com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create();
+        }
+        byte[] bytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path.trim()));
+        com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument document =
+                com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
+                        .parse(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+        com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.Decoded decoded =
+                com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec
+                        .fromValues(document.values);
+        if (!decoded.violations.isEmpty()) {
+            throw new IllegalArgumentException("browser config has invalid values:\n"
+                    + new com.aresstack.askai.browser.search.SettingsValidationResult(
+                            decoded.violations).describe());
+        }
+        com.aresstack.askai.browser.search.SettingsValidationResult validation =
+                new com.aresstack.askai.browser.search.DefaultLegacyBrowserSearchSettingsValidator()
+                        .validate(decoded.settings);
+        if (!validation.isValid()) {
+            throw new IllegalArgumentException("browser config failed validation:\n"
+                    + validation.describe());
+        }
+        System.err.println("[browser] browser config: revision=" + document.settingsRevision
+                + " digest=" + document.settingsDigest);
+        return decoded.settings;
     }
 }

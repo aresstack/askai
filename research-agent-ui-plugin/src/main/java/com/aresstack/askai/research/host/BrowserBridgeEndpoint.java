@@ -17,8 +17,8 @@ import java.util.Map;
 
 /**
  * The PRODUCTIVE home of the {@code capture_id} convention (it is deliberately NOT in the agent loop): a
- * host-registered browser endpoint that delegates every {@code web_*} call to the Playwright sidecar via the
- * neutral {@link McpToolClient} and records every page-returning navigation into the session's Commit-37
+ * host-registered browser endpoint that delegates every {@code web_*} call to the session's research browser
+ * inside AskAI and records every page-returning navigation into the session's Commit-37
  * {@link CaptureStore}. The model-facing result line is
  * {@code URL: <url> title="<title>" capture_id=<id>} followed by the cleaned text — the exact contract the
  * agent loop consumes and {@code source_accept} resolves. Endpoint identity is session+generation-scoped
