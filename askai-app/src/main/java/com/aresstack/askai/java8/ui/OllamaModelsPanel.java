@@ -191,13 +191,16 @@ public final class OllamaModelsPanel extends JPanel {
         if (generation != refreshGeneration || !result.installedDone || !result.runningDone) {
             return;
         }
-        if (result.installedError != null) {
+        if (result.installedError != null && result.running.isEmpty()) {
             showInstalledPlaceholder("Could not load installed models: " + result.installedError.getMessage());
             installedStatusLabel.setText("Error while loading installed models.");
             return;
         }
         showModels(result.installed, result.running);
-        installedStatusLabel.setText(result.runningError != null
+        installedStatusLabel.setText(result.installedError != null
+                ? result.running.size() + " running; installed models could not be read: "
+                        + result.installedError.getMessage()
+                : result.runningError != null
                 ? result.installed.size() + " installed; running models could not be read: "
                         + result.runningError.getMessage()
                 : result.installed.size() + " installed, " + result.running.size() + " running");
