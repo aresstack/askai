@@ -9,7 +9,10 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import com.aresstack.comiccontrols.theme.AskAiTheme;
+
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -24,6 +27,7 @@ final class OllamaModelCard extends JPanel {
     // The full set of capabilities /api/show reported (completion, tools, thinking, vision, audio, ...).
     private Set<ModelCapability> capabilities = EnumSet.noneOf(ModelCapability.class);
     private boolean capabilitiesKnown;
+    private final boolean running;
 
     private OllamaModelCard(String title, String line1, String line2, boolean running,
                             final OllamaModelInfo installedModel, final Runnable searchAddOnsAction,
@@ -38,11 +42,14 @@ final class OllamaModelCard extends JPanel {
                             final Runnable localAddOnAction,
                             final Runnable useInChatAction, Runnable deleteAction,
                             final Runnable testRerankerAction) {
+        this.running = running;
         setLayout(new BorderLayout(12, 0));
         setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(ThemeColor.of("models.cardBorder")),
                 BorderFactory.createEmptyBorder(10, 12, 10, 12)));
-        setBackground(ThemeColor.of("models.cardBackground"));
+        // As in ollama-manager: a running model is told apart by the progress-bar accent wash and its
+        // RUNNING badge, and always sits on top of the list; installed models carry no badge.
+        setBackground(running ? runningBackground() : ThemeColor.of("models.cardBackground"));
         setMaximumSize(new Dimension(Integer.MAX_VALUE, 96));
 
         JPanel text = new JPanel(new GridLayout(0, 1, 0, 3));
@@ -60,6 +67,14 @@ final class OllamaModelCard extends JPanel {
         right.setOpaque(false);
         capabilityIconLabel.setToolTipText("Model capabilities (from /api/show)");
         right.add(capabilityIconLabel);
+        if (running) {
+            JLabel status = new JLabel("RUNNING");
+            status.setOpaque(true);
+            status.setForeground(ThemeColor.of("bubble.userForeground"));
+            status.setBackground(runningAccent());
+            status.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
+            right.add(status);
+        }
         if (deleteAction != null) {
             // Local reranker models are directly testable from their card (R0.4).
             if (testRerankerAction != null) {
@@ -106,15 +121,27 @@ final class OllamaModelCard extends JPanel {
             deleteButton.setForeground(ThemeColor.of("models.destructiveActionText"));
             deleteButton.addActionListener(event -> deleteAction.run());
             right.add(deleteButton);
-        } else {
-            JLabel status = new JLabel(running ? "RUNNING" : "INSTALLED");
-            status.setOpaque(true);
-            status.setForeground(ThemeColor.of("bubble.userForeground"));
-            status.setBackground(running ? ThemeColor.of("models.runningBadge") : ThemeColor.of("models.installedBadge"));
-            status.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
-            right.add(status);
         }
         add(right, BorderLayout.EAST);
+    }
+
+    /** The accent the progress bars are filled with; the running badge uses it as is. */
+    private static Color runningAccent() {
+        return AskAiTheme.active().comicPalette().getAccentOrange();
+    }
+
+    /**
+     * Card background of a running model: the progress-bar accent washed towards the card background (a quarter
+     * accent, built from theme tokens so a theme switch recolours it live).
+     */
+    private static Color runningBackground() {
+        Color base = ThemeColor.of("models.cardBackground");
+        return ThemeColor.average(base, ThemeColor.average(runningAccent(), base));
+    }
+
+    /** @return whether this card shows a running model (test hook). */
+    boolean isRunningCard() {
+        return running;
     }
 
     /** @return the capabilities currently shown on the card (test hook). */
@@ -140,10 +167,21 @@ final class OllamaModelCard extends JPanel {
 
     static OllamaModelCard installed(OllamaModelInfo model, Runnable searchAddOnsAction,
                                      Runnable localAddOnAction, Runnable useInChatAction, Runnable deleteAction) {
+        return installed(model, null, searchAddOnsAction, localAddOnAction, useInChatAction, deleteAction);
+    }
+
+    /**
+     * An installed model card; {@code running} is the matching {@code /api/ps} entry or {@code null}. A running
+     * model keeps all installed actions, shows RAM/VRAM/expiry instead of size/date/digest and is highlighted.
+     */
+    static OllamaModelCard installed(OllamaModelInfo model, OllamaRunningModelInfo running,
+                                     Runnable searchAddOnsAction, Runnable localAddOnAction,
+                                     Runnable useInChatAction, Runnable deleteAction) {
         String details = join(model.getDetails().getFamily(), model.getDetails().getParameterSize(),
                 model.getDetails().getQuantizationLevel(), model.getDetails().getFormat());
-        String meta = join(formatBytes(model.getSize()), shortDate(model.getModifiedAt()), shortDigest(model.getDigest()));
-        return new OllamaModelCard(model.getDisplayName(), details, meta, false, model, searchAddOnsAction,
+        String meta = running != null ? runningMeta(running)
+                : join(formatBytes(model.getSize()), shortDate(model.getModifiedAt()), shortDigest(model.getDigest()));
+        return new OllamaModelCard(model.getDisplayName(), details, meta, running != null, model, searchAddOnsAction,
                 localAddOnAction, useInChatAction, deleteAction);
     }
 
@@ -159,9 +197,16 @@ final class OllamaModelCard extends JPanel {
         }
         String details = join(model.getDetails().getFamily(), model.getDetails().getParameterSize(),
                 model.getDetails().getQuantizationLevel(), model.getDetails().getFormat());
-        String meta = join("RAM " + formatBytes(model.getSize()), "VRAM " + formatBytes(model.getSizeVram()),
+        return new OllamaModelCard(model.getDisplayName(), details, runningMeta(model), true,
+                null, null, null, null, null);
+    }
+
+    private static String runningMeta(OllamaRunningModelInfo model) {
+        if (model.isLocal()) {
+            return join("RAM " + formatBytes(model.getSize()), "VRAM 0");
+        }
+        return join("RAM " + formatBytes(model.getSize()), "VRAM " + formatBytes(model.getSizeVram()),
                 "expires " + shortDate(model.getExpiresAt()));
-        return new OllamaModelCard(model.getDisplayName(), details, meta, true, null, null, null, null, null);
     }
 
     /** A LOCALLY installed model card: capability/runtime line, test action, delete (R0.4). */
@@ -172,8 +217,14 @@ final class OllamaModelCard extends JPanel {
      */
     static OllamaModelCard installedLocal(OllamaModelInfo model, String detailLine,
                                           Runnable testRerankerAction, Runnable deleteAction) {
-        String meta = join(formatBytes(model.getSize()), shortDate(model.getModifiedAt()));
-        return new OllamaModelCard(model.getDisplayName(), detailLine, meta, false, model, null, null,
+        return installedLocal(model, null, detailLine, testRerankerAction, deleteAction);
+    }
+
+    static OllamaModelCard installedLocal(OllamaModelInfo model, OllamaRunningModelInfo running, String detailLine,
+                                          Runnable testRerankerAction, Runnable deleteAction) {
+        String meta = running != null ? runningMeta(running)
+                : join(formatBytes(model.getSize()), shortDate(model.getModifiedAt()));
+        return new OllamaModelCard(model.getDisplayName(), detailLine, meta, running != null, model, null, null,
                 null, deleteAction, testRerankerAction);
     }
 
