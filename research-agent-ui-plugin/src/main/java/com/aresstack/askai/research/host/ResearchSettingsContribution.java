@@ -53,23 +53,20 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
 
     /** General research-UI preferences — the first, non-technical tab. */
     private static JComponent buildGeneralTab(final ResearchAgentSession research) {
-        javax.swing.JPanel tab = new javax.swing.JPanel();
-        tab.setLayout(new javax.swing.BoxLayout(tab, javax.swing.BoxLayout.Y_AXIS));
-        tab.setBorder(javax.swing.BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        com.aresstack.comiccontrols.control.ComicForm tab =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Search tags");
         final javax.swing.JCheckBox readTagsBox = ComicControls.checkBox(
                 "Read search tags aloud when clicked",
                 ResearchRuntimeSettings.loadReadSearchTagsOnClick(research.getHostStateStore()));
         readTagsBox.setToolTipText("Clicking a yellow search/activity tag in the chat speaks its"
                 + " text with an assertive delivery.");
-        readTagsBox.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
         final javax.swing.JCheckBox onlyWhenActiveBox = ComicControls.checkBox(
                 "Only while read-aloud is active (Play pressed or automatic reading enabled)",
                 ResearchRuntimeSettings.loadReadTagsOnlyWhenReadAloudActive(
                         research.getHostStateStore()));
         onlyWhenActiveBox.setToolTipText("On (default): clicked tags stay silent unless you"
                 + " actually use the speech output. Off: tags always speak when clicked.");
-        onlyWhenActiveBox.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
-        onlyWhenActiveBox.setBorder(javax.swing.BorderFactory.createEmptyBorder(2, 22, 2, 0));
+        onlyWhenActiveBox.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 22, 0, 0));
         onlyWhenActiveBox.setEnabled(readTagsBox.isSelected());
         onlyWhenActiveBox.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent event) {
@@ -84,29 +81,25 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
                 onlyWhenActiveBox.setEnabled(readTagsBox.isSelected()); // sub-option follows
             }
         });
-        tab.add(readTagsBox);
-        tab.add(onlyWhenActiveBox);
-        javax.swing.JLabel hint = new javax.swing.JLabel("<html><i>Uses the configured speech"
-                + " output — set the voice per language in the Settings (gear) under Chat &gt;"
-                + " \"Audio &amp; Dictation\" &gt; Speech output.</i></html>");
-        hint.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
-        hint.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 22, 12, 0));
-        tab.add(hint);
+        tab.check(readTagsBox);
+        tab.check(onlyWhenActiveBox);
+        tab.note("Uses the configured speech output — set the voice per language under Settings >"
+                + " Chat > Audio & Dictation > Read aloud.");
+        com.aresstack.comiccontrols.control.ComicForm sources =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Sources");
         final javax.swing.JCheckBox autoReviewBox = ComicControls.checkBox(
                 "Review new sources automatically after a successful web search",
                 ResearchRuntimeSettings.loadAutoReviewAfterSearch(research.getHostStateStore()));
         autoReviewBox.setToolTipText("On: when a web search accepts sources, the review that the"
                 + " \"Review new sources\" tag triggers starts by itself. Off (default): you"
                 + " decide when to review.");
-        autoReviewBox.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
         autoReviewBox.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent event) {
                 ResearchRuntimeSettings.saveAutoReviewAfterSearch(
                         research.getHostStateStore(), autoReviewBox.isSelected());
             }
         });
-        tab.add(autoReviewBox);
-        tab.add(javax.swing.Box.createVerticalGlue());
-        return tab;
+        sources.check(autoReviewBox);
+        return com.aresstack.comiccontrols.control.ComicForm.page(tab, sources);
     }
 }

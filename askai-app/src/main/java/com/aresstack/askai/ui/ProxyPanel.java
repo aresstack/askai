@@ -2,6 +2,7 @@ package com.aresstack.askai.ui;
 
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicForm;
 import com.aresstack.askai.config.AppConfiguration;
 import com.aresstack.askai.config.AppConfigurationRepository;
 import com.aresstack.askai.hf.HuggingFaceClient;
@@ -13,11 +14,9 @@ import com.aresstack.askai.net.ProxyConfiguration;
 import com.aresstack.winproxy.ProxyDefaults;
 
 import javax.swing.BorderFactory;
-import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
-import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
@@ -30,8 +29,6 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.JTextComponent;
 import java.awt.BorderLayout;
-import java.awt.FlowLayout;
-import java.awt.GridLayout;
 
 public final class ProxyPanel extends JPanel {
 
@@ -52,7 +49,7 @@ public final class ProxyPanel extends JPanel {
     private final JTextField testUrl;
     private final JTextField pacUrlDiscoveryScript;
     private final JTextField manualHost;
-    private final JTextField manualPort;
+    private final javax.swing.JSpinner manualPort;
     private final JCheckBox trustJvmDefault;
     private final JCheckBox trustWindowsRoot;
     private final JCheckBox trustWindowsCaStores;
@@ -82,18 +79,18 @@ public final class ProxyPanel extends JPanel {
         rememberScriptText(cfg.getModeName(), cfg.getPacUrlDiscoveryScript());
         this.activeScriptMode = cfg.getModeName();
 
-        setLayout(new BorderLayout(8, 8));
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        setLayout(new BorderLayout());
+        setOpaque(false);
 
         CertificateTrustConfiguration trust = configurationRepository.load().getCertificateTrustConfiguration();
         HttpClientConfiguration http = configurationRepository.load().getHttpClientConfiguration();
 
         this.mode = ComicControls.<String>comboBox(UI_MODES);
         this.mode.setSelectedItem(cfg.getModeName());
-        this.testUrl = ComicControls.textField(cfg.getTestUrl());
-        this.pacUrlDiscoveryScript = ComicControls.textField(scriptTextFor(cfg.getModeName()));
-        this.manualHost = ComicControls.textField(empty(cfg.getManualProxyHost()));
-        this.manualPort = ComicControls.textField(cfg.getManualProxyPort() > 0 ? String.valueOf(cfg.getManualProxyPort()) : "");
+        this.testUrl = ComicControls.textField(cfg.getTestUrl(), 30);
+        this.pacUrlDiscoveryScript = ComicControls.textField(scriptTextFor(cfg.getModeName()), 30);
+        this.manualHost = ComicControls.textField(empty(cfg.getManualProxyHost()), 20);
+        this.manualPort = ComicControls.integerSpinner(cfg.getManualProxyPort(), 0, 65535, 1, 6);
         this.trustJvmDefault = ComicControls.checkBox("Use JVM default cacerts", trust.isUseJvmDefault());
         this.trustWindowsRoot = ComicControls.checkBox("Use Windows-ROOT store", trust.isUseWindowsRoot());
         this.trustWindowsCaStores = ComicControls.checkBox("Use Windows Root/Intermediate stores", trust.isUseWindowsCaStores());
@@ -104,75 +101,57 @@ public final class ProxyPanel extends JPanel {
         this.proxyAuthPassword = ComicControls.passwordField(empty(http.getProxyAuthPassword()), 16);
         this.preferIpv6 = ComicControls.checkBox("Prefer IPv6 (needs restart; use when IPv4 egress is broken)", http.isPreferIpv6());
 
-        JPanel form = new JPanel(new GridLayout(0, 2, 6, 6));
-        form.setBorder(ComicControls.titledBorder("Proxy resolution"));
-        form.add(new JLabel("Mode"));
-        form.add(mode);
-        form.add(new JLabel("Test URL"));
-        form.add(testUrl);
-        form.add(new JLabel("PAC URL discovery script"));
-        form.add(pacUrlDiscoveryScript);
-        form.add(new JLabel("Manual host"));
-        form.add(manualHost);
-        form.add(new JLabel("Manual port"));
-        form.add(manualPort);
+        ComicForm resolution = ComicForm.titled("Proxy resolution");
+        mode.setToolTipText("How the proxy is found: none, a manual host/port, the Windows settings or a PAC script.");
+        resolution.row("Mode", mode);
+        resolution.row("Test URL", testUrl);
+        pacUrlDiscoveryScript.setToolTipText("PAC_URL_MANUAL: the PAC/WPAD URL itself. PAC_URL_POWERSHELL /"
+                + " PAC_URL_WSCRIPT: the discovery script that prints the PAC URL.");
+        resolution.row("PAC URL discovery script", pacUrlDiscoveryScript);
+        resolution.row("Manual host", manualHost);
+        manualPort.setToolTipText("0 = not set.");
+        resolution.row("Manual port", manualPort);
 
-        JPanel trustPanel = new JPanel(new GridLayout(0, 1, 4, 4));
-        trustPanel.setBorder(ComicControls.titledBorder("TLS certificate trust"));
-        trustPanel.add(trustJvmDefault);
-        trustPanel.add(trustWindowsRoot);
-        trustPanel.add(trustWindowsCaStores);
+        ComicForm trustForm = ComicForm.titled("TLS certificate trust");
+        trustForm.check(trustJvmDefault);
+        trustForm.check(trustWindowsRoot);
+        trustForm.check(trustWindowsCaStores);
 
+        ComicForm httpForm = ComicForm.titled("HTTP client & proxy authentication");
         JButton browserUserAgent = new ComicButton("Use browser UA");
         browserUserAgent.addActionListener(e -> userAgentField.setText(HttpClientConfiguration.BROWSER_USER_AGENT));
-        JPanel userAgentRow = new JPanel(new BorderLayout(6, 0));
-        userAgentRow.add(userAgentField, BorderLayout.CENTER);
-        userAgentRow.add(browserUserAgent, BorderLayout.EAST);
+        httpForm.row("User-Agent", userAgentField, browserUserAgent);
+        httpForm.row("Proxy auth mode", proxyAuthMode);
+        httpForm.row("Proxy username (BASIC)", proxyAuthUser);
+        httpForm.row("Proxy password (BASIC)", proxyAuthPassword);
+        httpForm.check(preferIpv6);
+        ComicForm.alignLabels(resolution, httpForm);
 
-        JPanel httpPanel = new JPanel(new GridLayout(0, 2, 6, 6));
-        httpPanel.setBorder(ComicControls.titledBorder("HTTP client & proxy authentication"));
-        httpPanel.add(new JLabel("User-Agent"));
-        httpPanel.add(userAgentRow);
-        httpPanel.add(new JLabel("Proxy auth mode"));
-        httpPanel.add(proxyAuthMode);
-        httpPanel.add(new JLabel("Proxy username (BASIC)"));
-        httpPanel.add(proxyAuthUser);
-        httpPanel.add(new JLabel("Proxy password (BASIC)"));
-        httpPanel.add(proxyAuthPassword);
-        httpPanel.add(new JLabel("Network"));
-        httpPanel.add(preferIpv6);
-
-        JPanel groups = new JPanel();
-        groups.setLayout(new BoxLayout(groups, BoxLayout.Y_AXIS));
-        groups.add(form);
-        groups.add(trustPanel);
-        groups.add(httpPanel);
-
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton test = new ComicButton("Resolve test URL");
         test.addActionListener(e -> resolveTestUrl());
         JButton testHuggingFace = new ComicButton("Test HuggingFace HTTPS");
         testHuggingFace.addActionListener(e -> testHuggingFaceHttps());
         JButton defaults = new ComicButton("Reset default");
         defaults.addActionListener(e -> resetDefault());
-        buttons.add(test);
-        buttons.add(testHuggingFace);
-        buttons.add(defaults);
+        ComicForm actions = new ComicForm();
+        actions.actions(test, testHuggingFace, defaults);
+        actions.note("Proxy changes apply immediately to all Hugging Face operations. Resolve test URL checks"
+                + " only proxy/PAC resolution (no TLS); Test HuggingFace HTTPS performs a real request and"
+                + " validates the certificate chain.");
 
-        JPanel top = new JPanel(new BorderLayout(8, 8));
-        top.add(groups, BorderLayout.CENTER);
-        top.add(buttons, BorderLayout.SOUTH);
-        add(top, BorderLayout.NORTH);
-
-        log = ComicControls.textArea(12, 60);
+        ComicForm logForm = ComicForm.titled("Log");
+        log = ComicControls.textArea(6, 20);
         log.setEditable(false);
-        add(new JScrollPane(log), BorderLayout.CENTER);
-        append("Proxy changes apply immediately to all Hugging Face operations.");
+        log.setLineWrap(true);
+        log.setWrapStyleWord(true);
+        JScrollPane logScroll = new JScrollPane(log);
+        logScroll.setPreferredSize(new java.awt.Dimension(100, 140));
+        logForm.component(logScroll);
+
+        add(ComicForm.page(resolution, trustForm, httpForm, actions, logForm), BorderLayout.CENTER);
         append("PAC_URL_POWERSHELL: field contains a PowerShell discovery script.");
         append("PAC_URL_WSCRIPT: field contains a VBScript/WScript discovery script.");
         append("PAC_URL_MANUAL: field contains the PAC/WPAD URL directly.");
-        append("Resolve test URL checks only proxy/PAC resolution (no TLS, no certificate check).");
-        append("Test HuggingFace HTTPS performs a real request and validates the certificate chain.");
         installLiveBindings();
         appendModeHelp(selectedMode());
     }
@@ -185,11 +164,12 @@ public final class ProxyPanel extends JPanel {
             public void changedUpdate(DocumentEvent event) { onFieldEdited(); }
         };
         JTextComponent[] fields = new JTextComponent[]{
-                manualHost, manualPort, testUrl, pacUrlDiscoveryScript,
+                manualHost, testUrl, pacUrlDiscoveryScript,
                 userAgentField, proxyAuthUser, proxyAuthPassword};
         for (int i = 0; i < fields.length; i++) {
             fields[i].getDocument().addDocumentListener(onEdit);
         }
+        manualPort.addChangeListener(e -> writeConfiguration());
         JCheckBox[] trustBoxes = new JCheckBox[]{trustJvmDefault, trustWindowsRoot, trustWindowsCaStores};
         for (int i = 0; i < trustBoxes.length; i++) {
             trustBoxes[i].addActionListener(e -> writeConfiguration());
@@ -298,7 +278,7 @@ public final class ProxyPanel extends JPanel {
             updatingScriptText = false;
         }
         manualHost.setText(empty(cfg.getManualProxyHost()));
-        manualPort.setText(cfg.getManualProxyPort() > 0 ? String.valueOf(cfg.getManualProxyPort()) : "");
+        manualPort.setValue(Math.max(0, cfg.getManualProxyPort()));
         CertificateTrustConfiguration trustDefaults = CertificateTrustConfiguration.defaults();
         trustJvmDefault.setSelected(trustDefaults.isUseJvmDefault());
         trustWindowsRoot.setSelected(trustDefaults.isUseWindowsRoot());
@@ -393,7 +373,7 @@ public final class ProxyPanel extends JPanel {
                 scriptTextFor(selectedMode()),
                 "",
                 empty(manualHost.getText()),
-                parsePort(manualPort.getText()));
+                ((Number) manualPort.getValue()).intValue());
     }
 
     private String selectedMode() {
@@ -446,17 +426,5 @@ public final class ProxyPanel extends JPanel {
 
     private static String empty(String value) {
         return value == null ? "" : value;
-    }
-
-    private static int parsePort(String value) {
-        String trimmed = trimToNull(value);
-        if (trimmed == null) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(trimmed);
-        } catch (NumberFormatException ex) {
-            return 0;
-        }
     }
 }

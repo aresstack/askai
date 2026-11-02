@@ -2,6 +2,9 @@ package com.aresstack.askai.ui;
 
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicDurationField;
+import com.aresstack.comiccontrols.control.ComicForm;
+import javax.swing.JComponent;
 import com.aresstack.askai.agent.model.nlp.NlpCapability;
 import com.aresstack.askai.agent.model.nlp.NlpModelCatalog;
 import com.aresstack.askai.agent.model.reranker.RerankerModelCatalog;
@@ -9,18 +12,12 @@ import com.aresstack.askai.AskAiModel;
 import com.aresstack.askai.config.AiModelSelections;
 import com.aresstack.askai.service.VirtualOllamaContainerService;
 
-import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
-import java.awt.Component;
-import java.awt.FlowLayout;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -47,6 +44,9 @@ public final class AiModelsPanel extends JPanel {
     private final JComboBox<String> nlpSentenceDeCombo = ComicControls.<String>comboBox();
     private final JComboBox<String> nlpSentenceEnCombo = ComicControls.<String>comboBox();
     private final JLabel status = new JLabel(" ");
+    private final ComicDurationField keepAliveField = new ComicDurationField(7 * 24 * 60);
+    private final java.util.List<JComponent> extraSections = new java.util.ArrayList<JComponent>();
+    private JPanel pageHost;
 
     public AiModelsPanel(AskAiModel model, RerankerModelCatalog rerankerCatalog,
                          NlpModelCatalog nlpCatalog, VirtualOllamaContainerService ollamaService) {
@@ -66,45 +66,60 @@ public final class AiModelsPanel extends JPanel {
     }
 
     private void buildUserInterface() {
-        setLayout(new BorderLayout(8, 8));
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        setLayout(new BorderLayout());
+        setOpaque(false);
 
-        JPanel form = new JPanel(new GridBagLayout());
-        form.setBorder(ComicControls.titledBorder("AI models (managed centrally for all plugins)"));
-        GridBagConstraints constraints = new GridBagConstraints();
-        constraints.insets = new Insets(4, 4, 4, 4);
-        constraints.anchor = GridBagConstraints.WEST;
-        constraints.fill = GridBagConstraints.HORIZONTAL;
+        ComicForm form = ComicForm.titled("AI models (managed centrally for all plugins)");
+        form.row("Main model", mainModelValue);
+        form.note("The main (chat) model is chosen in the chat window's model picker.");
+        keepAliveField.setText(model.getDefaultKeepAlive());
+        keepAliveField.setToolTipText("Ollama keep_alive: how long a model stays loaded in memory after a"
+                + " request. One global value for every model AskAI calls (chat, embeddings, reranker)."
+                + " Longer = faster follow-up answers, memory stays in use.");
+        keepAliveField.addChangeListener(event -> {
+            model.setDefaultKeepAlive(keepAliveField.getText());
+            model.saveSettings();
+        });
+        form.row("Keep models loaded for", keepAliveField);
+        rerankerCombo.setToolTipText("Re-ranks search results and sources for all plugins; empty = none.");
+        form.row("Reranker model", rerankerCombo);
+        embeddingsCombo.setToolTipText("Embeddings for the knowledge index; empty = none.");
+        form.row("Embeddings model", embeddingsCombo);
+        form.row("Sentence detection (German)", nlpSentenceDeCombo);
+        form.row("Sentence detection (English)", nlpSentenceEnCombo);
+        form.note("The NLP sentence models are installed under Models > Setup > NLP; empty = regex fallback.");
 
-        addRow(form, constraints, 0, "Main model (set in the chat window)", mainModelValue);
-        addRow(form, constraints, 1, "Reranker model", rerankerCombo);
-        addRow(form, constraints, 2, "Embeddings model", embeddingsCombo);
-        addRow(form, constraints, 3, "NLP — Sentence detection (German)", nlpSentenceDeCombo);
-        addRow(form, constraints, 4, "NLP — Sentence detection (English)", nlpSentenceEnCombo);
-
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton saveButton = new ComicButton("Save");
         saveButton.addActionListener(event -> save());
         JButton refreshButton = new ComicButton("Refresh models");
         refreshButton.addActionListener(event -> reloadAvailableModels());
-        buttons.add(saveButton);
-        buttons.add(refreshButton);
+        ComicForm actions = new ComicForm();
+        actions.actions(saveButton, refreshButton);
+        actions.component(status);
 
-        JPanel top = new JPanel(new BorderLayout(8, 8));
-        top.add(form, BorderLayout.CENTER);
-        top.add(buttons, BorderLayout.SOUTH);
-        add(top, BorderLayout.NORTH);
-        add(status, BorderLayout.SOUTH);
+        rebuildPage(form, actions);
     }
 
-    private void addRow(JPanel form, GridBagConstraints constraints, int row, String label, Component field) {
-        constraints.gridx = 0;
-        constraints.gridy = row;
-        constraints.weightx = 0.0d;
-        form.add(new JLabel(label), constraints);
-        constraints.gridx = 1;
-        constraints.weightx = 1.0d;
-        form.add(field, constraints);
+    private ComicForm mainForm;
+    private ComicForm actionsForm;
+
+    private void rebuildPage(ComicForm form, ComicForm actions) {
+        mainForm = form;
+        actionsForm = actions;
+        removeAll();
+        java.util.List<JComponent> sections = new java.util.ArrayList<JComponent>();
+        sections.add(form);
+        sections.add(actions);
+        sections.addAll(extraSections);
+        add(ComicForm.page(sections.toArray(new JComponent[0])), BorderLayout.CENTER);
+        revalidate();
+        repaint();
+    }
+
+    /** Appends a section (e.g. the read-aloud voice installation) below the model selections. */
+    public void addSection(JComponent section) {
+        extraSections.add(section);
+        rebuildPage(mainForm, actionsForm);
     }
 
     private void refreshMainModelLabel() {
