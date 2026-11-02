@@ -28,6 +28,8 @@ final class OllamaModelCard extends JPanel {
     private Set<ModelCapability> capabilities = EnumSet.noneOf(ModelCapability.class);
     private boolean capabilitiesKnown;
     private final boolean running;
+    private final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+    private JButton loadToggleButton;
 
     private OllamaModelCard(String title, String line1, String line2, boolean running,
                             final OllamaModelInfo installedModel, final Runnable searchAddOnsAction,
@@ -47,8 +49,8 @@ final class OllamaModelCard extends JPanel {
         setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(ThemeColor.of("models.cardBorder")),
                 BorderFactory.createEmptyBorder(10, 12, 10, 12)));
-        // As in ollama-manager: a running model is told apart by the progress-bar accent wash and its
-        // RUNNING badge, and always sits on top of the list; installed models carry no badge.
+        // As in ollama-manager: a running model is told apart by the progress-bar accent wash and always sits
+        // on top of the list. Its state is also named by the Load/Unload toggle (no separate RUNNING badge).
         setBackground(running ? runningBackground() : ThemeColor.of("models.cardBackground"));
         setMaximumSize(new Dimension(Integer.MAX_VALUE, 96));
 
@@ -63,18 +65,10 @@ final class OllamaModelCard extends JPanel {
         }
         add(text, BorderLayout.CENTER);
 
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        JPanel right = actions;
         right.setOpaque(false);
         capabilityIconLabel.setToolTipText("Model capabilities (from /api/show)");
         right.add(capabilityIconLabel);
-        if (running) {
-            JLabel status = new JLabel("RUNNING");
-            status.setOpaque(true);
-            status.setForeground(ThemeColor.of("bubble.userForeground"));
-            status.setBackground(runningAccent());
-            status.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
-            right.add(status);
-        }
         if (deleteAction != null) {
             // Local reranker models are directly testable from their card (R0.4).
             if (testRerankerAction != null) {
@@ -125,7 +119,7 @@ final class OllamaModelCard extends JPanel {
         add(right, BorderLayout.EAST);
     }
 
-    /** The accent the progress bars are filled with; the running badge uses it as is. */
+    /** The accent the progress bars are filled with. */
     private static Color runningAccent() {
         return AskAiTheme.active().comicPalette().getAccentOrange();
     }
@@ -137,6 +131,65 @@ final class OllamaModelCard extends JPanel {
     private static Color runningBackground() {
         Color base = ThemeColor.of("models.cardBackground");
         return ThemeColor.average(base, ThemeColor.average(runningAccent(), base));
+    }
+
+    /**
+     * Add the Load/Unload toggle right after the capability icons. The label follows the model state: an idle
+     * model offers "Load" (warm it up in Ollama), a running one "Unload" (keep_alive 0). While the request runs
+     * the button is disabled; the list is rebuilt from {@code /api/ps} afterwards, which flips the label.
+     *
+     * @param action invoked on click; it receives the card to re-enable the button on failure
+     * @return this card
+     */
+    OllamaModelCard withLoadToggle(final java.util.function.Consumer<OllamaModelCard> action) {
+        if (loadToggleButton != null || action == null) {
+            return this;
+        }
+        loadToggleButton = new ComicButton(running ? "Unload" : "Load");
+        loadToggleButton.setToolTipText(running
+                ? "Unload this model from memory (keep_alive 0)"
+                : "Load this model into memory now, so the first chat answer starts without delay");
+        loadToggleButton.setFont(loadToggleButton.getFont().deriveFont(Font.BOLD));
+        loadToggleButton.addActionListener(event -> {
+            loadToggleButton.setEnabled(false);
+            loadToggleButton.setText(running ? "Unloading…" : "Loading…");
+            action.accept(this);
+        });
+        actions.add(loadToggleButton, 1);
+        actions.revalidate();
+        return this;
+    }
+
+    /**
+     * Add the primary "Use" button: it opens {@code menu} (built at click time, so its check marks show the
+     * current selections) below the button. Call before {@link #withLoadToggle} so the order is Load, Use.
+     */
+    OllamaModelCard withUseMenu(final java.util.function.Supplier<javax.swing.JPopupMenu> menu) {
+        if (menu == null) {
+            return this;
+        }
+        final JButton use = new ComicButton("Use \u25BE");
+        use.setName("use");
+        use.setToolTipText("Choose what this model is used for (chat, embeddings, ...)");
+        use.setFont(use.getFont().deriveFont(Font.BOLD));
+        use.setForeground(ThemeColor.of("models.primaryActionText"));
+        use.addActionListener(event -> menu.get().show(use, 0, use.getHeight()));
+        actions.add(use, 1);
+        actions.revalidate();
+        return this;
+    }
+
+    /** Re-enable the Load/Unload toggle after a failed request (label back to the current state). */
+    void resetLoadToggle() {
+        if (loadToggleButton != null) {
+            loadToggleButton.setEnabled(true);
+            loadToggleButton.setText(running ? "Unload" : "Load");
+        }
+    }
+
+    /** @return the Load/Unload toggle or {@code null} (test hook). */
+    JButton loadToggleButton() {
+        return loadToggleButton;
     }
 
     /** @return whether this card shows a running model (test hook). */

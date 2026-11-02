@@ -36,6 +36,9 @@ public interface OllamaService {
 
     Task deleteModel(String modelName, ActionListener listener);
 
+    /** Load (warm up) a model with the given keep_alive, without generating anything. */
+    Task loadModel(String modelName, String keepAlive, ActionListener listener);
+
     Task unloadModel(String modelName, ActionListener listener);
 
     Task pullModel(String modelName, PullListener listener);

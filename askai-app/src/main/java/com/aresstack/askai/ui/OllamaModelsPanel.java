@@ -272,7 +272,8 @@ public final class OllamaModelsPanel extends JPanel {
                     addSectionHeader(installedCardsPanel, container);
                     lastContainer = container;
                 }
-                installedCardsPanel.add(OllamaModelCard.running(entry.getValue()));
+                installedCardsPanel.add(OllamaModelCard.running(entry.getValue())
+                        .withLoadToggle(loadToggle(entry.getValue().getDisplayName(), true)));
                 installedCardsPanel.add(Box.createVerticalStrut(6));
             }
             for (final OllamaModelInfo modelInfo : ordered) {
@@ -311,19 +312,16 @@ public final class OllamaModelsPanel extends JPanel {
                                     confirmAndDelete(modelInfo.getDisplayName());
                                 }
                             });
+                    if (canRerank) {
+                        localCard.withUseMenu(useMenu(modelInfo.getDisplayName(),
+                                java.util.EnumSet.of(ModelUsePurpose.RERANKER)));
+                    }
+                    localCard.withLoadToggle(loadToggle(modelInfo.getDisplayName(), running != null));
                     installedCardsPanel.add(localCard);
                     installedCardsPanel.add(Box.createVerticalStrut(6));
                     loadCapabilities(modelInfo.getDisplayName(), localCard);
                     continue;
                 }
-                Runnable useInChat = new Runnable() {
-                    @Override
-                    public void run() {
-                        if (useInChatHandler != null) {
-                            useInChatHandler.useInChat(modelInfo.getDisplayName());
-                        }
-                    }
-                };
                 // Stateless: route to HF search or a local projector file — never guess/store encoder state.
                 Runnable searchAddOns = new Runnable() {
                     @Override
@@ -341,13 +339,16 @@ public final class OllamaModelsPanel extends JPanel {
                         }
                     }
                 };
-                OllamaModelCard card = OllamaModelCard.installed(modelInfo, running, searchAddOns, localAddOn, useInChat,
+                OllamaModelCard card = OllamaModelCard.installed(modelInfo, running, searchAddOns, localAddOn, null,
                         new Runnable() {
                     @Override
                     public void run() {
                         confirmAndDelete(modelInfo.getDisplayName());
                     }
                 });
+                card.withUseMenu(useMenu(modelInfo.getDisplayName(),
+                        java.util.EnumSet.of(ModelUsePurpose.CHAT, ModelUsePurpose.EMBEDDINGS)));
+                card.withLoadToggle(loadToggle(modelInfo.getDisplayName(), running != null));
                 installedCardsPanel.add(card);
                 installedCardsPanel.add(Box.createVerticalStrut(6));
                 loadCapabilities(modelInfo.getDisplayName(), card);
@@ -525,6 +526,82 @@ public final class OllamaModelsPanel extends JPanel {
         installedCardsPanel.removeAll();
         addPlaceholder(installedCardsPanel, message);
         refreshCards(installedCardsPanel);
+    }
+
+    /**
+     * The "Use" popup of a model card: one check item per purpose, checked when this model currently holds it.
+     * Checking assigns the model (the previous holder is replaced, so it is un-checked everywhere); un-checking
+     * clears the purpose. Chat goes through the chat window so its model selector follows.
+     */
+    private java.util.function.Supplier<javax.swing.JPopupMenu> useMenu(final String modelName,
+                                                                         final java.util.Set<ModelUsePurpose> purposes) {
+        return () -> {
+            javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+            com.aresstack.askai.config.AiModelSelections selections = model.getAiModelSelections();
+            for (final ModelUsePurpose purpose : purposes) {
+                final javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(purpose.label(),
+                        purpose.isSelected(selections, modelName));
+                item.addActionListener(event -> use(modelName, purpose, item.isSelected()));
+                menu.add(item);
+            }
+            return menu;
+        };
+    }
+
+    private void use(String modelName, ModelUsePurpose purpose, boolean use) {
+        if (purpose == ModelUsePurpose.CHAT) {
+            if (use && useInChatHandler != null) {
+                useInChatHandler.useInChat(modelName);
+            } else {
+                model.persistMainModel(purpose.apply(model.getAiModelSelections(), modelName, use).getMainModel());
+            }
+        } else {
+            com.aresstack.askai.config.AiModelSelections next =
+                    purpose.apply(model.getAiModelSelections(), modelName, use);
+            model.persistRerankerAndEmbeddingsModels(next.getRerankerModel(), next.getEmbeddingsModel());
+        }
+        installedStatusLabel.setText((use ? "Using " : "No longer using ") + modelName + " for "
+                + purpose.label().toLowerCase(java.util.Locale.ROOT) + ".");
+    }
+
+    /**
+     * The Load/Unload action of a model card, as in ollama-manager: load = empty /api/generate with the
+     * configured chat keep_alive, unload = keep_alive 0. Afterwards the list is refreshed from /api/ps, so the
+     * card moves to/from the top and its button flips; on failure the button is re-enabled.
+     */
+    private java.util.function.Consumer<OllamaModelCard> loadToggle(final String modelName, final boolean running) {
+        return card -> {
+            installedStatusLabel.setText((running ? "Unloading " : "Loading ") + modelName + " ...");
+            OllamaService.ActionListener listener = new OllamaService.ActionListener() {
+                @Override
+                public void onComplete(final String message) {
+                    onUi(new Runnable() {
+                        @Override
+                        public void run() {
+                            installedStatusLabel.setText(message);
+                            refreshModels();
+                        }
+                    });
+                }
+
+                @Override
+                public void onError(final Exception ex) {
+                    onUi(new Runnable() {
+                        @Override
+                        public void run() {
+                            installedStatusLabel.setText("Could not " + (running ? "unload " : "load ")
+                                    + modelName + ": " + ex.getMessage());
+                            card.resetLoadToggle();
+                        }
+                    });
+                }
+            };
+            if (running) {
+                ollamaService.unloadModel(modelName, listener);
+            } else {
+                ollamaService.loadModel(modelName, model.getDefaultKeepAlive(), listener);
+            }
+        };
     }
 
     private void confirmAndDelete(final String modelName) {
