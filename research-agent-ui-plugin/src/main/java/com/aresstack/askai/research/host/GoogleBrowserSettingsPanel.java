@@ -34,6 +34,8 @@ public final class GoogleBrowserSettingsPanel extends JPanel {
     private final JTextField language = ComicControls.textField(6);
     private final JCheckBox resolveGoto = ComicControls.checkBox("Resolve Google /goto links over HTTP");
     private final JLabel status = new JLabel(" ");
+    /** Draft the edits are applied to; an invalid file falls back to defaults so the UI can repair it. */
+    private GoogleBrowserSearchConfiguration draft;
 
     public GoogleBrowserSettingsPanel(ProviderConfigurationService configurations) {
         super(new BorderLayout());
@@ -66,6 +68,7 @@ public final class GoogleBrowserSettingsPanel extends JPanel {
             status.setText("google-browser.json is invalid: " + invalid.getMessage());
             c = new GoogleBrowserSearchConfiguration();
         }
+        draft = c;
         enabled.setSelected(c.isEnabled());
         browserType.setSelectedItem("firefox".equalsIgnoreCase(text(c.getBrowserType()).trim())
                 ? "firefox" : "chromium");
@@ -80,7 +83,7 @@ public final class GoogleBrowserSettingsPanel extends JPanel {
     /** Writes {@code google-browser.json}. Returns false on a validation error. */
     public boolean save() {
         try {
-            GoogleBrowserSearchConfiguration c = configurations.loadOrCreateGoogleBrowser();
+            GoogleBrowserSearchConfiguration c = draft;
             c.setEnabled(enabled.isSelected());
             c.setBrowserType((String) browserType.getSelectedItem());
             c.setChannel(trimToNull(channel.getText()));
