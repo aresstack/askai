@@ -61,6 +61,12 @@ public final class WebSearchProvidersModuleSmokeTest {
             serpApi.setSearchEngine(SerpApiSearchEngine.BING);
             service.saveSerpApi(serpApi, "serpapi-secret-PLAINTEXT".toCharArray());
 
+            // askai #31: the Google search browser is built lazily - no browser starts before the first search.
+            com.aresstack.askai.research.search.googlebrowser.GoogleBrowserSearchConfiguration googleBrowser =
+                    service.loadOrCreateGoogleBrowser();
+            googleBrowser.setEnabled(true);
+            service.saveGoogleBrowser(googleBrowser);
+
             // Rebuild the registry from the now-enabled, catalog-validated configurations.
             module.reloadProviders();
             WebSearchProviderRegistry registry = module.getProviderRegistry();
@@ -69,7 +75,9 @@ public final class WebSearchProvidersModuleSmokeTest {
             assertNotNull(registry.require(SearchProviderId.DATA_FOR_SEO));
             assertNotNull(registry.require(SearchProviderId.SERP_API));
             assertTrue(registry.require(SearchProviderId.SERP_API).supports(SearchEngine.BING));
-            assertEquals(4, registry.getAll().size());
+            assertNotNull(registry.require(SearchProviderId.GOOGLE_BROWSER));
+            assertTrue(registry.require(SearchProviderId.GOOGLE_BROWSER).supports(SearchEngine.GOOGLE));
+            assertEquals(5, registry.getAll().size());
 
             // Secrets are encrypted at rest: no config file leaks the plaintext, each stores ciphertext.
             Path[] files = {paths.getBraveConfigurationFile(), paths.getBrightDataConfigurationFile(),

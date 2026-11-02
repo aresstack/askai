@@ -8,6 +8,8 @@ import com.aresstack.askai.research.search.brightdata.BrightDataSearchConfigurat
 import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchConfiguration;
 import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchConfigurationValidator;
 import com.aresstack.askai.research.search.security.SecretArrays;
+import com.aresstack.askai.research.search.googlebrowser.GoogleBrowserSearchConfiguration;
+import com.aresstack.askai.research.search.googlebrowser.GoogleBrowserSearchConfigurationValidator;
 import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfiguration;
 import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfigurationValidator;
 import com.aresstack.askai.research.search.security.SecretValueService;
@@ -24,6 +26,7 @@ public final class ProviderConfigurationService {
     private final BrightDataSearchConfigurationValidator brightDataValidator;
     private final DataForSeoSearchConfigurationValidator dataForSeoValidator;
     private final SerpApiSearchConfigurationValidator serpApiValidator;
+    private final GoogleBrowserSearchConfigurationValidator googleBrowserValidator;
 
     public ProviderConfigurationService(
             ProviderConfigurationPaths paths,
@@ -43,6 +46,8 @@ public final class ProviderConfigurationService {
                 new DataForSeoSearchConfigurationValidator();
         this.serpApiValidator =
                 new SerpApiSearchConfigurationValidator();
+        this.googleBrowserValidator =
+                new GoogleBrowserSearchConfigurationValidator();
     }
 
     public ProviderConfigurationBundle loadOrCreateAll() {
@@ -50,7 +55,8 @@ public final class ProviderConfigurationService {
                 loadOrCreateBrave(),
                 loadOrCreateBrightData(),
                 loadOrCreateDataForSeo(),
-                loadOrCreateSerpApi());
+                loadOrCreateSerpApi(),
+                loadOrCreateGoogleBrowser());
     }
 
     public BraveSearchConfiguration loadOrCreateBrave() {
@@ -195,6 +201,23 @@ public final class ProviderConfigurationService {
         } finally {
             SecretArrays.clear(apiKey);
         }
+    }
+
+    public GoogleBrowserSearchConfiguration loadOrCreateGoogleBrowser() {
+        Path file = paths.getGoogleBrowserConfigurationFile();
+        if (!Files.exists(file)) {
+            GoogleBrowserSearchConfiguration configuration = new GoogleBrowserSearchConfiguration();
+            saveGoogleBrowser(configuration);
+            return configuration;
+        }
+        GoogleBrowserSearchConfiguration configuration = store.load(file, GoogleBrowserSearchConfiguration.class);
+        googleBrowserValidator.validate(configuration);
+        return configuration;
+    }
+
+    public void saveGoogleBrowser(GoogleBrowserSearchConfiguration configuration) {
+        googleBrowserValidator.validate(configuration);
+        store.save(paths.getGoogleBrowserConfigurationFile(), configuration);
     }
 
     public ProviderConfigurationPaths getPaths() {
