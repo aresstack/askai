@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.runtime.team;
 
-import com.aresstack.askai.java8.modelport.CentralModelDirectories;
-import com.aresstack.askai.java8.modelport.OllamaModelPort;
+import com.aresstack.askai.modelport.CentralModelDirectories;
+import com.aresstack.askai.modelport.OllamaModelPort;
 import com.aresstack.askai.research.agent.ConversationPolicyProjection;
 import com.aresstack.askai.research.domain.scope.ResearchScopeDraft;
 import com.aresstack.askai.research.domain.scope.ResearchScopeFenceView;

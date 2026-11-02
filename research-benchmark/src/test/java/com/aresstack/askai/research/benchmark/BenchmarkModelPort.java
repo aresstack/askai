@@ -2,8 +2,8 @@ package com.aresstack.askai.research.benchmark;
 
 import com.aresstack.askai.agent.model.port.ModelSlot;
 import com.aresstack.askai.agent.model.port.resource.ModelEndpoint;
-import com.aresstack.askai.java8.modelport.ModelPortSettingsRepository;
-import com.aresstack.askai.java8.modelport.OllamaModelPort;
+import com.aresstack.askai.modelport.ModelPortSettingsRepository;
+import com.aresstack.askai.modelport.OllamaModelPort;
 
 import java.io.File;
 import java.time.Duration;

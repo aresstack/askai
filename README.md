@@ -118,7 +118,7 @@ tab). A **Revisions** view shows how the project got there.
   toolchain locally (IntelliJ `~/.jdks`, `JAVA_HOME`, PATH) or downloads one through the foojay resolver.
 - **An Ollama server** for chat, dictation and model management.
 - **Nothing to install for browser research** (Windows x86_64 and Linux x86_64): the default browser
-  channel `camoufox` downloads Camoufox once (about 1.3 GB) to `%APPDATA%/.askai-java8/browser`. It is
+  channel `camoufox` downloads Camoufox once (about 1.3 GB) to `%APPDATA%/.askai/browser`. It is
   the patched build of the [Argos](https://github.com/aresstack/argos) distribution, which carries the
   WebDriver BiDi fixes of daijro/camoufox#952 that no Camoufox release contains yet. AskAI checks the
   archive's pinned SHA-256 at download and both fixes at every browser start. The download starts in the background when a research
@@ -159,7 +159,7 @@ must run online once to fill the Gradle cache.
 
 ### Configuration
 
-Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.askai-java8/` if
+Settings are stored in `%APPDATA%\.askai\askai.properties` (`~/.askai/` if
 `APPDATA` is not set).
 
 ## Project structure

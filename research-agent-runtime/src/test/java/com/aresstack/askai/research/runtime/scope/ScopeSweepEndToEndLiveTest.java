@@ -115,7 +115,7 @@ public class ScopeSweepEndToEndLiveTest {
         env.put("ASKAI_INFERENCE_CONFIG", inferenceConfig.getAbsolutePath());
         // The model roles reach the model through the host's port (ADR 0001, 3.2), here over the local Ollama.
         InProcessResearchSessionBackend backend = new InProcessResearchSessionBackend(env, research, null, null,
-                com.aresstack.askai.java8.modelport.CentralModelDirectories.fixedModelPort(OLLAMA, chatModel,
+                com.aresstack.askai.modelport.CentralModelDirectories.fixedModelPort(OLLAMA, chatModel,
                         java.time.Duration.ofMinutes(5)));
 
         final BackendScopeProbeGenerator[] activeGenerator = {null};

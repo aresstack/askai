@@ -38,7 +38,7 @@ DataForSEO, SerpApi) laufen bereits über Serp4J in der Runtime (`web-search-pro
 - Gradle 7.6.4 (läuft nur auf JDK ≤ 19), Root-`build.gradle` setzt alle Module außer drei auf Java 8.
 - CI (`release.yml`, `chatgpt-cache.yml`) baut mit JDK 8, JDK 21 nur für Serp4J.
 - Gruppe `com.aresstack.askai.java8`, Hauptklasse `AskAiJava8App`, Artefakt `askai-java8-<version>.jar`,
-  Modul `ollama4j-java8`.
+  Modul `ollama4j-java8`, Datenordner `%APPDATA%\.askai-java8`.
 
 ## Zielbild
 Eine JVM (Java 21): die AskAI-App. Darin laufen Plugin-Host, Research-Plugin, Research-Logik, beide Browser und die
@@ -74,7 +74,9 @@ Suche. Die Google-Suche ist ein direkter Methodenaufruf
 
 ### 5. Altlasten entfernen
 - Sidecar-Module, Prozessstarter, Watchdogs (`ParentDeathWatchdog`), Jar-Tasks und Einstellungen für Sidecar-Java.
-- Java-8-Namen (`askai-java8`, `AskAiJava8App`, `ollama4j-java8`, Paket `com.aresstack.askai.java8`).
+- Java-8-Namen (#51, erledigt): Projekt/Artefakt `askai` (`askai-<version>.jar`), Hauptklasse `AskAiApp`, Modul
+  `ollama4j`, Paket `com.aresstack.askai`, User-Agent `askai`, Datenordner `%APPDATA%\.askai`
+  (`AppDirectoryMigration` verschiebt den alten Ordner `.askai-java8` beim ersten Start).
 - Java-8-Bibliotheksreste, die es nur wegen Java 8 gibt.
 
 ## Offene Punkte fürs Review
@@ -83,4 +85,5 @@ Suche. Die Google-Suche ist ein direkter Methodenaufruf
 2. Die KI-gestützte Layout-Erkennung (`browser-search-analysis`) wird für Google durch den festen Parser aus
    `serp4j-playwright-google` ersetzt. Bing und DuckDuckGo über den Browser haben danach keinen Pfad mehr, solange sie
    nicht ebenfalls als Serp4J-Provider vorliegen.
-3. Umbenennung der Java-8-Namen (Artefakt, Hauptklasse, Paket) erst am Ende, weil sie alle Module berührt.
+3. Die Java-8-Namen sind umbenannt (#51). Die Module `browser-mcp-server-java21` und
+   `local-model-runtime-sidecar-java21` tragen noch ihre alten Namen, obwohl sie keine Sidecars mehr sind.

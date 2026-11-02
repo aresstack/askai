@@ -97,7 +97,7 @@ test {
 }
 
 application {
-    mainClass = 'com.aresstack.askai.java8.AskAiJava8App'
+    mainClass = 'com.aresstack.askai.AskAiApp'
 }
 
 jar {

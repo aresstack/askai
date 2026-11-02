@@ -43,7 +43,7 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
 
     /**
      * Where saved worker sign-in states belong: next to the chat browser's profile
-     * ({@code <APPDATA>/.askai-java8/browser-profiles/worker-state}), never in a research project folder.
+     * ({@code <APPDATA>/.askai/browser-profiles/worker-state}), never in a research project folder.
      */
     public static Path defaultStateDirectory() {
         return CamoufoxProvisioning.appDirectory().resolve("browser-profiles").resolve("worker-state");

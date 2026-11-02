@@ -158,7 +158,7 @@ only two of them talk to GPT-OSS 20B.
   tab limit; each closes on its own, all close with the user context. Popups are closed, downloads refused.
 - **Chat:** `ProductiveResearchSessionResources.close()` closes every lease and worker browser of the chat.
 - **Persisted sign-in state:** only with a state key. Playwright `storageState` (cookies + local storage)
-  in `<APPDATA>/.askai-java8/browser-profiles/worker-state/<sha256(chat)>/<key>.json`: next to the chat
+  in `<APPDATA>/.askai/browser-profiles/worker-state/<sha256(chat)>/<key>.json`: next to the chat
   browser's own profile, never in the research project folder; owner-only (`rw-------`) on POSIX, the per-user
   `%APPDATA%` ACL on Windows (the same protection as the browser's own cookie database); atomic writes.
 

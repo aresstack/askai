@@ -76,7 +76,7 @@ public class MainModelScopeProbeGeneratorLiveTest {
                                 ScopeAnchor.Membership.OUT)),
                 TARGET_BROAD);
         MainModelScopeProbeGenerator generator = new MainModelScopeProbeGenerator(
-                new PortMainModelChat(com.aresstack.askai.java8.modelport.CentralModelDirectories.fixedModelPort(
+                new PortMainModelChat(com.aresstack.askai.modelport.CentralModelDirectories.fixedModelPort(
                         BASE_URL, model, java.time.Duration.ofMillis(TIMEOUT_MILLIS)),
                         ResearchModelSlots.SCOPE, java.time.Duration.ofMillis(TIMEOUT_MILLIS)),
                 new GeneratorSettings(0.7d, MAX_OUTPUT_TOKENS, CONTROLS_PER_ANCHOR));

@@ -6,7 +6,7 @@ import com.aresstack.askai.agent.model.inference.InferenceConfigurationException
 import com.aresstack.askai.agent.model.inference.InferenceConfigurationSnapshot;
 import com.aresstack.askai.agent.model.inference.InferenceConfigurationSnapshotProvider;
 import com.aresstack.askai.agent.model.inference.InferenceEndpointDescriptor;
-import com.aresstack.askai.java8.modelport.OllamaModelPort;
+import com.aresstack.askai.modelport.OllamaModelPort;
 import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
 import com.aresstack.askai.research.backend.ResearchBackendEvent;
 import com.aresstack.askai.research.backend.ResearchBackendEventType;

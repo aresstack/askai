@@ -1,8 +1,8 @@
 package com.aresstack.askai.research.runtime.team;
 
 import com.aresstack.askai.agent.model.reranker.MiniJson;
-import com.aresstack.askai.java8.modelport.CentralModelDirectories;
-import com.aresstack.askai.java8.modelport.OllamaModelPort;
+import com.aresstack.askai.modelport.CentralModelDirectories;
+import com.aresstack.askai.modelport.OllamaModelPort;
 import com.aresstack.askai.research.runtime.role.ResearchRoles;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;

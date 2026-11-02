@@ -96,7 +96,7 @@ public class AgentPluginLoadIntegrationTest {
                         name.startsWith("com/aresstack/askai/plugin/api/"));
                 assertFalse("bundled pf4j-bridge API: " + name,
                         name.startsWith("com/aresstack/askai/plugin/pf4j/api/"));
-                assertFalse("bundled askai-app: " + name, name.startsWith("com/aresstack/askai/java8/"));
+                assertFalse("bundled askai-app: " + name, name.startsWith("com/aresstack/askai/"));
                 assertFalse("orphan legacy workspace class: " + name,
                         name.contains("ResearchWorkspace") || name.contains("ResearchDemoData")
                                 || name.contains("/research/domain/"));
