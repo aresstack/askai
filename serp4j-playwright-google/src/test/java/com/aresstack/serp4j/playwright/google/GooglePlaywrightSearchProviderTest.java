@@ -45,6 +45,36 @@ class GooglePlaywrightSearchProviderTest {
     }
 
     @Test
+    void waitsForTheResultPageAfterGooglesJavaScriptStartPage() {
+        // Live with Camoufox (02.11.): /search first answers with a JavaScript start page whose noscript block
+        // points to /httpservice/retry/enablejs; #search appears only after that script ran.
+        FakeBrowser fake = new FakeBrowser("https://www.google.com/search?q=serp4j&hl=de",
+                GoogleSerpHtmlParserTest.html("browser-web-de.html"), 200);
+
+        provider.search(SearchRequest.builder("serp4j").build(), fake.browser());
+
+        assertThat(fake.awaited).containsExactly(GooglePlaywrightSearchProvider.RESULT_PAGE_SELECTOR);
+        assertThat(GooglePlaywrightSearchProvider.RESULT_PAGE_SELECTOR)
+                .contains("#search", "#rso", "#captcha-form", "consent.google.");
+    }
+
+    @Test
+    void startPageThatNeverRendersIsReportedAsJavaScriptRequired() {
+        FakeBrowser fake = new FakeBrowser("https://www.google.com/search?q=serp4j&hl=de",
+                "<html><head><noscript><meta content=\"0;url=/httpservice/retry/enablejs?sei=x\" "
+                        + "http-equiv=\"refresh\"></noscript></head><body></body></html>", 200);
+        fake.waitTimesOut = true;
+
+        assertThatThrownBy(() -> provider.search(SearchRequest.builder("serp4j").build(), fake.browser()))
+                .isInstanceOfSatisfying(SearchProviderException.class, e -> {
+                    assertThat(e.getCategory()).isEqualTo(SearchErrorCategory.BLOCKED);
+                    assertThat(e.getDetails())
+                            .containsEntry(PlaywrightSearchFailures.DETAIL_OBSTACLE, "javascript_required");
+                });
+        assertThat(fake.pageClosed).isTrue();
+    }
+
+    @Test
     void challengePageIsBlockedWithoutClicking() {
         FakeBrowser fake = new FakeBrowser("https://www.google.com/sorry/index?continue=x",
                 "<html><body><form id=\"captcha-form\"></form></body></html>", 429);
@@ -86,6 +116,8 @@ class GooglePlaywrightSearchProviderTest {
         final String html;
         final int status;
         final List<String> navigated = new ArrayList<String>();
+        final List<String> awaited = new ArrayList<String>();
+        boolean waitTimesOut;
         boolean connected = true;
         boolean pageClosed;
         boolean browserClosed;
@@ -136,6 +168,12 @@ class GooglePlaywrightSearchProviderTest {
                             throw navigationFailure;
                         }
                         return response;
+                    case "waitForSelector":
+                        awaited.add((String) args[0]);
+                        if (waitTimesOut) {
+                            throw new com.microsoft.playwright.TimeoutError("Timeout 15000ms exceeded.");
+                        }
+                        return null;
                     case "url":
                         return finalUrl;
                     case "content":
