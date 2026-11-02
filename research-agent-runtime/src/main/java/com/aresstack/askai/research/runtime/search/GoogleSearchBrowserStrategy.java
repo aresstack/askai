@@ -28,9 +28,20 @@ public final class GoogleSearchBrowserStrategy {
      * @param locale        language and country of the Google result page; empty parts leave Google's default
      */
     public static SearchStrategy create(SearchBrowser searchBrowser, Locale locale) {
+        return create(searchBrowser, locale, null);
+    }
+
+    /**
+     * @param searchUrl another search endpoint than {@code https://www.google.com/search}, or {@code null}; only
+     *                  for local test worlds that serve a Google-shaped result page
+     */
+    public static SearchStrategy create(SearchBrowser searchBrowser, Locale locale, String searchUrl) {
         // askai #41 (lazy resolution): google.*/goto links stay as Google lists them; no request resolves them during
         // the search. The browser follows such a link when the research pipeline actually opens the hit.
         GooglePlaywrightSearchProvider.Builder google = GooglePlaywrightSearchProvider.builder();
+        if (searchUrl != null && !searchUrl.trim().isEmpty()) {
+            google.baseUrl(searchUrl.trim());
+        }
         if (locale != null && !locale.getLanguage().isEmpty()) {
             google.defaultLanguage(locale.getLanguage());
         }

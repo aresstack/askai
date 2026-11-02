@@ -308,7 +308,8 @@ public final class ResearchAgentSession {
             if (this.searchStrategy == null) {
                 // askai #31: the browser search is Google via Serp4J on AskAI's own search browser.
                 this.searchStrategy = com.aresstack.askai.research.runtime.search.GoogleSearchBrowserStrategy
-                        .create(ensureSearchBrowser(), java.util.Locale.getDefault());
+                        .create(ensureSearchBrowser(), java.util.Locale.getDefault(),
+                                env.get("ASKAI_GOOGLE_SEARCH_URL"));
                 this.searchProviderLabel = providerLabel(
                         com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER);
             }

@@ -938,6 +938,12 @@ public final class ProductiveResearchBackendFactory {
             baseEnv.put("ASKAI_USE_AI_RERANKER", String.valueOf(useAiReranker));
             // "Orchestrated research" and its limits (ADR 0001 lane F).
             baseEnv.putAll(orchestratorEnvironment);
+            // Dev/test hand-off for local test worlds (like the former per-run browser flags): a Google-shaped
+            // local result page instead of www.google.com. Never persisted, never set in normal operation.
+            String googleSearchUrl = System.getProperty("askai.research.googleSearchUrl", "").trim();
+            if (!googleSearchUrl.isEmpty()) {
+                baseEnv.put("ASKAI_GOOGLE_SEARCH_URL", googleSearchUrl);
+            }
             InProcessResearchSessionBackend backend = null; // assigned after the endpoints are open
 
             ProductiveResearchSessionResources resources;
