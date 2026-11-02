@@ -96,7 +96,7 @@ public class AgentPluginLoadIntegrationTest {
                         name.startsWith("com/aresstack/askai/plugin/api/"));
                 assertFalse("bundled pf4j-bridge API: " + name,
                         name.startsWith("com/aresstack/askai/plugin/pf4j/api/"));
-                assertFalse("bundled askai-app: " + name, name.startsWith("com/aresstack/askai/java8/"));
+                assertFalse("bundled askai-app: " + name, isAskAiAppClass(name));
                 assertFalse("orphan legacy workspace class: " + name,
                         name.contains("ResearchWorkspace") || name.contains("ResearchDemoData")
                                 || name.contains("/research/domain/"));
@@ -104,6 +104,28 @@ public class AgentPluginLoadIntegrationTest {
         } finally {
             files.close();
         }
+    }
+
+    /** askai-app shares the {@code com.aresstack.askai} root package with the plugin since #51; these are its own. */
+    private static final String[] ASKAI_APP_PACKAGES = {"audio/", "batch/", "catalog/", "client/", "config/", "hf/",
+            "history/", "localmodels/", "net/", "notify/", "ollamalib/", "party/", "plugin/host/", "service/",
+            "settings/", "speech/", "state/", "stt/", "text/", "tool/", "tts/", "ui/", "video/", "vision/"};
+
+    private static boolean isAskAiAppClass(String name) {
+        String root = "com/aresstack/askai/";
+        if (!name.startsWith(root)) {
+            return false;
+        }
+        String rest = name.substring(root.length());
+        if (rest.indexOf('/') < 0) {
+            return true; // AskAiApp, AskAiModel, ...
+        }
+        for (String appPackage : ASKAI_APP_PACKAGES) {
+            if (rest.startsWith(appPackage)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String readEntry(java.util.jar.JarFile jar, String name) throws Exception {

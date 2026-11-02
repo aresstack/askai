@@ -1,0 +1,71 @@
+package com.aresstack.askai.client;
+
+/**
+ * Final result of an Ollama chat call, mapped from ollama4j metadata.
+ *
+ * <p>Carries the assembled assistant content plus the token metrics the UI needs,
+ * so the UI no longer parses raw chat JSON for {@code eval_count}/{@code eval_duration}.</p>
+ */
+public final class OllamaChatCompletion {
+
+    private final String thinking;
+    private final String content;
+    private final java.util.List<OllamaToolCall> toolCalls;
+    private final long evalCount;
+    private final long evalDurationNanos;
+
+    public OllamaChatCompletion(String content, long evalCount, long evalDurationNanos) {
+        this("", content, java.util.Collections.<OllamaToolCall>emptyList(), evalCount, evalDurationNanos);
+    }
+
+    public OllamaChatCompletion(String thinking, String content, java.util.List<OllamaToolCall> toolCalls,
+                                long evalCount, long evalDurationNanos) {
+        this.thinking = thinking == null ? "" : thinking;
+        this.content = content == null ? "" : content;
+        this.toolCalls = toolCalls == null
+                ? java.util.Collections.<OllamaToolCall>emptyList()
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<OllamaToolCall>(toolCalls));
+        this.evalCount = evalCount;
+        this.evalDurationNanos = evalDurationNanos;
+    }
+
+    public static OllamaChatCompletion empty() {
+        return new OllamaChatCompletion("", 0L, 0L);
+    }
+
+    /** @return the full reasoning streamed this turn (empty when the model did not think). */
+    public String getThinking() {
+        return thinking;
+    }
+
+    /** @return the tool calls the assistant requested this turn (empty when none). */
+    public java.util.List<OllamaToolCall> getToolCalls() {
+        return toolCalls;
+    }
+
+    public String getContent() {
+        return content;
+    }
+
+    public long getEvalCount() {
+        return evalCount;
+    }
+
+    public long getEvalDurationNanos() {
+        return evalDurationNanos;
+    }
+
+    public boolean hasMetrics() {
+        return evalCount > 0L && evalDurationNanos > 0L;
+    }
+
+    /**
+     * Output tokens per second, or {@code 0} when metrics are unavailable.
+     */
+    public double tokensPerSecond() {
+        if (!hasMetrics()) {
+            return 0.0d;
+        }
+        return evalCount / (evalDurationNanos / 1_000_000_000.0d);
+    }
+}

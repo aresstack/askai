@@ -63,8 +63,8 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: askai-java8-${{ env.VERSION }}
-          path: askai-app/build/libs/askai-java8-${{ env.VERSION }}.jar
+          name: askai-${{ env.VERSION }}
+          path: askai-app/build/libs/askai-${{ env.VERSION }}.jar
           if-no-files-found: error
 
       - name: Publish GitHub release
@@ -73,7 +73,7 @@ jobs:
           tag_name: ${{ env.TAG }}
           name: AskAI ${{ env.TAG }}
           generate_release_notes: true
-          files: askai-app/build/libs/askai-java8-${{ env.VERSION }}.jar
+          files: askai-app/build/libs/askai-${{ env.VERSION }}.jar
           fail_on_unmatched_files: true
 
   # Rolling snapshot for quick testing. Runs on every push to any branch other than
@@ -89,7 +89,7 @@ jobs:
       github.ref != 'refs/heads/main' &&
       !startsWith(github.ref, 'refs/heads/v')
     concurrency:
-      group: askai-java8-snapshot
+      group: askai-snapshot
       cancel-in-progress: true
 
     steps:
@@ -121,7 +121,7 @@ jobs:
           # Remove the previous snapshot release and its tag so the new one fully replaces it.
           gh release delete snapshot --yes --cleanup-tag || true
           gh release create snapshot \
-            askai-app/build/libs/askai-java8-snapshot.jar \
+            askai-app/build/libs/askai-snapshot.jar \
             --prerelease \
             --target "${GITHUB_SHA}" \
             --title "Snapshot (latest build)" \

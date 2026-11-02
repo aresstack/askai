@@ -4,7 +4,7 @@ name: ChatGPT offline Gradle cache
 # wrapper distribution) by running a full build once with network access, then publish that primed home as a
 # ZIP. Unzipped into the repo root, it lets a ChatGPT-like sandbox (no internet) build/test offline:
 #
-#   unzip askai-java8-chatgpt-gradle-home.zip        # recreates .chatgpt/gradle-home
+#   unzip askai-chatgpt-gradle-home.zip        # recreates .chatgpt/gradle-home
 #   GRADLE_USER_HOME=.chatgpt/gradle-home ./gradlew --offline build
 #
 # The single "chatgpt-compatible" pre-release is overwritten on each push (rolling, like the snapshot job).
@@ -24,7 +24,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: askai-java8-chatgpt-cache-${{ github.event.inputs.ref || github.ref }}
+  group: askai-chatgpt-cache-${{ github.event.inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -94,8 +94,8 @@ jobs:
 
       - name: Zip the primed Gradle home
         run: |
-          zip -q -r askai-java8-chatgpt-gradle-home.zip .chatgpt/gradle-home .chatgpt/m2 .chatgpt/README-chatgpt.md
-          ls -lh askai-java8-chatgpt-gradle-home.zip
+          zip -q -r askai-chatgpt-gradle-home.zip .chatgpt/gradle-home .chatgpt/m2 .chatgpt/README-chatgpt.md
+          ls -lh askai-chatgpt-gradle-home.zip
 
       - name: Overwrite rolling chatgpt-compatible pre-release
         env:
@@ -104,7 +104,7 @@ jobs:
           TARGET_REF="${{ steps.target.outputs.ref }}"
           gh release delete chatgpt-compatible --yes --cleanup-tag || true
           gh release create chatgpt-compatible \
-            askai-java8-chatgpt-gradle-home.zip \
+            askai-chatgpt-gradle-home.zip \
             --prerelease \
             --target "${TARGET_REF}" \
             --title "ChatGPT-compatible offline Gradle cache" \

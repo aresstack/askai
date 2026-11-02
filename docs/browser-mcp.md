@@ -27,7 +27,7 @@ The default browser is **Camoufox** (`--browser-channel=camoufox`), taken over f
 
 - **One-time download** of Argos' Camoufox distribution `camoufox-156.0.1-beta.36-argos.2`: the
   daijro/camoufox release with the two WebDriver BiDi fixes of daijro/camoufox#952 already applied
-  (not in any Camoufox release yet) plus uBlock Origin. Installed to `%APPDATA%/.askai-java8/browser`.
+  (not in any Camoufox release yet) plus uBlock Origin. Installed to `%APPDATA%/.askai/browser`.
 - **Verification**: archive SHA-256 pinned per platform (Windows x86_64, Linux x86_64), download into a
   `.partial-*` folder, unpack, check manifest and both fixed `omni.ja` entries, then one atomic rename.
   Every start re-checks the marker, the executable and both fixes. Concurrent installs serialize over
@@ -35,7 +35,7 @@ The default browser is **Camoufox** (`--browser-channel=camoufox`), taken over f
 - **Start**: `firefox().launchPersistentContext` with channel `moz-firefox`, the verified executable,
   the fingerprint environment (`CAMOU_CONFIG_1..n`, `CAMOU_PREFS_1..n`) and prefs of the built-in
   profile, and no Playwright emulation (viewport, color scheme ...), exactly as Argos starts it. Profile:
-  `%APPDATA%/.askai-java8/browser-profiles/camoufox`; a concurrent research session gets a temporary
+  `%APPDATA%/.askai/browser-profiles/camoufox`; a concurrent research session gets a temporary
   profile that is deleted on close.
 - **Progress**: while installing, the sidecar prints `camoufox install: ...` lines every 5 s; the host
   restarts its readiness timeout on each one. When a research session starts, the host runs

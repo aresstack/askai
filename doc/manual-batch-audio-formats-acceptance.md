@@ -17,7 +17,7 @@ the Gradle cache:
 Then launch the fresh fat jar:
 
 ```bash
-java -jar askai-app/build/libs/askai-java8-*.jar
+java -jar askai-app/build/libs/askai-*.jar
 ```
 
 ## Checks
@@ -57,7 +57,7 @@ Add files in the **Batch** view and run *Start batch*:
 Confirm the merged descriptor lists the compressed readers:
 
 ```bash
-unzip -p askai-app/build/libs/askai-java8-*.jar \
+unzip -p askai-app/build/libs/askai-*.jar \
   META-INF/services/javax.sound.sampled.spi.AudioFileReader
 ```
 

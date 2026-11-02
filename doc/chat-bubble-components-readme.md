@@ -154,7 +154,7 @@ SwingUtilities.invokeLater(new Runnable() {
 In IntelliJ die `main`-Methode dieser Klasse starten:
 
 ```text
-com.aresstack.askai.java8.ui.bubble.BubbleComponentsShowcase
+com.aresstack.askai.ui.bubble.BubbleComponentsShowcase
 ```
 
 Die Vorschau zeigt:
@@ -177,13 +177,13 @@ Die Komponenten sind absichtlich noch unabhängig von Markdown und ACP. Sinnvoll
 ## Dateien für die Integration
 
 ```text
-askai-app/src/main/java/com/aresstack/askai/java8/ui/bubble/BubbleSide.java
-askai-app/src/main/java/com/aresstack/askai/java8/ui/bubble/BubblePalette.java
-askai-app/src/main/java/com/aresstack/askai/java8/ui/bubble/SpeechBubblePanel.java
-askai-app/src/main/java/com/aresstack/askai/java8/ui/bubble/BubbleMessageRow.java
-askai-app/src/main/java/com/aresstack/askai/java8/ui/bubble/AgentActivityBubblePanel.java
-askai-app/src/main/java/com/aresstack/askai/java8/ui/bubble/BubbleTranscriptPanel.java
-askai-app/src/test/java/com/aresstack/askai/java8/ui/bubble/BubbleComponentsTest.java
-askai-app/src/test/java/com/aresstack/askai/java8/ui/bubble/BubbleComponentsShowcase.java
+askai-app/src/main/java/com/aresstack/askai/ui/bubble/BubbleSide.java
+askai-app/src/main/java/com/aresstack/askai/ui/bubble/BubblePalette.java
+askai-app/src/main/java/com/aresstack/askai/ui/bubble/SpeechBubblePanel.java
+askai-app/src/main/java/com/aresstack/askai/ui/bubble/BubbleMessageRow.java
+askai-app/src/main/java/com/aresstack/askai/ui/bubble/AgentActivityBubblePanel.java
+askai-app/src/main/java/com/aresstack/askai/ui/bubble/BubbleTranscriptPanel.java
+askai-app/src/test/java/com/aresstack/askai/ui/bubble/BubbleComponentsTest.java
+askai-app/src/test/java/com/aresstack/askai/ui/bubble/BubbleComponentsShowcase.java
 doc/chat-bubble-components-readme.md
 ```

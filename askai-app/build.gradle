@@ -1,7 +1,7 @@
 apply plugin: 'application'
 
 dependencies {
-    implementation project(':ollama4j-java8')
+    implementation project(':ollama4j')
     // askai #49: the local model runtime (win-directml) runs inside the AskAI JVM, no sidecar process.
     implementation project(':local-model-runtime-sidecar-java21')
     // Comic UI foundation (issue #36): neutral Java-8 Swing controls — hover menus, comic split
@@ -107,7 +107,7 @@ test {
     }
 }
 
-mainClassName = 'com.aresstack.askai.java8.AskAiJava8App'
+mainClassName = 'com.aresstack.askai.AskAiApp'
 
 jar {
     manifest {
@@ -126,7 +126,7 @@ def mergedServicesDir = layout.buildDirectory.dir('mergedServices')
 
 task mergeServiceFiles {
     description = 'Concatenate META-INF/services descriptors so GraalVM language providers survive the fat jar.'
-    dependsOn ':ollama4j-java8:jar'
+    dependsOn ':ollama4j:jar'
     dependsOn ':group-chat-api:jar'
     dependsOn ':group-chat-jgroups:jar'
     dependsOn ':audio-dsp:jar'
@@ -176,14 +176,14 @@ task mergeServiceFiles {
 
 task fatJar(type: Jar) {
     group = 'build'
-    description = 'Build a Java 8 runnable jar containing AskAI, ollama4j-java8, and runtime dependencies.'
-    archiveBaseName = 'askai-java8'
+    description = 'Build a runnable jar containing AskAI, ollama4j, and runtime dependencies.'
+    archiveBaseName = 'askai'
     archiveClassifier = ''
     archiveVersion = project.version.toString()
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     dependsOn classes
-    dependsOn ':ollama4j-java8:jar'
+    dependsOn ':ollama4j:jar'
     dependsOn ':group-chat-api:jar'
     dependsOn ':group-chat-jgroups:jar'
     dependsOn ':audio-dsp:jar'
