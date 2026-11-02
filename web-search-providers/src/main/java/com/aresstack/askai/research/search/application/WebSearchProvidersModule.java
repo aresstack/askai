@@ -114,7 +114,7 @@ public final class WebSearchProvidersModule
             return configurationService.loadOrCreateAll();
         }
         return new ProviderConfigurationBundle(loadBraveOrDisabled(),
-                loadBrightDataOrDisabled(), loadDataForSeoOrDisabled());
+                loadBrightDataOrDisabled(), loadDataForSeoOrDisabled(), loadSerpApiOrDisabled());
     }
 
     private com.aresstack.askai.research.search.brave.BraveSearchConfiguration loadBraveOrDisabled() {
@@ -143,6 +143,14 @@ public final class WebSearchProvidersModule
         }
     }
 
+    private com.aresstack.askai.research.search.serpapi.SerpApiSearchConfiguration loadSerpApiOrDisabled() {
+        try {
+            return configurationService.loadOrCreateSerpApi();
+        } catch (RuntimeException invalid) {
+            return new com.aresstack.askai.research.search.serpapi.SerpApiSearchConfiguration();
+        }
+    }
+
     private WebSearchProviderRegistry createRegistry(
             ProviderConfigurationBundle configurations) {
 
@@ -167,6 +175,14 @@ public final class WebSearchProvidersModule
             addProvider(providers, new ProviderSupplier() {
                 public WebSearchProvider get() {
                     return providerFactory.createDataForSeo(configurations.getDataForSeo());
+                }
+            });
+        }
+
+        if (configurations.getSerpApi().isEnabled()) {
+            addProvider(providers, new ProviderSupplier() {
+                public WebSearchProvider get() {
+                    return providerFactory.createSerpApi(configurations.getSerpApi());
                 }
             });
         }

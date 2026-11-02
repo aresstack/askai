@@ -1,6 +1,6 @@
 # Websuche über Serp4J
 
-Seit WP5 laufen die Websuche-Provider **Brave**, **Bright Data** und **DataForSEO** in AskAI über die
+Seit WP5 laufen die Websuche-Provider **Brave**, **Bright Data**, **DataForSEO** und **SerpApi** in AskAI über die
 Serp4J-Provider-Module (`com.aresstack:serp4j-provider-*`). AskAI bleibt der Host:
 
 | Thema | Wer | Wo |
@@ -11,7 +11,22 @@ Serp4J-Provider-Module (`com.aresstack:serp4j-provider-*`). AskAI bleibt der Hos
 | HTTP-Aufruf, Auth-Header, Mapping, Fehlerkategorien | Serp4J | Provider-Module |
 
 Zugangsdaten gehen ausschließlich als HTTP-Header raus (Brave `X-Subscription-Token`, Bright Data
-`Authorization: Bearer`, DataForSEO Basic). Serp4J hat keine Abhängigkeit zu AskAI.
+`Authorization: Bearer`, DataForSEO Basic). Einzige Ausnahme ist SerpApi: SerpApi akzeptiert den Key nur als
+URL-Parameter `api_key`; Serp4J maskiert ihn in jeder URL-, Log- und Fehlerausgabe (`api_key=***`). Serp4J hat keine
+Abhängigkeit zu AskAI.
+
+## SerpApi
+
+Konfiguration `~/agents/research/providers/serpapi.json` (Beispiel: `web-search-providers/examples/providers/serpapi.json`),
+Key verschlüsselt über `ProviderConfigurationService.saveSerpApi(configuration, char[] apiKey)`.
+
+- `searchEngine`: `GOOGLE` (Default) oder `BING`; pro Datei eine Engine, wie bei DataForSEO.
+- `country`/`language`/`location`/`googleDomain`/`noCache` gehen als Serp4J-Defaults (`SerpApiSearchOptions`) durch.
+  Bing braucht zur Sprache ein Land; Sprache ohne Land liefert in Serp4J eine Warnung bzw. `UNSUPPORTED`.
+- `resolveGoogleGotoUrls` (Default `true`, nur Google) und `urlResolveTimeoutMillis` (0 = Serp4J-Default) steuern die
+  Auflösung der Google-`/goto`-Links in Serp4J; AskAI wertet `serp4j:url_resolution`/`serp4j:original_url` wie bei
+  DataForSEO aus.
+- In der Research-Runtime ist `SERP_API` jetzt ein migrierter Provider (Auswahl „SerpApi“ in den Sucheinstellungen).
 
 ## Was sich gegenüber der alten Implementierung ändert
 
