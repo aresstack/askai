@@ -80,6 +80,18 @@ public class Serp4jWebSearchProviderTest {
     }
 
     @Test
+    public void nonOrganicResultsNeverBecomeHits() throws Exception {
+        SearchResultItem ad = SearchResultItem.builder(ElementId.of("ad1"), ResultType.PAID, "https://ads.example.org/")
+                .title("Ad").build();
+        SearchResponse onlyAds = SearchResponse.of(SearchData.builder().result(ad).build(),
+                SearchMetadata.forProvider(DFS, SearchEngineId.GOOGLE, SearchVertical.WEB, QueryInfo.of("java")).build());
+        Serp4jWebSearchProvider adapter = new Serp4jWebSearchProvider(SearchProviderId.DATA_FOR_SEO,
+                SearchEngine.GOOGLE, new FakeProvider(CompletableFuture.completedFuture(onlyAds)));
+
+        assertTrue(adapter.search(WebSearchRequest.builder("java").build()).get().getHits().isEmpty());
+    }
+
+    @Test
     public void translatesSerp4jCategories() {
         assertStatus(SearchErrorCategory.AUTHENTICATION, 401);
         assertStatus(SearchErrorCategory.RATE_LIMITED, 429);

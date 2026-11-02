@@ -157,10 +157,9 @@ public final class Serp4jWebSearchProvider implements WebSearchProvider {
             responseEngine = toAskAiEngine(metadata.get().getEngine().get(), configuredEngine);
         }
 
+        // Organic results only: ads and other SERP elements must never become research sources (the runtime
+        // treats every hit as an organic candidate). No organic results means an empty hit list.
         List<SearchResultItem> items = response.getData().getOrganicResults();
-        if (items.isEmpty()) {
-            items = response.getData().getResults();
-        }
         List<WebSearchHit> hits = new ArrayList<WebSearchHit>(items.size());
         int index = request.getOffset();
         for (SearchResultItem item : items) {

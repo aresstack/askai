@@ -67,6 +67,13 @@ jobs:
           # `build` so it works on any ref (e.g. main) regardless of which optional modules/tasks exist there.
           ./gradlew --no-daemon build
 
+      - name: Bundle the Serp4J artifacts from mavenLocal
+        run: |
+          # Serp4J is resolved from mavenLocal (not on Central yet); ship that slice of ~/.m2 inside the ZIP so the
+          # offline build stays self-contained. Used via -Dmaven.repo.local (see the usage note below).
+          mkdir -p .chatgpt/m2/repository/com/aresstack
+          cp -r "$HOME"/.m2/repository/com/aresstack/serp4j-* .chatgpt/m2/repository/com/aresstack/
+
       - name: Trim volatile cache files
         run: |
           # Drop locks, daemon state and journals that must not travel into the offline sandbox.
@@ -83,14 +90,16 @@ jobs:
 
           Usage (from the repo root, after unzipping this at the repo root):
 
-              GRADLE_USER_HOME=.chatgpt/gradle-home ./gradlew --offline build
+              GRADLE_USER_HOME=.chatgpt/gradle-home ./gradlew --offline -Dmaven.repo.local=\$PWD/.chatgpt/m2/repository build
+
+          The Serp4J artifacts (not on Maven Central yet) are bundled in .chatgpt/m2 and read through maven.repo.local.
 
           Requires a Java 8 JDK on PATH. Built from commit ${GITHUB_SHA} on branch ${GITHUB_REF_NAME}.
           NOTE
 
       - name: Zip the primed Gradle home
         run: |
-          zip -q -r askai-java8-chatgpt-gradle-home.zip .chatgpt/gradle-home .chatgpt/README-chatgpt.md
+          zip -q -r askai-java8-chatgpt-gradle-home.zip .chatgpt/gradle-home .chatgpt/m2 .chatgpt/README-chatgpt.md
           ls -lh askai-java8-chatgpt-gradle-home.zip
 
       - name: Overwrite rolling chatgpt-compatible pre-release
@@ -104,4 +113,4 @@ jobs:
             --prerelease \
             --target "${TARGET_REF}" \
             --title "ChatGPT-compatible offline Gradle cache" \
-            --notes "This ZIP contains a prepared \`.chatgpt/gradle-home\` cache (Gradle 7.6.4 + all dependencies) for offline Gradle execution in ChatGPT-like environments. Unzip at the repo root, then run \`GRADLE_USER_HOME=.chatgpt/gradle-home ./gradlew --offline build\` with a Java 8 JDK. Rolling artifact, overwritten on every push (cached from \`${TARGET_REF}\`)."
+            --notes "This ZIP contains a prepared \`.chatgpt/gradle-home\` cache (Gradle 7.6.4 + all dependencies) for offline Gradle execution in ChatGPT-like environments. Unzip at the repo root, then run \`GRADLE_USER_HOME=.chatgpt/gradle-home ./gradlew --offline -Dmaven.repo.local=\$PWD/.chatgpt/m2/repository build\` with a Java 8 JDK. Rolling artifact, overwritten on every push (cached from \`${TARGET_REF}\`)."
