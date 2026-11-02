@@ -41,6 +41,7 @@ public final class SearchProviderCardsPanel extends JPanel {
     private final ResearchProviderServices providers;
     private final DataForSeoSettingsDraft dataForSeoDraft;
     private DataForSeoSettingsPanel dataForSeoPanel;
+    private SerpApiSettingsPanel serpApiPanel;
 
     public SearchProviderCardsPanel(WorkspaceStateStore store) {
         super(new BorderLayout(6, 6));
@@ -69,7 +70,7 @@ public final class SearchProviderCardsPanel extends JPanel {
         cardHost.add(placeholderCard("Brave Search API"), PROVIDER_LABELS[1]);
         cardHost.add(placeholderCard("Bright Data"), PROVIDER_LABELS[2]);
         cardHost.add(dataForSeoCard(), PROVIDER_LABELS[3]);
-        cardHost.add(placeholderCard("SerpApi"), PROVIDER_LABELS[4]);
+        cardHost.add(serpApiCard(), PROVIDER_LABELS[4]);
         add(cardHost, BorderLayout.CENTER);
 
         int selected = indexOfProvider(ResearchRuntimeSettings.loadSearchStrategy(store));
@@ -89,6 +90,12 @@ public final class SearchProviderCardsPanel extends JPanel {
         persistSelection();
         if (dataForSeoPanel != null) {
             dataForSeoPanel.save();
+        }
+        if (serpApiPanel != null && !serpApiPanel.save()) {
+            // The settings dialog is closing; the card's own status line is no longer visible.
+            javax.swing.JOptionPane.showMessageDialog(null,
+                    "SerpApi settings were not saved:\n" + serpApiPanel.getLastError(),
+                    "SerpApi", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
     }
 
@@ -129,6 +136,14 @@ public final class SearchProviderCardsPanel extends JPanel {
         dataForSeoPanel = new DataForSeoSettingsPanel(
                 dataForSeoDraft, providers.dataForSeoPlayground(), providers.secrets());
         return dataForSeoPanel;
+    }
+
+    private JComponent serpApiCard() {
+        if (providers == null) {
+            return placeholderUnavailable();
+        }
+        serpApiPanel = new SerpApiSettingsPanel(providers.configurationService());
+        return serpApiPanel;
     }
 
     private JComponent placeholderCard(String name) {
