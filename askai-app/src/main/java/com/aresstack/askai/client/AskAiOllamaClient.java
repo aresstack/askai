@@ -116,6 +116,14 @@ public final class AskAiOllamaClient {
         }
     }
 
+    public void loadModel(String modelName, String keepAlive) throws OllamaRequestException {
+        try {
+            ollama.loadModel(modelName, keepAlive);
+        } catch (OllamaException ex) {
+            throw wrap("load " + modelName, ex);
+        }
+    }
+
     public void unloadModel(String modelName) throws OllamaRequestException {
         try {
             ollama.unloadModel(modelName);
