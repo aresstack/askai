@@ -19,6 +19,8 @@ Zugangsdaten gehen ausschließlich als HTTP-Header raus (Brave `X-Subscription-T
   DataForSEO werden nicht mehr pauschal als `GOOGLE` etikettiert; eine DataForSEO-Bing-Suche heißt jetzt `BING`.
   Bright Data unterstützt in Serp4J vorerst nur Google; eine andere konfigurierte Engine endet mit einer
   Konfigurationsfehlermeldung statt mit falsch etikettierten Google-Treffern.
+- **Nur organische Treffer:** Anzeigen und andere SERP-Elemente werden nie zu Rechercheergebnissen; ohne organische
+  Treffer bleibt die Liste leer.
 - **Rohantwort:** AskAI fordert `RawPayloadPolicy.ALWAYS` an. Die Rohantwort steht in `WebSearchResult.getRawResponse()`
   und jetzt auch in `SearchProviderResult.getRawResponse()` der Research-Runtime (Diagnosezeile nennt ihre Länge).
   Persistenz im Research-Domain-Modell ist noch offen.
@@ -47,7 +49,7 @@ scripts/install-serp4j.sh Develop ../Serp4J   # oder: vorhandenen Checkout verwe
 Serp4Js Gradle braucht JDK 17+ (`SERP4J_JAVA_HOME`, sonst `JAVA_HOME_21_X64`/`JAVA_HOME`). Eine andere Version:
 `./gradlew build -Pserp4jVersion=…`. Die Workflows `release.yml` und `chatgpt-cache.yml` führen das Skript vor dem
 Build aus. Ein Composite Build (`includeBuild`) geht derzeit nicht, weil AskAI Gradle 7.6.4 nutzt und Serp4J
-Gradle 8 mit Kotlin-DSL-Build-Logik. Hinweis: Das Offline-ZIP aus `chatgpt-cache.yml` enthält `~/.m2` nicht; offline
-muss `scripts/install-serp4j.sh` vorher einmal mit Netz gelaufen sein.
+Gradle 8 mit Kotlin-DSL-Build-Logik. Das Offline-ZIP aus `chatgpt-cache.yml` bringt die Serp4J-Artefakte unter
+`.chatgpt/m2` mit; offline: `./gradlew --offline -Dmaven.repo.local=$PWD/.chatgpt/m2/repository build`.
 
 Sobald Serp4J auf Central veröffentlicht ist, entfallen `mavenLocal` und das Skript.
