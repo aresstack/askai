@@ -32,6 +32,7 @@ class BrowserGotoResolverTest {
 
         for (GoogleSerpPage.Organic hit : resolved.getOrganicResults()) {
             assertThat(hit.getUrl()).startsWith("https://example.org/");
+            assertThat(hit.getOriginalUrl()).startsWith("https://www.google.com/goto?url=");
             for (GoogleSerpPage.Link link : hit.getSiteLinks()) {
                 assertThat(link.getUrl()).startsWith("https://example.org/");
             }
@@ -54,6 +55,7 @@ class BrowserGotoResolverTest {
         for (int i = 0; i < parsed.getOrganicResults().size(); i++) {
             assertThat(resolved.getOrganicResults().get(i).getUrl())
                     .isEqualTo(parsed.getOrganicResults().get(i).getUrl());
+            assertThat(resolved.getOrganicResults().get(i).getOriginalUrl()).isNull();
         }
     }
 
@@ -100,6 +102,25 @@ class BrowserGotoResolverTest {
         assertThat(BrowserGotoResolver.targetOf(gotoUrl, null)).isNull();
         assertThat(BrowserGotoResolver.isGoogleGoto("https://www.google.de/goto?url=X")).isTrue();
         assertThat(BrowserGotoResolver.isGoogleGoto("https://example.org/goto?url=X")).isFalse();
+    }
+
+    @Test
+    void googleGotoLinksResolvesOneLinkInTheBrowsersSearchSessionLater() {
+        // askai #41: a hit left unresolved during the search is resolved again before its visit.
+        APIRequestContext request = request(url -> response(302, "https://pf4j.org/"));
+        com.microsoft.playwright.BrowserContext context = (com.microsoft.playwright.BrowserContext)
+                Proxy.newProxyInstance(getClass().getClassLoader(),
+                        new Class<?>[]{com.microsoft.playwright.BrowserContext.class},
+                        (p, m, a) -> m.getName().equals("request") ? request : null);
+        com.microsoft.playwright.Browser browser = (com.microsoft.playwright.Browser) Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[]{com.microsoft.playwright.Browser.class},
+                (p, m, a) -> m.getName().equals("contexts") ? Collections.singletonList(context) : null);
+
+        assertThat(GoogleGotoLinks.resolve(browser, "https://www.google.com/goto?url=X",
+                java.time.Duration.ofSeconds(1))).isEqualTo("https://pf4j.org/");
+        assertThat(GoogleGotoLinks.resolve(browser, "https://pf4j.org/", java.time.Duration.ofSeconds(1))).isNull();
+        assertThat(GoogleGotoLinks.resolve(null, "https://www.google.com/goto?url=X",
+                java.time.Duration.ofSeconds(1))).isNull();
     }
 
     private interface Answer {

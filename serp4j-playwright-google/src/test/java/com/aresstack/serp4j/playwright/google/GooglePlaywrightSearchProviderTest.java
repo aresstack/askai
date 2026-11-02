@@ -45,6 +45,22 @@ class GooglePlaywrightSearchProviderTest {
     }
 
     @Test
+    void aGotoResolvedInTheBrowserKeepsTheGotoLinkAsOriginalUrl() {
+        FakeBrowser fake = new FakeBrowser("https://www.google.com/search?q=serp4j&hl=de",
+                GoogleSerpHtmlParserTest.html("browser-web-de.html"), 200);
+        fake.gotoTarget = "https://example.org/target";
+
+        SearchResponse response = provider.search(SearchRequest.builder("serp4j").build(), fake.browser());
+
+        com.aresstack.serp4j.core.model.data.SearchResultItem first = response.getData().getResults().get(0);
+        assertThat(first.getUrl()).isEqualTo("https://example.org/target");
+        assertThat(first.getExtensions().get(com.aresstack.serp4j.http.resolve.ResultUrlEnricher.ORIGINAL_URL))
+                .hasValueSatisfying(url -> assertThat(url).startsWith("https://www.google.com/goto?url="));
+        assertThat(first.getExtensions().get(com.aresstack.serp4j.http.resolve.ResultUrlEnricher.URL_RESOLUTION))
+                .contains(com.aresstack.serp4j.http.resolve.ResultUrlEnricher.RESOLVED);
+    }
+
+    @Test
     void waitsForTheResultPageAfterGooglesJavaScriptStartPage() {
         // Live with Camoufox (02.11.): /search first answers with a JavaScript start page whose noscript block
         // points to /httpservice/retry/enablejs; #search appears only after that script ran.
@@ -122,6 +138,8 @@ class GooglePlaywrightSearchProviderTest {
         boolean pageClosed;
         boolean browserClosed;
         RuntimeException navigationFailure;
+        /** Where Google's /goto redirects inside the browser session; {@code null}: no redirect. */
+        String gotoTarget;
 
         FakeBrowser(String finalUrl, String html, int status) {
             this.finalUrl = finalUrl;
@@ -132,7 +150,16 @@ class GooglePlaywrightSearchProviderTest {
         Browser browser() {
             // /goto links answer without redirect here, so the URLs stay as parsed.
             com.microsoft.playwright.APIResponse noRedirect = proxy(com.microsoft.playwright.APIResponse.class,
-                    (name, args) -> name.equals("status") ? (Object) 200 : null);
+                    (name, args) -> {
+                        switch (name) {
+                            case "status":
+                                return gotoTarget == null ? 200 : 302;
+                            case "headers":
+                                return Collections.singletonMap("location", gotoTarget);
+                            default:
+                                return null;
+                        }
+                    });
             com.microsoft.playwright.APIRequestContext request = proxy(
                     com.microsoft.playwright.APIRequestContext.class, (name, args) -> {
                         if (name.equals("get")) {

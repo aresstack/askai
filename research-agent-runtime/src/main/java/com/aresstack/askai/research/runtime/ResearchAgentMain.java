@@ -531,6 +531,24 @@ public final class ResearchAgentMain {
         return shared.searchProviderRegistry();
     }
 
+    /**
+     * askai #41: resolves a Google {@code /goto} hit in the running search browser (the session Google redirects).
+     * Never starts a browser for it; anything else, or a failure, yields {@code null} and the visit opens the link.
+     */
+    private com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.RedirectResolver
+            searchBrowserRedirectResolver() {
+        return new com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.RedirectResolver() {
+            public String resolve(final String url) {
+                if (!com.aresstack.serp4j.playwright.google.GoogleGotoLinks.isGoogleGoto(url)) {
+                    return null;
+                }
+                return ensureSearchBrowser().withRunningBrowser(
+                        browser -> com.aresstack.serp4j.playwright.google.GoogleGotoLinks.resolve(browser, url,
+                                java.time.Duration.ofSeconds(3)), 5_000L);
+            }
+        };
+    }
+
     /** AskAI's headless search browser (askai #31): the host's one shared instance, started on the first search. */
     private com.aresstack.askai.browser.sidecar.SearchBrowser ensureSearchBrowser() {
         return shared.searchBrowser();
@@ -968,6 +986,7 @@ public final class ResearchAgentMain {
             acquisition.setCompletionPolicy(
                     new com.aresstack.askai.research.runtime.acquire.FixedAcceptedSourceCountPolicy(
                             searchBudget.getMaxAcceptedSources()));
+            acquisition.setRedirectResolver(searchBrowserRedirectResolver()); // askai #41
             // SC1: the manual search runs behind the SAME scope-control gate as the autonomous
             // loop — the internal service endpoint, never an agent tool.
             acquisition.setScopeControl(
@@ -1650,6 +1669,8 @@ public final class ResearchAgentMain {
             } else if (inferencePort != null) {
                 loop.setStructuredInferencePort(inferencePort);
             }
+            // askai #41: a still unresolved Google /goto hit is resolved again in the search browser before its visit.
+            loop.setRedirectResolver(searchBrowserRedirectResolver());
             // SC1: the autonomous loop gets the same scope-control lane (internal service
             // endpoint) — a canonical OUT is filtered identically on both acquisition paths.
             if (environment.hasService()) {

@@ -90,6 +90,12 @@ final class BrowserGotoResolver {
         }
     }
 
+    /** One link: the target, or {@code null} when Google did not redirect or the request failed. */
+    static String resolveOne(APIRequestContext request, String url, long timeoutMillis) {
+        String target = fetchLocation(request, url, timeoutMillis);
+        return FAILED.equals(target) ? null : target;
+    }
+
     /** @return the target, {@code null} when Google did not redirect, {@link #FAILED} when the request failed */
     private static String fetchLocation(APIRequestContext request, String url, long timeoutMillis) {
         APIResponse response = null;

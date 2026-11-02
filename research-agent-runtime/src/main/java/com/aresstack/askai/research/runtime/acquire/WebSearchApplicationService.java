@@ -164,6 +164,21 @@ public final class WebSearchApplicationService {
     // with the reranker/relevance model). One immutable snapshot per run — a running search
     // never goes stale; the NEXT run sees the new fence.
     private SearchScopeControlPort scopeControl;
+
+    /**
+     * askai #41: resolves a search hit's still unresolved redirect (Google {@code /goto}) right before the visit,
+     * e.g. in the search browser whose session Google redirects. Returns the target or {@code null}.
+     */
+    public interface RedirectResolver {
+        String resolve(String url);
+    }
+
+    private RedirectResolver redirectResolver;
+
+    /** Wire the visit-time redirect resolution (askai #41); {@code null} keeps plain browser navigation. */
+    public void setRedirectResolver(RedirectResolver resolver) {
+        this.redirectResolver = resolver;
+    }
     private String scopeHandle;
     private boolean scopeActive;
     /** SC2a capability split: only the OUT filter is fail-closed; IN affinity degrades. */
@@ -494,6 +509,13 @@ public final class WebSearchApplicationService {
             }
             FrontierEntry entry = frontier.remove(0);
             String url = entry.getUrl();
+            String redirectTarget = resolveRedirectBeforeVisit(entry);
+            if (redirectTarget != null) {
+                // askai #41: the unresolved search hit now has a verified target; the redirect is only an alias.
+                progress.noteVisitedAlias(WebAcquisitionText.canonicalish(url));
+                listener.status("redirect resolved before the visit: " + redirectTarget);
+                url = redirectTarget;
+            }
             // From here on this page has its own identity: a Skip pressed while it is being worked on
             // belongs to THIS visit, and any of its work that finishes afterwards can tell that it does.
             currentVisitGeneration = pageSkip.beginVisit();
@@ -681,9 +703,10 @@ public final class WebSearchApplicationService {
                         new java.util.ArrayList<SearchScopeControlPort.Item>();
                 for (com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate
                         ranked : result.selected) {
-                    if (!ranked.candidate.resolvedTargetUrl.isEmpty()) {
+                    // askai #41: an UNRESOLVED hit (Google /goto) stays a candidate under its provider URL.
+                    if (!ranked.candidate.navigationUrl().isEmpty()) {
                         scopeItems.add(new SearchScopeControlPort.Item(
-                                ranked.candidate.resolvedTargetUrl,
+                                ranked.candidate.navigationUrl(),
                                 (ranked.candidate.title + " " + ranked.candidate.snippet)
                                         .trim()));
                     }
@@ -696,9 +719,14 @@ public final class WebSearchApplicationService {
                 int scopedOut = 0;
                 for (com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate ranked
                         : result.selected) {
-                    if (!ranked.candidate.resolvedTargetUrl.isEmpty()) {
-                        SearchScopeControlPort.Decision decision =
-                                serpVerdicts.get(ranked.candidate.resolvedTargetUrl);
+                    String navigationUrl = ranked.candidate.navigationUrl();
+                    if (!ranked.candidate.hasVerifiedTarget() && !navigationUrl.isEmpty()) {
+                        // askai #41: the redirect's host (google.com) is transit, never a source: when the browser
+                        // does not get past the redirect, the visit loop skips it as a search-provider page.
+                        searchProviderSites.add(familyOf(WebAcquisitionText.hostOf(navigationUrl)));
+                    }
+                    if (!navigationUrl.isEmpty()) {
+                        SearchScopeControlPort.Decision decision = serpVerdicts.get(navigationUrl);
                         if (scopeSkips(decision)) {
                             scopedOut++;
                             listener.status("search-scope skip candidate=\""
@@ -712,8 +740,10 @@ public final class WebSearchApplicationService {
                         // The selected hit keeps its identity: the entry names the candidate it came from
                         // and carries what the SERP promised (the Layer 2 semantic readiness net) instead
                         // of parking that promise in a side map keyed by URL.
-                        String candidateId = candidateIdFor(ranked.candidate.resolvedTargetUrl);
-                        frontier.add(FrontierEntry.fromSearchResult(ranked.candidate.resolvedTargetUrl,
+                        String candidateId = candidateIdFor(navigationUrl);
+                        // An UNRESOLVED hit is opened through its provider URL; the browser follows the redirect
+                        // and the page loop judges the FINAL URL it lands on (never the redirect itself).
+                        frontier.add(FrontierEntry.fromSearchResult(navigationUrl,
                                 candidateId,
                                 (ranked.candidate.title + " " + ranked.candidate.snippet).trim()));
                         // Park the candidate with its reranker score BEFORE it is visited, so every hit is
@@ -1076,7 +1106,33 @@ public final class WebSearchApplicationService {
         return minted;
     }
 
+    /**
+     * The target of a search hit whose redirect was still unresolved (askai #41), or {@code null}: no resolver, not a
+     * search hit, nothing to resolve, or the resolution failed. On {@code null} the browser simply opens the
+     * redirect; the page it lands on decides, a search-engine page is never a source.
+     */
+    private String resolveRedirectBeforeVisit(FrontierEntry entry) {
+        if (redirectResolver == null || entry.getOrigin() != FrontierEntry.Origin.SEARCH_RESULT) {
+            return null;
+        }
+        try {
+            String target = redirectResolver.resolve(entry.getUrl());
+            return target == null || target.trim().isEmpty() || target.trim().equals(entry.getUrl())
+                    ? null : target.trim();
+        } catch (RuntimeException failed) {
+            listener.status("redirect resolution failed, opening the redirect: " + entry.getUrl());
+            return null;
+        }
+    }
+
     private void parkCandidate(com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate ranked) {
+        if (!ranked.candidate.hasVerifiedTarget()) {
+            // askai #41: parking stores the hit under its target address; an unresolved redirect has none yet.
+            // It is still in the frontier, and only the page the browser lands on can be accepted as a source.
+            listener.status("not parked (redirect not resolved yet, opened via browser): "
+                    + ranked.candidate.title);
+            return;
+        }
         try {
             sourceAcceptancePort.park(ranked.candidate.resolvedTargetUrl, ranked.candidate.title,
                     ranked.candidate.snippet, ranked.score);

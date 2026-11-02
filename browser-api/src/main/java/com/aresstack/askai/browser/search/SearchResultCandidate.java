@@ -32,6 +32,13 @@ public final class SearchResultCandidate {
      * when the source did not name an engine (API providers, synthetic candidates).
      */
     public final String engineHost;
+    /**
+     * Whether {@link #resolvedTargetUrl} is a verified target (askai #41). For {@link UrlResolutionStatus#UNRESOLVED}
+     * the target is empty and the hit is navigated through {@link #rawSearchHref}; see {@link #navigationUrl()}.
+     */
+    public final UrlResolutionStatus urlResolution;
+    /** The provider's URL before resolution (e.g. a Google {@code /goto} link); empty when there was none. */
+    public final String originalUrl;
 
     public SearchResultCandidate(String candidateId, String snapshotId, String resolvedTargetUrl,
                                  String rawSearchHref, String title, String snippet,
@@ -50,7 +57,21 @@ public final class SearchResultCandidate {
                                  String resultContainerId, String resultBlockContainerId,
                                  double structuralConfidence, double primaryLinkConfidence,
                                  List<SearchResultSiteLink> siteLinks, String engineHost) {
+        this(candidateId, snapshotId, resolvedTargetUrl, rawSearchHref, title, snippet, displayedDomain,
+                originalRank, resultContainerId, resultBlockContainerId, structuralConfidence,
+                primaryLinkConfidence, siteLinks, engineHost, UrlResolutionStatus.DIRECT, "");
+    }
+
+    public SearchResultCandidate(String candidateId, String snapshotId, String resolvedTargetUrl,
+                                 String rawSearchHref, String title, String snippet,
+                                 String displayedDomain, int originalRank,
+                                 String resultContainerId, String resultBlockContainerId,
+                                 double structuralConfidence, double primaryLinkConfidence,
+                                 List<SearchResultSiteLink> siteLinks, String engineHost,
+                                 UrlResolutionStatus urlResolution, String originalUrl) {
         this.engineHost = engineHost == null ? "" : engineHost;
+        this.urlResolution = urlResolution == null ? UrlResolutionStatus.DIRECT : urlResolution;
+        this.originalUrl = originalUrl == null ? "" : originalUrl;
         this.candidateId = candidateId;
         this.snapshotId = snapshotId;
         this.resolvedTargetUrl = resolvedTargetUrl == null ? "" : resolvedTargetUrl;
@@ -71,6 +92,20 @@ public final class SearchResultCandidate {
         return new SearchResultCandidate(candidateId, snapshotId, resolvedTargetUrl, rawSearchHref,
                 title, snippet, displayedDomain, originalRank, resultContainerId,
                 resultBlockContainerId, structuralConfidence, primaryLinkConfidence, siteLinks,
-                engine);
+                engine, urlResolution, originalUrl);
+    }
+
+    /** {@code true} when {@link #resolvedTargetUrl} is a verified target address (DIRECT or RESOLVED). */
+    public boolean hasVerifiedTarget() {
+        return urlResolution.isVerifiedTarget() && !resolvedTargetUrl.isEmpty();
+    }
+
+    /**
+     * What the browser opens for this hit: the verified target, or for an UNRESOLVED hit its provider URL (the
+     * browser follows the redirect; only the page it lands on can become a source). Empty when there is none.
+     */
+    public String navigationUrl() {
+        return hasVerifiedTarget() ? resolvedTargetUrl
+                : urlResolution == UrlResolutionStatus.UNRESOLVED ? rawSearchHref : resolvedTargetUrl;
     }
 }

@@ -68,8 +68,10 @@ public final class GoogleSerpPage {
             for (Link link : o.siteLinks) {
                 links.add(new Link(link.text, resolvedOr(resolver, link.url), link.description));
             }
-            organics.add(new Organic(o.rank, o.title, resolvedOr(resolver, o.url), o.displayUrl, o.siteName,
-                    o.snippet, o.dateText, o.video, links));
+            String target = resolver.apply(o.url);
+            Organic copy = target == null ? o : new Organic(o.rank, o.title, target, o.displayUrl, o.siteName,
+                    o.snippet, o.dateText, o.video, o.siteLinks, o.originalUrl == null ? o.url : o.originalUrl);
+            organics.add(copy.withSiteLinks(links));
         }
         return new GoogleSerpPage(organics, relatedQueries, structureRecognized, nextPage, unrecognizedBlocks,
                 pageObstacle);
@@ -129,8 +131,17 @@ public final class GoogleSerpPage {
         private final boolean video;
         private final List<Link> siteLinks;
 
+        /** The Google {@code /goto} URL this hit had before it was resolved, or {@code null}. */
+        private final String originalUrl;
+
         Organic(int rank, String title, String url, String displayUrl, String siteName, String snippet,
                 String dateText, boolean video, List<Link> siteLinks) {
+            this(rank, title, url, displayUrl, siteName, snippet, dateText, video, siteLinks, null);
+        }
+
+        Organic(int rank, String title, String url, String displayUrl, String siteName, String snippet,
+                String dateText, boolean video, List<Link> siteLinks, String originalUrl) {
+            this.originalUrl = originalUrl;
             this.rank = rank;
             this.title = Objects.requireNonNull(title, "title");
             this.url = Objects.requireNonNull(url, "url");
@@ -180,6 +191,15 @@ public final class GoogleSerpPage {
 
         public List<Link> getSiteLinks() {
             return siteLinks;
+        }
+
+        /** The provider URL before {@code /goto} resolution; {@code null} when the URL was never a redirect. */
+        public String getOriginalUrl() {
+            return originalUrl;
+        }
+
+        Organic withSiteLinks(List<Link> links) {
+            return new Organic(rank, title, url, displayUrl, siteName, snippet, dateText, video, links, originalUrl);
         }
 
         @Override
