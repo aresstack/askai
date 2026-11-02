@@ -86,15 +86,6 @@ public final class SearchProviderFactory {
         return serp4j.createSerpApi(configuration);
     }
 
-    /** Google browser search via Serp4J ({@code serp4j-engine-google-browser}); no AskAI-side HTML parsing. */
-    public WebSearchProvider createGoogleBrowser(
-            com.aresstack.askai.research.search.googlebrowser.GoogleBrowserSearchConfiguration configuration) {
-
-        new com.aresstack.askai.research.search.googlebrowser.GoogleBrowserSearchConfigurationValidator()
-                .validate(configuration);
-        return serp4j.createGoogleBrowser(configuration);
-    }
-
     /**
      * Pre-Serp4J implementation, kept only until the Serp4J path has real-response coverage.
      *

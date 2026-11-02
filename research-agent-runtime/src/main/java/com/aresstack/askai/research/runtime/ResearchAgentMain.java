@@ -555,7 +555,6 @@ public final class ResearchAgentMain {
             case BRAVE_SEARCH_API: return "Brave Search";
             case BRIGHT_DATA: return "Bright Data";
             case SERP_API: return "SerpApi";
-            case GOOGLE_BROWSER: return "Google (Suchbrowser)";
             default: return providerId.name();
         }
     }

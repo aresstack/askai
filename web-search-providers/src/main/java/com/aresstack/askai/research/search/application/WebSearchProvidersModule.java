@@ -114,8 +114,7 @@ public final class WebSearchProvidersModule
             return configurationService.loadOrCreateAll();
         }
         return new ProviderConfigurationBundle(loadBraveOrDisabled(),
-                loadBrightDataOrDisabled(), loadDataForSeoOrDisabled(), loadSerpApiOrDisabled(),
-                loadGoogleBrowserOrDisabled());
+                loadBrightDataOrDisabled(), loadDataForSeoOrDisabled(), loadSerpApiOrDisabled());
     }
 
     private com.aresstack.askai.research.search.brave.BraveSearchConfiguration loadBraveOrDisabled() {
@@ -152,15 +151,6 @@ public final class WebSearchProvidersModule
         }
     }
 
-    private com.aresstack.askai.research.search.googlebrowser.GoogleBrowserSearchConfiguration
-            loadGoogleBrowserOrDisabled() {
-        try {
-            return configurationService.loadOrCreateGoogleBrowser();
-        } catch (RuntimeException invalid) {
-            return new com.aresstack.askai.research.search.googlebrowser.GoogleBrowserSearchConfiguration();
-        }
-    }
-
     private WebSearchProviderRegistry createRegistry(
             ProviderConfigurationBundle configurations) {
 
@@ -193,14 +183,6 @@ public final class WebSearchProvidersModule
             addProvider(providers, new ProviderSupplier() {
                 public WebSearchProvider get() {
                     return providerFactory.createSerpApi(configurations.getSerpApi());
-                }
-            });
-        }
-
-        if (configurations.getGoogleBrowser().isEnabled()) {
-            addProvider(providers, new ProviderSupplier() {
-                public WebSearchProvider get() {
-                    return providerFactory.createGoogleBrowser(configurations.getGoogleBrowser());
                 }
             });
         }
