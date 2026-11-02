@@ -58,6 +58,26 @@ class BrowserGotoResolverTest {
     }
 
     @Test
+    void retriesAFailedOrganicLinkOnceBeforeTheSitelinks() {
+        String first = parsed.getOrganicResults().get(0).getUrl();
+        List<String> requested = new ArrayList<String>();
+        APIRequestContext request = request(url -> {
+            requested.add(url);
+            if (url.equals(first) && requested.indexOf(url) == requested.size() - 1) {
+                throw new PlaywrightException("Timeout 1500ms exceeded.");
+            }
+            return response(302, "https://example.org/" + requested.size());
+        });
+
+        GoogleSerpPage resolved = BrowserGotoResolver.resolve(request, parsed, Clock.systemUTC(), 10_000);
+
+        assertThat(resolved.getOrganicResults().get(0).getUrl()).startsWith("https://example.org/");
+        assertThat(requested.stream().filter(first::equals).count()).isEqualTo(2);
+        String firstSiteLink = parsed.getOrganicResults().get(0).getSiteLinks().get(0).getUrl();
+        assertThat(requested.lastIndexOf(first)).isLessThan(requested.indexOf(firstSiteLink));
+    }
+
+    @Test
     void noBudgetMeansNoRequest() {
         List<String> requested = new ArrayList<String>();
         BrowserGotoResolver.resolve(request(url -> {
