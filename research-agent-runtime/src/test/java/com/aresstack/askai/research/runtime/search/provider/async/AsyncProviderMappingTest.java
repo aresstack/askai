@@ -18,6 +18,8 @@ public final class AsyncProviderMappingTest {
                 com.aresstack.askai.research.search.api.SearchProviderId.BRIGHT_DATA));
         assertEquals(SearchProviderId.DATA_FOR_SEO, AsyncProviderMapping.toRuntimeId(
                 com.aresstack.askai.research.search.api.SearchProviderId.DATA_FOR_SEO));
+        assertEquals(SearchProviderId.SERP_API, AsyncProviderMapping.toRuntimeId(
+                com.aresstack.askai.research.search.api.SearchProviderId.SERP_API));
     }
 
     @Test
@@ -32,6 +34,7 @@ public final class AsyncProviderMappingTest {
         assertEquals(SearchEngine.BRAVE, AsyncProviderMapping.defaultEngine(SearchProviderId.BRAVE_SEARCH_API));
         assertEquals(SearchEngine.PROVIDER_DEFAULT, AsyncProviderMapping.defaultEngine(SearchProviderId.BRIGHT_DATA));
         assertEquals(SearchEngine.PROVIDER_DEFAULT, AsyncProviderMapping.defaultEngine(SearchProviderId.DATA_FOR_SEO));
-        assertNull(AsyncProviderMapping.defaultEngine(SearchProviderId.SERP_API));
+        assertEquals(SearchEngine.PROVIDER_DEFAULT, AsyncProviderMapping.defaultEngine(SearchProviderId.SERP_API));
+        assertNull(AsyncProviderMapping.defaultEngine(SearchProviderId.TAVILY));
     }
 }

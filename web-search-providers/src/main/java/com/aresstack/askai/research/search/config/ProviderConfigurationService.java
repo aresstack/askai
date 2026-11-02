@@ -8,6 +8,8 @@ import com.aresstack.askai.research.search.brightdata.BrightDataSearchConfigurat
 import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchConfiguration;
 import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchConfigurationValidator;
 import com.aresstack.askai.research.search.security.SecretArrays;
+import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfiguration;
+import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfigurationValidator;
 import com.aresstack.askai.research.search.security.SecretValueService;
 
 import java.nio.file.Files;
@@ -21,6 +23,7 @@ public final class ProviderConfigurationService {
     private final BraveSearchConfigurationValidator braveValidator;
     private final BrightDataSearchConfigurationValidator brightDataValidator;
     private final DataForSeoSearchConfigurationValidator dataForSeoValidator;
+    private final SerpApiSearchConfigurationValidator serpApiValidator;
 
     public ProviderConfigurationService(
             ProviderConfigurationPaths paths,
@@ -38,13 +41,16 @@ public final class ProviderConfigurationService {
                 new BrightDataSearchConfigurationValidator();
         this.dataForSeoValidator =
                 new DataForSeoSearchConfigurationValidator();
+        this.serpApiValidator =
+                new SerpApiSearchConfigurationValidator();
     }
 
     public ProviderConfigurationBundle loadOrCreateAll() {
         return new ProviderConfigurationBundle(
                 loadOrCreateBrave(),
                 loadOrCreateBrightData(),
-                loadOrCreateDataForSeo());
+                loadOrCreateDataForSeo(),
+                loadOrCreateSerpApi());
     }
 
     public BraveSearchConfiguration loadOrCreateBrave() {
@@ -89,6 +95,21 @@ public final class ProviderConfigurationService {
                 file,
                 DataForSeoSearchConfiguration.class);
         dataForSeoValidator.validate(configuration);
+        return configuration;
+    }
+
+    public SerpApiSearchConfiguration loadOrCreateSerpApi() {
+        Path file = paths.getSerpApiConfigurationFile();
+        if (!Files.exists(file)) {
+            SerpApiSearchConfiguration configuration =
+                    new SerpApiSearchConfiguration();
+            saveSerpApi(configuration);
+            return configuration;
+        }
+        SerpApiSearchConfiguration configuration = store.load(
+                file,
+                SerpApiSearchConfiguration.class);
+        serpApiValidator.validate(configuration);
         return configuration;
     }
 
@@ -151,6 +172,28 @@ public final class ProviderConfigurationService {
             saveDataForSeo(configuration);
         } finally {
             SecretArrays.clear(password);
+        }
+    }
+
+    public void saveSerpApi(
+            SerpApiSearchConfiguration configuration) {
+
+        serpApiValidator.validate(configuration);
+        store.save(
+                paths.getSerpApiConfigurationFile(),
+                configuration);
+    }
+
+    public void saveSerpApi(
+            SerpApiSearchConfiguration configuration,
+            char[] apiKey) {
+
+        try {
+            configuration.setApiKey(
+                    secretValueService.encrypt(apiKey));
+            saveSerpApi(configuration);
+        } finally {
+            SecretArrays.clear(apiKey);
         }
     }
 
