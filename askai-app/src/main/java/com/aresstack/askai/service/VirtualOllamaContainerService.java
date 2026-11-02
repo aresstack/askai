@@ -308,6 +308,20 @@ public final class VirtualOllamaContainerService implements OllamaService {
     }
 
     @Override
+    public Task loadModel(final String modelName, final String keepAlive, final ActionListener listener) {
+        return submit(new Runnable() {
+            public void run() {
+                try {
+                    routedClient(modelName).loadModel(modelName, keepAlive);
+                    listener.onComplete("Loaded " + modelName + ".");
+                } catch (Exception ex) {
+                    listener.onError(ex);
+                }
+            }
+        });
+    }
+
+    @Override
     public Task unloadModel(final String modelName, final ActionListener listener) {
         return submit(new Runnable() {
             public void run() {
