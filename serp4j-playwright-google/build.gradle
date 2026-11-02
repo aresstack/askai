@@ -4,11 +4,6 @@
 // Java 21 like the browser sidecar that owns the search browser.
 apply plugin: 'java-library'
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
 
 def serp4jVersion = (findProperty('serp4jVersion') ?: '0.1.0-SNAPSHOT').toString()
 

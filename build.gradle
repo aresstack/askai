@@ -21,18 +21,11 @@ allprojects {
 subprojects {
     apply plugin: 'java'
 
-    // The DELIBERATE Java-21 sidecar processes: the browser MCP sidecar (playwright4j is major 65)
-    // and the local model runtime (win-directml-java is Java 21). Everything else stays strictly
-    // Java 8; the Java-8 host never compiles against or loads sidecar classes.
-    def java21Modules = [
-            'browser-mcp-server-java21',
-            'local-model-runtime-sidecar-java21',
-            // askai #31 / Serp4J ADR-020: Google provider on serp4j-playwright (in AskAI, not published).
-            'serp4j-playwright-google'
-    ]
-    if (!(name in java21Modules)) {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+    // AskAI is a Java-21 application (Angelo 2026-11-02, askai #31): every module compiles for and runs on Java 21.
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
     }
 
     tasks.withType(JavaCompile) {

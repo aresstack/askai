@@ -58,13 +58,12 @@ Serp4J ist noch nicht auf Maven Central. Die Root-`build.gradle` liest deshalb *
 ```bash
 scripts/install-serp4j.sh              # klont Serp4J (Develop) nach build/serp4j-src und publiziert nach ~/.m2
 scripts/install-serp4j.sh Develop ../Serp4J   # oder: vorhandenen Checkout verwenden
-./gradlew build                        # AskAI wie gewohnt (Gradle 7.6.4, JDK 8–17)
+./gradlew build                        # AskAI wie gewohnt (Gradle 8.14.3, JDK 21)
 ```
 
 Serp4Js Gradle braucht JDK 17+ (`SERP4J_JAVA_HOME`, sonst `JAVA_HOME_21_X64`/`JAVA_HOME`). Eine andere Version:
 `./gradlew build -Pserp4jVersion=…`. Die Workflows `release.yml` und `chatgpt-cache.yml` führen das Skript vor dem
-Build aus. Ein Composite Build (`includeBuild`) geht derzeit nicht, weil AskAI Gradle 7.6.4 nutzt und Serp4J
-Gradle 8 mit Kotlin-DSL-Build-Logik. Das Offline-ZIP aus `chatgpt-cache.yml` bringt die Serp4J-Artefakte unter
+Build aus. Ein Composite Build (`includeBuild`) ist noch nicht eingerichtet. Das Offline-ZIP aus `chatgpt-cache.yml` bringt die Serp4J-Artefakte unter
 `.chatgpt/m2` mit; offline: `./gradlew --offline -Dmaven.repo.local=$PWD/.chatgpt/m2/repository build`.
 
 Sobald Serp4J auf Central veröffentlicht ist, entfallen `mavenLocal` und das Skript.

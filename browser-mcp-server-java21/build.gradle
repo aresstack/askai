@@ -8,11 +8,6 @@
 // blurred module boundary, no duplicate classes in the sidecar jar.
 apply plugin: 'application'
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
 
 dependencies {
     implementation project(':browser-api')
