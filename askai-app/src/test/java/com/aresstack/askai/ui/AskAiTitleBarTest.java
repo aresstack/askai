@@ -45,6 +45,44 @@ public class AskAiTitleBarTest {
     }
 
     @Test
+    public void helpAndCloseCirclesShareSizeAndHeight() {
+        AskAiTitleBar bar = new AskAiTitleBar("AskAI", NOTHING, NOTHING);
+        javax.swing.JButton help = new com.aresstack.comiccontrols.control.ComicHelpButton(24, "Help");
+        bar.addTrailingControl(help);
+        bar.setSize(800, 40);
+        layoutTree(bar);
+        java.awt.Component close = find(bar, com.aresstack.comiccontrols.control.ComicWindowCloseButton.class);
+        assertEquals(close.getSize(), help.getSize());
+        assertEquals("? and X sit on exactly the same height",
+                javax.swing.SwingUtilities.convertPoint(close.getParent(), close.getLocation(), bar).y,
+                javax.swing.SwingUtilities.convertPoint(help.getParent(), help.getLocation(), bar).y);
+    }
+
+    private static void layoutTree(java.awt.Container container) {
+        container.doLayout();
+        for (java.awt.Component child : container.getComponents()) {
+            if (child instanceof java.awt.Container) {
+                layoutTree((java.awt.Container) child);
+            }
+        }
+    }
+
+    private static java.awt.Component find(java.awt.Container container, Class<?> type) {
+        for (java.awt.Component child : container.getComponents()) {
+            if (type.isInstance(child)) {
+                return child;
+            }
+            if (child instanceof java.awt.Container) {
+                java.awt.Component found = find((java.awt.Container) child, type);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
     public void theSearchIsHiddenWithoutAnAgentContribution() {
         AskAiTitleBar bar = new AskAiTitleBar("AskAI", NOTHING, NOTHING);
         assertNull(bar.searchField());

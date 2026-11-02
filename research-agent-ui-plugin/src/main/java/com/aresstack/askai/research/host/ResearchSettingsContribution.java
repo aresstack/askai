@@ -87,7 +87,7 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
         tab.add(readTagsBox);
         tab.add(onlyWhenActiveBox);
         javax.swing.JLabel hint = new javax.swing.JLabel("<html><i>Uses the configured speech"
-                + " output — set the voice per language in the chat settings (gear) under"
+                + " output — set the voice per language in the Settings (gear) under Chat &gt;"
                 + " \"Audio &amp; Dictation\" &gt; Speech output.</i></html>");
         hint.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
         hint.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 22, 12, 0));
