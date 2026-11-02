@@ -63,7 +63,9 @@ public final class SingleProviderSearchStrategy implements SearchStrategy {
         }
         List<String> diagnostics = Collections.singletonList(
                 "provider " + providerResult.getProviderId() + " / " + providerResult.getSearchEngine()
-                        + " returned " + candidates.size() + " organic candidate(s)");
+                        + " returned " + candidates.size() + " organic candidate(s)"
+                        + (providerResult.getRawResponse().isEmpty() ? ""
+                        : ", raw response " + providerResult.getRawResponse().length() + " chars"));
         return new InitialSearchResult(candidates, Collections.<String>emptyList(),
                 Collections.<com.aresstack.askai.browser.search.repair.SearchChallengeState>emptyList(),
                 diagnostics);

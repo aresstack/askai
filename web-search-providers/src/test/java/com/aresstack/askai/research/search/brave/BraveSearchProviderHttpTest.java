@@ -80,7 +80,7 @@ public final class BraveSearchProviderHttpTest {
         config.setEndpoint("http://127.0.0.1:" + server.getAddress().getPort() + "/res/v1/web/search");
         config.setApiKey(secrets.encrypt(API_KEY.toCharArray()));
         return new SearchProviderFactory(new Gson(), new AsyncHttpClientFactory(), secrets)
-                .createBrave(config);
+                .createLegacyBrave(config);
     }
 
     private static WebSearchRequest request() {

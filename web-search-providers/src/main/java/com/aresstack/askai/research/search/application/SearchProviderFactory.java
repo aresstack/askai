@@ -23,6 +23,7 @@ import com.aresstack.askai.research.search.http.EncryptedBasicAuthentication;
 import com.aresstack.askai.research.search.http.EncryptedBearerAuthentication;
 import com.aresstack.askai.research.search.http.EncryptedHeaderAuthentication;
 import com.aresstack.askai.research.search.security.SecretValueService;
+import com.aresstack.askai.research.search.serp4j.Serp4jProviderFactory;
 import com.google.gson.Gson;
 
 public final class SearchProviderFactory {
@@ -30,6 +31,7 @@ public final class SearchProviderFactory {
     private final Gson gson;
     private final AsyncHttpClientFactory httpClientFactory;
     private final SecretValueService secretValueService;
+    private final Serp4jProviderFactory serp4j;
 
     public SearchProviderFactory(
             Gson gson,
@@ -43,9 +45,43 @@ public final class SearchProviderFactory {
         this.secretValueService = requireNonNull(
                 secretValueService,
                 "secretValueService");
+        this.serp4j = new Serp4jProviderFactory(secretValueService);
     }
 
+    /** Brave via Serp4J ({@code serp4j-provider-brave}); the AskAI configuration file stays authoritative. */
     public WebSearchProvider createBrave(
+            BraveSearchConfiguration configuration) {
+
+        new BraveSearchConfigurationValidator()
+                .validate(configuration);
+        return serp4j.createBrave(configuration);
+    }
+
+    /** Bright Data via Serp4J ({@code serp4j-provider-brightdata}, synchronous Google SERP). */
+    public WebSearchProvider createBrightData(
+            BrightDataSearchConfiguration configuration) {
+
+        new BrightDataSearchConfigurationValidator()
+                .validate(configuration);
+        return serp4j.createBrightData(configuration);
+    }
+
+    /** DataForSEO via Serp4J ({@code serp4j-provider-dataforseo}, live regular/advanced). */
+    public WebSearchProvider createDataForSeo(
+            DataForSeoSearchConfiguration configuration) {
+
+        new DataForSeoSearchConfigurationValidator()
+                .validate(configuration);
+        return serp4j.createDataForSeo(configuration);
+    }
+
+    /**
+     * Pre-Serp4J implementation, kept only until the Serp4J path has real-response coverage.
+     *
+     * @deprecated use {@link #createBrave}; removed after the WP5 migration is verified.
+     */
+    @Deprecated
+    public WebSearchProvider createLegacyBrave(
             BraveSearchConfiguration configuration) {
 
         new BraveSearchConfigurationValidator()
@@ -67,7 +103,13 @@ public final class SearchProviderFactory {
                 new BraveSearchResponseMapper());
     }
 
-    public WebSearchProvider createBrightData(
+    /**
+     * Pre-Serp4J implementation, kept only until the Serp4J path has real-response coverage.
+     *
+     * @deprecated use {@link #createBrightData}; removed after the WP5 migration is verified.
+     */
+    @Deprecated
+    public WebSearchProvider createLegacyBrightData(
             BrightDataSearchConfiguration configuration) {
 
         new BrightDataSearchConfigurationValidator()
@@ -89,7 +131,13 @@ public final class SearchProviderFactory {
                 new BrightDataSearchResponseMapper());
     }
 
-    public WebSearchProvider createDataForSeo(
+    /**
+     * Pre-Serp4J implementation, kept only until the Serp4J path has real-response coverage.
+     *
+     * @deprecated use {@link #createDataForSeo}; removed after the WP5 migration is verified.
+     */
+    @Deprecated
+    public WebSearchProvider createLegacyDataForSeo(
             DataForSeoSearchConfiguration configuration) {
 
         new DataForSeoSearchConfigurationValidator()

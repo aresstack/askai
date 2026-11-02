@@ -7,6 +7,14 @@ allprojects {
         // Maven Central release (com.aresstack:*:0.2.1). No mavenLocal / SNAPSHOT — the build must
         // resolve reproducibly on a fresh machine.
         mavenCentral()
+        // Serp4J (WP5) is not on Maven Central yet. ONLY its artifacts (com.aresstack:serp4j-*) are read from
+        // mavenLocal; everything else still resolves reproducibly from Central. Publish them first from a Serp4J
+        // checkout (branch Develop): ./gradlew publishToMavenLocal  - see docs/serp4j.md.
+        mavenLocal {
+            content {
+                includeModuleByRegex('com\\.aresstack', 'serp4j-.*')
+            }
+        }
     }
 }
 

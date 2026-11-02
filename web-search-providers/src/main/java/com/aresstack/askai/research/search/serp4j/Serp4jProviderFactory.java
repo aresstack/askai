@@ -1,0 +1,197 @@
+package com.aresstack.askai.research.search.serp4j;
+
+import com.aresstack.askai.research.search.api.SearchEngine;
+import com.aresstack.askai.research.search.api.SearchProviderId;
+import com.aresstack.askai.research.search.api.WebSearchProvider;
+import com.aresstack.askai.research.search.brave.BraveSearchConfiguration;
+import com.aresstack.askai.research.search.brightdata.BrightDataSearchConfiguration;
+import com.aresstack.askai.research.search.config.HttpTransportConfiguration;
+import com.aresstack.askai.research.search.dataforseo.DataForSeoResultFormat;
+import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchConfiguration;
+import com.aresstack.askai.research.search.security.SecretValueService;
+import com.aresstack.serp4j.core.model.id.ProviderId;
+import com.aresstack.serp4j.core.port.credential.CredentialKey;
+import com.aresstack.serp4j.http.ahc.AhcHttpTransport;
+import com.aresstack.serp4j.http.ahc.AhcHttpTransportOptions;
+import com.aresstack.serp4j.provider.brave.BraveSearchOptions;
+import com.aresstack.serp4j.provider.brave.BraveSearchProvider;
+import com.aresstack.serp4j.provider.brightdata.BrightDataSearchProvider;
+import com.aresstack.serp4j.provider.dataforseo.DataForSeoFunction;
+import com.aresstack.serp4j.provider.dataforseo.DataForSeoSearchProvider;
+
+import java.time.Duration;
+
+/**
+ * Builds AskAI's {@link WebSearchProvider}s from the existing AskAI configuration files, backed by the Serp4J
+ * provider modules (WP5). AskAI stays the host: it owns configuration, the AES-GCM secrets (resolved through
+ * {@link HostCredentialProvider}) and one {@link AhcHttpTransport} per provider instance, which the returned
+ * adapter closes. Credentials only ever travel in HTTP headers, as implemented by the Serp4J providers.
+ */
+public final class Serp4jProviderFactory {
+
+    static final ProviderId BRAVE_ID = ProviderId.of(BraveSearchProvider.PROVIDER_TYPE);
+    static final ProviderId BRIGHT_DATA_ID = ProviderId.of(BrightDataSearchProvider.PROVIDER_TYPE);
+    static final ProviderId DATA_FOR_SEO_ID = ProviderId.of(DataForSeoSearchProvider.PROVIDER_TYPE);
+
+    private final SecretValueService secretValueService;
+
+    public Serp4jProviderFactory(SecretValueService secretValueService) {
+        if (secretValueService == null) {
+            throw new IllegalArgumentException("secretValueService must not be null");
+        }
+        this.secretValueService = secretValueService;
+    }
+
+    public WebSearchProvider createBrave(BraveSearchConfiguration configuration) {
+        CredentialKey apiKey = CredentialKey.of(BRAVE_ID, BraveSearchProvider.API_KEY_SECRET);
+        HostCredentialProvider credentials = HostCredentialProvider.builder(secretValueService)
+                .encrypted(apiKey, configuration.getApiKey())
+                .build();
+        BraveSearchOptions.Builder options = BraveSearchOptions.builder()
+                .baseUrl(braveBaseUrl(configuration.getEndpoint()))
+                .timeout(requestTimeout(configuration.getTransport()));
+        if (configuration.getApiVersion() != null && !configuration.getApiVersion().trim().isEmpty()) {
+            options.apiVersion(configuration.getApiVersion().trim());
+        }
+        if (hasText(configuration.getCountry())) {
+            options.defaultCountry(configuration.getCountry().trim());
+        }
+        if (hasText(configuration.getSearchLanguage())) {
+            options.defaultSearchLanguage(configuration.getSearchLanguage().trim());
+        }
+        if (hasText(configuration.getUiLanguage())) {
+            options.defaultUiLanguage(configuration.getUiLanguage().trim());
+        }
+        AhcHttpTransport transport = transport(configuration.getTransport());
+        try {
+            BraveSearchProvider provider = BraveSearchProvider.builder()
+                    .id(BRAVE_ID)
+                    .transport(transport)
+                    .credentials(credentials)
+                    .credentialKey(apiKey)
+                    .options(options.build())
+                    .build();
+            return new Serp4jWebSearchProvider(SearchProviderId.BRAVE, SearchEngine.BRAVE, provider, transport);
+        } catch (RuntimeException failure) {
+            transport.close();
+            throw failure;
+        }
+    }
+
+    public WebSearchProvider createBrightData(BrightDataSearchConfiguration configuration) {
+        CredentialKey apiKey = CredentialKey.of(BRIGHT_DATA_ID, BrightDataSearchProvider.API_KEY);
+        HostCredentialProvider credentials = HostCredentialProvider.builder(secretValueService)
+                .encrypted(apiKey, configuration.getApiKey())
+                .build();
+        SearchEngine engine = configuration.getSearchEngine() == null
+                ? SearchEngine.GOOGLE : configuration.getSearchEngine().getSearchEngine();
+        AhcHttpTransport transport = transport(configuration.getTransport());
+        try {
+            BrightDataSearchProvider.Builder builder = BrightDataSearchProvider.builder(BRIGHT_DATA_ID)
+                    .transport(transport)
+                    .credentials(credentials)
+                    .apiKey(apiKey)
+                    .zone(configuration.getZone())
+                    .requestTimeout(requestTimeout(configuration.getTransport()));
+            if (hasText(configuration.getSynchronousEndpoint())) {
+                builder.apiUrl(configuration.getSynchronousEndpoint().trim());
+            }
+            if (engine == SearchEngine.GOOGLE && hasText(configuration.getSearchEngineEndpoint())) {
+                builder.googleSearchUrl(configuration.getSearchEngineEndpoint().trim());
+            }
+            // Engines other than Google are passed on unchanged; Serp4J answers them with UNSUPPORTED
+            // instead of silently returning Google results under another label.
+            return new Serp4jWebSearchProvider(SearchProviderId.BRIGHT_DATA, engine, builder.build(), transport);
+        } catch (RuntimeException failure) {
+            transport.close();
+            throw failure;
+        }
+    }
+
+    public WebSearchProvider createDataForSeo(DataForSeoSearchConfiguration configuration) {
+        CredentialKey login = DataForSeoSearchProvider.loginKey(DATA_FOR_SEO_ID);
+        CredentialKey password = DataForSeoSearchProvider.passwordKey(DATA_FOR_SEO_ID);
+        HostCredentialProvider credentials = HostCredentialProvider.builder(secretValueService)
+                .plain(login, configuration.getUsername())
+                .encrypted(password, configuration.getPassword())
+                .build();
+        SearchEngine engine = configuration.getSearchEngine() == null
+                ? SearchEngine.GOOGLE : configuration.getSearchEngine().getSearchEngine();
+        AhcHttpTransport transport = transport(configuration.getTransport());
+        try {
+            DataForSeoSearchProvider.Builder builder = DataForSeoSearchProvider.builder(transport, credentials)
+                    .id(DATA_FOR_SEO_ID)
+                    .loginKey(login)
+                    .passwordKey(password)
+                    .function(configuration.getResultFormat() == DataForSeoResultFormat.REGULAR
+                            ? DataForSeoFunction.REGULAR : DataForSeoFunction.ADVANCED);
+            if (hasText(configuration.getEndpointBase())) {
+                builder.baseUrl(configuration.getEndpointBase().trim());
+            }
+            if (configuration.getLocationCode() != null) {
+                builder.defaultLocationCode(configuration.getLocationCode());
+            }
+            if (hasText(configuration.getLanguageCode())) {
+                builder.defaultLanguageCode(configuration.getLanguageCode().trim());
+            }
+            return new Serp4jWebSearchProvider(SearchProviderId.DATA_FOR_SEO, engine, builder.build(), transport);
+        } catch (RuntimeException failure) {
+            transport.close();
+            throw failure;
+        }
+    }
+
+    /** AskAI stores the full {@code …/res/v1/web/search} endpoint; Serp4J wants the API base. */
+    static String braveBaseUrl(String endpoint) {
+        if (!hasText(endpoint)) {
+            return BraveSearchOptions.DEFAULT_BASE_URL;
+        }
+        String value = endpoint.trim();
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        if (value.endsWith("/web/search")) {
+            value = value.substring(0, value.length() - "/web/search".length());
+        }
+        return value;
+    }
+
+    private static AhcHttpTransport transport(HttpTransportConfiguration configuration) {
+        AhcHttpTransportOptions.Builder options = AhcHttpTransportOptions.builder();
+        if (configuration != null) {
+            if (configuration.getConnectTimeoutMillis() > 0) {
+                options.connectTimeout(Duration.ofMillis(configuration.getConnectTimeoutMillis()));
+            }
+            if (configuration.getReadTimeoutMillis() > 0) {
+                options.readTimeout(Duration.ofMillis(configuration.getReadTimeoutMillis()));
+            }
+            if (configuration.getRequestTimeoutMillis() > 0) {
+                options.requestTimeout(Duration.ofMillis(configuration.getRequestTimeoutMillis()));
+            }
+            if (configuration.getMaxConnections() > 0) {
+                options.maxConnections(configuration.getMaxConnections());
+            }
+            if (configuration.getMaxConnectionsPerHost() > 0) {
+                options.maxConnectionsPerHost(configuration.getMaxConnectionsPerHost());
+            }
+            options.followRedirects(configuration.isFollowRedirects());
+            options.keepAlive(configuration.isKeepAlive());
+            options.compressionEnabled(configuration.isCompressionEnabled());
+            if (hasText(configuration.getUserAgent())) {
+                options.userAgent(configuration.getUserAgent().trim());
+            }
+        }
+        return AhcHttpTransport.create(options.build());
+    }
+
+    private static Duration requestTimeout(HttpTransportConfiguration configuration) {
+        if (configuration == null || configuration.getRequestTimeoutMillis() <= 0) {
+            return BraveSearchOptions.DEFAULT_TIMEOUT;
+        }
+        return Duration.ofMillis(configuration.getRequestTimeoutMillis());
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+}
