@@ -122,34 +122,6 @@ public final class SearchBrowser implements AutoCloseable {
     }
 
     /** How often the browser was started (1 after the first search, +1 per restart). */
-    /**
-     * Runs {@code work} with the CURRENT search browser on its owner thread, e.g. to resolve a Google {@code /goto}
-     * link in the session that produced it (askai #41). Starts no browser: returns {@code null} when none is running,
-     * the browser is closed, or {@code work} does not finish within {@code timeoutMillis}.
-     */
-    public <T> T withRunningBrowser(java.util.function.Function<Browser, T> work, long timeoutMillis) {
-        Objects.requireNonNull(work, "work");
-        if (closed) {
-            return null;
-        }
-        Future<T> future;
-        try {
-            future = owner.submit(() -> browser != null && browser.isConnected() ? work.apply(browser) : null);
-        } catch (RejectedExecutionException e) {
-            return null;
-        }
-        try {
-            return future.get(Math.max(1L, timeoutMillis), java.util.concurrent.TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            future.cancel(true);
-            return null;
-        } catch (ExecutionException | java.util.concurrent.TimeoutException e) {
-            future.cancel(true);
-            return null;
-        }
-    }
-
     public int getLaunchCount() {
         try {
             return owner.submit(() -> launches).get();

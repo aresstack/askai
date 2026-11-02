@@ -4,6 +4,8 @@ import com.aresstack.serp4j.core.error.SearchErrorCategory;
 import com.aresstack.serp4j.core.error.SearchProviderException;
 import com.aresstack.serp4j.core.model.SearchRequest;
 import com.aresstack.serp4j.core.model.SearchResponse;
+import com.aresstack.serp4j.core.model.data.SearchResultItem;
+import com.aresstack.serp4j.core.model.ext.ExtensionKey;
 import com.aresstack.serp4j.playwright.PlaywrightSearchFailures;
 import com.aresstack.serp4j.playwright.PlaywrightSearchProvider;
 import com.microsoft.playwright.Browser;
@@ -27,8 +29,59 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class GooglePlaywrightSearchProviderTest {
 
+    /** Serp4J's {@code serp4j:url_resolution} extension: absent, because nothing was resolved. */
+    private static final ExtensionKey<String> URL_RESOLUTION =
+            ExtensionKey.of("serp4j", "url_resolution", String.class);
+
     private final PlaywrightSearchProvider provider = GooglePlaywrightSearchProvider.builder()
             .defaultLanguage("de").defaultCountry("DE").build();
+
+    @Test
+    void onlyGotoHitsAreAllKeptUnresolvedWithTheirMetadataAndWithoutAnyResolutionRequest() {
+        // Recorded (anonymised) Camoufox result page: all nine organic links are google.com/goto redirects.
+        FakeBrowser fake = new FakeBrowser("https://www.google.com/search?q=serp4j&hl=de",
+                GoogleSerpHtmlParserTest.html("browser-web-de.html"), 200);
+
+        SearchResponse response = provider.search(SearchRequest.builder("serp4j").build(), fake.browser());
+
+        List<SearchResultItem> results = response.getData().getResults();
+        assertThat(results).hasSize(9).allSatisfy(item -> {
+            assertThat(item.getUrl()).startsWith("https://www.google.com/goto?url=ANONYMIZED");
+            assertThat(item.getTitle()).isPresent();
+            assertThat(item.getExtensions().get(URL_RESOLUTION)).isEmpty();
+            assertThat(item.getDomain()).isEmpty(); // never guessed for a redirect
+        });
+        assertThat(results.get(0).getDisplayUrl()).contains("https://www.elastic.co › clients");
+        assertThat(results.get(0).getSnippet().get()).startsWith("The Elasticsearch Java client");
+        assertThat(results.get(0).getSiteName()).contains("Elastic.co");
+        assertThat(results.get(0).getSiteLinks()).hasSize(2);
+        // Exactly one Google request (the result page), however many /goto links it lists.
+        assertThat(fake.navigated).hasSize(1);
+        assertThat(fake.pagesOpened).isEqualTo(1);
+        assertThat(fake.apiRequests).isZero();
+    }
+
+    @Test
+    void mixedDirectAndGotoHitsAreAllKeptInTheirOrder() {
+        String html = GoogleSerpHtmlParserTest.html("browser-web-de.html");
+        String withDirect = html.replace("href=\"/goto?url=ANONYMIZED1&amp;gsessionid=ANONYMIZED\"",
+                "href=\"https://www.elastic.co/docs/reference/elasticsearch/clients/java\"");
+        assertThat(withDirect).isNotEqualTo(html); // test variation of the recorded page, not a recording
+        FakeBrowser fake = new FakeBrowser("https://www.google.com/search?q=serp4j&hl=de", withDirect, 200);
+
+        SearchResponse response = provider.search(SearchRequest.builder("serp4j").build(), fake.browser());
+
+        List<SearchResultItem> results = response.getData().getResults();
+        assertThat(results).hasSize(9);
+        long direct = results.stream().filter(r -> r.getUrl().startsWith("https://www.elastic.co/")).count();
+        long gotos = results.stream().filter(r -> r.getUrl().startsWith("https://www.google.com/goto?")).count();
+        assertThat(direct + gotos).isEqualTo(9);
+        assertThat(direct).isLessThanOrEqualTo(1);
+        assertThat(results).extracting(r -> r.getPosition().get().getRankAbsolute().getAsInt())
+                .containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9);
+        assertThat(fake.navigated).hasSize(1);
+        assertThat(fake.apiRequests).isZero();
+    }
 
     @Test
     void mapsRecordedResultPageAndClosesOnlyItsPage() {
@@ -42,22 +95,6 @@ class GooglePlaywrightSearchProviderTest {
         assertThat(fake.navigated.get(0)).startsWith("https://www.google.com/search?").doesNotContain("udm=50");
         assertThat(fake.pageClosed).isTrue();
         assertThat(fake.browserClosed).isFalse();
-    }
-
-    @Test
-    void aGotoResolvedInTheBrowserKeepsTheGotoLinkAsOriginalUrl() {
-        FakeBrowser fake = new FakeBrowser("https://www.google.com/search?q=serp4j&hl=de",
-                GoogleSerpHtmlParserTest.html("browser-web-de.html"), 200);
-        fake.gotoTarget = "https://example.org/target";
-
-        SearchResponse response = provider.search(SearchRequest.builder("serp4j").build(), fake.browser());
-
-        com.aresstack.serp4j.core.model.data.SearchResultItem first = response.getData().getResults().get(0);
-        assertThat(first.getUrl()).isEqualTo("https://example.org/target");
-        assertThat(first.getExtensions().get(com.aresstack.serp4j.http.resolve.ResultUrlEnricher.ORIGINAL_URL))
-                .hasValueSatisfying(url -> assertThat(url).startsWith("https://www.google.com/goto?url="));
-        assertThat(first.getExtensions().get(com.aresstack.serp4j.http.resolve.ResultUrlEnricher.URL_RESOLUTION))
-                .contains(com.aresstack.serp4j.http.resolve.ResultUrlEnricher.RESOLVED);
     }
 
     @Test
@@ -137,9 +174,10 @@ class GooglePlaywrightSearchProviderTest {
         boolean connected = true;
         boolean pageClosed;
         boolean browserClosed;
+        int pagesOpened;
+        /** Calls of the request API ({@code context.request()}, {@code page.request()}): resolution requests. */
+        int apiRequests;
         RuntimeException navigationFailure;
-        /** Where Google's /goto redirects inside the browser session; {@code null}: no redirect. */
-        String gotoTarget;
 
         FakeBrowser(String finalUrl, String html, int status) {
             this.finalUrl = finalUrl;
@@ -148,36 +186,16 @@ class GooglePlaywrightSearchProviderTest {
         }
 
         Browser browser() {
-            // /goto links answer without redirect here, so the URLs stay as parsed.
-            com.microsoft.playwright.APIResponse noRedirect = proxy(com.microsoft.playwright.APIResponse.class,
-                    (name, args) -> {
-                        switch (name) {
-                            case "status":
-                                return gotoTarget == null ? 200 : 302;
-                            case "headers":
-                                return Collections.singletonMap("location", gotoTarget);
-                            default:
-                                return null;
-                        }
-                    });
-            com.microsoft.playwright.APIRequestContext request = proxy(
-                    com.microsoft.playwright.APIRequestContext.class, (name, args) -> {
-                        if (name.equals("get")) {
-                            return noRedirect;
-                        }
-                        throw new UnsupportedOperationException(name);
-                    });
-            BrowserContext[] holder = new BrowserContext[1];
-            holder[0] = proxy(BrowserContext.class, (name, args) -> {
+            BrowserContext context = proxy(BrowserContext.class, (name, args) -> {
                 if (name.equals("newPage")) {
-                    return page(holder[0]);
+                    pagesOpened++;
+                    return page();
                 }
                 if (name.equals("request")) {
-                    return request;
+                    apiRequests++;
                 }
                 throw new UnsupportedOperationException(name);
             });
-            BrowserContext context = holder[0];
             return proxy(Browser.class, (name, args) -> {
                 switch (name) {
                     case "isConnected":
@@ -193,7 +211,7 @@ class GooglePlaywrightSearchProviderTest {
             });
         }
 
-        private Page page(BrowserContext context) {
+        private Page page() {
             Response response = proxy(Response.class, (name, args) -> {
                 if (name.equals("status")) {
                     return status;
@@ -220,11 +238,12 @@ class GooglePlaywrightSearchProviderTest {
                         return finalUrl;
                     case "content":
                         return html;
-                    case "context":
-                        return context;
                     case "close":
                         pageClosed = true;
                         return null;
+                    case "request":
+                        apiRequests++;
+                        throw new UnsupportedOperationException(name);
                     default:
                         throw new UnsupportedOperationException(name);
                 }

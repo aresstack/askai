@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.runtime.acquire;
 
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
 import com.aresstack.askai.research.runtime.loop.ResearchRunActivity;
 import com.aresstack.askai.research.runtime.loop.ResearchRunBudget;
 import com.aresstack.askai.research.runtime.loop.ResearchRunProgress;
@@ -43,9 +44,25 @@ public final class WebSearchApplicationService {
         private final String pageHost;
         private final String pageTitle;
         private final String page;
+        private final String originalUrl;
+        private final UrlResolutionStatus urlResolution;
 
         public AcceptedSource(String sourceId, boolean duplicate, String captureId, String pageUrl,
                               String pageHost, String pageTitle, String page) {
+            this(sourceId, duplicate, captureId, pageUrl, pageHost, pageTitle, page, "", UrlResolutionStatus.DIRECT);
+        }
+
+        /**
+         * @param pageUrl       the FINAL URL the browser landed on (source identity)
+         * @param originalUrl   the URL that was opened when it differs (e.g. the search hit's Google /goto link),
+         *                      kept as provenance; empty otherwise
+         * @param urlResolution DIRECT, or RESOLVED when the browser's navigation followed a redirect
+         */
+        public AcceptedSource(String sourceId, boolean duplicate, String captureId, String pageUrl,
+                              String pageHost, String pageTitle, String page, String originalUrl,
+                              UrlResolutionStatus urlResolution) {
+            this.originalUrl = originalUrl == null ? "" : originalUrl;
+            this.urlResolution = urlResolution == null ? UrlResolutionStatus.DIRECT : urlResolution;
             this.sourceId = sourceId;
             this.duplicate = duplicate;
             this.captureId = captureId;
@@ -57,6 +74,15 @@ public final class WebSearchApplicationService {
 
         public String getSourceId() {
             return sourceId;
+        }
+
+        /** The opened URL when the browser was redirected (provenance), else empty. */
+        public String getOriginalUrl() {
+            return originalUrl;
+        }
+
+        public UrlResolutionStatus getUrlResolution() {
+            return urlResolution;
         }
 
         public boolean isDuplicate() {
@@ -166,20 +192,6 @@ public final class WebSearchApplicationService {
     // never goes stale; the NEXT run sees the new fence.
     private SearchScopeControlPort scopeControl;
 
-    /**
-     * askai #41: resolves a search hit's still unresolved redirect (Google {@code /goto}) right before the visit,
-     * e.g. in the search browser whose session Google redirects. Returns the target or {@code null}.
-     */
-    public interface RedirectResolver {
-        String resolve(String url);
-    }
-
-    private RedirectResolver redirectResolver;
-
-    /** Wire the visit-time redirect resolution (askai #41); {@code null} keeps plain browser navigation. */
-    public void setRedirectResolver(RedirectResolver resolver) {
-        this.redirectResolver = resolver;
-    }
     private String scopeHandle;
     private boolean scopeActive;
     /** SC2a capability split: only the OUT filter is fail-closed; IN affinity degrades. */
@@ -510,13 +522,6 @@ public final class WebSearchApplicationService {
             }
             FrontierEntry entry = frontier.remove(0);
             String url = entry.getUrl();
-            String redirectTarget = resolveRedirectBeforeVisit(entry);
-            if (redirectTarget != null) {
-                // askai #41: the unresolved search hit now has a verified target; the redirect is only an alias.
-                progress.noteVisitedAlias(WebAcquisitionText.canonicalish(url));
-                listener.status("redirect resolved before the visit: " + redirectTarget);
-                url = redirectTarget;
-            }
             // From here on this page has its own identity: a Skip pressed while it is being worked on
             // belongs to THIS visit, and any of its work that finishes afterwards can tell that it does.
             currentVisitGeneration = pageSkip.beginVisit();
@@ -576,8 +581,23 @@ public final class WebSearchApplicationService {
                             ResearchRunActivity.pageSkipped(effectiveUrl, finalHost, pageTitle));
                     continue;
                 }
+                // askai #41 (lazy resolution): a search hit's redirect (Google /goto) is resolved HERE, by the
+                // browser's normal navigation; the final URL is the source identity, the provider URL stays
+                // as provenance.
+                boolean redirected = !finalCanonical.equals(canonical);
+                UrlResolutionStatus resolution = redirected
+                        ? UrlResolutionStatus.RESOLVED : UrlResolutionStatus.DIRECT;
+                if (redirected && entry.getOrigin() == FrontierEntry.Origin.SEARCH_RESULT) {
+                    listener.status("redirect resolved by navigation: " + url + " -> " + effectiveUrl);
+                    if (progress.alreadyVisited(finalCanonical)) {
+                        // Two hits (e.g. two /goto links) landed on the same target: dedupe on the final URL.
+                        progress.noteVisitedAlias(canonical);
+                        listener.status("skipped duplicate target: " + effectiveUrl + " (via " + url + ")");
+                        continue;
+                    }
+                }
                 progress.pageVisited(finalCanonical, finalHost);
-                if (!finalCanonical.equals(canonical)) {
+                if (redirected) {
                     // A redirect: the requested address is marked visited too (but never counted).
                     progress.noteVisitedAlias(canonical);
                 }
@@ -618,7 +638,8 @@ public final class WebSearchApplicationService {
                                         pageTitle));
                         continue;
                     }
-                    ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle);
+                    ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle,
+                            redirected ? url : "", resolution);
                     if (g3 != null) {
                         return g3;
                     }
@@ -664,7 +685,10 @@ public final class WebSearchApplicationService {
                 return ResearchStopReason.MCP_UNAVAILABLE;
             } catch (ToolInvoker.ToolFailure ex) {
                 progress.error();
+                // A failed navigation (also a redirect blocked by the URL policy) ends only this visit; the
+                // search hit stays in the search result and its candidate list, it is never removed afterwards.
                 listener.status("[web-search] technical failure stage=PAGE_OPEN url=" + url
+                        + (entry.getOrigin() == FrontierEntry.Origin.SEARCH_RESULT ? " (search hit kept)" : "")
                         + " cause=" + describe(ex));
             }
         }
@@ -1105,25 +1129,6 @@ public final class WebSearchApplicationService {
         String minted = "c" + (candidateIdByUrl.size() + 1);
         candidateIdByUrl.put(key, minted);
         return minted;
-    }
-
-    /**
-     * The target of a search hit whose redirect was still unresolved (askai #41), or {@code null}: no resolver, not a
-     * search hit, nothing to resolve, or the resolution failed. On {@code null} the browser simply opens the
-     * redirect; the page it lands on decides, a search-engine page is never a source.
-     */
-    private String resolveRedirectBeforeVisit(FrontierEntry entry) {
-        if (redirectResolver == null || entry.getOrigin() != FrontierEntry.Origin.SEARCH_RESULT) {
-            return null;
-        }
-        try {
-            String target = redirectResolver.resolve(entry.getUrl());
-            return target == null || target.trim().isEmpty() || target.trim().equals(entry.getUrl())
-                    ? null : target.trim();
-        } catch (RuntimeException failed) {
-            listener.status("redirect resolution failed, opening the redirect: " + entry.getUrl());
-            return null;
-        }
     }
 
     private void parkCandidate(com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate ranked) {
@@ -1625,7 +1630,8 @@ public final class WebSearchApplicationService {
      * NOT errors. A rejected write (state changed under us) ends the run explicitly, not as a crash.
      */
     private ResearchStopReason acceptSource(String captureId, String page, String pageUrl, String pageHost,
-                                            String pageTitle)
+                                            String pageTitle, String originalUrl,
+                                            UrlResolutionStatus urlResolution)
             throws ToolInvoker.EndpointUnavailable {
         if (captureId == null) {
             return null;
@@ -1652,7 +1658,8 @@ public final class WebSearchApplicationService {
             // Research-specific per-source work happens in the caller's listener at THIS exact point,
             // budgeted via budgetGate (since issue #32 both callers are no-ops here).
             return acceptedSourceListener.onAccepted(
-                    new AcceptedSource(sourceId, duplicate, captureId, pageUrl, pageHost, pageTitle, page),
+                    new AcceptedSource(sourceId, duplicate, captureId, pageUrl, pageHost, pageTitle, page,
+                            originalUrl, urlResolution),
                     budgetGate);
         } catch (ToolInvoker.ToolFailure ex) {
             // A rejected write (state changed under us) ends the run explicitly, not as a crash.
