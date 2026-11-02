@@ -11,7 +11,8 @@ dependencies {
     // serp4j-playwright brings serp4j-core and the Playwright API WITHOUT a driver; the browser sidecar brings the
     // driver (playwright4j) and owns the browser.
     api "com.aresstack:serp4j-playwright:${serp4jVersion}"
-    implementation "com.aresstack:serp4j-http-api:${serp4jVersion}"
+    // public: Builder.gotoResolutionTransport(HttpTransport)
+    api "com.aresstack:serp4j-http-api:${serp4jVersion}"
     implementation 'org.jsoup:jsoup:1.18.3'
 
     testImplementation "com.aresstack:serp4j-testkit:${serp4jVersion}"

@@ -4,6 +4,7 @@ import com.aresstack.askai.browser.playwright.SearchBrowser;
 import com.aresstack.askai.research.runtime.search.provider.SearchEngine;
 import com.aresstack.askai.research.runtime.search.provider.SearchProviderId;
 import com.aresstack.askai.research.runtime.search.provider.async.AsyncModuleSearchProvider;
+import com.aresstack.askai.research.search.serp4j.Serp4jProviderFactory;
 import com.aresstack.askai.research.search.serp4j.Serp4jWebSearchProvider;
 import com.aresstack.serp4j.playwright.google.GooglePlaywrightSearchProvider;
 
@@ -28,7 +29,10 @@ public final class GoogleSearchBrowserStrategy {
      * @param locale        language and country of the Google result page; empty parts leave Google's default
      */
     public static SearchStrategy create(SearchBrowser searchBrowser, Locale locale) {
-        GooglePlaywrightSearchProvider.Builder google = GooglePlaywrightSearchProvider.builder();
+        // google.*/goto links are resolved like for SerpApi (Serp4J ResultUrlEnricher); the transport lives as
+        // long as the strategy, i.e. the runtime process.
+        GooglePlaywrightSearchProvider.Builder google = GooglePlaywrightSearchProvider.builder()
+                .gotoResolutionTransport(Serp4jProviderFactory.newGotoResolutionTransport());
         if (locale != null && !locale.getLanguage().isEmpty()) {
             google.defaultLanguage(locale.getLanguage());
         }
