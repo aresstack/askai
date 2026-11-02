@@ -27,6 +27,8 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.Response;
+import com.microsoft.playwright.TimeoutError;
+import com.microsoft.playwright.options.WaitForSelectorState;
 import com.microsoft.playwright.options.WaitUntilState;
 
 import java.time.Clock;
@@ -67,6 +69,12 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
     private final GoogleUrlBuilder urlBuilder;
     private final GoogleSerpHtmlParser parser = new GoogleSerpHtmlParser();
     private final GoogleSerpMapper mapper;
+    /** Longest wait for Google's result page after the JavaScript start page. */
+    static final Duration RESULT_WAIT = Duration.ofSeconds(15);
+    /** Result container, challenge form or consent form: whichever Google ends up showing. */
+    static final String RESULT_PAGE_SELECTOR =
+            "#search, #rso, #captcha-form, form[action*=\"consent.google.\"]";
+
     private final Duration navigationTimeout;
     private final Clock clock;
     private final ResultUrlEnricher urlEnricher;
@@ -109,6 +117,23 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
      * browser). Blocks until the optional {@code /goto} resolution is done; that resolution is bounded by
      * {@link GoogleGotoUrlResolver#DEFAULT_TIMEOUT} and the context deadline.
      */
+    /**
+     * Google first answers {@code /search} with a JavaScript start page (its {@code noscript} block points to
+     * {@code /httpservice/retry/enablejs}); the results appear only after that script has run. Waits until the
+     * result container, a challenge form or a consent form is in the page, at most {@link #RESULT_WAIT} and never
+     * beyond the context deadline. When none appears, the page is classified as it is.
+     */
+    private void awaitResultPage(Page page, SearchContext context) {
+        double wait = Math.min(RESULT_WAIT.toMillis(),
+                PlaywrightSearchSupport.timeoutMillis(context, navigationTimeout, clock.instant()));
+        try {
+            page.waitForSelector(RESULT_PAGE_SELECTOR, new Page.WaitForSelectorOptions()
+                    .setState(WaitForSelectorState.ATTACHED).setTimeout(wait));
+        } catch (TimeoutError e) {
+            // classify what is there (JavaScript start page, unknown layout)
+        }
+    }
+
     @Override
     public SearchResponse search(SearchRequest request, SearchContext context, Browser browser) {
         ProviderId id = descriptor.getId();
@@ -132,6 +157,7 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
             page = openPage(browser);
             page.setDefaultTimeout(PlaywrightSearchSupport.timeoutMillis(context, navigationTimeout, clock.instant()));
             response = page.navigate(url, new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+            awaitResultPage(page, context);
             finalUrl = page.url();
             html = page.content();
         } catch (PlaywrightException e) {
