@@ -8,7 +8,7 @@ import java.util.List;
  * (not merely compiled). Optional arg: an exact device specifier to target; otherwise the OS default is used.
  *
  * <p>Run from the fat JAR, e.g.:
- * {@code java -cp askai-java8-0.1.0.jar com.aresstack.audio.openal.OpenAlDiagnostics}</p>
+ * {@code java -cp askai-0.1.0.jar com.aresstack.audio.openal.OpenAlDiagnostics}</p>
  */
 public final class OpenAlDiagnostics {
 

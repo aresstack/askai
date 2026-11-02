@@ -1,7 +1,7 @@
 package com.aresstack.askai.agent.model.nlp;
 
 /**
- * A static NLP capability provided by a locally deployed model ARTIFACT (not a runtime/sidecar model). The first
+ * A static NLP capability provided by a locally deployed model ARTIFACT (not a runtime model). The first
  * slice ships only {@link #SENTENCE_DETECTION}; the enum is the extension point for later tokenizer / POS / NER
  * capabilities, so the whole SPI (selection, descriptor, catalog, snapshot) is capability-parameterised from the
  * start and never has to be re-shaped to add one.

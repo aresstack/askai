@@ -1,7 +1,8 @@
 package com.aresstack.askai.research.host;
 
-import com.aresstack.askai.mcp.api.McpToolClient;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
+
+import com.aresstack.askai.browser.BrowserException;
+import com.aresstack.askai.browser.runtime.InProcessBrowser;
 
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -12,9 +13,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 
 /**
- * A lazy, restartable owner of ONE browser MCP sidecar generation. It is created STOPPED (no process, no
+ * A lazy, restartable owner of ONE in-process browser generation. It is created STOPPED (no browser, no
  * Playwright, no readiness probe) when the research session starts, so selecting the Research agent never
- * spawns a browser. The sidecar is started on the FIRST browser command ({@link #execute}), stopped again
+ * spawns a browser. The browser is started on the FIRST browser command ({@link #execute}), stopped again
  * with {@link #stop()} when the browsing phase ends, and can be thrown away + replaced with {@link #restart()}
  * on failure — the TeamAgent survives a browser crash untouched.
  *
@@ -25,8 +26,8 @@ import java.util.concurrent.ThreadFactory;
  */
 public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
 
-    /** One started sidecar generation (process + client), abstracted so the lifecycle is unit-testable. */
-    interface Sidecar {
+    /** One started browser generation, abstracted so the lifecycle is unit-testable. */
+    interface RunningBrowser {
         String call(String tool, Map<String, Object> arguments) throws BrowserRuntimeException;
 
         /**
@@ -43,12 +44,12 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         void close();
     }
 
-    /** Starts a fresh sidecar generation, BLOCKING until it is ready; throws on any start failure. */
-    interface SidecarStarter {
-        Sidecar start() throws BrowserRuntimeException;
+    /** Starts a fresh browser generation, BLOCKING until it is ready; throws on any start failure. */
+    interface BrowserStarter {
+        RunningBrowser start() throws BrowserRuntimeException;
     }
 
-    private final SidecarStarter starter;
+    private final BrowserStarter starter;
     private final ExecutorService owner;
     private volatile Listener listener = Listener.NONE;
 
@@ -56,27 +57,21 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
     // current is volatile ONLY for the out-of-band control-plane snapshot in executeControl).
     private volatile State state = State.STOPPED;
     private long generation;
-    private volatile Sidecar current;
+    private volatile RunningBrowser current;
     private volatile boolean closed;
     /** Dedupe for control-plane failure logging (polled ~1/s — never flood stderr). */
     private volatile String lastControlFailureLine;
 
     /**
-     * Production runtime over the real browser MCP sidecar process.
+     * Production runtime over the in-process Playwright browser (askai #31: no separate process, no MCP).
      *
-     * @param toolTimeoutSeconds the user's browser tool timeout (the setting the runtime gets as
-     *                           ASKAI_BROWSER_TOOL_TIMEOUT_SECONDS): the host's own data client toward the
-     *                           sidecar must cover the same blocking call — a web_search_prepare over three
-     *                           result pages — or the host reports a working sidecar as dead first.
+     * @param browserConfigPath the versioned browser-search config document, or {@code null} for the defaults
      */
-    public LazyRestartableBrowserRuntime(ResearchRuntimeConfig config, long readyTimeoutSeconds,
-                                         String browserConfigPath, McpToolClientFactory toolClients,
-                                         int toolTimeoutSeconds) {
-        this(productionStarter(config, readyTimeoutSeconds, browserConfigPath, toolClients,
-                toolTimeoutSeconds));
+    public LazyRestartableBrowserRuntime(ResearchRuntimeConfig config, String browserConfigPath) {
+        this(inProcessStarter(config, browserConfigPath));
     }
 
-    LazyRestartableBrowserRuntime(SidecarStarter starter) {
+    LazyRestartableBrowserRuntime(BrowserStarter starter) {
         this.starter = starter;
         this.owner = Executors.newSingleThreadExecutor(new ThreadFactory() {
             public Thread newThread(Runnable r) {
@@ -119,12 +114,12 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         // data call blocks the owner thread — and never starts/restarts a browser just to poll it. A
         // missing or broken generation reports nothing; a genuinely dead browser is detected (and
         // restarted) by the DATA calls, which is where the run's fate is decided.
-        Sidecar sidecar = current;
-        if (closed || state != State.READY || sidecar == null) {
+        RunningBrowser running = current;
+        if (closed || state != State.READY || running == null) {
             return "";
         }
         try {
-            return sidecar.controlCall(tool, arguments);
+            return running.controlCall(tool, arguments);
         } catch (BrowserRuntimeException failure) {
             String line = "[browser] control call failed tool=" + tool + ": " + failure.getMessage();
             if (!line.equals(lastControlFailureLine)) {
@@ -246,7 +241,7 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         if (state == State.READY || state == State.STARTING || state == State.FAILED) {
             state = State.STOPPING;
         }
-        Sidecar toClose = current;
+        RunningBrowser toClose = current;
         current = null;
         if (toClose != null) {
             toClose.close();
@@ -281,90 +276,45 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         }
     }
 
-    /** Log a dead/unreachable sidecar's exit code and its last stderr lines (bounded) — pure diagnostics. */
-    private static void logSidecarPostMortem(String tool, BrowserMcpSidecarProcess process) {
-        Integer code = process.exitCodeOrNull();
-        java.util.List<String> stderr = process.recentStderr();
-        System.err.println("[browser] sidecar endpoint unavailable on tool=" + tool + " exit="
-                + (code == null ? "still-alive" : code) + " stderrLines=" + stderr.size());
-        int from = Math.max(0, stderr.size() - 12);
-        for (int i = from; i < stderr.size(); i++) {
-            System.err.println("[browser]   " + stderr.get(i));
-        }
-    }
-
-    /** The productive starter: spawn the Java-21 browser sidecar and connect its MCP client (blocks to ready). */
-    private static SidecarStarter productionStarter(final ResearchRuntimeConfig config,
-                                                    final long readyTimeoutSeconds,
-                                                    final String browserConfigPath,
-                                                    final McpToolClientFactory toolClients,
-                                                    final int toolTimeoutSeconds) {
-        return new SidecarStarter() {
-            public Sidecar start() throws BrowserRuntimeException {
+    /** The productive starter: start the Playwright browser in this process (blocks until ready). */
+    private static BrowserStarter inProcessStarter(final ResearchRuntimeConfig config,
+                                                   final String browserConfigPath) {
+        return new BrowserStarter() {
+            public RunningBrowser start() throws BrowserRuntimeException {
+                final InProcessBrowser browser;
                 try {
-                    final BrowserMcpSidecarProcess process = BrowserMcpSidecarProcess.start(config,
-                            readyTimeoutSeconds, browserConfigPath);
-                    // The DATA lane blocks for a whole tool call (a multi-page SERP prepare): its timeout
-                    // is the user's tool timeout, the same one the runtime applies on its side.
-                    final McpToolClient client = toolClients.connect(process.getMcpUrl(), "streamable",
-                            toolTimeoutSeconds);
-                    // Second connection to the SAME generation for the control plane: the data client is
-                    // busy for the whole of a blocking call, and its thread-safety under concurrent use is
-                    // not guaranteed — the control lane gets its own client instead of double-using it.
-                    final McpToolClient controlClient = toolClients.connect(process.getMcpUrl(),
-                            "streamable");
-                    return new Sidecar() {
-                        public String call(String tool, Map<String, Object> arguments)
-                                throws BrowserRuntimeException {
-                            try {
-                                return client.callTool(tool, arguments);
-                            } catch (McpToolClient.McpToolCallException ex) {
-                                if (ex.isEndpointUnavailable()) {
-                                    // The sidecar just became unreachable — dump its exit code + last words
-                                    // so a mid-run browser death is diagnosable, not a bare "endpoint gone".
-                                    logSidecarPostMortem(tool, process);
-                                }
-                                throw new BrowserRuntimeException(ex.getMessage(), ex.isEndpointUnavailable());
-                            }
-                        }
-
-                        public String controlCall(String tool, Map<String, Object> arguments)
-                                throws BrowserRuntimeException {
-                            try {
-                                // Serialized among control callers only — never queued behind data calls.
-                                synchronized (controlClient) {
-                                    return controlClient.callTool(tool, arguments);
-                                }
-                            } catch (McpToolClient.McpToolCallException ex) {
-                                throw new BrowserRuntimeException(ex.getMessage(), ex.isEndpointUnavailable());
-                            }
-                        }
-
-                        public boolean isAlive() {
-                            return process.isAlive();
-                        }
-
-                        public void close() {
-                            // McpToolClient has its OWN close() and is NOT java.io.Closeable — an instanceof
-                            // Closeable check silently skipped it, leaking the Solon client's non-daemon
-                            // heartbeat scheduler ("pool-N-thread-1") and keeping the JVM alive after exit.
-                            try {
-                                controlClient.close();
-                            } catch (RuntimeException ignored) {
-                                // best-effort
-                            }
-                            try {
-                                client.close();
-                            } catch (RuntimeException ignored) {
-                                // best-effort
-                            }
-                            process.close();
-                        }
-                    };
+                    browser = InProcessBrowser.start(config.getBrowserChannel(), config.isHeadless(),
+                            config.isAllowPrivateNetworks(), browserConfigPath);
                 } catch (Exception failure) {
-                    throw new BrowserRuntimeException("browser sidecar failed to start: "
-                            + failure.getMessage(), true);
+                    throw new BrowserRuntimeException("browser failed to start: " + failure.getMessage(), true);
                 }
+                return new RunningBrowser() {
+                    public String call(String tool, Map<String, Object> arguments)
+                            throws BrowserRuntimeException {
+                        try {
+                            return browser.call(tool, arguments);
+                        } catch (BrowserException ex) {
+                            // Same text the MCP tool error carried, so every consumer keeps its parsing.
+                            throw new BrowserRuntimeException("Tool failed: " + ex.getMessage(), false);
+                        } catch (RuntimeException ex) {
+                            throw new BrowserRuntimeException("Tool failed: " + ex, false);
+                        }
+                    }
+
+                    public String controlCall(String tool, Map<String, Object> arguments)
+                            throws BrowserRuntimeException {
+                        // The HUD inbox is drained directly by the session (never queued behind a data call).
+                        return call(tool, arguments);
+                    }
+
+                    public boolean isAlive() {
+                        return browser.isAlive();
+                    }
+
+                    public void close() {
+                        browser.close();
+                    }
+                };
             }
         };
     }

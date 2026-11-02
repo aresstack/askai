@@ -7,8 +7,6 @@ import com.aresstack.askai.agent.model.reranker.RerankerConfigurationException;
 import com.aresstack.askai.agent.model.reranker.RerankerConfigurationSnapshot;
 import com.aresstack.askai.agent.model.reranker.RerankerConfigurationSnapshotProvider;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
-import com.aresstack.askai.mcp.api.McpToolClient;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
 import com.aresstack.askai.research.acp.AcpResearchSessionBackend;
 import com.aresstack.askai.research.capture.CaptureStore;
 import com.aresstack.askai.research.capture.ResearchSearchIndex;
@@ -34,21 +32,25 @@ import java.util.Map;
  *     index adapter; the Lucene adapter stays open as MCP-P006),</li>
  * <li>the research-control endpoint (state-gated tools, Commit 33) bound to the session's own hierarchical
  *     state machine — the single transition authority,</li>
- * <li>one browser sidecar process per session + the {@link BrowserBridgeEndpoint} carrying the
+ * <li>the session's research browser inside AskAI + the {@link BrowserBridgeEndpoint} carrying the
  *     {@code capture_id} convention,</li>
- * <li>the {@link AcpResearchSessionBackend} handing both endpoint descriptors to the external agent via
- *     structured launch environment.</li>
+ * <li>the {@link AcpResearchSessionBackend} handing the endpoint descriptors to the research agent, which runs
+ *     inside the AskAI JVM ({@link InProcessResearchRuntime}).</li>
  * </ol>
  * Construction is atomic: any failure rolls back everything already started and nothing half-built is
  * returned. All external paths come from the explicit {@link ResearchRuntimeConfig} — no hidden globals.
  */
 public final class ProductiveResearchBackendFactory {
 
-    private static final long SIDECAR_READY_TIMEOUT_SECONDS = 120;
 
     private final McpServerRegistry registry;
-    private final McpToolClientFactory toolClients;
     private final AcpAgentConnector connector;
+    /**
+     * Where the endpoints only the research agent calls (research control, research service, research
+     * browser) are registered: the in-process registry of the AskAI JVM (askai #48). The bot-control endpoint
+     * for external clients uses the host registry.
+     */
+    private final McpServerRegistry agentRegistry;
     private final ResearchRuntimeConfig config;
     private final long generationId;
     /** Stored browser-search overrides (canonical codec keys) + their revision, from the host store. */
@@ -145,7 +147,7 @@ public final class ProductiveResearchBackendFactory {
         this.useAiReranker = enabled;
     }
 
-    /** Per-call MCP timeout toward the browser sidecar (seconds) — the settings value, never a constant. */
+    /** Per-call MCP timeout toward the browser runtime (seconds) — the settings value, never a constant. */
     public void setBrowserToolTimeoutSeconds(int seconds) {
         if (seconds > 0) {
             this.browserToolTimeoutSeconds = seconds;
@@ -168,49 +170,49 @@ public final class ProductiveResearchBackendFactory {
     /** OPTIONAL host NLP snapshot provider; resolves the session's selected sentence model (else regex). */
     private volatile com.aresstack.askai.agent.model.nlp.NlpConfigurationSnapshotProvider nlpSnapshots;
 
-    public ProductiveResearchBackendFactory(McpServerRegistry registry, McpToolClientFactory toolClients,
-                                            AcpAgentConnector connector, ResearchRuntimeConfig config,
+    public ProductiveResearchBackendFactory(McpServerRegistry registry, InProcessResearchRuntime runtime,
+                                            ResearchRuntimeConfig config,
                                             long generationId,
                                             RerankerConfigurationSnapshotProvider rerankerSnapshots) {
-        this(registry, toolClients, connector, config, generationId,
+        this(registry, runtime, config, generationId,
                 Collections.<String, String>emptyMap(), 0L, rerankerSnapshots);
     }
 
-    public ProductiveResearchBackendFactory(McpServerRegistry registry, McpToolClientFactory toolClients,
-                                            AcpAgentConnector connector, ResearchRuntimeConfig config,
+    public ProductiveResearchBackendFactory(McpServerRegistry registry, InProcessResearchRuntime runtime,
+                                            ResearchRuntimeConfig config,
                                             long generationId, Map<String, String> browserSearchValues,
                                             long browserSearchRevision,
                                             RerankerConfigurationSnapshotProvider rerankerSnapshots) {
-        this(registry, toolClients, connector, config, generationId, browserSearchValues,
+        this(registry, runtime, config, generationId, browserSearchValues,
                 browserSearchRevision, rerankerSnapshots, null);
     }
 
-    public ProductiveResearchBackendFactory(McpServerRegistry registry, McpToolClientFactory toolClients,
-                                            AcpAgentConnector connector, ResearchRuntimeConfig config,
+    public ProductiveResearchBackendFactory(McpServerRegistry registry, InProcessResearchRuntime runtime,
+                                            ResearchRuntimeConfig config,
                                             long generationId, Map<String, String> browserSearchValues,
                                             long browserSearchRevision,
                                             RerankerConfigurationSnapshotProvider rerankerSnapshots,
                                             com.aresstack.askai.agent.model.inference
                                                     .InferenceConfigurationSnapshotProvider inferenceSnapshots) {
-        this(registry, toolClients, connector, config, generationId, browserSearchValues,
+        this(registry, runtime, config, generationId, browserSearchValues,
                 browserSearchRevision, rerankerSnapshots, inferenceSnapshots,
                 SearchStrategySelection.legacyBrowser());
     }
 
-    public ProductiveResearchBackendFactory(McpServerRegistry registry, McpToolClientFactory toolClients,
-                                            AcpAgentConnector connector, ResearchRuntimeConfig config,
+    public ProductiveResearchBackendFactory(McpServerRegistry registry, InProcessResearchRuntime runtime,
+                                            ResearchRuntimeConfig config,
                                             long generationId, Map<String, String> browserSearchValues,
                                             long browserSearchRevision,
                                             RerankerConfigurationSnapshotProvider rerankerSnapshots,
                                             com.aresstack.askai.agent.model.inference
                                                     .InferenceConfigurationSnapshotProvider inferenceSnapshots,
                                             SearchStrategySelection searchStrategy) {
-        this(registry, toolClients, connector, config, generationId, browserSearchValues,
+        this(registry, runtime, config, generationId, browserSearchValues,
                 browserSearchRevision, rerankerSnapshots, inferenceSnapshots, searchStrategy, null);
     }
 
-    public ProductiveResearchBackendFactory(McpServerRegistry registry, McpToolClientFactory toolClients,
-                                            AcpAgentConnector connector, ResearchRuntimeConfig config,
+    public ProductiveResearchBackendFactory(McpServerRegistry registry, InProcessResearchRuntime runtime,
+                                            ResearchRuntimeConfig config,
                                             long generationId, Map<String, String> browserSearchValues,
                                             long browserSearchRevision,
                                             RerankerConfigurationSnapshotProvider rerankerSnapshots,
@@ -220,8 +222,8 @@ public final class ProductiveResearchBackendFactory {
                                             com.aresstack.askai.agent.model.embedding
                                                     .EmbeddingConfigurationSnapshotProvider embeddingSnapshots) {
         this.registry = registry;
-        this.toolClients = toolClients;
-        this.connector = connector;
+        this.agentRegistry = runtime.registry();
+        this.connector = runtime.connector();
         this.config = config;
         this.generationId = generationId;
         this.browserSearchValues = browserSearchValues;
@@ -265,7 +267,7 @@ public final class ProductiveResearchBackendFactory {
             throw new IOException("Cannot create " + searchConfigDir);
         }
         File profileFile = new File(searchConfigDir, "search-profile.json");
-        File sidecarConfigFile = new File(searchConfigDir, "browser-config.json");
+        File browserConfigFile = new File(searchConfigDir, "browser-config.json");
         com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot profile;
         if (profileFile.isFile()) {
             try {
@@ -315,13 +317,13 @@ public final class ProductiveResearchBackendFactory {
                     sessionKey, browserSearchRevision, System.currentTimeMillis(), decoded.settings);
             writeUtf8(profileFile, profile.toJson());
         }
-        // The browser-near SUBSET for the sidecar is regenerated from the SNAPSHOT on every start
+        // The browser-near SUBSET for the browser runtime is regenerated from the SNAPSHOT on every start
         // (AI/prompt/reranker settings never enter the browser process).
-        writeUtf8(sidecarConfigFile, new com.aresstack.askai.browser.search
+        writeUtf8(browserConfigFile, new com.aresstack.askai.browser.search
                 .LegacyBrowserSearchConfigDocument(
                         profile.schemaVersion, profile.profileRevision, profile.settingsDigest,
                         com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
-                                .sidecarSubset(com.aresstack.askai.browser.search
+                                .browserSubset(com.aresstack.askai.browser.search
                                         .LegacyBrowserSearchSettingsCodec
                                         .toValues(profile.settings))).toJson());
         File fullConfigFile = profileFile;
@@ -631,17 +633,16 @@ public final class ProductiveResearchBackendFactory {
         com.aresstack.askai.research.mcp.ResearchControlEndpoint control = null;
         com.aresstack.askai.research.mcp.ResearchServiceEndpoint service = null;
         // 2. LAZY browser runtime: created STOPPED — selecting the Research agent must NOT spawn a browser
-        // or block the EDT. The Playwright sidecar starts on the FIRST browser command (on the runtime's
+        // or block the EDT. The Playwright browser runtime starts on the FIRST browser command (on the runtime's
         // own owner thread) and is stopped again when the browsing phase ends; a broken generation restarts.
         // The managed Camoufox is downloaded once; start that now in the background so the first browser
         // command (usually minutes later, after scoping) finds it installed. Spawns no browser.
         CamoufoxPrefetch.startOnce(config);
         final BrowserRuntimePort browser = new LazyRestartableBrowserRuntime(config,
-                SIDECAR_READY_TIMEOUT_SECONDS, sidecarConfigFile.getAbsolutePath(), toolClients,
-                browserToolTimeoutSeconds);
+                browserConfigFile.getAbsolutePath());
         try {
             // 3. Host endpoints for this session+generation (the bridge forwards through the lazy runtime).
-            bridge = new BrowserBridgeEndpoint(registry, browser, captures, sessionKey, generationId);
+            bridge = new BrowserBridgeEndpoint(agentRegistry, browser, captures, sessionKey, generationId);
             bridge.open();
 
             // The control endpoint needs the live-state context; resources are created first with a
@@ -817,16 +818,15 @@ public final class ProductiveResearchBackendFactory {
                         }
                     };
             control = new com.aresstack.askai.research.mcp.ResearchControlEndpoint(
-                    registry, sessionKey, generationId, controlContext);
+                    agentRegistry, sessionKey, generationId, controlContext);
             // The INTERNAL service endpoint (manual_source_accept + the explicit derived actions, #33)
             // shares the SAME acceptance context but its own namespace — user/host/test operations,
             // never agent tools. The derived actions resolve through the session at call time.
             // The runtime-plumbing endpoint (manual_source_*) — internal runtime->host traffic only.
             service = new com.aresstack.askai.research.mcp.ResearchServiceEndpoint(
-                    registry, sessionKey, generationId, controlContext);
+                    agentRegistry, sessionKey, generationId, controlContext);
 
             // 4. Backend with BOTH endpoint descriptors (structured env hand-off; tokens never logged).
-            String agentJava = config.getAgentJavaExecutable();
             // The agent reads the FULL settings document (AI/prompt settings stay host-side only in
             // the sense of never reaching the BROWSER process; the agent needs them) plus the MANDATORY
             // reranker start snapshot: the agent MUST rerank before opening any page.
@@ -856,24 +856,15 @@ public final class ProductiveResearchBackendFactory {
                     String.valueOf(browserToolTimeoutSeconds));
             // "KI-Reranker verwenden": OFF = the runtime scores lexically (BM25, no model call).
             baseEnv.put("ASKAI_USE_AI_RERANKER", String.valueOf(useAiReranker));
-            // DEV/TEST-only hand-off (mirrors askai.research.sidecar.args for the browser sidecar): extra JVM
-            // args for the research-agent-runtime child, inserted BEFORE -jar so they are JVM flags. Empty by
-            // default → no production effect. Set on the HOST JVM, e.g. to A/B the overlay:
-            //   -Daskai.research.agent.jvmargs=-Daskai.research.hud.enabled=false
-            java.util.List<String> agentArgs = new java.util.ArrayList<String>();
-            // UTF-8 default for the Java-8 agent child: on a German Windows its platform charset is
-            // Cp1252, and any library decoding MCP HTTP bytes with the default turns UTF-8 source
-            // titles/excerpts into mojibake ('ä' → 'ÃÂ¤' after two hops). Explicit, always.
-            agentArgs.add("-Dfile.encoding=UTF-8");
-            String extraJvmArgs = System.getProperty("askai.research.agent.jvmargs", "").trim();
-            if (!extraJvmArgs.isEmpty()) {
-                for (String extra : extraJvmArgs.split("\\s+")) {
-                    agentArgs.add(extra);
-                }
+            // Dev/test hand-off for local test worlds (like the former per-run browser flags): a Google-shaped
+            // local result page instead of www.google.com. Never persisted, never set in normal operation.
+            String googleSearchUrl = System.getProperty("askai.research.googleSearchUrl", "").trim();
+            if (!googleSearchUrl.isEmpty()) {
+                baseEnv.put("ASKAI_GOOGLE_SEARCH_URL", googleSearchUrl);
             }
-            agentArgs.add("-jar");
-            agentArgs.add(config.getAgentJar());
-            AgentLaunchSpec spec = new AgentLaunchSpec(agentJava, agentArgs, baseEnv);
+            // The agent runs inside this JVM: the launch spec only carries its configuration.
+            AgentLaunchSpec spec = new AgentLaunchSpec("in-process",
+                    java.util.Collections.<String>emptyList(), baseEnv);
             AcpResearchSessionBackend backend = null; // assigned after control.open()
 
             ProductiveResearchSessionResources resources;
@@ -944,13 +935,13 @@ public final class ProductiveResearchBackendFactory {
                 System.err.println("[research-bot] bot-control MCP disabled by configuration - "
                         + "this session is GUI-only");
             }
-            String researchUrl = registry.endpointUrl(control.getHandle());
+            String researchUrl = agentRegistry.endpointUrl(control.getHandle());
             AcpEndpointDescriptor researchDescriptor = new AcpEndpointDescriptor(
                     control.getEndpointId(), researchUrl, "streamable", control.getHandle().getToken());
-            String bridgeUrl = registry.endpointUrl(bridge.getHandle());
+            String bridgeUrl = agentRegistry.endpointUrl(bridge.getHandle());
             AcpEndpointDescriptor browserDescriptor = new AcpEndpointDescriptor(
                     bridge.getEndpointId(), bridgeUrl, "streamable", bridge.getHandle().getToken());
-            String serviceUrl = registry.endpointUrl(service.getHandle());
+            String serviceUrl = agentRegistry.endpointUrl(service.getHandle());
             AcpEndpointDescriptor serviceDescriptor = new AcpEndpointDescriptor(
                     service.getEndpointId(), serviceUrl, "streamable", service.getHandle().getToken());
             // Issue #33: DEV hand-off for HEADLESS clients (gates, tests, an MCP-driving AI): the service
@@ -1072,7 +1063,7 @@ public final class ProductiveResearchBackendFactory {
             bridge.close();
         }
         if (browser != null) {
-            browser.close(); // STOPPED runtime → just releases the owner thread; started → tears the sidecar down
+            browser.close(); // STOPPED runtime → just releases the owner thread; started → tears the browser runtime down
         }
     }
 

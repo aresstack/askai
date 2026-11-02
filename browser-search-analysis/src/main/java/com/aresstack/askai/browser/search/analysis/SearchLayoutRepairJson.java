@@ -30,7 +30,7 @@ import java.util.Map;
 
 /**
  * The pure Java-8 wire codec for the SERP layout repair bridge — the ONLY thing that crosses the MCP
- * boundary between the model-free sidecar and the model-using research runtime. It round-trips every
+ * boundary between the model-free browser runtime and the model-using research runtime. It round-trips every
  * binding value fully (repair ticket id, analysis id, snapshot id + generation, document fingerprint,
  * layout structure fingerprint, settings digest) and HARD-REJECTS malformed payloads: missing required
  * fields, wrong types and unknown enum/status values all throw {@link DecodeException}. No decision is
@@ -442,6 +442,8 @@ public final class SearchLayoutRepairJson {
             dbl(sb, "structuralConfidence", c.structuralConfidence).append(',');
             dbl(sb, "primaryLinkConfidence", c.primaryLinkConfidence).append(',');
             str(sb, "engineHost", c.engineHost).append(',');
+            str(sb, "urlResolution", c.urlResolution.name()).append(',');
+            str(sb, "originalUrl", c.originalUrl).append(',');
             sb.append("\"siteLinks\":[");
             for (int j = 0; j < c.siteLinks.size(); j++) {
                 if (j > 0) {
@@ -473,7 +475,8 @@ public final class SearchLayoutRepairJson {
                     reqStr(c, "displayedDomain"), reqInt(c, "originalRank"),
                     reqStr(c, "resultContainerId"), reqStr(c, "resultBlockContainerId"),
                     reqDouble(c, "structuralConfidence"), reqDouble(c, "primaryLinkConfidence"),
-                    siteLinks, optStr(c, "engineHost")));
+                    siteLinks, optStr(c, "engineHost"), urlResolutionOf(optStr(c, "urlResolution")),
+                    optStr(c, "originalUrl")));
         }
         return candidates;
     }
@@ -557,6 +560,18 @@ public final class SearchLayoutRepairJson {
             throw new DecodeException("missing required object field '" + key + "'");
         }
         return asObject(o.get(key), key);
+    }
+
+    /** askai #41; a document without the field (older writer) is DIRECT, as before. */
+    private static com.aresstack.askai.browser.search.UrlResolutionStatus urlResolutionOf(String value) {
+        if (value == null || value.isEmpty()) {
+            return com.aresstack.askai.browser.search.UrlResolutionStatus.DIRECT;
+        }
+        try {
+            return com.aresstack.askai.browser.search.UrlResolutionStatus.valueOf(value);
+        } catch (IllegalArgumentException unknown) {
+            throw new DecodeException("urlResolution: unknown value " + value);
+        }
     }
 
     /** An optional string field: absent means empty, never a decode failure (older payloads). */

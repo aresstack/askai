@@ -67,7 +67,6 @@ public final class ResearchLoop {
 
     /** Inject the source-acceptance route (T2c wires the manual port; default stays the agent's tool). */
     private com.aresstack.askai.research.runtime.acquire.SearchScopeControlPort scopeControl;
-
     /** SC1: the autonomous loop uses the SAME scope-control gate as the manual search. */
     public void setScopeControl(
             com.aresstack.askai.research.runtime.acquire.SearchScopeControlPort port) {

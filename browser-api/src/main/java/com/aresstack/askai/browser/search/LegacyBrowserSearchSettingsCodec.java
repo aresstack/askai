@@ -13,7 +13,7 @@ import java.util.TreeMap;
 
 /**
  * Canonical flat key→value form of {@link LegacyBrowserSearchSettings} — ONE encoding for
- * persistence, the sidecar hand-off payload, the profile snapshot and the settings digest.
+ * persistence, the browser runtime hand-off payload, the profile snapshot and the settings digest.
  * Lists are joined with {@code \n} (selectors and prompts never contain newlines per entry).
  *
  * <p>Decoding never invents values: a missing key falls back to {@link LegacyBrowserSearchDefaults}

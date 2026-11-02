@@ -16,20 +16,20 @@ import static org.junit.Assert.fail;
 /**
  * The lazy, restartable browser runtime: nothing starts until the first command, exactly one start is shared
  * by concurrent first commands, a dead generation restarts+retries once, stop ends the phase and a later
- * command restarts, and start failures stay typed — all without a real sidecar process.
+ * command restarts, and start failures stay typed — all without a real separate process.
  */
 public class LazyRestartableBrowserRuntimeTest {
 
     private static final Map<String, Object> NO_ARGS = Collections.emptyMap();
 
-    /** A fake sidecar generation: records calls/closes and can be told to fail its first call once. */
-    private static final class FakeSidecar implements LazyRestartableBrowserRuntime.Sidecar {
+    /** A fake browser runtime generation: records calls/closes and can be told to fail its first call once. */
+    private static final class FakeBrowserRuntime implements LazyRestartableBrowserRuntime.RunningBrowser {
         private final int generation;
         private final boolean failFirstCall;
         private boolean firstCallDone;
         volatile boolean closed;
 
-        FakeSidecar(int generation, boolean failFirstCall) {
+        FakeBrowserRuntime(int generation, boolean failFirstCall) {
             this.generation = generation;
             this.failFirstCall = failFirstCall;
         }
@@ -38,7 +38,7 @@ public class LazyRestartableBrowserRuntimeTest {
                 throws BrowserRuntimePort.BrowserRuntimeException {
             if (failFirstCall && !firstCallDone) {
                 firstCallDone = true;
-                throw new BrowserRuntimePort.BrowserRuntimeException("sidecar died", true);
+                throw new BrowserRuntimePort.BrowserRuntimeException("browser died", true);
             }
             return "gen" + generation + ":" + tool;
         }
@@ -53,14 +53,14 @@ public class LazyRestartableBrowserRuntimeTest {
     }
 
     /** A starter that counts starts and hands out fake generations (optionally failing the very first start). */
-    private static final class CountingStarter implements LazyRestartableBrowserRuntime.SidecarStarter {
+    private static final class CountingStarter implements LazyRestartableBrowserRuntime.BrowserStarter {
         final AtomicInteger starts = new AtomicInteger();
         volatile boolean deadOnFirstCall;
         volatile boolean failNextStart;
-        volatile FakeSidecar last;
+        volatile FakeBrowserRuntime last;
         private CountDownLatch startGate; // optional: block starts until released
 
-        public LazyRestartableBrowserRuntime.Sidecar start()
+        public LazyRestartableBrowserRuntime.RunningBrowser start()
                 throws BrowserRuntimePort.BrowserRuntimeException {
             if (startGate != null) {
                 try {
@@ -73,9 +73,9 @@ public class LazyRestartableBrowserRuntimeTest {
             if (failNextStart) {
                 throw new BrowserRuntimePort.BrowserRuntimeException("start failed", true);
             }
-            FakeSidecar sidecar = new FakeSidecar(n, deadOnFirstCall && n == 1);
-            last = sidecar;
-            return sidecar;
+            FakeBrowserRuntime running = new FakeBrowserRuntime(n, deadOnFirstCall && n == 1);
+            last = running;
+            return running;
         }
     }
 
@@ -159,7 +159,7 @@ public class LazyRestartableBrowserRuntimeTest {
         LazyRestartableBrowserRuntime runtime = new LazyRestartableBrowserRuntime(starter);
         try {
             runtime.execute("web_search", NO_ARGS);
-            FakeSidecar first = starter.last;
+            FakeBrowserRuntime first = starter.last;
             runtime.stop();
             // stop() is async; the next execute serializes behind it and starts a fresh generation.
             assertEquals("gen2:web_search", runtime.execute("web_search", NO_ARGS));
@@ -192,8 +192,8 @@ public class LazyRestartableBrowserRuntimeTest {
         // Skip poll must still get through — out of band, on the caller's thread, via controlCall.
         final CountDownLatch dataEntered = new CountDownLatch(1);
         final CountDownLatch releaseData = new CountDownLatch(1);
-        final LazyRestartableBrowserRuntime.Sidecar sidecar =
-                new LazyRestartableBrowserRuntime.Sidecar() {
+        final LazyRestartableBrowserRuntime.RunningBrowser running =
+                new LazyRestartableBrowserRuntime.RunningBrowser() {
                     public String call(String tool, Map<String, Object> arguments) {
                         if ("web_read".equals(tool)) {
                             dataEntered.countDown();
@@ -219,9 +219,9 @@ public class LazyRestartableBrowserRuntimeTest {
                     }
                 };
         final LazyRestartableBrowserRuntime runtime = new LazyRestartableBrowserRuntime(
-                new LazyRestartableBrowserRuntime.SidecarStarter() {
-                    public LazyRestartableBrowserRuntime.Sidecar start() {
-                        return sidecar;
+                new LazyRestartableBrowserRuntime.BrowserStarter() {
+                    public LazyRestartableBrowserRuntime.RunningBrowser start() {
+                        return running;
                     }
                 });
         try {
@@ -274,6 +274,6 @@ public class LazyRestartableBrowserRuntimeTest {
         } catch (BrowserRuntimePort.BrowserRuntimeException expected) {
             // expected
         }
-        assertEquals("no sidecar is started after close", 0, starter.starts.get());
+        assertEquals("no browser is started after close", 0, starter.starts.get());
     }
 }

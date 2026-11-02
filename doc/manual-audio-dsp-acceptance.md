@@ -31,7 +31,7 @@ Result of the full build in this integration: **BUILD SUCCESSFUL** (all modules,
 `mergeServiceFiles` and `fatJar`). The Fat JAR is:
 
 ```
-askai-app/build/libs/askai-java8-0.1.0.jar
+askai-app/build/libs/askai-0.1.0.jar
 ```
 
 Inspect the resolved runtime classpath if a Graal version conflict is suspected:
@@ -45,7 +45,7 @@ bash "$ROOT_DIR/gradlew" :askai-app:dependencies --configuration runtimeClasspat
 ## Checklist
 
 ### 1. Start the application from the actually built Fat JAR — [MANUAL]
-- Run `java -jar askai-app/build/libs/askai-java8-0.1.0.jar`.
+- Run `java -jar askai-app/build/libs/askai-0.1.0.jar`.
 - Expect the AskAI main window to open with the FlatLaf look and feel installed.
 - Do **not** substitute an IntelliJ run or a plain Gradle-classpath launch — the point is to exercise
   the merged `META-INF/services` inside the Fat JAR.
@@ -96,7 +96,7 @@ bash "$ROOT_DIR/gradlew" :askai-app:dependencies --configuration runtimeClasspat
 ### 9. Persist a user profile, restart, verify persistence — [AUTO] + [MANUAL]
 - **[AUTO]** `FileAudioProfileRepositoryTest` verifies a saved profile reloads with its block order and
   parameters intact (atomic `.properties` write with `REPLACE_EXISTING` fallback under
-  `.askai-java8/audio-profiles/`).
+  `.askai/audio-profiles/`).
 - **[MANUAL]** Save `Speech test`, close the app, restart from the Fat JAR, and confirm the profile is
   still listed and unchanged.
 
@@ -134,13 +134,13 @@ bash "$ROOT_DIR/gradlew" :askai-app:dependencies --configuration runtimeClasspat
 ### 15. Unknown profile id in the configuration → default fallback — [AUTO] + [MANUAL]
 - **[AUTO]** `SpeechToTextConfigurationProfileTest` covers loading an old/absent id as `default-speech`;
   `findById(unknown)` resolves to the default.
-- **[MANUAL]** Edit `.askai-java8/askai-java8.properties`, set `stt.audioProcessingProfile=does-not-exist`,
+- **[MANUAL]** Edit `.askai/askai.properties`, set `stt.audioProcessingProfile=does-not-exist`,
   start the Fat JAR, and confirm the app uses `Default speech` without error.
 
 ### 16. Corrupt / unreadable profile file does not crash the app — [AUTO for load tolerance] + [MANUAL]
 - **[AUTO]** `FileAudioProfileRepository.findAll` skips unreadable/broken user files and always returns
   at least the built-in default (repository behaviour).
-- **[MANUAL]** Put a malformed `.properties` file in `.askai-java8/audio-profiles/`, start the Fat JAR,
+- **[MANUAL]** Put a malformed `.properties` file in `.askai/audio-profiles/`, start the Fat JAR,
   and confirm the app starts, lists the valid profiles + the default, and logs (not crashes) on the bad
   file.
 
@@ -156,7 +156,7 @@ bash "$ROOT_DIR/gradlew" :askai-app:dependencies --configuration runtimeClasspat
   break the GraalJS provider path.
 
 ### 19. PAC / Mermaid / other GraalJS users are not broken by Fat JAR service files — [PACKAGING] + [MANUAL]
-- **[PACKAGING]** Verified by inspecting `askai-java8-0.1.0.jar`:
+- **[PACKAGING]** Verified by inspecting `askai-0.1.0.jar`:
   - `uk/me/berndporr/iirj/*` present (the new IIR dependency; pure Java, no Truffle — no service-file
     conflict);
   - `com/aresstack/audio/profile/*` and `com/aresstack/audio/dsp/AudioProfileProcessor` present;
@@ -166,7 +166,7 @@ bash "$ROOT_DIR/gradlew" :askai-app:dependencies --configuration runtimeClasspat
     `META-INF/services/org.graalvm.polyglot.impl.AbstractPolyglotImpl`.
   - Reproduce with:
     ```bash
-    JAR=askai-app/build/libs/askai-java8-0.1.0.jar
+    JAR=askai-app/build/libs/askai-0.1.0.jar
     unzip -l "$JAR" | grep -E "berndporr/iirj|audio/profile/AudioProcessingProfiles|META-INF/services/.*(truffle|polyglot)"
     ```
   Rules kept: `mergeServiceFiles` is not removed, there is no plain `DuplicatesStrategy.EXCLUDE` without

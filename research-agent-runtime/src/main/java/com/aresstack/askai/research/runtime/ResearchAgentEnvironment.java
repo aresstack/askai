@@ -19,7 +19,7 @@ final class ResearchAgentEnvironment {
     /** Internal service endpoint (manual_source_accept) for user searches; null when absent. */
     final String serviceUrl;
     final String serviceTransport;
-    /** Path of the legacy-browser-search config document (same file the sidecar receives), or null. */
+    /** Path of the legacy-browser-search config document (same file the browser runtime receives), or null. */
     final String browserSearchConfigPath;
     /** Path of the reranker start snapshot (the mandatory local cross-encoder endpoint), or null. */
     final String rerankerConfigPath;

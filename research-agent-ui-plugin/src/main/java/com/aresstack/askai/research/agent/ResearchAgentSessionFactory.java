@@ -1,8 +1,6 @@
 package com.aresstack.askai.research.agent;
 
-import com.aresstack.askai.acp.AcpAgentConnector;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
-import com.aresstack.askai.mcp.api.McpToolClientFactory;
 import com.aresstack.askai.plugin.api.agent.AgentHostContext;
 import com.aresstack.askai.plugin.api.agent.AgentSession;
 import com.aresstack.askai.plugin.api.agent.AgentSessionCreationRequest;
@@ -27,9 +25,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * <li>{@code FAKE} → the deterministic clickdummy backend (development/demo mode, clearly labelled in the
  *     runtime settings view);</li>
  * <li>{@code ACP} → the productive chain via {@link ProductiveResearchBackendFactory} (external agent
- *     process, research-control + browser-bridge endpoints, Playwright sidecar, file-persisted sources).</li>
+ *     process, research-control + browser-bridge endpoints, Playwright browser runtime, file-persisted sources).</li>
  * </ul>
- * A productive start failure (invalid configuration, missing host service, sidecar not READY) throws with the
+ * A productive start failure (invalid configuration, missing host service, browser runtime not READY) throws with the
  * concrete reason — there is NO automatic fallback to the fake backend in any direction.
  */
 public final class ResearchAgentSessionFactory implements AgentSessionFactory {
@@ -109,8 +107,7 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
     private AgentSession createProductive(ResearchRuntimeSettings settings,
                                           AgentSessionCreationRequest request,
                                           AgentHostContext hostContext) {
-        // Empty fields are completed from the detectable environment (running JVM, assembled
-        // distribution, discovered Java 21) — explicit user values always win.
+        // The browser channel is completed from the detectable environment.
         settings = com.aresstack.askai.research.host.ResearchRuntimeDefaults.complete(settings);
         List<String> problems = settings.validateProductive();
         if (!problems.isEmpty()) {
@@ -118,8 +115,6 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                     + "(no fallback to the fake backend): " + problems);
         }
         McpServerRegistry registry = requireService(hostContext, McpServerRegistry.class);
-        McpToolClientFactory toolClients = requireService(hostContext, McpToolClientFactory.class);
-        AcpAgentConnector connector = requireService(hostContext, AcpAgentConnector.class);
         // Diagnostics: which host services actually reached THIS plugin classloader (a class-identity split
         // across classloaders shows up as present=false even when the host published them).
         System.err.println("[research-runtime] RerankerConfigurationSnapshotProvider present="
@@ -154,7 +149,8 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                                 .EmbeddingConfigurationSnapshotProvider.class);
 
         ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(
-                registry, toolClients, connector, settings.toRuntimeConfig(), generationId,
+                registry, com.aresstack.askai.research.host.InProcessResearchRuntime.shared(),
+                settings.toRuntimeConfig(), generationId,
                 com.aresstack.askai.research.host.LegacyBrowserSearchSettingsStore
                         .loadValues(hostContext.getStateStore()),
                 com.aresstack.askai.research.host.LegacyBrowserSearchSettingsStore
@@ -232,7 +228,7 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
             activeSessions.register(request.getSessionId(), sessionDirectory);
         }
         // The session OWNS the resources: structured commands route to their state machine, close() tears
-        // them down last (endpoints → sidecar client → sidecar process).
+        // them down last (endpoints → browser runtime client → separate process).
         ResearchAgentSession session = new ResearchAgentSession(resources.getBackend(), null, hostContext,
                 request.getSessionId(), request.getProjectId(), resources,
                 publicChatSessionId(request));

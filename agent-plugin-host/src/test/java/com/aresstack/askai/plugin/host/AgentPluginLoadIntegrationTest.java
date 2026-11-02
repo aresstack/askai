@@ -96,7 +96,7 @@ public class AgentPluginLoadIntegrationTest {
                         name.startsWith("com/aresstack/askai/plugin/api/"));
                 assertFalse("bundled pf4j-bridge API: " + name,
                         name.startsWith("com/aresstack/askai/plugin/pf4j/api/"));
-                assertFalse("bundled askai-app: " + name, name.startsWith("com/aresstack/askai/java8/"));
+                assertFalse("bundled askai-app: " + name, isAskAiAppClass(name));
                 assertFalse("orphan legacy workspace class: " + name,
                         name.contains("ResearchWorkspace") || name.contains("ResearchDemoData")
                                 || name.contains("/research/domain/"));
@@ -104,6 +104,28 @@ public class AgentPluginLoadIntegrationTest {
         } finally {
             files.close();
         }
+    }
+
+    /** askai-app shares the {@code com.aresstack.askai} root package with the plugin since #51; these are its own. */
+    private static final String[] ASKAI_APP_PACKAGES = {"audio/", "batch/", "catalog/", "client/", "config/", "hf/",
+            "history/", "localmodels/", "net/", "notify/", "ollamalib/", "party/", "plugin/host/", "service/",
+            "settings/", "speech/", "state/", "stt/", "text/", "tool/", "tts/", "ui/", "video/", "vision/"};
+
+    private static boolean isAskAiAppClass(String name) {
+        String root = "com/aresstack/askai/";
+        if (!name.startsWith(root)) {
+            return false;
+        }
+        String rest = name.substring(root.length());
+        if (rest.indexOf('/') < 0) {
+            return true; // AskAiApp, AskAiModel, ...
+        }
+        for (String appPackage : ASKAI_APP_PACKAGES) {
+            if (rest.startsWith(appPackage)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String readEntry(java.util.jar.JarFile jar, String name) throws Exception {
@@ -283,8 +305,39 @@ public class AgentPluginLoadIntegrationTest {
             };
         }
 
+        /** The developer-only FAKE mode: this test proves classloading and isolation, not the runtime. */
+        private final java.util.Map<String, String> state = new java.util.HashMap<String, String>(
+                java.util.Collections.singletonMap("research.runtime.mode", "FAKE"));
+
         public WorkspaceStateStore getStateStore() {
-            return null;
+            return new WorkspaceStateStore() {
+                public String get(String key, String defaultValue) {
+                    String value = state.get(key);
+                    return value == null ? defaultValue : value;
+                }
+
+                public boolean getBoolean(String key, boolean defaultValue) {
+                    String value = state.get(key);
+                    return value == null ? defaultValue : Boolean.parseBoolean(value);
+                }
+
+                public int getInt(String key, int defaultValue) {
+                    String value = state.get(key);
+                    return value == null ? defaultValue : Integer.parseInt(value);
+                }
+
+                public void put(String key, String value) {
+                    state.put(key, value);
+                }
+
+                public void putBoolean(String key, boolean value) {
+                    state.put(key, String.valueOf(value));
+                }
+
+                public void putInt(String key, int value) {
+                    state.put(key, String.valueOf(value));
+                }
+            };
         }
 
         public PluginPathService getPluginPathService() {

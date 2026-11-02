@@ -13,7 +13,7 @@ import java.util.Map;
 
 /**
  * The LEXICAL default reranker: Okapi BM25 over each candidate's title + snippet — no model, no
- * sidecar, no GPU. This is what scores the search unless the user explicitly enables the AI reranker
+ * browser runtime, no GPU. This is what scores the search unless the user explicitly enables the AI reranker
  * ("KI-Reranker verwenden"): cheap and deterministic, at the price of pure word matching (no
  * synonyms, no semantics). Scores are unbounded and only comparable WITHIN one call — exactly the
  * {@link RerankerScoreSemantics#RAW_LOGIT} contract the selection policy already honours.
