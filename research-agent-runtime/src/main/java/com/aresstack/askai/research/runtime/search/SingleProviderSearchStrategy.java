@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.runtime.search;
 
 import com.aresstack.askai.browser.search.SearchResultCandidate;
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
 import com.aresstack.askai.browser.search.SearchResultSiteLink;
 import com.aresstack.askai.browser.search.inference.CancellationSignal;
 import com.aresstack.askai.research.runtime.search.provider.SearchEngine;
@@ -69,8 +70,8 @@ public final class SingleProviderSearchStrategy implements SearchStrategy {
                         : ", raw response " + providerResult.getRawResponse().length() + " chars"));
         List<String> unresolved = providerResult.getUnresolvedRedirects();
         if (!unresolved.isEmpty()) {
-            diagnostics.add(unresolved.size() + " further hit(s) found but excluded as sources: redirect target"
-                    + " not resolved");
+            diagnostics.add(unresolved.size() + " of them with unresolved redirect: kept as candidates, not"
+                    + " verified targets until the browser lands on their page");
             for (String line : unresolved) {
                 diagnostics.add("unresolved redirect: " + line);
             }
@@ -81,16 +82,19 @@ public final class SingleProviderSearchStrategy implements SearchStrategy {
     }
 
     /**
-     * Map a provider hit onto the neutral candidate: the normalized URL is what gets navigated, the raw
-     * provider URL is kept as diagnostic provenance, and DOM-only fields are empty with full confidence
-     * (an API hit is a certain, structured result, not an inferred SERP block).
+     * Map a provider hit onto the neutral candidate: the normalized URL is the verified target that gets navigated,
+     * the raw provider URL is kept as provenance, and DOM-only fields are empty with full confidence (an API hit is a
+     * certain, structured result, not an inferred SERP block). askai #41: an UNRESOLVED hit has NO verified target;
+     * it stays a candidate with its provider URL in {@code rawSearchHref}, which the browser navigates later.
      */
     private static SearchResultCandidate toCandidate(SearchHit hit) {
-        String normalized = SearchUrlNormalizer.normalize(hit.getUrl());
+        boolean unresolved = hit.getUrlResolution() == UrlResolutionStatus.UNRESOLVED;
+        String target = unresolved ? "" : SearchUrlNormalizer.normalize(hit.getUrl());
+        String original = !hit.getOriginalUrl().isEmpty() ? hit.getOriginalUrl() : unresolved ? hit.getUrl() : "";
         return new SearchResultCandidate(
                 hit.getProviderId() + "#" + hit.getRank(),
                 "",
-                normalized,
+                target,
                 hit.getUrl(),
                 hit.getTitle(),
                 hit.getSnippet(),
@@ -100,6 +104,9 @@ public final class SingleProviderSearchStrategy implements SearchStrategy {
                 "",
                 1.0,
                 1.0,
-                Collections.<SearchResultSiteLink>emptyList());
+                Collections.<SearchResultSiteLink>emptyList(),
+                "",
+                hit.getUrlResolution(),
+                original);
     }
 }

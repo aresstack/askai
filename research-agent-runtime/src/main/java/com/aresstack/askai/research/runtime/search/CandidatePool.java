@@ -34,7 +34,8 @@ public final class CandidatePool {
         int rank = 0;
         for (SearchResultCandidate hit : hits) {
             rank++;
-            String target = hit.resolvedTargetUrl == null ? "" : hit.resolvedTargetUrl.trim();
+            // askai #41: an UNRESOLVED hit has no verified target but stays a candidate under its provider URL.
+            String target = hit.navigationUrl().trim();
             if (target.isEmpty()) {
                 continue;
             }
@@ -49,7 +50,8 @@ public final class CandidatePool {
             }
             String candidateId = "c" + (byNormalizedUrl.size() + 1);
             byNormalizedUrl.put(normalized, new SearchCandidate(candidateId, normalized, hit.title,
-                    hit.snippet, hit.displayedDomain, java.util.Collections.singletonList(occurrence)));
+                    hit.snippet, hit.displayedDomain, java.util.Collections.singletonList(occurrence),
+                    hit.hasVerifiedTarget()));
             added++;
         }
         return added;

@@ -67,6 +67,13 @@ public final class ResearchLoop {
 
     /** Inject the source-acceptance route (T2c wires the manual port; default stays the agent's tool). */
     private com.aresstack.askai.research.runtime.acquire.SearchScopeControlPort scopeControl;
+    private com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.RedirectResolver redirectResolver;
+
+    /** askai #41: visit-time resolution of unresolved search-hit redirects (see WebSearchApplicationService). */
+    public void setRedirectResolver(
+            com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.RedirectResolver resolver) {
+        this.redirectResolver = resolver;
+    }
 
     /** SC1: the autonomous loop uses the SAME scope-control gate as the manual search. */
     public void setScopeControl(
@@ -237,6 +244,7 @@ public final class ResearchLoop {
             // search uses — one filter truth for both acquisition paths.
             acquisition.setScopeControl(scopeControl);
         }
+        acquisition.setRedirectResolver(redirectResolver);
         ResearchStopReason reason = acquisition.execute(task);
         listener.status("run stopped: " + reason
                 + " (pages=" + progress.getPagesVisited()
