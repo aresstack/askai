@@ -37,6 +37,8 @@ public final class SerpApiSettingsPanel extends JPanel {
     private final JTextField googleDomain = ComicControls.textField(16);
     private final JCheckBox resolveGoto = ComicControls.checkBox("Resolve Google /goto links to the target URL");
     private final JLabel status = new JLabel(" ");
+    /** Draft the edits are applied to; an invalid file falls back to defaults so the UI can repair it. */
+    private SerpApiSearchConfiguration draft;
 
     public SerpApiSettingsPanel(ProviderConfigurationService configurations) {
         super(new BorderLayout());
@@ -70,6 +72,7 @@ public final class SerpApiSettingsPanel extends JPanel {
             status.setText("serpapi.json is invalid: " + invalid.getMessage());
             c = new SerpApiSearchConfiguration();
         }
+        draft = c;
         enabled.setSelected(c.isEnabled());
         boolean stored = c.getApiKey() != null && c.getApiKey().isPresent();
         apiKeyHint.setText(stored ? "A key is stored." : "No key stored.");
@@ -84,7 +87,7 @@ public final class SerpApiSettingsPanel extends JPanel {
     /** Writes {@code serpapi.json}; a typed key replaces the stored one. Returns false on a validation error. */
     public boolean save() {
         try {
-            SerpApiSearchConfiguration c = configurations.loadOrCreateSerpApi();
+            SerpApiSearchConfiguration c = draft;
             apply(c);
             char[] typed = apiKey.getPassword();
             if (typed.length > 0) {
