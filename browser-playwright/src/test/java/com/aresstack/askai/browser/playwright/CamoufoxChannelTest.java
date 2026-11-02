@@ -21,6 +21,24 @@ public class CamoufoxChannelTest {
     public TemporaryFolder temporary = new TemporaryFolder();
 
     @Test
+    public void aConfiguredLocationWithoutInstallationFailsInsteadOfDownloading() throws Exception {
+        Path empty = temporary.newFolder("no-camoufox").toPath();
+        String old = System.setProperty(CamoufoxProvisioning.ROOT_PROPERTY, empty.toString());
+        try {
+            CamoufoxProvisioning.browserRoot();
+            org.junit.Assert.fail("a configured location without a verified Camoufox must not become a download target");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("nothing is downloaded"));
+        } finally {
+            if (old == null) {
+                System.clearProperty(CamoufoxProvisioning.ROOT_PROPERTY);
+            } else {
+                System.setProperty(CamoufoxProvisioning.ROOT_PROPERTY, old);
+            }
+        }
+    }
+
+    @Test
     public void camoufoxIsTheDefaultChannel() {
         assertEquals("camoufox", PlaywrightSessionFactory.normalizeChannel(null));
         assertEquals("camoufox", PlaywrightSessionFactory.normalizeChannel("camoufox"));
