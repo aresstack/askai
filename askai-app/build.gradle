@@ -15,7 +15,7 @@ dependencies {
     // FFmpeg backend: compiled against JavaCV, but the jars (incl. ~100+ MB natives) are NEVER shipped
     // or fetched silently — FfmpegRuntimeLoader downloads them from Maven Central ONLY after the user's
     // explicit, confirmed request (reference: WD4J/corenth VideoRuntimeLoader), then attaches them to
-    // the Java-8 system classloader. compileOnly keeps them out of the fat jar.
+    // a dedicated classloader (FfmpegRuntimeLoader.RecorderClassLoader). compileOnly keeps them out of the fat jar.
     compileOnly 'org.bytedeco:javacv:1.5.10'
     compileOnly 'org.bytedeco:javacpp:1.5.10'
     compileOnly 'org.bytedeco:ffmpeg:6.1.1-1.5.10'
@@ -80,8 +80,25 @@ dependencies {
     testImplementation project(':research-agent-ui-plugin')
 }
 
+configurations {
+    // The FFmpeg jars as the user-confirmed download would bring them, for the classloader test only
+    // (never on the test classpath: there they would hide what the dedicated loader has to do).
+    ffmpegJars { transitive = false }
+}
+
+dependencies {
+    ffmpegJars 'org.bytedeco:javacv:1.5.10'
+    ffmpegJars 'org.bytedeco:javacpp:1.5.10'
+    ffmpegJars 'org.bytedeco:ffmpeg:6.1.1-1.5.10'
+}
+
 test {
     useJUnit()
+    inputs.files(configurations.ffmpegJars)
+    doFirst {
+        systemProperty 'askai.test.ffmpegJars', configurations.ffmpegJars.files.collect { it.absolutePath }
+                .join(File.pathSeparator)
+    }
     // App-classpath reproduction of the research-agent start (diagnoses -32603 from the GUI).
     dependsOn ':research-agent-runtime:researchAgentJar'
     dependsOn ':browser-mcp-server-java21:sidecarJar'

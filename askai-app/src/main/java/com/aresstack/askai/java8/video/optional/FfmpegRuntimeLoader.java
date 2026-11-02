@@ -3,7 +3,6 @@ package com.aresstack.askai.java8.video.optional;
 import java.io.BufferedInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -22,8 +21,10 @@ import java.util.List;
  * local lib dir — i.e. after that one confirmed download — they are attached silently on later runs,
  * which is the persisted result of the user's earlier consent, not a new download.
  *
- * <p>Java 8 only for the attach: the system classloader must be a {@link URLClassLoader}. Everything is
- * fetched from Maven Central over HTTPS into {@code ~/.askai/video-libs}.</p>
+ * <p>The jars are attached through a dedicated classloader (the system classloader of Java 9+ cannot take
+ * new jars): {@link FfmpegRecorder} itself is defined in that loader, so its JavaCV references resolve
+ * there, while the AskAI types it implements come from the application. Everything is fetched from Maven
+ * Central over HTTPS into {@code ~/.askai/video-libs}.</p>
  */
 public final class FfmpegRuntimeLoader {
 
@@ -37,7 +38,31 @@ public final class FfmpegRuntimeLoader {
         void onFile(String fileName, int index, int total);
     }
 
+    private static final String RECORDER_CLASS = "com.aresstack.askai.java8.video.optional.FfmpegRecorder";
+
+    /** The loader holding the downloaded jars and {@link FfmpegRecorder}; null until attached. */
+    private static ClassLoader attached;
+
     private FfmpegRuntimeLoader() {
+    }
+
+    /** A new FFmpeg recorder, defined in the loader that sees the JavaCV classes. */
+    static synchronized com.aresstack.askai.java8.video.MediaRecorder newRecorder(
+            com.aresstack.askai.java8.video.VideoSettings.Ffmpeg settings) {
+        ClassLoader loader = attached != null ? attached : FfmpegRuntimeLoader.class.getClassLoader();
+        try {
+            return (com.aresstack.askai.java8.video.MediaRecorder) Class.forName(RECORDER_CLASS, true, loader)
+                    .getConstructor(com.aresstack.askai.java8.video.VideoSettings.Ffmpeg.class)
+                    .newInstance(settings);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            throw new IllegalStateException("The FFmpeg recorder could not be created: " + cause, cause);
+        } catch (ReflectiveOperationException | LinkageError e) {
+            throw new IllegalStateException("The FFmpeg recorder could not be created: " + e, e);
+        }
     }
 
     /** True when the JavaCV/FFmpeg classes are loadable — attaching previously downloaded jars first. */
@@ -112,7 +137,7 @@ public final class FfmpegRuntimeLoader {
         attach(localJars());
         if (!classesPresent()) {
             throw new IllegalStateException("The FFmpeg libraries were downloaded but could not be "
-                    + "attached to the classloader (this needs a Java 8 runtime).");
+                    + "loaded.");
         }
     }
 
@@ -120,7 +145,8 @@ public final class FfmpegRuntimeLoader {
 
     private static boolean classesPresent() {
         try {
-            Class.forName("org.bytedeco.javacv.FFmpegFrameRecorder");
+            Class.forName("org.bytedeco.javacv.FFmpegFrameRecorder", false,
+                    attached != null ? attached : FfmpegRuntimeLoader.class.getClassLoader());
             return true;
         } catch (Throwable absent) {
             return false;
@@ -209,16 +235,64 @@ public final class FfmpegRuntimeLoader {
         Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING);
     }
 
-    private static void attach(List<Path> jars) throws Exception {
-        ClassLoader system = ClassLoader.getSystemClassLoader();
-        if (!(system instanceof URLClassLoader)) {
-            throw new IllegalStateException(
-                    "The system classloader is not a URLClassLoader (the FFmpeg backend needs Java 8).");
+    private static void attach(List<Path> jars) throws IOException {
+        if (attached != null) {
+            return;
         }
-        Method addUrl = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
-        addUrl.setAccessible(true);
+        URL[] urls = new URL[jars.size()];
         for (int i = 0; i < jars.size(); i++) {
-            addUrl.invoke(system, jars.get(i).toUri().toURL());
+            urls[i] = jars.get(i).toUri().toURL();
+        }
+        attached = new RecorderClassLoader(urls, FfmpegRuntimeLoader.class.getClassLoader());
+    }
+
+    /**
+     * Parent-first, except for {@link FfmpegRecorder} (and its nested classes): those are defined here from
+     * the application's class bytes, so their JavaCV references resolve against the downloaded jars.
+     */
+    static final class RecorderClassLoader extends URLClassLoader {
+
+        static {
+            ClassLoader.registerAsParallelCapable();
+        }
+
+        RecorderClassLoader(URL[] urls, ClassLoader parent) {
+            super(urls, parent);
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            if (!name.equals(RECORDER_CLASS) && !name.startsWith(RECORDER_CLASS + "$")) {
+                return super.loadClass(name, resolve);
+            }
+            synchronized (getClassLoadingLock(name)) {
+                Class<?> c = findLoadedClass(name);
+                if (c == null) {
+                    String resource = name.replace('.', '/') + ".class";
+                    java.io.InputStream in = getParent().getResourceAsStream(resource);
+                    if (in == null) {
+                        throw new ClassNotFoundException(name);
+                    }
+                    try {
+                        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                        byte[] buf = new byte[8192];
+                        int read;
+                        while ((read = in.read(buf)) >= 0) {
+                            bytes.write(buf, 0, read);
+                        }
+                        byte[] b = bytes.toByteArray();
+                        c = defineClass(name, b, 0, b.length, FfmpegRuntimeLoader.class.getProtectionDomain());
+                    } catch (IOException e) {
+                        throw new ClassNotFoundException(name, e);
+                    } finally {
+                        try { in.close(); } catch (IOException ignore) { }
+                    }
+                }
+                if (resolve) {
+                    resolveClass(c);
+                }
+                return c;
+            }
         }
     }
 }

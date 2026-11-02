@@ -35,7 +35,7 @@ public final class FfmpegRecorderProvider implements MediaRecorderProvider {
             throw new IllegalStateException("The FFmpeg libraries are not installed. The Record Video "
                     + "dialog offers the download — it runs only on your explicit confirmation.");
         }
-        return new FfmpegRecorder(
+        return FfmpegRuntimeLoader.newRecorder(
                 com.aresstack.askai.java8.video.VideoSettingsStore.shared().load().getFfmpeg());
     }
 }
