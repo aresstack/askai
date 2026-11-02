@@ -23,6 +23,8 @@ dependencies {
         exclude group: 'com.microsoft.playwright', module: 'driver'
         exclude group: 'com.microsoft.playwright', module: 'driver-bundle'
     }
+    // askai #31: the search browser hands its Browser to Serp4J PlaywrightSearchProviders (ADR-020).
+    api "com.aresstack:serp4j-playwright:${(findProperty('serp4jVersion') ?: '0.1.0-SNAPSHOT')}"
     implementation 'com.aresstack:playwright4j:0.3.0' // embeds the Core JS package itself (no driver-bundle)
     // The Camoufox distribution/launch code (com.aresstack.askai.browser.playwright.camoufox) reads its manifest,
     // font groups and fingerprint profile with Gson, the house JSON library (ADR 0001, section 3.1); Playwright
