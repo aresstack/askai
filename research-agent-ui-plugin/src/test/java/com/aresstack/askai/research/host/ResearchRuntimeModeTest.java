@@ -292,14 +292,16 @@ public class ResearchRuntimeModeTest {
     @Test
     public void panelReadsAndWritesTheSameTypedMapper() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "a", "b", "c", "d", "msedge", false)
+        // camoufox: the one channel installedBrowserChannel never swaps for another installed browser, so the
+        // round trip does not depend on whether Edge or Chrome exists on the machine.
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "a", "b", "c", "d", "camoufox", false)
                 .save(store);
         ResearchRuntimeSettingsPanel panel = new ResearchRuntimeSettingsPanel(store);
         ResearchRuntimeSettings fromPanel = panel.currentSettings();
         assertEquals(ResearchBackendMode.ACP, fromPanel.getMode());
         assertEquals("a", fromPanel.getAgentJavaExecutable());
         assertEquals("d", fromPanel.getSidecarJar());
-        assertEquals("msedge", fromPanel.getBrowserChannel());
+        assertEquals("camoufox", fromPanel.getBrowserChannel());
         assertEquals(false, fromPanel.isHeadless());
     }
 
