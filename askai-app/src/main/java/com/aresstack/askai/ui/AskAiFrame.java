@@ -339,13 +339,13 @@ public final class AskAiFrame extends JFrame {
 
     /** The Audio screen: drawer with Batch transcription and Audio processing. */
     private static final String AUDIO_SCREEN = "audio-screen";
-    /** The Models screen: drawer with Setup, Installed and Running Models, "Back" in the footer. */
+    /** The Models screen: drawer with Setup and Models (installed + running in one list), "Back" in the footer. */
     private static final String MODELS_SCREEN = "models-screen";
     private static final String PAGE_BATCH = "Batch transcription";
     private static final String PAGE_AUDIO_PROCESSING = "Audio processing";
     private static final String PAGE_SETUP = "Setup";
-    private static final String PAGE_INSTALLED = "Installed";
-    private static final String PAGE_RUNNING = "Running Models";
+    /** Installed and running models in one list; running models on top with a badge (as in ollama-manager). */
+    private static final String PAGE_MODELS = "Models";
     private com.aresstack.askai.ui.chat.DrawerScreen audioScreen;
     private com.aresstack.askai.ui.chat.DrawerScreen modelsScreen;
     /** The last Text/Audio screen — where the Models drawer's "Back" returns to. */
@@ -392,7 +392,7 @@ public final class AskAiFrame extends JFrame {
         return menu;
     }
 
-    /** The models button (cube glyph, the gear's size): Setup / Installed / Running Models as a menu. */
+    /** The models button (cube glyph, the gear's size): Setup / Models as a menu. */
     private javax.swing.JComponent createModelsButton() {
         final com.aresstack.comiccontrols.control.ComicButton models = new com.aresstack.comiccontrols.control.ComicButton(
                 new ScaledIcon(com.aresstack.askai.ui.ChatComposerPanel.createModelsGlyphIcon(), 20));
@@ -400,7 +400,7 @@ public final class AskAiFrame extends JFrame {
         models.setFocusable(false);
         models.setMargin(new java.awt.Insets(0, 0, 0, 0));
         models.setPreferredSize(new Dimension(24, 24));
-        models.setToolTipText("Models: setup, installed, running");
+        models.setToolTipText("Models: setup, installed and running models");
         models.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
         models.addActionListener(event -> showScreen(MODELS_SCREEN)); // the Models drawer
         models.setMaximumSize(models.getPreferredSize());
@@ -1239,8 +1239,7 @@ public final class AskAiFrame extends JFrame {
                 useModelInChat(modelName);
             }
         });
-        modelsScreen().addPage(PAGE_INSTALLED, modelsPanel, () -> showModelsPage(true));
-        modelsScreen().addPage(PAGE_RUNNING, modelsPanel, () -> showModelsPage(false));
+        modelsScreen().addPage(PAGE_MODELS, modelsPanel, this::showModelsPage);
         contentPanel.add(withFooter(new OllamaActionsPanel(featureActionService, ollamaService)), ACTIONS_VIEW);
         // Java 8 port: model search with two sources in tabs — HuggingFace (search/analyze/import)
         // and the Ollama Library (scrape ollama.com, pull a tag on the remote server).
@@ -1283,10 +1282,10 @@ public final class AskAiFrame extends JFrame {
                 modelSearchPanel.openLocalProjectorAddOn(modelName);
             }
         });
-        // After a verified encoder attach, re-read Installed Models from /api/show (no local state kept).
+        // After a verified encoder attach, re-read the models from /api/show (no local state kept).
         modelSearchPanel.setAddOnAttachedListener(new Runnable() {
             public void run() {
-                modelsPanel.showInstalled();
+                modelsPanel.showModels();
             }
         });
         this.installSearchPanel = modelSearchPanel;
@@ -1414,22 +1413,12 @@ public final class AskAiFrame extends JFrame {
         }
     }
 
-    /** Show the Models drawer on the Installed or Running Models page. */
-    private void showModels(boolean installed) {
-        showScreen(MODELS_SCREEN);
-        modelsScreen().select(installed ? PAGE_INSTALLED : PAGE_RUNNING);
-    }
-
-    /** The Installed / Running Models page of the Models drawer was chosen. */
-    private void showModelsPage(boolean installed) {
+    /** The Models page (installed and running models in one list) of the Models drawer was chosen. */
+    private void showModelsPage() {
         if (installSearchPanel != null) {
             installSearchPanel.leaveAddOnMode(); // leaving Setup drops any transient add-on target
         }
-        if (installed) {
-            modelsPanel.showInstalled();
-        } else {
-            modelsPanel.showRunning();
-        }
+        modelsPanel.showModels();
         refreshConnectionStatus();
     }
 }
