@@ -137,6 +137,16 @@ public class Serp4jWebSearchProviderTest {
     }
 
     @Test
+    public void onlyExactHttpSchemesCountAsOpaqueRedirects() {
+        assertTrue(com.aresstack.askai.research.search.api.SearchRedirectUrls
+                .isOpaqueRedirect("HTTPS://www.google.com/goto?url=CAES"));
+        assertFalse(com.aresstack.askai.research.search.api.SearchRedirectUrls
+                .isOpaqueRedirect("httpx://www.google.com/goto?url=CAES"));
+        assertFalse(com.aresstack.askai.research.search.api.SearchRedirectUrls
+                .isOpaqueRedirect("https://www.google.com/search?q=goto"));
+    }
+
+    @Test
     public void translatesSerp4jCategories() {
         assertStatus(SearchErrorCategory.AUTHENTICATION, 401);
         assertStatus(SearchErrorCategory.RATE_LIMITED, 429);
