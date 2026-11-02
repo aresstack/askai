@@ -34,6 +34,43 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void theNetworkInputsAreLockedWhileATestRunsSoItsAnswerAlwaysCounts() {
+        Fake fake = new Fake();
+        fake.holdNetwork = true;
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.networkTestButton().doClick();
+        assertFalse(wizard.trustWindowsBox().isEnabled());
+        assertFalse(wizard.proxyModeChoice().isEnabled());
+
+        fake.pendingNetwork.accept("OK", null);
+
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_NETWORK));
+        assertTrue(wizard.nextButton().isEnabled());
+        assertTrue(wizard.trustWindowsBox().isEnabled());
+    }
+
+    @Test
+    public void changingACheckedSettingAfterTheFinalCheckRequiresANewCheck() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        walkToVoice(wizard);
+        assertTrue(wizard.finishButton().isEnabled());
+
+        wizard.jumpTo(SetupWizardPanel.STEP_CHAT);
+        wizard.chatModelChoice().setSelectedItem("qwen3");
+        wizard.jumpTo(SetupWizardPanel.STEP_VOICE);
+
+        assertFalse(wizard.isDone(SetupWizardPanel.STEP_CHECK));
+        assertFalse(wizard.finishButton().isEnabled());
+        assertFalse(wizard.skipButton().isEnabled());
+        assertEquals(SetupWizardPanel.CHECK_OUTDATED, wizard.checkStatusText());
+
+        wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
+        assertEquals("qwen3", fake.finished.chatModel());
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_CHECK));
+    }
+
+    @Test
     public void manualProxyFieldsOnlyShowForTheManualProxy() {
         SetupWizardPanel wizard = wizard(new Fake());
         wizard.proxyModeChoice().setSelectedItem(SetupWizardPanel.LABEL_PROXY_NONE);
@@ -219,6 +256,8 @@ public class SetupWizardPanelTest {
     /** Answers every call at once, on the calling thread. */
     static final class Fake implements SetupActions {
         String networkError;
+        boolean holdNetwork;
+        BiConsumer<String, String> pendingNetwork;
         String ollamaVersion = "0.9.0";
         boolean localRuntime;
         int runtimeChecks;
@@ -231,6 +270,10 @@ public class SetupWizardPanelTest {
 
         @Override
         public void testNetwork(SetupDraft draft, BiConsumer<String, String> done) {
+            if (holdNetwork) {
+                pendingNetwork = done;
+                return;
+            }
             done.accept(networkError == null ? "OK" : null, networkError);
         }
 

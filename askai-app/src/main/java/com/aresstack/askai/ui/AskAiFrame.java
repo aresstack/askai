@@ -464,6 +464,9 @@ public final class AskAiFrame extends JFrame {
                     new com.aresstack.askai.java8.localmodels.LocalNlpModelStore(), new Runnable() {
                         public void run() {
                             catalogRefreshService.refresh(); // new models and selections reach every chat tab
+                            if (configPanel != null) {
+                                configPanel.reloadFromModel(); // its Save must not write the old address back
+                            }
                             refreshConnectionStatus();
                         }
                     });

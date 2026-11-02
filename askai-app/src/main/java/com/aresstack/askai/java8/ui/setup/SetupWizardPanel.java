@@ -184,6 +184,9 @@ public final class SetupWizardPanel extends JPanel {
     private final JLabel checkStatus = statusLabel();
     private final ComicButton checkRetry = new ComicButton("Check again");
     private List<SetupCheck> lastChecks = Collections.emptyList();
+    /** The draft the last passed final check saved (without the voices, which the last step saves itself). */
+    private String checkedDraft = "";
+    static final String CHECK_OUTDATED = "Settings changed since the check – open “Check” to save and check again.";
 
     // Step 6: voice (optional)
     private final JComboBox<String> voiceGerman = ComicControls.comboBox();
@@ -668,6 +671,11 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private void updateButtons() {
+        if (done[STEP_CHECK] && !checkedKey(collect()).equals(checkedDraft)) {
+            // Something the final check saved and checked changed afterwards: save and check again first.
+            done[STEP_CHECK] = false;
+            checkStatus.setText(CHECK_OUTDATED);
+        }
         done[STEP_CHAT] = !text(chatModel).isEmpty();
         done[STEP_KNOWLEDGE] = !text(embeddingModel).isEmpty() && positive(embeddingDimension.getText());
         done[STEP_VOICE] = voicesReady();
@@ -688,6 +696,11 @@ public final class SetupWizardPanel extends JPanel {
         for (JComponent part : manualProxyParts) {
             part.setVisible(manual);
         }
+        // While a request runs its inputs stay put, so its answer always belongs to what is shown.
+        proxyMode.setEnabled(!busy);
+        proxyHost.setEnabled(!busy);
+        proxyPort.setEnabled(!busy);
+        trustWindows.setEnabled(!busy);
         networkTest.setEnabled(!busy);
         networkAdvanced.setEnabled(!busy);
         runtimeTest.setEnabled(!busy && !runtimeChecking);
@@ -985,6 +998,7 @@ public final class SetupWizardPanel extends JPanel {
                 }
             }
             done[STEP_CHECK] = allOk;
+            checkedDraft = allOk ? checkedKey(draft) : "";
             checkStatus.setText(allOk ? "Everything is ready." : "Not ready yet.");
             if (!allOk) {
                 fail(STEP_CHECK, failed.length() == 0 ? "The check returned no result." : failed.toString().trim());
@@ -1207,6 +1221,11 @@ public final class SetupWizardPanel extends JPanel {
         return b.build();
     }
 
+    /** What the final check covers: everything but the voices. */
+    private static String checkedKey(SetupDraft value) {
+        return value.toBuilder().voices("", "").build().toString();
+    }
+
     private void setBusy(boolean value) {
         busy = value;
         updateButtons();
@@ -1333,6 +1352,10 @@ public final class SetupWizardPanel extends JPanel {
 
     JButton sentenceInstallButton() {
         return sentenceInstall;
+    }
+
+    JCheckBox trustWindowsBox() {
+        return trustWindows;
     }
 
     JComboBox<String> proxyModeChoice() {

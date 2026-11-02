@@ -81,7 +81,15 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** The Ollama address before the wizard tried another one (restored on cancel); {@code null}: untouched. */
     private String originalOllamaUrl;
+    /** Counts wizard runs ended by a cancel; a runtime result from an earlier run must not touch the model. */
+    private int cancellations;
     private PiperReadAloudService merlinService;
+    /** Speaks Merlin's lines: Piper synthesis and playback block until the line is over, never on the EDT. */
+    private final ExecutorService speaker = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "askai-setup-wizard-voice");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /**
      * @param localRuntime nullable: no local runtime staged
@@ -194,6 +202,7 @@ public final class AskAiSetupActions implements SetupActions {
     @Override
     public void checkRuntime(final SetupDraft draft, final Consumer<RuntimeStatus> done) {
         final String url = draft.ollamaBaseUrl().isEmpty() ? model.getOllamaBaseUrl() : draft.ollamaBaseUrl();
+        final int run = cancellations;
         background(() -> {
             String version = null;
             String problem = "";
@@ -206,6 +215,9 @@ public final class AskAiSetupActions implements SetupActions {
             final RuntimeStatus status = new RuntimeStatus(version, problem, local);
             final boolean apply = version != null;
             deliver(() -> {
+                if (run != cancellations) {
+                    return; // cancelled meanwhile: neither the model nor the closed wizard may change
+                }
                 if (apply) {
                     useOllamaUrl(url); // the model lists of the next steps come from the address that answered
                 }
@@ -232,6 +244,7 @@ public final class AskAiSetupActions implements SetupActions {
 
     @Override
     public void cancelled() {
+        cancellations++;
         if (originalOllamaUrl != null) {
             model.setOllamaBaseUrl(originalOllamaUrl);
             originalOllamaUrl = null;
@@ -559,8 +572,9 @@ public final class AskAiSetupActions implements SetupActions {
             }
 
             @Override
-            public void speak(String text) {
-                service.speak(text, MERLIN_LANGUAGE);
+            public void speak(final String text) {
+                service.stop(); // a new line replaces the one still being spoken
+                speaker.execute(() -> service.speak(text, MERLIN_LANGUAGE));
             }
 
             @Override
