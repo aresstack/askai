@@ -23,9 +23,6 @@ import com.aresstack.serp4j.core.model.metadata.QueryInfo;
 import com.aresstack.serp4j.core.model.metadata.SearchMetadata;
 import com.aresstack.serp4j.core.model.metadata.SearchWarning;
 
-import com.aresstack.serp4j.core.model.ext.Extensions;
-import com.aresstack.serp4j.http.resolve.ResultUrlEnricher;
-
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -135,14 +132,6 @@ public final class GoogleSerpMapper {
         }
         for (GoogleSerpPage.Link link : hit.getSiteLinks()) {
             item.siteLink(SiteLink.of(link.getUrl(), link.getText(), link.getDescription()));
-        }
-        if (hit.getOriginalUrl() != null) {
-            // Resolved in the search browser: the target is the URL, the /goto link stays as provenance
-            // (same extensions as Serp4J's ResultUrlEnricher).
-            item.extensions(Extensions.builder()
-                    .put(ResultUrlEnricher.ORIGINAL_URL, hit.getOriginalUrl())
-                    .put(ResultUrlEnricher.URL_RESOLUTION, ResultUrlEnricher.RESOLVED)
-                    .build());
         }
         return item.build();
     }

@@ -57,31 +57,6 @@ public final class GoogleSerpPage {
         return pageObstacle;
     }
 
-    /**
-     * A copy whose organic and sitelink URLs are replaced where {@code resolver} returns a non-null URL (a resolved
-     * {@code /goto} link); everything else stays as it is.
-     */
-    GoogleSerpPage withResolvedUrls(java.util.function.Function<String, String> resolver) {
-        List<Organic> organics = new ArrayList<Organic>(organicResults.size());
-        for (Organic o : organicResults) {
-            List<Link> links = new ArrayList<Link>(o.siteLinks.size());
-            for (Link link : o.siteLinks) {
-                links.add(new Link(link.text, resolvedOr(resolver, link.url), link.description));
-            }
-            String target = resolver.apply(o.url);
-            Organic copy = target == null ? o : new Organic(o.rank, o.title, target, o.displayUrl, o.siteName,
-                    o.snippet, o.dateText, o.video, o.siteLinks, o.originalUrl == null ? o.url : o.originalUrl);
-            organics.add(copy.withSiteLinks(links));
-        }
-        return new GoogleSerpPage(organics, relatedQueries, structureRecognized, nextPage, unrecognizedBlocks,
-                pageObstacle);
-    }
-
-    private static String resolvedOr(java.util.function.Function<String, String> resolver, String url) {
-        String resolved = resolver.apply(url);
-        return resolved == null ? url : resolved;
-    }
-
     @Override
     public String toString() {
         return "GoogleSerpPage{organic=" + organicResults.size() + ", related=" + relatedQueries.size()
@@ -131,17 +106,8 @@ public final class GoogleSerpPage {
         private final boolean video;
         private final List<Link> siteLinks;
 
-        /** The Google {@code /goto} URL this hit had before it was resolved, or {@code null}. */
-        private final String originalUrl;
-
         Organic(int rank, String title, String url, String displayUrl, String siteName, String snippet,
                 String dateText, boolean video, List<Link> siteLinks) {
-            this(rank, title, url, displayUrl, siteName, snippet, dateText, video, siteLinks, null);
-        }
-
-        Organic(int rank, String title, String url, String displayUrl, String siteName, String snippet,
-                String dateText, boolean video, List<Link> siteLinks, String originalUrl) {
-            this.originalUrl = originalUrl;
             this.rank = rank;
             this.title = Objects.requireNonNull(title, "title");
             this.url = Objects.requireNonNull(url, "url");
@@ -191,15 +157,6 @@ public final class GoogleSerpPage {
 
         public List<Link> getSiteLinks() {
             return siteLinks;
-        }
-
-        /** The provider URL before {@code /goto} resolution; {@code null} when the URL was never a redirect. */
-        public String getOriginalUrl() {
-            return originalUrl;
-        }
-
-        Organic withSiteLinks(List<Link> links) {
-            return new Organic(rank, title, url, displayUrl, siteName, snippet, dateText, video, links, originalUrl);
         }
 
         @Override

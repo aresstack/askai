@@ -207,14 +207,6 @@ public final class Serp4jProviderFactory {
         return value;
     }
 
-    /**
-     * A transport with the default settings for resolving {@code google.*}/goto links of providers that have no
-     * transport of their own (the browser-based Google search). The caller owns and closes it.
-     */
-    public static com.aresstack.serp4j.http.HttpTransport newGotoResolutionTransport() {
-        return transport(null);
-    }
-
     private static AhcHttpTransport transport(HttpTransportConfiguration configuration) {
         AhcHttpTransportOptions.Builder options = AhcHttpTransportOptions.builder();
         if (configuration != null) {

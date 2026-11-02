@@ -28,6 +28,23 @@ Key verschlüsselt über `ProviderConfigurationService.saveSerpApi(configuration
   DataForSEO aus.
 - In der Research-Runtime ist `SERP_API` jetzt ein migrierter Provider (Auswahl „SerpApi“ in den Sucheinstellungen).
 
+## Google-`/goto`-Treffer: Auflösung erst bei der Navigation (askai #41)
+
+Google liefert organische Treffer oft als `https://www.google.com/goto?url=…`. Für die Google-Suche im Suchbrowser
+(`serp4j-playwright-google`) gilt:
+
+- Während der Suchergebnisbeschaffung wird **keine** `/goto`-URL aufgelöst: keine GET-/HEAD-Anfragen, keine
+  Resolver-Schleife, kein `ResultUrlEnricher`. Je Suche geht genau eine Anfrage an Google (die Trefferseite).
+- Jeder organische Treffer bleibt mit Provider-URL, Titel, Snippet, Breadcrumb und Sitelinks erhalten. Ein
+  `/goto`-Treffer ist `UNRESOLVED`: Recherchekandidat, aber keine verifizierte Zieladresse (wird nicht geparkt).
+- Erst wenn die Recherche den Treffer öffnet, navigiert der Browser die `/goto`-URL und folgt der Weiterleitung.
+  Die Ziel-URL aus dem Browser ist Quellenidentität und Grundlage für die Deduplizierung; die `/goto`-URL bleibt als
+  Provenienz (`AcceptedSource.getOriginalUrl()`, Status `RESOLVED`). Die URL-Sicherheitsprüfung nach dem Redirect
+  greift wie für jede Seite. Bleibt der Browser auf Google, ist die Seite Transit und nie Quelle. Ein
+  Navigationsfehler beendet nur diesen Besuch; der Treffer bleibt im Suchergebnis.
+- Die HTTP-Resolver in Serp4J (`GoogleGotoUrlResolver`, `ResultUrlEnricher`) bleiben für API-Provider wie SerpApi
+  erhalten (`resolveGoogleGotoUrls`); AskAI hat keine eigene zweite Auflösungslogik.
+
 ## Was sich gegenüber der alten Implementierung ändert
 
 - **Engine-Etikett:** Die Engine kommt aus der Serp4J-Antwort (Metadaten und Herkunft je Treffer). Bright Data und
