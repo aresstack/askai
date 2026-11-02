@@ -60,4 +60,15 @@ public class SearchRedirectResolverTest {
                 SearchRedirectResolver.Status.NOT_A_REDIRECT,
                 SearchRedirectResolver.resolve("https://www.bing.com/videos/search?q=x").getStatus());
     }
+
+    @Test
+    public void googleGotoIsAnUnresolvedRedirectNotATarget() {
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve("https://www.google.com/goto?url=CAESAAAA").getStatus());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve("https://www.google.de/goto?url=CAESAAAA").getStatus());
+        assertEquals("", SearchRedirectResolver.resolve("https://www.google.com/goto?url=CAESAAAA").getTargetUrl());
+        assertEquals(SearchRedirectResolver.Status.NOT_A_REDIRECT,
+                SearchRedirectResolver.resolve("https://example.org/goto?url=x").getStatus());
+    }
 }

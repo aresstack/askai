@@ -61,11 +61,20 @@ public final class SingleProviderSearchStrategy implements SearchStrategy {
         for (SearchHit hit : providerResult.getHits()) {
             candidates.add(toCandidate(hit));
         }
-        List<String> diagnostics = Collections.singletonList(
+        List<String> diagnostics = new ArrayList<String>();
+        diagnostics.add(
                 "provider " + providerResult.getProviderId() + " / " + providerResult.getSearchEngine()
                         + " returned " + candidates.size() + " organic candidate(s)"
                         + (providerResult.getRawResponse().isEmpty() ? ""
                         : ", raw response " + providerResult.getRawResponse().length() + " chars"));
+        List<String> unresolved = providerResult.getUnresolvedRedirects();
+        if (!unresolved.isEmpty()) {
+            diagnostics.add(unresolved.size() + " further hit(s) found but excluded as sources: redirect target"
+                    + " not resolved");
+            for (String line : unresolved) {
+                diagnostics.add("unresolved redirect: " + line);
+            }
+        }
         return new InitialSearchResult(candidates, Collections.<String>emptyList(),
                 Collections.<com.aresstack.askai.browser.search.repair.SearchChallengeState>emptyList(),
                 diagnostics);
