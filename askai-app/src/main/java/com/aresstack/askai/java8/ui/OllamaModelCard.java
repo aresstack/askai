@@ -130,15 +130,13 @@ final class OllamaModelCard extends JPanel {
         return AskAiTheme.active().comicPalette().getAccentOrange();
     }
 
-    /** Card background of a running model: the progress-bar accent washed towards the card background. */
+    /**
+     * Card background of a running model: the progress-bar accent washed towards the card background (a quarter
+     * accent, built from theme tokens so a theme switch recolours it live).
+     */
     private static Color runningBackground() {
-        Color accent = runningAccent();
         Color base = ThemeColor.of("models.cardBackground");
-        float ratio = 0.35f;
-        return new Color(
-                Math.round(accent.getRed() * ratio + base.getRed() * (1f - ratio)),
-                Math.round(accent.getGreen() * ratio + base.getGreen() * (1f - ratio)),
-                Math.round(accent.getBlue() * ratio + base.getBlue() * (1f - ratio)));
+        return ThemeColor.average(base, ThemeColor.average(runningAccent(), base));
     }
 
     /** @return whether this card shows a running model (test hook). */
