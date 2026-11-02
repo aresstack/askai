@@ -31,6 +31,7 @@ public final class GoogleBrowserLiveTest {
         GoogleBrowserSearchConfiguration configuration = new GoogleBrowserSearchConfiguration();
         configuration.setEnabled(true);
         configuration.setChannel(System.getProperty("askai.live.googleBrowser.channel", "msedge"));
+        configuration.setHeadless(!"false".equals(System.getProperty("askai.live.googleBrowser.headless")));
         Serp4jProviderFactory factory = new Serp4jProviderFactory(new SecretValueService(new SecretCipher() {
             public EncryptedSecret encrypt(char[] plainText) {
                 throw new UnsupportedOperationException("no secrets");
