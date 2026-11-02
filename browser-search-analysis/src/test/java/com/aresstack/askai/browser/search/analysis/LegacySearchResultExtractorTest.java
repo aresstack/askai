@@ -6,6 +6,7 @@ import com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults;
 import com.aresstack.askai.browser.search.SearchPageAnalysisOutcome;
 import com.aresstack.askai.browser.search.SearchResultCandidate;
 import com.aresstack.askai.browser.search.SearchResultExtractionResult;
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
 import org.junit.Test;
 
 import java.util.Collections;
@@ -42,6 +43,45 @@ public class LegacySearchResultExtractorTest {
         assertTrue(first.structuralConfidence > 0.9);
         assertFalse(first.snapshotId.isEmpty());
         assertFalse(first.resultBlockContainerId.isEmpty());
+    }
+
+    @Test
+    public void unresolvedRedirectHitsBecomeUnverifiedCandidatesWithTheirProviderUrl() {
+        // askai #41 for the browser path (Bing/DuckDuckGo/Google): same separation as the Serp4J path.
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addNavigationBar(8);
+        serp.addBareResultColumn(4, new RenderedBox(300, 120, 680, 560),
+                new boolean[] {false, true, false, true});
+        SearchResultExtractionResult result = extractor.extract(serp.build());
+
+        assertEquals(SearchPageAnalysisOutcome.ORGANIC_RESULTS, result.outcome);
+        assertEquals("no hit is lost, two unresolved hits are not one duplicate", 4, result.candidates.size());
+        SearchResultCandidate direct = result.candidates.get(0);
+        assertEquals(UrlResolutionStatus.DIRECT, direct.urlResolution);
+        assertTrue(direct.hasVerifiedTarget());
+        assertEquals(direct.resolvedTargetUrl, direct.navigationUrl());
+        for (int i : new int[] {1, 3}) {
+            SearchResultCandidate unresolved = result.candidates.get(i);
+            assertEquals(UrlResolutionStatus.UNRESOLVED, unresolved.urlResolution);
+            assertFalse("never a verified target", unresolved.hasVerifiedTarget());
+            assertEquals("", unresolved.resolvedTargetUrl);
+            assertTrue(unresolved.rawSearchHref.contains("/goto?url="));
+            assertEquals("the browser opens the provider URL", unresolved.rawSearchHref, unresolved.navigationUrl());
+            assertEquals("provenance", unresolved.rawSearchHref, unresolved.originalUrl);
+        }
+        // The status survives the JSON hop between browser runtime and research runtime.
+        SearchResultCandidate decoded = SearchLayoutRepairJson.decodePrepared(SearchLayoutRepairJson.encodePrepared(
+                new com.aresstack.askai.browser.search.repair.PreparedWebSearchResult(
+                        com.aresstack.askai.browser.search.repair.WebSearchPreparationStatus.ORGANIC_RESULTS,
+                        result.candidates,
+                        Collections.<com.aresstack.askai.browser.search.repair.SearchLayoutRepairRequest>emptyList(),
+                        Collections.singletonList("engine.example"),
+                        Collections.<com.aresstack.askai.browser.LegacySearchEngineAttemptResult>emptyList(),
+                        Collections.<com.aresstack.askai.browser.search.repair.SearchChallengeState>emptyList(),
+                        Collections.<String>emptyList()))).candidates.get(1);
+        assertEquals(UrlResolutionStatus.UNRESOLVED, decoded.urlResolution);
+        assertEquals(result.candidates.get(1).navigationUrl(), decoded.navigationUrl());
+        assertEquals(result.candidates.get(1).originalUrl, decoded.originalUrl);
     }
 
     @Test

@@ -6,7 +6,7 @@ package com.aresstack.askai.agent.model.inference;
  * tokens or credentials ever live here (a plain local/loopback or configured Ollama base URL only).
  *
  * <p>The model is the centrally selected AskAI main (chat) model; the host has already resolved it to its
- * actual serving endpoint (the local runtime sidecar for a {@code local/...} model, or the configured
+ * actual serving endpoint (the in-process local model runtime for a {@code local/...} model, or the configured
  * remote Ollama base URL otherwise). The agent is a dumb consumer: it POSTs to {@code baseUrl + chatPath}
  * and never decides which model to use.</p>
  */

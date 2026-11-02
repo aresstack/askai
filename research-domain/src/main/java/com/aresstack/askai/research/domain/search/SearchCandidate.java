@@ -31,9 +31,21 @@ public final class SearchCandidate {
     private final String snippet;
     private final String domain;
     private final List<SearchOccurrence> occurrences;
+    /**
+     * askai #41: {@code false} when the URL is a provider redirect whose target is not known yet (Google
+     * {@code /goto}). Such a hit is a full candidate, but its URL is no verified target address; only the page the
+     * browser lands on can become a source.
+     */
+    private final boolean targetVerified;
 
     public SearchCandidate(String candidateId, String normalizedUrl, String title, String snippet,
                            String domain, List<SearchOccurrence> occurrences) {
+        this(candidateId, normalizedUrl, title, snippet, domain, occurrences, true);
+    }
+
+    public SearchCandidate(String candidateId, String normalizedUrl, String title, String snippet,
+                           String domain, List<SearchOccurrence> occurrences, boolean targetVerified) {
+        this.targetVerified = targetVerified;
         if (candidateId == null || candidateId.trim().isEmpty()) {
             throw new IllegalArgumentException("candidateId must not be empty");
         }
@@ -116,6 +128,11 @@ public final class SearchCandidate {
         }
         List<SearchOccurrence> extended = new ArrayList<SearchOccurrence>(occurrences);
         extended.add(occurrence);
-        return new SearchCandidate(candidateId, normalizedUrl, title, snippet, domain, extended);
+        return new SearchCandidate(candidateId, normalizedUrl, title, snippet, domain, extended, targetVerified);
+    }
+
+    /** Whether {@link #getNormalizedUrl()} is a verified target address (not an unresolved redirect). */
+    public boolean isTargetVerified() {
+        return targetVerified;
     }
 }

@@ -1,5 +1,7 @@
 package com.aresstack.askai.research.runtime.search.provider;
 
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
+
 /**
  * One organic result as a provider reports it — NOT yet a research source and not yet a normalized URL. A
  * hit records the provider and the actual {@link SearchEngine} that produced it (so multi-provider origin
@@ -22,10 +24,24 @@ public final class SearchHit {
     private final int absoluteRank;
     /** Optional provider-reported timestamp, or {@code null}. */
     private final String publishedAt;
+    /** askai #41: whether {@link #url} is a verified target; an UNRESOLVED hit is still a candidate. */
+    private final UrlResolutionStatus urlResolution;
+    /** The provider URL before resolution (Google {@code /goto}); empty when the URL was never a redirect. */
+    private final String originalUrl;
+    /** Why an UNRESOLVED URL could not be resolved (diagnostics), or empty. */
+    private final String resolutionDetail;
 
     public SearchHit(SearchProviderId providerId, SearchEngine searchEngine, String query, int rank,
                      String url, String title, String snippet, String domain, int absoluteRank,
                      String publishedAt) {
+        this(providerId, searchEngine, query, rank, url, title, snippet, domain, absoluteRank, publishedAt,
+                UrlResolutionStatus.DIRECT, "", "");
+    }
+
+    public SearchHit(SearchProviderId providerId, SearchEngine searchEngine, String query, int rank,
+                     String url, String title, String snippet, String domain, int absoluteRank,
+                     String publishedAt, UrlResolutionStatus urlResolution, String originalUrl,
+                     String resolutionDetail) {
         if (providerId == null) {
             throw new IllegalArgumentException("Provider id must not be null");
         }
@@ -45,6 +61,21 @@ public final class SearchHit {
         this.domain = domain == null ? "" : domain;
         this.absoluteRank = absoluteRank;
         this.publishedAt = publishedAt;
+        this.urlResolution = urlResolution == null ? UrlResolutionStatus.DIRECT : urlResolution;
+        this.originalUrl = originalUrl == null ? "" : originalUrl;
+        this.resolutionDetail = resolutionDetail == null ? "" : resolutionDetail;
+    }
+
+    public UrlResolutionStatus getUrlResolution() {
+        return urlResolution;
+    }
+
+    public String getOriginalUrl() {
+        return originalUrl;
+    }
+
+    public String getResolutionDetail() {
+        return resolutionDetail;
     }
 
     public SearchProviderId getProviderId() {

@@ -20,13 +20,13 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * The MODEL-FREE sidecar core of the repair bridge (A4 productive). It never calls a model: it
+ * The MODEL-FREE browser runtime core of the repair bridge (A4 productive). It never calls a model: it
  * captures nothing itself, but given a rendered page it either extracts organic candidates
  * mechanically (HIGH_CONFIDENCE) or, for a LOW_CONFIDENCE layout, emits a bounded
  * {@link SearchLayoutRepairRequest} and holds the {@code RenderedPageDocument} in a bounded, one-shot
  * {@link SearchLayoutRepairCache}. Later it applies a VALIDATED decision the runtime returns — after
  * re-checking the attempt, snapshot, fingerprint and container ids — through the single A3/A4
- * extraction. Time is injected so the sidecar owns the clock.
+ * extraction. Time is injected so the browser runtime owns the clock.
  */
 public final class WebSearchLayoutRepairService {
 
@@ -122,7 +122,7 @@ public final class WebSearchLayoutRepairService {
 
     /**
      * Apply a runtime-validated decision to the cached snapshot. Every guard is re-checked in the
-     * sidecar; only then is the EXISTING extraction run. The attempt is consumed exactly once, the
+     * browser runtime; only then is the EXISTING extraction run. The attempt is consumed exactly once, the
      * moment the extraction is actually attempted.
      */
     public SearchLayoutRepairResult apply(SearchLayoutRepairSubmission submission,
@@ -231,7 +231,7 @@ public final class WebSearchLayoutRepairService {
                     }
                 }
                 for (SearchResultCandidate candidate : result.candidates) {
-                    if (seenTargets.add(candidate.resolvedTargetUrl)) {
+                    if (seenTargets.add(candidate.navigationUrl())) {
                         merged.add(candidate);
                     }
                 }

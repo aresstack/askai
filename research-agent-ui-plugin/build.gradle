@@ -29,6 +29,10 @@ dependencies {
     // Netty) are NOT bundled into a fat jar — they ship in the plugin's lib/ directory (see pluginDistribution
     // below) and load via the plugin classloader. The runtime process keeps its own separate copy.
     implementation project(':web-search-providers')
+    // askai #31: the research browser runs inside AskAI (Playwright + Camoufox), no separate process.
+    implementation project(':browser-runtime-java21')
+    // askai #48: the research agent runs inside the AskAI JVM (no agent process, no stdio, no MCP).
+    implementation project(':research-agent-runtime')
     // The comic visual foundation (issue #36 line) is HOST-provided like the shared APIs: askai-app
     // has it on the application classpath, so the plugin compiles against it and PF4J delegates the
     // classes to the host at runtime — ONE copy, one uniform look, no identity split.

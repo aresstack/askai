@@ -4,7 +4,7 @@
 
 # AskAI
 
-AskAI is a Java 8 Swing desktop client for local AI. It talks to an Ollama server and to its own
+AskAI is a Java 21 Swing desktop client for local AI. It talks to an Ollama server and to its own
 local model runtime, and you can extend it with PF4J agent plugins. The main plugin is the
 **Research Agent**. It turns a question into a researched document backed by sources, in four phases:
 **Concept → Sources → Outline → Document** (the outline is worked on in a drawer of the Document
@@ -112,13 +112,12 @@ tab). A **Revisions** view shows how the project got there.
 
 ## Requirements
 
-- **Java 8** to run AskAI. Every module except the two sidecars is compiled for Java 8.
-- **Java 21** for the sidecar processes `browser-mcp-server-java21` (Playwright4J) and
-  `local-model-runtime-sidecar-java21` (win-directml-java). Gradle finds Java 21 as a toolchain. If no
-  Java 21 toolchain is available, `run` starts without the local model runtime.
+- **Java 21** to build and run AskAI. Every module is compiled for Java 21 (askai #31, see
+  [docs/java21-migration.md](docs/java21-migration.md)). AskAI runs as one Java 21 process: the browsers
+  (`browser-runtime-java21`) and the local model runtime (`local-model-runtime-java21`) run inside it.
 - **An Ollama server** for chat, dictation and model management.
 - **Nothing to install for browser research** (Windows x86_64 and Linux x86_64): the default browser
-  channel `camoufox` downloads Camoufox once (about 1.3 GB) to `%APPDATA%/.askai-java8/browser`. It is
+  channel `camoufox` downloads Camoufox once (about 1.3 GB) to `%APPDATA%/.askai/browser`. It is
   the patched build of the [Argos](https://github.com/aresstack/argos) distribution, which carries the
   WebDriver BiDi fixes of daijro/camoufox#952 that no Camoufox release contains yet. AskAI checks the
   archive's pinned SHA-256 at download and both fixes at every browser start. The download starts in the background when a research
@@ -127,10 +126,10 @@ tab). A **Revisions** view shows how the project got there.
 
 ## Build and run
 
-The Gradle wrapper uses Gradle 7.6.4. On Windows, run these commands from Git Bash.
+The Gradle wrapper uses Gradle 8.14.3 and runs on JDK 21. On Windows, run these commands from Git Bash.
 
 ```bash
-# Runnable Java 8 fat jar -> askai-app/build/libs/askai-java8-0.1.0.jar
+# Runnable fat jar -> askai-app/build/libs/askai-0.1.0.jar
 ./gradlew :askai-app:fatJar
 
 # Run AskAI (stages the local model runtime when a Java 21 toolchain is available)
@@ -161,7 +160,7 @@ must run online once to fill the Gradle cache.
 
 ### Configuration
 
-Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.askai-java8/` if
+Settings are stored in `%APPDATA%\.askai\askai.properties` (`~/.askai/` if
 `APPDATA` is not set).
 
 ## Project structure
@@ -169,7 +168,7 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 | Module | Purpose |
 |---|---|
 | `askai-app` | The Swing application: chat, models, audio, settings, plugin host wiring; builds the fat jar |
-| `ollama4j-java8` | Small Java 8 Ollama client based on `HttpURLConnection` |
+| `ollama4j` | Small Ollama client based on `HttpURLConnection` |
 | `comic-controls` | Dependency-free Swing design system: palettes, themes, Java2D painters, controls |
 | `audio-dsp` | Audio capture and DSP pipeline (IIR filters via iirj, FFT/STFT blocks) |
 | `audio-openal` | Optional OpenAL Soft playback backend (LWJGL); natives are installed as an opt-in add-on |
@@ -189,8 +188,8 @@ Settings are stored in `%APPDATA%\.askai-java8\askai-java8.properties` (`~/.aska
 | `browser-api` | Generic, framework-free browser port |
 | `browser-search-analysis` | Mechanical analysis of search result pages (regions, result blocks, candidates) |
 | `browser-static-http` | Static HTTP browser backend (`HttpURLConnection` + jsoup, no JavaScript) |
-| `browser-mcp-server-java21` | Java 21 browser MCP sidecar based on Playwright4J (`web_*` tools over Solon MCP) |
-| `local-model-runtime-sidecar-java21` | Java 21 local model runtime sidecar (Ollama-compatible API, DirectML reranking) |
+| `browser-runtime-java21` | Browsers inside the AskAI JVM: research browser and headless search browser (Playwright, playwright4j, Camoufox) |
+| `local-model-runtime-java21` | Local model runtime inside the AskAI JVM (Ollama-compatible HTTP API on loopback, DirectML) |
 | `mcp-runtime-api` | Generic MCP runtime contracts |
 | `mcp-solon-runtime` | Solon-based streamable-HTTP MCP server behind the runtime port |
 | `mcp-marketplace` | MCP marketplace search/registry/import browser (saves configurations only; not wired into the app) |

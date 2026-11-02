@@ -1,7 +1,7 @@
 package com.aresstack.askai.browser.search.repair;
 
 /**
- * The opaque handle for one bounded repair attempt held in the sidecar cache. It ties a
+ * The opaque handle for one bounded repair attempt held in the browser runtime cache. It ties a
  * {@link SearchLayoutRepairRequest} to the exact cached {@code RenderedPageDocument} it was captured
  * from, so a submission can only ever be applied to that one snapshot and exactly once.
  */

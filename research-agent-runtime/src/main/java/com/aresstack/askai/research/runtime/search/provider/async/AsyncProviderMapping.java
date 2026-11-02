@@ -30,6 +30,8 @@ public final class AsyncProviderMapping {
                 return SearchProviderId.DATA_FOR_SEO;
             case SERP_API:
                 return SearchProviderId.SERP_API;
+            case GOOGLE_BROWSER:
+                return SearchProviderId.GOOGLE_BROWSER;
             default:
                 return null; // COMPOSITE and any future module-only ids are not wired into the runtime seam
         }
@@ -47,6 +49,8 @@ public final class AsyncProviderMapping {
             case DATA_FOR_SEO:
             case SERP_API:
                 return SearchEngine.PROVIDER_DEFAULT; // the real engine comes from each result (toRuntimeEngine)
+            case GOOGLE_BROWSER:
+                return SearchEngine.GOOGLE;
             default:
                 return null;
         }

@@ -87,7 +87,7 @@ Referenz — irrelevant, weil nach dem Umschalten neu gezeichnet wird.)
 
 ### 1.4 Bubbles
 
-`askai-app/src/main/java/com/aresstack/askai/java8/ui/bubble/BubblePalette.java`, 10 Rollen,
+`askai-app/src/main/java/com/aresstack/askai/ui/bubble/BubblePalette.java`, 10 Rollen,
 Default `windowsPhoneInspired()`. Nutzerfarben: `config/ChatColorSettings` (5 Farben, persistiert
 unter `chat.color.*` in `AppConfigurationRepository`, Zeilen 77–81 und 148–158), Settings-Zeile
 „Colors“ mit Reset. `ChatTranscript.paletteFrom(ChatColorSettings)` baut die Palette.
@@ -99,7 +99,7 @@ unter `chat.color.*` in `AppConfigurationRepository`, Zeilen 77–81 und 148–1
 
 ### 1.6 Startpfad und Settings-Dialog
 
-- `askai-app/.../AskAiJava8App.java:24` lädt `AppConfigurationRepository`, Z. 29–32 `invokeLater`
+- `askai-app/.../AskAiApp.java:24` lädt `AppConfigurationRepository`, Z. 29–32 `invokeLater`
   → `new AskAiFrame(...)`. `AskAiFrame.java:267` ruft `ComicTheme.install(AskAiTheme.active())`.
 - Settings-Dialog: `OllamaChatPanel` (ab ~Z. 925): `SETTINGS_CATEGORIES`-Array + `CardLayout`,
   Karten über `cards.add(settingsCard(...), SETTINGS_CATEGORIES[i])`.
@@ -110,7 +110,7 @@ unter `chat.color.*` in `AppConfigurationRepository`, Zeilen 77–81 und 148–1
   `public static void setActive(AskAiTheme theme)` (EDT, beliebig oft) und
   `addChangeListener(Runnable)` / `removeChangeListener(Runnable)`. `active()` liefert das zuletzt
   gesetzte Theme. Startwert: JVM-Property `askai.theme`, sonst Konfigurationswert `ui.theme`,
-  sonst `arcane`. Der Host setzt den Startwert in `AskAiJava8App.main` vor `invokeLater`.
+  sonst `arcane`. Der Host setzt den Startwert in `AskAiApp.main` vor `invokeLater`.
   Danach ist das einzige Umschalt-Tor der Host-Dienst **`ThemeSwitcher.apply(AskAiTheme)`**
   (askai-app, Muster MainframeMate `ThemeManager.applyTheme` + `refreshWindow`):
   1. `AskAiTheme.setActive(theme)`,

@@ -13,7 +13,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * The lexical DEFAULT scorer: BM25 over title + snippet, no model, no sidecar. It orders by real
+ * The lexical DEFAULT scorer: BM25 over title + snippet, no model, no browser runtime. It orders by real
  * word overlap (umlauts intact), selects only candidates that matched at all, and serves the same
  * relevance-assessment seam the AI reranker does — so "KI-Reranker aus" is a working search, not a
  * degraded one.

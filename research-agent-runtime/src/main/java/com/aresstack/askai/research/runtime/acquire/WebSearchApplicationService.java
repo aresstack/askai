@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.runtime.acquire;
 
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
 import com.aresstack.askai.research.runtime.loop.ResearchRunActivity;
 import com.aresstack.askai.research.runtime.loop.ResearchRunBudget;
 import com.aresstack.askai.research.runtime.loop.ResearchRunProgress;
@@ -43,9 +44,25 @@ public final class WebSearchApplicationService {
         private final String pageHost;
         private final String pageTitle;
         private final String page;
+        private final String originalUrl;
+        private final UrlResolutionStatus urlResolution;
 
         public AcceptedSource(String sourceId, boolean duplicate, String captureId, String pageUrl,
                               String pageHost, String pageTitle, String page) {
+            this(sourceId, duplicate, captureId, pageUrl, pageHost, pageTitle, page, "", UrlResolutionStatus.DIRECT);
+        }
+
+        /**
+         * @param pageUrl       the FINAL URL the browser landed on (source identity)
+         * @param originalUrl   the URL that was opened when it differs (e.g. the search hit's Google /goto link),
+         *                      kept as provenance; empty otherwise
+         * @param urlResolution DIRECT, or RESOLVED when the browser's navigation followed a redirect
+         */
+        public AcceptedSource(String sourceId, boolean duplicate, String captureId, String pageUrl,
+                              String pageHost, String pageTitle, String page, String originalUrl,
+                              UrlResolutionStatus urlResolution) {
+            this.originalUrl = originalUrl == null ? "" : originalUrl;
+            this.urlResolution = urlResolution == null ? UrlResolutionStatus.DIRECT : urlResolution;
             this.sourceId = sourceId;
             this.duplicate = duplicate;
             this.captureId = captureId;
@@ -57,6 +74,15 @@ public final class WebSearchApplicationService {
 
         public String getSourceId() {
             return sourceId;
+        }
+
+        /** The opened URL when the browser was redirected (provenance), else empty. */
+        public String getOriginalUrl() {
+            return originalUrl;
+        }
+
+        public UrlResolutionStatus getUrlResolution() {
+            return urlResolution;
         }
 
         public boolean isDuplicate() {
@@ -164,6 +190,7 @@ public final class WebSearchApplicationService {
     // with the reranker/relevance model). One immutable snapshot per run — a running search
     // never goes stale; the NEXT run sees the new fence.
     private SearchScopeControlPort scopeControl;
+
     private String scopeHandle;
     private boolean scopeActive;
     /** SC2a capability split: only the OUT filter is fail-closed; IN affinity degrades. */
@@ -212,13 +239,13 @@ public final class WebSearchApplicationService {
     /** Upper bound for the inter-page delay slider (mirrors the overlay's max), so a stray value cannot stall a run. */
     private static final long HUD_MAX_DELAY_MILLIS = 30_000L;
     /**
-     * Set when a browser call reports the endpoint is gone (the browser was closed / the sidecar died even after
+     * Set when a browser call reports the endpoint is gone (the browser was closed / the browser runtime died even after
      * one restart). It makes {@link #stopReasonNow} return MCP_UNAVAILABLE so the run ends TECHNICALLY instead of
      * spinning forever on a dead browser (→ manualSearchFailed → the composer is freed + a red error shows).
      */
     private volatile boolean browserGone;
     /**
-     * Set when a browser call fails with the sidecar's typed BROWSER_CLOSED marker: the USER closed the
+     * Set when a browser call fails with the browser runtime's typed BROWSER_CLOSED marker: the USER closed the
      * window. That is their stop signal — the run ends as USER_CANCELLED (their decision, sources kept),
      * never as a technical failure and never by polling a dead browser until a budget gives out.
      */
@@ -402,10 +429,10 @@ public final class WebSearchApplicationService {
                 // reranker failure ends the run with a typed reason and opens nothing.
                 seedStop = seedReranking(query, result.candidates, frontier);
             } catch (ToolInvoker.EndpointUnavailable ex) {
-                // The browser MCP endpoint is gone (the sidecar likely died): this is the concrete,
+                // The browser MCP endpoint is gone (the browser runtime likely died): this is the concrete,
                 // retryable technical cause behind a SEARCH_TECHNICAL_PROBLEM — log it, never swallow it.
                 listener.status("[web-search] technical failure stage=SEED_SEARCH (endpoint unavailable —"
-                        + " sidecar may be dead) cause=" + describe(ex));
+                        + " browser runtime unavailable) cause=" + describe(ex));
                 return ResearchStopReason.MCP_UNAVAILABLE;
             } catch (ToolInvoker.ToolFailure ex) {
                 if (noteIfBrowserClosed(ex)) {
@@ -553,8 +580,23 @@ public final class WebSearchApplicationService {
                             ResearchRunActivity.pageSkipped(effectiveUrl, finalHost, pageTitle));
                     continue;
                 }
+                // askai #41 (lazy resolution): a search hit's redirect (Google /goto) is resolved HERE, by the
+                // browser's normal navigation; the final URL is the source identity, the provider URL stays
+                // as provenance.
+                boolean redirected = !finalCanonical.equals(canonical);
+                UrlResolutionStatus resolution = redirected
+                        ? UrlResolutionStatus.RESOLVED : UrlResolutionStatus.DIRECT;
+                if (redirected && entry.getOrigin() == FrontierEntry.Origin.SEARCH_RESULT) {
+                    listener.status("redirect resolved by navigation: " + url + " -> " + effectiveUrl);
+                    if (progress.alreadyVisited(finalCanonical)) {
+                        // Two hits (e.g. two /goto links) landed on the same target: dedupe on the final URL.
+                        progress.noteVisitedAlias(canonical);
+                        listener.status("skipped duplicate target: " + effectiveUrl + " (via " + url + ")");
+                        continue;
+                    }
+                }
                 progress.pageVisited(finalCanonical, finalHost);
-                if (!finalCanonical.equals(canonical)) {
+                if (redirected) {
                     // A redirect: the requested address is marked visited too (but never counted).
                     progress.noteVisitedAlias(canonical);
                 }
@@ -595,7 +637,8 @@ public final class WebSearchApplicationService {
                                         pageTitle));
                         continue;
                     }
-                    ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle);
+                    ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle,
+                            redirected ? url : "", resolution);
                     if (g3 != null) {
                         return g3;
                     }
@@ -636,12 +679,15 @@ public final class WebSearchApplicationService {
                     frontier.add(FrontierEntry.fromDiscoveredLink(linkUrl, url));
                 }
             } catch (ToolInvoker.EndpointUnavailable ex) {
-                listener.status("[web-search] technical failure stage=PAGE_OPEN (endpoint unavailable — sidecar"
-                        + " may be dead) url=" + url + " cause=" + describe(ex));
+                listener.status("[web-search] technical failure stage=PAGE_OPEN (endpoint unavailable — browser"
+                        + " runtime unavailable) url=" + url + " cause=" + describe(ex));
                 return ResearchStopReason.MCP_UNAVAILABLE;
             } catch (ToolInvoker.ToolFailure ex) {
                 progress.error();
+                // A failed navigation (also a redirect blocked by the URL policy) ends only this visit; the
+                // search hit stays in the search result and its candidate list, it is never removed afterwards.
                 listener.status("[web-search] technical failure stage=PAGE_OPEN url=" + url
+                        + (entry.getOrigin() == FrontierEntry.Origin.SEARCH_RESULT ? " (search hit kept)" : "")
                         + " cause=" + describe(ex));
             }
         }
@@ -681,9 +727,10 @@ public final class WebSearchApplicationService {
                         new java.util.ArrayList<SearchScopeControlPort.Item>();
                 for (com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate
                         ranked : result.selected) {
-                    if (!ranked.candidate.resolvedTargetUrl.isEmpty()) {
+                    // askai #41: an UNRESOLVED hit (Google /goto) stays a candidate under its provider URL.
+                    if (!ranked.candidate.navigationUrl().isEmpty()) {
                         scopeItems.add(new SearchScopeControlPort.Item(
-                                ranked.candidate.resolvedTargetUrl,
+                                ranked.candidate.navigationUrl(),
                                 (ranked.candidate.title + " " + ranked.candidate.snippet)
                                         .trim()));
                     }
@@ -696,9 +743,14 @@ public final class WebSearchApplicationService {
                 int scopedOut = 0;
                 for (com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate ranked
                         : result.selected) {
-                    if (!ranked.candidate.resolvedTargetUrl.isEmpty()) {
-                        SearchScopeControlPort.Decision decision =
-                                serpVerdicts.get(ranked.candidate.resolvedTargetUrl);
+                    String navigationUrl = ranked.candidate.navigationUrl();
+                    if (!ranked.candidate.hasVerifiedTarget() && !navigationUrl.isEmpty()) {
+                        // askai #41: the redirect's host (google.com) is transit, never a source: when the browser
+                        // does not get past the redirect, the visit loop skips it as a search-provider page.
+                        searchProviderSites.add(familyOf(WebAcquisitionText.hostOf(navigationUrl)));
+                    }
+                    if (!navigationUrl.isEmpty()) {
+                        SearchScopeControlPort.Decision decision = serpVerdicts.get(navigationUrl);
                         if (scopeSkips(decision)) {
                             scopedOut++;
                             listener.status("search-scope skip candidate=\""
@@ -712,8 +764,10 @@ public final class WebSearchApplicationService {
                         // The selected hit keeps its identity: the entry names the candidate it came from
                         // and carries what the SERP promised (the Layer 2 semantic readiness net) instead
                         // of parking that promise in a side map keyed by URL.
-                        String candidateId = candidateIdFor(ranked.candidate.resolvedTargetUrl);
-                        frontier.add(FrontierEntry.fromSearchResult(ranked.candidate.resolvedTargetUrl,
+                        String candidateId = candidateIdFor(navigationUrl);
+                        // An UNRESOLVED hit is opened through its provider URL; the browser follows the redirect
+                        // and the page loop judges the FINAL URL it lands on (never the redirect itself).
+                        frontier.add(FrontierEntry.fromSearchResult(navigationUrl,
                                 candidateId,
                                 (ranked.candidate.title + " " + ranked.candidate.snippet).trim()));
                         // Park the candidate with its reranker score BEFORE it is visited, so every hit is
@@ -1077,6 +1131,13 @@ public final class WebSearchApplicationService {
     }
 
     private void parkCandidate(com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate ranked) {
+        if (!ranked.candidate.hasVerifiedTarget()) {
+            // askai #41: parking stores the hit under its target address; an unresolved redirect has none yet.
+            // It is still in the frontier, and only the page the browser lands on can be accepted as a source.
+            listener.status("not parked (redirect not resolved yet, opened via browser): "
+                    + ranked.candidate.title);
+            return;
+        }
         try {
             sourceAcceptancePort.park(ranked.candidate.resolvedTargetUrl, ranked.candidate.title,
                     ranked.candidate.snippet, ranked.score);
@@ -1108,7 +1169,7 @@ public final class WebSearchApplicationService {
             pr = com.aresstack.askai.browser.BrowserPageReadiness.parse(
                     callBrowser("web_probe", args("url", url)));
         } catch (ToolInvoker.ToolFailure ex) {
-            // A sidecar without web_probe: fall back to the single-step open (never fail the visit here).
+            // A browser runtime without web_probe: fall back to the single-step open (never fail the visit here).
             return callBrowser("web_open", args("url", url));
         }
         if (visitSkipped()) {
@@ -1346,7 +1407,7 @@ public final class WebSearchApplicationService {
             browserGone = true;
         }
         String line = "[browser-hud] " + stage + " failed"
-                + (endpoint ? " (endpoint unavailable — sidecar may be dead)" : "") + " cause=" + describe(ex);
+                + (endpoint ? " (endpoint unavailable — browser runtime unavailable)" : "") + " cause=" + describe(ex);
         if (!line.equals(lastHudErrorLine)) {
             lastHudErrorLine = line;
             listener.status(line);
@@ -1568,7 +1629,8 @@ public final class WebSearchApplicationService {
      * NOT errors. A rejected write (state changed under us) ends the run explicitly, not as a crash.
      */
     private ResearchStopReason acceptSource(String captureId, String page, String pageUrl, String pageHost,
-                                            String pageTitle)
+                                            String pageTitle, String originalUrl,
+                                            UrlResolutionStatus urlResolution)
             throws ToolInvoker.EndpointUnavailable {
         if (captureId == null) {
             return null;
@@ -1595,7 +1657,8 @@ public final class WebSearchApplicationService {
             // Research-specific per-source work happens in the caller's listener at THIS exact point,
             // budgeted via budgetGate (since issue #32 both callers are no-ops here).
             return acceptedSourceListener.onAccepted(
-                    new AcceptedSource(sourceId, duplicate, captureId, pageUrl, pageHost, pageTitle, page),
+                    new AcceptedSource(sourceId, duplicate, captureId, pageUrl, pageHost, pageTitle, page,
+                            originalUrl, urlResolution),
                     budgetGate);
         } catch (ToolInvoker.ToolFailure ex) {
             // A rejected write (state changed under us) ends the run explicitly, not as a crash.
@@ -1765,7 +1828,7 @@ public final class WebSearchApplicationService {
             return ResearchStopReason.USER_CANCELLED;
         }
         if (browserGone) {
-            return ResearchStopReason.MCP_UNAVAILABLE; // sidecar dead → end technically, never hang
+            return ResearchStopReason.MCP_UNAVAILABLE; // browser runtime gone → end technically, never hang
         }
         if (browserClosedByUser) {
             // Closing the window IS the user's stop: their decision, not a failure — sources stay.
@@ -1808,7 +1871,7 @@ public final class WebSearchApplicationService {
     }
 
     /**
-     * The sidecar's {@code serp-pages: host=n, host=n} diagnostics line, rendered for the funnel card
+     * The browser runtime's {@code serp-pages: host=n, host=n} diagnostics line, rendered for the funnel card
      * ({@code "html.duckduckgo.com 3 Seiten"}). Empty when the search carried none (API provider).
      */
     static String serpSummaryOf(List<String> diagnostics) {
@@ -1835,7 +1898,7 @@ public final class WebSearchApplicationService {
     }
 
     /**
-     * The ONE recognizer of the sidecar's typed "the user closed the window" marker. Every path a tool
+     * The ONE recognizer of the browser runtime's typed "the user closed the window" marker. Every path a tool
      * failure can take (page visit, SERP prepare, challenge poll) funnels through here, so the user's
      * stop can never be laundered into a technical failure by the catch that happened to see it first.
      */

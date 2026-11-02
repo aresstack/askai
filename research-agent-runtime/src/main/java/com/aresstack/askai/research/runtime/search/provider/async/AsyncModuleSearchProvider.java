@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.runtime.search.provider.async;
 
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
 import com.aresstack.askai.research.runtime.search.provider.SearchEngine;
 import com.aresstack.askai.research.runtime.search.provider.SearchHit;
 import com.aresstack.askai.research.runtime.search.provider.SearchProvider;
@@ -14,6 +15,7 @@ import com.aresstack.askai.research.runtime.search.provider.SearchProviderRespon
 import com.aresstack.askai.research.runtime.search.provider.SearchProviderResult;
 import com.aresstack.askai.research.runtime.search.provider.SearchProviderTemporaryException;
 
+import com.aresstack.askai.research.search.api.UrlResolution;
 import com.aresstack.askai.research.search.api.WebSearchHit;
 import com.aresstack.askai.research.search.api.WebSearchProvider;
 import com.aresstack.askai.research.search.api.WebSearchRequest;
@@ -131,20 +133,37 @@ public final class AsyncModuleSearchProvider implements SearchProvider {
         int index = 0;
         for (WebSearchHit hit : result.getHits()) {
             index++;
-            if (!hit.getUrlResolution().isUsableSource()) {
-                // Issue #41: an unresolved redirect (Google /goto) is a found hit, but never a verified source
-                // and never classified as google.com. Kept as diagnostic only.
-                unresolved.add("rank " + (hit.getRank() > 0 ? hit.getRank() : index) + " \"" + hit.getTitle()
-                        + "\": redirect not resolved (" + (hit.getResolutionDetail().isEmpty() ? "unknown"
-                        : hit.getResolutionDetail()) + ")");
-                continue;
-            }
             int rank = hit.getRank() > 0 ? hit.getRank() : index;
+            UrlResolutionStatus resolution = toStatus(hit.getUrlResolution());
+            if (resolution == UrlResolutionStatus.UNRESOLVED) {
+                // askai #41: an unresolved redirect (Google /goto) is a valid hit and STAYS a candidate; it is
+                // only not a verified target. The browser navigates it later; the landing page decides.
+                unresolved.add("rank " + rank + " \"" + hit.getTitle() + "\": redirect not resolved ("
+                        + (hit.getResolutionDetail().isEmpty() ? "unknown" : hit.getResolutionDetail())
+                        + "), kept as candidate");
+            }
             SearchEngine hitEngine = AsyncProviderMapping.toRuntimeEngine(hit.getSearchEngine(), resultEngine);
-            hits.add(new SearchHit(providerId, hitEngine, request.getQuery(), rank,
-                    hit.getUrl(), hit.getTitle(), hit.getSnippet(), domainOf(hit.getUrl()), rank, null));
+            // An unresolved redirect is never classified by its redirect host (google.com).
+            String domain = resolution == UrlResolutionStatus.UNRESOLVED ? "" : domainOf(hit.getUrl());
+            hits.add(new SearchHit(providerId, hitEngine, request.getQuery(), rank, hit.getUrl(), hit.getTitle(),
+                    hit.getSnippet(), domain, rank, null, resolution,
+                    hit.getOriginalUrl() == null ? "" : hit.getOriginalUrl(), hit.getResolutionDetail()));
         }
         return new SearchProviderResult(providerId, resultEngine, hits, result.getRawResponse(), unresolved);
+    }
+
+    private static UrlResolutionStatus toStatus(UrlResolution resolution) {
+        if (resolution == null) {
+            return UrlResolutionStatus.DIRECT;
+        }
+        switch (resolution) {
+            case RESOLVED:
+                return UrlResolutionStatus.RESOLVED;
+            case UNRESOLVED:
+                return UrlResolutionStatus.UNRESOLVED;
+            default:
+                return UrlResolutionStatus.DIRECT;
+        }
     }
 
     /** The host of {@code url}, or an empty string when it cannot be parsed — never throws. */

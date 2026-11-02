@@ -24,7 +24,9 @@ import com.aresstack.askai.mcp.api.McpToolContribution;
 import com.aresstack.askai.mcp.api.McpToolHandler;
 import com.aresstack.askai.mcp.api.McpToolParameter;
 import com.aresstack.askai.mcp.api.McpToolResult;
-import com.aresstack.askai.mcp.solon.SolonMcpServerRuntime;
+import com.aresstack.askai.mcp.api.InProcessMcpServerRegistry;
+import com.aresstack.askai.research.runtime.host.HostToolEndpoint;
+import com.aresstack.askai.research.runtime.host.InProcessHostToolEndpoints;
 import org.junit.AfterClass;
 import org.junit.Test;
 
@@ -40,16 +42,16 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pflichtnachweis (§7): the two-step SERP layout repair runs across REAL Solon MCP endpoints — the
- * repair DTOs are serialized by the sidecar tools, transported over the streamable MCP channel and
- * deserialized by the research runtime (never passed in-process). A model-free sidecar prepares/
+ * Pflichtnachweis (§7): the two-step SERP layout repair runs across the in-process host tool endpoints (askai #50) — the
+ * repair DTOs are serialized by the browser runtime tools, transported over the streamable MCP channel and
+ * deserialized by the research runtime (never passed in-process). A model-free browser runtime prepares/
  * applies; the runtime coordinator validates against snapshot-local descriptors and repairs. Also:
  * high confidence calls no model, and the guard rejections (unknown / consumed / snapshot / expired)
  * hold over the wire.
  */
 public class LayoutRepairMcpIntegrationTest {
 
-    private static SolonMcpServerRuntime runtime;
+    private static InProcessMcpServerRegistry runtime;
 
     @AfterClass
     public static void shutdown() {
@@ -59,9 +61,9 @@ public class LayoutRepairMcpIntegrationTest {
         }
     }
 
-    private static SolonMcpServerRuntime runtime() {
+    private static InProcessMcpServerRegistry runtime() {
         if (runtime == null) {
-            runtime = new SolonMcpServerRuntime();
+            runtime = new InProcessMcpServerRegistry();
         }
         return runtime;
     }
@@ -150,8 +152,8 @@ public class LayoutRepairMcpIntegrationTest {
     public void lowConfidenceRepairedAcrossRealMcpEndpointsYieldsRealCandidates() throws Exception {
         LegacyBrowserSearchSettings settings = RepairBridgeFixtures.lowConfidenceAiEnabled();
         McpEndpointHandle handle = registerTools(tools(settings, new AtomicLong(1000L)::get));
-        SolonToolInvoker browser =
-                new SolonToolInvoker(runtime().endpointUrl(handle), "streamable");
+        HostToolEndpoint browser =
+                new InProcessHostToolEndpoints(runtime()).connect(runtime().endpointUrl(handle), "streamable", 30);
         ScriptedPort port = new ScriptedPort(decisionNaming("container-0003"));
         AtomicInteger budgetChecks = new AtomicInteger();
         try {
@@ -177,8 +179,8 @@ public class LayoutRepairMcpIntegrationTest {
     public void highConfidenceUsesNoModelOverMcp() throws Exception {
         LegacyBrowserSearchSettings settings = RepairBridgeFixtures.highConfidenceAiEnabled();
         McpEndpointHandle handle = registerTools(tools(settings, new AtomicLong(1000L)::get));
-        SolonToolInvoker browser =
-                new SolonToolInvoker(runtime().endpointUrl(handle), "streamable");
+        HostToolEndpoint browser =
+                new InProcessHostToolEndpoints(runtime()).connect(runtime().endpointUrl(handle), "streamable", 30);
         ScriptedPort port = new ScriptedPort(decisionNaming("container-0003"));
         try {
             McpLayoutRepairClient client =
@@ -199,8 +201,8 @@ public class LayoutRepairMcpIntegrationTest {
     public void aiUnavailableEndsInExtractionFailedOverMcp() throws Exception {
         LegacyBrowserSearchSettings settings = RepairBridgeFixtures.lowConfidenceAiEnabled();
         McpEndpointHandle handle = registerTools(tools(settings, new AtomicLong(1000L)::get));
-        SolonToolInvoker browser =
-                new SolonToolInvoker(runtime().endpointUrl(handle), "streamable");
+        HostToolEndpoint browser =
+                new InProcessHostToolEndpoints(runtime()).connect(runtime().endpointUrl(handle), "streamable", 30);
         ScriptedPort port = new ScriptedPort(
                 StructuredInferenceResult.of(StructuredInferenceStatus.UNAVAILABLE, "no adapter"));
         try {
@@ -222,8 +224,8 @@ public class LayoutRepairMcpIntegrationTest {
         AtomicLong clock = new AtomicLong(1000L);
         SearchLayoutRepairTools tools = tools(settings, clock::get);
         McpEndpointHandle handle = registerTools(tools);
-        SolonToolInvoker browser =
-                new SolonToolInvoker(runtime().endpointUrl(handle), "streamable");
+        HostToolEndpoint browser =
+                new InProcessHostToolEndpoints(runtime()).connect(runtime().endpointUrl(handle), "streamable", 30);
         try {
             // unknown ticket
             assertEquals(SearchLayoutRepairStatus.UNKNOWN_ATTEMPT,
@@ -256,7 +258,7 @@ public class LayoutRepairMcpIntegrationTest {
         }
     }
 
-    private SearchLayoutRepairStatus applyStatus(SolonToolInvoker browser, String submissionJson)
+    private SearchLayoutRepairStatus applyStatus(HostToolEndpoint browser, String submissionJson)
             throws Exception {
         String resultJson = browser.call("web_search_apply_layout",
                 Collections.<String, Object>singletonMap("submission", submissionJson));
@@ -276,7 +278,7 @@ public class LayoutRepairMcpIntegrationTest {
                 layoutFp, "", decision));
     }
 
-    /** The structure fingerprint the sidecar will have cached for the fixture under these settings. */
+    /** The structure fingerprint the browser runtime will have cached for the fixture under these settings. */
     private static String layoutFingerprintFor(LegacyBrowserSearchSettings settings) {
         com.aresstack.askai.browser.render.RenderedPageDocument doc =
                 RepairBridgeFixtures.navPlusColumn();

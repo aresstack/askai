@@ -55,7 +55,7 @@ phase/run-state pairs is gone; illegal combinations are now rejected by `Researc
 The clickdummy backend gained a full productive sibling; nothing user-visible was removed:
 
 - New modules: `mcp-runtime-api`, `mcp-solon-runtime`, `mcp-marketplace`, `browser-api`,
-  `browser-static-http`, `browser-mcp-server-java21` (the ONE Java-21 process), `acp-client-api`,
+  `browser-static-http`, `browser-runtime-java21` (the ONE Java-21 process), `acp-client-api`,
   `acp-solon-client`, `acp-demo-agent`, `research-agent-runtime` (the external agent process).
 - `ResearchSessionBackend` now has two implementations behind the same port: the deterministic
   `FakeResearchSessionBackend` (clickdummy, still the UI default — see problems.md MCP-P007) and the
