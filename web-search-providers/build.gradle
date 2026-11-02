@@ -29,4 +29,11 @@ dependencies {
 
 test {
     useJUnit()
+    // Live check of the Google search browser (askai #31): -Daskai.live.googleBrowser=true [-Daskai.live.googleBrowser.channel=chrome]
+    ['askai.live.googleBrowser', 'askai.live.googleBrowser.channel'].each { name ->
+        if (System.getProperty(name) != null) {
+            systemProperty name, System.getProperty(name)
+        }
+    }
+    testLogging { showStandardStreams = System.getProperty('askai.live.googleBrowser') != null }
 }
