@@ -2,6 +2,7 @@ package com.aresstack.askai.ui;
 
 import com.aresstack.comiccontrols.theme.ThemeColor;
 import com.aresstack.comiccontrols.control.ComicControls;
+import com.aresstack.comiccontrols.control.ComicForm;
 import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.askai.tts.PiperInstaller;
 import com.aresstack.askai.tts.PiperTtsStore;
@@ -12,7 +13,6 @@ import com.aresstack.askai.tts.TtsSettingsStore;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -59,7 +59,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
     private final Map<String, JPanel> rowByVoice = new LinkedHashMap<String, JPanel>();
     private final JLabel error = new JLabel(" ");
     /** Fires after a voice install (and its adoption choice) so the owner's selector can reload. */
-    private Runnable onVoicesChanged;
+    private final java.util.List<Runnable> voicesChangedListeners = new java.util.ArrayList<Runnable>();
 
     /** Productive wiring: real installer + a background thread + the EDT + a JOptionPane prompt. */
     public SpeechOutputModelsPanel(PiperTtsStore store, TtsSettingsStore settings) {
@@ -69,7 +69,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
 
     SpeechOutputModelsPanel(PiperTtsStore store, TtsSettingsStore settings, InstallAction installer,
                             AdoptPrompt adoptPrompt, Executor background, Executor ui) {
-        super(new BorderLayout(8, 8));
+        super(new BorderLayout());
         this.store = store;
         this.settings = settings;
         this.installer = installer;
@@ -81,41 +81,50 @@ public final class SpeechOutputModelsPanel extends JPanel {
     }
 
     private void buildUserInterface() {
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        JPanel rows = new JPanel();
-        rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
-        rows.setBorder(ComicControls.titledBorder("Read-aloud voices (Piper)"));
-        JLabel intro = new JLabel("<html>The default speech output is the Windows voice — it needs"
-                + " no download. These model voices sound far more natural.<br>"
-                + "<b>CPU (recommended)</b> — the GPU stays free for the AI models.&nbsp;&nbsp;·"
-                + "&nbsp;&nbsp;GPU acceleration — <i>coming soon</i>.</html>");
-        JPanel introRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        introRow.add(intro);
-        rows.add(introRow);
+        setOpaque(false);
+        ComicForm rows = ComicForm.titled("Read-aloud voices (Piper)");
+        rows.note("The default speech output is the Windows voice — it needs no download. These model"
+                + " voices sound far more natural. CPU (recommended) — the GPU stays free for the AI"
+                + " models; GPU acceleration is coming soon.");
         for (PiperVoice voice : PiperVoiceCatalog.curated()) {
-            rows.add(buildRow(voice));
+            rows.component(buildRow(voice));
         }
         // Full transparency about the downloads — and that the Models route is only a shortcut.
-        JLabel sources = new JLabel("<html><i>Downloads: voices from HuggingFace"
-                + " “rhasspy/piper-voices”; the engine once (~21 MB) from the pinned"
-                + " Piper 2023.11.14-2 release on GitHub. Stored under"
-                + " %APPDATA%\\.askai\\tts.<br>"
-                + "The 🔊 entries under Models &gt; Setup &gt; Hugging Face are just a"
-                + " shortcut that opens this section.</i></html>");
-        JPanel sourcesRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        sourcesRow.add(sources);
-        rows.add(sourcesRow);
-        add(rows, BorderLayout.NORTH);
-        add(error, BorderLayout.SOUTH);
+        rows.note("Downloads: voices from HuggingFace “rhasspy/piper-voices”; the engine once (~21 MB)"
+                + " from the pinned Piper 2023.11.14-2 release on GitHub. Stored under"
+                + " %APPDATA%\\.askai\\tts. The 🔊 entries under Models > Setup > Hugging Face are"
+                + " just a shortcut that opens this section.");
+        rows.component(error);
+        add(rows, BorderLayout.CENTER);
     }
 
     /** Owner hook: reload the speech-output selector after installs/adoption. */
     public void setOnVoicesChanged(Runnable listener) {
-        this.onVoicesChanged = listener;
+        voicesChangedListeners.clear();
+        addVoicesChangedListener(listener);
+    }
+
+    /** Another owner (e.g. each chat's voice selector) that reloads after installs/adoption. */
+    public void addVoicesChangedListener(Runnable listener) {
+        if (listener != null) {
+            voicesChangedListeners.add(listener);
+        }
+    }
+
+    /** Forgets a listener registered with {@link #addVoicesChangedListener(Runnable)} (a closed chat). */
+    public void removeVoicesChangedListener(Runnable listener) {
+        voicesChangedListeners.remove(listener);
+    }
+
+    private void fireVoicesChanged() {
+        for (Runnable listener : new java.util.ArrayList<Runnable>(voicesChangedListeners)) {
+            listener.run();
+        }
     }
 
     private JPanel buildRow(final PiperVoice voice) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        row.setOpaque(false);
         row.add(new JLabel(voice.getLanguage() + " — " + voice.getDisplayName()
                 + "  ·  ~" + voice.getApproximateSizeMb() + " MB"));
         JLabel status = new JLabel();
@@ -213,9 +222,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
                             error.setText("Uninstall failed: " + describe(outcome));
                         }
                         refresh();
-                        if (onVoicesChanged != null) {
-                            onVoicesChanged.run(); // the selector drops the removed voice
-                        }
+                        fireVoicesChanged(); // the selector drops the removed voice
                     }
                 });
             }
@@ -255,9 +262,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
                         if (outcome == null) {
                             offerAdoption(voice);
                             refresh();
-                            if (onVoicesChanged != null) {
-                                onVoicesChanged.run();
-                            }
+                            fireVoicesChanged();
                         } else {
                             error.setText("Install failed: " + describe(outcome));
                             refresh();

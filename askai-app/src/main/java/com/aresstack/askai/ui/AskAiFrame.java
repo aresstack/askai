@@ -71,7 +71,10 @@ public final class AskAiFrame extends JFrame {
     private static final String INSTALL_VIEW = "install";
     /** The application pages inside the Settings (formerly own screens behind the gear menu). */
     private static final String SETTINGS_CONNECTIONS = "Connections";
-    private static final String SETTINGS_AI_MODELS = "AI models";
+    private static final String SETTINGS_AI_MODELS = OllamaChatPanel.SETTINGS_AI_MODELS;
+    /** The application's one read-aloud voice install section (shown under Settings > AI models). */
+    private final SpeechOutputModelsPanel speechVoicesPanel = new SpeechOutputModelsPanel(
+            new com.aresstack.askai.tts.PiperTtsStore(), new com.aresstack.askai.tts.TtsSettingsStore());
     private static final String SETTINGS_NETWORK = "Network";
     private static final String SETTINGS_PLUGINS = "Plugins";
     private static final String ABOUT_VIEW = "about";
@@ -427,12 +430,13 @@ public final class AskAiFrame extends JFrame {
         }
     }
 
-    /** An application page as a Settings category: scrollable, without the old screen footer. */
+    /**
+     * An application page as a Settings category, without the old screen footer. The pages scroll
+     * themselves (ComicForm pages scroll vertically only; the plugin table scrolls inside its own pane),
+     * so no second scroll pane is wrapped around them.
+     */
     private static javax.swing.JComponent settingsPage(javax.swing.JComponent page) {
-        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(page);
-        scroll.setBorder(javax.swing.BorderFactory.createEmptyBorder());
-        scroll.getVerticalScrollBar().setUnitIncrement(14);
-        return scroll;
+        return page;
     }
 
     /**
@@ -1179,6 +1183,7 @@ public final class AskAiFrame extends JFrame {
                         audioProfileRepository, applicationState, historyStore);
                 chat.setInstallAudioModelHandler(installHandler);
                 chat.setAudioProcessingSettingsHandler(audioHandler);
+                chat.setSpeechVoicesPanel(speechVoicesPanel);
                 // A persisted title/timestamp must reach an OPEN chat list right away.
                 chat.setHistoryChangedListener(new Runnable() {
                     public void run() {
@@ -1339,17 +1344,19 @@ public final class AskAiFrame extends JFrame {
         chatWorkspace.addApplicationSettingsPage(SETTINGS_CONNECTIONS, settingsPage(configPanel));
         // Central AI-model selection (reranker + embeddings) owned by AskAI for all plugins. The reranker
         // catalog needs the local runtime; when there is none, the panel simply offers no rerank models.
-        // Below it: the model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
-        javax.swing.JPanel aiModelsScreen = new javax.swing.JPanel(new java.awt.BorderLayout());
-        aiModelsScreen.add(new AiModelsPanel(model,
+        AiModelsPanel aiModelsPanel = new AiModelsPanel(model,
                 askAiService.localRuntimeManager() == null ? null
                         : new com.aresstack.askai.localmodels.LocalRerankerModelCatalog(
                                 askAiService.localRuntimeManager()),
                 nlpModelCatalog,
-                (VirtualOllamaContainerService) ollamaService), java.awt.BorderLayout.NORTH);
-        aiModelsScreen.add(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
-                .inConfigurationDirectory()), java.awt.BorderLayout.CENTER);
-        chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsScreen));
+                (VirtualOllamaContainerService) ollamaService);
+        // The read-aloud voices (Piper) are AI models too: ONE install section for the whole application,
+        // below the model selections; every chat's voice selector follows installs/removals there.
+        aiModelsPanel.addSection(speechVoicesPanel);
+        // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
+        aiModelsPanel.addSection(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
+                .inConfigurationDirectory()));
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsPanel));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
         chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,
                 settingsPage(new ProxyPanel(configurationRepository)));
