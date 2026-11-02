@@ -1,6 +1,6 @@
 package com.aresstack.askai.research.host;
 
-import com.aresstack.askai.browser.sidecar.InProcessBrowser;
+import com.aresstack.askai.browser.runtime.InProcessBrowser;
 
 /**
  * Downloads the managed Camoufox browser in the background as soon as a productive research session with the

@@ -14,7 +14,7 @@ import java.util.List;
  * Catalog- and MANIFEST-driven presentation of an AskAI local-engine model. Business data (family,
  * capabilities, backends, package, revision, install date, state) comes from the model's catalog-validated
  * {@link InstalledModelManifest} — never from a hardcoded "rerank / CPU" string and never reconstructed by
- * splitting the virtual id. Whether a generation model is still "pending" is driven by the SIDECAR's
+ * splitting the virtual id. Whether a generation model is still "pending" is driven by the local runtime's
  * reported generation-runtime linkage, not by a hardcoded family list, so it clears automatically once a
  * productive runtime is linked. {@code supportedBackends} is the catalogued support set, NOT a claim about
  * the currently active backend mode.
@@ -68,7 +68,7 @@ public final class LocalEngineModelView {
 
     /**
      * Whether this model is a generation model whose runtime is not linked yet — capability-based, NOT a
-     * hardcoded family list. {@code generationLinked} comes from the sidecar's reported feature set.
+     * hardcoded family list. {@code generationLinked} comes from the local runtime's reported feature set.
      */
     public static boolean isRuntimePending(InstalledModelManifest manifest, boolean generationLinked) {
         return isGenerationManifest(manifest) && !generationLinked;
@@ -110,7 +110,7 @@ public final class LocalEngineModelView {
 
     /**
      * The line for a RUNNING local card: family + capabilities only. It deliberately does NOT claim an
-     * active backend mode (the sidecar does not report one) and does not invent one from the catalog.
+     * active backend mode (the local runtime does not report one) and does not invent one from the catalog.
      */
     public static String runningDetailLine(String virtualName) {
         LocalRuntimeModelDescriptor descriptor = descriptorOf(virtualName);

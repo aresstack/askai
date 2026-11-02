@@ -5,7 +5,7 @@ import java.util.Locale;
 /**
  * DEV/TEST {@link DomainKeyResolver}: the domain family is the authority INCLUDING the port, so several
  * local test servers on 127.0.0.1 act as distinct "domains". This keeps production semantics (public
- * suffixes) untouched instead of bending them to localhost worlds. Selected via the sidecar's
+ * suffixes) untouched instead of bending them to localhost worlds. Selected via the browser runtime's
  * {@code --domain-key-mode=host-port} argument or injected directly in tests — never the default.
  */
 public final class HostPortDomainKeyResolver implements DomainKeyResolver {

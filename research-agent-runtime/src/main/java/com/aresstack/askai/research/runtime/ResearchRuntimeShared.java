@@ -1,6 +1,6 @@
 package com.aresstack.askai.research.runtime;
 
-import com.aresstack.askai.browser.sidecar.SearchBrowser;
+import com.aresstack.askai.browser.runtime.SearchBrowser;
 import com.aresstack.askai.research.runtime.search.provider.async.AsyncSearchProviderRegistry;
 import com.aresstack.askai.research.runtime.search.provider.async.ModuleAsyncSearchGenerationFactory;
 

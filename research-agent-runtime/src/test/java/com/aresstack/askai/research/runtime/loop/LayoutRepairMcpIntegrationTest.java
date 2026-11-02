@@ -43,8 +43,8 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Pflichtnachweis (§7): the two-step SERP layout repair runs across the in-process host tool endpoints (askai #50) — the
- * repair DTOs are serialized by the sidecar tools, transported over the streamable MCP channel and
- * deserialized by the research runtime (never passed in-process). A model-free sidecar prepares/
+ * repair DTOs are serialized by the browser runtime tools, transported over the streamable MCP channel and
+ * deserialized by the research runtime (never passed in-process). A model-free browser runtime prepares/
  * applies; the runtime coordinator validates against snapshot-local descriptors and repairs. Also:
  * high confidence calls no model, and the guard rejections (unknown / consumed / snapshot / expired)
  * hold over the wire.
@@ -278,7 +278,7 @@ public class LayoutRepairMcpIntegrationTest {
                 layoutFp, "", decision));
     }
 
-    /** The structure fingerprint the sidecar will have cached for the fixture under these settings. */
+    /** The structure fingerprint the browser runtime will have cached for the fixture under these settings. */
     private static String layoutFingerprintFor(LegacyBrowserSearchSettings settings) {
         com.aresstack.askai.browser.render.RenderedPageDocument doc =
                 RepairBridgeFixtures.navPlusColumn();

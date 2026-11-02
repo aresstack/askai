@@ -5,7 +5,7 @@ import java.util.List;
 
 /**
  * One container of the rendered page: NEUTRAL browser facts only (structure, text/link statistics,
- * geometry, visibility, computed colors, separation styling, structural signature). The sidecar
+ * geometry, visibility, computed colors, separation styling, structural signature). The browser runtime
  * measures — it never decides which container "is the content"; that judgement belongs to the
  * Java-8 analysis module. Ids are snapshot-local ({@code container-0001}) and NEVER stable
  * selectors: any later reference must also carry the snapshotId and is stale otherwise.

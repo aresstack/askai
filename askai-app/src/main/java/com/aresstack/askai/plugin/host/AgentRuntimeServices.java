@@ -65,7 +65,7 @@ public final class AgentRuntimeServices {
     private final com.aresstack.askai.agent.model.speech.SpeechSynthesisPort speechSynthesis =
             new com.aresstack.askai.tts.PiperReadAloudService();
 
-    /** The embedding descriptor request timeout (local sidecar; probe + calls). */
+    /** The embedding descriptor request timeout (local browser runtime; probe + calls). */
     private static final long EMBEDDING_TIMEOUT_MILLIS = 60_000L;
 
     /** @deprecated retained only for callers without the local model runtime (no reranker service). */
@@ -92,7 +92,7 @@ public final class AgentRuntimeServices {
                 : new LocalRerankerConfigurationSnapshotProvider(localModelRuntime, centralConfig);
         this.rerankerCatalog = localModelRuntime == null ? null
                 : new LocalRerankerModelCatalog(localModelRuntime);
-        // Inference uses the central main model, which may live on the LOCAL sidecar or a REMOTE Ollama —
+        // Inference uses the central main model, which may live on the LOCAL browser runtime or a REMOTE Ollama —
         // so it is published whenever there is a central config, even without a local runtime.
         this.inferenceSnapshots = centralConfig == null ? null
                 : new LocalInferenceConfigurationSnapshotProvider(localModelRuntime, centralConfig);
@@ -100,7 +100,7 @@ public final class AgentRuntimeServices {
         // a central config — the Ollama arm needs only the central Ollama endpoint, not a local runtime.
         this.embeddingSnapshots = centralConfig == null ? null
                 : embeddingProvider(localModelRuntime, centralConfig);
-        // NLP models are a global AskAI resource in their OWN store (not the sidecar runtime store), so the
+        // NLP models are a global AskAI resource in their OWN store (not the browser runtime runtime store), so the
         // catalog is always available; the snapshot provider needs the central selection to resolve.
         LocalNlpModelStore nlpStore = new LocalNlpModelStore();
         this.nlpCatalog = new LocalNlpModelCatalog(nlpStore);

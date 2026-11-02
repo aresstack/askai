@@ -113,8 +113,8 @@ tab). A **Revisions** view shows how the project got there.
 ## Requirements
 
 - **Java 21** to build and run AskAI. Every module is compiled for Java 21 (askai #31, see
-  [docs/java21-migration.md](docs/java21-migration.md)). The sidecar processes `browser-mcp-server-java21`
-  and `local-model-runtime-sidecar-java21` still exist and are being moved into the AskAI process.
+  [docs/java21-migration.md](docs/java21-migration.md)). AskAI runs as one Java 21 process: the browsers
+  (`browser-runtime-java21`) and the local model runtime (`local-model-runtime-java21`) run inside it.
 - **An Ollama server** for chat, dictation and model management.
 - **Nothing to install for browser research** (Windows x86_64 and Linux x86_64): the default browser
   channel `camoufox` downloads Camoufox once (about 1.3 GB) to `%APPDATA%/.askai/browser`. It is
@@ -188,8 +188,8 @@ Settings are stored in `%APPDATA%\.askai\askai.properties` (`~/.askai/` if
 | `browser-api` | Generic, framework-free browser port |
 | `browser-search-analysis` | Mechanical analysis of search result pages (regions, result blocks, candidates) |
 | `browser-static-http` | Static HTTP browser backend (`HttpURLConnection` + jsoup, no JavaScript) |
-| `browser-mcp-server-java21` | Java 21 browser MCP sidecar based on Playwright4J (`web_*` tools over Solon MCP) |
-| `local-model-runtime-sidecar-java21` | Java 21 local model runtime sidecar (Ollama-compatible API, DirectML reranking) |
+| `browser-runtime-java21` | Browsers inside the AskAI JVM: research browser and headless search browser (Playwright, playwright4j, Camoufox) |
+| `local-model-runtime-java21` | Local model runtime inside the AskAI JVM (Ollama-compatible HTTP API on loopback, DirectML) |
 | `mcp-runtime-api` | Generic MCP runtime contracts |
 | `mcp-solon-runtime` | Solon-based streamable-HTTP MCP server behind the runtime port |
 | `mcp-marketplace` | MCP marketplace search/registry/import browser (saves configurations only; not wired into the app) |

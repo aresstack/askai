@@ -3,7 +3,7 @@
 // registry — no agent process, no stdio, no ACP or MCP wire.
 
 dependencies {
-    // Public-suffix aware domain families (challenge locks, transit rules) — shared with the sidecar.
+    // Public-suffix aware domain families (challenge locks, transit rules) — shared with the browser runtime.
     implementation project(':browser-api')
     // The research DOMAIN CORE (pure Java 8, no dependencies): the runtime EXECUTES searches and produces
     // domain objects (SearchRun/SearchCandidate) that the host persists as project truth. Both sides must
@@ -20,15 +20,15 @@ dependencies {
     implementation project(':web-search-providers')
     // askai #31: Google via Serp4J on AskAI's own search browser (Playwright + Camoufox in this JVM).
     implementation project(':serp4j-playwright-google')
-    implementation project(':browser-mcp-server-java21')
+    implementation project(':browser-runtime-java21')
     // askai #48: the runtime runs inside the AskAI JVM: the host's tool registry is called directly and the
     // research plugin connects through the neutral ACP client port, both without a process or a wire.
     implementation project(':mcp-runtime-api')
     implementation project(':acp-client-api')
 
     // The reranker live test starts the local model runtime in the test JVM (askai #49).
-    testImplementation project(':local-model-runtime-sidecar-java21')
-    // 36C: the live-sidecar integration test drives the PRODUCTIVE capture/acceptance lifecycle
+    testImplementation project(':local-model-runtime-java21')
+    // 36C: the live-browser integration test drives the PRODUCTIVE capture/acceptance lifecycle
     // (CaptureStore, SourceAcceptanceService, in-memory repository/index) behind the research endpoint.
     testImplementation project(':research-agent-ui-plugin')
     // The plugin's shared APIs are compileOnly there (host-provided); the E2E host wiring test IS the host.

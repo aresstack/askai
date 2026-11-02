@@ -12,7 +12,7 @@ public final class BrowserSearchEngineCatalog {
     public static final String BING = "bing";
     /**
      * The engine a dev/test {@code --search-url=} override installs. It is not part of the catalog: it
-     * exists only when someone hands the sidecar an explicit template, and it then REPLACES the
+     * exists only when someone hands the browser runtime an explicit template, and it then REPLACES the
      * configured engines rather than joining them.
      */
     public static final String CUSTOM = "custom";

@@ -53,7 +53,7 @@ public interface AskAiService {
 
     /**
      * Installs a locally runnable model (staged download, wdmlpack compile + smoke load in the
-     * Java-21 sidecar, manifest, atomic activation), off the UI thread (R0).
+     * Java-21 browser runtime, manifest, atomic activation), off the UI thread (R0).
      */
     void installLocalModel(String modelId, LocalInstallListener listener);
 

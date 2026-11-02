@@ -532,7 +532,7 @@ public final class ResearchAgentMain {
     }
 
     /** AskAI's headless search browser (askai #31): the host's one shared instance, started on the first search. */
-    private com.aresstack.askai.browser.sidecar.SearchBrowser ensureSearchBrowser() {
+    private com.aresstack.askai.browser.runtime.SearchBrowser ensureSearchBrowser() {
         return shared.searchBrowser();
     }
 
@@ -1567,9 +1567,9 @@ public final class ResearchAgentMain {
     private static final int DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS = 300;
 
     /**
-     * The MCP request timeout toward the browser sidecar — the host's SETTING, handed over per spawn.
+     * The MCP request timeout toward the browser runtime — the host's SETTING, handed over per spawn.
      * A multi-page SERP prepare (several engines x result pages, evaluation and pacing between
-     * fetches) legitimately runs for minutes; the old hard-coded 30s was misread as "sidecar dead"
+     * fetches) legitimately runs for minutes; the old hard-coded 30s was misread as "browser runtime dead"
      * and ended every search as "Websuche technisch fehlgeschlagen" with empty sources.
      */
     private int browserToolTimeoutSeconds() {
@@ -1673,7 +1673,7 @@ public final class ResearchAgentMain {
     }
 
     /**
-     * The loop's settings come from the SAME config document the browser sidecar receives
+     * The loop's settings come from the SAME config document the browser runtime receives
      * ({@code ASKAI_BROWSER_SEARCH_CONFIG}); without one, exactly the central defaults apply. A broken
      * document fails the run visibly — settings are never silently substituted.
      */

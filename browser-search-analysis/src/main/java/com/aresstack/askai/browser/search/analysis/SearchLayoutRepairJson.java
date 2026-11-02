@@ -30,7 +30,7 @@ import java.util.Map;
 
 /**
  * The pure Java-8 wire codec for the SERP layout repair bridge — the ONLY thing that crosses the MCP
- * boundary between the model-free sidecar and the model-using research runtime. It round-trips every
+ * boundary between the model-free browser runtime and the model-using research runtime. It round-trips every
  * binding value fully (repair ticket id, analysis id, snapshot id + generation, document fingerprint,
  * layout structure fingerprint, settings digest) and HARD-REJECTS malformed payloads: missing required
  * fields, wrong types and unknown enum/status values all throw {@link DecodeException}. No decision is

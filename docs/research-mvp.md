@@ -86,9 +86,9 @@ session for you (explicit close/reopen), and the very first prompt can rarely re
 Environment: Windows, Java 8 + Java 21 installed, Chrome installed, jars built.
 
 1. `./gradlew build` is green.
-2. `./gradlew :research-agent-runtime:researchAgentJar :browser-mcp-server-java21:sidecarJar` built both artifacts.
+2. `./gradlew :research-agent-runtime:researchAgentJar :browser-runtime-java21:sidecarJar` built both artifacts.
 3. Start the sidecar manually (port/token of your choice); STDERR shows `playwright readiness: READY: channel=chrome …`.
-4. STDERR shows `ready on 127.0.0.1:<port> backend=PLAYWRIGHT_SIDECAR`; the token appears nowhere in the output.
+4. STDERR shows `ready on 127.0.0.1:<port> backend=PLAYWRIGHT`; the token appears nowhere in the output.
 5. Rename the Chrome folder (or use a machine without Chrome): readiness reports `BROWSER_NOT_INSTALLED`, tools return that status, the process stays up. Restore Chrome.
 6. `web_open` on a JavaScript-rendered page returns the rendered text (not the empty static HTML).
 7. `web_open` on `file:///…` and on `http://169.254.169.254/` is rejected with a readable reason.

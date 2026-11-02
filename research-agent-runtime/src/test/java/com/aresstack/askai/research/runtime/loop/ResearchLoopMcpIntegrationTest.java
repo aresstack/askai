@@ -67,7 +67,7 @@ public class ResearchLoopMcpIntegrationTest {
         List<McpToolContribution> browserTools = new ArrayList<McpToolContribution>();
         browserTools.add(McpToolContribution.of("web_search_prepare", "prepare", new McpToolHandler() {
             public McpToolResult invoke(McpToolCall call) {
-                // A high-confidence SERP: A3-resolved organic candidate, encoded like the real sidecar.
+                // A high-confidence SERP: A3-resolved organic candidate, encoded like the real browser runtime.
                 return McpToolResult.ok(ResearchLoopTest.preparedJson(
                         java.util.Arrays.asList("https://host1.com/a"),
                         java.util.Collections.<String>emptyList(),

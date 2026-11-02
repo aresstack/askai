@@ -24,11 +24,11 @@ public final class ResearchRuntimeDefaults {
      * The browser channel to actually use: the configured one when its browser is installed; otherwise the
      * OTHER channel when that one is provably present (e.g. a machine with Edge but no Chrome keeps
      * working after Chrome is uninstalled). When neither is found, the configured channel stays and the
-     * sidecar's readiness probe reports BROWSER_NOT_INSTALLED readably. Discovery only — never installs.
+     * browser runtime's readiness probe reports BROWSER_NOT_INSTALLED readably. Discovery only — never installs.
      */
     public static String installedBrowserChannel(String configured) {
         if (ResearchRuntimeSettings.CAMOUFOX_CHANNEL.equals(configured)) {
-            return configured; // managed: the sidecar downloads and verifies its own Camoufox
+            return configured; // managed: the browser runtime downloads and verifies its own Camoufox
         }
         String channel = "msedge".equals(configured) ? "msedge" : "chrome";
         String other = "msedge".equals(channel) ? "chrome" : "msedge";
@@ -41,7 +41,7 @@ public final class ResearchRuntimeDefaults {
         return configuredInstalled || !otherInstalled ? configured : other;
     }
 
-    /** Standard install locations of the channel's browser (mirrors the sidecar's discovery paths). */
+    /** Standard install locations of the channel's browser (mirrors the browser runtime's discovery paths). */
     static boolean browserInstalled(String channel) {
         boolean chrome = !"msedge".equals(channel);
         java.util.List<String> paths = new java.util.ArrayList<String>();

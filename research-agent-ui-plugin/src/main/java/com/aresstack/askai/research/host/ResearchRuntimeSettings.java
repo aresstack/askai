@@ -18,7 +18,7 @@ public final class ResearchRuntimeSettings {
     static final String KEY_BROWSER_CHANNEL = "research.runtime.browserChannel";
     /** Set once the stored channel went through the Camoufox switch (see {@link #load}). */
     static final String KEY_BROWSER_CHANNEL_CAMOUFOX_SWITCH = "research.runtime.browserChannel.camoufoxSwitch";
-    /** The managed Camoufox browser (downloaded once by the sidecar) — the default channel. */
+    /** The managed Camoufox browser (downloaded once by the browser runtime) — the default channel. */
     public static final String CAMOUFOX_CHANNEL = "camoufox";
     static final String KEY_HEADLESS = "research.runtime.headless";
     /** Conversation-policy thresholds (documented defaults; adjustable WITHOUT a rebuild via
@@ -177,7 +177,7 @@ public final class ResearchRuntimeSettings {
     /** Safety time limit per search run (minutes) — user waits are never counted against it. */
     public static final int DEFAULT_SEARCH_MAX_MINUTES = 10;
 
-    /** Per-call MCP timeout toward the browser sidecar (seconds) — must cover a multi-page SERP prepare. */
+    /** Per-call MCP timeout toward the browser runtime (seconds) — must cover a multi-page SERP prepare. */
     public static final String KEY_BROWSER_TOOL_TIMEOUT_SECONDS =
             "research.search.browserToolTimeoutSeconds";
     public static final int DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS = 300;

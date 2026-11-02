@@ -29,7 +29,7 @@ import java.util.List;
  * The research runtime configuration surface. Reads/writes exclusively through
  * {@link ResearchRuntimeSettings} (the same mapper the session factory uses). Saving an ACP configuration
  * that fails validation is rejected with the concrete problem list; FAKE is labelled clearly as the
- * clickdummy/development mode. "Check requirements" runs validation + the sidecar readiness probe on a
+ * clickdummy/development mode. "Check requirements" runs validation + the browser runtime readiness probe on a
  * background daemon thread (never the EDT) with a visible busy state; results come back via
  * {@link SwingUtilities#invokeLater} as one structured line per requirement.
  */
@@ -411,7 +411,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS,
                 "Timeout je Browser-Aufruf in Sekunden. Muss die komplette Suchmaschinen-Phase "
                         + "abdecken (mehrere Engines und Ergebnisseiten, sequenziell mit Auswertung) — "
-                        + "zu klein wird als 'Sidecar tot' fehlgedeutet und bricht jede Suche ab.");
+                        + "zu klein wird als 'Browser nicht verfügbar' fehlgedeutet und bricht jede Suche ab.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
                 "Wie viele Quellen eine Auswertung höchstens liest (neueste zuerst).");
@@ -743,7 +743,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         final ResearchRuntimeSettings settings = ResearchRuntimeDefaults.complete(currentSettings());
         check.setEnabled(false);
         save.setEnabled(false);
-        busy.setText("Checking requirements (starts the sidecar briefly)…");
+        busy.setText("Checking requirements (starts the browser briefly)…");
         results.setText("");
         Thread worker = new Thread(new Runnable() {
             public void run() {

@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * Capabilities the LOCAL model runtime exposes, mirroring the neutral catalog's {@link ModelCapability}
- * so the host and the sidecar route strictly by capability (never by a model-name heuristic). The Ollama
+ * so the host and the local runtime route strictly by capability (never by a model-name heuristic). The Ollama
  * tag is the token that appears in the virtual container's {@code /api/show} capability list.
  */
 public enum LocalRuntimeCapability {

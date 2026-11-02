@@ -2,7 +2,7 @@ package com.aresstack.askai.research.host;
 
 
 import com.aresstack.askai.browser.BrowserException;
-import com.aresstack.askai.browser.sidecar.InProcessBrowser;
+import com.aresstack.askai.browser.runtime.InProcessBrowser;
 
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -13,9 +13,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 
 /**
- * A lazy, restartable owner of ONE browser MCP sidecar generation. It is created STOPPED (no process, no
+ * A lazy, restartable owner of ONE in-process browser generation. It is created STOPPED (no browser, no
  * Playwright, no readiness probe) when the research session starts, so selecting the Research agent never
- * spawns a browser. The sidecar is started on the FIRST browser command ({@link #execute}), stopped again
+ * spawns a browser. The browser is started on the FIRST browser command ({@link #execute}), stopped again
  * with {@link #stop()} when the browsing phase ends, and can be thrown away + replaced with {@link #restart()}
  * on failure — the TeamAgent survives a browser crash untouched.
  *
@@ -26,8 +26,8 @@ import java.util.concurrent.ThreadFactory;
  */
 public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
 
-    /** One started sidecar generation (process + client), abstracted so the lifecycle is unit-testable. */
-    interface Sidecar {
+    /** One started browser generation, abstracted so the lifecycle is unit-testable. */
+    interface RunningBrowser {
         String call(String tool, Map<String, Object> arguments) throws BrowserRuntimeException;
 
         /**
@@ -44,12 +44,12 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         void close();
     }
 
-    /** Starts a fresh sidecar generation, BLOCKING until it is ready; throws on any start failure. */
-    interface SidecarStarter {
-        Sidecar start() throws BrowserRuntimeException;
+    /** Starts a fresh browser generation, BLOCKING until it is ready; throws on any start failure. */
+    interface BrowserStarter {
+        RunningBrowser start() throws BrowserRuntimeException;
     }
 
-    private final SidecarStarter starter;
+    private final BrowserStarter starter;
     private final ExecutorService owner;
     private volatile Listener listener = Listener.NONE;
 
@@ -57,13 +57,13 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
     // current is volatile ONLY for the out-of-band control-plane snapshot in executeControl).
     private volatile State state = State.STOPPED;
     private long generation;
-    private volatile Sidecar current;
+    private volatile RunningBrowser current;
     private volatile boolean closed;
     /** Dedupe for control-plane failure logging (polled ~1/s — never flood stderr). */
     private volatile String lastControlFailureLine;
 
     /**
-     * Production runtime over the in-process Playwright browser (askai #31: no sidecar process, no MCP).
+     * Production runtime over the in-process Playwright browser (askai #31: no separate process, no MCP).
      *
      * @param browserConfigPath the versioned browser-search config document, or {@code null} for the defaults
      */
@@ -71,7 +71,7 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         this(inProcessStarter(config, browserConfigPath));
     }
 
-    LazyRestartableBrowserRuntime(SidecarStarter starter) {
+    LazyRestartableBrowserRuntime(BrowserStarter starter) {
         this.starter = starter;
         this.owner = Executors.newSingleThreadExecutor(new ThreadFactory() {
             public Thread newThread(Runnable r) {
@@ -114,12 +114,12 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         // data call blocks the owner thread — and never starts/restarts a browser just to poll it. A
         // missing or broken generation reports nothing; a genuinely dead browser is detected (and
         // restarted) by the DATA calls, which is where the run's fate is decided.
-        Sidecar sidecar = current;
-        if (closed || state != State.READY || sidecar == null) {
+        RunningBrowser running = current;
+        if (closed || state != State.READY || running == null) {
             return "";
         }
         try {
-            return sidecar.controlCall(tool, arguments);
+            return running.controlCall(tool, arguments);
         } catch (BrowserRuntimeException failure) {
             String line = "[browser] control call failed tool=" + tool + ": " + failure.getMessage();
             if (!line.equals(lastControlFailureLine)) {
@@ -241,7 +241,7 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
         if (state == State.READY || state == State.STARTING || state == State.FAILED) {
             state = State.STOPPING;
         }
-        Sidecar toClose = current;
+        RunningBrowser toClose = current;
         current = null;
         if (toClose != null) {
             toClose.close();
@@ -277,10 +277,10 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
     }
 
     /** The productive starter: start the Playwright browser in this process (blocks until ready). */
-    private static SidecarStarter inProcessStarter(final ResearchRuntimeConfig config,
+    private static BrowserStarter inProcessStarter(final ResearchRuntimeConfig config,
                                                    final String browserConfigPath) {
-        return new SidecarStarter() {
-            public Sidecar start() throws BrowserRuntimeException {
+        return new BrowserStarter() {
+            public RunningBrowser start() throws BrowserRuntimeException {
                 final InProcessBrowser browser;
                 try {
                     browser = InProcessBrowser.start(config.getBrowserChannel(), config.isHeadless(),
@@ -288,7 +288,7 @@ public final class LazyRestartableBrowserRuntime implements BrowserRuntimePort {
                 } catch (Exception failure) {
                     throw new BrowserRuntimeException("browser failed to start: " + failure.getMessage(), true);
                 }
-                return new Sidecar() {
+                return new RunningBrowser() {
                     public String call(String tool, Map<String, Object> arguments)
                             throws BrowserRuntimeException {
                         try {

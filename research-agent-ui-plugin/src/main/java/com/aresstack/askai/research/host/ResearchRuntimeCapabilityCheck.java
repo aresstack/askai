@@ -37,8 +37,8 @@ public final class ResearchRuntimeCapabilityCheck {
         for (String problem : settings.validateProductive()) {
             items.add(new Item("Configuration", false, problem));
         }
-        com.aresstack.askai.browser.sidecar.PlaywrightReadiness readiness =
-                new com.aresstack.askai.browser.sidecar.PlaywrightCapabilityProbe()
+        com.aresstack.askai.browser.runtime.PlaywrightReadiness readiness =
+                new com.aresstack.askai.browser.runtime.PlaywrightCapabilityProbe()
                         .probe(settings.getBrowserChannel());
         items.add(new Item("Browser readiness (" + settings.getBrowserChannel() + ")", readiness.isReady(),
                 readiness.render()));

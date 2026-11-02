@@ -19,7 +19,7 @@ import java.util.List;
 
 /**
  * The MODEL-USING research-runtime half of the repair bridge. Given a bounded
- * {@link SearchLayoutRepairRequest} from the model-free sidecar, it FIRST tries a stored layout
+ * {@link SearchLayoutRepairRequest} from the model-free browser runtime, it FIRST tries a stored layout
  * profile (no model call), and only otherwise drives the {@link StructuredInferencePort} through the
  * validating/repairing resolver — behind the neutral {@link InferenceBudgetGate} and injectable
  * {@link RetryDelay}. A success yields a {@link SearchLayoutRepairSubmission} the runtime sends back to

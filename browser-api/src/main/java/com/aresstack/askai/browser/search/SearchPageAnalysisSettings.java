@@ -46,7 +46,7 @@ public final class SearchPageAnalysisSettings {
     /** Text beyond this length adds no further score (saturation). */
     public final int textLengthSaturationCharacters;
 
-    // A3 capture limits (the sidecar capture is bounded by construction).
+    // A3 capture limits (the browser runtime capture is bounded by construction).
     public final int maximumContainerDomDepth;
     public final int maximumCapturedContainers;
     public final int maximumLinksPerContainer;

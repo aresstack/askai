@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 /**
  * THE single origin of every default value of the legacy browser search. All values that were
- * previously constants in sidecar/loop classes (SERP guard selectors, readiness timings, engine
+ * previously constants in browser runtime/loop classes (SERP guard selectors, readiness timings, engine
  * fallbacks, probe cadences) live here and ONLY here. Components never invent substitute values;
  * a missing configuration is answered by {@link #create()}, never by a local constant.
  */

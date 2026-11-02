@@ -25,9 +25,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * <li>{@code FAKE} → the deterministic clickdummy backend (development/demo mode, clearly labelled in the
  *     runtime settings view);</li>
  * <li>{@code ACP} → the productive chain via {@link ProductiveResearchBackendFactory} (external agent
- *     process, research-control + browser-bridge endpoints, Playwright sidecar, file-persisted sources).</li>
+ *     process, research-control + browser-bridge endpoints, Playwright browser runtime, file-persisted sources).</li>
  * </ul>
- * A productive start failure (invalid configuration, missing host service, sidecar not READY) throws with the
+ * A productive start failure (invalid configuration, missing host service, browser runtime not READY) throws with the
  * concrete reason — there is NO automatic fallback to the fake backend in any direction.
  */
 public final class ResearchAgentSessionFactory implements AgentSessionFactory {
@@ -228,7 +228,7 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
             activeSessions.register(request.getSessionId(), sessionDirectory);
         }
         // The session OWNS the resources: structured commands route to their state machine, close() tears
-        // them down last (endpoints → sidecar client → sidecar process).
+        // them down last (endpoints → browser runtime client → separate process).
         ResearchAgentSession session = new ResearchAgentSession(resources.getBackend(), null, hostContext,
                 request.getSessionId(), request.getProjectId(), resources,
                 publicChatSessionId(request));

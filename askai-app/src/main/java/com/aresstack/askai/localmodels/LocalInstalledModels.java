@@ -10,7 +10,7 @@ import java.nio.file.Files;
 
 /**
  * Host-side reader of on-disk local-model manifests. Fail-closed: a directory's manifest is returned only
- * when it parses AND validates VALID against the shared catalog (same rules the sidecar applies for
+ * when it parses AND validates VALID against the shared catalog (same rules the local runtime applies for
  * /api/tags), so an invalid manifest, an unknown schema or an invented capability never reaches the UI.
  */
 public final class LocalInstalledModels {

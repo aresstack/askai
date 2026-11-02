@@ -147,7 +147,7 @@ public final class ProductiveResearchBackendFactory {
         this.useAiReranker = enabled;
     }
 
-    /** Per-call MCP timeout toward the browser sidecar (seconds) — the settings value, never a constant. */
+    /** Per-call MCP timeout toward the browser runtime (seconds) — the settings value, never a constant. */
     public void setBrowserToolTimeoutSeconds(int seconds) {
         if (seconds > 0) {
             this.browserToolTimeoutSeconds = seconds;
@@ -267,7 +267,7 @@ public final class ProductiveResearchBackendFactory {
             throw new IOException("Cannot create " + searchConfigDir);
         }
         File profileFile = new File(searchConfigDir, "search-profile.json");
-        File sidecarConfigFile = new File(searchConfigDir, "browser-config.json");
+        File browserConfigFile = new File(searchConfigDir, "browser-config.json");
         com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot profile;
         if (profileFile.isFile()) {
             try {
@@ -317,13 +317,13 @@ public final class ProductiveResearchBackendFactory {
                     sessionKey, browserSearchRevision, System.currentTimeMillis(), decoded.settings);
             writeUtf8(profileFile, profile.toJson());
         }
-        // The browser-near SUBSET for the sidecar is regenerated from the SNAPSHOT on every start
+        // The browser-near SUBSET for the browser runtime is regenerated from the SNAPSHOT on every start
         // (AI/prompt/reranker settings never enter the browser process).
-        writeUtf8(sidecarConfigFile, new com.aresstack.askai.browser.search
+        writeUtf8(browserConfigFile, new com.aresstack.askai.browser.search
                 .LegacyBrowserSearchConfigDocument(
                         profile.schemaVersion, profile.profileRevision, profile.settingsDigest,
                         com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
-                                .sidecarSubset(com.aresstack.askai.browser.search
+                                .browserSubset(com.aresstack.askai.browser.search
                                         .LegacyBrowserSearchSettingsCodec
                                         .toValues(profile.settings))).toJson());
         File fullConfigFile = profileFile;
@@ -633,13 +633,13 @@ public final class ProductiveResearchBackendFactory {
         com.aresstack.askai.research.mcp.ResearchControlEndpoint control = null;
         com.aresstack.askai.research.mcp.ResearchServiceEndpoint service = null;
         // 2. LAZY browser runtime: created STOPPED — selecting the Research agent must NOT spawn a browser
-        // or block the EDT. The Playwright sidecar starts on the FIRST browser command (on the runtime's
+        // or block the EDT. The Playwright browser runtime starts on the FIRST browser command (on the runtime's
         // own owner thread) and is stopped again when the browsing phase ends; a broken generation restarts.
         // The managed Camoufox is downloaded once; start that now in the background so the first browser
         // command (usually minutes later, after scoping) finds it installed. Spawns no browser.
         CamoufoxPrefetch.startOnce(config);
         final BrowserRuntimePort browser = new LazyRestartableBrowserRuntime(config,
-                sidecarConfigFile.getAbsolutePath());
+                browserConfigFile.getAbsolutePath());
         try {
             // 3. Host endpoints for this session+generation (the bridge forwards through the lazy runtime).
             bridge = new BrowserBridgeEndpoint(agentRegistry, browser, captures, sessionKey, generationId);
@@ -1057,7 +1057,7 @@ public final class ProductiveResearchBackendFactory {
             bridge.close();
         }
         if (browser != null) {
-            browser.close(); // STOPPED runtime → just releases the owner thread; started → tears the sidecar down
+            browser.close(); // STOPPED runtime → just releases the owner thread; started → tears the browser runtime down
         }
     }
 

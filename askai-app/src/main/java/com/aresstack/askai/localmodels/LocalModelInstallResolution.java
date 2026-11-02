@@ -21,7 +21,7 @@ public final class LocalModelInstallResolution {
         ENCODER,
         /** A cross-encoder reranker (reranker.wdmlpack). */
         RERANKER,
-        /** A native text-generation family (Qwen/SmolLM2/Gemma3/Phi-3/T5) — installed via the sidecar's
+        /** A native text-generation family (Qwen/SmolLM2/Gemma3/Phi-3/T5) — installed via the local runtime's
          *  generation runtime (compile + package-backed smoke). */
         GENERATION,
         /** Retained for compatibility; no longer returned now the generation runtime is linked. */

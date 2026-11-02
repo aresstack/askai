@@ -5,11 +5,11 @@
 - `:browser-api` (Java 8) — the shared port: `BrowserSession` (search/open/currentPage/links/follow/
   back/close), `BrowserPageSnapshot` (url/title/clean text/truncated — never raw HTML),
   `BrowserLink` (stable per-snapshot ids `link-1..n`), `WebSearchResult`, `UrlSafetyPolicy`,
-  `BrowserLimits`, `BrowserBackendKind { PLAYWRIGHT_SIDECAR, STATIC_HTTP }`.
+  `BrowserLimits`, `BrowserBackendKind { PLAYWRIGHT, STATIC_HTTP }`.
 - `:browser-static-http` (Java 8) — `StaticHttpBrowserSession` (jsoup): static fetch + cleanup only;
   search is honestly unsupported. A separate, visibly limited backend — **never** an automatic
   fallback for the sidecar.
-- `:browser-mcp-server-java21` — the ONE deliberate Java-21 process. The Java-8 host never compiles
+- `:browser-runtime-java21` — the ONE deliberate Java-21 process. The Java-8 host never compiles
   against it and never loads its classes; it only talks MCP to it.
 
 ## How the Playwright backend works (MCP-P005, resolved)
@@ -21,7 +21,7 @@ second **Java** process (`GraalDriverMain`) hosting the Playwright Core JS drive
 
 The default browser is **Camoufox** (`--browser-channel=camoufox`), taken over from
 [Argos](https://github.com/aresstack/argos) with minimal changes (package
-`com.aresstack.askai.browser.sidecar.camoufox`: `CamoufoxDistribution`, `CamoufoxInstaller`,
+`com.aresstack.askai.browser.runtime.camoufox`: `CamoufoxDistribution`, `CamoufoxInstaller`,
 `CamoufoxLaunch`, plus `camoufox/distribution.properties` and the fingerprint profile
 `camoufox/default-launch.json`):
 
