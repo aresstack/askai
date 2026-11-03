@@ -172,6 +172,31 @@ public interface SetupActions {
         return null;
     }
 
+    /**
+     * Suggested for dictation when no audio-capable model is installed: Gemma 3n understands speech in Ollama
+     * (its audio works through {@code ollama pull}, not through a single-file GGUF import).
+     */
+    String RECOMMENDED_AUDIO_MODEL = "gemma3n:e4b";
+
+    /** The capture devices by name; the system default microphone is not part of the list. */
+    default List<String> microphones() {
+        return Collections.emptyList();
+    }
+
+    /**
+     * Opens the microphone for a few seconds and reports its level (0–100) on the EDT; nothing is recorded or sent.
+     * {@code done}: whether a signal was heard, or the error.
+     */
+    default void testMicrophone(String device, java.util.function.IntConsumer level,
+                                BiConsumer<Boolean, String> done) {
+        done.accept(null, "testing the microphone is not available here");
+    }
+
+    /** The installed models that understand audio (checked with the runtime, not guessed from the name). */
+    default void loadAudioModels(SetupDraft draft, Consumer<List<String>> done) {
+        done.accept(Collections.<String>emptyList());
+    }
+
     /** The installed models per role. */
     final class SetupModels {
         private final List<String> chat;

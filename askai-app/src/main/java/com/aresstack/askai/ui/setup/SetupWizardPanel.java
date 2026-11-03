@@ -56,7 +56,8 @@ public final class SetupWizardPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
 
-    static final String[] STEP_NAMES = {"Connection & voice", "AI runtime", "Chat model", "Research", "Check"};
+    static final String[] STEP_NAMES = {"Connection & voice", "AI runtime", "Chat model", "Research", "Dictation",
+            "Check"};
     /**
      * The first step sets up the network and downloads the Witch's voice in one go: the download through the
      * configured proxy and certificates is the network test, and from then on the Witch can speak.
@@ -67,14 +68,17 @@ public final class SetupWizardPanel extends JPanel {
     static final int STEP_RUNTIME = 1;
     static final int STEP_CHAT = 2;
     static final int STEP_KNOWLEDGE = 3;
+    /** Optional: microphone and audio model for speaking instead of typing. */
+    static final int STEP_DICTATION = 4;
     /** The last step: saves and checks everything; “Finish” ends the setup here. */
-    static final int STEP_CHECK = 4;
+    static final int STEP_CHECK = 5;
 
     /**
      * Witch's picture per step: cut-outs with a transparent background (copies of the third set in
      * docs/images/setup-wizard/originals/v3).
      */
-    private static final String[] STEP_MASCOTS = {"wizard/v3-06-voice.png", "wizard/v3-02-ai-runtime.png", "wizard/v3-03-chat-model.png", "wizard/v3-04-knowledge.png",
+    private static final String[] STEP_MASCOTS = {"wizard/v3-06-voice.png", "wizard/v3-02-ai-runtime.png",
+            "wizard/v3-03-chat-model.png", "wizard/v3-04-knowledge.png", "wizard/v3-06-voice.png",
             "wizard/v3-05-check.png"};
     /** The runtime step shows this picture until a runtime answers (the same cut-out as once it answers). */
     static final String RUNTIME_INSTALL_MASCOT = "wizard/v3-02-ai-runtime.png";
@@ -83,12 +87,12 @@ public final class SetupWizardPanel extends JPanel {
     /** Per step: Witch's place in the free space (alternating, so it feels alive). */
     private static final SetupWizardMascot.Placement[] MASCOT_PLACEMENTS = {SetupWizardMascot.Placement.RIGHT,
             SetupWizardMascot.Placement.LEFT, SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.LEFT,
-            SetupWizardMascot.Placement.CENTER};
+            SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.CENTER};
     /**
      * Per step: Witch's largest height in logical pixels. Larger than any free space on purpose: Witch grows to
      * fill the free space of the step instead of standing small in a corner.
      */
-    private static final int[] MASCOT_HEIGHTS = {900, 900, 900, 900, 900};
+    private static final int[] MASCOT_HEIGHTS = {900, 900, 900, 900, 900, 900};
 
     /** AskAI proxy modes the step offers directly; every other mode is kept and edited in the network settings. */
     static final String PROXY_NONE = "DISABLED";
@@ -101,6 +105,10 @@ public final class SetupWizardPanel extends JPanel {
 
     /** First entry of the voice choices: the zero-setup Windows voice. */
     static final String WINDOWS_VOICE = "Windows voice (no download)";
+    /** First microphone choice: whatever Windows uses as its default recording device. */
+    static final String MIC_DEFAULT = "System default microphone";
+    /** First audio model choice: AskAI picks an installed audio-capable model itself. */
+    static final String AUDIO_AUTOMATIC = "Automatic";
     /** No reranker / no sentence model: AskAI uses its fallbacks. */
     static final String NONE = "";
 
@@ -225,6 +233,19 @@ public final class SetupWizardPanel extends JPanel {
     private final ModelDownload chatDownload = new ModelDownload("Download model");
     private final ModelDownload embeddingDownload = new ModelDownload("Download model");
     private final ModelDownload rerankerDownload = new ModelDownload("Install recommended reranker");
+    // Dictation (optional)
+    private final JComboBox<String> microphone = ComicControls.comboBox();
+    private final ComicButton micTest = new ComicButton("Test microphone");
+    private final JProgressBar micLevel = ComicControls.progressBar(0, 100);
+    private final JLabel micStatus = statusLabel();
+    private boolean micTesting;
+    private final JComboBox<String> audioModel = ComicControls.comboBox();
+    private final ModelDownload audioDownload = new ModelDownload("Download audio model");
+    private final JLabel audioStatus = statusLabel();
+    private List<String> installedAudio = Collections.emptyList();
+    /** The microphones and audio models were read once; until then the draft's choice stays as it is. */
+    private boolean dictationLoaded;
+    private boolean audioLoading;
     private final JLabel voiceStatus = statusLabel();
     private final JProgressBar voiceProgress = ComicControls.progressBar(0, 1000);
     /** Label in the voice choices → voice id. */
@@ -265,6 +286,7 @@ public final class SetupWizardPanel extends JPanel {
         deck.add(runtimeStep(), STEP_NAMES[STEP_RUNTIME]);
         deck.add(chatStep(), STEP_NAMES[STEP_CHAT]);
         deck.add(knowledgeStep(), STEP_NAMES[STEP_KNOWLEDGE]);
+        deck.add(dictationStep(), STEP_NAMES[STEP_DICTATION]);
         deck.add(checkStep(), STEP_NAMES[STEP_CHECK]);
         runtimeConnectedArt = mascotOf(STEP_RUNTIME).art();
         checkPendingArt = mascotOf(STEP_CHECK).art();
@@ -434,6 +456,24 @@ public final class SetupWizardPanel extends JPanel {
         researchRows.panel.repaint();
     }
 
+    private JPanel dictationStep() {
+        Rows rows = new Rows(STEP_DICTATION, "Dictation");
+        rows.note("Optional: speak instead of typing. AskAI records with your microphone and an audio-capable "
+                + "model in your AI runtime writes down what you said. Skip this step if you only type.");
+        rows.field("Microphone", microphone);
+        JPanel micActions = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        micActions.add(micTest);
+        micActions.add(micStatus);
+        rows.field("", micActions);
+        micLevel.setVisible(false);
+        rows.stretched("", micLevel);
+        rows.field("Audio model", audioModel);
+        rows.field("", audioDownload.row());
+        rows.stretched("", audioDownload.bar);
+        rows.field("", audioStatus);
+        return rows.panel();
+    }
+
     private JPanel checkStep() {
         Rows rows = new Rows(STEP_CHECK, "Final check");
         rows.note("The settings are saved and then checked for real. Nothing here blocks you: missing local models "
@@ -495,6 +535,8 @@ public final class SetupWizardPanel extends JPanel {
         });
         sentenceInstall.addActionListener(e -> installSentenceModels());
         chatDownload.button.addActionListener(e -> pull(chatDownload, chatModel));
+        micTest.addActionListener(e -> testMicrophone());
+        audioDownload.button.addActionListener(e -> pullAudioModel());
         embeddingDownload.button.addActionListener(e -> pull(embeddingDownload, embeddingModel));
         rerankerDownload.button.addActionListener(e -> installReranker());
         checkRetry.addActionListener(e -> runFinalCheck());
@@ -747,6 +789,8 @@ public final class SetupWizardPanel extends JPanel {
             runFinalCheck();
         } else if (index == STEP_VOICE && !voicesLoaded) {
             loadVoices();
+        } else if (index == STEP_DICTATION && !dictationLoaded) {
+            loadDictation();
         }
         updateButtons();
     }
@@ -793,6 +837,10 @@ public final class SetupWizardPanel extends JPanel {
         embeddingDownload.button.setVisible(!text(embeddingModel).isEmpty()
                 && !installedEmbeddings.contains(text(embeddingModel)));
         rerankerDownload.button.setEnabled(!rerankerDownload.running);
+        micTest.setEnabled(!busy && !micTesting);
+        audioDownload.button.setVisible(dictationLoaded && !audioLoading && installedAudio.isEmpty());
+        audioDownload.button.setEnabled(!audioDownload.running);
+        done[STEP_DICTATION] = dictationLoaded && !installedAudio.isEmpty();
         // The reranker is a local model: offer the installation whenever the chosen one is not installed.
         rerankerDownload.button.setVisible(!installedRerankers.contains(text(rerankerModel)));
         sentenceInstall.setEnabled(!busy && !installing());
@@ -1447,6 +1495,101 @@ public final class SetupWizardPanel extends JPanel {
         });
     }
 
+    // ------------------------------------------------------------------ dictation
+
+    /** Reads the microphones and the audio-capable models the first time the step opens. */
+    private void loadDictation() {
+        dictationLoaded = true;
+        String chosen = draft.microphone();
+        microphone.removeAllItems();
+        microphone.addItem(MIC_DEFAULT);
+        for (String device : setup.microphones()) {
+            microphone.addItem(device);
+        }
+        // A saved device that is gone falls back to the system default, as in the chat settings.
+        microphone.setSelectedItem(((javax.swing.DefaultComboBoxModel<String>) microphone.getModel())
+                .getIndexOf(chosen) >= 0 ? chosen : MIC_DEFAULT);
+        loadAudioModels(draft.audioModel());
+    }
+
+    private void loadAudioModels(final String select) {
+        audioLoading = true;
+        audioStatus.setText("Looking for models that understand audio …");
+        updateButtons();
+        setup.loadAudioModels(collect(), models -> {
+            if (closed) {
+                return;
+            }
+            audioLoading = false;
+            installedAudio = models == null ? Collections.<String>emptyList() : models;
+            audioModel.removeAllItems();
+            audioModel.addItem(AUDIO_AUTOMATIC);
+            for (String name : installedAudio) {
+                audioModel.addItem(name);
+            }
+            if (!select.isEmpty() && !installedAudio.contains(select)) {
+                audioModel.addItem(select); // chosen before but not (or no longer) there: the check says so
+            }
+            audioModel.setSelectedItem(select.isEmpty() ? AUDIO_AUTOMATIC : select);
+            audioStatus.setText(installedAudio.isEmpty()
+                    ? "No model that understands audio yet – “Download audio model” fetches "
+                    + SetupActions.RECOMMENDED_AUDIO_MODEL + "."
+                    : installedAudio.size() == 1 ? "1 audio model installed."
+                    : installedAudio.size() + " audio models installed.");
+            updateButtons();
+        });
+    }
+
+    /** Listens to the chosen microphone for a few seconds and shows its level; nothing is recorded. */
+    private void testMicrophone() {
+        if (micTesting) {
+            return;
+        }
+        micTesting = true;
+        micLevel.setValue(0);
+        micLevel.setVisible(true);
+        micStatus.setText("Say something …");
+        updateButtons();
+        setup.testMicrophone(choice(microphone, MIC_DEFAULT), level -> {
+            if (!closed) {
+                micLevel.setValue(level);
+            }
+        }, (heard, error) -> {
+            if (closed) {
+                return;
+            }
+            micTesting = false;
+            micLevel.setVisible(false);
+            micStatus.setText(error != null ? shorten("Microphone test failed: " + error)
+                    : Boolean.TRUE.equals(heard) ? "The microphone works – I can hear you."
+                    : "No signal – check the microphone or pick another one.");
+            updateButtons();
+        });
+    }
+
+    private void pullAudioModel() {
+        if (audioDownload.running) {
+            return;
+        }
+        audioDownload.begin();
+        setup.pullModel(collect(), SetupActions.RECOMMENDED_AUDIO_MODEL, audioDownload.progress(), (model, error) -> {
+            if (closed) {
+                return;
+            }
+            audioDownload.end(error == null ? model + " is installed." : "Download failed: " + error);
+            if (error == null) {
+                loadAudioModels(model);
+            }
+        });
+    }
+
+    /** The combo's value; empty for its first, “nothing specific” entry. */
+    private static String choice(JComboBox<String> combo, String none) {
+        Object selected = combo.getSelectedItem();
+        String value = selected == null ? "" : String.valueOf(selected).trim();
+        return none.equals(value) ? "" : value;
+    }
+
     private final StringBuilder fixFailures = new StringBuilder();
 
     /** The local models the last check found missing: reranker and/or sentence models. */
@@ -1547,6 +1690,9 @@ public final class SetupWizardPanel extends JPanel {
                 .nlpSentence(text(sentenceGerman), text(sentenceEnglish));
         if (voicesLoaded && !voiceByLabel.isEmpty()) {
             b.voices(voiceId(voiceGerman), voiceId(voiceEnglish));
+        }
+        if (dictationLoaded) {
+            b.dictation(choice(microphone, MIC_DEFAULT), choice(audioModel, AUDIO_AUTOMATIC));
         }
         return b.build();
     }
@@ -1678,6 +1824,26 @@ public final class SetupWizardPanel extends JPanel {
 
     JButton networkTestButton() {
         return networkTest;
+    }
+
+    JComboBox<String> microphoneChoice() {
+        return microphone;
+    }
+
+    JComboBox<String> audioModelChoice() {
+        return audioModel;
+    }
+
+    JButton micTestButton() {
+        return micTest;
+    }
+
+    JLabel micStatusLabel() {
+        return micStatus;
+    }
+
+    JButton audioDownloadButton() {
+        return audioDownload.button;
     }
 
     JButton checkInstallMissingButton() {

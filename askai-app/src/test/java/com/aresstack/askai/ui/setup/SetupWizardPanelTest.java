@@ -332,14 +332,48 @@ public class SetupWizardPanelTest {
     @Test
     public void everyStepShowsItsOwnPicture() {
         SetupWizardPanel wizard = wizard(new Fake());
-        String[] expected = {"voice", "ai-runtime", "chat-model", "knowledge", "check"};
+        String[] expected = {"voice", "ai-runtime", "chat-model", "knowledge", "voice", "check"};
         int[] steps = {SetupWizardPanel.STEP_VOICE, SetupWizardPanel.STEP_RUNTIME, SetupWizardPanel.STEP_CHAT,
-                SetupWizardPanel.STEP_KNOWLEDGE, SetupWizardPanel.STEP_CHECK};
+                SetupWizardPanel.STEP_KNOWLEDGE, SetupWizardPanel.STEP_DICTATION, SetupWizardPanel.STEP_CHECK};
         for (int i = 0; i < steps.length; i++) {
             String resource = wizard.mascotOf(steps[i]).art().resource();
             assertTrue(SetupWizardPanel.STEP_NAMES[steps[i]] + " shows " + resource,
                     resource.contains(expected[i]) || resource.equals(SetupWizardPanel.CHECK_SUCCESS_MASCOT));
         }
+    }
+
+    @Test
+    public void dictationPicksAndTestsTheMicrophoneAndDownloadsAnAudioModel() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
+        assertEquals(3, wizard.microphoneChoice().getItemCount()); // system default + two devices
+        assertTrue("offered while no model understands audio", wizard.audioDownloadButton().isVisible());
+
+        wizard.microphoneChoice().setSelectedItem("USB Headset");
+        wizard.micTestButton().doClick();
+        assertEquals("USB Headset", fake.testedMicrophone);
+        assertTrue(wizard.micStatusLabel().getText().contains("works"));
+
+        wizard.audioDownloadButton().doClick();
+        assertEquals(Collections.singletonList(SetupActions.RECOMMENDED_AUDIO_MODEL), fake.pulled);
+        assertFalse(wizard.audioDownloadButton().isVisible());
+        assertEquals("USB Headset", wizard.draft().microphone());
+        assertEquals(SetupActions.RECOMMENDED_AUDIO_MODEL, wizard.draft().audioModel());
+    }
+
+    @Test
+    public void dictationKeepsTheSavedChoiceUntilTheStepIsOpenedAndSkippingKeepsIt() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = new SetupWizardPanel(SetupDraft.builder().ollamaBaseUrl("http://localhost:11434")
+                .dictation("Laptop microphone", "").build(), fake, ComicPalette.defaultPalette());
+        assertEquals("Laptop microphone", wizard.draft().microphone());
+        wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
+        assertEquals("Laptop microphone", wizard.microphoneChoice().getSelectedItem());
+        assertEquals(SetupWizardPanel.AUDIO_AUTOMATIC, wizard.audioModelChoice().getSelectedItem());
+        wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
+        assertEquals("Laptop microphone", fake.finished.microphone());
+        assertEquals("", fake.finished.audioModel());
     }
 
     @Test
@@ -519,6 +553,9 @@ public class SetupWizardPanelTest {
         List<String> pulled = new ArrayList<String>();
         int rerankerInstalls;
         int finishes;
+        List<String> audioModels = new ArrayList<String>();
+        Boolean micHeard = Boolean.TRUE;
+        String testedMicrophone;
         List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> contributions =
                 new ArrayList<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>();
         boolean cancelled;
@@ -588,6 +625,9 @@ public class SetupWizardPanelTest {
         @Override
         public void pullModel(SetupDraft draft, String model, Progress progress, BiConsumer<String, String> done) {
             pulled.add(model);
+            if (model.equals(SetupActions.RECOMMENDED_AUDIO_MODEL)) {
+                audioModels.add(model);
+            }
             progress.update("pulling", 1, 2);
             done.accept(AskAiSetupActions.canonicalOllamaName(model), null);
         }
@@ -612,6 +652,24 @@ public class SetupWizardPanelTest {
         public void saveVoices(SetupDraft draft, Consumer<String> done) {
             savedVoices = draft;
             done.accept(null);
+        }
+
+        @Override
+        public List<String> microphones() {
+            return Arrays.asList("USB Headset", "Laptop microphone");
+        }
+
+        @Override
+        public void testMicrophone(String device, java.util.function.IntConsumer level,
+                                   BiConsumer<Boolean, String> done) {
+            testedMicrophone = device;
+            level.accept(42);
+            done.accept(micHeard, null);
+        }
+
+        @Override
+        public void loadAudioModels(SetupDraft draft, Consumer<List<String>> done) {
+            done.accept(new ArrayList<String>(audioModels));
         }
 
         @Override

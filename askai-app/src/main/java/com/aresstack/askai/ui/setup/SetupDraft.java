@@ -22,6 +22,8 @@ public final class SetupDraft {
     private final String nlpSentenceEnglish;
     private final String voiceGerman;
     private final String voiceEnglish;
+    private final String microphone;
+    private final String audioModel;
 
     private SetupDraft(Builder b) {
         this.ollamaBaseUrl = clean(b.ollamaBaseUrl);
@@ -36,6 +38,8 @@ public final class SetupDraft {
         this.nlpSentenceEnglish = clean(b.nlpSentenceEnglish);
         this.voiceGerman = clean(b.voiceGerman);
         this.voiceEnglish = clean(b.voiceEnglish);
+        this.microphone = clean(b.microphone);
+        this.audioModel = clean(b.audioModel);
     }
 
     public static Builder builder() {
@@ -57,6 +61,8 @@ public final class SetupDraft {
         b.nlpSentenceEnglish = nlpSentenceEnglish;
         b.voiceGerman = voiceGerman;
         b.voiceEnglish = voiceEnglish;
+        b.microphone = microphone;
+        b.audioModel = audioModel;
         return b;
     }
 
@@ -117,6 +123,16 @@ public final class SetupDraft {
         return voiceEnglish;
     }
 
+    /** The capture device for dictation; empty: the system default microphone. */
+    public String microphone() {
+        return microphone;
+    }
+
+    /** The audio model for dictation; empty: AskAI picks an audio-capable model automatically. */
+    public String audioModel() {
+        return audioModel;
+    }
+
     private static String clean(String value) {
         return value == null ? "" : value.trim();
     }
@@ -127,7 +143,8 @@ public final class SetupDraft {
         return "SetupDraft{ollama='" + ollamaBaseUrl + "', proxy=" + proxyMode + ' ' + proxyHost + ':' + proxyPort
                 + ", windowsTrust=" + trustWindowsStores + ", chat='" + chatModel + "', embedding='" + embeddingModel
                 + "', reranker='" + rerankerModel + "', nlp=" + nlpSentenceGerman + '/' + nlpSentenceEnglish
-                + ", voices=" + voiceGerman + '/' + voiceEnglish + '}';
+                + ", voices=" + voiceGerman + '/' + voiceEnglish + ", microphone='" + microphone + "', audio='"
+                + audioModel + "'}";
     }
 
     /** Mutable builder; {@link #build()} trims every text. */
@@ -144,6 +161,8 @@ public final class SetupDraft {
         private String nlpSentenceEnglish;
         private String voiceGerman;
         private String voiceEnglish;
+        private String microphone;
+        private String audioModel;
 
         private Builder() {
         }
@@ -189,6 +208,12 @@ public final class SetupDraft {
         public Builder voices(String german, String english) {
             this.voiceGerman = german;
             this.voiceEnglish = english;
+            return this;
+        }
+
+        public Builder dictation(String microphone, String audioModel) {
+            this.microphone = microphone;
+            this.audioModel = audioModel;
             return this;
         }
 
