@@ -101,15 +101,24 @@ public class BrowserSearchEngineSelectionTest {
                 idsOf(decoded.settings.navigation.engineSelection));
     }
 
-    /** The shipped default is the product decision: DuckDuckGo first, Bing behind it, one at a time. */
+    /**
+     * The shipped default is the product decision: Google first (search browser), DuckDuckGo behind it, one at a
+     * time; Bing is listed but off (DuckDuckGo's results come from Bing).
+     */
     @Test
-    public void theDefaultAsksDuckDuckGoFirstAndBingOnlyIfNeeded() {
+    public void theDefaultAsksGoogleFirstThenDuckDuckGoAndLeavesBingOff() {
         BrowserSearchEngineSelection shipped =
                 LegacyBrowserSearchDefaults.create().navigation.engineSelection;
 
         assertEquals(EngineAcquisitionMode.FIRST_USABLE, shipped.getMode());
-        assertEquals(Arrays.asList(BrowserSearchEngineCatalog.DUCKDUCKGO,
-                BrowserSearchEngineCatalog.BING), idsOf(shipped));
+        assertEquals(Arrays.asList(BrowserSearchEngineCatalog.GOOGLE,
+                BrowserSearchEngineCatalog.DUCKDUCKGO), idsOf(shipped));
+        assertEquals(3, shipped.getEntries().size());
+        assertEquals(BrowserSearchEngineCatalog.BING, shipped.getEntries().get(2).getEngineId());
+        org.junit.Assert.assertFalse(shipped.getEntries().get(2).isEnabled());
+        org.junit.Assert.assertTrue(BrowserSearchEngineCatalog.runsInSearchBrowser(BrowserSearchEngineCatalog.GOOGLE));
+        org.junit.Assert.assertFalse(
+                BrowserSearchEngineCatalog.runsInSearchBrowser(BrowserSearchEngineCatalog.DUCKDUCKGO));
     }
 
     private static List<String> idsOf(BrowserSearchEngineSelection selection) {

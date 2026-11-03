@@ -210,12 +210,15 @@ public final class ResearchAgentMain {
             // Fix the initial-search strategy for the whole session here (null → unchanged browser path).
             this.searchStrategy = buildSearchStrategy();
             if (this.searchStrategy == null) {
-                // askai #31: the browser search is Google via Serp4J on AskAI's own search browser.
-                this.searchStrategy = com.aresstack.askai.research.runtime.search.GoogleSearchBrowserStrategy
-                        .create(ensureSearchBrowser(), java.util.Locale.getDefault(),
-                                env.get("ASKAI_GOOGLE_SEARCH_URL"));
-                this.searchProviderLabel = providerLabel(
-                        com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER);
+                // Browser (SERP): the engines configured under Search → Engines. Google runs via Serp4J in
+                // AskAI's own search browser (askai #31); DuckDuckGo/Bing run in the research browser and are
+                // combined per run (BrowserEnginesSearchStrategy), because that path needs the run's browser.
+                this.browserEngineSelection = loadBrowserSearchSettings().navigation.engineSelection;
+                if (googleEnabled(browserEngineSelection)) {
+                    this.googleSearchStrategy = com.aresstack.askai.research.runtime.search
+                            .GoogleSearchBrowserStrategy.create(ensureSearchBrowser(), java.util.Locale.getDefault(),
+                                    env.get("ASKAI_GOOGLE_SEARCH_URL"));
+                }
             }
             // OPTIONAL model-backed SERP layout repair over the central main model (honest fallback else).
             this.inferencePort = buildInferencePort();
@@ -513,6 +516,33 @@ public final class ResearchAgentMain {
 
     /** User-facing REST provider name for the search progress ("via DataForSEO", no browser shown). */
     private String searchProviderLabel;
+    /** Browser (SERP) path only: the configured engines and, when Google is enabled, its search-browser strategy. */
+    private com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection browserEngineSelection;
+    private com.aresstack.askai.research.runtime.search.SearchStrategy googleSearchStrategy;
+
+    private static boolean googleEnabled(
+            com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection selection) {
+        if (selection == null) {
+            return false;
+        }
+        for (com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry entry
+                : selection.getEntries()) {
+            if (entry.isEnabled() && com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
+                    .runsInSearchBrowser(entry.getEngineId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The Browser (SERP) search over {@code pageEngines} (the research browser's DuckDuckGo/Bing search). */
+    private com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy browserEngines(
+            com.aresstack.askai.research.runtime.search.SearchStrategy pageEngines) {
+        return new com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy(
+                browserEngineSelection != null ? browserEngineSelection
+                        : loadBrowserSearchSettings().navigation.engineSelection,
+                googleSearchStrategy, pageEngines);
+    }
 
     private static String providerLabel(
             com.aresstack.askai.research.runtime.search.provider.SearchProviderId providerId) {
@@ -823,14 +853,17 @@ public final class ResearchAgentMain {
                 strategy = searchStrategy;
                 apiLabel = searchProviderLabel;
             } else {
-                strategy = com.aresstack.askai.research.runtime.search.SessionSearchStrategyResolver.resolve(
+                com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy engines = browserEngines(
+                        com.aresstack.askai.research.runtime.search.SessionSearchStrategyResolver.resolve(
                         null, true, browser, loadBrowserSearchSettings(), inferencePort,
                         new java.util.function.LongSupplier() {
                             public long getAsLong() {
                                 return System.currentTimeMillis();
                             }
-                        });
-                apiLabel = null;
+                        }));
+                strategy = engines.hasSteps() ? engines : null;
+                apiLabel = engines.isGoogleOnly() ? providerLabel(
+                        com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER) : null;
             }
             System.err.println("[manual-search] execute started requestId=" + requestId + " strategy="
                     + (strategy == null ? "unavailable" : strategy.getClass().getSimpleName()));
@@ -1638,8 +1671,16 @@ public final class ResearchAgentMain {
             // structured-inference port into the default SERP strategy for model-backed layout repair.
             if (searchStrategy != null) {
                 loop.setSearchStrategy(searchStrategy, searchProviderLabel);
-            } else if (inferencePort != null) {
-                loop.setStructuredInferencePort(inferencePort);
+            } else {
+                if (inferencePort != null) {
+                    loop.setStructuredInferencePort(inferencePort);
+                }
+                // Browser (SERP): the configured engines around the loop's own research-browser search.
+                com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy engines =
+                        browserEngines(loop.searchStrategy());
+                loop.setSearchStrategy(engines, engines.isGoogleOnly() ? providerLabel(
+                        com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER)
+                        : null);
             }
             // SC1: the autonomous loop gets the same scope-control lane (internal service
             // endpoint) — a canonical OUT is filtered identically on both acquisition paths.
