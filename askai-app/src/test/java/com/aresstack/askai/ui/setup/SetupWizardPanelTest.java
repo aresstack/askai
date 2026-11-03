@@ -197,7 +197,8 @@ public class SetupWizardPanelTest {
         wizard.finishButton().doClick();
 
         assertTrue(finished[0]);
-        assertNull("a voice that is not installed is not stored", fake.savedVoices);
+        assertTrue("a voice that is not installed is not stored",
+                fake.savedVoices == null || fake.savedVoices.voiceGerman().isEmpty());
     }
 
     @Test
@@ -244,8 +245,8 @@ public class SetupWizardPanelTest {
     public void theVoiceStepComesRightAfterTheNetworkAndStoresTheVoicesOnLeaving() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
-        wizard.nextButton().doClick();
-        assertEquals(SetupWizardPanel.STEP_VOICE, wizard.step());
+        assertEquals("network and voice share the first step", SetupWizardPanel.STEP_VOICE, wizard.step());
+        assertEquals(SetupWizardPanel.STEP_NETWORK, wizard.step());
         assertNull(fake.savedVoices);
 
         wizard.nextButton().doClick();
@@ -257,7 +258,6 @@ public class SetupWizardPanelTest {
     @Test
     public void withoutAVoiceTheWizardOnlyThinks() {
         SetupWizardPanel wizard = wizard(new Fake());
-        wizard.nextButton().doClick();
         assertFalse(wizard.isWitchAwake());
         assertEquals(WizardGuide.THOUGHT_SILENT, wizard.mascotOf(SetupWizardPanel.STEP_VOICE).spokenText());
     }
@@ -292,6 +292,46 @@ public class SetupWizardPanelTest {
 
         assertTrue("awake without any AI runtime", wizard.isWitchAwake());
         assertFalse(spoken.isEmpty());
+    }
+
+    @Test
+    public void theVoiceDownloadUsesTheProxyOfTheStepAndShowsItsProgress() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.proxyModeChoice().setSelectedItem(SetupWizardPanel.LABEL_PROXY_MANUAL);
+        wizard.voiceGermanChoice().setSelectedItem("Thorsten (German)");
+
+        wizard.voiceInstallButton().doClick();
+
+        assertEquals("the download is the network test", SetupWizardPanel.PROXY_MANUAL, fake.voiceDraft.proxyMode());
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_NETWORK));
+    }
+
+    @Test
+    public void aMissingChatModelCanBeDownloadedRightInTheStep() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_CHAT);
+        wizard.chatModelChoice().setSelectedItem("mistral");
+        assertTrue("offered for a model that is not installed", wizard.chatDownloadButton().isVisible());
+
+        wizard.chatDownloadButton().doClick();
+
+        assertEquals(Collections.singletonList("mistral"), fake.pulled);
+        assertEquals("mistral", wizard.draft().chatModel());
+    }
+
+    @Test
+    public void theRequiredRerankerIsInstalledAndSelectedInTheKnowledgeStep() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_KNOWLEDGE);
+        assertTrue(wizard.rerankerInstallButton().isVisible());
+
+        wizard.rerankerInstallButton().doClick();
+
+        assertEquals(1, fake.rerankerInstalls);
+        assertEquals("ms-marco-MiniLM-L6-v2", wizard.draft().rerankerModel());
     }
 
     @Test
@@ -385,6 +425,9 @@ public class SetupWizardPanelTest {
         SetupDraft finished;
         SetupDraft savedVoices;
         boolean thorstenInstalled;
+        SetupDraft voiceDraft;
+        List<String> pulled = new ArrayList<String>();
+        int rerankerInstalls;
         boolean cancelled;
 
         @Override
@@ -415,7 +458,8 @@ public class SetupWizardPanelTest {
         @Override
         public void loadModels(SetupDraft draft, Consumer<SetupModels> done) {
             done.accept(new SetupModels(Arrays.asList("llama3.2", "qwen3"), Collections.singletonList(
-                    "nomic-embed-text"), Collections.<String>emptyList(), sentenceInstalled
+                    "nomic-embed-text"), rerankerInstalls > 0 ? Collections.singletonList("ms-marco-MiniLM-L6-v2")
+                    : Collections.<String>emptyList(), sentenceInstalled
                     ? Collections.singletonList("opennlp-de-sent") : Collections.<String>emptyList(),
                     Collections.<String>emptyList(), ""));
         }
@@ -440,9 +484,25 @@ public class SetupWizardPanelTest {
         }
 
         @Override
-        public void installVoice(String voiceId, Consumer<String> progress, BiConsumer<String, String> done) {
+        public void installVoice(SetupDraft draft, String voiceId, Progress progress,
+                                 BiConsumer<String, String> done) {
+            voiceDraft = draft;
+            progress.update("Downloading", 50, 100);
             thorstenInstalled = true;
             done.accept("installed", null);
+        }
+
+        @Override
+        public void pullModel(SetupDraft draft, String model, Progress progress, BiConsumer<String, String> done) {
+            pulled.add(model);
+            progress.update("pulling", 1, 2);
+            done.accept(model, null);
+        }
+
+        @Override
+        public void installReranker(SetupDraft draft, Progress progress, BiConsumer<String, String> done) {
+            rerankerInstalls++;
+            done.accept("ms-marco-MiniLM-L6-v2", null);
         }
 
         @Override

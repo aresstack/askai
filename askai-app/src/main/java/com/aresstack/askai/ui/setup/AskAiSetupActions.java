@@ -4,6 +4,7 @@ import com.aresstack.askai.agent.model.nlp.NlpCapability;
 import com.aresstack.askai.agent.model.reranker.RerankerModelCatalog;
 import com.aresstack.askai.AskAiModel;
 import com.aresstack.askai.client.AskAiOllamaClient;
+import com.aresstack.askai.client.OllamaPullProgress;
 import com.aresstack.askai.config.AiModelSelections;
 import com.aresstack.askai.config.AppConfiguration;
 import com.aresstack.askai.config.AppConfigurationRepository;
@@ -11,11 +12,13 @@ import com.aresstack.askai.hf.HuggingFaceClient;
 import com.aresstack.askai.hf.HuggingFaceConnectionTestResult;
 import com.aresstack.askai.localmodels.ApacheOpenNlpModelCatalogProvider;
 import com.aresstack.askai.localmodels.HttpNlpDownloadClient;
+import com.aresstack.askai.localmodels.LocalModelInstaller;
 import com.aresstack.askai.localmodels.LocalModelRuntimeManager;
 import com.aresstack.askai.localmodels.LocalNlpModelCatalog;
 import com.aresstack.askai.localmodels.LocalNlpModelStore;
 import com.aresstack.askai.localmodels.NlpModelCatalogEntry;
 import com.aresstack.askai.localmodels.NlpModelInstaller;
+import com.aresstack.askai.net.ConfiguredConnections;
 import com.aresstack.askai.net.CertificateTrustConfiguration;
 import com.aresstack.askai.net.ProxyConfiguration;
 import com.aresstack.askai.service.OllamaService;
@@ -61,7 +64,7 @@ public final class AskAiSetupActions implements SetupActions {
     /** Where the wizard's “Download Ollama…” leads. */
     static final String OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
     /** The language Witch speaks in (his lines are English). */
-    private static final String MERLIN_LANGUAGE = "en";
+    private static final String WITCH_LANGUAGE = "en";
     private static final String[] SENTENCE_LANGUAGES = {"de", "en"};
 
     private final AskAiModel model;
@@ -288,6 +291,64 @@ public final class AskAiSetupActions implements SetupActions {
     }
 
     @Override
+    public void pullModel(SetupDraft draft, final String model, final Progress progress,
+                          final BiConsumer<String, String> done) {
+        if (model == null || model.trim().isEmpty()) {
+            done.accept(null, "no model name");
+            return;
+        }
+        final String name = model.trim();
+        ollama.pullModel(name, new OllamaService.PullListener() {
+            @Override
+            public void onProgress(final OllamaPullProgress p) {
+                deliver(() -> progress.update(p.getStatus(), p.getCompleted(), p.getTotal()));
+            }
+
+            @Override
+            public void onComplete(String message) {
+                deliver(() -> done.accept(name, null));
+            }
+
+            @Override
+            public void onError(final Exception ex) {
+                deliver(() -> done.accept(null, message(ex)));
+            }
+        });
+    }
+
+    @Override
+    public void installReranker(final SetupDraft draft, final Progress progress,
+                                final BiConsumer<String, String> done) {
+        if (localRuntime == null) {
+            done.accept(null, "AskAI's local model runtime is not available in this installation");
+            return;
+        }
+        final AppConfiguration stored = configuration.load();
+        background(() -> {
+            try {
+                HuggingFaceClient client = new HuggingFaceClient(proxyOf(draft, stored), trustOf(draft, stored),
+                        stored.getHttpClientConfiguration(), stored.getHuggingFaceToken());
+                final String name = new LocalModelInstaller(client, localRuntime).install(RECOMMENDED_RERANKER,
+                        new LocalModelInstaller.Listener() {
+                            @Override
+                            public void onStep(final String step) {
+                                deliver(() -> progress.update(step, 0, 0));
+                            }
+
+                            @Override
+                            public void onDownloadProgress(final String file, final long completed,
+                                                           final long total) {
+                                deliver(() -> progress.update(file, completed, total));
+                            }
+                        });
+                deliver(() -> done.accept(name, null));
+            } catch (Exception e) {
+                deliver(() -> done.accept(null, message(e)));
+            }
+        });
+    }
+
+    @Override
     public void embeddingDimension(SetupDraft draft, final BiConsumer<Integer, String> done) {
         if (draft.embeddingModel().isEmpty()) {
             done.accept(null, "no embedding model chosen");
@@ -363,7 +424,7 @@ public final class AskAiSetupActions implements SetupActions {
     }
 
     @Override
-    public void installVoice(final String voiceId, final Consumer<String> progress,
+    public void installVoice(final SetupDraft draft, final String voiceId, final Progress progress,
                              final BiConsumer<String, String> done) {
         final PiperVoice voice = PiperVoiceCatalog.findById(voiceId);
         if (voice == null) {
@@ -372,9 +433,11 @@ public final class AskAiSetupActions implements SetupActions {
         }
         background(() -> {
             try {
-                new PiperInstaller(piperStore, ttsSettings).install(voice, (stage, bytesDone, bytesTotal) ->
-                        deliver(() -> progress.accept(bytesTotal > 0
-                                ? stage + " " + (100 * bytesDone / bytesTotal) + " %" : stage)));
+                AppConfiguration stored = configuration.load();
+                ConfiguredConnections network = new ConfiguredConnections(proxyOf(draft, stored),
+                        trustOf(draft, stored), stored.getHttpClientConfiguration());
+                new PiperInstaller(piperStore, ttsSettings, network::open).install(voice,
+                        (stage, bytesDone, bytesTotal) -> deliver(() -> progress.update(stage, bytesDone, bytesTotal)));
                 deliver(() -> done.accept(voice.getDisplayName() + " installed.", null));
             } catch (Exception e) {
                 deliver(() -> done.accept(null, message(e)));
@@ -472,7 +535,8 @@ public final class AskAiSetupActions implements SetupActions {
         }
 
         if (draft.rerankerModel().isEmpty()) {
-            checks.add(SetupCheck.ok("Reranker", "none chosen (optional)"));
+            checks.add(SetupCheck.failed("Reranker", "none chosen – the web research needs one; install the "
+                    + "recommended reranker in the Knowledge step"));
         } else if (rerankers != null && quietly(rerankers::listInstalledRerankModels)
                 .contains(draft.rerankerModel())) {
             checks.add(SetupCheck.ok("Reranker", draft.rerankerModel()));
@@ -568,13 +632,13 @@ public final class AskAiSetupActions implements SetupActions {
         return new WizardVoice() {
             @Override
             public boolean isAvailable() {
-                return service.isModelVoiceActive(MERLIN_LANGUAGE);
+                return service.isModelVoiceActive(WITCH_LANGUAGE);
             }
 
             @Override
             public void speak(final String text) {
                 service.stop(); // a new line replaces the one still being spoken
-                speaker.execute(() -> service.speak(text, MERLIN_LANGUAGE));
+                speaker.execute(() -> service.speak(text, WITCH_LANGUAGE));
             }
 
             @Override
