@@ -231,7 +231,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             new com.aresstack.askai.tts.TtsSettingsStore();
     private final com.aresstack.askai.tts.PiperTtsStore piperTtsStore =
             new com.aresstack.askai.tts.PiperTtsStore();
-    /** The application's voice INSTALL section (Settings > AI models), shared by all chats. */
+    /** The application's voice INSTALL section (Models > Setup > Voices), shared by all chats. */
     private SpeechOutputModelsPanel speechVoicesPanel;
     // Playback output (recording preview + tests): persisted device across JavaSound/OpenAL/VLC.
     private final javax.swing.JComboBox<Object> playbackOutputCombo =
@@ -1475,7 +1475,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             JComboBox<Object> combo = ComicControls.<Object>comboBox();
             combo.setEditable(false); // only INSTALLED Piper voices of this language
             combo.setToolTipText("The Piper voice for " + speechLanguageLabel(language)
-                    + " answers. Install voices under Settings > AI models > Read-aloud voices.");
+                    + " answers. Install voices under Models > Setup > Voices.");
             combo.addActionListener(event -> persistSpeechOutputSelection(language));
             speechOutputCombos.put(language, combo);
             JButton speechTestButton = new ComicButton("Test");
@@ -1546,7 +1546,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         chunkingCombo.addActionListener(persistChunking);
         workersSpinner.addChangeListener(event -> persistChunking.actionPerformed(null));
         speech.row("Synthesis chunks", chunkingCombo, new JLabel("Workers"), workersSpinner);
-        speech.note("Voices are installed under Settings > AI models > Read-aloud voices.");
+        speech.note("Voices are installed under Models > Setup > Voices.");
         ComicForm.alignLabels(input, speech);
         JComponent card = ComicForm.stack(input, speech);
         // Populate NOW: on the dialog's FIRST open the combos are created here, AFTER
@@ -1608,7 +1608,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     }
 
     /**
-     * The application's ONE voice-install section (shown under Settings > AI models, owned by the frame):
+     * The application's ONE voice-install section (Models > Setup > Voices, owned by the frame):
      * this chat's voice selectors reload whenever a voice is installed or removed there.
      */
     public void setSpeechVoicesPanel(SpeechOutputModelsPanel panel) {

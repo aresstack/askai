@@ -40,7 +40,7 @@ public final class SpeechOutputTester {
                     : PiperVoiceCatalog.findById(selection.getVoiceId());
             if (voice == null && selection.getVoiceId().isEmpty()) {
                 return "No Piper voice is installed for this language — install one under"
-                        + " Settings > AI models (until then the Windows voice reads aloud).";
+                        + " Models > Setup > Voices (until then the Windows voice reads aloud).";
             }
             if (voice == null) {
                 return "Selected voice id is unknown: \"" + selection.getVoiceId() + "\"";
