@@ -36,6 +36,10 @@ public interface SetupActions {
     /** Opens the download page of a runtime (Ollama) in the browser. */
     void openRuntimeDownload();
 
+    /** Opens the releases page of the Ollama Manager in the browser. */
+    default void openOllamaManagerDownload() {
+    }
+
     /**
      * Opens AskAI's model browser (Hugging Face, Ollama library, local runtime) as a modal dialog over
      * {@code parent}; returns when it is closed. Its downloads use the draft's network settings. Without a
@@ -220,6 +224,23 @@ public interface SetupActions {
     /** The installed models that understand audio (checked with the runtime, not guessed from the name). */
     default void loadAudioModels(SetupDraft draft, Consumer<List<String>> done) {
         done.accept(Collections.<String>emptyList());
+    }
+
+    /**
+     * The curated Whisper models for dictation with their install state, recommended first (an offer's language
+     * code is empty). Empty where Whisper is not offered.
+     */
+    default void loadWhisperModels(Consumer<List<VoiceOffer>> done) {
+        done.accept(Collections.<VoiceOffer>emptyList());
+    }
+
+    /**
+     * Downloads Whisper (engine first, if missing) and the model {@code modelId} through the draft's network
+     * settings; with {@code reinstall} an installed model is downloaded again.
+     */
+    default void installWhisper(SetupDraft draft, String modelId, boolean reinstall, Progress progress,
+                                BiConsumer<String, String> done) {
+        done.accept(null, "Whisper is not available here");
     }
 
     /** The installed models per role. */

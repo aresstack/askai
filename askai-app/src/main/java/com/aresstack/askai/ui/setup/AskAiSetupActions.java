@@ -63,6 +63,7 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** Where the wizard's “Download Ollama…” leads. */
     static final String OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
+    static final String OLLAMA_MANAGER_URL = "https://github.com/aresstack/ollama-manager/releases";
     /** How long the microphone test listens. */
     private static final long MIC_TEST_MILLIS = 4000;
     /** The language Witch speaks in (his lines are English). */
@@ -78,6 +79,10 @@ public final class AskAiSetupActions implements SetupActions {
     private final Runnable onSaved;
     private final TtsSettingsStore ttsSettings = new TtsSettingsStore();
     private final PiperTtsStore piperStore = new PiperTtsStore();
+    private final com.aresstack.askai.stt.whisper.WhisperStore whisperStore =
+            new com.aresstack.askai.stt.whisper.WhisperStore();
+    private final com.aresstack.askai.stt.whisper.DictationSettingsStore dictationSettings =
+            new com.aresstack.askai.stt.whisper.DictationSettingsStore();
     private final ExecutorService worker = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "askai-setup-wizard");
         thread.setDaemon(true);
@@ -201,7 +206,18 @@ public final class AskAiSetupActions implements SetupActions {
                         selections.getNlp().getModelId(NlpCapability.SENTENCE_DETECTION, "en"))
                 .voices(piperVoiceOf(tts, "de"), piperVoiceOf(tts, "en"))
                 .dictation(stt().getMicrophoneDeviceId(), stt().isAudioModelAutomatic() ? "" : stt().getModelName())
+                .dictationEngine(dictation().getEngine()
+                                == com.aresstack.askai.stt.whisper.DictationSettings.Engine.OLLAMA,
+                        dictation().getWhisperModelId())
                 .build();
+    }
+
+    private com.aresstack.askai.stt.whisper.DictationSettings dictation() {
+        try {
+            return dictationSettings.load();
+        } catch (RuntimeException e) {
+            return com.aresstack.askai.stt.whisper.DictationSettings.defaults();
+        }
     }
 
     private com.aresstack.askai.stt.SpeechToTextConfiguration stt() {
@@ -342,6 +358,11 @@ public final class AskAiSetupActions implements SetupActions {
     @Override
     public void openRuntimeDownload() {
         BrowserLauncher.open(OLLAMA_DOWNLOAD_URL);
+    }
+
+    @Override
+    public void openOllamaManagerDownload() {
+        BrowserLauncher.open(OLLAMA_MANAGER_URL);
     }
 
     @Override
@@ -638,6 +659,15 @@ public final class AskAiSetupActions implements SetupActions {
                 ? stt.withAudioModelAutomatic(true).withModelName("")
                 : stt.withAudioModelAutomatic(false).withModelName(draft.audioModel()));
         model.saveSettings(); // the Ollama address and the dictation; every other stored value is kept
+        try {
+            dictationSettings.save(dictation()
+                    .withEngine(draft.dictationWithOllama()
+                            ? com.aresstack.askai.stt.whisper.DictationSettings.Engine.OLLAMA
+                            : com.aresstack.askai.stt.whisper.DictationSettings.Engine.WHISPER)
+                    .withWhisperModelId(draft.whisperModel()));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("dictation settings: " + e.getMessage(), e);
+        }
         originalOllamaUrl = null; // saved: a later cancel no longer restores the old address
         model.persistMainModel(draft.chatModel());
         model.persistRerankerAndEmbeddingsModels(draft.rerankerModel(), draft.embeddingModel());
@@ -694,10 +724,24 @@ public final class AskAiSetupActions implements SetupActions {
         return checks;
     }
 
-    /** Dictation is optional: only a chosen audio model that is missing counts as a problem. */
+    /** Dictation is optional: only a chosen model that is missing counts as a problem. */
     private SetupCheck dictationCheck(SetupDraft draft) {
-        List<String> audio = audioModelsNow();
         String microphone = draft.microphone().isEmpty() ? "system microphone" : draft.microphone();
+        if (!draft.dictationWithOllama()) {
+            com.aresstack.askai.stt.whisper.WhisperModel chosen =
+                    com.aresstack.askai.stt.whisper.WhisperModelCatalog.findById(draft.whisperModel());
+            if (chosen != null && !(whisperStore.isEngineInstalled() && whisperStore.isModelInstalled(chosen))) {
+                return SetupCheck.failed("Dictation", "Whisper " + chosen.getDisplayName() + " is not installed");
+            }
+            com.aresstack.askai.stt.whisper.WhisperModel used = whisperStore.modelFor(
+                    com.aresstack.askai.stt.whisper.DictationSettings.defaults()
+                            .withWhisperModelId(draft.whisperModel()));
+            if (used != null) {
+                return SetupCheck.ok("Dictation", microphone + ", Whisper " + used.getDisplayName());
+            }
+            // no Whisper model yet: the Ollama audio model transcribes (below)
+        }
+        List<String> audio = audioModelsNow();
         if (draft.audioModel().isEmpty()) {
             return SetupCheck.ok("Dictation", audio.isEmpty()
                     ? "no audio model yet (optional; download one in the Dictation step)"
@@ -706,6 +750,50 @@ public final class AskAiSetupActions implements SetupActions {
         return audio.contains(draft.audioModel())
                 ? SetupCheck.ok("Dictation", microphone + ", " + draft.audioModel())
                 : SetupCheck.failed("Dictation", draft.audioModel() + " is not installed or does not understand audio");
+    }
+
+    @Override
+    public void loadWhisperModels(final Consumer<List<VoiceOffer>> done) {
+        background(() -> {
+            final List<VoiceOffer> offers = new ArrayList<VoiceOffer>();
+            boolean engine = whisperStore.isEngineInstalled();
+            for (com.aresstack.askai.stt.whisper.WhisperModel model
+                    : com.aresstack.askai.stt.whisper.WhisperModelCatalog.curated()) {
+                offers.add(new VoiceOffer(model.getId(), model.getDisplayName() + " – "
+                        + model.getApproximateSizeMb() + " MB", "", engine && whisperStore.isModelInstalled(model)));
+            }
+            deliver(() -> done.accept(offers));
+        });
+    }
+
+    @Override
+    public void installWhisper(final SetupDraft draft, final String modelId, final boolean reinstall,
+                               final Progress progress, final BiConsumer<String, String> done) {
+        final com.aresstack.askai.stt.whisper.WhisperModel whisper =
+                com.aresstack.askai.stt.whisper.WhisperModelCatalog.findById(modelId);
+        if (whisper == null) {
+            done.accept(null, "unknown Whisper model " + modelId);
+            return;
+        }
+        install(() -> {
+            try {
+                AppConfiguration stored = configuration.load();
+                ConfiguredConnections network = new ConfiguredConnections(proxyOf(draft, stored),
+                        trustOf(draft, stored), stored.getHttpClientConfiguration());
+                com.aresstack.askai.stt.whisper.WhisperInstaller installer =
+                        new com.aresstack.askai.stt.whisper.WhisperInstaller(whisperStore, network::open);
+                PiperInstaller.Progress report =
+                        (stage, bytesDone, bytesTotal) -> deliver(() -> progress.update(stage, bytesDone, bytesTotal));
+                if (reinstall) {
+                    installer.reinstall(whisper, report);
+                } else {
+                    installer.install(whisper, report);
+                }
+                deliver(() -> done.accept("Whisper " + whisper.getDisplayName() + " installed.", null));
+            } catch (Exception e) {
+                deliver(() -> done.accept(null, message(e)));
+            }
+        });
     }
 
     /** The installed models whose capabilities include audio (asked from the runtime, one by one). */
