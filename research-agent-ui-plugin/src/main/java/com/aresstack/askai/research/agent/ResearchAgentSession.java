@@ -428,13 +428,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             boolean freshState =
                     com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(current.getPhaseId())
                     && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW.equals(current.getStateId());
-            if (freshState) {
-                // The model-backed TeamAgent (runtime process) OWNS the greeting: send ONE bootstrap turn so
-                // its model-generated greeting arrives as an assistant message. On success the runtime signals
-                // GREETING_DONE and the host advances the state one step (see handleGreetingDone).
-                beginAgentTurn(); // busy + preempt visualizer; cleared by the greeting turn's terminal event
-                backend.submitPrompt(handle, new ResearchPrompt("", ""));
-            } else {
+            // A fresh chat (SCOPING/NEW) stays EMPTY: no bootstrap turn, no model call. The user writes first;
+            // the scoping starts with the user's first message (see startScopingOnFirstMessage).
+            if (!freshState) {
                 // Restored session: the conversation text comes back from the persisted transcript, but the
                 // interactive buttons do not. Re-derive the decision buttons from the live state
                 // (non-persisted, so they never duplicate/accumulate across restarts), and bring back the
@@ -975,6 +971,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 technicalLog("stale decision tombstone superseded by a substantive turn");
             }
             echoUserMessage(text);
+            startScopingOnFirstMessage();
             // KISS (live-gate 4): the mission is bookkeeping, not intelligence — the user's
             // FIRST message IS the mission until they restate it. No model turn ever begs
             // for setMission again.
@@ -1058,12 +1055,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * The model-backed greeting was delivered successfully: advance the scope state ONE step (SCOPING/NEW →
-     * SCOPING/RUNNING via START). The greeting depends only on the state, so after this a restart sees a
-     * non-fresh state and never greets again (the persisted chat shows the prior greeting instead). Idempotent
-     * and only meaningful while still at SCOPING/NEW.
+     * SCOPING/NEW → SCOPING/RUNNING when the user sends the first message of a fresh chat — synchronously,
+     * BEFORE the turn reaches the runtime, so the turn's concept writes are allowed and the runtime answers
+     * the topic directly. Also the handler of the runtime's GREETING_DONE signal. Idempotent.
      */
-    private void handleGreetingDone() {
+    private void startScopingOnFirstMessage() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return;
         }
@@ -2010,7 +2006,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 handleScopeProposal(event.getText(), event.getTechnicalDetail());
                 break;
             case GREETING_DONE:
-                handleGreetingDone();
+                startScopingOnFirstMessage();
                 break;
             case SCOPE_UPDATE:
                 applyScopeUpdate(event.getText());
