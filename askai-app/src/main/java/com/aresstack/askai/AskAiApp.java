@@ -20,6 +20,9 @@ public final class AskAiApp {
     }
 
     public static void main(String[] args) {
+        // Console categories ([browser], [local-runtime], ...) switchable in Settings > General > Logging.
+        com.aresstack.askai.settings.ConsoleLogSettings.apply();
+        com.aresstack.askai.plugin.api.service.HostLog.installConsoleFilter();
         holdDevPluginRunLock();
         // askai #51: the data of the former .askai-java8 folder moves into .askai before anything reads it.
         com.aresstack.askai.settings.AppDirectoryMigration.run();
