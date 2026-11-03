@@ -47,10 +47,10 @@ public final class SerpApiSettingsPanel extends JPanel {
         this.configurations = configurations;
         JPanel p = ProviderForm.column();
         p.add(row("", enabled));
-        JPanel key = new JPanel(new BorderLayout(4, 0));
+        JPanel key = new JPanel(new BorderLayout(8, 0));
         key.add(apiKey, BorderLayout.CENTER);
         apiKeyHint.setEnabled(false);
-        key.add(apiKeyHint, BorderLayout.SOUTH);
+        key.add(apiKeyHint, BorderLayout.EAST); // status right beside the field
         p.add(row("API key:", key));
         p.add(hint("The stored key is never shown. Leave the field empty to keep it; type a new one to replace "
                 + "it (encrypted on save). SerpApi only accepts the key as URL parameter; Serp4J masks it in every "
@@ -67,7 +67,10 @@ public final class SerpApiSettingsPanel extends JPanel {
                 save();
             }
         });
-        p.add(row("", saveNow));
+        JPanel saveRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+        saveRow.setOpaque(false);
+        saveRow.add(saveNow);
+        p.add(row("", saveRow));
         p.add(row("", status));
         add(p, BorderLayout.NORTH);
         load();

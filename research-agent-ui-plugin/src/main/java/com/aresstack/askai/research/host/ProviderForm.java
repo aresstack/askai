@@ -32,11 +32,23 @@ final class ProviderForm {
         return p;
     }
 
+    /** A wrapping hint in the FIELD column (label column left empty), as wide as the field. */
     static JComponent hint(String text) {
-        JLabel l = new JLabel("<html><body style='width:420px'>" + text + "</body></html>");
-        l.setEnabled(false);
-        l.setBorder(BorderFactory.createEmptyBorder(2, 0, 6, 0));
-        return l;
+        javax.swing.JTextArea area = com.aresstack.comiccontrols.control.ComicControls.textArea(text);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setEditable(false);
+        area.setFocusable(false);
+        area.setOpaque(false);
+        area.setBorder(BorderFactory.createEmptyBorder(2, 0, 6, 0));
+        area.setForeground(com.aresstack.comiccontrols.theme.ThemeColor.of("research.settingsHintText"));
+        JPanel p = new JPanel(new BorderLayout(8, 0));
+        p.setOpaque(false);
+        JLabel spacer = new JLabel();
+        spacer.setPreferredSize(new Dimension(150, 1));
+        p.add(spacer, BorderLayout.WEST);
+        p.add(area, BorderLayout.CENTER);
+        return p;
     }
 
     /** Typing a secret switches its provider on: a key without the tick would silently do nothing. */
