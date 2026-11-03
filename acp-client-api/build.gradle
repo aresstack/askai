@@ -1,7 +1,0 @@
-// Neutral ACP client contracts (Java 8). NO Reactor/ACP-SDK/Solon/Swing types — those live only in
-// :acp-solon-client. Process, connection, session and prompt lifecycles are separate handles with guarded
-// state transitions.
-dependencies {
-    testImplementation 'junit:junit:4.13.2'
-}
-test { useJUnit() }

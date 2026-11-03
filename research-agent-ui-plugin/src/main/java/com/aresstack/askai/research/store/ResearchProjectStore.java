@@ -10,6 +10,7 @@ import java.io.File;
  * ├── artifacts/   outline.md, document.md (+ .meta); legacy projects may still hold concept.md,
  * │                research-notes.md, findings.md, draft.md, final.md — kept untouched, never re-tabbed
  * ├── sources/     &lt;sourceId&gt;.properties
+ * ├── tasks/       &lt;taskId&gt;.json — the work packages of the task model (ADR 0001, section 4.4)
  * └── state/       research-session.json, post-search-review.properties
  * </pre>
  *
@@ -23,6 +24,7 @@ public final class ResearchProjectStore {
     private final FileResearchSourceRepository sourceRepository;
     private final SessionStateFileStore sessionStateStore;
     private final FilePostSearchReviewStore reviewStore;
+    private final FileResearchTaskStore taskStore;
 
     public ResearchProjectStore(File projectRoot) {
         this.root = projectRoot;
@@ -30,6 +32,7 @@ public final class ResearchProjectStore {
         this.sourceRepository = new FileResearchSourceRepository(new File(projectRoot, "sources"));
         this.sessionStateStore = new SessionStateFileStore(new File(projectRoot, "state"));
         this.reviewStore = new FilePostSearchReviewStore(new File(projectRoot, "state"));
+        this.taskStore = new FileResearchTaskStore(new File(projectRoot, "tasks"));
     }
 
     public File getRoot() {
@@ -51,5 +54,10 @@ public final class ResearchProjectStore {
     /** How far the agent has reviewed this project's sources — persisted, so a restart keeps the offer. */
     public FilePostSearchReviewStore postSearchReview() {
         return reviewStore;
+    }
+
+    /** The persisted task graph of this project: work packages, artifacts, receipts, budgets. */
+    public FileResearchTaskStore tasks() {
+        return taskStore;
     }
 }

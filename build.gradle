@@ -18,10 +18,18 @@ allprojects {
     }
 }
 
+// ONE Gson version for every module that declares Gson (ADR 0001, section 3.1). It is the version Playwright
+// Java brings into the research plugin's lib/, so the plugin and the host resolve the same Gson.
+ext.gsonVersion = '2.14.0'
+
 subprojects {
     apply plugin: 'java'
 
-    // AskAI is a Java-21 application (Angelo 2026-11-02, askai #31): every module compiles for and runs on Java 21.
+    // ONE language level for the whole build: Java 21 (the return from the Java-8 line, 2026-10). Every
+    // module — app, plugin, runtime and the former sidecars — is compiled, tested and run with a Java 21
+    // toolchain, so Gradle uses a JDK 21 for compile/test/run even when the Gradle daemon itself runs on
+    // an older JVM. The toolchain is found locally (IntelliJ ~/.jdks, JAVA_HOME, PATH, registry) or
+    // auto-provisioned through the foojay resolver declared in settings.gradle.
     java {
         toolchain {
             languageVersion = JavaLanguageVersion.of(21)

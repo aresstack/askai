@@ -19,8 +19,7 @@ Each productive session writes `<projectDir>/service-endpoint.json`:
 
 - The token is part of the URL path — the `url` is everything a client needs.
 - Streamable HTTP = MCP JSON-RPC (initialize → tools/list → tools/call). Plain `curl` cannot speak the
-  handshake; use any MCP client (e.g. Solon's `McpClientProvider`, shipped in
-  `build/research-runtime/research-agent-runtime.jar`).
+  handshake; use any MCP client (e.g. Solon's `McpClientProvider` from `org.noear:solon-ai-mcp`).
 - The endpoint dies with the session (close invalidates the token); the file is overwritten on the next
   session start and simply goes stale after close.
 - The toggle "Bot control via MCP" in the Research-Agent settings (gear menu) disables the endpoint for

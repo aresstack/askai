@@ -6,7 +6,7 @@ import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.askai.ollamalib.OllamaLibraryModel;
 import com.aresstack.askai.ollamalib.OllamaModelVariant;
 import com.aresstack.askai.service.AskAiService;
-import io.github.ollama4j.models.PullProgress;
+import com.aresstack.askai.client.OllamaPullProgress;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -229,7 +229,7 @@ public final class OllamaLibraryPanel extends JPanel {
             append("Note: this is a cloud tag — it runs on Ollama's cloud, not as a local model.");
         }
         askAiService.pullOllamaModel(variant.getTag(), new AskAiService.PullListener() {
-            public void onProgress(final PullProgress progress) {
+            public void onProgress(final OllamaPullProgress progress) {
                 onUi(new Runnable() {
                     public void run() {
                         long total = progress.getTotal();

@@ -1,7 +1,7 @@
 package com.aresstack.askai.localmodels;
 
 import com.aresstack.askai.hf.HuggingFaceClient;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.json.SimpleJson;
 
 import org.junit.Test;
 
@@ -25,10 +25,11 @@ import static org.junit.Assume.assumeTrue;
 
 /**
  * C2c real-model smokes for the encoder + reranker families, run STRICTLY through the productive install
- * pipeline (download → catalog compile → package-backed smoke → manifest) and the local runtime HTTP surface.
+ * pipeline (download → catalog compile → package-backed smoke → manifest) and the sidecar HTTP surface.
  *
- * <p>The runtime runs inside this JVM (askai #49); the test does NOT skip because a model is missing — a
- * missing model is downloaded, and a real infrastructure or inference failure is a visible test failure. Opt in with {@code -Daskai.local.realModelSmoke=true} so a
+ * <p>Environment-gated on the assembled sidecar distribution and a Java-21 launcher (infrastructure); it
+ * does NOT skip because a model is missing — a missing model is downloaded, and a real infrastructure or
+ * inference failure is a visible test failure. Opt in with {@code -Daskai.local.realModelSmoke=true} so a
  * normal build does not fetch gigabytes. E5-large is loaded LAST and each model is unloaded before the
  * next so the four encoders never sit in memory together.</p>
  */
@@ -181,13 +182,13 @@ public class LocalEngineRealSmokeTest {
         connection.setConnectTimeout(30_000);
         connection.setReadTimeout(600_000);
         try (OutputStream out = connection.getOutputStream()) {
-            out.write(OllamaJson.toJson(body).getBytes(StandardCharsets.UTF_8));
+            out.write(SimpleJson.toJson(body).getBytes(StandardCharsets.UTF_8));
         }
         int status = connection.getResponseCode();
         InputStream in = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
         String text = new String(readAll(in), StandardCharsets.UTF_8);
         assertEquals(path + " -> " + text, expectedStatus, status);
-        return (Map<String, Object>) OllamaJson.parse(text);
+        return (Map<String, Object>) SimpleJson.parse(text);
     }
 
     private static byte[] readAll(InputStream in) throws IOException {

@@ -150,8 +150,9 @@ public final class WebSearchApplicationService {
     private Double seedPageRelevanceFloor;
     /**
      * The same idea for the other kind of text: the LOWEST score among the SERP hits the reranker
-     * selected, measured on their title+snippet. A link is judged on its anchor text, which is the same
-     * shape of document — so this, and not the page floor, is the bar a link has to clear. Comparing a
+     * selected, measured on their title+snippet (plus displayed domain and address). A link is judged on
+     * its anchor text, which is the same shape of document — so this, and not the page floor, is the bar
+     * a link has to clear. Comparing a
      * one-line anchor against a floor measured on full page text would compare two different things.
      */
     private Double seedSerpRelevanceFloor;
@@ -432,7 +433,7 @@ public final class WebSearchApplicationService {
                 // The browser MCP endpoint is gone (the browser runtime likely died): this is the concrete,
                 // retryable technical cause behind a SEARCH_TECHNICAL_PROBLEM — log it, never swallow it.
                 listener.status("[web-search] technical failure stage=SEED_SEARCH (endpoint unavailable —"
-                        + " browser runtime unavailable) cause=" + describe(ex));
+                        + " browser runtime may be dead) cause=" + describe(ex));
                 return ResearchStopReason.MCP_UNAVAILABLE;
             } catch (ToolInvoker.ToolFailure ex) {
                 if (noteIfBrowserClosed(ex)) {
@@ -679,8 +680,8 @@ public final class WebSearchApplicationService {
                     frontier.add(FrontierEntry.fromDiscoveredLink(linkUrl, url));
                 }
             } catch (ToolInvoker.EndpointUnavailable ex) {
-                listener.status("[web-search] technical failure stage=PAGE_OPEN (endpoint unavailable — browser"
-                        + " runtime unavailable) url=" + url + " cause=" + describe(ex));
+                listener.status("[web-search] technical failure stage=PAGE_OPEN (endpoint unavailable — browser runtime"
+                        + " may be dead) url=" + url + " cause=" + describe(ex));
                 return ResearchStopReason.MCP_UNAVAILABLE;
             } catch (ToolInvoker.ToolFailure ex) {
                 progress.error();
@@ -1407,7 +1408,7 @@ public final class WebSearchApplicationService {
             browserGone = true;
         }
         String line = "[browser-hud] " + stage + " failed"
-                + (endpoint ? " (endpoint unavailable — browser runtime unavailable)" : "") + " cause=" + describe(ex);
+                + (endpoint ? " (endpoint unavailable — browser runtime may be dead)" : "") + " cause=" + describe(ex);
         if (!line.equals(lastHudErrorLine)) {
             lastHudErrorLine = line;
             listener.status(line);
@@ -1742,6 +1743,9 @@ public final class WebSearchApplicationService {
             if (cancelled.get() || browserClosedByUser) {
                 return ResearchStopReason.USER_CANCELLED;
             }
+            if (browserGone) {
+                return ResearchStopReason.MCP_UNAVAILABLE;
+            }
             long tickStart = clock.currentTimeMillis();
             clock.sleepMillis(challengeProbeIntervalMillis);
             waitedForUserMillis += Math.max(0, clock.currentTimeMillis() - tickStart);
@@ -1764,7 +1768,14 @@ public final class WebSearchApplicationService {
             // Deliberately WITHOUT the budget gate: polling the user's pending challenge must never
             // exhaust a tool budget or count as research work.
             applyChallengeLines(callBrowser("web_challenge_status", args()));
-        } catch (ToolInvoker.EndpointUnavailable | ToolInvoker.ToolFailure ignored) {
+        } catch (ToolInvoker.EndpointUnavailable gone) {
+            // A worker's user context that is gone never answers again (the chat browser would restart): end
+            // the wait technically so the worker gives its lease back and the package can be retried.
+            if (gone.getMessage() != null && gone.getMessage().contains(
+                    com.aresstack.askai.research.runtime.browser.UserContextWebAcquisition.USER_CONTEXT_LOST)) {
+                browserGone = true;
+            }
+        } catch (ToolInvoker.ToolFailure ignored) {
             // The probe is best-effort; the next tick retries. (A BROWSER_CLOSED failure has already
             // flipped browserClosedByUser inside callBrowser — the gates end the run as the user's.)
         }
@@ -1807,6 +1818,9 @@ public final class WebSearchApplicationService {
             if (browserClosedByUser) {
                 return ResearchStopReason.USER_CANCELLED; // the window close IS the user's answer
             }
+            if (browserGone) {
+                return ResearchStopReason.MCP_UNAVAILABLE; // a lost worker user context never answers again
+            }
         }
         return cancelled.get() ? ResearchStopReason.USER_CANCELLED : null;
     }
@@ -1828,7 +1842,7 @@ public final class WebSearchApplicationService {
             return ResearchStopReason.USER_CANCELLED;
         }
         if (browserGone) {
-            return ResearchStopReason.MCP_UNAVAILABLE; // browser runtime gone → end technically, never hang
+            return ResearchStopReason.MCP_UNAVAILABLE; // browser runtime dead → end technically, never hang
         }
         if (browserClosedByUser) {
             // Closing the window IS the user's stop: their decision, not a failure — sources stay.

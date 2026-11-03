@@ -8,7 +8,7 @@ import com.aresstack.askai.research.state.oo.ResearchStateMemento;
 /**
  * Immutable backend event with a stable envelope (eventId, sessionId, projectId, revision, timestamp, a
  * per-session monotonic sequenceNumber, and the originating commandId when applicable) plus type-specific
- * payload. The sequenceNumber lets the UI ignore late/duplicate deliveries and prepares for later ACP
+ * payload. The sequenceNumber lets the UI ignore late/duplicate deliveries and prepares for later transport
  * reordering/replay without a UI rewrite. Only public-safe text is carried; raw tool args/results are not.
  */
 public final class ResearchBackendEvent {

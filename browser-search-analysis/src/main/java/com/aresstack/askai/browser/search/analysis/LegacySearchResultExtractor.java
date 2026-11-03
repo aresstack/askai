@@ -42,7 +42,7 @@ import java.util.Set;
  * <p>HIGH_CONFIDENCE never calls the AI. On LOW_CONFIDENCE, when — and only when — a
  * {@link SearchPageLayoutResolver} was injected, the ununderstood layout is offered to it as a
  * bounded artifact; a VALIDATED decision then feeds the EXISTING result-block extraction. Absent a
- * resolver (the model-free browser runtime) or on a disabled/unavailable resolver, LOW_CONFIDENCE stays
+ * resolver (the model-free sidecar) or on a disabled/unavailable resolver, LOW_CONFIDENCE stays
  * EXTRACTION_FAILED and the engine-fallback policy moves on. The AI only ever replaces the uncertain
  * LAYOUT resolution — primary-link selection, snippet extraction, sitelinks and dedup remain the
  * single A3 implementation.</p>
@@ -61,7 +61,7 @@ public final class LegacySearchResultExtractor {
     }
 
     /**
-     * Wire an AI layout resolver for the LOW_CONFIDENCE path. The browser runtime keeps using the single-arg
+     * Wire an AI layout resolver for the LOW_CONFIDENCE path. The sidecar keeps using the single-arg
      * constructor and therefore stays model-free.
      */
     public LegacySearchResultExtractor(LegacyBrowserSearchSettings settings,

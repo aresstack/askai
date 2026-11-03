@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 
 import java.util.List;
 
@@ -18,7 +18,7 @@ public final class ResearchRuntimeSettings {
     static final String KEY_BROWSER_CHANNEL = "research.runtime.browserChannel";
     /** Set once the stored channel went through the Camoufox switch (see {@link #load}). */
     static final String KEY_BROWSER_CHANNEL_CAMOUFOX_SWITCH = "research.runtime.browserChannel.camoufoxSwitch";
-    /** The managed Camoufox browser (downloaded once by the browser runtime) — the default channel. */
+    /** The managed Camoufox browser (downloaded once by the in-process browser runtime) — the default channel. */
     public static final String CAMOUFOX_CHANNEL = "camoufox";
     /** The RESEARCH browser (pages visited while researching): visible by default. */
     static final String KEY_HEADLESS = "research.runtime.headless";
@@ -118,7 +118,7 @@ public final class ResearchRuntimeSettings {
 
     private static void applyBrowserExecutable(String channel, String path) {
         try {
-            com.aresstack.askai.browser.runtime.BrowserExecutables.use(channel, path);
+            com.aresstack.askai.browser.playwright.BrowserExecutables.use(channel, path);
         } catch (RuntimeException | LinkageError unavailable) {
             // no browser runtime here: nothing to configure
         }
@@ -137,7 +137,7 @@ public final class ResearchRuntimeSettings {
             return; // the automatic choice (or a location configured at launch) stays
         }
         try {
-            com.aresstack.askai.browser.runtime.InProcessBrowser.useCamoufox(folder);
+            com.aresstack.askai.browser.playwright.CamoufoxSetup.useCamoufox(folder);
         } catch (RuntimeException | LinkageError unavailable) {
             // no browser runtime here: nothing to configure
         }
@@ -249,14 +249,64 @@ public final class ResearchRuntimeSettings {
     /** Safety time limit per search run (minutes) — user waits are never counted against it. */
     public static final int DEFAULT_SEARCH_MAX_MINUTES = 10;
 
-    /** Per-call MCP timeout toward the browser runtime (seconds) — must cover a multi-page SERP prepare. */
+    /** Per-call timeout toward the browser (seconds) — must cover a multi-page SERP prepare. */
     public static final String KEY_BROWSER_TOOL_TIMEOUT_SECONDS =
             "research.search.browserToolTimeoutSeconds";
     public static final int DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS = 300;
+    /**
+     * How long a browser generation stays warm after a browsing phase ended without a new browser command,
+     * before it is stopped (seconds). Keeping it warm saves the browser start (Playwright driver + browser
+     * launch, about 10 s) on the next search; 0 = stop right after each search (the historic behaviour).
+     */
+    public static final String KEY_BROWSER_IDLE_STOP_SECONDS = "research.search.browserIdleStopSeconds";
+    public static final int DEFAULT_BROWSER_IDLE_STOP_SECONDS = 300;
+
+    // ---- worker browsers: isolated user contexts for parallel research workers. Configured independently of
+    // the model capacity ("Model resources"); call timeout and idle stop reuse the two browser values above.
+    /** Worker browser processes over all chats; also the number of browser operations that run in parallel. */
+    public static final String KEY_WORKER_BROWSER_PROCESSES = "research.browser.workers.maxProcesses";
+    public static final int DEFAULT_WORKER_BROWSER_PROCESSES =
+            com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_MAX_BROWSER_PROCESSES;
+    /** User contexts (one per worker) one worker browser process hosts. */
+    public static final String KEY_WORKER_USER_CONTEXTS_PER_PROCESS =
+            "research.browser.workers.maxUserContextsPerProcess";
+    public static final int DEFAULT_WORKER_USER_CONTEXTS_PER_PROCESS =
+            com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_MAX_USER_CONTEXTS_PER_PROCESS;
+    /** Tabs (browsing contexts) one worker may hold open in its user context. */
+    public static final String KEY_WORKER_TABS_PER_USER_CONTEXT = "research.browser.workers.maxTabsPerUserContext";
+    public static final int DEFAULT_WORKER_TABS_PER_USER_CONTEXT = com.aresstack.askai.browser.playwright
+            .WorkerBrowserLimits.DEFAULT_MAX_BROWSING_CONTEXTS_PER_USER_CONTEXT;
+    /** Worker browser operations against the same site at the same time (search engines count as one). */
+    public static final String KEY_WORKER_PER_SITE = "research.browser.workers.maxConcurrentPerSite";
+    public static final int DEFAULT_WORKER_PER_SITE =
+            com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_MAX_CONCURRENT_PER_SITE;
+    /** How long a worker waits for a free user context (seconds). */
+    public static final String KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS = "research.browser.workers.acquireTimeoutSeconds";
+    public static final int DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS =
+            com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_ACQUIRE_TIMEOUT_SECONDS;
     public static final int DEFAULT_SEARCH_MAX_ERRORS = 3;
     /** How many sources one post-search review may read, and how much of each. */
     public static final int DEFAULT_REVIEW_MAX_SOURCES = 12;
     public static final int DEFAULT_REVIEW_MAX_CHARS = 1_200;
+
+    /** A persisted NON-NEGATIVE integer (0 is a legal value); unset, unparsable or negative → the default. */
+    public static int loadNonNegativeInt(WorkspaceStateStore store, String key, int fallback) {
+        if (store == null) {
+            return fallback;
+        }
+        try {
+            int value = Integer.parseInt(store.get(key, String.valueOf(fallback)).trim());
+            return value >= 0 ? value : fallback;
+        } catch (NumberFormatException invalid) {
+            return fallback;
+        }
+    }
+
+    public static void saveNonNegativeInt(WorkspaceStateStore store, String key, int value) {
+        if (store != null && value >= 0) {
+            store.put(key, String.valueOf(value));
+        }
+    }
 
     /** A persisted positive integer; unset, unparsable or non-positive values fall back to the default. */
     public static int loadPositiveInt(WorkspaceStateStore store, String key, int fallback) {
@@ -472,6 +522,113 @@ public final class ResearchRuntimeSettings {
      */
     public static final String KEY_USE_AI_RERANKER = "research.runtime.useAiReranker";
 
+    // ---- ADR 0001 lane F: the orchestrated research run (limits are settings, never constants) ----------
+
+    /** "Orchestrated research" (default OFF = the single autonomous research loop). */
+    public static final String KEY_ORCHESTRATOR_ENABLED = "research.orchestrator.enabled";
+    public static final String KEY_ORCHESTRATOR_MAX_ROUNDS = "research.orchestrator.maxRounds";
+    public static final String KEY_ORCHESTRATOR_MAX_TASKS = "research.orchestrator.maxTasks";
+    public static final String KEY_ORCHESTRATOR_TASKS_PER_ROUND = "research.orchestrator.maxTasksPerRound";
+    public static final String KEY_ORCHESTRATOR_TOKEN_BUDGET = "research.orchestrator.tokenBudget";
+    public static final String KEY_ORCHESTRATOR_TIME_BUDGET_MINUTES = "research.orchestrator.timeBudgetMinutes";
+    public static final String KEY_ORCHESTRATOR_TASK_RETRIES = "research.orchestrator.taskRetryLimit";
+    public static final String KEY_ORCHESTRATOR_MIN_SOURCES_PER_SECTION =
+            "research.orchestrator.minSourcesPerSection";
+    // The defaults are the runtime's (OrchestratorSettings), so host and agent never disagree.
+    public static final int DEFAULT_ORCHESTRATOR_MAX_ROUNDS =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MAX_ROUNDS;
+    public static final int DEFAULT_ORCHESTRATOR_MAX_TASKS =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MAX_TASKS;
+    public static final int DEFAULT_ORCHESTRATOR_TASKS_PER_ROUND =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MAX_TASKS_PER_ROUND;
+    public static final int DEFAULT_ORCHESTRATOR_TOKEN_BUDGET = (int)
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_TOKEN_BUDGET;
+    public static final int DEFAULT_ORCHESTRATOR_TIME_BUDGET_MINUTES =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_TIME_BUDGET_MINUTES;
+    public static final int DEFAULT_ORCHESTRATOR_TASK_RETRIES =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_TASK_RETRY_LIMIT;
+    public static final int DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION =
+            com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.DEFAULT_MIN_SOURCES_PER_SECTION;
+
+    // ADR 0001 lane G: the new worker roles (each on by default inside the orchestrated mode) and their limits.
+    public static final String KEY_WORKER_SEARCH_PLANNER = "research.orchestrator.worker.searchPlanner";
+    public static final String KEY_WORKER_SOURCE_VERIFIER = "research.orchestrator.worker.sourceVerifier";
+    public static final String KEY_WORKER_WRITER = "research.orchestrator.worker.writer";
+    public static final String KEY_WORKER_PLANNER_MAX_QUERIES = "research.orchestrator.worker.plannerMaxQueries";
+    public static final String KEY_WORKER_VERIFIER_MAX_SOURCES = "research.orchestrator.worker.verifierMaxSources";
+    public static final String KEY_WORKER_WRITER_MAX_SOURCES = "research.orchestrator.worker.writerMaxSources";
+    public static final int DEFAULT_WORKER_PLANNER_MAX_QUERIES =
+            com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.DEFAULT_PLANNER_MAX_QUERIES;
+    public static final int DEFAULT_WORKER_VERIFIER_MAX_SOURCES =
+            com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.DEFAULT_VERIFIER_MAX_SOURCES;
+    public static final int DEFAULT_WORKER_WRITER_MAX_SOURCES =
+            com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.DEFAULT_WRITER_MAX_SOURCES;
+
+    public static boolean loadWorkerRole(WorkspaceStateStore store, String key) {
+        return store == null || store.getBoolean(key, true);
+    }
+
+    public static void saveWorkerRole(WorkspaceStateStore store, String key, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(key, enabled);
+        }
+    }
+
+    public static boolean loadOrchestratorEnabled(WorkspaceStateStore store) {
+        return store != null && store.getBoolean(KEY_ORCHESTRATOR_ENABLED, false);
+    }
+
+    public static void saveOrchestratorEnabled(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_ORCHESTRATOR_ENABLED, enabled);
+        }
+    }
+
+    /**
+     * The orchestrated run's settings as the agent's {@code ASKAI_ORCHESTRATOR_*} hand-off (the same mechanism
+     * as the search limits). Values the user never set travel as their defaults.
+     */
+    public static java.util.Map<String, String> loadOrchestratorEnvironment(WorkspaceStateStore store) {
+        java.util.Map<String, String> env = new java.util.LinkedHashMap<String, String>();
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MODE,
+                loadOrchestratorEnabled(store) ? "orchestrated" : "loop");
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MAX_ROUNDS,
+                String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_MAX_ROUNDS, DEFAULT_ORCHESTRATOR_MAX_ROUNDS)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MAX_TASKS,
+                String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_MAX_TASKS, DEFAULT_ORCHESTRATOR_MAX_TASKS)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MAX_TASKS_PER_ROUND,
+                String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_TASKS_PER_ROUND,
+                        DEFAULT_ORCHESTRATOR_TASKS_PER_ROUND)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_TOKEN_BUDGET,
+                String.valueOf(loadNonNegativeInt(store, KEY_ORCHESTRATOR_TOKEN_BUDGET,
+                        DEFAULT_ORCHESTRATOR_TOKEN_BUDGET)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_TIME_BUDGET_MINUTES,
+                String.valueOf(loadNonNegativeInt(store, KEY_ORCHESTRATOR_TIME_BUDGET_MINUTES,
+                        DEFAULT_ORCHESTRATOR_TIME_BUDGET_MINUTES)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_TASK_RETRY_LIMIT,
+                String.valueOf(loadNonNegativeInt(store, KEY_ORCHESTRATOR_TASK_RETRIES,
+                        DEFAULT_ORCHESTRATOR_TASK_RETRIES)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.ENV_MIN_SOURCES_PER_SECTION,
+                String.valueOf(loadPositiveInt(store, KEY_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
+                        DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_SEARCH_PLANNER,
+                loadWorkerRole(store, KEY_WORKER_SEARCH_PLANNER) ? "on" : "off");
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_SOURCE_VERIFIER,
+                loadWorkerRole(store, KEY_WORKER_SOURCE_VERIFIER) ? "on" : "off");
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_WRITER,
+                loadWorkerRole(store, KEY_WORKER_WRITER) ? "on" : "off");
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_PLANNER_MAX_QUERIES,
+                String.valueOf(loadPositiveInt(store, KEY_WORKER_PLANNER_MAX_QUERIES,
+                        DEFAULT_WORKER_PLANNER_MAX_QUERIES)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_VERIFIER_MAX_SOURCES,
+                String.valueOf(loadPositiveInt(store, KEY_WORKER_VERIFIER_MAX_SOURCES,
+                        DEFAULT_WORKER_VERIFIER_MAX_SOURCES)));
+        env.put(com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.ENV_WRITER_MAX_SOURCES,
+                String.valueOf(loadPositiveInt(store, KEY_WORKER_WRITER_MAX_SOURCES,
+                        DEFAULT_WORKER_WRITER_MAX_SOURCES)));
+        return env;
+    }
+
     public static boolean loadUseAiReranker(WorkspaceStateStore store) {
         return store != null && store.getBoolean(KEY_USE_AI_RERANKER, false);
     }
@@ -630,23 +787,19 @@ public final class ResearchRuntimeSettings {
      */
     private final String selectedRerankerModel;
 
-    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel,
-                                   boolean headless) {
-        this(mode, browserChannel,
-                headless, false);
+    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel, boolean headless) {
+        this(mode, browserChannel, headless, false);
     }
 
     /** @param allowPrivateNetworks development-only override of the strict URL policy (default false). */
-    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel,
-                                   boolean headless, boolean allowPrivateNetworks) {
-        this(mode, browserChannel,
-                headless, allowPrivateNetworks, "");
+    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel, boolean headless,
+                                   boolean allowPrivateNetworks) {
+        this(mode, browserChannel, headless, allowPrivateNetworks, "");
     }
 
     /** @param selectedRerankerModel the explicitly selected virtual reranker model id ("" = none). */
-    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel,
-                                   boolean headless, boolean allowPrivateNetworks,
-                                   String selectedRerankerModel) {
+    public ResearchRuntimeSettings(ResearchBackendMode mode, String browserChannel, boolean headless,
+                                   boolean allowPrivateNetworks, String selectedRerankerModel) {
         this.mode = mode == null ? ResearchBackendMode.FAKE : mode;
         this.browserChannel = browserChannel == null || browserChannel.isEmpty() ? CAMOUFOX_CHANNEL : browserChannel;
         this.headless = headless;
@@ -731,7 +884,13 @@ public final class ResearchRuntimeSettings {
         return new ResearchRuntimeConfig(browserChannel, headless, allowPrivateNetworks, selectedRerankerModel);
     }
 
-    /** The runtime rules ({@link ResearchRuntimeConfig#validate()}). Empty = usable. */
+    /**
+     * The runtime rules ({@link ResearchRuntimeConfig#validate()}). Empty = usable.
+     * <p>
+     * A search provider URL does not exist anymore: the product ships with search engines and the
+     * user orders them in the search settings. Dev/test worlds pass the in-process browser an explicit
+     * {@code --search-url} per run (askai.research.browser.args) — never a persisted value.
+     */
     public List<String> validateProductive() {
         return new java.util.ArrayList<String>(toRuntimeConfig().validate());
     }

@@ -9,12 +9,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The bounded, one-shot cache the model-free browser runtime uses to hold a low-confidence
+ * The bounded, one-shot cache the model-free sidecar uses to hold a low-confidence
  * {@code RenderedPageDocument} between {@code web_search_prepare} and a later
  * {@code web_search_apply_layout}. Bounded by a maximum entry count and a TTL; oldest entries are
  * evicted first; an attempt may be consumed exactly once. Cleanup happens on discard, on consume, on
  * clear (session close / browser recovery) and lazily on access. This is a per-session instance, never
- * a global static map. Time is passed in so the browser runtime controls the clock.
+ * a global static map. Time is passed in so the sidecar controls the clock.
  */
 public final class SearchLayoutRepairCache {
 

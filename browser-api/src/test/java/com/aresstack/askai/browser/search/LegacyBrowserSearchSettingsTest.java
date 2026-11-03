@@ -34,6 +34,46 @@ public class LegacyBrowserSearchSettingsTest {
     }
 
     @Test
+    public void theUntouchedOldShippedChallengeTextListIsLiftedOnDecode() {
+        // Stored settings that still carry the exact list that shipped with the bare word "captcha" are the
+        // untouched default, not a choice: decoding lifts them to the current list (the INNOQ false positive).
+        Map<String, String> values = LegacyBrowserSearchSettingsCodec.toValues(LegacyBrowserSearchDefaults.create());
+        values.put("captcha.challengeTexts",
+                String.join("\n", LegacyBrowserSearchSettingsCodec.SHIPPED_CHALLENGE_TEXTS_WITH_BARE_CAPTCHA));
+        LegacyBrowserSearchSettingsCodec.Decoded decoded = LegacyBrowserSearchSettingsCodec.fromValues(values);
+        assertTrue(decoded.violations.isEmpty());
+        assertEquals(LegacyBrowserSearchDefaults.create().captcha.challengeTexts,
+                decoded.settings.captcha.challengeTexts);
+        assertFalse(decoded.settings.captcha.challengeTexts.contains("captcha"));
+        // Surrounding whitespace / blank lines (how the settings editor may store the list) is still the same list.
+        values.put("captcha.challengeTexts", "  " + String.join(" \n\n",
+                LegacyBrowserSearchSettingsCodec.SHIPPED_CHALLENGE_TEXTS_WITH_BARE_CAPTCHA) + "\n");
+        assertFalse(LegacyBrowserSearchSettingsCodec.fromValues(values)
+                .settings.captcha.challengeTexts.contains("captcha"));
+    }
+
+    @Test
+    public void anEditedChallengeTextListIsTheUsersChoiceAndStaysExactlyAsStored() {
+        Map<String, String> values = LegacyBrowserSearchSettingsCodec.toValues(LegacyBrowserSearchDefaults.create());
+        List<String> shipped = LegacyBrowserSearchSettingsCodec.SHIPPED_CHALLENGE_TEXTS_WITH_BARE_CAPTCHA;
+        // An added entry.
+        String added = String.join("\n", shipped) + "\nzugriff verweigert";
+        values.put("captcha.challengeTexts", added);
+        List<String> kept = LegacyBrowserSearchSettingsCodec.fromValues(values).settings.captcha.challengeTexts;
+        assertEquals(java.util.Arrays.asList(added.split("\n")), kept);
+        assertTrue("the user's own 'captcha' entry survives", kept.contains("captcha"));
+        // A reordered list.
+        List<String> reordered = new java.util.ArrayList<String>(shipped);
+        java.util.Collections.reverse(reordered);
+        values.put("captcha.challengeTexts", String.join("\n", reordered));
+        assertEquals(reordered, LegacyBrowserSearchSettingsCodec.fromValues(values).settings.captcha.challengeTexts);
+        // A user list that is just "captcha".
+        values.put("captcha.challengeTexts", "captcha");
+        assertEquals(java.util.Collections.singletonList("captcha"),
+                LegacyBrowserSearchSettingsCodec.fromValues(values).settings.captcha.challengeTexts);
+    }
+
+    @Test
     public void aiLayoutResolverShipsProductivelyEnabled() {
         // The model-backed SERP layout repair is productive: enabled by default with a non-empty
         // symbolic model profile (the runtime port targets the host-published main-model descriptor).

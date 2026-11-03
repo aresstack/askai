@@ -6,12 +6,16 @@ import java.io.File;
 import java.io.IOException;
 
 /**
- * Host-side OWNER of the local model runtime. Since askai #49 the runtime runs inside the AskAI JVM: AskAI starts
- * it on first use (never the research agent), provides its loopback base URL (the Ollama-compatible endpoint the
- * reranker, embedding and generation clients talk to), starts it again after a failed start once the backoff has
- * passed, and stops it on AskAI shutdown. There is no child process and no global fixed port.
+ * Host-side OWNER of the local model runtime: AskAI's virtual Ollama container for locally installed
+ * models. Since the return to Java 21 the runtime runs INSIDE the application ({@link LocalModelRuntime}):
+ * the manager starts it on demand, hands out its loopback base URL, brings it back after an AskAI restart
+ * when local models exist, and closes it on AskAI shutdown. There is no global fixed port — the runtime
+ * binds a free one per start — and no separate JVM any more.
  */
 public final class LocalModelRuntimeManager {
+
+    /** The inference backend of the in-process runtime (the CPU reference path, as before). */
+    static final String BACKEND = "cpu";
 
     /** A failed start is not retried for this long — N queued callers fail fast instead of serially. */
     private static final long START_RETRY_BACKOFF_MILLIS = 15_000L;
@@ -50,17 +54,20 @@ public final class LocalModelRuntimeManager {
         return runtime != null;
     }
 
-    /** The runtime is part of AskAI itself, so it can always serve (it is started on demand). */
+    /**
+     * True when the runtime can serve at all. The runtime is part of the application now, so it is always
+     * available; the method stays for the callers that only aggregate (model lists, boot start).
+     */
     public boolean isAvailable() {
         return true;
     }
 
     /** The base URL of the RUNNING runtime, or null. */
     public synchronized String getBaseUrl() {
-        return runtime != null ? runtime.baseUrl() : null;
+        return runtime == null ? null : runtime.baseUrl();
     }
 
-    /** Start the runtime in this JVM if it is not running; @return the base URL. */
+    /** Start the runtime if it is not running; @return the base URL. */
     public synchronized String ensureStarted() throws IOException {
         if (runtime != null) {
             return runtime.baseUrl();
@@ -71,25 +78,25 @@ public final class LocalModelRuntimeManager {
             throw new IOException("local model runtime start failed recently; retry postponed");
         }
         try {
-            runtime = LocalModelRuntime.start(modelRoot.toPath(), "cpu");
-        } catch (IOException | RuntimeException | LinkageError failed) {
+            runtime = LocalModelRuntime.start(modelRoot.toPath(), BACKEND);
+        } catch (IOException | RuntimeException failed) {
             lastStartFailureMillis = System.currentTimeMillis();
-            throw new IOException("The local model runtime could not be started: " + failed, failed);
+            throw new IOException("The local model runtime could not be started (model root "
+                    + modelRoot.getAbsolutePath() + "): " + failed.getMessage(), failed);
         }
-        System.err.println("[local-runtime] ready on " + runtime.baseUrl() + " backend=" + runtime.backend()
-                + " modelRoot=" + modelRoot.getAbsolutePath());
         return runtime.baseUrl();
     }
 
-    /** Idempotent shutdown: stops the endpoint and releases the loaded models. */
+    /** Idempotent shutdown: unloads every model and frees the port. */
     public synchronized void stop() {
         if (runtime == null) {
             return;
         }
         try {
             runtime.close();
-        } finally {
-            runtime = null;
+        } catch (RuntimeException failed) {
+            System.err.println("[local-runtime] stop failed: " + failed.getMessage());
         }
+        runtime = null;
     }
 }

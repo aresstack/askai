@@ -63,7 +63,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     private ResearchSessionHandle handle;
     private boolean started;
-    // Volatile: set on close() (possibly off-EDT) and read by late async browser/ACP callbacks on the EDT —
+    // Volatile: set on close() (possibly off-EDT) and read by late async browser/agent callbacks on the EDT —
     // a callback that arrives after the tab closed must apply nothing.
     private volatile boolean disposed;
     private final com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostStateStore;
@@ -295,7 +295,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     /**
      * Surface the lazy browser lifecycle as a transient chat activity: a "Starte Browser…" thinking bubble
-     * when the browser runtime starts on the first browser command, finished with "Browser bereit." on READY (or a
+     * when the browser starts on the first browser command, finished with "Browser bereit." on READY (or a
      * visible problem on failure). The runtime fires these on its owner thread; we marshal onto the EDT.
      */
     private void wireBrowserActivity(
@@ -373,13 +373,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     // ------------------------------------------------------------------ AgentSession lifecycle
 
-    /** Visible one-time message shown when the session starts (e.g. the demo-mode notice). */
-    private volatile String startupNotice;
-
-    public void setStartupNotice(String notice) {
-        this.startupNotice = notice;
-    }
-
     @Override
     public void activate() {
         if (disposed || started) {
@@ -399,30 +392,23 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             botRegistration = com.aresstack.askai.research.mcp.ResearchBotSessionDirectory.get()
                     .register(chatSessionId, sessionId, botGateway);
         }
-        // Wire the user web search onto the productive backend transport (a #RSC1# service command over ACP).
+        // Wire the user web search onto the productive backend transport (a #RSC1# service command through the backend transport).
         // Transport-agnostic: a fake/clickdummy backend's submitServiceCommand is a no-op. Tests may override
         // the port AFTER activate().
         this.manualWebSearchPort = new com.aresstack.askai.research.search.BackendManualWebSearchPort(
                 backend, handle);
         restoreManualSearchedQueries(); // covered queries survive a restart (each source remembers its query)
         wireToolActivityReadAloud();
-        final String notice = startupNotice;
-        if (notice != null && sink != null) {
-            uiExecutor.execute(new Runnable() {
-                public void run() {
-                    sink.showProblem(publish("research-runtime-mode"), notice);
-                }
-            });
-        }
         if (productiveResources != null && problemMessage.isEmpty()) {
             // Still restore the persisted assignment (question + focus areas) so a resumed project keeps its
             // scope for continuation; the scoping ceremony is no longer host-driven.
             restoreProjectMetadata();
             // Show the last PERSISTED visualization (possibly stale) — never regenerate on open (issue #29).
             restorePersistedVisualization();
-            // The greeting depends ONLY on the state: greet exactly once, when the scope state is still fresh
-            // (SCOPING/NEW). A restored session whose state already advanced past NEW is NOT greeted again —
-            // its prior greeting comes back from the persisted chat transcript instead (no double greeting).
+            // A fresh chat (SCOPING/NEW) stays EMPTY: no bootstrap turn, no model call. The former greeting
+            // asked for a topic the user was about to name anyway, cost a model call on every new chat and sat
+            // in the context of the real first turn. The scoping starts with the user's first message (see
+            // startScopingOnFirstMessage).
             com.aresstack.askai.research.state.oo.ResearchStateMemento current =
                     productiveResources.currentState();
             boolean freshState =
@@ -917,6 +903,34 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private final java.util.concurrent.atomic.AtomicLong playbookMessageIds =
             new java.util.concurrent.atomic.AtomicLong();
 
+    /**
+     * ADR 0001 lane F: the user's decision on the orchestrated run ({@code "approve"} or {@code "stop"}),
+     * sent as a typed service command on a foreground turn, so the busy state and Stop cover the run.
+     */
+    public void submitOrchestratorDecision(String decision) {
+        if (handle == null || productiveResources == null || productiveResources.isClosed()) {
+            return;
+        }
+        String type = "stop".equals(decision) ? "orchestrator_stop" : "orchestrator_approve";
+        technicalLog("orchestrator decision by the user: " + decision);
+        beginAgentTurn();
+        backend.submitPrompt(handle, new ResearchPrompt(
+                com.aresstack.askai.research.search.ResearchServiceCommandWire.orchestrator(type, ""), ""));
+    }
+
+    /** The project's orchestrated run as persisted, or {@code null} (none, or no productive project). */
+    public com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun currentOrchestratorRun() {
+        if (productiveResources == null || productiveResources.getProjectContext() == null) {
+            return null;
+        }
+        try {
+            return new com.aresstack.askai.research.store.ProjectTaskBoard(productiveResources.getProjectContext())
+                    .currentRun();
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
+    }
+
     public void submitPrompt(String text, String activeSectionId) {
         if (handle == null || disposed) {
             // Never drop a prompt silently: keep the user's turn visible and say why nothing happens.
@@ -931,7 +945,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             // returns as an assistant message and any validated proposal returns as a SCOPE_PROPOSAL the host
             // executes. The host no longer runs ScopingConversation or the playbook greeting/outline here —
             // those stay for FAKE mode and the legacy tests only.
-            // The productive ACP agent cannot echo the user's OWN message back, so show it in the shared chat
+            // The productive in-process agent cannot echo the user's OWN message back, so show it in the shared chat
             // here (right-aligned, by role) before the agent replies — otherwise the user's turn is invisible.
             // Gate 6 contract: while a concept conflict is PENDING, the host OWNS the next
             // unambiguous yes/no — "Ja." never reaches the model (which once answered it with
@@ -1059,6 +1073,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * BEFORE the turn reaches the runtime, so the turn's concept writes are allowed and the runtime answers
      * the topic directly. Also the handler of the runtime's GREETING_DONE signal. Idempotent.
      */
+    /**
+     * SCOPING/NEW → SCOPING/RUNNING when the user sends the first message of a fresh chat — synchronously,
+     * BEFORE the turn reaches the runtime, so the turn's concept writes (bound to SCOPING/running) are allowed
+     * and the runtime answers the topic directly. Also the handler of a runtime's GREETING_DONE signal.
+     */
     private void startScopingOnFirstMessage() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return;
@@ -1073,7 +1092,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * Show the user's OWN turn in the shared chat (right-aligned, by role) — the productive ACP agent never
+     * Show the user's OWN turn in the shared chat (right-aligned, by role) — the productive in-process agent never
      * echoes it back. Empty bootstrap turns carry no text and are ignored, so no blank user bubble appears.
      */
     private void echoUserMessage(final String text) {
@@ -3119,7 +3138,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     // ------------------------------------------------------ one-command exclusion facade (gate 4)
 
     /**
-     * One registered concept conflict (ID-browser runtime slice): references are
+     * One registered concept conflict (ID-sidecar slice): references are
      * {@code epoch + nodeId + expectedRevision} — never a stored name path (a rename must not
      * break them). {@code open} implements the ratified candidate/open model: only a conflict
      * whose question was VISIBLY asked (the terminal exclude receipt) is answerable — buttons,
@@ -3144,7 +3163,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * The DiscardedDecisionTombstone (ID-browser runtime gate finding): when a raw save/restore
+     * The DiscardedDecisionTombstone (ID-sidecar gate finding): when a raw save/restore
      * discards an OPEN conflict, the transcript still shows the old removal question — a bare
      * "Ja." afterwards must get a deterministic HOST answer ("the question is stale, nothing
      * changed, the topic stays suppressed"), never a model inference. Consumed on the first
@@ -3173,6 +3192,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private int turnsWithoutNewCards;
     /** The ephemeral fence block, recomputed once per user turn — NEVER persisted state. */
     private volatile String conversationPolicyBlock = "";
+    /** The stage behind that block, or null while no policy is projected (no scope system). */
+    private volatile ConversationPolicyProjection.Stage conversationPolicyStage;
 
     /** The concept side of the fence fingerprint: epoch + working revision (or a marker). */
     private String conceptStamp() {
@@ -3200,6 +3221,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 scopeCoordinator();
         if (service == null || coordinator == null || !coordinator.isUsable()) {
             conversationPolicyBlock = "";
+            conversationPolicyStage = null;
             return;
         }
         java.util.Set<String> ids =
@@ -3258,6 +3280,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 ConversationPolicyProjection.stageOf(inputs);
         conversationPolicyBlock =
                 ConversationPolicyProjection.hintBlock(stage, calibrationWeak);
+        conversationPolicyStage = stage;
         technicalLog(ConversationPolicyProjection.logLine(stage, inputs));
     }
 
@@ -3285,7 +3308,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return null;
     }
 
-    /** The OPEN conflicts' CURRENT name paths (resolved via the ID browser runtime at render time). */
+    /** The OPEN conflicts' CURRENT name paths (resolved via the ID sidecar at render time). */
     private java.util.Map<String, java.util.List<String>> openConflictPaths() {
         java.util.Map<String, java.util.List<String>> paths =
                 new java.util.LinkedHashMap<String, java.util.List<String>>();
@@ -3662,8 +3685,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 suggestions = parseOfferedSearches(suggestionsJson);
         if (suggestions.isEmpty()) {
             return "No usable suggestion — every entry needs a non-empty \"query\". Example: "
-                    + "[{\"query\":\"FreeRTOS ESP32 Grundlagen Tutorial\","
-                    + "\"purpose\":\"Einstieg sichten\"}]";
+                    + "[{\"query\":\"<topic> basics overview\","
+                    + "\"purpose\":\"<core aspect>\"}]";
         }
         latestScopingProjection = new com.aresstack.askai.research.backend.ScopingAssistantUpdate(
                 state.getPhaseId(), suggestions, "", "");
@@ -3692,6 +3715,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (coordinator == null || !coordinator.isUsable() || handle == null
                 || productiveResources == null || productiveResources.isClosed()) {
             return null; // no scope system — the tool answers honestly
+        }
+        // The probe is the CLOSURE-CHECK sensor (AP3 drill). The prompt says so, but the PR #19
+        // live acceptance saw gemma4:e2b probe in the FIRST turn of both topics, and the sensor
+        // lock then turned the whole opening answer into a probe summary. Machinery now: outside
+        // CLOSURE_CHECK the host refuses the measurement before any embedding runs, with a
+        // teaching rejection the loop hands back to the model (a REJECTED round, no lock).
+        ConversationPolicyProjection.Stage stage = conversationPolicyStage;
+        if (stage != null && stage != ConversationPolicyProjection.Stage.CLOSURE_CHECK) {
+            technicalLog("scope_probe -> PROBE_REFUSED stage=" + stage.name()
+                    + " (the probe is the closure-check sensor only)");
+            return ConversationPolicyProjection.probeRefusal(stage);
         }
         com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor descriptor =
                 productiveResources.getEmbeddingDescriptor();
@@ -4577,6 +4611,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     public ResearchStateSnapshot currentResearchSnapshot() {
         return ResearchStateSnapshot.of(stateFactory.restore(state), revision, problemMessage);
+    }
+
+    /**
+     * The persisted work packages of this project (ADR 0001, section 4.4), oldest first — read-only, for the
+     * task list in the State tab. Empty without a productive project context.
+     */
+    public java.util.List<com.aresstack.askai.research.domain.task.ResearchTask> currentResearchTasks() {
+        if (productiveResources == null || productiveResources.getProjectContext() == null) {
+            return java.util.Collections.emptyList();
+        }
+        return productiveResources.getProjectContext().getTaskStore().loadAll().getTasks();
     }
 
     /**

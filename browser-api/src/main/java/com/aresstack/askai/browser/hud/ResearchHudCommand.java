@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A command the HUD overlay sends back to the agent (buffered in the browser runtime, drained by the runtime via the
+ * A command the HUD overlay sends back to the agent (buffered in the sidecar, drained by the runtime via the
  * {@code web_hud_poll} tool). Slice 1 uses {@link Type#PAUSE}/{@link Type#RESUME}/{@link Type#SKIP}/
  * {@link Type#NEXT}; later slices add {@code SET_DELAY}/{@code SET_RELEVANCE} (kept in the enum so the wire format
  * never has to change). Line format: {@code TYPE} or {@code TYPE:arg}.

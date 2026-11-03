@@ -34,7 +34,7 @@ public class LocalModelInstallResolutionTest {
     @Test
     public void runnableGenerationFamiliesAreInstallable() {
         // Catalogued RUNNABLE generation families (per the published 0.2.0 catalog) install via the
-        // local runtime's generation runtime (compile + package-backed smoke).
+        // sidecar's generation runtime (compile + package-backed smoke).
         for (String repo : new String[]{"Qwen/Qwen2.5-Coder-0.5B-Instruct",
                 "HuggingFaceTB/SmolLM2-135M-Instruct", "HuggingFaceTB/SmolLM2-360M-Instruct",
                 "google-t5/t5-small", "google/flan-t5-small", "Salesforce/codet5-small",

@@ -2,7 +2,7 @@ package com.aresstack.askai.agent.model.nlp;
 
 /**
  * The neutral, resolved identity + location of a locally installed NLP model ARTIFACT. Unlike embeddings/reranker
- * (a callable HTTP endpoint of the local model runtime), an NLP model is a static file loaded directly by Java, so the
+ * (a callable HTTP endpoint on the sidecar), an NLP model is a static file loaded directly by Java, so the
  * descriptor carries the local {@code artifactPath} instead of a URL. The consumer ({@code research-text-opennlp})
  * needs ONLY this descriptor (id, implementation, path) — never the AskAI settings, the model store or a catalog.
  *

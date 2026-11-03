@@ -10,39 +10,34 @@ import com.aresstack.askai.agent.model.reranker.RerankerEndpointDescriptorCodec;
 import com.aresstack.askai.agent.model.reranker.RerankerProvider;
 import com.aresstack.askai.agent.model.reranker.RerankerScoreSemantics;
 import com.aresstack.askai.agent.model.reranker.RerankerSelectionConfiguration;
+import com.aresstack.askai.localruntime.LocalModelRuntime;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.util.Arrays;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 /**
- * A shared test harness that starts the REAL local-model runtime (backend=cpu) in this JVM (askai #49) against
- * the installed cross-encoder and exposes it as a {@link RerankerConfigurationSnapshotProvider}. Returns
- * {@code null} from {@link #startOrNull()} when no installed reranker model is present, so callers can skip
- * readably.
+ * A shared test harness that starts the REAL local-model runtime (backend=cpu) in-process — exactly as the
+ * host does since the return to Java 21 — against the installed cross-encoder and exposes it as a
+ * {@link RerankerConfigurationSnapshotProvider}. Returns {@code null} from {@link #startOrNull()} when no
+ * installed reranker model exists, so callers can skip readably.
  */
 public final class LiveLocalRerankerRuntime {
 
     private static final Charset UTF_8 = Charset.forName("UTF-8");
 
-    private final com.aresstack.askai.localruntime.LocalModelRuntime runtime;
+    private final LocalModelRuntime runtime;
     public final String baseUrl;
     public final String modelName;
 
-    private LiveLocalRerankerRuntime(com.aresstack.askai.localruntime.LocalModelRuntime runtime, String baseUrl,
-                                     String modelName) {
+    private LiveLocalRerankerRuntime(LocalModelRuntime runtime, String modelName) {
         this.runtime = runtime;
-        this.baseUrl = baseUrl;
+        this.baseUrl = runtime.baseUrl();
         this.modelName = modelName;
     }
 
-    /** Prerequisites present in this environment? (an installed model) */
+    /** Prerequisites present in this environment? (an installed local model under the app's model root) */
     public static boolean available() {
         File modelRoot = localModelRoot();
         return modelRoot.isDirectory() && hasInstalledModel(modelRoot);
@@ -51,7 +46,7 @@ public final class LiveLocalRerankerRuntime {
     /**
      * Start the runtime, or return {@code null} when prerequisites are missing — including when no installed
      * RUNNABLE model publishes the {@code rerank} capability. The capability is resolved up front from the
-     * published manifests, BEFORE spawning the runtime and BEFORE any rerank call, so a non-rerank model
+     * published manifests, BEFORE starting the runtime and BEFORE any rerank call, so a non-rerank model
      * (e.g. an embedding-only model) makes callers skip readably instead of failing later on an HTTP 400.
      */
     public static LiveLocalRerankerRuntime startOrNull() throws Exception {
@@ -59,18 +54,15 @@ public final class LiveLocalRerankerRuntime {
             return null;
         }
         File modelRoot = localModelRoot();
-
         // Decide from the PUBLISHED capability, not from a runtime error and not from the model name.
         String rerankModel = LocalModelRerankPrerequisite.firstRerankCapableModelOrNull(modelRoot);
         if (rerankModel == null) {
             return null;
         }
-
-        com.aresstack.askai.localruntime.LocalModelRuntime runtime =
-                com.aresstack.askai.localruntime.LocalModelRuntime.start(modelRoot.toPath(), "cpu");
+        LocalModelRuntime runtime = LocalModelRuntime.start(modelRoot.toPath(), "cpu");
         // The runtime serves exactly the installed RUNNABLE manifests, so the rerank-capable model chosen
         // from the published capability above is the served model.
-        return new LiveLocalRerankerRuntime(runtime, runtime.baseUrl(), rerankModel);
+        return new LiveLocalRerankerRuntime(runtime, rerankModel);
     }
 
     public RerankerEndpointDescriptor descriptor(int topN) {

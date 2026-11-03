@@ -10,6 +10,16 @@ dependencies {
     // bundled INTO the plugin jar below (no other classloader in the host loads them — no identity
     // split).
     implementation project(':browser-api')
+    // The IN-PROCESS Playwright browser (playwright4j GraalJS driver, Camoufox, the web_* tool set): the
+    // plugin starts it on the first browser command. Its jars (Playwright, playwright4j, the GraalVM 25
+    // stack, Gson) ship in this plugin's lib/ and load plugin-first, so they never meet the host's
+    // GraalJS 21.2 on one classpath; the driver child JVM takes its classpath from these jar URLs.
+    implementation project(':browser-playwright')
+    // The research agent itself (ResearchAgentSession, the loop, the search strategies): since the return to
+    // Java 21 it runs IN-PROCESS inside this plugin instead of as an ACP child process. Its jar ships in
+    // this plugin's lib/; the host-provided APIs it compiles against (agent-model-runtime-api,
+    // mcp-runtime-api) stay excluded from lib/ below.
+    implementation project(':research-agent-runtime')
     // Central OAuth (AP 6): offline JWT validation of centrally issued access tokens.
     implementation 'com.aresstack:anauthentia:0.1.0'
     implementation 'com.aresstack:anauthentia-jwt:0.1.0'
@@ -29,10 +39,6 @@ dependencies {
     // Netty) are NOT bundled into a fat jar — they ship in the plugin's lib/ directory (see pluginDistribution
     // below) and load via the plugin classloader. The runtime process keeps its own separate copy.
     implementation project(':web-search-providers')
-    // askai #31: the research browser runs inside AskAI (Playwright + Camoufox), no separate process.
-    implementation project(':browser-runtime-java21')
-    // askai #48: the research agent runs inside the AskAI JVM (no agent process, no stdio, no MCP).
-    implementation project(':research-agent-runtime')
     // The comic visual foundation (issue #36 line) is HOST-provided like the shared APIs: askai-app
     // has it on the application classpath, so the plugin compiles against it and PF4J delegates the
     // classes to the host at runtime — ONE copy, one uniform look, no identity split.
@@ -43,7 +49,6 @@ dependencies {
     compileOnly project(':agent-workspace-api')
     compileOnly project(':agent-plugin-pf4j-api')
     compileOnly project(':mcp-runtime-api')      // host-provided, like the other shared APIs
-    compileOnly project(':acp-client-api')       // neutral ACP port, host-provided; NO acp-sdk types here
     // Neutral reranker host port (RerankerConfigurationSnapshotProvider + DTOs). Host-provided at
     // runtime by askai-app; the plugin never depends on askai-app or LocalModelRuntimeManager.
     compileOnly project(':agent-model-runtime-api')
@@ -55,7 +60,6 @@ dependencies {
     testImplementation project(':agent-workspace-api')
     testImplementation project(':agent-plugin-pf4j-api')
     testImplementation project(':mcp-runtime-api')
-    testImplementation project(':acp-client-api')
     testImplementation project(':agent-model-runtime-api')
     testImplementation 'org.pf4j:pf4j:3.15.0'
     testImplementation 'junit:junit:4.13.2'
@@ -63,6 +67,75 @@ dependencies {
 
 test {
     useJUnit()
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// ADR 0001, work item I: the LangChain4j SPIKE. One worker role (the search planner of lane G) is built a
+// second time with LangChain4j core, through a ChatModel adapter over the host's model port. The spike is its
+// own source set: LangChain4j (and the Jackson it brings) is on NEITHER the plugin's runtimeClasspath NOR its
+// lib/, so pluginDistribution and the host-API guard above are untouched. It becomes a product dependency only
+// by an ADR decision on the measured evidence (`langchain4jSpikeTest`, `langchain4jSpikeLive`).
+// ---------------------------------------------------------------------------------------------------------
+ext.langchain4jVersion = '1.22.0'
+
+sourceSets {
+    langchain4jSpike {
+        java.srcDir 'src/langchain4jSpike/java'
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    langchain4jSpikeTest {
+        java.srcDir 'src/langchain4jSpikeTest/java'
+        compileClasspath += sourceSets.langchain4jSpike.output + sourceSets.langchain4jSpike.compileClasspath
+        runtimeClasspath += sourceSets.langchain4jSpike.output + sourceSets.langchain4jSpike.runtimeClasspath
+    }
+}
+
+dependencies {
+    langchain4jSpikeImplementation "dev.langchain4j:langchain4j:${langchain4jVersion}"
+    // What the host provides at runtime, provided here for compiling and testing outside the host.
+    langchain4jSpikeImplementation project(':agent-model-runtime-api')
+    langchain4jSpikeImplementation project(':mcp-runtime-api')
+    langchain4jSpikeImplementation project(':research-domain')
+    langchain4jSpikeImplementation "com.google.code.gson:gson:${gsonVersion}"
+    langchain4jSpikeTestImplementation 'junit:junit:4.13.2'
+    // The live comparison drives both twins through the platform's own model port on ollama4j (as the
+    // benchmark does); the spike only constructs it, ollama4j stays inside askai-app.
+    langchain4jSpikeTestImplementation project(':askai-app')
+    langchain4jSpikeTestRuntimeOnly 'org.slf4j:slf4j-nop:2.0.17'
+}
+
+// The model-free comparison (scripted port): part of `check`, so CI runs it.
+tasks.register('langchain4jSpikeTest', Test) {
+    description = 'Runs the LangChain4j spike comparison against a scripted model port (no Ollama needed).'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.langchain4jSpikeTest.output.classesDirs
+    classpath = sourceSets.langchain4jSpikeTest.runtimeClasspath
+    exclude '**/*LiveTest*'
+}
+check.dependsOn tasks.named('langchain4jSpikeTest')
+
+// The live comparison on the owner's machine; skips with a readable reason without Ollama or the models.
+tasks.register('langchain4jSpikeLive', Test) {
+    description = 'Runs both search-planner twins live through the model port (needs Ollama; skips otherwise).'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.langchain4jSpikeTest.output.classesDirs
+    classpath = sourceSets.langchain4jSpikeTest.runtimeClasspath
+    include '**/*LiveTest*'
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
+    }
+    doFirst {
+        System.getProperties().each { key, value ->
+            if (key.toString().startsWith('askai.spike.')) {
+                systemProperty key.toString(), value.toString()
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -127,7 +200,6 @@ task pluginDistribution(type: Sync) {
         // above; keep them out of lib/ so PF4J delegates them to the host.
         exclude 'agent-model-runtime-api*.jar'
         exclude 'mcp-runtime-api*.jar'
-        exclude 'acp-client-api*.jar'
         exclude 'agent-workspace-api*.jar'
         exclude 'agent-plugin-pf4j-api*.jar'
         exclude 'comic-controls*.jar' // host-provided visual foundation — same rule as the APIs
@@ -140,7 +212,7 @@ task pluginDistribution(type: Sync) {
     // Regression guard: fail the build if any host-provided shared API slipped into the plugin's lib/.
     doLast {
         def libDir = layout.buildDirectory.dir("plugin-dist/${researchPluginDirName}/lib").get().asFile
-        def forbidden = ['agent-model-runtime-api', 'mcp-runtime-api', 'acp-client-api',
+        def forbidden = ['agent-model-runtime-api', 'mcp-runtime-api',
                          'agent-workspace-api', 'agent-plugin-pf4j-api', 'comic-controls', 'slf4j-']
         def leaked = (libDir.listFiles() ?: []).findAll { file ->
             forbidden.any { file.name.startsWith(it) }

@@ -1,7 +1,7 @@
 package com.aresstack.askai.localmodels;
 
 import com.aresstack.askai.hf.HuggingFaceClient;
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.json.SimpleJson;
 
 import org.junit.Test;
 
@@ -24,13 +24,13 @@ import static org.junit.Assume.assumeTrue;
 
 /**
  * C8 real generation smoke: a small RUNNABLE generation model driven end to end through the PRODUCTIVE
- * pipeline (download -> generation wdmlpack compile + package-backed smoke -> manifest) and the local
- * runtime generation surface: /api/version reports generation linked, /api/generate and /api/chat return real
+ * pipeline (download -> generation wdmlpack compile + package-backed smoke -> manifest) and the sidecar
+ * generation surface: /api/version reports generation linked, /api/generate and /api/chat return real
  * non-empty output through the DirectML runtime, /api/show carries chat/completion, and keep_alive:0
  * unloads the handle.
  *
- * <p>The runtime runs inside this JVM (askai #49); opt in with
- * {@code -Daskai.local.realModelSmoke=true} so a normal build does not download a model.</p>
+ * <p>Opt in with {@code -Daskai.local.realModelSmoke=true} so a normal build does not download a model
+ * (the runtime itself runs in-process now, nothing has to be staged).</p>
  */
 public class LocalGenerationRealSmokeTest {
 
@@ -145,7 +145,7 @@ public class LocalGenerationRealSmokeTest {
         HttpURLConnection connection = (HttpURLConnection) new URL(baseUrl + path).openConnection();
         connection.setConnectTimeout(30_000);
         connection.setReadTimeout(600_000);
-        return (Map<String, Object>) OllamaJson.parse(new String(readAll(connection.getInputStream()),
+        return (Map<String, Object>) SimpleJson.parse(new String(readAll(connection.getInputStream()),
                 StandardCharsets.UTF_8));
     }
 
@@ -158,13 +158,13 @@ public class LocalGenerationRealSmokeTest {
         connection.setConnectTimeout(30_000);
         connection.setReadTimeout(600_000);
         try (OutputStream out = connection.getOutputStream()) {
-            out.write(OllamaJson.toJson(body).getBytes(StandardCharsets.UTF_8));
+            out.write(SimpleJson.toJson(body).getBytes(StandardCharsets.UTF_8));
         }
         int status = connection.getResponseCode();
         InputStream in = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
         String text = new String(readAll(in), StandardCharsets.UTF_8);
         assertEquals(path + " -> " + text, expectedStatus, status);
-        return (Map<String, Object>) OllamaJson.parse(text);
+        return (Map<String, Object>) SimpleJson.parse(text);
     }
 
     private static byte[] readAll(InputStream in) throws IOException {

@@ -4,9 +4,9 @@ import java.util.List;
 
 /**
  * The seam the TeamAgent talks to for main-model chat completions. The productive implementation is
- * {@link HttpMainModelChatClient} (Ollama {@code /api/chat} over the host-published inference descriptor);
- * tests inject a scripted fake so the whole conversation engine runs without a real model. The agent performs
- * NO model management — which model answers is entirely the descriptor AskAI wrote.
+ * {@link PortMainModelChat} over the host's model port (ADR 0001, 3.2); tests inject a scripted fake so the
+ * whole conversation engine runs without a real model. The agent performs NO model management — which model
+ * fills the role's slot is entirely AskAI's configuration.
  */
 public interface MainModelChat {
 
@@ -32,6 +32,14 @@ public interface MainModelChat {
         return complete(messages, temperature, maxOutputTokens);
     }
 
-    /** The model name this client will call (for the honest readiness line and diagnostics). */
+    /** What this client calls, for the readiness line and diagnostics (a slot name, never a secret). */
     String modelName();
+
+    /**
+     * Abort the call(s) in flight, so a session close or a pause returns promptly instead of waiting out the
+     * model timeout; the aborted call returns an honest non-OK result. A no-op for clients without a
+     * transport (fakes, the unavailable client).
+     */
+    default void cancelInFlight() {
+    }
 }

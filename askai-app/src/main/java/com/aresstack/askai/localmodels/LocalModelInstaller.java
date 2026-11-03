@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * The staged LOCAL installation of a catalogued Hugging Face model. The FAMILY is decided by the neutral
  * catalog (never a name heuristic): resolve revision → download the catalogued files (checksums verified by
- * the HF client) → hand the staged directory to the Java-21 browser runtime, which re-resolves the repository
+ * the HF client) → hand the staged directory to the local runtime, which re-resolves the repository
  * against the catalog ITSELF, compiles the family's {@code *.wdmlpack} and runs a package-backed
  * smoke-load → write the shared v2 provenance manifest LAST → atomically activate the directory. Nothing
  * half-installed becomes visible; the local runtime only publishes directories whose manifest validates against

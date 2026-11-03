@@ -12,8 +12,8 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * The LEXICAL default reranker: Okapi BM25 over each candidate's title + snippet — no model, no
- * browser runtime, no GPU. This is what scores the search unless the user explicitly enables the AI reranker
+ * The LEXICAL default reranker: Okapi BM25 over each candidate's title, snippet, displayed domain and
+ * target address — no model, no sidecar, no GPU. This is what scores the search unless the user explicitly enables the AI reranker
  * ("KI-Reranker verwenden"): cheap and deterministic, at the price of pure word matching (no
  * synonyms, no semantics). Scores are unbounded and only comparable WITHIN one call — exactly the
  * {@link RerankerScoreSemantics#RAW_LOGIT} contract the selection policy already honours.
@@ -151,9 +151,31 @@ public final class Bm25CandidateReranker implements CandidateReranker {
             sb.append(candidate.snippet).append(' ');
         }
         if (candidate.displayedDomain != null) {
-            sb.append(candidate.displayedDomain);
+            sb.append(candidate.displayedDomain).append(' ');
+        }
+        // The address the hit points to is part of what the engine matched, and often the only place
+        // a version or a product name survives: the captured snippet is a short excerpt, and Bing's
+        // breadcrumb "adoptium.net › temurin › releases" hides "?version=21". Without it the Temurin
+        // JDK 21 page Bing ranked fourth for "Java 21 LTS release" scored zero and was dropped
+        // before it ever reached the frontier.
+        if (candidate.resolvedTargetUrl != null) {
+            sb.append(addressWords(candidate.resolvedTargetUrl));
         }
         return sb.toString();
+    }
+
+    /**
+     * The address as words: without its scheme and with percent escapes decoded, so "/h%C3%BChner/"
+     * scores as "hühner". Scoring text only — the hit keeps its address. An address that does not
+     * decode is scored as it stands.
+     */
+    static String addressWords(String url) {
+        String address = url.replaceFirst("^[a-zA-Z][a-zA-Z0-9+.-]*://", "");
+        try {
+            return java.net.URLDecoder.decode(address, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException malformed) {
+            return address;
+        }
     }
 
     /** Unicode-aware lower-case word tokens — "Hühner" stays one term (see the query-mangling lesson). */

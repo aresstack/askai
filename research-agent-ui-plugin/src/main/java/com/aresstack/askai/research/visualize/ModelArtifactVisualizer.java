@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The model-backed {@link ArtifactVisualizationService}: renders an artifact through the host's neutral
- * {@link AgentInferencePort} (no HTTP, no model names, no ACP). The streaming port is bridged to the
+ * {@link AgentInferencePort} (no HTTP, no model names, no transport). The streaming port is bridged to the
  * synchronous service contract with a latch — safe because the visualizer only ever runs on a background
  * worker (the lazy scheduler), never on the EDT. Any failure/timeout degrades to
  * {@link VisualizationResult#none} — a visualization is never critical.

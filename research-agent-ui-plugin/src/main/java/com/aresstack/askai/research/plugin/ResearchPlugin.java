@@ -21,5 +21,7 @@ public final class ResearchPlugin extends Plugin {
     @Override
     public void stop() {
         com.aresstack.askai.research.connector.ChatGptConnectorRuntime.get().shutdown();
+        // The worker browsers of parallel research workers belong to this plugin classloader too.
+        com.aresstack.askai.research.host.SharedWorkerBrowserPool.shutdown();
     }
 }

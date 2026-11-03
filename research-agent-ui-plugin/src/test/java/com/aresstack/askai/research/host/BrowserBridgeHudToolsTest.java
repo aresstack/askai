@@ -26,7 +26,7 @@ import static org.junit.Assert.assertTrue;
  * invoke tools the bridge publishes, so {@code web_hud_render}/{@code web_hud_poll} MUST be in this catalog —
  * otherwise the call is rejected before Playwright is ever reached ("Unknown tool", surfaced as the live
  * {@code [browser-hud] … cause=ToolFailure: Unknown tool} that made the HUD wholly inert). This guards that the
- * bridge and the browser runtime never drift apart again.
+ * bridge and the sidecar never drift apart again.
  */
 public class BrowserBridgeHudToolsTest {
 
@@ -59,7 +59,7 @@ public class BrowserBridgeHudToolsTest {
         McpToolResult result = registry.tool("web_hud_render").getHandler()
                 .invoke(new McpToolCall("web_hud_render", args));
 
-        assertFalse("render must not error on a live browser runtime", result.isError());
+        assertFalse("render must not error on a live sidecar", result.isError());
         assertEquals("web_hud_render", browser.lastTool);
         assertEquals("PHASE|status|0|-1|false", browser.lastArgs.get("state"));
         assertFalse("render touches the page — it is a DATA call, not control", browser.controlUsed);

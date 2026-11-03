@@ -25,7 +25,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * The model-free browser runtime bridge core: HIGH_CONFIDENCE extracts directly, LOW_CONFIDENCE emits a
+ * The model-free sidecar bridge core: HIGH_CONFIDENCE extracts directly, LOW_CONFIDENCE emits a
  * bounded cached repair request, and applying a runtime-validated decision re-checks every guard
  * (unknown / expired / consumed / snapshot / fingerprint / invalid) before running the single A3
  * extraction. The service never calls a model.
@@ -93,6 +93,39 @@ public class WebSearchLayoutRepairServiceTest {
         assertEquals("berlin", request.query);
         assertTrue(request.expiresAtEpochMillis > request.createdAtEpochMillis);
         assertEquals(1, service.cache().size());
+    }
+
+    @Test
+    public void aRepairRequiredPageCarriesItsHarvestedLinksAsTheFallback() {
+        // Live on Bing every repair attempt failed and the search ended "technically failed" although
+        // the page listed results: the harvest of the page had been thrown away with the repair ticket.
+        WebSearchLayoutRepairService service = service(lowConf);
+        PreparedWebSearchResult page =
+                service.prepareSingle(columnDocument(null), "q", "engine.example", 1000L);
+
+        assertEquals(WebSearchPreparationStatus.REPAIR_REQUIRED, page.status);
+        assertEquals(1, page.repairRequests.size());
+        assertEquals("the page's external links travel along", 3, page.candidates.size());
+        assertEquals("engine.example", page.candidates.get(0).engineHost);
+
+        PreparedWebSearchResult merged = WebSearchLayoutRepairService.merge(
+                Arrays.asList(page, service.prepareSingle(columnDocument(null), "q",
+                        "engine.example", 1000L)));
+        assertEquals(WebSearchPreparationStatus.REPAIR_REQUIRED, merged.status);
+        assertEquals(2, merged.repairRequests.size());
+        assertEquals("the fallback survives the merge, deduplicated by target",
+                3, merged.candidates.size());
+    }
+
+    @Test
+    public void aRepairRequiredPageWithoutHarvestCarriesNoCandidates() {
+        WebSearchLayoutRepairService service =
+                service(LayoutTestSupport.withoutLinkHarvest(lowConf));
+        PreparedWebSearchResult page =
+                service.prepareSingle(columnDocument(null), "q", "engine.example", 1000L);
+
+        assertEquals(WebSearchPreparationStatus.REPAIR_REQUIRED, page.status);
+        assertTrue(page.candidates.isEmpty());
     }
 
     @Test

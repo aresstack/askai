@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicForm;
 
@@ -66,7 +66,7 @@ final class BrowserBasicsRows {
                 ResearchRuntimeSettings.loadSearchBrowserHeadless(store));
         headless.addActionListener(e -> {
             ResearchRuntimeSettings.saveSearchBrowserHeadless(store, headless.isSelected());
-            InProcessResearchRuntime.applySearchBrowserHeadless(headless.isSelected());
+            com.aresstack.askai.research.runtime.ResearchRuntimeShared.process().setSearchBrowserHeadless(headless.isSelected());
         });
         form.row("Search browser", headless);
         form.row("", ComicForm.hint("The search browser opens the result pages; it is separate from the research"

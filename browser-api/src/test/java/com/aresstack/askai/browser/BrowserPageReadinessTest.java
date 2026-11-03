@@ -6,7 +6,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** The readability probe renders to a typed block and parses back losslessly (host ↔ browser runtime wire). */
+/** The readability probe renders to a typed block and parses back losslessly (host ↔ sidecar wire). */
 public class BrowserPageReadinessTest {
 
     @Test

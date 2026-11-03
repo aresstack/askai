@@ -7,31 +7,39 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Per-engine result paging: page 1 is the plain endpoint template, deeper pages come from the
- * engine's OWN pagination template (offset math is catalog DATA, never engine-specific code), and an
- * engine without a pagination template simply cannot page. The per-engine page count is the user's
+ * Per-engine result paging. The catalog engines are asked through their start pages' search fields and page by a
+ * real click on their own "next" control, so they have no result URL at all. A URL-template engine (the dev/test
+ * override): page 1 is the plain endpoint template, deeper pages come from its OWN pagination template, and one
+ * without a pagination template simply cannot page. The per-engine page count is the user's
  * setting, carried in the selection entries with a backward-compatible flat form.
  */
 public class BrowserSearchEnginePagingTest {
 
     @Test
-    public void theCatalogEnginesAddressTheirFollowUpPages() {
+    public void theCatalogEnginesAreAskedThroughTheirStartPagesNeverByAResultUrl() {
         BrowserSearchEngine bing = BrowserSearchEngineCatalog.byId(BrowserSearchEngineCatalog.BING);
-        assertEquals("https://www.bing.com/search?q=hase", bing.pageUrl(0, "hase", 1));
-        assertEquals("Bing pages via the 1-based `first` offset",
-                "https://www.bing.com/search?q=hase&first=11", bing.pageUrl(0, "hase", 2));
-        assertEquals("https://www.bing.com/search?q=hase&first=21", bing.pageUrl(0, "hase", 3));
+        assertTrue(bing.usesSearchForms());
+        assertEquals("https://www.bing.com/", bing.formOf(0).getHomeUrl());
+        assertEquals("#sb_form_q", bing.formOf(0).getSearchBoxSelectors().get(0));
+        assertEquals("a.sb_pagN", bing.formOf(0).getNextPageSelectors().get(0));
+        assertNull("no result URL for page 1", bing.pageUrl(0, "hase", 1));
+        assertNull("no result URL for page 2", bing.pageUrl(0, "hase", 2));
 
         BrowserSearchEngine ddg = BrowserSearchEngineCatalog.byId(BrowserSearchEngineCatalog.DUCKDUCKGO);
-        assertEquals("https://html.duckduckgo.com/html/?q=hase", ddg.pageUrl(0, "hase", 1));
-        assertEquals("DuckDuckGo pages via the `s` offset",
-                "https://html.duckduckgo.com/html/?q=hase&s=30", ddg.pageUrl(0, "hase", 2));
-        assertEquals("the lite transport has its own pagination template",
-                "https://lite.duckduckgo.com/lite/?q=hase&s=30", ddg.pageUrl(1, "hase", 2));
+        assertEquals(Arrays.asList("https://html.duckduckgo.com/html/", "https://lite.duckduckgo.com/lite/"),
+                ddg.getEndpointTemplates());
+        assertEquals("input[name=q]", ddg.formOf(1).getSearchBoxSelectors().get(0));
+        assertNull(ddg.pageUrl(1, "hase", 1));
+
+        BrowserSearchEngine google = BrowserSearchEngineCatalog.byId(BrowserSearchEngineCatalog.GOOGLE);
+        assertEquals("https://www.google.com/", google.formOf(0).getHomeUrl());
+        assertEquals("#pnnext", google.formOf(0).getNextPageSelectors().get(0));
+        assertNull("an endpoint index without a form", google.formOf(1));
     }
 
     @Test
@@ -40,6 +48,8 @@ public class BrowserSearchEnginePagingTest {
         assertEquals("http://x.test/s?q=hase", custom.pageUrl(0, "hase", 1));
         assertNull("no template, no deeper page", custom.pageUrl(0, "hase", 2));
         assertNull(custom.pageUrl(7, "hase", 1)); // unknown endpoint index
+        assertFalse("a URL template is no search form", custom.usesSearchForms());
+        assertNull(custom.formOf(0));
     }
 
     @Test

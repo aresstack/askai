@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.Assert.assertEquals;
 
 /**
- * Closing the browser window IS the user's stop signal. The browser runtime reports it as the typed
+ * Closing the browser window IS the user's stop signal. The sidecar reports it as the typed
  * BROWSER_CLOSED tool error; the acquisition then ends the run as USER_CANCELLED — the user's decision,
  * sources kept — instead of the historic behaviour, where 'Target closed' matched no classifier and the
  * run kept polling a dead browser until some budget gave out (with the Websuche bubble stuck forever).

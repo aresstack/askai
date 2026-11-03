@@ -1,9 +1,9 @@
 package com.aresstack.askai.browser.search;
 
 /**
- * Bounds of the browser runtime's per-session layout-repair ticket cache (A4 transport). Part of the versioned
+ * Bounds of the sidecar's per-session layout-repair ticket cache (A4 transport). Part of the versioned
  * {@link LegacyBrowserSearchSettings} contract and its digest, so the ticket cache is never configured
- * by literals in the browser runtime main or the repair tools. Validated: a positive maximum and a positive
+ * by literals in the sidecar main or the repair tools. Validated: a positive maximum and a positive
  * TTL.
  */
 public final class SearchLayoutRepairSettings {

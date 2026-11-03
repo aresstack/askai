@@ -1,6 +1,6 @@
 name: ChatGPT offline Gradle cache
 
-# On every push, prime a self-contained project-local Gradle home (all dependencies + the Gradle 7.6.4
+# On every push, prime a self-contained project-local Gradle home (all dependencies + the Gradle 8.14.6
 # wrapper distribution) by running a full build once with network access, then publish that primed home as a
 # ZIP. Unzipped into the repo root, it lets a ChatGPT-like sandbox (no internet) build/test offline:
 #
@@ -50,10 +50,9 @@ jobs:
       - name: Publish Serp4J to mavenLocal (not on Maven Central yet, see docs/serp4j.md)
         run: bash scripts/install-serp4j.sh "${SERP4J_REF:-Develop}"
 
-
       - name: Prime project-local Gradle home (deps + wrapper distribution)
         env:
-          # The wrapper downloads the Gradle 8.14.3 distribution AND all module/dependency caches here, so the
+          # The wrapper downloads the Gradle 8.14.6 distribution AND all module/dependency caches here, so the
           # zipped folder is fully self-contained for an offline `--offline` build.
           GRADLE_USER_HOME: ${{ github.workspace }}/.chatgpt/gradle-home
         run: |
@@ -80,7 +79,7 @@ jobs:
           cat > .chatgpt/README-chatgpt.md <<NOTE
           # Offline Gradle home for ChatGPT-like sandboxes
 
-          This folder (`.chatgpt/gradle-home`) is a primed Gradle user home containing the Gradle 7.6.4
+          This folder (\`.chatgpt/gradle-home\`) is a primed Gradle user home containing the Gradle 8.14.6
           distribution and every dependency this repo needs, so the project builds without internet.
 
           Usage (from the repo root, after unzipping this at the repo root):
@@ -102,10 +101,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TARGET_REF="${{ steps.target.outputs.ref }}"
-          gh release delete chatgpt-compatible --yes --cleanup-tag || true
-          gh release create chatgpt-compatible \
-            askai-chatgpt-gradle-home.zip \
-            --prerelease \
-            --target "${TARGET_REF}" \
-            --title "ChatGPT-compatible offline Gradle cache" \
-            --notes "This ZIP contains a prepared \`.chatgpt/gradle-home\` cache (Gradle 8.14.3 + all dependencies) for offline Gradle execution in ChatGPT-like environments. Unzip at the repo root, then run \`GRADLE_USER_HOME=.chatgpt/gradle-home ./gradlew --offline -Dmaven.repo.local=\$PWD/.chatgpt/m2/repository build\` with a Java 21 JDK. Rolling artifact, overwritten on every push (cached from \`${TARGET_REF}\`)."
+          # Pushes to different branches run in parallel (the concurrency group is per ref) and all overwrite
+          # this one rolling release; when another run deletes it mid-upload, start over instead of failing.
+          for attempt in 1 2 3 4 5; do
+            gh release delete chatgpt-compatible --yes --cleanup-tag || true
+            if gh release create chatgpt-compatible \
+              askai-chatgpt-gradle-home.zip \
+              --prerelease \
+              --target "${TARGET_REF}" \
+              --title "ChatGPT-compatible offline Gradle cache" \
+              --notes "This ZIP contains a prepared \`.chatgpt/gradle-home\` cache (Gradle 8.14.6 + all dependencies) for offline Gradle execution in ChatGPT-like environments. Unzip at the repo root, then run \`GRADLE_USER_HOME=.chatgpt/gradle-home ./gradlew --offline -Dmaven.repo.local=\$PWD/.chatgpt/m2/repository build\` with a Java 21 JDK. Rolling artifact, overwritten on every push (cached from \`${TARGET_REF}\`)."; then
+              exit 0
+            fi
+            sleep $((attempt * 10 + RANDOM % 10))
+          done
+          # Every branch overwrites this one rolling release. Losing the race to builds of other branches
+          # (or GitHub answering 5xx meanwhile) leaves the newest of them published, which is what "rolling"
+          # means; it must not turn this branch's successful build red.
+          echo "::warning::Could not overwrite the rolling chatgpt-compatible release; a concurrent build of another branch published it."

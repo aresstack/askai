@@ -13,6 +13,8 @@ public final class OllamaChatCompletion {
     private final java.util.List<OllamaToolCall> toolCalls;
     private final long evalCount;
     private final long evalDurationNanos;
+    private final long promptEvalCount;
+    private final String doneReason;
 
     public OllamaChatCompletion(String content, long evalCount, long evalDurationNanos) {
         this("", content, java.util.Collections.<OllamaToolCall>emptyList(), evalCount, evalDurationNanos);
@@ -20,6 +22,18 @@ public final class OllamaChatCompletion {
 
     public OllamaChatCompletion(String thinking, String content, java.util.List<OllamaToolCall> toolCalls,
                                 long evalCount, long evalDurationNanos) {
+        this(thinking, content, toolCalls, evalCount, evalDurationNanos, -1L, "");
+    }
+
+    /**
+     * @param promptEvalCount evaluated prompt tokens, or -1 when not reported
+     * @param doneReason      Ollama's {@code done_reason} ({@code stop}, {@code length}, ...), or ""
+     */
+    public OllamaChatCompletion(String thinking, String content, java.util.List<OllamaToolCall> toolCalls,
+                                long evalCount, long evalDurationNanos, long promptEvalCount,
+                                String doneReason) {
+        this.promptEvalCount = promptEvalCount;
+        this.doneReason = doneReason == null ? "" : doneReason;
         this.thinking = thinking == null ? "" : thinking;
         this.content = content == null ? "" : content;
         this.toolCalls = toolCalls == null
@@ -53,6 +67,16 @@ public final class OllamaChatCompletion {
 
     public long getEvalDurationNanos() {
         return evalDurationNanos;
+    }
+
+    /** Evaluated prompt tokens, or -1 when not reported. */
+    public long getPromptEvalCount() {
+        return promptEvalCount;
+    }
+
+    /** Ollama's {@code done_reason}, or "" when not reported. */
+    public String getDoneReason() {
+        return doneReason;
     }
 
     public boolean hasMetrics() {

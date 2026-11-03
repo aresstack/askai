@@ -218,8 +218,8 @@ public final class ConceptAction {
             String name = asString(map.get("name"));
             if (name == null || name.trim().isEmpty()) {
                 return Parsed.invalid("conceptAction type \"add\" requires \"name\" — example: "
-                        + "{\"type\":\"add\",\"parent\":[\"FreeRTOS\"],"
-                        + "\"name\":\"Synchronisation\"}");
+                        + "{\"type\":\"add\",\"parent\":[\"<card>\"],"
+                        + "\"name\":\"<subtopic>\"}");
             }
             return Parsed.ok(new ConceptAction(Type.ADD, null,
                     segments(map.get("parent"), map.get("parent_path"), map.get("path")), name));
@@ -232,7 +232,7 @@ public final class ConceptAction {
                 return Parsed.invalid("conceptAction type \"add_cards\" requires \"names\" — "
                         + "ALL card names as one array (a single card is a one-element list); "
                         + "example: {\"type\":\"add_cards\",\"parent\":[],\"names\":"
-                        + "[\"Grundlagen\",\"Architektur\",\"Debugging\"]}");
+                        + "[\"<area 1>\",\"<area 2>\",\"<area 3>\"]}");
             }
             StringBuilder json = new StringBuilder("[");
             for (int index = 0; index < names.size(); index++) {
@@ -260,7 +260,7 @@ public final class ConceptAction {
                 return Parsed.invalid("conceptAction type \"move\" requires \"source\" (the "
                         + "leaf — one globally unique card name is enough) and \"parent\" "
                         + "([] = top level) — example: {\"type\":\"move\",\"source\":"
-                        + "[\"Scheduling\"],\"parent\":[\"FreeRTOS\"]}");
+                        + "[\"<card>\"],\"parent\":[\"<new parent>\"]}");
             }
             return Parsed.ok(new ConceptAction(Type.MOVE, source,
                     segments(map.get("parent"), map.get("parent_path")), ""));
@@ -269,8 +269,7 @@ public final class ConceptAction {
             List<String> path = segments(map.get("path"), map.get("parent"));
             if (path.isEmpty()) {
                 return Parsed.invalid("conceptAction type \"remove\" requires \"path\" — "
-                        + "example: {\"type\":\"remove\",\"path\":[\"FreeRTOS\",\"Praxis\","
-                        + "\"ESP-IDF\"]}");
+                        + "example: {\"type\":\"remove\",\"path\":[\"<card>\",\"<child card>\"]}");
             }
             return Parsed.ok(new ConceptAction(Type.REMOVE, path, null, null));
         }
@@ -278,7 +277,7 @@ public final class ConceptAction {
             String topic = asString(map.get("topic"));
             if (topic == null || topic.trim().isEmpty()) {
                 return Parsed.invalid("conceptAction type \"exclude\" requires \"topic\" (the "
-                        + "user's words) — example: {\"type\":\"exclude\",\"topic\":\"ESP-IDF\"}");
+                        + "user's words) — example: {\"type\":\"exclude\",\"topic\":\"<term>\"}");
             }
             return Parsed.ok(new ConceptAction(Type.EXCLUDE, null, null, topic));
         }
@@ -287,8 +286,8 @@ public final class ConceptAction {
             String newName = asString(map.get("name"));
             if (path.isEmpty() || newName == null || newName.trim().isEmpty()) {
                 return Parsed.invalid("conceptAction type \"rename\" requires \"path\" and "
-                        + "\"name\" — example: {\"type\":\"rename\",\"path\":[\"FreeRTOS\","
-                        + "\"Setup\"],\"name\":\"ESP32-Entwicklung mit Arduino\"}");
+                        + "\"name\" — example: {\"type\":\"rename\",\"path\":[\"<card>\","
+                        + "\"<child card>\"],\"name\":\"<new name>\"}");
             }
             return Parsed.ok(new ConceptAction(Type.RENAME, path, null, newName));
         }
@@ -298,8 +297,8 @@ public final class ConceptAction {
             if (path.isEmpty() || !(leavesValue instanceof List)) {
                 return Parsed.invalid("conceptAction type \"rewrite\" requires \"path\" and "
                         + "\"leaves\" (the branch's NEW leaf names; may be []) — example: "
-                        + "{\"type\":\"rewrite\",\"path\":[\"FreeRTOS\",\"Setup\"],"
-                        + "\"leaves\":[\"Arduino\",\"Debugging\"]}");
+                        + "{\"type\":\"rewrite\",\"path\":[\"<card>\",\"<child card>\"],"
+                        + "\"leaves\":[\"<leaf 1>\",\"<leaf 2>\"]}");
             }
             List<String> leaves = segments(leavesValue);
             StringBuilder json = new StringBuilder("[");
@@ -320,8 +319,8 @@ public final class ConceptAction {
             if (terms.isEmpty()) {
                 return Parsed.invalid("conceptAction type \"probe\" requires \"terms\" — "
                         + "several plausible remaining concepts as ONE array; example: "
-                        + "{\"type\":\"probe\",\"terms\":[\"Priority Inversion\","
-                        + "\"SMP Scheduling\"]}");
+                        + "{\"type\":\"probe\",\"terms\":[\"<term 1>\","
+                        + "\"<term 2>\"]}");
             }
             StringBuilder json = new StringBuilder("[");
             for (int index = 0; index < terms.size(); index++) {
@@ -338,8 +337,8 @@ public final class ConceptAction {
             if (suggestions.isEmpty()) {
                 return Parsed.invalid("conceptAction type \"offer\" requires \"suggestions\" "
                         + "with at least one non-empty query — example: {\"type\":\"offer\","
-                        + "\"suggestions\":[{\"query\":\"FreeRTOS ESP32 Grundlagen Tutorial\","
-                        + "\"purpose\":\"Einstieg sichten\"}]}");
+                        + "\"suggestions\":[{\"query\":\"<topic> basics overview\","
+                        + "\"purpose\":\"<direction>\"}]}");
             }
             return Parsed.ok(new ConceptAction(Type.OFFER, null, null,
                     suggestionsJson(suggestions)));

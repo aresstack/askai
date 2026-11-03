@@ -4,10 +4,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Explicit configuration of the productive research runtime: the browser channel and its options. The research
- * agent and the browsers run inside AskAI (askai #31, #48, #50), so there is no launcher or jar to configure.
- * {@link #validate()} reports every missing prerequisite readably; a generation switch validates BEFORE
- * publishing (a broken config never displaces a working generation).
+ * Explicit configuration of the productive research runtime — every setting is passed here, never through
+ * hidden system properties or globals: the browser channel, the display mode and the URL policy. Both the
+ * research agent and the browser run in-process now, so there are no runtime paths left to configure;
+ * {@link #validate()} stays the hook a generation switch runs BEFORE publishing.
  */
 public final class ResearchRuntimeConfig {
 

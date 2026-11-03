@@ -7,7 +7,7 @@ import java.util.Map;
 
 /**
  * The NEUTRAL structured capture of one rendered page: container hierarchy, per-container text and
- * link statistics, geometry, visibility and computed colors — measured by the Java-21 browser runtime,
+ * link statistics, geometry, visibility and computed colors — measured by the Java-21 sidecar,
  * interpreted exclusively by the Java-8 analysis. Container/link ids are valid ONLY within this
  * snapshot ({@link #snapshotId}/{@link #snapshotGeneration}); resolving them against a different
  * DOM state must be rejected as stale. The capture is bounded ({@link #captureTruncated} and

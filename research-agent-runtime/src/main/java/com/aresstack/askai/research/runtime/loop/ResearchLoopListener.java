@@ -1,6 +1,6 @@
 package com.aresstack.askai.research.runtime.loop;
 
-/** Status stream of a run (mapped to ACP updates by the caller). PHASE_READY is an EVENT, never a transition. */
+/** Status stream of a run (mapped to backend events by the caller). PHASE_READY is an EVENT, never a transition. */
 public interface ResearchLoopListener {
 
     /** A technical diagnostic line — surfaced only in collapsible technical details, never as chat text. */

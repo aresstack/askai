@@ -22,7 +22,7 @@ import static org.junit.Assert.fail;
 /**
  * The host inference-snapshot provider resolves the central main model to its serving endpoint and writes an
  * atomic {@code inference-config.json}. The local/remote routing is asserted through the {@code EndpointSources}
- * seam so no local runtime is spawned: a {@code local/...} model resolves to the runtime base URL, everything else
+ * seam so no sidecar is spawned: a {@code local/...} model resolves to the runtime base URL, everything else
  * to the configured remote Ollama base URL.
  */
 public class LocalInferenceConfigurationSnapshotProviderTest {
@@ -82,7 +82,7 @@ public class LocalInferenceConfigurationSnapshotProviderTest {
     }
 
     @Test
-    public void aLocalDirectmlModelResolvesToTheLocalRuntimeBaseUrl() throws Exception {
+    public void aLocalDirectmlModelResolvesToTheRuntimeSidecarBaseUrl() throws Exception {
         RecordingSources sources = new RecordingSources("local/qwen3:latest");
         LocalInferenceConfigurationSnapshotProvider provider =
                 new LocalInferenceConfigurationSnapshotProvider(sources);
@@ -116,7 +116,7 @@ public class LocalInferenceConfigurationSnapshotProviderTest {
                     }
 
                     public String localRuntimeBaseUrl() throws IOException {
-                        throw new IOException("local runtime failed to start");
+                        throw new IOException("sidecar failed to start");
                     }
 
                     public String remoteOllamaBaseUrl() {

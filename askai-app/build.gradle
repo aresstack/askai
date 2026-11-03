@@ -1,9 +1,12 @@
 apply plugin: 'application'
 
 dependencies {
-    implementation project(':ollama4j')
-    // askai #49: the local model runtime (win-directml) runs inside the AskAI JVM, no separate process.
-    implementation project(':local-model-runtime-java21')
+    // The official Ollama client, as the original AskAI used it before the Java-8 detour (Java 17+). It
+    // brings Jackson, Guava, the Prometheus simpleclient, jsoup and the MCP Java SDK (Reactor) along.
+    implementation 'io.github.ollama4j:ollama4j:1.1.7'
+    // Used directly ONLY inside the Ollama adapter (AskAiOllamaClient) to patch the library's request
+    // body on the JSON tree; everywhere else the app keeps Gson/SimpleJson.
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.0'
     // Comic UI foundation (issue #36): neutral Java-8 Swing controls — hover menus, comic split
     // pane, shared palette/painters. Deliberately free of AskAI/Research/PF4J types.
     implementation project(':comic-controls')
@@ -16,12 +19,12 @@ dependencies {
     implementation 'uk.co.caprica:vlcj:3.12.1'
     // FFmpeg backend: compiled against JavaCV, but the jars (incl. ~100+ MB natives) are NEVER shipped
     // or fetched silently — FfmpegRuntimeLoader downloads them from Maven Central ONLY after the user's
-    // explicit, confirmed request (reference: WD4J/corenth VideoRuntimeLoader), then attaches them to
-    // a dedicated classloader (FfmpegRuntimeLoader.RecorderClassLoader). compileOnly keeps them out of the fat jar.
+    // explicit, confirmed request (reference: WD4J/corenth VideoRuntimeLoader), then attaches them in a
+    // dedicated backend classloader. compileOnly keeps them out of the fat jar.
     compileOnly 'org.bytedeco:javacv:1.5.10'
     compileOnly 'org.bytedeco:javacpp:1.5.10'
     compileOnly 'org.bytedeco:ffmpeg:6.1.1-1.5.10'
-    // Neutral win-directml model catalog (Java-8: no DirectML/Java-21 classes leak into the host): the
+    // Neutral win-directml model catalog (no DirectML runtime classes leak into the host): the
     // single source of truth for locally runnable model families (capabilities, download manifests,
     // runtime family, backends). Pinned to the published Maven Central release.
     implementation 'com.aresstack:directml-model-catalog:0.2.1'
@@ -33,6 +36,9 @@ dependencies {
     implementation project(':research-text-opennlp')
     // A5b: neutral reranker endpoint contract (DTO/codec only) shared with the research agent.
     implementation project(':agent-model-runtime-api')
+    // The local model runtime (virtual Ollama container over win-directml-java) runs INSIDE the app since
+    // the return to Java 21: LocalModelRuntimeManager starts it in-process on a loopback port.
+    implementation project(':local-model-runtime')
     implementation project(':group-chat-api')
     implementation project(':group-chat-jgroups')
     testImplementation 'org.jgroups:jgroups:4.2.30.Final' // PartySession + real JGroups regression tests
@@ -41,20 +47,19 @@ dependencies {
     // PF4J workspace-plugin host (brings agent-workspace-api + agent-plugin-pf4j-api + pf4j transitively).
     // The research plugin is NOT a dependency and never enters the fat jar.
     implementation project(':agent-plugin-host')
-    // Host runtime services for the PRODUCTIVE research mode: the Solon MCP server runtime for EXTERNAL MCP
-    // clients and the neutral ACP port the research plugin uses to talk to its in-JVM agent; plugins reach
-    // them only through the neutral AgentHostContext.getService lookup / the host classloader.
+    // Host runtime services for the PRODUCTIVE research mode (Commit 40): the host is the intended owner
+    // of the Solon MCP server runtime; plugins reach it only through the neutral AgentHostContext.getService
+    // lookup. Research classes themselves stay out of the fat jar (the agent runs inside the plugin).
     implementation project(':mcp-runtime-api')
     implementation project(':mcp-solon-runtime')
-    implementation project(':acp-client-api')
     implementation 'com.aresstack:win-proxy-java:0.1.0-beta.4'
     // HTML parsing for the Ollama Library scraper (Jerry/Lagarto). Java 8 bytecode, pulls
     // jodd-core transitively; only used to parse ollama.com HTML, the HTTP fetch goes through
     // the app's own proxy/TLS plumbing.
     implementation 'org.jodd:jodd-lagarto:6.0.6'
-    // JSON for versioned audio-profile import/export (Slice 3). Gson is Java 8 compatible; do not
-    // introduce Jackson in parallel.
-    implementation 'com.google.code.gson:gson:2.10.1'
+    // JSON for versioned audio-profile import/export (Slice 3). Gson stays the app's JSON library for
+    // its own files; Jackson is ollama4j's and confined to the Ollama adapter.
+    implementation "com.google.code.gson:gson:${gsonVersion}"
 
     // Decode audio formats accepted by file transcription. vorbis/flac/aac are discovered via Java Sound
     // SPI (META-INF/services, kept in the fat jar by mergeServiceFiles below), so they stay runtime-only.
@@ -65,7 +70,7 @@ dependencies {
     runtimeOnly 'com.tianscar.javasound:javasound-flac:1.4.1'
     runtimeOnly 'com.tianscar.javasound:javasound-aac:0.9.8'
 
-    // Markdown parsing — last Java 8-compatible line (do NOT move to 0.64.x which needs Java 11).
+    // Markdown parsing — pinned to the 0.62.x line (0.64.x changes the API; no Java-level reason any more).
     // Only the extensions actually used are added, not flexmark-all.
     implementation 'com.vladsch.flexmark:flexmark:0.62.2'
     implementation 'com.vladsch.flexmark:flexmark-ext-autolink:0.62.2'
@@ -87,40 +92,26 @@ dependencies {
     testImplementation project(':research-agent-ui-plugin')
 }
 
-configurations {
-    // The FFmpeg jars as the user-confirmed download would bring them, for the classloader test only
-    // (never on the test classpath: there they would hide what the dedicated loader has to do).
-    ffmpegJars { transitive = false }
-}
-
-dependencies {
-    ffmpegJars 'org.bytedeco:javacv:1.5.10'
-    ffmpegJars 'org.bytedeco:javacpp:1.5.10'
-    ffmpegJars 'org.bytedeco:ffmpeg:6.1.1-1.5.10'
-}
-
 test {
     useJUnit()
     // As AskAiApp.main sets it before the first HTTP connection (the JDK reads it once per JVM); without it the
     // proxy-tunnel test depends on which test opened a connection first.
     systemProperty 'jdk.http.auth.tunneling.disabledSchemes', ''
-    inputs.files(configurations.ffmpegJars)
     doFirst {
-        systemProperty 'askai.test.ffmpegJars', configurations.ffmpegJars.files.collect { it.absolutePath }
-                .join(File.pathSeparator)
-    }
-    doFirst {
-        // Forward the opt-in real-model-smoke flag from the Gradle CLI to the forked test JVM.
+        // C2c: the opt-in real-model smoke drives the productive (in-process) LocalModelRuntimeManager.
+        // Gated by -Daskai.local.realModelSmoke=true, so a normal build never downloads models.
         systemProperty 'askai.local.realModelSmoke',
                 System.getProperty('askai.local.realModelSmoke', 'false')
     }
 }
 
-mainClassName = 'com.aresstack.askai.AskAiApp'
+application {
+    mainClass = 'com.aresstack.askai.AskAiApp'
+}
 
 jar {
     manifest {
-        attributes('Main-Class': mainClassName)
+        attributes('Main-Class': application.mainClass.get())
     }
 }
 
@@ -135,7 +126,6 @@ def mergedServicesDir = layout.buildDirectory.dir('mergedServices')
 
 task mergeServiceFiles {
     description = 'Concatenate META-INF/services descriptors so GraalVM language providers survive the fat jar.'
-    dependsOn ':ollama4j:jar'
     dependsOn ':group-chat-api:jar'
     dependsOn ':group-chat-jgroups:jar'
     dependsOn ':audio-dsp:jar'
@@ -185,14 +175,13 @@ task mergeServiceFiles {
 
 task fatJar(type: Jar) {
     group = 'build'
-    description = 'Build a runnable jar containing AskAI, ollama4j, and runtime dependencies.'
+    description = 'Build the runnable AskAI fat jar (app + runtime dependencies; the research plugin stays outside).'
     archiveBaseName = 'askai'
     archiveClassifier = ''
     archiveVersion = project.version.toString()
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     dependsOn classes
-    dependsOn ':ollama4j:jar'
     dependsOn ':group-chat-api:jar'
     dependsOn ':group-chat-jgroups:jar'
     dependsOn ':audio-dsp:jar'
@@ -208,7 +197,7 @@ task fatJar(type: Jar) {
     }
 
     manifest {
-        attributes('Main-Class': mainClassName)
+        attributes('Main-Class': application.mainClass.get())
     }
 }
 
@@ -228,8 +217,10 @@ def devPluginsDir = rootProject.layout.buildDirectory.dir('dev-plugins')
 def devPluginRunsDir = rootProject.layout.buildDirectory.dir('dev-plugin-runs')
 
 run {
-    // UTF-8 as the JVM default: every library that decodes HTTP/JSON bytes with the platform default would
-    // otherwise read UTF-8 as mojibake on a German Windows (Cp1252).
+    // UTF-8 as the JVM default (Java 18+ defaults to UTF-8, it stays explicit anyway): every library
+    // that decodes HTTP/JSON bytes with the platform default then reads UTF-8 as mojibake
+    // ('ä' -> 'ÃÂ¤' after two hops through the MCP chain). All three processes
+    // (app, agent, browser sidecar) run UTF-8 explicitly.
     jvmArgs '-Dfile.encoding=UTF-8'
 }
 
@@ -243,9 +234,7 @@ task runWithDevPlugins(type: JavaExec) {
     description = 'Run AskAI from a fresh immutable plugin generation under <root>/build/dev-plugin-runs.'
     dependsOn ':research-agent-ui-plugin:pluginDistribution'
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = mainClassName
-    // askai #31: the app is Java 21; launch it with the toolchain, never with whatever JDK runs Gradle.
-    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+    mainClass = application.mainClass
     jvmArgs '-Dfile.encoding=UTF-8' // see `run`: UTF-8 default on every process of the chain
     doFirst {
         // The assembled, immutable plugin directory (…/plugin-dist/research-agent-ui-plugin).

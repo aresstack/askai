@@ -1,8 +1,8 @@
 package com.aresstack.askai.research.host;
 
-import com.aresstack.askai.browser.runtime.BrowserExecutables;
-import com.aresstack.askai.browser.runtime.InProcessBrowser;
-import com.aresstack.askai.browser.runtime.camoufox.CamoufoxInstaller;
+import com.aresstack.askai.browser.playwright.BrowserExecutables;
+import com.aresstack.askai.browser.playwright.CamoufoxSetup;
+import com.aresstack.askai.browser.playwright.camoufox.CamoufoxInstaller;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
 import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.control.ComicControls;
@@ -160,14 +160,14 @@ final class BrowserLocationControl {
         }
         final String target;
         try {
-            target = chosen().isEmpty() ? InProcessBrowser.defaultCamoufoxFolder() : chosen();
+            target = chosen().isEmpty() ? CamoufoxSetup.defaultCamoufoxFolder() : chosen();
         } catch (RuntimeException | LinkageError unavailable) {
             refresh();
             return;
         }
         installing = target;
         // The same installer as the browser start (verified, resumable, never over a foreign Camoufox).
-        Thread install = new Thread(() -> InProcessBrowser.installCamoufox(target), "camoufox-setup");
+        Thread install = new Thread(() -> CamoufoxSetup.installCamoufox(target), "camoufox-setup");
         install.setDaemon(true);
         install.start();
         progress.setIndeterminate(true);
@@ -202,8 +202,8 @@ final class BrowserLocationControl {
         }
         String placeholder;
         try {
-            String found = InProcessBrowser.foundCamoufox();
-            placeholder = found.isEmpty() ? InProcessBrowser.defaultCamoufoxFolder() : found;
+            String found = CamoufoxSetup.foundCamoufox();
+            placeholder = found.isEmpty() ? CamoufoxSetup.defaultCamoufoxFolder() : found;
         } catch (RuntimeException | LinkageError unavailable) {
             placeholder = "";
         }
@@ -217,8 +217,8 @@ final class BrowserLocationControl {
         CamoufoxInstaller.Status state;
         String found;
         try {
-            state = InProcessBrowser.camoufoxStatus(location);
-            found = installing != null ? "NONE" : InProcessBrowser.inspectCamoufox(location);
+            state = CamoufoxSetup.camoufoxStatus(location);
+            found = installing != null ? "NONE" : CamoufoxSetup.inspectCamoufox(location);
         } catch (RuntimeException | LinkageError unavailable) {
             status.setText("The browser cannot be installed here.");
             download.setEnabled(false);

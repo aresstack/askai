@@ -18,13 +18,13 @@ Die vorhandene Implementierung wird umgezogen.
 
 ## Ist-Stand (main 5774bf6a)
 
-### Prozesse (Ausgangslage vor #31, Modulnamen bereits aktualisiert)
+### Prozesse
 | Prozess | Java | Module | Gestartet von | Verbindung |
 |---|---|---|---|---|
 | AskAI-App (Swing, Plugin-Host) | 8 | `askai-app`, `research-agent-ui-plugin`, `agent-plugin-host` u. a. | Nutzer | – |
 | Research-Runtime | 8 | `research-agent-runtime` (`ResearchAgentMain`, Jar `researchAgentJar`) | Research-Plugin (`ProductiveResearchBackendFactory`) | ACP über stdio zur App; MCP (HTTP, Loopback) zu Research-Control- und Browser-Endpunkt der App |
-| Browser-Sidecar | 21 | `browser-runtime-java21` (Playwright, playwright4j, Camoufox) | Research-Plugin (`BrowserMcpSidecarProcess`, `LazyRestartableBrowserRuntime`) | MCP (HTTP, Loopback, Token) |
-| Local-Model-Sidecar | 21 | `local-model-runtime-java21` (win-directml-java) | App (`LocalModelRuntimeManager`) | HTTP (Loopback) |
+| Browser-Sidecar | 21 | `browser-mcp-server-java21` (Playwright, playwright4j, Camoufox) | Research-Plugin (`BrowserMcpSidecarProcess`, `LazyRestartableBrowserRuntime`) | MCP (HTTP, Loopback, Token) |
+| Local-Model-Sidecar | 21 | `local-model-runtime-sidecar-java21` (win-directml-java) | App (`LocalModelRuntimeManager`) | HTTP (Loopback) |
 
 ### Browser-Suche heute
 Die Research-Runtime ruft `web_search_prepare`/`web_search_apply_layout` über MCP am Browser-Endpunkt der App auf
@@ -53,7 +53,7 @@ Suche. Die Google-Suche ist ein direkter Methodenaufruf
 - Keine Verhaltensänderung, die Prozesse bleiben vorerst.
 
 ### 2. Browser in die AskAI-JVM
-- Die Playwright-Klassen aus `browser-runtime-java21` (`PlaywrightBrowserSession`, `PlaywrightSessionFactory`,
+- Die Playwright-Klassen aus `browser-mcp-server-java21` (`PlaywrightBrowserSession`, `PlaywrightSessionFactory`,
   `CamoufoxProvisioning`, `RenderedPageDocumentCapture`, …) werden eine normale Bibliothek der App.
 - `BrowserRuntimePort` bekommt eine In-Process-Implementierung, die die Browser-Session direkt aufruft (statt
   `BrowserMcpSidecarProcess` + MCP). Der Research-Browser bleibt so, wie er heute ist (sichtbar, Camoufox).
@@ -69,7 +69,7 @@ Suche. Die Google-Suche ist ein direkter Methodenaufruf
 - Entfällt für die Suche: MCP-Aufrufe Runtime → App, `BrowserBridgeEndpoint`-Durchreichen von `web_search*`.
 
 ### 4. Local-Model-Runtime in die AskAI-JVM
-- `local-model-runtime-java21` wird Bibliothek der App, `LocalModelRuntimeManager` ruft die Engine direkt
+- `local-model-runtime-sidecar-java21` wird Bibliothek der App, `LocalModelRuntimeManager` ruft die Engine direkt
   auf statt einen Prozess zu starten.
 
 ### 5. Altlasten entfernen
@@ -85,6 +85,5 @@ Suche. Die Google-Suche ist ein direkter Methodenaufruf
 2. Die KI-gestützte Layout-Erkennung (`browser-search-analysis`) wird für Google durch den festen Parser aus
    `serp4j-playwright-google` ersetzt. Bing und DuckDuckGo über den Browser haben danach keinen Pfad mehr, solange sie
    nicht ebenfalls als Serp4J-Provider vorliegen.
-3. Die Java-8-Namen sind umbenannt (#51). Die früheren Sidecar-Module heißen jetzt `browser-runtime-java21`
-   (vorher `browser-mcp-server-java21`, Paket `com.aresstack.askai.browser.runtime`, vorher `…browser.sidecar`) und
-   `local-model-runtime-java21` (vorher `local-model-runtime-sidecar-java21`, `SidecarManifests` → `LocalModelManifests`).
+3. Die Java-8-Namen sind umbenannt (#51). Die Module `browser-mcp-server-java21` und
+   `local-model-runtime-sidecar-java21` tragen noch ihre alten Namen, obwohl sie keine Sidecars mehr sind.

@@ -157,7 +157,7 @@ public class HuggingFaceInstallPlanTest {
     }
 
     @Test
-    public void writeThenReadRoundTripsThroughOllamaJson() throws Exception {
+    public void writeThenReadRoundTripsThroughSimpleJson() throws Exception {
         File gguf = File.createTempFile("askai-rt-", ".gguf");
         gguf.deleteOnExit();
         new HuggingFaceInstallPlan("owner/model-GGUF", "abc123", "m:q4",

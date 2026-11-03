@@ -839,8 +839,8 @@ public final class AskAiFrame extends JFrame {
                         return agentPluginService.getSelectableAgentExtension(agentId);
                     }
                 };
-        // Host-owned runtime services for the productive research mode (lazy Solon MCP runtime,
-        // MCP tool-client factory, ACP connector). Plugins look them up via AgentHostContext.getService.
+        // Host-owned runtime services for the productive research mode (lazy Solon MCP runtime, model
+        // snapshot providers). Plugins look them up via AgentHostContext.getService.
         final com.aresstack.askai.plugin.host.AgentRuntimeServices agentRuntimeServices =
                 new com.aresstack.askai.plugin.host.AgentRuntimeServices(
                         askAiService.localRuntimeManager(), configurationRepository);
@@ -1480,6 +1480,9 @@ public final class AskAiFrame extends JFrame {
                 (VirtualOllamaContainerService) ollamaService);
         // The read-aloud voices (Piper) are installed under Models > Setup > Voices (one section for the whole
         // application); every chat's voice selector follows installs/removals there.
+        // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
+        aiModelsPanel.addSection(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
+                .inConfigurationDirectory()));
         chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsPanel));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
         chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,

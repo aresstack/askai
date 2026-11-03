@@ -3,7 +3,7 @@ package com.aresstack.askai.research.search;
 /**
  * Host-side ENCODER of the host→runtime service-command envelope ({@code #RSC1#}) — the sibling of the
  * runtime→host run wire ({@code #RSX1#}). A service command is a typed control instruction carried over the
- * ACP prompt frame (the only host→agent channel) but is NEVER a chat turn: the runtime dispatches it before
+ * prompt channel (the only host→agent channel) but is NEVER a chat turn: the runtime dispatches it before
  * any model/TeamAgent/state logic. Encoded {@code key=value} with URL-encoded free-text values, so no field
  * ever contains a space. The runtime's parser of the same name is the ONLY consumer.
  *
@@ -87,6 +87,17 @@ public final class ResearchServiceCommandWire {
         StringBuilder sb = new StringBuilder(MARKER).append("choose_advice")
                 .append(" request_id=").append(requestId == null ? "" : requestId);
         appendEncoded(sb, "req", requestJson);
+        return sb.toString();
+    }
+
+    /**
+     * ADR 0001 lane F: an orchestrator command of the USER ({@code orchestrator_start}, {@code _approve},
+     * {@code _stop}, {@code _answer}); {@code text} is the question or the answer, empty otherwise. Like every
+     * service command it never transitions the host state machine.
+     */
+    public static String orchestrator(String type, String text) {
+        StringBuilder sb = new StringBuilder(MARKER).append(type);
+        appendEncoded(sb, "query", text);
         return sb.toString();
     }
 

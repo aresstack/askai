@@ -253,9 +253,29 @@ public class ConceptToolsPolicyTest {
 
     @Test
     public void theDescriptionsCarryConcreteExamplesTheMainframeMateWay() {
-        assertTrue(tool("concept_add").getDescription().contains("Task Notifications"));
-        assertTrue(tool("concept_rename").getDescription().contains("ESP32-Entwicklung"));
-        assertTrue(tool("concept_read").getDescription().contains("FreeRTOS"));
+        assertTrue(tool("concept_add").getDescription().contains("name=\"<subtopic>\""));
+        assertTrue(tool("concept_rename").getDescription().contains("name=\"<new name>\""));
+        assertTrue(tool("concept_read").getDescription().contains("path=\"<card>/<child card>\""));
+    }
+
+    /**
+     * Scoping regression (hasenhaltung yielded ESP32/FreeRTOS cards): a model-facing example shows the
+     * SHAPE with placeholders, never a domain topic a small model could take for the user's.
+     */
+    @Test
+    public void noModelFacingExampleCarriesADomainTopic() {
+        String[] foreign = {"FreeRTOS", "ESP32", "ESP-IDF", "Arduino", "Priority Inversion", "Einstieg sichten"};
+        for (String name : new String[] {"concept_read", "concept_add", "concept_add_cards", "concept_rename",
+                "concept_move_leaf", "exclude_topic", "offer_searches", "scope_probe"}) {
+            McpToolContribution tool = tool(name);
+            for (String word : foreign) {
+                assertFalse(name + " still shows " + word, tool != null && tool.getDescription().contains(word));
+            }
+        }
+        String missingName = invoke(tool("concept_add"), "parent_path", "Setup").getText();
+        for (String word : foreign) {
+            assertFalse("the missing-argument example shows " + word, missingName.contains(word));
+        }
     }
 
     // ------------------------------------------------------------------ the atomic flow
@@ -311,7 +331,7 @@ public class ConceptToolsPolicyTest {
         McpToolResult noName = invoke(tool("concept_add"), "parent_path", "FreeRTOS");
         assertTrue(noName.isError());
         assertTrue(noName.getText().contains("Missing argument: name"));
-        assertTrue("the error teaches by example", noName.getText().contains("Synchronisation"));
+        assertTrue("the error teaches by example", noName.getText().contains("name=\"<subtopic>\""));
         McpToolResult renameNoName = invoke(tool("concept_rename"), "path", "FreeRTOS");
         assertTrue(renameNoName.isError());
         assertTrue(renameNoName.getText().contains("Missing argument: name"));

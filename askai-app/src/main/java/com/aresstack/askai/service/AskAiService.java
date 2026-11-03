@@ -8,17 +8,12 @@ import com.aresstack.askai.hf.convert.RepositoryAnalysis;
 import com.aresstack.askai.hf.convert.SupportDecision;
 import com.aresstack.askai.ollamalib.OllamaLibraryModel;
 import com.aresstack.askai.ollamalib.OllamaModelVariant;
-import io.github.ollama4j.models.Model;
-import io.github.ollama4j.models.PullProgress;
+import com.aresstack.askai.client.OllamaPullProgress;
 
 import java.io.File;
 import java.util.List;
 
 public interface AskAiService {
-
-    void listModels(ModelListListener listener);
-
-    void sendChat(ChatRequest request, ChatListener listener);
 
     void pullOllamaModel(String modelName, PullListener listener);
 
@@ -53,7 +48,7 @@ public interface AskAiService {
 
     /**
      * Installs a locally runnable model (staged download, wdmlpack compile + smoke load in the
-     * Java-21 browser runtime, manifest, atomic activation), off the UI thread (R0).
+     * local runtime, manifest, atomic activation), off the UI thread (R0).
      */
     void installLocalModel(String modelId, LocalInstallListener listener);
 
@@ -137,22 +132,8 @@ public interface AskAiService {
         void cancel();
     }
 
-    interface ModelListListener {
-        void onModels(List<Model> models);
-
-        void onError(Exception ex);
-    }
-
-    interface ChatListener {
-        void onToken(String token);
-
-        void onComplete(ChatSummary summary);
-
-        void onError(Exception ex);
-    }
-
     interface PullListener {
-        void onProgress(PullProgress progress);
+        void onProgress(OllamaPullProgress progress);
 
         /**
          * The verified {@code /api/show} result for the just-installed model, delivered right before

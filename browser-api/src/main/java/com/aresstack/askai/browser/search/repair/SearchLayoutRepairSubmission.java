@@ -5,7 +5,7 @@ import com.aresstack.askai.browser.search.layout.ValidatedSearchPageLayoutDecisi
 /**
  * What the research runtime sends to {@code web_search_apply_layout}: a decision that has ALREADY
  * passed strict validation in the runtime, bound to the attempt, snapshot and fingerprint. The
- * browser runtime re-checks all of these against its cached document before applying — a validated decision
+ * sidecar re-checks all of these against its cached document before applying — a validated decision
  * never bypasses the snapshot guard.
  */
 public final class SearchLayoutRepairSubmission {

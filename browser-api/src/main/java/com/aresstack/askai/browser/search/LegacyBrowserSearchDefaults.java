@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 /**
  * THE single origin of every default value of the legacy browser search. All values that were
- * previously constants in browser runtime/loop classes (SERP guard selectors, readiness timings, engine
+ * previously constants in sidecar/loop classes (SERP guard selectors, readiness timings, engine
  * fallbacks, probe cadences) live here and ONLY here. Components never invent substitute values;
  * a missing configuration is answered by {@link #create()}, never by a local constant.
  */
@@ -49,7 +49,7 @@ public final class LegacyBrowserSearchDefaults {
     private static LegacySearchNavigationSettings navigation() {
         return new LegacySearchNavigationSettings(
                 engineSelection(),
-                3,          // maximumEngineAttempts: engine ENDPOINTS opened per search
+                4,          // maximumEngineAttempts: engine ENDPOINTS opened per search (room for all 3 engines + DDG Lite)
                 20_000,     // navigationCommitTimeoutMillis (previously BrowserLimits.defaults())
                 true,       // redirectResolutionEnabled
                 2_048,      // maximumRedirectUrlLength
@@ -100,9 +100,13 @@ public final class LegacyBrowserSearchDefaults {
                         "[class*='captcha']", "[id*='captcha']",
                         // Bing's "one last step" challenge container
                         "#b_rrsr", "iframe[src*='turnstile']"),
+                // Challenge PHRASES only. The bare word "captcha" was dropped: it names a product or a widget
+                // ("FriendlyCaptcha" in a footer contact form, articles about CAPTCHAs), not a challenge page,
+                // and parked readable pages (INNOQ). Stored profiles still carrying the old shipped list are
+                // lifted by LegacyBrowserSearchSettingsCodec.
                 Arrays.asList(
                         "noch ein letzter schritt", "one last step", "verify you are human",
-                        "unusual traffic", "complete the challenge", "captcha",
+                        "unusual traffic", "complete the challenge",
                         "bestätigen sie, dass sie ein mensch sind"),
                 1_000,  // challengeProbeIntervalMillis (previously ResearchLoop constant)
                 true,   // focusTabOnFirstDetection (bringToFront exactly once)
@@ -117,6 +121,15 @@ public final class LegacyBrowserSearchDefaults {
         return new SearchPageReadinessSettings(250, 2, 48, 6_000, 20_000, 8_000,
                 3);     // maximumPageReadinessRetries: scan→handle→re-scan attempts before parking
     }
+
+    /**
+     * Capture retries after a mid-capture DOM change: 0. Measured on Bing the SERP mutates continuously
+     * (lazy images, ads, related searches): the retries never reached a consistent state and cost about
+     * 15 s per search (docs/search-performance-analysis.md) — so capture once and flag the change.
+     */
+    public static final int DEFAULT_CAPTURE_RETRIES = 0;
+    /** Settle wait before a capture retry (only used when retries are allowed). */
+    public static final int DEFAULT_CAPTURE_SETTLE_MILLIS = 300;
 
     private static SearchPageAnalysisSettings analysis() {
         return new SearchPageAnalysisSettings(
@@ -147,9 +160,11 @@ public final class LegacyBrowserSearchDefaults {
                 0.85,   // fullPageAreaRatio
                 600,    // textLengthSaturationCharacters
                 40,     // maximumContainerDomDepth
-                600,    // maximumCapturedContainers
+                1_200,  // maximumCapturedContainers: Bing page 1 hit the old 600 before its result list ended
                 50,     // maximumLinksPerContainer
                 3,      // maximumStructureSignatureDepth
+                DEFAULT_CAPTURE_RETRIES,       // maximumCaptureRetries
+                DEFAULT_CAPTURE_SETTLE_MILLIS, // captureSettleMillis
                 5,      // linkHarvestMinimumStructuredCandidates — below this, external links are harvested
                 20,     // linkHarvestMaximumCandidates
                 // linkHarvestExcludedDomains: Bing's page furniture links microsoft.com legal/consent

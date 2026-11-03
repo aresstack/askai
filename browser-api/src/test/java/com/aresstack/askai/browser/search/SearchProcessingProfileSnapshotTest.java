@@ -45,10 +45,30 @@ public class SearchProcessingProfileSnapshotTest {
     }
 
     @Test
+    public void aV5SnapshotWithTheOldShippedChallengeTextsIsLiftedNotRejected() {
+        // A session frozen before v6 still carries the shipped list with the bare word "captcha" and a digest
+        // over it. It must restore (no digest failure) with the current list.
+        String oldList = String.join("\\n", LegacyBrowserSearchSettingsCodec.SHIPPED_CHALLENGE_TEXTS_WITH_BARE_CAPTCHA);
+        String current = SearchProcessingProfileSnapshot.create(
+                "s", 1L, 1L, LegacyBrowserSearchDefaults.create()).toJson();
+        String v5 = current
+                .replace("\"schemaVersion\": " + LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION,
+                        "\"schemaVersion\": 5")
+                .replaceAll("\"captcha\\.challengeTexts\": \"[^\"]*\"",
+                        java.util.regex.Matcher.quoteReplacement("\"captcha.challengeTexts\": \"" + oldList + "\""));
+        assertTrue("fixture carries the old list", v5.contains("complete the challenge\\ncaptcha\\n"));
+        SearchProcessingProfileSnapshot restored = SearchProcessingProfileSnapshot.parse(v5);
+        assertEquals(LegacyBrowserSearchDefaults.create().captcha.challengeTexts,
+                restored.settings.captcha.challengeTexts);
+        assertEquals(LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION, restored.schemaVersion);
+    }
+
+    @Test
     public void unknownOlderSchemaHasNoGuessedMigration() {
         String json = SearchProcessingProfileSnapshot.create(
                         "s", 1L, 1L, LegacyBrowserSearchDefaults.create()).toJson()
-                .replace("\"schemaVersion\": 5", "\"schemaVersion\": 0");
+                .replace("\"schemaVersion\": " + LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION,
+                        "\"schemaVersion\": 0");
         try {
             SearchProcessingProfileSnapshot.parse(json);
             fail("expected missing migration path");
@@ -84,7 +104,7 @@ public class SearchProcessingProfileSnapshotTest {
                 migrated.settings.analysis.repeatedBlockWeight, 0.0001);
         assertEquals("new A4 layout-repair fields take their central defaults", 16,
                 migrated.settings.layoutRepair.maximumCachedTickets);
-        assertEquals(5, migrated.schemaVersion);
+        assertEquals(LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION, migrated.schemaVersion);
     }
 
     @Test
@@ -106,7 +126,7 @@ public class SearchProcessingProfileSnapshotTest {
                 migrated.settings.aiLayoutResolver.modelProfileId);
         assertEquals("frozen overrides stay exactly as stored", 3000,
                 migrated.settings.captcha.challengeProbeIntervalMillis);
-        assertEquals(5, migrated.schemaVersion);
+        assertEquals(LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION, migrated.schemaVersion);
     }
 
     @Test

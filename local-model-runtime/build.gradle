@@ -1,0 +1,29 @@
+// AskAI's LOCAL MODEL RUNTIME: the virtual Ollama container for locally installed models (cross-encoder
+// reranking, embeddings and text generation via win-directml-java). Since the return to Java 21 it is a
+// plain library that runs INSIDE the application process — the host starts it through LocalModelRuntime
+// and talks the Ollama-compatible HTTP API to it on loopback. No sidecar JVM, no ready line, no watchdog.
+apply plugin: 'java-library'
+
+// The pinned win-directml-java runtime from MAVEN CENTRAL (0.1.1 = the release that extracted
+// :directml-model-package, so the published core is self-contained). For local development
+// against unreleased directml changes, publishToMavenLocal there and temporarily add
+// mavenLocal() to the root repositories. No sources are copied into AskAI.
+ext.directmlVersion = '0.2.1'
+
+dependencies {
+    implementation "com.aresstack:directml-runtime:${directmlVersion}"
+    implementation "com.aresstack:directml-encoder:${directmlVersion}"
+    // The wdmlpack/lifecycle contract (ModelPackageLifecycle, ModelConversionResult, …).
+    implementation "com.aresstack:directml-model-package:${directmlVersion}"
+    // The published win-directml text-generation runtime (GenerationRuntime + request/result + streaming).
+    implementation "com.aresstack:directml-inference:${directmlVersion}"
+    // The neutral model catalog: the runtime re-resolves repositoryId -> catalog itself (it never trusts
+    // the host-claimed family/capabilities) and applies the SAME manifest trust rules as the host.
+    implementation "com.aresstack:directml-model-catalog:${directmlVersion}"
+
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test {
+    useJUnit()
+}

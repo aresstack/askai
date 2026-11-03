@@ -3,6 +3,7 @@ package com.aresstack.askai.research.mcp;
 import com.aresstack.askai.mcp.api.McpEndpointDefinition;
 import com.aresstack.askai.mcp.api.McpEndpointHandle;
 import com.aresstack.askai.mcp.api.McpServerRegistry;
+import com.aresstack.askai.mcp.api.McpToolContribution;
 
 /**
  * The per-session research-control MCP endpoint. Its identity is bound to the session key AND the plugin
@@ -18,6 +19,9 @@ public final class ResearchControlEndpoint {
     private final String endpointId;
     private McpEndpointHandle handle;
     private boolean closed;
+    /** The in-process lane of the agent: always the CURRENT state-derived tool set. */
+    private final com.aresstack.askai.research.runtime.loop.ContributionToolInvoker invoker =
+            new com.aresstack.askai.research.runtime.loop.ContributionToolInvoker();
 
     public ResearchControlEndpoint(McpServerRegistry registry, String sessionKey, long pluginGenerationId,
                                    ResearchControlContext context) {
@@ -35,6 +39,11 @@ public final class ResearchControlEndpoint {
         return handle;
     }
 
+    /** The agent's in-process research lane over this endpoint's current tools (no transport). */
+    public com.aresstack.askai.research.runtime.loop.ToolInvoker toolInvoker() {
+        return invoker;
+    }
+
     /** Register the endpoint and publish the initial state-derived tool set. Idempotent. */
     public void open() {
         if (closed || handle != null) {
@@ -49,8 +58,10 @@ public final class ResearchControlEndpoint {
         if (closed || handle == null) {
             return;
         }
-        registry.updateTools(handle, ResearchToolPolicy.toolsFor(
-                context.currentPhaseId(), context.currentStateId(), context));
+        java.util.Collection<McpToolContribution> tools = ResearchToolPolicy.toolsFor(
+                context.currentPhaseId(), context.currentStateId(), context);
+        invoker.setTools(tools);
+        registry.updateTools(handle, tools);
     }
 
     /** Unregister the endpoint (invalidates the token). Idempotent. */
@@ -59,6 +70,7 @@ public final class ResearchControlEndpoint {
             return;
         }
         closed = true;
+        invoker.close();
         if (handle != null) {
             registry.unregisterEndpoint(handle);
             handle = null;

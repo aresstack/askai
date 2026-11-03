@@ -55,7 +55,7 @@ public final class StaticHttpBrowserSession implements BrowserSession {
     @Override
     public WebSearchResult search(String query) throws BrowserException {
         throw new BrowserException("The STATIC_HTTP backend cannot search the web. "
-                + "Use web_open with a known URL, or use the Playwright backend.");
+                + "Use web_open with a known URL, or run the Playwright sidecar backend.");
     }
 
     @Override

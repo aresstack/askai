@@ -13,6 +13,14 @@ import java.util.Map;
  * as the same shape when their tag-token similarity (Dice coefficient) reaches the configured
  * {@code resultBlockSimilarityThreshold} — small per-block differences (an optional date line, a
  * missing sitelink row) must not break the repetition signal.
+ * <p>
+ * Each cluster is measured against ONE representative, and that representative is the sibling with
+ * the most similar siblings — never simply the first one. A list that opens with a foreign element
+ * (Bing puts an AI answer card above its ten results) would otherwise make that element the yardstick:
+ * results close to it join its cluster, the others open a second one, and one list of ten results is
+ * split in two (issue #22, "Java 21 LTS release": 5 of 10 and 3 of 10 results lost). The most
+ * connected sibling is a member of the dominant repeated shape, so the clusters no longer depend on
+ * what happens to come first.
  */
 public final class DomStructureClusterer {
 
@@ -22,29 +30,55 @@ public final class DomStructureClusterer {
         this.similarityThreshold = similarityThreshold;
     }
 
-    /** Clusters in input order; each cluster keeps its members in sibling order. */
+    /**
+     * Clusters of similar siblings. The first cluster forms around the sibling with the most similar
+     * siblings (ties: the earliest), the next around the best connected of the rest, and so on; each
+     * cluster keeps its members in input (sibling) order.
+     */
     public List<List<RenderedContainerDescriptor>> cluster(
             List<RenderedContainerDescriptor> siblings) {
         List<List<RenderedContainerDescriptor>> clusters =
                 new ArrayList<List<RenderedContainerDescriptor>>();
-        List<DomStructureSignature> representatives = new ArrayList<DomStructureSignature>();
-        for (RenderedContainerDescriptor sibling : siblings) {
-            int match = -1;
-            for (int i = 0; i < representatives.size(); i++) {
-                if (similarity(representatives.get(i), sibling.structureSignature)
-                        >= similarityThreshold) {
-                    match = i;
-                    break;
+        List<RenderedContainerDescriptor> remaining =
+                new ArrayList<RenderedContainerDescriptor>(siblings);
+        while (!remaining.isEmpty()) {
+            RenderedContainerDescriptor representative = bestConnected(remaining);
+            List<RenderedContainerDescriptor> cluster = new ArrayList<RenderedContainerDescriptor>();
+            List<RenderedContainerDescriptor> rest = new ArrayList<RenderedContainerDescriptor>();
+            for (RenderedContainerDescriptor sibling : remaining) {
+                if (sibling == representative || similar(representative, sibling)) {
+                    cluster.add(sibling);
+                } else {
+                    rest.add(sibling);
                 }
             }
-            if (match < 0) {
-                clusters.add(new ArrayList<RenderedContainerDescriptor>());
-                representatives.add(sibling.structureSignature);
-                match = clusters.size() - 1;
-            }
-            clusters.get(match).add(sibling);
+            clusters.add(cluster);
+            remaining = rest;
         }
         return clusters;
+    }
+
+    /** The sibling with the most similar siblings; the earliest wins a tie. */
+    private RenderedContainerDescriptor bestConnected(List<RenderedContainerDescriptor> siblings) {
+        RenderedContainerDescriptor best = null;
+        int bestNeighbours = -1;
+        for (RenderedContainerDescriptor candidate : siblings) {
+            int neighbours = 0;
+            for (RenderedContainerDescriptor other : siblings) {
+                if (other != candidate && similar(candidate, other)) {
+                    neighbours++;
+                }
+            }
+            if (neighbours > bestNeighbours) {
+                best = candidate;
+                bestNeighbours = neighbours;
+            }
+        }
+        return best;
+    }
+
+    private boolean similar(RenderedContainerDescriptor a, RenderedContainerDescriptor b) {
+        return similarity(a.structureSignature, b.structureSignature) >= similarityThreshold;
     }
 
     /** Dice coefficient over tag-token multisets (0..1); identical signatures are 1. */

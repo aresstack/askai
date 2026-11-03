@@ -1,6 +1,9 @@
 package com.aresstack.askai.research.runtime.acquire;
 
 import com.aresstack.askai.browser.BrowserPageReadiness;
+import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
+import com.aresstack.askai.research.runtime.role.ResearchRole;
+import com.aresstack.askai.research.runtime.role.RoleOutput;
 
 import java.util.Locale;
 
@@ -26,6 +29,16 @@ public final class ModelPageReadinessJudge implements PageReadinessJudge {
                     + "ACCESS_BLOCKED - a TERMINAL block with nothing to solve (e.g. \"Access denied\", "
                     + "Cloudflare Error 1020, IP/geo block);\n"
                     + "UNREADABLE - error, empty, login/paywall, or otherwise not usable.";
+
+    /**
+     * The role (ADR 0001, 4.1): the judge slot, no tools, a one-word verdict read by
+     * {@code classifyWithModel}; any unrecognised answer falls back to the heuristic.
+     */
+    public static final ResearchRole ROLE = ResearchRole.builder("page-readiness-judge", ResearchModelSlots.JUDGE)
+            .purpose("classifies an ambiguous opened page (readable, consent, challenge, blocked, unreadable)")
+            .systemPrompt(SYSTEM)
+            .output(RoleOutput.text("ModelPageReadinessJudge one-word verdict"))
+            .build();
 
     private final PageReadinessModel model;
     private final int minReadableChars;
@@ -88,7 +101,7 @@ public final class ModelPageReadinessJudge implements PageReadinessJudge {
                 + "Excerpt:\n" + probe.excerpt;
         String answer;
         try {
-            answer = model.complete(SYSTEM, user);
+            answer = model.complete(ROLE.getSystemPrompt(), user);
         } catch (RuntimeException ex) {
             return null; // never let a model problem abort the visit
         }

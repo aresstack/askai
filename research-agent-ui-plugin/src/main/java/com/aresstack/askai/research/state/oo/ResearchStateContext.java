@@ -2,7 +2,7 @@ package com.aresstack.askai.research.state.oo;
 
 /**
  * Ambient dependencies for a transition: the session id (for future correlation) and the factory used to build
- * target states. Kept small on purpose; it carries no Swing/ACP/PF4J type.
+ * target states. Kept small on purpose; it carries no Swing/transport/PF4J type.
  */
 public final class ResearchStateContext {
 

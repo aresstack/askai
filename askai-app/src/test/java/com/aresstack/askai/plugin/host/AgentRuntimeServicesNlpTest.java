@@ -7,7 +7,7 @@ import org.junit.Test;
 import static org.junit.Assert.assertNotNull;
 
 /**
- * The NLP model catalog is a GLOBAL AskAI resource (its own store, not the local model runtime store), so it is
+ * The NLP model catalog is a GLOBAL AskAI resource (its own store, not the sidecar runtime store), so it is
  * published to plugins even without a local model runtime.
  */
 public class AgentRuntimeServicesNlpTest {

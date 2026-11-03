@@ -15,9 +15,9 @@ public class ResearchBriefWireTest {
         String line = ResearchRunWire.researchBrief("scoping", brief);
 
         // The UI-side parser (a deliberate duplicate on the plugin side of the process boundary) decodes it.
-        Map<String, String> f = com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
-        assertEquals("brief", com.aresstack.askai.research.acp.ResearchRunWire.typeOf(line));
-        assertEquals("scoping", com.aresstack.askai.research.acp.ResearchRunWire.decodedField(f, "phase"));
-        assertEquals(brief, com.aresstack.askai.research.acp.ResearchRunWire.decodedField(f, "content"));
+        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
+        assertEquals("brief", com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
+        assertEquals("scoping", com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(f, "phase"));
+        assertEquals(brief, com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(f, "content"));
     }
 }

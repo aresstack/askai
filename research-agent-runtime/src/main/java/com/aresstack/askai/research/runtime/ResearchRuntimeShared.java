@@ -1,29 +1,37 @@
 package com.aresstack.askai.research.runtime;
 
-import com.aresstack.askai.browser.runtime.SearchBrowser;
-import com.aresstack.askai.research.runtime.search.provider.async.AsyncSearchProviderRegistry;
-import com.aresstack.askai.research.runtime.search.provider.async.ModuleAsyncSearchGenerationFactory;
+import com.aresstack.askai.browser.playwright.SearchBrowser;
 
 /**
- * What all research sessions of one AskAI JVM share (askai #48): the headless search browser (one per AskAI,
- * reused across searches and sessions, restarted after a crash by {@link SearchBrowser} itself) and the
- * search-provider registry with its HTTP clients. AskAI owns it and closes it when it ends.
+ * What all research sessions of one AskAI JVM share (askai #48, ADR-020): the headless search browser, one per
+ * AskAI, reused across searches and sessions and restarted after a crash by {@link SearchBrowser} itself. The
+ * research browser (Camoufox per chat, worker user contexts) stays separate and is not held here.
  */
 public final class ResearchRuntimeShared implements AutoCloseable {
 
-    private static final long SEARCH_PROVIDER_TIMEOUT_MILLIS = 90_000L;
+    private static ResearchRuntimeShared process;
 
     private final String searchBrowserChannel;
     private SearchBrowser searchBrowser;
     /** The search browser's window setting (default headless); the next search follows a change. */
     private volatile boolean searchBrowserHeadless = true;
-    private AsyncSearchProviderRegistry searchProviderRegistry;
     private boolean closed;
 
     /** @param searchBrowserChannel {@code camoufox} (default) or a Chromium channel */
     public ResearchRuntimeShared(String searchBrowserChannel) {
         this.searchBrowserChannel = searchBrowserChannel == null || searchBrowserChannel.trim().isEmpty()
                 ? "camoufox" : searchBrowserChannel.trim();
+    }
+
+    /** The one instance of this JVM; created on first use, closed when the JVM ends. */
+    public static synchronized ResearchRuntimeShared process() {
+        if (process == null) {
+            final ResearchRuntimeShared shared = new ResearchRuntimeShared(
+                    System.getenv().getOrDefault("ASKAI_SEARCH_BROWSER_CHANNEL", "camoufox"));
+            Runtime.getRuntime().addShutdownHook(new Thread(shared::close, "research-search-browser-close"));
+            process = shared;
+        }
+        return process;
     }
 
     /** The search browser; created on first use, started on the first search. */
@@ -42,29 +50,12 @@ public final class ResearchRuntimeShared implements AutoCloseable {
         this.searchBrowserHeadless = headless;
     }
 
-    /** The search-provider registry; opened on first use. */
-    public synchronized AsyncSearchProviderRegistry searchProviderRegistry() {
-        if (closed) {
-            throw new IllegalStateException("research runtime resources are closed");
-        }
-        if (searchProviderRegistry == null) {
-            searchProviderRegistry = new AsyncSearchProviderRegistry(
-                    ModuleAsyncSearchGenerationFactory.userHome(SEARCH_PROVIDER_TIMEOUT_MILLIS));
-        }
-        return searchProviderRegistry;
-    }
-
     @Override
     public synchronized void close() {
-        if (closed) {
-            return;
-        }
         closed = true;
         if (searchBrowser != null) {
             searchBrowser.close();
-        }
-        if (searchProviderRegistry != null) {
-            searchProviderRegistry.close();
+            searchBrowser = null;
         }
     }
 }

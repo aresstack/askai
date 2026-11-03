@@ -1,6 +1,6 @@
 package com.aresstack.askai.research.runtime.team;
 
-import com.aresstack.askai.research.acp.ResearchRunWire;
+import com.aresstack.askai.research.agentwire.ResearchRunWire;
 
 import org.junit.Test;
 

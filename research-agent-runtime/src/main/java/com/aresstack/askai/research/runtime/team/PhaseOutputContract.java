@@ -18,4 +18,12 @@ public interface PhaseOutputContract {
     default String outputSchemaJson() {
         return null;
     }
+
+    /**
+     * The generation-time schema for a machinery turn that must answer with ONE specific action type (a
+     * nudge or repair that asks for exactly that action). Contracts without typed actions ignore the type.
+     */
+    default String outputSchemaJson(String requiredActionType) {
+        return outputSchemaJson();
+    }
 }

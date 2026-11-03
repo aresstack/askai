@@ -21,7 +21,7 @@ public class ScopingConceptPromptTest {
         // user-named areas as ONE typed list (four one-by-one rounds once cost "Debugging"
         // its place in the budget).
         assertTrue(with.contains("{\"type\":\"add_cards\",\"parent\":[],\"names\":"
-                + "[\"Grundlagen\","));
+                + "[\"<area 1>\","));
         assertFalse("the single add is no longer taught",
                 with.contains("{\"type\":\"add\","));
         assertTrue("named areas outrank offers and own ideas",
@@ -62,8 +62,8 @@ public class ScopingConceptPromptTest {
         // platform owns ids, facets and the concept-conflict check ("military drill": one
         // command, one effect, one reply, then maybe a NEW command in a LATER turn.)
         assertTrue(with.contains("THE EXCLUSION COMMAND"));
-        assertTrue(with.contains("ESP-IDF möchte ich doch nicht behandeln"));
-        assertTrue(with.contains("{\"type\": \"exclude\", \"topic\": \"ESP-IDF\"}"));
+        assertTrue(with.contains("<Z> möchte ich doch nicht behandeln"));
+        assertTrue(with.contains("{\"type\": \"exclude\", \"topic\": \"<Z>\"}"));
         assertTrue(with.contains("No id, no scopePatch, no concept edit"));
         assertTrue(with.contains("INFORM_AND_ASK_REMOVE"));
         assertTrue("removal only in a LATER user turn",
@@ -75,7 +75,7 @@ public class ScopingConceptPromptTest {
         // Safety slice after the slice-2 gate: rename stays; remove/rewrite left the contract
         // (a natural rewrite wish became a branch-vaporising remove, and "PlatformIO möchte
         // ich nicht behandeln" became a remove instead of the exclusion).
-        assertTrue(with.contains("{\"type\": \"rename\", \"path\": [\"FreeRTOS\", \"Setup\"]"));
+        assertTrue(with.contains("{\"type\": \"rename\", \"path\": [\"<card>\", \"<child card>\"]"));
         assertTrue("a rename is pinned as non-destructive",
                 with.contains("A rename is NEVER a deletion"));
         assertFalse("the model cannot be TAUGHT a remove action",
@@ -97,15 +97,15 @@ public class ScopingConceptPromptTest {
                 with.contains("no partial adds standing in for a rewrite"));
         // Gate 4: the two identity spaces, pinned with the exact live confusion pair.
         assertTrue(with.contains("TWO IDENTITY SPACES"));
-        assertTrue(with.contains("[\"ESP32 und FreeRTOS Setup\"]"));
-        assertTrue(with.contains("\"esp32-setup\""));
+        assertTrue(with.contains("[\"<card name>\"]"));
+        assertTrue(with.contains("\"<facet-id>\""));
         assertFalse("the both-channels demand is gone for good",
                 with.contains("BOTH artifacts in the SAME answer"));
         // Gate 8b: the in-band suggestions field starved under the grammar — with the action
         // channel the suggestions are a COMMAND, shown with a worked example.
         assertTrue(with.contains("THE SEARCH OFFER COMMAND"));
         assertTrue(with.contains("{\"type\": \"offer\", \"suggestions\": ["));
-        assertTrue(with.contains("\"query\": \"FreeRTOS ESP32 Grundlagen Tutorial\""));
+        assertTrue(with.contains("\"query\": \"<topic> basics overview\""));
         assertTrue(with.contains("they are HOW the user explores"));
         assertTrue(with.contains("leave the searchSuggestions field empty"));
         // Gate 9: the broad first turn skipped the offer — the drill spells out the sequence
@@ -124,7 +124,7 @@ public class ScopingConceptPromptTest {
         assertTrue(with.contains("recorded AUTOMATICALLY from the user's first message"));
         assertFalse("gate 5: the model tried 'setMission without mission' although the host had"
                 + " already seeded it", with.contains("setMission"));
-        assertTrue(with.contains("Task Notifications"));
+        assertTrue(with.contains("\"names\":[\"<subtopic>\"]"));
         assertTrue(with.contains("{\"type\":\"none\"}"));
         assertTrue("no handle field in the model contract", !with.contains("\"handle\""));
         assertTrue("no branch payloads in the model contract", !with.contains("branchJson"));
@@ -143,21 +143,22 @@ public class ScopingConceptPromptTest {
         // Gate ruling: the dedicated generator owns the model side of moves EXCLUSIVELY —
         // the universal enum advertises no move (its starving invalid rounds once competed
         // with the pre-executed dedicated path and produced a false close).
-        assertTrue(schema.contains(
-                "\"enum\":[\"none\",\"read\",\"add_cards\",\"exclude\",\"resolve\","
-                        + "\"offer\",\"rename\",\"probe\"]"));
+        for (String type : new String[] {"none", "read", "add_cards", "exclude", "resolve", "offer", "rename",
+                "probe"}) {
+            assertTrue(type, schema.contains("\"enum\":[\"" + type + "\"]"));
+        }
         // scope_probe (AP3): ONE field, a bounded list of terms — no ids, no thresholds.
-        assertTrue(schema.contains("\"terms\":{\"type\":\"array\",\"maxItems\":12"));
+        assertTrue(schema.contains("\"terms\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":12"));
         assertFalse(schema.contains("\"move\""));
         assertFalse(schema.contains("\"source\""));
         assertTrue("the names list is grammar-bounded and typed",
-                schema.contains("\"names\":{\"type\":\"array\",\"maxItems\":16"));
+                schema.contains("\"names\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":16"));
         assertFalse(schema.contains("\"rewrite\""));
         assertFalse(schema.contains("\"leaves\""));
-        assertTrue(schema.contains("\"topic\":{\"type\":\"string\"}"));
+        assertTrue(schema.contains("\"topic\":{\"type\":\"string\",\"minLength\":1}"));
         assertTrue(schema.contains("\"enum\":[\"REMOVE\",\"KEEP_SUPPRESSED\"]"));
         assertTrue("the action decision is always explicit",
-                schema.contains("\"required\":[\"assistantMessage\",\"conceptAction\"]"));
+                schema.contains("\"required\":[\"conceptAction\",\"assistantMessage\"]"));
         assertTrue("runaway lists are stopped by the grammar", schema.contains("maxItems"));
         // Scope hardening after the live gates: operations pin their kind AND a non-empty
         // facetId (gate 2: excludeFacet/addFacet arrived without one and the exclusion never
@@ -204,11 +205,12 @@ public class ScopingConceptPromptTest {
         java.util.Map<?, ?> conceptAction = (java.util.Map<?, ?>)
                 ((java.util.Map<?, ?>) ((java.util.Map<?, ?>) parsed).get("properties"))
                         .get("conceptAction");
-        java.util.Map<?, ?> properties =
-                (java.util.Map<?, ?>) conceptAction.get("properties");
-        assertNull("no source field left in the universal grammar", properties.get("source"));
-        assertFalse("move is NOT an emittable type here", String.valueOf(
-                ((java.util.Map<?, ?>) properties.get("type")).get("enum")).contains("move"));
+        for (Object variant : (java.util.List<?>) conceptAction.get("anyOf")) {
+            java.util.Map<?, ?> properties = (java.util.Map<?, ?>) ((java.util.Map<?, ?>) variant).get("properties");
+            assertNull("no source field left in the universal grammar", properties.get("source"));
+            assertFalse("move is NOT an emittable type here", String.valueOf(
+                    ((java.util.Map<?, ?>) properties.get("type")).get("enum")).contains("move"));
+        }
     }
 
     @Test
@@ -217,5 +219,102 @@ public class ScopingConceptPromptTest {
                 .forPhase("scoping").getSystemPrompt().contains("conceptAction"));
         assertFalse(PhaseAssistantProfileRegistry.defaults(false, false)
                 .forPhase("scoping").getSystemPrompt().contains("conceptAction"));
+    }
+
+    /**
+     * Scoping regression (Hasenhaltung): gemma copied the ESP32/FreeRTOS examples of this prompt into the
+     * concept of an unrelated topic. The examples keep their SHAPE (small models need it for the format)
+     * but carry no topic any more — only placeholders that the concept loop refuses to execute.
+     */
+    @Test
+    public void theScopingPromptCarriesNoDomainExamplesOnlyPlaceholders() {
+        for (boolean offers : new boolean[] {false, true}) {
+            for (boolean concept : new boolean[] {false, true}) {
+                String prompt = TeamAgentPlaybook.scopingSystemPrompt(offers, concept).toLowerCase(java.util.Locale.ROOT);
+                for (String domain : new String[] {"esp32", "esp-idf", "freertos", "arduino", "praxisprojekte"}) {
+                    assertFalse(domain + " in prompt(offers=" + offers + ", concept=" + concept + ")",
+                            prompt.contains(domain));
+                }
+            }
+        }
+        String with = TeamAgentPlaybook.scopingSystemPrompt(true, true);
+        assertTrue("the examples are declared as shape only", with.contains("EXAMPLES SHOW THE SHAPE ONLY"));
+        assertTrue("the batch shape a small model needs stays",
+                with.contains("{\"type\":\"add_cards\",\"parent\":[],\"names\":[\"<area 1>\""));
+        assertTrue("a bare topic gets the topic's own areas",
+                with.contains("When the user only names a topic, the first cards are the main areas of THAT topic"));
+    }
+
+    /**
+     * Meerschweinchen live gate: with assistantMessage generated first the small model narrated its action
+     * ("add_cards: …") and then answered "none". The grammar (required properties first, in schema order)
+     * and the prompt contract now put conceptAction FIRST.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    public void theActionComesBeforeTheVisibleMessage() {
+        java.util.Map<String, Object> schema = (java.util.Map<String, Object>)
+                com.aresstack.askai.agent.model.reranker.MiniJson.parse(
+                        new ScopingPhaseOutputContract(true).outputSchemaJson());
+        java.util.List<String> keys = new java.util.ArrayList<String>(
+                ((java.util.Map<String, Object>) schema.get("properties")).keySet());
+        assertEquals("conceptAction", keys.get(0));
+        assertEquals("assistantMessage", keys.get(1));
+        assertEquals(java.util.Arrays.asList("conceptAction", "assistantMessage"), schema.get("required"));
+        String with = TeamAgentPlaybook.scopingSystemPrompt(true, true);
+        assertTrue(with.indexOf("\"conceptAction\": {") < with.indexOf("\"assistantMessage\": string"));
+        assertFalse("no placeholder-valued example in the nudges", TeamAgentPlaybook.offerSearchesMissing(true)
+                .contains("\"...\""));
+    }
+
+    /**
+     * Second live acceptance: the flat action object made {"type":"add_cards"} and
+     * {"type":"offer","suggestions":[]} grammatical (checked with llama.cpp's json-schema-to-grammar, which
+     * Ollama uses). Each action type is now its own variant with its required, non-empty fields.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    public void everyActionVariantRequiresTheFieldsItsCommandNeeds() {
+        java.util.Map<String, Object> schema = (java.util.Map<String, Object>)
+                com.aresstack.askai.agent.model.reranker.MiniJson.parse(
+                        new ScopingPhaseOutputContract(true).outputSchemaJson());
+        java.util.Map<String, Object> action = (java.util.Map<String, Object>)
+                ((java.util.Map<String, Object>) schema.get("properties")).get("conceptAction");
+        java.util.List<Object> variants = (java.util.List<Object>) action.get("anyOf");
+        java.util.Map<String, java.util.List<Object>> required = new java.util.LinkedHashMap<String, java.util.List<Object>>();
+        java.util.Map<String, java.util.Map<String, Object>> properties =
+                new java.util.LinkedHashMap<String, java.util.Map<String, Object>>();
+        for (Object v : variants) {
+            java.util.Map<String, Object> variant = (java.util.Map<String, Object>) v;
+            java.util.Map<String, Object> props = (java.util.Map<String, Object>) variant.get("properties");
+            String type = (String) ((java.util.List<Object>) ((java.util.Map<String, Object>) props.get("type"))
+                    .get("enum")).get(0);
+            required.put(type, (java.util.List<Object>) variant.get("required"));
+            properties.put(type, props);
+        }
+        assertEquals(java.util.Arrays.asList("none", "read", "add_cards", "exclude", "resolve", "offer", "rename",
+                "probe"), new java.util.ArrayList<String>(required.keySet()));
+        assertEquals(java.util.Arrays.asList("type", "parent", "names"), required.get("add_cards"));
+        assertEquals(java.util.Arrays.asList("type", "suggestions"), required.get("offer"));
+        assertEquals(java.util.Arrays.asList("type", "topic"), required.get("exclude"));
+        assertEquals(java.util.Arrays.asList("type", "path", "name"), required.get("rename"));
+        assertEquals(java.util.Arrays.asList("type", "terms"), required.get("probe"));
+        assertEquals(1.0, ((Number) ((java.util.Map<String, Object>) properties.get("add_cards").get("names"))
+                .get("minItems")).doubleValue(), 0.0);
+        assertEquals(1.0, ((Number) ((java.util.Map<String, Object>) properties.get("offer").get("suggestions"))
+                .get("minItems")).doubleValue(), 0.0);
+        assertFalse("no move in the model grammar", required.containsKey("move"));
+    }
+
+    /** A nudge asking for ONE action gets the grammar of only that variant: no "none", no other action. */
+    @Test
+    public void aRequiredActionTypeLeavesOnlyThatVariant() {
+        String offerOnly = new ScopingPhaseOutputContract(true).outputSchemaJson("offer");
+        assertTrue(offerOnly.contains("\"enum\":[\"offer\"]"));
+        assertFalse(offerOnly.contains("\"enum\":[\"none\"]"));
+        assertFalse(offerOnly.contains("\"anyOf\""));
+        assertTrue(new ScopingPhaseOutputContract(true).outputSchemaJson("add_cards")
+                .contains("\"required\":[\"type\",\"parent\",\"names\"]"));
+        assertEquals(null, new ScopingPhaseOutputContract(false).outputSchemaJson("offer"));
     }
 }

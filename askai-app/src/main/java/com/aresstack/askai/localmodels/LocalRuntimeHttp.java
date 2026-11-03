@@ -1,6 +1,6 @@
 package com.aresstack.askai.localmodels;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.json.SimpleJson;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -11,7 +11,7 @@ import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.Map;
 
-/** Minimal loopback HTTP/JSON helper for talking to the local model runtime local runtime. */
+/** Minimal loopback HTTP/JSON helper for talking to the local model runtime. */
 public final class LocalRuntimeHttp {
 
     private static final Charset UTF8 = Charset.forName("UTF-8");
@@ -32,12 +32,12 @@ public final class LocalRuntimeHttp {
         connection.setRequestProperty("Content-Type", "application/json");
         OutputStream out = connection.getOutputStream();
         try {
-            out.write(OllamaJson.toJson(body).getBytes(UTF8));
+            out.write(SimpleJson.toJson(body).getBytes(UTF8));
         } finally {
             out.close();
         }
         String response = readBody(connection);
-        Object parsed = OllamaJson.parse(response);
+        Object parsed = SimpleJson.parse(response);
         if (!(parsed instanceof Map)) {
             throw new IOException("Unexpected local runtime response: " + response);
         }

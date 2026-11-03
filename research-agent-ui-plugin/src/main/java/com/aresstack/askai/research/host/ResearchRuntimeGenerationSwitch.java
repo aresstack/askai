@@ -8,22 +8,20 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Prepare-then-publish generation switching for the productive research runtime. {@link #switchTo} fully
- * PREPARES the next generation (configuration validated — a broken jar/launcher path fails here) BEFORE it is
+ * PREPARES the next generation (configuration validated) BEFORE it is
  * published; only after publishing is the previous generation locked for new sessions and its resources
  * closed. A preparation failure throws and leaves the previously active generation completely untouched.
  */
 public final class ResearchRuntimeGenerationSwitch {
 
     private final McpServerRegistry registry;
-    private final InProcessResearchRuntime runtime;
     private final RerankerConfigurationSnapshotProvider rerankerSnapshots;
     private final AtomicLong generationIds = new AtomicLong();
     private volatile ResearchRuntimeGeneration active;
 
-    public ResearchRuntimeGenerationSwitch(McpServerRegistry registry, InProcessResearchRuntime runtime,
+    public ResearchRuntimeGenerationSwitch(McpServerRegistry registry,
                                            RerankerConfigurationSnapshotProvider rerankerSnapshots) {
         this.registry = registry;
-        this.runtime = runtime;
         this.rerankerSnapshots = rerankerSnapshots;
     }
 
@@ -44,9 +42,9 @@ public final class ResearchRuntimeGenerationSwitch {
                     "New research runtime generation is not usable, keeping the current one: " + problems);
         }
         long id = generationIds.incrementAndGet();
-        ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(registry, runtime,
-                config, id, rerankerSnapshots);
-        ResearchRuntimeGeneration next = new ResearchRuntimeGeneration(id, factory);
+        ResearchRuntimeGeneration next = new ResearchRuntimeGeneration(id,
+                new ProductiveResearchBackendFactory(registry, config, id,
+                        rerankerSnapshots));
         // b) publish.
         ResearchRuntimeGeneration previous = active;
         active = next;

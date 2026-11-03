@@ -14,7 +14,7 @@ import java.util.List;
  * Catalog- and MANIFEST-driven presentation of an AskAI local-engine model. Business data (family,
  * capabilities, backends, package, revision, install date, state) comes from the model's catalog-validated
  * {@link InstalledModelManifest} — never from a hardcoded "rerank / CPU" string and never reconstructed by
- * splitting the virtual id. Whether a generation model is still "pending" is driven by the local runtime's
+ * splitting the virtual id. Whether a generation model is still "pending" is driven by the SIDECAR's
  * reported generation-runtime linkage, not by a hardcoded family list, so it clears automatically once a
  * productive runtime is linked. {@code supportedBackends} is the catalogued support set, NOT a claim about
  * the currently active backend mode.

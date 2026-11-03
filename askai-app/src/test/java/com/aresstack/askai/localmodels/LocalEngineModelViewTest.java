@@ -13,7 +13,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * The local-engine card presentation is manifest-backed and family-aware; the "pending" state is driven by
- * the local runtime-reported generation linkage (a boolean), NOT a hardcoded family list; and it is fail-closed.
+ * the sidecar-reported generation linkage (a boolean), NOT a hardcoded family list; and it is fail-closed.
  */
 public class LocalEngineModelViewTest {
 

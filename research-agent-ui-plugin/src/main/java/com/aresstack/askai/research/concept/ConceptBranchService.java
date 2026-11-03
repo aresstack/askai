@@ -1570,7 +1570,7 @@ public final class ConceptBranchService {
         if (names == null || names.isEmpty()) {
             return editError(JsonTreeDiagnostic.of(JsonTreeErrorCode.BRANCH_GRAFT_FAILED,
                     "The concept's working surface itself cannot be removed — name the card "
-                            + "to remove (e.g. \"FreeRTOS/Praxis/ESP-IDF\").").build());
+                            + "to remove (e.g. \"<card>/<child card>\").").build());
         }
         String document = store.effectiveContent();
         StrictJsonParseResult parsed = StrictJsonParser.parse(document);
@@ -1743,7 +1743,7 @@ public final class ConceptBranchService {
         Located located = new Located();
         if (names == null || names.isEmpty()) {
             located.error = editError(JsonTreeDiagnostic.of(JsonTreeErrorCode.BRANCH_GRAFT_FAILED,
-                    "Name the card to edit (e.g. [\"FreeRTOS\",\"Praxis\"]).").build());
+                    "Name the card to edit (e.g. [\"<card>\",\"<child card>\"]).").build());
             return located;
         }
         String document = store.effectiveContent();

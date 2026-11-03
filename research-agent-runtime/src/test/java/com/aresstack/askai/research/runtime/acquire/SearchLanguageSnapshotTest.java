@@ -139,7 +139,7 @@ public class SearchLanguageSnapshotTest {
         assertEquals("hühner unterschiede puten", strategy.lastRequest.getQuery());
     }
 
-    /** The browser runtime's serp-pages diagnostics render as the card's "Suche:" line — or stay silent. */
+    /** The sidecar's serp-pages diagnostics render as the card's "Suche:" line — or stay silent. */
     @Test
     public void theSerpPageCountsRenderForTheFunnelCard() {
         assertEquals("html.duckduckgo.com 3 Seiten, www.bing.com 1 Seite",

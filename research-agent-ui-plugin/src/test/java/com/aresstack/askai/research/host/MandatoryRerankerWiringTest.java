@@ -18,15 +18,6 @@ import static org.junit.Assert.fail;
  */
 public class MandatoryRerankerWiringTest {
 
-    /** The in-JVM research runtime; nothing in it starts until a session really runs. */
-    private final InProcessResearchRuntime runtime = new InProcessResearchRuntime("chrome");
-
-    @org.junit.After
-    public void closeRuntime() {
-        runtime.close();
-    }
-
-
     @Rule
     public final TemporaryFolder folder = new TemporaryFolder();
 
@@ -69,6 +60,8 @@ public class MandatoryRerankerWiringTest {
 
     @Test
     public void createSessionPassesTheSessionResearchLanguageToTheRerankerResolution() throws Exception {
+        File exe = folder.newFile("java");
+        File jar = folder.newFile("agent.jar");
         ResearchRuntimeConfig config = new ResearchRuntimeConfig("chrome", true, true);
         // Records the language the factory resolves the reranker with, then aborts the start (visible error).
         final String[] seenLanguage = new String[1];
@@ -91,7 +84,7 @@ public class MandatoryRerankerWiringTest {
                     }
                 };
         ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(
-                null, runtime, config, 1L, recording);
+                null, config, 1L, recording);
         factory.setResearchLanguageCode("de");
         try {
             factory.createSession("s1", folder.newFolder("session"));
@@ -104,6 +97,8 @@ public class MandatoryRerankerWiringTest {
 
     @Test
     public void createSessionPublishesPerLanguageRerankerSnapshots() throws Exception {
+        File exe = folder.newFile("java");
+        File jar = folder.newFile("agent.jar");
         ResearchRuntimeConfig config = new ResearchRuntimeConfig("chrome", true, true);
         // Serves the session-default and "en" snapshots, then aborts on the "de" publication — proving the
         // factory resolves session-language + en + de (in that order) before the runtime is launched.
@@ -143,7 +138,7 @@ public class MandatoryRerankerWiringTest {
                     }
                 };
         ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(
-                null, runtime, config, 1L, provider);
+                null, config, 1L, provider);
         factory.setResearchLanguageCode("de");
         try {
             factory.createSession("s1", folder.newFolder("session"));
@@ -157,10 +152,12 @@ public class MandatoryRerankerWiringTest {
 
     @Test
     public void createSessionWithoutARerankerProviderFailsVisibly() throws Exception {
+        File exe = folder.newFile("java");
+        File jar = folder.newFile("agent.jar");
         ResearchRuntimeConfig config = new ResearchRuntimeConfig("chrome", true, true);
         // A null provider models "the host did not publish the mandatory reranker service".
         ProductiveResearchBackendFactory factory = new ProductiveResearchBackendFactory(
-                null, runtime, config, 1L, null);
+                null, config, 1L, null);
         try {
             factory.createSession("s1", folder.newFolder("session"));
             fail("expected a visible failure without a reranker snapshot provider");

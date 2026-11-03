@@ -3,7 +3,7 @@ package com.aresstack.askai.localmodels;
 import com.aresstack.askai.agent.model.nlp.NlpCapability;
 import com.aresstack.askai.agent.model.nlp.NlpModelDescriptor;
 
-import io.github.ollama4j.json.OllamaJson;
+import com.aresstack.askai.json.SimpleJson;
 
 import java.io.File;
 import java.io.IOException;
@@ -18,9 +18,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The DEDICATED local store for static NLP model artifacts — separate from the runtime/local runtime model store
+ * The DEDICATED local store for static NLP model artifacts — separate from the runtime model store
  * ({@code .../models/local}) and from any research-agent-specific path, because OpenNLP models are a global AskAI
- * NLP resource loaded directly by Java, not a runnable local runtime model. Default location
+ * NLP resource loaded directly by Java, not a runnable local-runtime model. Default location
  * {@code %APPDATA%\.askai\models\nlp\<implementation>\<id>\} with a small {@code askai-nlp-model.json} manifest +
  * the artifact file; the file name is NEVER the identity (the manifest is).
  *
@@ -188,7 +188,7 @@ public final class LocalNlpModelStore {
     @SuppressWarnings("unchecked")
     static NlpModelDescriptor parse(File manifestFile) {
         try {
-            Object parsed = OllamaJson.parse(new String(Files.readAllBytes(manifestFile.toPath()), UTF8));
+            Object parsed = SimpleJson.parse(new String(Files.readAllBytes(manifestFile.toPath()), UTF8));
             if (!(parsed instanceof Map)) {
                 return null;
             }

@@ -1,6 +1,6 @@
 // STATIC_HTTP browser backend (Java 8): HttpURLConnection fetch + jsoup cleanup behind the shared
 // BrowserSession port. Visibly limited: no JavaScript, no dynamic pages, no real interaction, no search.
-// It is a separate, explicitly selected backend — never a silent fallback for the Playwright browser runtime.
+// It is a separate, explicitly selected backend — never a silent fallback for the Playwright sidecar.
 apply plugin: 'java-library'
 
 dependencies {

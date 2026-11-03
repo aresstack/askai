@@ -107,7 +107,7 @@ public class AgentPluginLoadIntegrationTest {
     }
 
     /** askai-app shares the {@code com.aresstack.askai} root package with the plugin since #51; these are its own. */
-    private static final String[] ASKAI_APP_PACKAGES = {"audio/", "batch/", "catalog/", "client/", "config/", "hf/",
+    private static final String[] ASKAI_APP_PACKAGES = {"audio/", "batch/", "catalog/", "client/", "config/", "hf/", "json/", "modelport/",
             "history/", "localmodels/", "net/", "notify/", "ollamalib/", "party/", "plugin/host/", "service/",
             "settings/", "speech/", "state/", "stt/", "text/", "tool/", "tts/", "ui/", "video/", "vision/"};
 
@@ -305,39 +305,8 @@ public class AgentPluginLoadIntegrationTest {
             };
         }
 
-        /** The developer-only FAKE mode: this test proves classloading and isolation, not the runtime. */
-        private final java.util.Map<String, String> state = new java.util.HashMap<String, String>(
-                java.util.Collections.singletonMap("research.runtime.mode", "FAKE"));
-
         public WorkspaceStateStore getStateStore() {
-            return new WorkspaceStateStore() {
-                public String get(String key, String defaultValue) {
-                    String value = state.get(key);
-                    return value == null ? defaultValue : value;
-                }
-
-                public boolean getBoolean(String key, boolean defaultValue) {
-                    String value = state.get(key);
-                    return value == null ? defaultValue : Boolean.parseBoolean(value);
-                }
-
-                public int getInt(String key, int defaultValue) {
-                    String value = state.get(key);
-                    return value == null ? defaultValue : Integer.parseInt(value);
-                }
-
-                public void put(String key, String value) {
-                    state.put(key, value);
-                }
-
-                public void putBoolean(String key, boolean value) {
-                    state.put(key, String.valueOf(value));
-                }
-
-                public void putInt(String key, int value) {
-                    state.put(key, String.valueOf(value));
-                }
-            };
+            return null;
         }
 
         public PluginPathService getPluginPathService() {

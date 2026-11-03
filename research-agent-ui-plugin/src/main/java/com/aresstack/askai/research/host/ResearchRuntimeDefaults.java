@@ -3,17 +3,18 @@ package com.aresstack.askai.research.host;
 import java.io.File;
 
 /**
- * Automatic defaults for the productive research runtime. The only setting left to complete is the browser
- * channel: when the configured browser is provably absent but the other channel's browser is installed, the
- * installed one is used (otherwise every session would fail although a working browser exists). The research
- * agent and the browsers run inside AskAI, so no launcher or jar is discovered any more (askai #50).
+ * Automatic defaults for the productive research runtime. Both the research agent and the browser run
+ * in-process, so nothing has to be located any more; the one completion left is the browser channel: when
+ * the configured browser is provably absent but the other channel's browser is installed, the installed one
+ * is used (otherwise every session would fail although a working browser exists). Explicit user values
+ * always win, and nothing is ever downloaded or installed here.
  */
 public final class ResearchRuntimeDefaults {
 
     private ResearchRuntimeDefaults() {
     }
 
-    /** Complete the settings from the detectable environment (only the browser channel). */
+    /** Complete the settings from the detectable environment (the installed browsers). */
     public static ResearchRuntimeSettings complete(ResearchRuntimeSettings settings) {
         return new ResearchRuntimeSettings(settings.getMode(),
                 installedBrowserChannel(settings.getBrowserChannel()), settings.isHeadless(),
@@ -24,7 +25,7 @@ public final class ResearchRuntimeDefaults {
      * The browser channel to actually use: the configured one when its browser is installed; otherwise the
      * OTHER channel when that one is provably present (e.g. a machine with Edge but no Chrome keeps
      * working after Chrome is uninstalled). When neither is found, the configured channel stays and the
-     * browser runtime's readiness probe reports BROWSER_NOT_INSTALLED readably. Discovery only — never installs.
+     * browser's readiness probe reports BROWSER_NOT_INSTALLED readably. Discovery only — never installs.
      */
     public static String installedBrowserChannel(String configured) {
         if (ResearchRuntimeSettings.CAMOUFOX_CHANNEL.equals(configured)) {
@@ -43,7 +44,7 @@ public final class ResearchRuntimeDefaults {
 
     private static boolean chosenExecutableExists(String channel) {
         try {
-            String chosen = com.aresstack.askai.browser.runtime.BrowserExecutables.configured(channel);
+            String chosen = com.aresstack.askai.browser.playwright.BrowserExecutables.configured(channel);
             return !chosen.isEmpty() && new File(chosen).isFile();
         } catch (RuntimeException | LinkageError unavailable) {
             return false;

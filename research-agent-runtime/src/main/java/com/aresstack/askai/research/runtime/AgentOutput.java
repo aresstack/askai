@@ -1,11 +1,11 @@
 package com.aresstack.askai.research.runtime;
 
 /**
- * Where the research agent writes what it has to say during one turn (askai #50): a plain method call into the
- * research plugin inside the AskAI JVM. It replaces the ACP prompt context of the former agent process.
+ * The agent's one output channel for a turn: every line the agent used to stream to the host as an ACP
+ * message — assistant text or a typed {@code #RSX1#} wire line — now goes here, directly in-process. The
+ * host maps the lines into its backend events exactly as before; nothing about the line contract changed.
  */
 public interface AgentOutput {
 
-    /** One agent message (wire lines and readable text alike). */
-    void sendMessage(String text);
+    void message(String text);
 }

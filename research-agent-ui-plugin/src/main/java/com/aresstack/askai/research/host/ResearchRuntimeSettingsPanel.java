@@ -6,7 +6,7 @@ import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.theme.ThemeColor;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -26,9 +26,9 @@ import java.util.List;
 
 /**
  * The research runtime configuration surface. Reads/writes exclusively through
- * {@link ResearchRuntimeSettings} (the same mapper the session factory uses). Saving an ACP configuration
+ * {@link ResearchRuntimeSettings} (the same mapper the session factory uses). Saving a productive configuration
  * that fails validation is rejected with the concrete problem list; FAKE is labelled clearly as the
- * clickdummy/development mode. "Check requirements" runs validation + the browser runtime readiness probe on a
+ * clickdummy/development mode. "Check requirements" runs validation + the browser readiness probe on a
  * background daemon thread (never the EDT) with a visible busy state; results come back via
  * {@link SwingUtilities#invokeLater} as one structured line per requirement.
  */
@@ -50,7 +50,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField searchMaxToolCalls = ComicControls.textField(4);
     private final JTextField searchMaxMinutes = ComicControls.textField(4);
     private final JTextField browserToolTimeout = ComicControls.textField(4);
+    private final JTextField browserIdleStop = ComicControls.textField(4);
     private final JTextField searchMaxErrors = ComicControls.textField(4);
+    // Worker browsers (parallel research workers): separate from the model capacity.
+    private final JTextField workerProcesses = ComicControls.textField(3);
+    private final JTextField workerUserContexts = ComicControls.textField(3);
+    private final JTextField workerTabs = ComicControls.textField(3);
+    private final JTextField workerPerSite = ComicControls.textField(3);
+    private final JTextField workerAcquireTimeout = ComicControls.textField(4);
     // Review-context bounds: how many sources one review reads, and how much of each.
     private final JTextField reviewMaxSources = ComicControls.textField(4);
     private final JTextField reviewMaxChars = ComicControls.textField(6);
@@ -79,6 +86,23 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField scopeCheckNoveltyGap = ComicControls.textField(4);
     private final JTextField scopeCheckNoveltyWeight = ComicControls.textField(4);
     private final JTextField scopeCheckDuplicateCeiling = ComicControls.textField(4);
+    /** ADR 0001 lane F: orchestrated research opt-in (default OFF = the single autonomous loop). */
+    private final JCheckBox orchestratorEnabled = ComicControls.checkBox(
+            "Orchestrated research: plan, approve, rounds of work packages (applies to new sessions)", false);
+    private final JTextField orchestratorMaxRounds = ComicControls.textField(3);
+    private final JTextField orchestratorMaxTasks = ComicControls.textField(3);
+    private final JTextField orchestratorTasksPerRound = ComicControls.textField(3);
+    private final JTextField orchestratorTokenBudget = ComicControls.textField(7);
+    private final JTextField orchestratorTimeBudget = ComicControls.textField(4);
+    private final JTextField orchestratorTaskRetries = ComicControls.textField(3);
+    private final JTextField orchestratorSectionSources = ComicControls.textField(3);
+    /** ADR 0001 lane G: the worker roles the orchestrator may delegate to, and their limits. */
+    private final JCheckBox workerSearchPlanner = ComicControls.checkBox("Search planner", true);
+    private final JCheckBox workerSourceVerifier = ComicControls.checkBox("Source verifier", true);
+    private final JCheckBox workerWriter = ComicControls.checkBox("Writer", true);
+    private final JTextField workerPlannerQueries = ComicControls.textField(3);
+    private final JTextField workerVerifierSources = ComicControls.textField(3);
+    private final JTextField workerWriterSources = ComicControls.textField(3);
     /** AI reranker opt-in (default OFF = lexical BM25 scoring, no model load). */
     private final JCheckBox useAiReranker = ComicControls.checkBox(
             "Use AI reranker (semantic model instead of BM25; applies to new sessions)", false);
@@ -133,11 +157,28 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         limits.row("Search run", group(labelled("Source target", searchTargetSources),
                 labelled("Pages", searchMaxPages), labelled("Tool calls", searchMaxToolCalls),
                 labelled("Minutes", searchMaxMinutes), labelled("Tool timeout (s)", browserToolTimeout),
-                labelled("Errors", searchMaxErrors)));
+                labelled("Idle stop (s)", browserIdleStop), labelled("Errors", searchMaxErrors)));
         limits.row("Review context", group(labelled("Sources", reviewMaxSources),
                 labelled("Chars/source", reviewMaxChars)));
         limits.row("Concept loop", group(labelled("Tool rounds", conceptToolRounds),
                 labelled("Repairs", conceptRepairAttempts)));
+
+        // Orchestrated research (ADR 0001 lane F/G): the plan of work packages, its limits and the worker browsers.
+        com.aresstack.comiccontrols.control.ComicForm orchestrator =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Orchestrator");
+        orchestrator.row("", orchestratorEnabled);
+        orchestrator.row("Limits", group(labelled("Rounds", orchestratorMaxRounds),
+                labelled("Packages", orchestratorMaxTasks), labelled("Per round", orchestratorTasksPerRound),
+                labelled("Tokens", orchestratorTokenBudget), labelled("Minutes", orchestratorTimeBudget),
+                labelled("Retries", orchestratorTaskRetries),
+                labelled("Sources/section", orchestratorSectionSources)));
+        orchestrator.row("Worker browsers", group(labelled("Processes", workerProcesses),
+                labelled("User contexts/process", workerUserContexts),
+                labelled("Tabs/user context", workerTabs), labelled("Per site", workerPerSite),
+                labelled("Wait (s)", workerAcquireTimeout)));
+        orchestrator.row("Worker roles", group(workerSearchPlanner, labelled("Queries", workerPlannerQueries),
+                workerSourceVerifier, labelled("Sources", workerVerifierSources),
+                workerWriter, labelled("Sources", workerWriterSources)));
 
         com.aresstack.comiccontrols.control.ComicForm scope =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Scope check");
@@ -193,8 +234,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
         com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
         actions.actions(save, check, busy);
-        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, scope, scopeAdvanced);
-        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, scope, scopeAdvanced, actions),
+        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, orchestrator, scope, scopeAdvanced);
+        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, orchestrator, scope, scopeAdvanced, actions),
                 BorderLayout.NORTH);
 
         results.setEditable(false);
@@ -203,6 +244,55 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
 
         // Persisted values first, then the automatic browser-channel decision.
         apply(ResearchRuntimeDefaults.complete(ResearchRuntimeSettings.load(store)));
+        orchestratorEnabled.setSelected(ResearchRuntimeSettings.loadOrchestratorEnabled(store));
+        orchestratorEnabled.setToolTipText("Off: a research question runs the single autonomous search loop. "
+                + "On: the orchestrator proposes a plan of work packages; nothing runs until you approve it, "
+                + "and anything beyond the approved plan or budget comes back to you.");
+        orchestratorEnabled.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveOrchestratorEnabled(ResearchRuntimeSettingsPanel.this.store,
+                        orchestratorEnabled.isSelected());
+            }
+        });
+        bindLimit(orchestratorMaxRounds, ResearchRuntimeSettings.KEY_ORCHESTRATOR_MAX_ROUNDS,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_MAX_ROUNDS,
+                "Evaluation rounds of one approved run before it comes back to you.");
+        bindLimit(orchestratorMaxTasks, ResearchRuntimeSettings.KEY_ORCHESTRATOR_MAX_TASKS,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_MAX_TASKS,
+                "Work packages of one approved run (plan plus follow-ups).");
+        bindLimit(orchestratorTasksPerRound, ResearchRuntimeSettings.KEY_ORCHESTRATOR_TASKS_PER_ROUND,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_TASKS_PER_ROUND,
+                "How many follow-up packages one round may propose.");
+        bindNonNegativeLimit(orchestratorTokenBudget, ResearchRuntimeSettings.KEY_ORCHESTRATOR_TOKEN_BUDGET,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_TOKEN_BUDGET,
+                "Token budget of one approved run (orchestrator and workers); 0 = not limited.");
+        bindNonNegativeLimit(orchestratorTimeBudget, ResearchRuntimeSettings.KEY_ORCHESTRATOR_TIME_BUDGET_MINUTES,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_TIME_BUDGET_MINUTES,
+                "Time budget of one approved run in minutes; 0 = not limited.");
+        bindNonNegativeLimit(orchestratorTaskRetries, ResearchRuntimeSettings.KEY_ORCHESTRATOR_TASK_RETRIES,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_TASK_RETRIES,
+                "How often a work package is retried after a technical failure or an interruption.");
+        bindLimit(orchestratorSectionSources, ResearchRuntimeSettings.KEY_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
+                ResearchRuntimeSettings.DEFAULT_ORCHESTRATOR_MIN_SOURCES_PER_SECTION,
+                "Accepted sources every outline section needs before the run may close.");
+        bindWorkerRole(workerSearchPlanner, ResearchRuntimeSettings.KEY_WORKER_SEARCH_PLANNER,
+                "The orchestrator may hand an aspect to the search planner, which writes distinct search "
+                        + "queries that a web research package then searches.");
+        bindWorkerRole(workerSourceVerifier, ResearchRuntimeSettings.KEY_WORKER_SOURCE_VERIFIER,
+                "The orchestrator may have accepted sources checked: relevance, the claim each supports, "
+                        + "contradictions. Rejected sources stop counting as evidence; nothing is removed.");
+        bindWorkerRole(workerWriter, ResearchRuntimeSettings.KEY_WORKER_WRITER,
+                "The orchestrator may have cited section drafts written from the sources. The drafts stay on "
+                        + "the task; the document is only written in the draft phase.");
+        bindLimit(workerPlannerQueries, ResearchRuntimeSettings.KEY_WORKER_PLANNER_MAX_QUERIES,
+                ResearchRuntimeSettings.DEFAULT_WORKER_PLANNER_MAX_QUERIES,
+                "Search queries one planner package may propose.");
+        bindLimit(workerVerifierSources, ResearchRuntimeSettings.KEY_WORKER_VERIFIER_MAX_SOURCES,
+                ResearchRuntimeSettings.DEFAULT_WORKER_VERIFIER_MAX_SOURCES,
+                "Sources one verifier package checks.");
+        bindLimit(workerWriterSources, ResearchRuntimeSettings.KEY_WORKER_WRITER_MAX_SOURCES,
+                ResearchRuntimeSettings.DEFAULT_WORKER_WRITER_MAX_SOURCES,
+                "Sources one writer package writes from.");
         useAiReranker.setSelected(ResearchRuntimeSettings.loadUseAiReranker(store));
         useAiReranker.setToolTipText("Off: search hits are scored lexically with BM25 — fast, "
                 + "no model. On: the configured cross-encoder model scores them semantically.");
@@ -285,15 +375,39 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "Safety limit: maximum CONSECUTIVE technical errors before the run ends.");
         bindLimit(browserToolTimeout, ResearchRuntimeSettings.KEY_BROWSER_TOOL_TIMEOUT_SECONDS,
                 ResearchRuntimeSettings.DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS,
-                "Timeout per browser call in seconds. Must cover the whole search engine phase "
-                        + "(several engines and result pages, sequential with evaluation) — "
-                        + "too small is misread as 'browser unavailable' and aborts every search.");
+                "Timeout per browser call in seconds. Must cover the whole search-engine phase "
+                        + "(several engines and result pages, sequential with evaluation) — too small "
+                        + "is misread as 'browser dead' and aborts every search.");
+        bindNonNegativeLimit(browserIdleStop, ResearchRuntimeSettings.KEY_BROWSER_IDLE_STOP_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_BROWSER_IDLE_STOP_SECONDS,
+                "How long the browser stays open after a search without a new browser command before it "
+                        + "is stopped. Keeping it warm saves the browser start (about 10 s) on the next "
+                        + "search; 0 = stop right after each search.");
+        bindLimit(workerProcesses, ResearchRuntimeSettings.KEY_WORKER_BROWSER_PROCESSES,
+                ResearchRuntimeSettings.DEFAULT_WORKER_BROWSER_PROCESSES,
+                "Worker browser processes for parallel research workers, over all chats. This is also how many "
+                        + "browser operations run at the same time. Independent of the model capacity "
+                        + "(AI models > Model resources). Each process costs a browser plus a driver JVM.");
+        bindLimit(workerUserContexts, ResearchRuntimeSettings.KEY_WORKER_USER_CONTEXTS_PER_PROCESS,
+                ResearchRuntimeSettings.DEFAULT_WORKER_USER_CONTEXTS_PER_PROCESS,
+                "Isolated user contexts (own cookies and sign-ins, one per worker) one worker browser hosts. "
+                        + "Workers in the same process take turns on its browser.");
+        bindLimit(workerTabs, ResearchRuntimeSettings.KEY_WORKER_TABS_PER_USER_CONTEXT,
+                ResearchRuntimeSettings.DEFAULT_WORKER_TABS_PER_USER_CONTEXT,
+                "Tabs (browsing contexts) one worker may hold open in its user context.");
+        bindLimit(workerPerSite, ResearchRuntimeSettings.KEY_WORKER_PER_SITE,
+                ResearchRuntimeSettings.DEFAULT_WORKER_PER_SITE,
+                "Worker browser operations against the same site at the same time, over all workers and "
+                        + "chats. Search engines count as one site.");
+        bindLimit(workerAcquireTimeout, ResearchRuntimeSettings.KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS,
+                "How long a worker waits for a free user context before its task fails.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
-                "Maximum number of sources one review reads (newest first).");
+                "How many sources one review reads at most (newest first).");
         bindLimit(reviewMaxChars, ResearchRuntimeSettings.KEY_REVIEW_MAX_CHARS,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_CHARS,
-                "How many characters per source go into the review.");
+                "How many characters per source enter the review.");
         bindLimit(conceptToolRounds, ResearchRuntimeSettings.KEY_CONCEPT_TOOL_ROUNDS,
                 ResearchRuntimeSettings.DEFAULT_CONCEPT_TOOL_ROUNDS,
                 "How many model-tool cycles ONE concept turn may make (work budget).");
@@ -557,6 +671,50 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
      * persisted on Enter and focus-lost, and a non-numeric/non-positive entry resets to the persisted
      * value instead of silently storing something broken. Applies to NEW sessions like its neighbours.
      */
+    /** Like {@link #bindLimit} but 0 is a legal value (e.g. "stop right away"). */
+    private void bindNonNegativeLimit(final JTextField field, final String key, final int fallback,
+                                      String tooltip) {
+        field.setText(String.valueOf(
+                ResearchRuntimeSettings.loadNonNegativeInt(store, key, fallback)));
+        field.setToolTipText(tooltip);
+        final Runnable persist = new Runnable() {
+            public void run() {
+                try {
+                    int value = Integer.parseInt(field.getText().trim());
+                    if (value >= 0) {
+                        ResearchRuntimeSettings.saveNonNegativeInt(store, key, value);
+                        return;
+                    }
+                } catch (NumberFormatException invalid) {
+                    // fall through to the reset below
+                }
+                field.setText(String.valueOf(
+                        ResearchRuntimeSettings.loadNonNegativeInt(store, key, fallback)));
+            }
+        };
+        field.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                persist.run();
+            }
+        });
+        field.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persist.run();
+            }
+        });
+    }
+
+    private void bindWorkerRole(final JCheckBox box, final String key, String tooltip) {
+        box.setSelected(ResearchRuntimeSettings.loadWorkerRole(store, key));
+        box.setToolTipText(tooltip + " Applies to new sessions.");
+        box.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveWorkerRole(ResearchRuntimeSettingsPanel.this.store, key, box.isSelected());
+            }
+        });
+    }
+
     private void bindLimit(final JTextField field, final String key, final int fallback, String tooltip) {
         field.setText(String.valueOf(
                 ResearchRuntimeSettings.loadPositiveInt(store, key, fallback)));

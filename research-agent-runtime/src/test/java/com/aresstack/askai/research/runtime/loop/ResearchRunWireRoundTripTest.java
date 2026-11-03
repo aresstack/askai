@@ -15,7 +15,7 @@ public class ResearchRunWireRoundTripTest {
 
     @Test
     public void markersAreIdenticalOnBothSides() {
-        assertEquals(com.aresstack.askai.research.acp.ResearchRunWire.MARKER, ResearchRunWire.MARKER);
+        assertEquals(com.aresstack.askai.research.agentwire.ResearchRunWire.MARKER, ResearchRunWire.MARKER);
     }
 
     @Test
@@ -29,22 +29,22 @@ public class ResearchRunWireRoundTripTest {
                 ResearchRunActivity.readingPage("https://example-a.org/article", "example-a.org",
                         "Ein Artikel über PF4J & Isolation"));
 
-        assertTrue(com.aresstack.askai.research.acp.ResearchRunWire.isWireLine(line));
-        assertEquals("progress", com.aresstack.askai.research.acp.ResearchRunWire.typeOf(line));
-        Map<String, String> f = com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
-        assertEquals(1, com.aresstack.askai.research.acp.ResearchRunWire.intField(f, "pages"));
-        assertEquals(1, com.aresstack.askai.research.acp.ResearchRunWire.intField(f, "sources"));
-        assertEquals(1, com.aresstack.askai.research.acp.ResearchRunWire.intField(f, "hosts"));
-        assertEquals(2, com.aresstack.askai.research.acp.ResearchRunWire.intField(f, "tools"));
-        assertEquals(3, com.aresstack.askai.research.acp.ResearchRunWire.intField(f, "min_sources"));
-        assertEquals(2, com.aresstack.askai.research.acp.ResearchRunWire.intField(f, "min_hosts"));
+        assertTrue(com.aresstack.askai.research.agentwire.ResearchRunWire.isWireLine(line));
+        assertEquals("progress", com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
+        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
+        assertEquals(1, com.aresstack.askai.research.agentwire.ResearchRunWire.intField(f, "pages"));
+        assertEquals(1, com.aresstack.askai.research.agentwire.ResearchRunWire.intField(f, "sources"));
+        assertEquals(1, com.aresstack.askai.research.agentwire.ResearchRunWire.intField(f, "hosts"));
+        assertEquals(2, com.aresstack.askai.research.agentwire.ResearchRunWire.intField(f, "tools"));
+        assertEquals(3, com.aresstack.askai.research.agentwire.ResearchRunWire.intField(f, "min_sources"));
+        assertEquals(2, com.aresstack.askai.research.agentwire.ResearchRunWire.intField(f, "min_hosts"));
         assertEquals("READING_PAGE", f.get("activity"));
         assertEquals("https://example-a.org/article", f.get("url"));
         // Free-text fields travel URL-encoded (never a space on the wire) and decode losslessly.
         assertEquals("example-a.org",
-                com.aresstack.askai.research.acp.ResearchRunWire.decodedField(f, "host"));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(f, "host"));
         assertEquals("Ein Artikel über PF4J & Isolation",
-                com.aresstack.askai.research.acp.ResearchRunWire.decodedField(f, "title"));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(f, "title"));
     }
 
     @Test
@@ -52,12 +52,12 @@ public class ResearchRunWireRoundTripTest {
         ResearchRunProgress progress = new ResearchRunProgress();
         String line = ResearchRunWire.progress(progress, ResearchRunBudget.defaults(),
                 ResearchRunActivity.searching("pf4j plugin isolation updates"));
-        Map<String, String> f = com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
+        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
         assertEquals("SEARCHING", f.get("activity"));
         assertEquals("pf4j plugin isolation updates",
-                com.aresstack.askai.research.acp.ResearchRunWire.decodedField(f, "query"));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(f, "query"));
         assertEquals("a missing field decodes to the empty string", "",
-                com.aresstack.askai.research.acp.ResearchRunWire.decodedField(f, "title"));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(f, "title"));
     }
 
     @Test
@@ -72,11 +72,11 @@ public class ResearchRunWireRoundTripTest {
                 ResearchRunOutcome.from(ResearchStopReason.TOOL_BUDGET_EXHAUSTED, progress, budget);
         String line = ResearchRunWire.outcome(outcome);
 
-        assertEquals("outcome", com.aresstack.askai.research.acp.ResearchRunWire.typeOf(line));
-        Map<String, String> f = com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
+        assertEquals("outcome", com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
+        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
         assertEquals("TOOL_BUDGET_EXHAUSTED", f.get("stop"));
-        assertEquals(7, com.aresstack.askai.research.acp.ResearchRunWire.intField(f, "sources"));
-        assertEquals(1, com.aresstack.askai.research.acp.ResearchRunWire.intField(f, "hosts"));
+        assertEquals(7, com.aresstack.askai.research.agentwire.ResearchRunWire.intField(f, "sources"));
+        assertEquals(1, com.aresstack.askai.research.agentwire.ResearchRunWire.intField(f, "hosts"));
         assertEquals("INSUFFICIENT_HOST_DIVERSITY", f.get("limitation"));
         assertEquals("CONTINUE_RESEARCH", f.get("action"));
         assertEquals("true", f.get("recoverable"));
@@ -87,7 +87,7 @@ public class ResearchRunWireRoundTripTest {
         String line = ResearchRunWire.outcome(ResearchRunOutcome.from(
                 ResearchStopReason.RERANKER_CONFIGURATION_ERROR, new ResearchRunProgress(),
                 ResearchRunBudget.defaults()));
-        Map<String, String> f = com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
+        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
         assertEquals("RERANKER_CONFIGURATION_ERROR", f.get("stop"));
         assertEquals("OPEN_CONFIGURATION", f.get("action"));
         assertEquals("false", f.get("recoverable"));
@@ -97,45 +97,45 @@ public class ResearchRunWireRoundTripTest {
     public void scopeProposalRoundTripsWithQuestionAndAspects() {
         String line = ResearchRunWire.scopeProposal("SUBMIT_SCOPE", "How do EVs age over time?",
                 java.util.Arrays.asList("battery health", "cost & resale"));
-        assertTrue(com.aresstack.askai.research.acp.ResearchRunWire.isWireLine(line));
-        assertEquals("scope", com.aresstack.askai.research.acp.ResearchRunWire.typeOf(line));
-        Map<String, String> f = com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
+        assertTrue(com.aresstack.askai.research.agentwire.ResearchRunWire.isWireLine(line));
+        assertEquals("scope", com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
+        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
         assertEquals("SUBMIT_SCOPE", f.get("command"));
         // Free text travels URL-encoded (never a space on the wire) and decodes losslessly.
         assertEquals("How do EVs age over time?",
-                com.aresstack.askai.research.acp.ResearchRunWire.decodedField(f, "question"));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(f, "question"));
         assertEquals(java.util.Arrays.asList("battery health", "cost & resale"),
-                com.aresstack.askai.research.acp.ResearchRunWire.decodedList(f, "aspects"));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedList(f, "aspects"));
     }
 
     @Test
     public void scopeProposalWithoutAspectsOmitsTheField() {
         String line = ResearchRunWire.scopeProposal("SUBMIT_SCOPE", "just a question", null);
-        Map<String, String> f = com.aresstack.askai.research.acp.ResearchRunWire.fields(line);
+        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
         assertEquals("SUBMIT_SCOPE", f.get("command"));
-        assertTrue(com.aresstack.askai.research.acp.ResearchRunWire.decodedList(f, "aspects").isEmpty());
+        assertTrue(com.aresstack.askai.research.agentwire.ResearchRunWire.decodedList(f, "aspects").isEmpty());
     }
 
     @Test
     public void greetedSignalRoundTrips() {
         String line = ResearchRunWire.greeted();
-        assertTrue(com.aresstack.askai.research.acp.ResearchRunWire.isWireLine(line));
-        assertEquals(com.aresstack.askai.research.acp.ResearchRunWire.TYPE_GREETED,
-                com.aresstack.askai.research.acp.ResearchRunWire.typeOf(line));
+        assertTrue(com.aresstack.askai.research.agentwire.ResearchRunWire.isWireLine(line));
+        assertEquals(com.aresstack.askai.research.agentwire.ResearchRunWire.TYPE_GREETED,
+                com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
     }
 
     @Test
     public void attentionLinesRoundTripBothStates() {
         String required = ResearchRunWire.attention("CAPTCHA", "bing.com",
                 "https://www.bing.com/search?q=pf4j", false);
-        assertEquals("attention", com.aresstack.askai.research.acp.ResearchRunWire.typeOf(required));
-        Map<String, String> f = com.aresstack.askai.research.acp.ResearchRunWire.fields(required);
+        assertEquals("attention", com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(required));
+        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(required);
         assertEquals("CAPTCHA", f.get("reason"));
         assertEquals("bing.com", f.get("domain"));
         assertEquals("REQUIRED", f.get("state"));
         assertEquals("https://www.bing.com/search?q=pf4j", f.get("url"));
 
-        Map<String, String> resolved = com.aresstack.askai.research.acp.ResearchRunWire.fields(
+        Map<String, String> resolved = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(
                 ResearchRunWire.attention("CAPTCHA", "bing.com", "", true));
         assertEquals("RESOLVED", resolved.get("state"));
     }
@@ -143,8 +143,8 @@ public class ResearchRunWireRoundTripTest {
     @Test
     public void logLinesCarryFreeTextAndNewlinesAreFlattened() {
         String line = ResearchRunWire.log("accepted source-7 (duplicate content)\nsecond");
-        assertEquals("log", com.aresstack.askai.research.acp.ResearchRunWire.typeOf(line));
+        assertEquals("log", com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
         assertEquals("accepted source-7 (duplicate content) second",
-                com.aresstack.askai.research.acp.ResearchRunWire.logText(line));
+                com.aresstack.askai.research.agentwire.ResearchRunWire.logText(line));
     }
 }

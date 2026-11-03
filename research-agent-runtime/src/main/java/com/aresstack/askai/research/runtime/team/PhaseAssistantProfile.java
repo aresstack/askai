@@ -1,5 +1,10 @@
 package com.aresstack.askai.research.runtime.team;
 
+import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
+import com.aresstack.askai.research.runtime.role.ResearchRole;
+import com.aresstack.askai.research.runtime.role.RoleOutput;
+import com.aresstack.askai.research.runtime.role.RoleToolCatalog;
+
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -12,14 +17,16 @@ import java.util.Set;
  * and its context policy. The active phase — decided solely by the application's state machine — selects the
  * profile, and the profile decides the prompt and (later) the tools and readable/writable artifacts.
  *
- * <p>In this first slice only {@link #getSystemPrompt()} is consumed productively; the artifact ids, the
- * capability set and the {@link PhaseContextPolicy} are carried as declared metadata (forward hooks) so a
- * phase can already state its intended privileges before artifacts, tools and context filtering are wired.</p>
+ * <p>Since ADR 0001 lane D a profile runs a {@link ResearchRole}: the role carries the system prompt, the
+ * tool subset (the allowed capabilities), the output shape, the model slot and the context size. Only
+ * {@link #getSystemPrompt()} is consumed productively so far; the artifact ids, the capability set and the
+ * {@link PhaseContextPolicy} are carried as declared metadata (forward hooks) so a phase can already state its
+ * intended privileges before artifacts, tools and context filtering are wired.</p>
  */
 public final class PhaseAssistantProfile {
 
     private final String phaseId;
-    private final String systemPrompt;
+    private final ResearchRole role;
     private final PhaseOutputContract outputContract;
     private final String writableArtifactId;
     private final List<String> readableArtifactIds;
@@ -29,20 +36,61 @@ public final class PhaseAssistantProfile {
     public PhaseAssistantProfile(String phaseId, String systemPrompt, PhaseOutputContract outputContract,
                                  String writableArtifactId, List<String> readableArtifactIds,
                                  Set<String> allowedCapabilities, PhaseContextPolicy contextPolicy) {
+        this(phaseId, conversationRole(phaseId, systemPrompt, outputContract, allowedCapabilities),
+                outputContract, writableArtifactId, readableArtifactIds, contextPolicy);
+    }
+
+    /**
+     * A profile over an explicit {@link ResearchRole} (ADR 0001, 4.1): the role carries the system prompt,
+     * the tool subset (which IS the allowed capability set), the output shape, the model slot and the context
+     * size; the profile adds what is phase-bound (the contract object, the artifacts, the context policy).
+     */
+    public PhaseAssistantProfile(String phaseId, ResearchRole role, PhaseOutputContract outputContract,
+                                 String writableArtifactId, List<String> readableArtifactIds,
+                                 PhaseContextPolicy contextPolicy) {
+        if (role == null) {
+            throw new IllegalArgumentException("role must not be null");
+        }
+        if (role.getPromptSource() != ResearchRole.PromptSource.ROLE) {
+            throw new IllegalArgumentException("a phase assistant declares its own system prompt");
+        }
+        if (outputContract == null) {
+            throw new IllegalArgumentException("outputContract must not be null");
+        }
+        this.phaseId = phaseId == null ? "" : phaseId.trim();
+        this.role = role;
+        this.outputContract = outputContract;
+        this.writableArtifactId = writableArtifactId == null ? "" : writableArtifactId.trim();
+        this.readableArtifactIds = immutableStrings(readableArtifactIds);
+        this.allowedCapabilities = immutableSet(new LinkedHashSet<String>(role.getTools().getToolNames()));
+        this.contextPolicy = contextPolicy == null
+                ? PhaseContextPolicy.OWN_PHASE_CHAT_AND_LATEST_ARTIFACTS : contextPolicy;
+    }
+
+    /**
+     * The conversation role of a phase: role id {@code conversation} (the phase-agnostic fallback) or
+     * {@code conversation.<phase>}, the conversation slot, the slot's default context, the given tools.
+     */
+    public static ResearchRole conversationRole(String phaseId, String systemPrompt,
+                                                PhaseOutputContract outputContract,
+                                                java.util.Collection<String> toolNames) {
         if (systemPrompt == null || systemPrompt.trim().isEmpty()) {
             throw new IllegalArgumentException("systemPrompt must not be empty");
         }
         if (outputContract == null) {
             throw new IllegalArgumentException("outputContract must not be null");
         }
-        this.phaseId = phaseId == null ? "" : phaseId.trim();
-        this.systemPrompt = systemPrompt;
-        this.outputContract = outputContract;
-        this.writableArtifactId = writableArtifactId == null ? "" : writableArtifactId.trim();
-        this.readableArtifactIds = immutableStrings(readableArtifactIds);
-        this.allowedCapabilities = immutableSet(allowedCapabilities);
-        this.contextPolicy = contextPolicy == null
-                ? PhaseContextPolicy.OWN_PHASE_CHAT_AND_LATEST_ARTIFACTS : contextPolicy;
+        String phase = phaseId == null ? "" : phaseId.trim().toLowerCase(java.util.Locale.ROOT);
+        return ResearchRole.builder(phase.isEmpty() ? "conversation" : "conversation." + phase,
+                        ResearchModelSlots.CONVERSATION)
+                .purpose(phase.isEmpty()
+                        ? "assists the user in a phase without its own profile"
+                        : "assists the user in the " + phase + " phase")
+                .systemPrompt(systemPrompt)
+                .tools(RoleToolCatalog.of(toolNames == null
+                        ? Collections.<String>emptyList() : new java.util.ArrayList<String>(toolNames)))
+                .output(RoleOutput.text(outputContract.getClass().getSimpleName()))
+                .build();
     }
 
     /** The phase this profile serves (matched case-insensitively against the live host phase id). */
@@ -51,7 +99,12 @@ public final class PhaseAssistantProfile {
     }
 
     public String getSystemPrompt() {
-        return systemPrompt;
+        return role.getSystemPrompt();
+    }
+
+    /** The conversation role this profile runs (prompt, tools, output, slot, context). */
+    public ResearchRole getRole() {
+        return role;
     }
 
     /** How this phase's raw model output is parsed/validated — selected together with the system prompt. */

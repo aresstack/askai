@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * The browser port behind the MCP web_* tools. One session per research session. Implementations differ in
  * capability and MUST be visibly selected via {@link BrowserBackendKind} — there is no silent fallback from
- * the Playwright browser runtime to the static backend. Failures are reported as {@link BrowserException} (mapped to
+ * the Playwright sidecar to the static backend. Failures are reported as {@link BrowserException} (mapped to
  * tool errors), never as raw stack traces to the model.
  */
 public interface BrowserSession {
@@ -13,6 +13,18 @@ public interface BrowserSession {
     BrowserBackendKind getBackendKind();
 
     WebSearchResult search(String query) throws BrowserException;
+
+    /**
+     * A search with exactly these engines (catalog ids, in this order) for this one call; {@code null} = the engines
+     * enabled in the settings. A wrong id is refused, never corrected or replaced by another engine. Backends without
+     * engine selection search as {@link #search(String)} does when no selection is given and refuse one otherwise.
+     */
+    default WebSearchResult search(String query, List<String> engineIds) throws BrowserException {
+        if (engineIds == null) {
+            return search(query);
+        }
+        throw new BrowserException("This browser backend cannot choose search engines per call.");
+    }
 
     BrowserPageSnapshot open(String url) throws BrowserException;
 

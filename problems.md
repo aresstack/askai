@@ -479,7 +479,7 @@ Fortlaufende IDs `MCP-Pnnn`. Feasibility probes gegen Maven Central durchgeführ
 **Erkannt in:** Commit 32 (browser MCP) — Vorab-Feasibility
 **Status:** WORKAROUND
 **Schweregrad:** MEDIUM
-**Betroffene Module:** browser-runtime-java21 (neu), browser-api
+**Betroffene Module:** browser-mcp-server-java21 (neu), browser-api
 
 ### Erwartung
 Browserzugriff über MCP; `com.aresstack:playwright4j:0.1.0` verwenden.
@@ -495,7 +495,7 @@ anspricht. Vorteile: kein Java-21-Bytecode im Host, Browserabsturz reißt AskAI 
 pro-Prozess schließbar, keine Classloader-Konflikte.
 
 ### Gewähltes Zwischenverhalten
-Neues Modul `:browser-runtime-java21` (Java-21-Toolchain, `playwright4j` + `solon-ai-mcp`), separates
+Neues Modul `:browser-mcp-server-java21` (Java-21-Toolchain, `playwright4j` + `solon-ai-mcp`), separates
 ausführbares Artefakt, **nicht** im AskAI-Fat-JAR, nur über den Java-8-MCP-Client angesprochen. Der Host
 kennt nur den Browser-MCP-Endpoint + die flachen Tools (`web_search/open/read/links/follow/back`).
 Optionaler `HttpURLConnection`+jsoup-Fallback für statische Seiten hinter demselben Browser-Port (nicht als
@@ -582,7 +582,7 @@ isoliert beweisen. Dies ist durch die obige Auflösung erledigt.
 **Erkannt in:** Commit 32 (browser MCP sidecar)
 **Status:** RESOLVED (Commit 36B)
 **Schweregrad:** HIGH (historisch)
-**Betroffene Module:** browser-runtime-java21
+**Betroffene Module:** browser-mcp-server-java21
 
 ### Erwartung
 Der Java-21-Sidecar bedient `web_*` real über Playwright (JS-Navigation, dynamische Seiten).

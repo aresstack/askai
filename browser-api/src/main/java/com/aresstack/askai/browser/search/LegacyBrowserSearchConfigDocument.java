@@ -5,14 +5,14 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * The versioned, immutable configuration document handed from the host to the Java-21 browser runtime
+ * The versioned, immutable configuration document handed from the host to the Java-21 browser sidecar
  * ({@code --browser-config=<absolute-path>}) instead of dozens of CLI arguments. JSON with a fixed,
  * restricted shape (all settings values are strings in the canonical codec form):
  * <pre>
  * { "schemaVersion": 1, "settingsRevision": 3, "settingsDigest": "…",
  *   "settings": { "consent.enabled": "true", … } }
  * </pre>
- * Writer and parser are dependency-free so every module (Java 8 host, Java 8 runtime, Java-21 browser runtime)
+ * Writer and parser are dependency-free so every module (Java 8 host, Java 8 runtime, Java 21 sidecar)
  * uses the SAME implementation. The parser is strict: a malformed document throws with a readable
  * message — a broken config never silently degrades to defaults.
  *
@@ -27,10 +27,12 @@ public final class LegacyBrowserSearchConfigDocument {
      * v3 = A4 layout-repair ticket-cache settings; v4 = the AI layout resolver ships productively
      * enabled (the stale disabled shipped default in frozen session profiles is lifted by the typed
      * snapshot migration); v5 = the primary-engine-plus-fallback-templates pair is replaced by an
-     * ORDERED engine selection with an acquisition mode. Older documents decode cleanly: missing keys
-     * fall back to {@link LegacyBrowserSearchDefaults}, which is the migration.
+     * ORDERED engine selection with an acquisition mode; v6 = the shipped challenge-text list no longer
+     * carries the bare word "captcha" (an untouched old shipped list is lifted while decoding, see
+     * {@link LegacyBrowserSearchSettingsCodec#liftStaleShippedDefaults}). Older documents decode cleanly:
+     * missing keys fall back to {@link LegacyBrowserSearchDefaults}, which is the migration.
      */
-    public static final int CURRENT_SCHEMA_VERSION = 5;
+    public static final int CURRENT_SCHEMA_VERSION = 6;
 
     public final int schemaVersion;
     public final long settingsRevision;
@@ -59,10 +61,10 @@ public final class LegacyBrowserSearchConfigDocument {
     }
 
     /**
-     * The browser-near subset for the browser runtime: AI prompts and reranker/model configuration stay in
+     * The browser-near subset for the sidecar: AI prompts and reranker/model configuration stay in
      * the Java-8 research agent and are NEVER transferred into the browser process.
      */
-    public static Map<String, String> browserSubset(Map<String, String> allValues) {
+    public static Map<String, String> sidecarSubset(Map<String, String> allValues) {
         Map<String, String> subset = new LinkedHashMap<String, String>();
         for (Map.Entry<String, String> entry : allValues.entrySet()) {
             String key = entry.getKey();

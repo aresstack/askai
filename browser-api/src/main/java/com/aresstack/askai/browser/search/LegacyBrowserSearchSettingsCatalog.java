@@ -245,6 +245,13 @@ public final class LegacyBrowserSearchSettingsCatalog {
         integer(f, "analysis.maximumStructureSignatureDepth", SECTION_ANALYSIS,
                 "Maximum structure signature depth",
                 "Depth bound of the structural shape signature.", 1, 10);
+        integer(f, "analysis.maximumCaptureRetries", SECTION_ANALYSIS,
+                "Capture retries after a mid-capture DOM change",
+                "0 = capture once and flag the inconsistency; each retry is a full capture "
+                        + "(seconds on a big result page).", 0, 10);
+        integer(f, "analysis.captureSettleMillis", SECTION_ANALYSIS,
+                "Settle wait before a capture retry (ms)", "Only used when retries are allowed.",
+                0, 10_000);
         integer(f, "analysis.linkHarvestMinimumStructuredCandidates", SECTION_ANALYSIS,
                 "Link harvest below N structured candidates",
                 "When the structured extraction yields fewer candidates, the page's external links "

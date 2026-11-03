@@ -10,7 +10,7 @@ import com.aresstack.askai.plugin.api.service.PluginPathService;
 import com.aresstack.askai.plugin.api.service.ThemeService;
 import com.aresstack.askai.plugin.api.service.UiExecutor;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 import com.aresstack.askai.research.agent.ResearchAgentSessionFactory;
 
 import org.junit.Test;
@@ -163,9 +163,11 @@ public class ResearchRuntimeModeTest {
     }
 
     @Test
-    public void persistedFakeModeCreatesTheFakeBackendWithoutAnyServiceLookup() {
+    public void fakeModeCreatesTheFakeBackendWithoutAnyServiceLookup() {
         FakeHostContext host = new FakeHostContext();
-        host.store.put(ResearchRuntimeSettings.KEY_MODE, ResearchBackendMode.FAKE.name());
+        // The developer-only override: a PERSISTED FAKE mode (nothing else can make the productive chain
+        // unavailable at configuration level — the agent and the browser run in-process).
+        new ResearchRuntimeSettings(ResearchBackendMode.FAKE, "chrome", true).save(host.store);
         AgentSession session = new ResearchAgentSessionFactory().create(
                 new AgentSessionCreationRequest("s1", "p1", new HashMap<String, String>()), host);
         assertNotNull(session);
@@ -176,7 +178,8 @@ public class ResearchRuntimeModeTest {
     @Test
     public void missingHostServiceIsNamedIndividually() throws Exception {
         FakeHostContext host = new FakeHostContext();
-        // The settings are usable, but the host offers no runtime services.
+        // The configuration is complete (nothing external left to configure), but the host offers no
+        // runtime services.
         File dir = Files.createTempDirectory("askai-mode").toFile();
         host.workspaceDir = dir;
         new ResearchRuntimeSettings(ResearchBackendMode.ACP, "chrome", true).save(host.store);
@@ -189,6 +192,17 @@ public class ResearchRuntimeModeTest {
                     expected.getMessage().contains("McpServerRegistry"));
             assertTrue(expected.getMessage().contains("no fallback"));
         }
+    }
+
+    @Test
+    public void completedSettingsNeverComplainAboutTheAgentJava() throws Exception {
+        // Regression (user-reported): Save validated the RAW panel fields and demanded the removed
+        // agent-Java field. Validation must always run on the COMPLETED settings — the agent runs on
+        // AskAI's own JVM.
+        ResearchRuntimeSettings raw = new ResearchRuntimeSettings(ResearchBackendMode.ACP, "chrome", true);
+        java.util.List<String> problems =
+                ResearchRuntimeDefaults.complete(raw).validateProductive();
+        assertTrue("completed settings must be fully usable: " + problems, problems.isEmpty());
     }
 
     @Test
@@ -226,8 +240,6 @@ public class ResearchRuntimeModeTest {
     @Test
     public void panelReadsAndWritesTheSameTypedMapper() {
         MemoryStore store = new MemoryStore();
-        // camoufox: the one channel installedBrowserChannel never swaps for another installed browser, so the
-        // round trip does not depend on whether Edge or Chrome exists on the machine.
         new ResearchRuntimeSettings(ResearchBackendMode.ACP, "camoufox", false)
                 .save(store);
         ResearchRuntimeSettingsPanel panel = new ResearchRuntimeSettingsPanel(store);

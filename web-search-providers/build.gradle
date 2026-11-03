@@ -16,7 +16,7 @@ dependencies {
     implementation "com.aresstack:serp4j-provider-brightdata:${serp4jVersion}"
     implementation "com.aresstack:serp4j-provider-dataforseo:${serp4jVersion}"
     implementation "com.aresstack:serp4j-provider-serpapi:${serp4jVersion}"
-    api 'com.google.code.gson:gson:2.13.1'
+    api "com.google.code.gson:gson:${gsonVersion}"
     implementation 'org.asynchttpclient:async-http-client:2.16.0'
 
     testImplementation 'junit:junit:4.13.2'

@@ -39,7 +39,11 @@ public final class SearchPageMechanicalAnalyzer {
         for (RenderedContainerDescriptor container : document.containers) {
             SearchPageRegionClassification region = classify(container);
             regions.put(container.containerId, region);
+            // The root (body) is the whole page, never a result region: the decision validator
+            // refuses it as FULL_PAGE_SELECTION, so offering it only let a small model pick it on
+            // every repair attempt.
             if (region == SearchPageRegionClassification.UNKNOWN && container.visible
+                    && !container.parentContainerId.isEmpty()
                     && container.linkCount > 0
                     && container.totalTextLength
                             >= settings.analysis.minimumContainerTextCharacters) {
@@ -125,9 +129,7 @@ public final class SearchPageMechanicalAnalyzer {
                 || containsToken(tokens, "pager")) {
             return SearchPageRegionClassification.PAGINATION;
         }
-        if (containsToken(tokens, "ad") || containsToken(tokens, "ads")
-                || containsToken(tokens, "advert") || containsToken(tokens, "sponsored")
-                || containsToken(tokens, "sponsor")) {
+        if (namedAsAdvertisement(tokens)) {
             return SearchPageRegionClassification.ADVERTISEMENT;
         }
         if (containsToken(tokens, "filter") || containsToken(tokens, "filters")
@@ -135,6 +137,17 @@ public final class SearchPageMechanicalAnalyzer {
             return SearchPageRegionClassification.FILTERS;
         }
         return SearchPageRegionClassification.UNKNOWN;
+    }
+
+    /** An element whose id, class or role names it an ad ("ad", "ads", "advert", "sponsor(ed)"). */
+    static boolean namedAsAdvertisement(RenderedContainerDescriptor c) {
+        return namedAsAdvertisement(nameTokens(c));
+    }
+
+    private static boolean namedAsAdvertisement(String tokens) {
+        return containsToken(tokens, "ad") || containsToken(tokens, "ads")
+                || containsToken(tokens, "advert") || containsToken(tokens, "sponsored")
+                || containsToken(tokens, "sponsor");
     }
 
     private static String nameTokens(RenderedContainerDescriptor c) {

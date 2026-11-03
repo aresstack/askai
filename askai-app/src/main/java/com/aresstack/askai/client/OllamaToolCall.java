@@ -11,14 +11,26 @@ import java.util.Map;
  */
 public final class OllamaToolCall {
 
+    private final String id;
     private final String name;
     private final Map<String, Object> arguments;
 
     public OllamaToolCall(String name, Map<String, Object> arguments) {
+        this(null, name, arguments);
+    }
+
+    /** @param id the provider's call id, or null/"" when it assigned none */
+    public OllamaToolCall(String id, String name, Map<String, Object> arguments) {
+        this.id = id == null ? "" : id;
         this.name = name == null ? "" : name;
         this.arguments = arguments == null
                 ? Collections.<String, Object>emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(arguments));
+    }
+
+    /** The provider's call id, or "" when none was assigned. */
+    public String getId() {
+        return id;
     }
 
     public String getName() {

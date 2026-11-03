@@ -36,15 +36,13 @@ public final class ReloadableMainModelChat implements MainModelChat {
     }
 
     /**
-     * Abort the underlying call in flight (if the current client supports it), so a session/tab close or a
-     * pause/cancel returns promptly rather than waiting out the full model timeout. A no-op for clients that
-     * are not HTTP-backed (e.g. the unavailable/fake transports).
+     * Abort the underlying call in flight, so a session/tab close or a pause/cancel returns promptly rather
+     * than waiting out the full model timeout. A no-op for clients without a transport (e.g. the
+     * unavailable/fake transports).
      */
+    @Override
     public void cancelInFlight() {
-        MainModelChat current = delegate.get();
-        if (current instanceof HttpMainModelChatClient) {
-            ((HttpMainModelChatClient) current).cancelInFlight();
-        }
+        delegate.get().cancelInFlight();
     }
 
     @Override

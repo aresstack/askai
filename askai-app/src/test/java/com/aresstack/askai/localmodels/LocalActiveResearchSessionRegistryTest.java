@@ -19,7 +19,7 @@ import static org.junit.Assert.assertTrue;
 /**
  * The host active-session registry re-publishes the inference descriptor to every RUNNING session's
  * directory when the central main model changes, and only to those still registered. Uses the inference
- * provider's {@code EndpointSources} seam so no local runtime is started.
+ * provider's {@code EndpointSources} seam so no sidecar is started.
  */
 public class LocalActiveResearchSessionRegistryTest {
 

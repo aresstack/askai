@@ -39,6 +39,9 @@ public final class ResearchServiceEndpoint {
     private final String endpointId;
     private McpEndpointHandle handle;
     private boolean closed;
+    /** The in-process service lane of the agent (manual_source_*, search_scope_*). */
+    private final com.aresstack.askai.research.runtime.loop.ContributionToolInvoker invoker =
+            new com.aresstack.askai.research.runtime.loop.ContributionToolInvoker();
 
     public ResearchServiceEndpoint(McpServerRegistry registry, String sessionKey, long pluginGenerationId,
                                    ResearchControlContext context) {
@@ -56,6 +59,11 @@ public final class ResearchServiceEndpoint {
         return handle;
     }
 
+    /** The agent's in-process service lane over this endpoint's tools (no transport). */
+    public com.aresstack.askai.research.runtime.loop.ToolInvoker toolInvoker() {
+        return invoker;
+    }
+
     /** Register the internal endpoint and publish its fixed tool set (no phase dependency). Idempotent. */
     public void open() {
         if (closed || handle != null) {
@@ -63,10 +71,12 @@ public final class ResearchServiceEndpoint {
         }
         handle = registry.registerEndpoint(
                 new McpEndpointDefinition(endpointId, "Research Service (internal)"));
-        registry.updateTools(handle, Arrays.asList(
+        java.util.List<McpToolContribution> tools = Arrays.asList(
                 manualSourceAcceptTool(context), manualSourceParkTool(context),
                 searchScopeBeginTool(context), searchScopeEvaluateTool(context),
-                searchScopeEndTool(context)));
+                searchScopeEndTool(context));
+        invoker.setTools(tools);
+        registry.updateTools(handle, tools);
     }
 
     /** Unregister the endpoint (invalidates the token). Idempotent. */
@@ -75,6 +85,7 @@ public final class ResearchServiceEndpoint {
             return;
         }
         closed = true;
+        invoker.close();
         if (handle != null) {
             registry.unregisterEndpoint(handle);
             handle = null;

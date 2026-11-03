@@ -5,9 +5,9 @@ import com.aresstack.askai.browser.search.layout.SearchPageAnalysisArtifact;
 import com.aresstack.askai.browser.search.layout.SearchPageAnalysisDiagnosticArtifact;
 
 /**
- * The bounded, model-free repair offer the browser runtime returns for one low-confidence SERP snapshot. It
+ * The bounded, model-free repair offer the sidecar returns for one low-confidence SERP snapshot. It
  * carries the neutral analysis artifact and typed diagnostics — never the full RenderedPageDocument,
- * raw HTML, Playwright objects, model configuration or secrets. The browser runtime keeps the corresponding
+ * raw HTML, Playwright objects, model configuration or secrets. The sidecar keeps the corresponding
  * document cached under {@link #attemptId} until it is applied, discarded or expires.
  */
 public final class SearchLayoutRepairRequest {

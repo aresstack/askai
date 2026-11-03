@@ -1,6 +1,6 @@
 # MCP marketplace
 
-`:mcp-marketplace` (Java 8, package `com.aresstack.mcp.*`) is the marketplace integration taken over
+`:mcp-marketplace` (package `com.aresstack.mcp.*`) is the marketplace integration taken over
 from the provided source drop — it was integrated, not rewritten.
 
 ## What it does

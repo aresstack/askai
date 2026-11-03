@@ -1,13 +1,13 @@
 package com.aresstack.askai.research.host;
 
-import com.aresstack.askai.browser.runtime.InProcessBrowser;
+import com.aresstack.askai.browser.playwright.PlaywrightBrowserRuntime;
 
 /**
  * Downloads the managed Camoufox browser in the background as soon as a productive research session with the
  * Camoufox channel starts, so the first browser command does not wait for the one-time download (about
- * 1.3 GB). Runs the same installer the browser uses at start (its install lock serializes concurrent
- * installs) on a daemon thread of this process, at most once per AskAI process. An already verified
- * installation finishes immediately.
+ * 1.3 GB). Runs the same installer the in-process browser runtime uses at start (serialized through its
+ * install lock), at most once per AskAI process, on a daemon thread. An already verified installation
+ * finishes immediately.
  */
 final class CamoufoxPrefetch {
 
@@ -16,17 +16,23 @@ final class CamoufoxPrefetch {
     private CamoufoxPrefetch() {
     }
 
-    static synchronized void startOnce(ResearchRuntimeConfig config) {
-        if (started || !ResearchRuntimeSettings.CAMOUFOX_CHANNEL.equals(config.getBrowserChannel())) {
+    static synchronized void startOnce(String browserChannel) {
+        if (started || !ResearchRuntimeSettings.CAMOUFOX_CHANNEL.equals(browserChannel)) {
             return;
         }
         started = true;
-        Thread install = new Thread(new Runnable() {
+        Thread worker = new Thread(new Runnable() {
             public void run() {
-                System.err.println("[camoufox-prefetch] finished with exit code " + InProcessBrowser.installCamoufox());
+                try {
+                    int code = PlaywrightBrowserRuntime.installCamoufox();
+                    System.err.println("[camoufox-prefetch] finished with exit code " + code);
+                } catch (RuntimeException failed) {
+                    // Not fatal: the browser runtime installs on its first start anyway.
+                    System.err.println("[camoufox-prefetch] failed: " + failed.getMessage());
+                }
             }
         }, "camoufox-prefetch");
-        install.setDaemon(true);
-        install.start();
+        worker.setDaemon(true);
+        worker.start();
     }
 }

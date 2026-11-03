@@ -6,7 +6,7 @@ import com.aresstack.askai.research.state.ResearchCommandType;
  * The ONE seam between the chat/workspace UI and a research session's controls. Plain text goes through
  * {@link #submitPrompt}; STRUCTURED actions (approve, review, pause, …) go through {@link #dispatch} with the
  * EXISTING domain {@link ResearchCommandType} — there is deliberately no second command hierarchy, no Swing,
- * no ACP and no host type here, and backends never interpret chat text by string matching. Availability
+ * no transport and no host type here, and backends never interpret chat text by string matching. Availability
  * comes from the session's state projection (the state machine stays the single source of truth); the UI
  * never re-implements phase rules.
  */

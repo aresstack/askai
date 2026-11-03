@@ -72,6 +72,24 @@ final class SerpDocuments {
      * heading link to an external target and explanatory snippet text.
      */
     String addResultColumn(int blocks, RenderedBox columnBox, RenderedColor background) {
+        List<String> classes = new ArrayList<String>();
+        for (int i = 0; i < blocks; i++) {
+            classes.add("result");
+        }
+        return addResultColumn(columnBox, background, classes);
+    }
+
+    /** As {@link #addResultColumn(int, RenderedBox, RenderedColor)}, one block per class token given. */
+    String addResultColumn(RenderedBox columnBox, RenderedColor background,
+                           List<String> blockClasses) {
+        return addResultColumn(columnBox, background, blockClasses,
+                Collections.nCopies(blockClasses.size(), "li(h2(a),p)"));
+    }
+
+    /** One block per class token and structure signature given. */
+    String addResultColumn(RenderedBox columnBox, RenderedColor background,
+                           List<String> blockClasses, List<String> blockSignatures) {
+        int blocks = blockClasses.size();
         String columnId = nextContainerId();
         bodyChildIds.add(columnId);
         List<String> blockIds = new ArrayList<String>();
@@ -82,7 +100,7 @@ final class SerpDocuments {
             blockIds.add(blockId);
             blockDescriptors.add(RenderedContainerDescriptor.builder(blockId)
                     .hierarchy(columnId, Collections.<String>emptyList(), i, 2)
-                    .semantics("li", "", Arrays.asList("result"), "", "",
+                    .semantics("li", "", Arrays.asList(blockClasses.get(i)), "", "",
                             Collections.<String>emptyList())
                     .text("Result " + i + " title Explanatory snippet text describing the target "
                                     + "page in one or two sentences.",
@@ -93,7 +111,7 @@ final class SerpDocuments {
                             1.0, false, 0.1, 0.1)
                     .colors(RenderedColor.TRANSPARENT, background, 0, 0)
                     .separation("", 0, "", 4, 8)
-                    .structure(new DomStructureSignature("li(h2(a),p)"), blocks - 1)
+                    .structure(new DomStructureSignature(blockSignatures.get(i)), blocks - 1)
                     .build());
             addLink(blockId, "https://site" + i + ".example.org/page", "Result " + i + " title",
                     DomainClassification.EXTERNAL_DOMAIN, true,
@@ -216,14 +234,45 @@ final class SerpDocuments {
         return "container-" + String.format("%04d", column + 1 + index);
     }
 
+    /**
+     * Let the body root carry the aggregated statistics of everything below it — what the real
+     * capture reports for {@code <body>} (text, headings, external links of the whole page).
+     */
+    SerpDocuments withAggregatingBody() {
+        aggregatingBody = true;
+        return this;
+    }
+
+    private boolean aggregatingBody;
+
     RenderedPageDocument build() {
+        int text = 40;
+        int linkText = 0;
+        int headings = 0;
+        int paragraphs = 0;
+        int linkCount = 0;
+        int sameHost = 0;
+        int external = 0;
+        if (aggregatingBody) {
+            for (RenderedContainerDescriptor c : containers) {
+                if ("container-0001".equals(c.parentContainerId)) {
+                    text += c.totalTextLength;
+                    linkText += c.linkTextLength;
+                    headings += c.headingCount;
+                    paragraphs += c.paragraphCount;
+                    linkCount += c.linkCount;
+                    sameHost += c.sameHostLinkCount;
+                    external += c.externalDomainLinkCount;
+                }
+            }
+        }
         List<RenderedContainerDescriptor> all = new ArrayList<RenderedContainerDescriptor>();
         all.add(RenderedContainerDescriptor.builder("container-0001")
                 .hierarchy("", bodyChildIds, 0, 0)
                 .semantics("body", "", Collections.<String>emptyList(), "", "",
                         Collections.<String>emptyList())
-                .text("page", 40, 0, 40, 0, 0)
-                .links(0, 0, 0, 0, 0, 0)
+                .text("page", text, linkText, text - linkText, headings, paragraphs)
+                .links(linkCount, sameHost, 0, 0, external, linkCount - sameHost - external)
                 .geometry(true, new RenderedBox(0, 0, 1280, 2000), 0.4, true, 0, 0)
                 .colors(WHITE, WHITE, 0, 0)
                 .separation("", 0, "", 0, 0)
