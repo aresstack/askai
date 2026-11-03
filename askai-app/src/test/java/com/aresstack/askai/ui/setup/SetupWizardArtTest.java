@@ -49,7 +49,7 @@ public class SetupWizardArtTest {
             assertTrue("original of " + copy.getName(), original.isFile());
             BufferedImage image = ImageIO.read(original);
             BufferedImage scaled = ImageIO.read(copy);
-            if (copy.getName().startsWith("witch-")) {
+            if (copy.getName().startsWith("merlin-")) {
                 assertEquals("original keeps its size", 1024, image.getWidth());
                 assertEquals(1536, image.getHeight());
                 assertEquals(900, scaled.getHeight());
