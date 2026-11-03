@@ -63,16 +63,12 @@ public final class OllamaLibraryPanel extends JPanel {
         lists.setContinuousLayout(true);
         lists.setBorder(null);
 
-        JPanel bottom = new JPanel(new BorderLayout(6, 6));
-        bottom.add(buildActionRow(), BorderLayout.NORTH);
-        bottom.add(buildLog(), BorderLayout.CENTER);
-
-        javax.swing.JSplitPane main = new javax.swing.JSplitPane(
-                javax.swing.JSplitPane.VERTICAL_SPLIT, lists, bottom);
-        main.setResizeWeight(0.5d);
-        main.setContinuousLayout(true);
-        main.setBorder(null);
+        // The technical log is shown in the "Technical details" tab of the owning container.
+        JPanel main = new JPanel(new BorderLayout(6, 6));
+        main.add(lists, BorderLayout.CENTER);
+        main.add(buildActionRow(), BorderLayout.SOUTH);
         add(main, BorderLayout.CENTER);
+        logComponent = buildLog();
 
         progressBar.setStringPainted(true);
         add(progressBar, BorderLayout.SOUTH);
@@ -130,9 +126,14 @@ public final class OllamaLibraryPanel extends JPanel {
         logArea.setLineWrap(true);
         logArea.setWrapStyleWord(true);
         JScrollPane scroll = new JScrollPane(logArea);
-        scroll.setPreferredSize(new java.awt.Dimension(scroll.getPreferredSize().width, 160));
-        // Technical pull output collapsed by default (progress bar above stays visible).
-        return new CollapsiblePanel("Technical details", scroll, false);
+        return scroll;
+    }
+
+    private JComponent logComponent;
+
+    /** The technical pull log, shown by the owner in its "Technical details" tab. */
+    public JComponent technicalDetails() {
+        return logComponent;
     }
 
     // ------------------------------------------------------------------ actions
