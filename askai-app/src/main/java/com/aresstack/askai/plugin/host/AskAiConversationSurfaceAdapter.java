@@ -65,7 +65,7 @@ final class AskAiConversationSurfaceAdapter implements ConversationSurface {
     public void updateThinking(String activityId, String text) {
         BubbleTranscriptPanel.ThinkingHandle handle = thinking.get(activityId);
         if (handle != null) {
-            panel.appendAssistantThinkingDelta(handle, text);
+            panel.replaceAssistantThinkingText(handle, text);
         }
     }
 
