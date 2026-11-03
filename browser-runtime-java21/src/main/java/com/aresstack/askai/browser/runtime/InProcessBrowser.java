@@ -93,7 +93,7 @@ public final class InProcessBrowser implements AutoCloseable {
         return CamoufoxProvisioning.inspect(java.nio.file.Paths.get(folder).toAbsolutePath().normalize()).name();
     }
 
-    /** The verified Camoufox found without configuration (Argos' or AskAI's own installation folder), or "". */
+    /** The verified Camoufox found without configuration (AskAI's own installation folder), or "". */
     public static String foundCamoufox() {
         java.nio.file.Path found = CamoufoxProvisioning.foundInstallation();
         return found == null ? "" : found.toString();

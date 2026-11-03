@@ -24,7 +24,7 @@ public class CamoufoxChannelTest {
     public void aFolderWithAForeignCamoufoxIsNeverDownloadedOver() throws Exception {
         Path empty = temporary.newFolder("empty").toPath();
         assertEquals("NONE", InProcessBrowser.inspectCamoufox(empty.toString()));
-        Path foreign = temporary.newFolder("camoufox-156").toPath();
+        Path foreign = temporary.newFolder("my-camoufox").toPath();
         Path executable = foreign.resolve(com.aresstack.askai.browser.runtime.camoufox.CamoufoxDistribution
                 .executableName(com.aresstack.askai.browser.runtime.camoufox.CamoufoxDistribution.currentTarget()));
         Files.write(executable, new byte[]{1, 2, 3});

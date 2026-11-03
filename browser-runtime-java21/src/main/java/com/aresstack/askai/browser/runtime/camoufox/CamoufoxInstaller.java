@@ -110,7 +110,7 @@ public final class CamoufoxInstaller {
     /**
      * @param installDirectory the installation folder; {@code null} = {@code <root>/<release>-<target>}. An
      *                         explicit one lets a verified installation that was moved or renamed (e.g.
-     *                         {@code G:\camoufox-156}) be used as it is
+     *                         {@code D:\browsers\camoufox}) be used as it is
      */
     public CamoufoxInstaller(Path root, CamoufoxDistribution distribution, String target, Path installDirectory) {
         this.root = root.toAbsolutePath().normalize();
