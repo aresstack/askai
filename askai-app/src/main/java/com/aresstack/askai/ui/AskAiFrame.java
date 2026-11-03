@@ -234,13 +234,17 @@ public final class AskAiFrame extends JFrame {
      * Solon's HTTP server runs a NON-daemon {@code HTTP-Dispatcher} thread that is otherwise never released, so
      * once research has booted Solon the JVM cannot exit naturally (the app hung on close). Stopping it here lets
      * every remaining thread (EDT after dispose, the plugin-shutdown worker once it completes) finish so the JVM
-     * exits on its own — no {@code System.exit}/{@code halt} needed. Idempotent.
+     * should exit on its own; {@link ExitWatchdog} forces the exit (and logs the blocking threads) if it does
+     * not within the grace period. Idempotent.
      */
     private void performShutdown() {
         if (!shuttingDown.compareAndSet(false, true)) {
             return; // idempotent
         }
         shutdownLog("performShutdown begin");
+        // Safety net: if a library thread (JGroups, HTTP, audio, browser, executors, ...) stays alive or a
+        // teardown step hangs, the watchdog logs the culprits and exits the JVM after a grace period.
+        ExitWatchdog.start(ExitWatchdog.DEFAULT_GRACE_MILLIS);
         if (chatWorkspaceHost != null) {
             try {
                 chatWorkspaceHost.shutdown();
