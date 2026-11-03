@@ -57,10 +57,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
 
     private final JComboBox<DataForSeoSearchEngine> engine =
             ComicControls.<DataForSeoSearchEngine>comboBox(ENGINES);
-    private final JTextField locationName = ComicControls.textField(20);
-    private final JSpinner locationCode = ProviderSettingsForm.number(2276, 1, 9_999_999, 8);
-    private final JTextField languageName = ComicControls.textField(12);
-    private final JTextField languageCode = ComicControls.textField(6);
+    private final JComboBox<RegionChoices.Choice> location = RegionChoices.dataForSeoLocations();
+    private final JComboBox<RegionChoices.Choice> language = RegionChoices.languages();
     private final JComboBox<String> device = ComicControls.<String>comboBox(new String[]{"Desktop", "Mobile"});
     private final JComboBox<String> operatingSystem = ComicControls.<String>comboBox();
     private final JSpinner depth = ProviderSettingsForm.number(10, 1, 200, 4);
@@ -103,12 +101,10 @@ public final class DataForSeoSettingsPanel extends JPanel {
 
     private void buildSearchOptions(ComicForm p) {
         p.row("Search engine:", engine);
-        p.row("Location:", locationName, new JLabel("code"), locationCode);
-        locationName.setToolTipText("DataForSEO location name, e.g. Germany");
-        locationCode.setToolTipText("DataForSEO location code, e.g. 2276 for Germany");
-        p.row("Language:", languageName, new JLabel("code"), languageCode);
-        languageName.setToolTipText("DataForSEO language name, e.g. German");
-        languageCode.setToolTipText("DataForSEO language code, e.g. de");
+        p.row("Location:", location);
+        location.setToolTipText("Country the results are localised for");
+        p.row("Language:", language);
+        language.setToolTipText("Language of the results");
         p.row("Device:", device);
         p.row("Operating system:", operatingSystem);
         p.row("Depth:", depth);
@@ -184,10 +180,9 @@ public final class DataForSeoSettingsPanel extends JPanel {
         apiKeyHint.setText(draft.hasStoredApiKey() ? "A key is stored." : "No key stored.");
         endpointBase.setText(nullToEmpty(c.getEndpointBase()));
         engine.setSelectedItem(c.getSearchEngine());
-        locationName.setText(nullToEmpty(c.getLocationName()));
-        locationCode.setValue(c.getLocationCode() == null ? 2276 : c.getLocationCode());
-        languageName.setText(nullToEmpty(c.getLanguageName()));
-        languageCode.setText(nullToEmpty(c.getLanguageCode()));
+        RegionChoices.select(location, c.getLocationCode() != null ? String.valueOf(c.getLocationCode())
+                : c.getLocationName() != null ? c.getLocationName() : "2276");
+        RegionChoices.select(language, c.getLanguageCode() != null ? c.getLanguageCode() : c.getLanguageName());
         device.setSelectedItem(c.getDevice() == DataForSeoDevice.MOBILE ? "Mobile" : "Desktop");
         refreshOsChoices();
         operatingSystem.setSelectedItem(osLabel(c.getOperatingSystem()));
@@ -208,10 +203,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
         draft.setNewApiKey(typed != null && typed.length > 0 ? typed : null);
         c.setEndpointBase(emptyToNull(endpointBase.getText().trim()));
         c.setSearchEngine((DataForSeoSearchEngine) engine.getSelectedItem());
-        c.setLocationName(emptyToNull(locationName.getText().trim()));
-        c.setLocationCode((Integer) locationCode.getValue());
-        c.setLanguageName(emptyToNull(languageName.getText().trim()));
-        c.setLanguageCode(emptyToNull(languageCode.getText().trim()));
+        applyLocation(c, RegionChoices.selected(location));
+        applyLanguage(c, RegionChoices.selected(language));
         c.setDevice("Mobile".equals(device.getSelectedItem())
                 ? DataForSeoDevice.MOBILE : DataForSeoDevice.DESKTOP);
         c.setOperatingSystem(osFromLabel((String) operatingSystem.getSelectedItem()));
@@ -369,5 +362,34 @@ public final class DataForSeoSettingsPanel extends JPanel {
 
     private static String emptyToNull(String value) {
         return value == null || value.isEmpty() ? null : value;
+    }
+
+    /** Stores the chosen location as code (numeric) or, for an unknown saved name, as name; never both. */
+    private static void applyLocation(DataForSeoSearchConfiguration c, String value) {
+        c.setLocationCode(null);
+        c.setLocationName(null);
+        if (value == null) {
+            return;
+        }
+        c.setLocationCoordinate(null);
+        if (value.matches("\\d{1,9}")) {
+            c.setLocationCode(Integer.valueOf(value));
+        } else {
+            c.setLocationName(value);
+        }
+    }
+
+    /** Stores the chosen language as its code; an unknown saved name stays a name. */
+    private static void applyLanguage(DataForSeoSearchConfiguration c, String value) {
+        c.setLanguageCode(null);
+        c.setLanguageName(null);
+        if (value == null) {
+            return;
+        }
+        if (value.matches("[A-Za-z]{2,3}(-[A-Za-z0-9]+)?")) {
+            c.setLanguageCode(value);
+        } else {
+            c.setLanguageName(value);
+        }
     }
 }
