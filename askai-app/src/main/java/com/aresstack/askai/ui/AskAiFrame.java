@@ -72,7 +72,7 @@ public final class AskAiFrame extends JFrame {
     /** The application pages inside the Settings (formerly own screens behind the gear menu). */
     private static final String SETTINGS_CONNECTIONS = "Connections";
     private static final String SETTINGS_AI_MODELS = OllamaChatPanel.SETTINGS_AI_MODELS;
-    /** The application's one read-aloud voice install section (shown under Settings > AI models). */
+    /** The application's one read-aloud voice install section (the Voices tab under Models > Setup). */
     private final SpeechOutputModelsPanel speechVoicesPanel = new SpeechOutputModelsPanel(
             new com.aresstack.askai.tts.PiperTtsStore(), new com.aresstack.askai.tts.TtsSettingsStore());
     private static final String SETTINGS_NETWORK = "Network";
@@ -1353,15 +1353,17 @@ public final class AskAiFrame extends JFrame {
                     }
                 });
         final ModelSearchPanel modelSearchPanel =
-                new ModelSearchPanel(configurationRepository, askAiService, nlpModelsPanel);
-        // 🔊 discovery entries in the HuggingFace suggestions are a SHORTCUT: they open the
-        // active chat's settings on Audio & Dictation, where the voices are installed and chosen.
+                new ModelSearchPanel(configurationRepository, askAiService, nlpModelsPanel, speechVoicesPanel,
+                        askAiService.localRuntimeManager() == null ? null
+                                : new LocalRuntimeModelsPanel(askAiService, new Runnable() {
+                                    public void run() {
+                                        catalogRefreshService.refresh();
+                                    }
+                                }));
+        // 🔊 discovery entries in the HuggingFace suggestions are a SHORTCUT to the Voices tab.
         modelSearchPanel.setSpeechOutputOpener(new java.util.function.Consumer<String>() {
             public void accept(String voiceId) {
-                OllamaChatPanel chat = activeChat();
-                if (chat != null) {
-                    chat.openSpeechOutputSettings(voiceId);
-                }
+                modelSearchPanel.openVoices(voiceId);
             }
         });
         modelsScreen().addPage(PAGE_SETUP, modelSearchPanel, null);
@@ -1395,9 +1397,8 @@ public final class AskAiFrame extends JFrame {
                                 askAiService.localRuntimeManager()),
                 nlpModelCatalog,
                 (VirtualOllamaContainerService) ollamaService);
-        // The read-aloud voices (Piper) are AI models too: ONE install section for the whole application,
-        // below the model selections; every chat's voice selector follows installs/removals there.
-        aiModelsPanel.addSection(speechVoicesPanel);
+        // The read-aloud voices (Piper) are installed under Models > Setup > Voices (one section for the whole
+        // application); every chat's voice selector follows installs/removals there.
         // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
         aiModelsPanel.addSection(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
                 .inConfigurationDirectory()));
