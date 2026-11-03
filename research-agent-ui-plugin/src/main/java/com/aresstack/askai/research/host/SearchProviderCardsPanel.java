@@ -326,7 +326,8 @@ public final class SearchProviderCardsPanel extends JPanel {
      * {@link BrowserSettingsSplit}); what the browser does with every provider is on the "Browser" tab.
      */
     private JComponent browserCard() {
-        return LegacyBrowserSearchSettingsPanel.serpSearch(store, activeProfile);
+        return LegacyBrowserSearchSettingsPanel.serpSearch(store, activeProfile,
+                form -> BrowserBasicsRows.addSearchBrowserTo(form, store));
     }
 
     private JComponent dataForSeoCard() {

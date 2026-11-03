@@ -24,7 +24,7 @@ final class BrowserBasicsRows {
                 new String[]{ResearchRuntimeSettings.CAMOUFOX_CHANNEL, "chrome", "msedge"});
         channel.setSelectedItem(current.getBrowserChannel());
         channel.setToolTipText("The browser that searches and opens the hits (applies to new sessions)");
-        final JCheckBox headless = ComicControls.checkBox("Run the browser headless", current.isHeadless());
+        final JCheckBox headless = ComicControls.checkBox("Run the research browser headless", current.isHeadless());
         // Transparency does not depend on a visible browser window: the chat shows the visited sites.
         String headlessHint = new com.aresstack.askai.research.agent.ResearchPlaybook(
                 com.aresstack.askai.research.agent.ResearchLanguage.fromCode(
@@ -45,7 +45,24 @@ final class BrowserBasicsRows {
         allowPrivate.addActionListener(e -> persist.run());
         form.row("Browser channel", channel);
         form.row("", headless);
-        form.row("", ComicForm.hint(headlessHint));
+        form.row("", ComicForm.hint(headlessHint + " Off (default): you see the pages the research opens."));
         form.row("", allowPrivate);
+    }
+
+    /**
+     * The search browser's own window switch at the top of Search → "Browser (SERP)". It is a separate browser from
+     * the research browser (one per AskAI, headless by default); a change takes effect with the next search.
+     */
+    static void addSearchBrowserTo(ComicForm form, final WorkspaceStateStore store) {
+        final JCheckBox headless = ComicControls.checkBox("Run the search browser headless",
+                ResearchRuntimeSettings.loadSearchBrowserHeadless(store));
+        headless.addActionListener(e -> {
+            ResearchRuntimeSettings.saveSearchBrowserHeadless(store, headless.isSelected());
+            InProcessResearchRuntime.applySearchBrowserHeadless(headless.isSelected());
+        });
+        form.row("Search browser", headless);
+        form.row("", ComicForm.hint("The search browser opens the result pages; it is separate from the research"
+                + " browser. On (default): no window. Off: its window is visible, e.g. to answer a CAPTCHA yourself."
+                + " Applies from the next search."));
     }
 }

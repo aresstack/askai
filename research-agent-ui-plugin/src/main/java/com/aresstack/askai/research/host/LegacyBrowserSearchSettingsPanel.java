@@ -57,8 +57,14 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
     /** The SERP-search half (only meaningful while the browser is the search provider). */
     static LegacyBrowserSearchSettingsPanel serpSearch(WorkspaceStateStore store,
             SearchProcessingProfileSnapshot activeProfile) {
+        return serpSearch(store, activeProfile, null);
+    }
+
+    /** The SERP-search half; {@code leading} rows (the search browser's own switches) open its first page. */
+    static LegacyBrowserSearchSettingsPanel serpSearch(WorkspaceStateStore store,
+            SearchProcessingProfileSnapshot activeProfile, java.util.function.Consumer<ComicForm> leading) {
         return new LegacyBrowserSearchSettingsPanel(store, activeProfile, BrowserSettingsSplit.SEARCH_PAGES,
-                BrowserSettingsSplit::searchPage, null);
+                BrowserSettingsSplit::searchPage, leading);
     }
 
     private LegacyBrowserSearchSettingsPanel(WorkspaceStateStore store,
