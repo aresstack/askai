@@ -26,6 +26,12 @@ public final class ResearchAgentPluginExtension implements AgentPluginExtension 
     /** The stable Research Agent id (also the plugin id). */
     public static final String AGENT_ID = ResearchPluginDescriptor.PLUGIN_ID;
 
+    static {
+        // The search browser download (about 1.3 GB) goes through AskAI's proxy and certificates.
+        com.aresstack.askai.browser.runtime.camoufox.CamoufoxInstaller.useConnector(
+                com.aresstack.askai.plugin.api.service.HostNetwork::open);
+    }
+
     @Override
     public AgentPluginDescriptor getAgentDescriptor() {
         return AgentPluginDescriptor.builder()

@@ -650,6 +650,18 @@ public final class AskAiSetupActions implements SetupActions {
         return audio;
     }
 
+    @Override
+    public void useNetwork(SetupDraft draft) {
+        if (draft == null) {
+            com.aresstack.askai.plugin.api.service.HostNetwork.override(null);
+            return;
+        }
+        final AppConfiguration stored = configuration.load();
+        final ConfiguredConnections connections = new ConfiguredConnections(proxyOf(draft, stored),
+                trustOf(draft, stored), stored.getHttpClientConfiguration());
+        com.aresstack.askai.plugin.api.service.HostNetwork.override(connections::open);
+    }
+
     // ------------------------------------------------------------------ dictation
 
     @Override

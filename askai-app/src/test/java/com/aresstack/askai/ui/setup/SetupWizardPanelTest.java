@@ -381,19 +381,19 @@ public class SetupWizardPanelTest {
         Fake fake = new Fake();
         fake.holdAudio = true;
         SetupWizardPanel wizard = new SetupWizardPanel(SetupDraft.builder().ollamaBaseUrl("http://localhost:11434")
-                .dictation("", "gemma3n:e4b").build(), fake, ComicPalette.defaultPalette());
+                .dictation("", SetupActions.RECOMMENDED_AUDIO_MODEL).build(), fake, ComicPalette.defaultPalette());
         wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
         assertNotNull("the audio models are still loading", fake.pendingAudio);
 
         wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
 
-        assertEquals("gemma3n:e4b", fake.finished.audioModel());
+        assertEquals(SetupActions.RECOMMENDED_AUDIO_MODEL, fake.finished.audioModel());
     }
 
     @Test
     public void anotherRuntimeReloadsTheAudioModels() {
         Fake fake = new Fake();
-        fake.audioModels.add("gemma3n:e4b");
+        fake.audioModels.add(SetupActions.RECOMMENDED_AUDIO_MODEL);
         SetupWizardPanel wizard = wizard(fake);
         wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
         assertFalse(wizard.audioDownloadButton().isVisible());

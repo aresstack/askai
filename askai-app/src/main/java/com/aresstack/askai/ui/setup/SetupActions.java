@@ -140,7 +140,7 @@ public interface SetupActions {
     }
 
     /** Suggested when no chat model is installed yet: small enough for an ordinary PC, good enough to chat. */
-    String RECOMMENDED_CHAT_MODEL = "qwen3:8b";
+    String RECOMMENDED_CHAT_MODEL = "gemma4:e2b";
     /** Suggested when no embedding model is installed yet. */
     String RECOMMENDED_EMBEDDING_MODEL = "nomic-embed-text";
     /** The reranker the research agent asks for; it runs in AskAI's own local runtime (Ollama has none). */
@@ -172,11 +172,15 @@ public interface SetupActions {
         return null;
     }
 
+    /** Suggested for dictation when no audio-capable model is installed: AskAI's model for speech input too. */
+    String RECOMMENDED_AUDIO_MODEL = "gemma4:e2b";
+
     /**
-     * Suggested for dictation when no audio-capable model is installed: Gemma 3n understands speech in Ollama
-     * (its audio works through {@code ollama pull}, not through a single-file GGUF import).
+     * Lets downloads of the plugins (e.g. the search browser) use the draft's network settings while they are
+     * not saved yet; {@code null} returns to the saved settings.
      */
-    String RECOMMENDED_AUDIO_MODEL = "gemma3n:e4b";
+    default void useNetwork(SetupDraft draft) {
+    }
 
     /** The capture devices by name; the system default microphone is not part of the list. */
     default List<String> microphones() {
