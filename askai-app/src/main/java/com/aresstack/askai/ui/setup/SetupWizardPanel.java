@@ -246,6 +246,8 @@ public final class SetupWizardPanel extends JPanel {
     /** The microphones and audio models were read once; until then the draft's choice stays as it is. */
     private boolean dictationLoaded;
     private boolean audioLoading;
+    /** The audio model choices were filled once; until then the draft's audio model stays as it is. */
+    private boolean audioListed;
     private final JLabel voiceStatus = statusLabel();
     private final JProgressBar voiceProgress = ComicControls.progressBar(0, 1000);
     /** Label in the voice choices → voice id. */
@@ -999,6 +1001,9 @@ public final class SetupWizardPanel extends JPanel {
         }
         modelsLoaded = false;
         refreshModels();
+        if (audioListed) {
+            loadAudioModels(choice(audioModel, AUDIO_AUTOMATIC)); // another runtime has other audio models
+        }
     }
 
     // --- steps 3 and 4: models
@@ -1521,6 +1526,7 @@ public final class SetupWizardPanel extends JPanel {
                 return;
             }
             audioLoading = false;
+            audioListed = true;
             installedAudio = models == null ? Collections.<String>emptyList() : models;
             audioModel.removeAllItems();
             audioModel.addItem(AUDIO_AUTOMATIC);
@@ -1692,7 +1698,8 @@ public final class SetupWizardPanel extends JPanel {
             b.voices(voiceId(voiceGerman), voiceId(voiceEnglish));
         }
         if (dictationLoaded) {
-            b.dictation(choice(microphone, MIC_DEFAULT), choice(audioModel, AUDIO_AUTOMATIC));
+            b.dictation(choice(microphone, MIC_DEFAULT),
+                    audioListed ? choice(audioModel, AUDIO_AUTOMATIC) : (draft == null ? "" : draft.audioModel()));
         }
         return b.build();
     }

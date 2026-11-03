@@ -377,6 +377,36 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void theSavedAudioModelStaysWhileTheAudioModelsAreStillLoading() {
+        Fake fake = new Fake();
+        fake.holdAudio = true;
+        SetupWizardPanel wizard = new SetupWizardPanel(SetupDraft.builder().ollamaBaseUrl("http://localhost:11434")
+                .dictation("", "gemma3n:e4b").build(), fake, ComicPalette.defaultPalette());
+        wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
+        assertNotNull("the audio models are still loading", fake.pendingAudio);
+
+        wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
+
+        assertEquals("gemma3n:e4b", fake.finished.audioModel());
+    }
+
+    @Test
+    public void anotherRuntimeReloadsTheAudioModels() {
+        Fake fake = new Fake();
+        fake.audioModels.add("gemma3n:e4b");
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
+        assertFalse(wizard.audioDownloadButton().isVisible());
+
+        fake.audioModels.clear(); // the other server has no audio model
+        wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
+        wizard.runtimeTestButton().doClick();
+        wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
+
+        assertTrue("the download is offered for the new runtime", wizard.audioDownloadButton().isVisible());
+    }
+
+    @Test
     public void aChosenButNotInstalledRerankerCanBeInstalled() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = new SetupWizardPanel(SetupDraft.builder().ollamaBaseUrl("http://localhost:11434")
@@ -556,6 +586,8 @@ public class SetupWizardPanelTest {
         List<String> audioModels = new ArrayList<String>();
         Boolean micHeard = Boolean.TRUE;
         String testedMicrophone;
+        boolean holdAudio;
+        Consumer<List<String>> pendingAudio;
         List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> contributions =
                 new ArrayList<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>();
         boolean cancelled;
@@ -669,6 +701,10 @@ public class SetupWizardPanelTest {
 
         @Override
         public void loadAudioModels(SetupDraft draft, Consumer<List<String>> done) {
+            if (holdAudio) {
+                pendingAudio = done;
+                return;
+            }
             done.accept(new ArrayList<String>(audioModels));
         }
 
