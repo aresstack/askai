@@ -31,8 +31,8 @@ public final class SerpApiSettingsPanel extends JPanel {
     private final JLabel apiKeyStatus = ProviderSettingsForm.status();
     private final JComboBox<SerpApiSearchEngine> engine =
             ComicControls.<SerpApiSearchEngine>comboBox(SerpApiSearchEngine.values());
-    private final JTextField country = ComicControls.textField(6);
-    private final JTextField language = ComicControls.textField(6);
+    private final JComboBox<RegionChoices.Choice> country = RegionChoices.countries(false);
+    private final JComboBox<RegionChoices.Choice> language = RegionChoices.languages();
     private final JTextField location = ComicControls.textField(24);
     private final JTextField googleDomain = ComicControls.textField(16);
     private final JCheckBox resolveGoto = ComicControls.checkBox("Resolve Google /goto links to the target URL");
@@ -53,11 +53,11 @@ public final class SerpApiSettingsPanel extends JPanel {
         ComicForm options = form.searchOptions();
         options.row("Search engine:", engine);
         options.row("Country:", country);
-        country.setToolTipText("Two-letter country code, e.g. de");
+        country.setToolTipText("Country the results are localised for");
         options.row("Language:", language);
-        language.setToolTipText("Two-letter language code, e.g. de");
-        options.row("Location:", location);
-        location.setToolTipText("Optional SerpApi location, e.g. Berlin, Germany");
+        language.setToolTipText("Language of the results");
+        options.row("City / region:", location);
+        location.setToolTipText("Optional city or region, e.g. Berlin, Germany");
         options.row("Google domain:", googleDomain);
         googleDomain.setToolTipText("Optional, e.g. google.de");
         form.advanced().check(resolveGoto);
@@ -77,8 +77,8 @@ public final class SerpApiSettingsPanel extends JPanel {
         boolean stored = c.getApiKey() != null && c.getApiKey().isPresent();
         apiKeyStatus.setText(stored ? "A key is stored." : "No key stored.");
         engine.setSelectedItem(c.getSearchEngine() == null ? SerpApiSearchEngine.GOOGLE : c.getSearchEngine());
-        country.setText(text(c.getCountry()));
-        language.setText(text(c.getLanguage()));
+        RegionChoices.select(country, c.getCountry());
+        RegionChoices.select(language, c.getLanguage());
         location.setText(text(c.getLocation()));
         googleDomain.setText(text(c.getGoogleDomain()));
         resolveGoto.setSelected(c.isResolveGoogleGotoUrls());
@@ -116,8 +116,8 @@ public final class SerpApiSettingsPanel extends JPanel {
         boolean stored = c.getApiKey() != null && c.getApiKey().isPresent();
         c.setEnabled(ProviderSettingsForm.enabled(stored, typed));
         c.setSearchEngine((SerpApiSearchEngine) engine.getSelectedItem());
-        c.setCountry(trimToNull(country.getText()));
-        c.setLanguage(trimToNull(language.getText()));
+        c.setCountry(RegionChoices.selected(country));
+        c.setLanguage(RegionChoices.selected(language));
         c.setLocation(trimToNull(location.getText()));
         c.setGoogleDomain(trimToNull(googleDomain.getText()));
         c.setResolveGoogleGotoUrls(resolveGoto.isSelected());

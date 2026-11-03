@@ -5,15 +5,13 @@ import com.aresstack.askai.research.search.config.ProviderConfigurationService;
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicForm;
 
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JSpinner;
-import javax.swing.JTextField;
 import java.awt.BorderLayout;
 
-import static com.aresstack.askai.research.host.ProviderSettingsForm.text;
-import static com.aresstack.askai.research.host.ProviderSettingsForm.trimToNull;
 
 /**
  * Settings for the Brave Search API ({@code brave.json}) in the shared {@link ProviderSettingsForm} frame.
@@ -26,9 +24,9 @@ public final class BraveSettingsPanel extends JPanel {
     private final ProviderConfigurationService configurations;
     private final JPasswordField apiKey = ProviderSettingsForm.secretField();
     private final JLabel apiKeyStatus = ProviderSettingsForm.status();
-    private final JTextField country = ComicControls.textField(6);
-    private final JTextField searchLanguage = ComicControls.textField(6);
-    private final JTextField uiLanguage = ComicControls.textField(8);
+    private final JComboBox<RegionChoices.Choice> country = RegionChoices.countries(true);
+    private final JComboBox<RegionChoices.Choice> searchLanguage = RegionChoices.languages();
+    private final JComboBox<RegionChoices.Choice> uiLanguage = RegionChoices.locales();
     private final JSpinner count = ProviderSettingsForm.number(20, 1, 20, 3);
     private final JLabel status = ProviderSettingsForm.message();
     private BraveSearchConfiguration draft;
@@ -44,11 +42,11 @@ public final class BraveSettingsPanel extends JPanel {
         credentials.row("", status);
         ComicForm options = form.searchOptions();
         options.row("Country:", country);
-        country.setToolTipText("Two-letter country code, e.g. DE");
+        country.setToolTipText("Country the results are localised for");
         options.row("Search language:", searchLanguage);
-        searchLanguage.setToolTipText("Two-letter language code, e.g. de");
+        searchLanguage.setToolTipText("Language of the results");
         options.row("UI language:", uiLanguage);
-        uiLanguage.setToolTipText("Locale of the result texts, e.g. de-DE");
+        uiLanguage.setToolTipText("Language and region of the result texts");
         options.row("Results per request:", count);
         count.setToolTipText("1 to 20");
         add(form.build(), BorderLayout.NORTH);
@@ -66,9 +64,9 @@ public final class BraveSettingsPanel extends JPanel {
         draft = c;
         boolean stored = c.getApiKey() != null && c.getApiKey().isPresent();
         apiKeyStatus.setText(stored ? "A key is stored." : "No key stored.");
-        country.setText(text(c.getCountry()));
-        searchLanguage.setText(text(c.getSearchLanguage()));
-        uiLanguage.setText(text(c.getUiLanguage()));
+        RegionChoices.select(country, c.getCountry());
+        RegionChoices.select(searchLanguage, c.getSearchLanguage());
+        RegionChoices.select(uiLanguage, c.getUiLanguage());
         count.setValue(Math.max(1, Math.min(20, c.getCount())));
     }
 
@@ -78,9 +76,9 @@ public final class BraveSettingsPanel extends JPanel {
             boolean stored = draft.getApiKey() != null && draft.getApiKey().isPresent();
             char[] typed = apiKey.getPassword();
             draft.setEnabled(ProviderSettingsForm.enabled(stored, typed));
-            draft.setCountry(trimToNull(country.getText()));
-            draft.setSearchLanguage(trimToNull(searchLanguage.getText()));
-            draft.setUiLanguage(trimToNull(uiLanguage.getText()));
+            draft.setCountry(RegionChoices.selected(country));
+            draft.setSearchLanguage(RegionChoices.selected(searchLanguage));
+            draft.setUiLanguage(RegionChoices.selected(uiLanguage));
             draft.setCount((Integer) count.getValue());
             if (typed.length > 0) {
                 configurations.saveBrave(draft, typed); // clears the array
