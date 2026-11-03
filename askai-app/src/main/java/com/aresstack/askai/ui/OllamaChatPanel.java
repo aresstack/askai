@@ -1341,7 +1341,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 + " server. Piper reads answers aloud — it cannot transcribe.");
         input.row("Backend", sttBackendLabel);
         audioModelCombo.setEditable(false); // only /api/show-verified models, never free text
-        audioModelCombo.setPrototypeDisplayValue("gemma3n:e4b-it-q8_0 (audio)"); // stable width, also while empty
+        audioModelCombo.setPrototypeDisplayValue("gemma4:e2b-it-q8_0 (automatic)"); // stable width, also while empty
         audioModelCombo.setToolTipText("Audio-capable models installed in Ollama. Automatic picks a verified"
                 + " one (the last model that worked first). Install more under Settings > AI models.");
         audioModelCombo.addActionListener(event -> persistAudioModelSelection());
