@@ -80,7 +80,6 @@ public final class LocalRuntimeModelsPanel extends JPanel {
     }
 
     private void buildUserInterface() {
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         ComicForm rows = ComicForm.titled("Models for AskAI's built-in local runtime");
         rows.note("These models run inside AskAI (no Ollama needed). Research needs a reranker."
                 + " Downloads come from Hugging Face; install with one click.");
@@ -88,33 +87,36 @@ public final class LocalRuntimeModelsPanel extends JPanel {
             rows.note("The local model runtime is not available in this installation.");
         }
         for (LocalRuntimeModelDescriptor model : models) {
-            rows.component(buildRow(model));
+            addRow(rows, model);
         }
         progress.setStringPainted(true);
         progress.setVisible(false);
         rows.component(progress);
         rows.component(message);
-        JScrollPane scroll = new JScrollPane(rows);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.getViewport().setOpaque(false);
-        scroll.setOpaque(false);
-        add(scroll, BorderLayout.CENTER);
+        // ComicForm.page keeps the form at its preferred height, top-aligned (a plain JScrollPane stretched it).
+        add(ComicForm.page(rows), BorderLayout.CENTER);
     }
 
-    private JPanel buildRow(final LocalRuntimeModelDescriptor model) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        row.setOpaque(false);
-        JLabel name = new JLabel(purpose(model) + " — " + model.huggingFaceRepositoryId());
+    /** Label column = purpose, field column = repository, then status + Install aligned in their own columns. */
+    private void addRow(ComicForm rows, final LocalRuntimeModelDescriptor model) {
+        JLabel name = new JLabel(model.huggingFaceRepositoryId());
         name.setToolTipText(model.notes());
-        row.add(name);
-        JLabel status = new JLabel();
-        JButton install = new ComicButton("Install");
+        JLabel status = new JLabel("Not installed");
+        status.setPreferredSize(new java.awt.Dimension(110, status.getPreferredSize().height));
+        JButton install = new ComicButton("Reinstall");
+        install.setPreferredSize(install.getPreferredSize()); // fixed width for Install/Reinstall
         install.addActionListener(event -> onInstall(model));
         statusByRepo.put(model.huggingFaceRepositoryId(), status);
         buttonByRepo.put(model.huggingFaceRepositoryId(), install);
-        row.add(status);
-        row.add(install);
-        return row;
+        JPanel line = new JPanel(new BorderLayout(8, 0));
+        line.setOpaque(false);
+        line.add(name, BorderLayout.CENTER);
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        right.setOpaque(false);
+        right.add(status);
+        right.add(install);
+        line.add(right, BorderLayout.EAST);
+        rows.row(purpose(model), line);
     }
 
     static String purpose(LocalRuntimeModelDescriptor model) {
