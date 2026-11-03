@@ -21,4 +21,16 @@ public interface AgentSettingsContribution {
      * not apply to it (wrong session type) — the host then omits the category entirely.
      */
     JComponent createSettingsComponent(AgentSession session);
+
+    /**
+     * Build the settings component WITHOUT any session, chat or model (Settings → Plugins → "Settings…"):
+     * it reads and writes the plugin's persisted defaults in {@code pluginSettings} — the values every NEW
+     * chat of this agent starts from. Opening it must never start a session or load a model.
+     *
+     * @return the component, or {@code null} when the plugin has no session-independent settings
+     */
+    default JComponent createPluginSettingsComponent(
+            com.aresstack.askai.plugin.api.service.WorkspaceStateStore pluginSettings) {
+        return null;
+    }
 }
