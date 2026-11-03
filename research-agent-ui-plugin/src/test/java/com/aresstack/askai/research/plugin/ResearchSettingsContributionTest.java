@@ -37,6 +37,36 @@ public class ResearchSettingsContributionTest {
     }
 
     @Test
+    public void pluginSettingsOpenWithoutAnySession() {
+        final java.util.Map<String, String> values = new java.util.HashMap<String, String>();
+        com.aresstack.askai.plugin.api.service.WorkspaceStateStore store =
+                new com.aresstack.askai.plugin.api.service.WorkspaceStateStore() {
+                    public String get(String key, String defaultValue) {
+                        return values.containsKey(key) ? values.get(key) : defaultValue;
+                    }
+                    public boolean getBoolean(String key, boolean defaultValue) {
+                        return Boolean.parseBoolean(get(key, String.valueOf(defaultValue)));
+                    }
+                    public int getInt(String key, int defaultValue) {
+                        return Integer.parseInt(get(key, String.valueOf(defaultValue)));
+                    }
+                    public void put(String key, String value) {
+                        values.put(key, value);
+                    }
+                    public void putBoolean(String key, boolean value) {
+                        put(key, String.valueOf(value));
+                    }
+                    public void putInt(String key, int value) {
+                        put(key, String.valueOf(value));
+                    }
+                };
+        org.junit.Assume.assumeFalse(java.awt.GraphicsEnvironment.isHeadless());
+        AgentSettingsContribution contribution = extension.getSettingsContributions().get(0);
+        // Settings → Plugins → "Settings…": no chat, no session, no model — the page still exists.
+        assertTrue(contribution.createPluginSettingsComponent(store) != null);
+    }
+
+    @Test
     public void runtimeAndSearchSettingsAreNoArtifactsAnymore() {
         for (AgentArtifact artifact : ResearchArtifacts.all()) {
             assertFalse("settings are not work products: " + artifact.getId(),

@@ -5,6 +5,8 @@ import com.aresstack.askai.plugin.api.agent.AgentSession;
 import com.aresstack.askai.plugin.api.agent.AgentSettingsContribution;
 import com.aresstack.askai.research.agent.ResearchAgentSession;
 
+import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
+
 import javax.swing.JComponent;
 import javax.swing.JTabbedPane;
 
@@ -27,16 +29,25 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
             return null; // not this plugin's session → the host omits the category
         }
         ResearchAgentSession research = (ResearchAgentSession) session;
-        final SearchProviderCardsPanel searchProviders =
-                new SearchProviderCardsPanel(research.getHostStateStore());
+        return build(research.getHostStateStore(), research, research.getActiveSearchProfile());
+    }
+
+    /** Session-free: the plugin's persisted defaults (Settings → Plugins), no session or model needed. */
+    @Override
+    public JComponent createPluginSettingsComponent(WorkspaceStateStore pluginSettings) {
+        return pluginSettings == null ? null : build(pluginSettings, null, null);
+    }
+
+    private static JComponent build(WorkspaceStateStore store, ResearchAgentSession research,
+            com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot profile) {
+        final SearchProviderCardsPanel searchProviders = new SearchProviderCardsPanel(store);
         JTabbedPane tabs = ComicControls.tabbedPane();
-        tabs.addTab("General", buildGeneralTab(research));
-        tabs.addTab("Runtime", new ResearchRuntimeSettingsPanel(research.getHostStateStore(), research));
+        tabs.addTab("General", buildGeneralTab(store));
+        tabs.addTab("Runtime", new ResearchRuntimeSettingsPanel(store, research));
         // The provider PICKER + each provider's own settings card (browser default, full DataForSEO
         // editor). The old shared engine/locale fields are gone — each provider owns its full config.
         tabs.addTab("Search", searchProviders);
-        tabs.addTab("Browser SERP", new LegacyBrowserSearchSettingsPanel(research.getHostStateStore(),
-                research.getActiveSearchProfile()));
+        tabs.addTab("Browser SERP", new LegacyBrowserSearchSettingsPanel(store, profile));
         // The DataForSEO draft + provider selection persist when the gear dialog is disposed; unsaved
         // provider drafts are dropped. The host's settings dialog does not expose an explicit Save hook,
         // so the panel commits on removal from the hierarchy (dialog close).
@@ -52,18 +63,18 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
     }
 
     /** General research-UI preferences — the first, non-technical tab. */
-    private static JComponent buildGeneralTab(final ResearchAgentSession research) {
+    private static JComponent buildGeneralTab(final WorkspaceStateStore store) {
         com.aresstack.comiccontrols.control.ComicForm tab =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Search tags");
         final javax.swing.JCheckBox readTagsBox = ComicControls.checkBox(
                 "Read search tags aloud when clicked",
-                ResearchRuntimeSettings.loadReadSearchTagsOnClick(research.getHostStateStore()));
+                ResearchRuntimeSettings.loadReadSearchTagsOnClick(store));
         readTagsBox.setToolTipText("Clicking a yellow search/activity tag in the chat speaks its"
                 + " text with an assertive delivery.");
         final javax.swing.JCheckBox onlyWhenActiveBox = ComicControls.checkBox(
                 "Only while read-aloud is active (Play pressed or automatic reading enabled)",
                 ResearchRuntimeSettings.loadReadTagsOnlyWhenReadAloudActive(
-                        research.getHostStateStore()));
+                        store));
         onlyWhenActiveBox.setToolTipText("On (default): clicked tags stay silent unless you"
                 + " actually use the speech output. Off: tags always speak when clicked.");
         onlyWhenActiveBox.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 22, 0, 0));
@@ -71,13 +82,13 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
         onlyWhenActiveBox.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent event) {
                 ResearchRuntimeSettings.saveReadTagsOnlyWhenReadAloudActive(
-                        research.getHostStateStore(), onlyWhenActiveBox.isSelected());
+                        store, onlyWhenActiveBox.isSelected());
             }
         });
         readTagsBox.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent event) {
                 ResearchRuntimeSettings.saveReadSearchTagsOnClick(
-                        research.getHostStateStore(), readTagsBox.isSelected());
+                        store, readTagsBox.isSelected());
                 onlyWhenActiveBox.setEnabled(readTagsBox.isSelected()); // sub-option follows
             }
         });
@@ -89,14 +100,14 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
                 com.aresstack.comiccontrols.control.ComicForm.titled("Sources");
         final javax.swing.JCheckBox autoReviewBox = ComicControls.checkBox(
                 "Review new sources automatically after a successful web search",
-                ResearchRuntimeSettings.loadAutoReviewAfterSearch(research.getHostStateStore()));
+                ResearchRuntimeSettings.loadAutoReviewAfterSearch(store));
         autoReviewBox.setToolTipText("On: when a web search accepts sources, the review that the"
                 + " \"Review new sources\" tag triggers starts by itself. Off (default): you"
                 + " decide when to review.");
         autoReviewBox.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent event) {
                 ResearchRuntimeSettings.saveAutoReviewAfterSearch(
-                        research.getHostStateStore(), autoReviewBox.isSelected());
+                        store, autoReviewBox.isSelected());
             }
         });
         sources.check(autoReviewBox);

@@ -463,43 +463,56 @@ public final class AskAiFrame extends JFrame {
     }
 
     /**
-     * Settings → Plugins → "Settings…": a plugin's settings are session-based (each chat tab configures its
-     * own agent session), so the ACTIVE chat tab switches to this agent (Questing) and the Settings then
-     * show the plugin's own category, e.g. "Research Agent".
+     * Settings → Plugins → "Settings…" (and double-click): shows the plugin's settings straight from the
+     * plugin and its persisted configuration — the defaults every NEW chat of this agent starts from. No chat
+     * tab is switched, no session is started and no model (reranker etc.) is needed.
      */
     private void openPluginSettings(String pluginId) {
         java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution> contributions =
                 pluginSettingsContributions(pluginId);
-        if (contributions.isEmpty() || chatWorkspaceHost == null) {
+        if (contributions.isEmpty()) {
             return;
         }
-        if (!pluginId.equals(chatWorkspaceHost.getActiveAgentId())) {
-            chatWorkspaceHost.selectAgent(pluginId);
-        }
-        if (!com.aresstack.askai.plugin.host.WorkspaceModeEntry.QUESTING_ID
-                .equals(chatWorkspaceHost.getInteractionMode())) {
-            chatWorkspaceHost.setInteractionMode(com.aresstack.askai.plugin.host.WorkspaceModeEntry.QUESTING_ID);
-        }
-        // The mode/agent may already be "Questing + this agent" while the coordinator has no running session
-        // (another tab was active, or an earlier start failed) — then the calls above change nothing and the
-        // plugin's pages never appear. Make sure the session runs; settings pages need it.
-        if (agentCoordinator != null && agentCoordinator.getActiveSession() == null) {
-            agentCoordinator.setActiveAgent(pluginId);
-        }
-        final String category = contributions.get(0).getDisplayName();
-        javax.swing.SwingUtilities.invokeLater(() -> {
-            if (agentCoordinator != null && agentCoordinator.getActiveSession() == null) {
-                // The session did not start (the reason is posted as a bubble in the chat): never fail silently.
-                showScreen(CHAT_VIEW);
-                javax.swing.JOptionPane.showMessageDialog(AskAiFrame.this,
-                        "The plugin could not start a session in this chat, so its settings cannot be shown.\n"
-                                + "The chat shows the reason (for example a missing reranker model:"
-                                + " install one under Models > Setup > Local models).",
-                        "Plugin settings", javax.swing.JOptionPane.WARNING_MESSAGE);
-                return;
+        // The same store the sessions use as their template ("agent.<id>."): writes here reach new chats.
+        com.aresstack.askai.plugin.api.service.WorkspaceStateStore store =
+                new com.aresstack.askai.plugin.host.ApplicationStateWorkspaceStateStore(
+                        applicationState, "agent." + pluginId + ".");
+        javax.swing.JComponent content;
+        String title;
+        if (contributions.size() == 1) {
+            content = contributions.get(0).createPluginSettingsComponent(store);
+            title = contributions.get(0).getDisplayName();
+        } else {
+            javax.swing.JTabbedPane tabs = com.aresstack.comiccontrols.control.ComicControls.tabbedPane();
+            for (com.aresstack.askai.plugin.api.agent.AgentSettingsContribution contribution : contributions) {
+                javax.swing.JComponent page = contribution.createPluginSettingsComponent(store);
+                if (page != null) {
+                    tabs.addTab(contribution.getDisplayName(), page);
+                }
             }
-            openSettings(category);
-        });
+            content = tabs.getTabCount() == 0 ? null : tabs;
+            title = pluginId;
+        }
+        if (content == null) {
+            javax.swing.JOptionPane.showMessageDialog(this, "This plugin has no settings of its own.",
+                    "Plugin settings", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        final javax.swing.JDialog dialog = new javax.swing.JDialog(this, title + " settings", true);
+        javax.swing.JButton close = new com.aresstack.comiccontrols.control.ComicButton("Close");
+        close.addActionListener(event -> dialog.dispose());
+        javax.swing.JPanel buttons = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT));
+        buttons.setOpaque(false);
+        buttons.add(close);
+        javax.swing.JPanel root = new javax.swing.JPanel(new java.awt.BorderLayout());
+        root.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        root.add(com.aresstack.comiccontrols.control.ComicForm.scroll(content), java.awt.BorderLayout.CENTER);
+        root.add(buttons, java.awt.BorderLayout.SOUTH);
+        dialog.setContentPane(root);
+        dialog.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
+        dialog.setSize(900, 680);
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true); // panels commit on removal from the hierarchy (dialog close)
     }
 
     /**
