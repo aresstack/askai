@@ -65,7 +65,7 @@ class CamoufoxInstallerTest {
         CamoufoxInstaller fresh = new CamoufoxInstaller(temporary.resolve("browser"), distribution, TARGET);
         assertEquals(CamoufoxInstaller.Phase.READY, fresh.status().phase(), "found, not 'not installed yet'");
 
-        Path renamed = temporary.resolve("G").resolve("camoufox-156");
+        Path renamed = temporary.resolve("elsewhere").resolve("my-camoufox");
         Files.createDirectories(renamed.getParent());
         Files.move(executable.getParent(), renamed);
         CamoufoxInstaller moved = new CamoufoxInstaller(renamed.getParent(), distribution, TARGET, renamed);
