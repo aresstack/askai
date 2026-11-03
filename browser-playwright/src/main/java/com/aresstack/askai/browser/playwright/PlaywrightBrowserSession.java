@@ -104,7 +104,17 @@ final class PlaywrightBrowserSession implements BrowserSession {
             return java.util.Collections.singletonList(
                     com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog.custom(searchUrlTemplate));
         }
-        return settings.navigation.engineSelection.resolvedEnabledEngines();
+        // Google is searched by AskAI's separate search browser, never by this (research) browser.
+        java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> pageEngines =
+                new java.util.ArrayList<com.aresstack.askai.browser.search.engine.BrowserSearchEngine>();
+        for (com.aresstack.askai.browser.search.engine.BrowserSearchEngine engine
+                : settings.navigation.engineSelection.resolvedEnabledEngines()) {
+            if (!com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog.runsInSearchBrowser(
+                    engine.getId())) {
+                pageEngines.add(engine);
+            }
+        }
+        return pageEngines;
     }
 
     /** The engines named by the running web_search call, or null (then the settings' enabled engines). */

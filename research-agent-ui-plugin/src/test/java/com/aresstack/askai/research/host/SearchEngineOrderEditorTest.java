@@ -19,12 +19,12 @@ public class SearchEngineOrderEditorTest {
             public void run() {
                 SearchEngineOrderEditor editor = new SearchEngineOrderEditor("duckduckgo:on,bing:on");
                 assertEquals("legacy input round-trips into the paged form (default 3)",
-                        "duckduckgo:on:3,bing:on:3", editor.get());
+                        "duckduckgo:on:3,bing:on:3,google:off:3", editor.get());
 
                 select(editor, 1);
                 move(editor, -1);
 
-                assertEquals("bing:on:3,duckduckgo:on:3", editor.get());
+                assertEquals("bing:on:3,duckduckgo:on:3,google:off:3", editor.get());
             }
         });
     }
@@ -35,7 +35,7 @@ public class SearchEngineOrderEditorTest {
             public void run() {
                 SearchEngineOrderEditor editor = new SearchEngineOrderEditor("duckduckgo:on");
                 assertEquals("gaining an engine is the user's decision, not an update's",
-                        "duckduckgo:on:3,bing:off:3", editor.get());
+                        "duckduckgo:on:3,google:off:3,bing:off:3", editor.get());
             }
         });
     }
@@ -47,7 +47,7 @@ public class SearchEngineOrderEditorTest {
                 SearchEngineOrderEditor editor =
                         new SearchEngineOrderEditor("duckduckgo:on:3:1.5,bing:on:3");
                 assertEquals("the delay survives the editor; 0 is simply not written",
-                        "duckduckgo:on:3:1.5,bing:on:3", editor.get());
+                        "duckduckgo:on:3:1.5,bing:on:3,google:off:3", editor.get());
             }
         });
     }

@@ -8,6 +8,11 @@ import java.util.List;
 /** The engines the product knows how to drive through a browser. Ids are stable — they are persisted. */
 public final class BrowserSearchEngineCatalog {
 
+    /**
+     * Google runs in AskAI's own headless SEARCH browser (serp4j-playwright-google), not in the research browser
+     * that opens DuckDuckGo/Bing result pages; see {@link #runsInSearchBrowser(String)}.
+     */
+    public static final String GOOGLE = "google";
     public static final String DUCKDUCKGO = "duckduckgo";
     public static final String BING = "bing";
     public static final String GOOGLE = "google";
@@ -25,6 +30,10 @@ public final class BrowserSearchEngineCatalog {
      */
     private static final List<BrowserSearchEngine> ENGINES = Collections.unmodifiableList(
             new ArrayList<BrowserSearchEngine>(Arrays.asList(
+                    new BrowserSearchEngine(GOOGLE, "Google", Arrays.asList(
+                            "https://www.google.com/search?q={query}"),
+                            Arrays.asList("https://www.google.com/search?q={query}&start={offset0}"),
+                            10),
                     new BrowserSearchEngine(DUCKDUCKGO, "DuckDuckGo", Arrays.asList(
                             // Server-rendered start pages of the SAME provider: the plain HTML one first,
                             // the lite one as its own fallback. One provider to the user.
@@ -52,6 +61,14 @@ public final class BrowserSearchEngineCatalog {
                             10))));
 
     private BrowserSearchEngineCatalog() {
+    }
+
+    /**
+     * Whether the engine is searched in AskAI's separate search browser (Google, through Serp4J) instead of by the
+     * research browser's page-engine search. The research browser skips such engines.
+     */
+    public static boolean runsInSearchBrowser(String id) {
+        return GOOGLE.equals(id == null ? null : id.trim());
     }
 
     /** All known engines in catalog order (NOT the execution order — that is the user's). */

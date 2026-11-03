@@ -128,6 +128,11 @@ public final class ResearchLoop {
         }
     }
 
+    /** The current initial-search strategy (the default browser SERP search unless one was injected). */
+    public com.aresstack.askai.research.runtime.search.SearchStrategy searchStrategy() {
+        return searchStrategy;
+    }
+
     /** Non-null exactly when the injected strategy is a REST provider (no browser during the search). */
     private String apiProviderLabel;
 
