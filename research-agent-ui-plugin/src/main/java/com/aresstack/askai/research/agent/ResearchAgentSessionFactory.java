@@ -268,8 +268,7 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 com.aresstack.askai.plugin.api.service.ChatSessionLauncher.class));
         ResearchRuntimeSettings.ChatGptConnectorSettings connector =
                 ResearchRuntimeSettings.loadChatGptConnectorSettings(hostContext.getStateStore());
-        if (connector.isEnabled()
-                && ResearchRuntimeSettings.loadBotControlMcp(hostContext.getStateStore())) {
+        if (connector.isEnabled()) {
             runtime.ensureStarted(new com.aresstack.askai.research.connector.ConnectorConfig(
                     connector.getPort(), connector.getPublicOrigin(), connector.getClientId(),
                     connector.getClientSecret(),

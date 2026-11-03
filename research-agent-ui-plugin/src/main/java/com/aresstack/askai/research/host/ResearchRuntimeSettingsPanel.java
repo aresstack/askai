@@ -345,6 +345,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 // Persisted immediately; running sessions keep their endpoint until they close.
                 ResearchRuntimeSettings.saveBotControlMcp(ResearchRuntimeSettingsPanel.this.store,
                         botControlMcp.isSelected());
+                // The connector key is app-wide (bot control is per chat): switching the server off
+                // clears the connector flag itself, so no chat's frozen value can stop another's listener.
+                if (!botControlMcp.isSelected()) {
+                    chatGptConnector.setSelected(false);
+                }
                 updateMcpFieldsEnabled();
                 persistConnectorSettings();
             }
@@ -712,7 +717,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // in the session directory; OFF stops only the listener, the running sessions stay registered.
         com.aresstack.askai.research.connector.ChatGptConnectorRuntime runtime =
                 com.aresstack.askai.research.connector.ChatGptConnectorRuntime.get();
-        if (settings.isEnabled() && botControlMcp.isSelected()) {
+        if (settings.isEnabled()) {
             runtime.ensureStarted(new com.aresstack.askai.research.connector.ConnectorConfig(
                     settings.getPort(), settings.getPublicOrigin(), settings.getClientId(),
                     settings.getClientSecret(),
