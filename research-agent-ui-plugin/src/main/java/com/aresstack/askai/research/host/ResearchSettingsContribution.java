@@ -65,7 +65,7 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
                 }
             }
         });
-        return tabs;
+        return com.aresstack.comiccontrols.control.ComicForm.fit(tabs);
     }
 
     /**
@@ -74,38 +74,7 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
      * vertically only when it really is taller than the tab.
      */
     static JComponent fitted(final JComponent content) {
-        WidthTracking column = new WidthTracking();
-        column.add(content, java.awt.BorderLayout.NORTH);
-        return com.aresstack.comiccontrols.control.ComicForm.scroll(column);
-    }
-
-    private static final class WidthTracking extends javax.swing.JPanel implements javax.swing.Scrollable {
-        private static final long serialVersionUID = 1L;
-
-        WidthTracking() {
-            super(new java.awt.BorderLayout());
-            setOpaque(false);
-        }
-
-        public java.awt.Dimension getPreferredScrollableViewportSize() {
-            return getPreferredSize();
-        }
-
-        public int getScrollableUnitIncrement(java.awt.Rectangle visible, int orientation, int direction) {
-            return 14;
-        }
-
-        public int getScrollableBlockIncrement(java.awt.Rectangle visible, int orientation, int direction) {
-            return Math.max(14, visible.height - 28);
-        }
-
-        public boolean getScrollableTracksViewportWidth() {
-            return true;
-        }
-
-        public boolean getScrollableTracksViewportHeight() {
-            return false;
-        }
+        return com.aresstack.comiccontrols.control.ComicForm.fit(content);
     }
 
     /** General research-UI preferences — the first, non-technical tab. */

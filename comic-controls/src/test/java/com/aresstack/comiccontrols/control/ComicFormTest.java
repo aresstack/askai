@@ -129,6 +129,35 @@ public class ComicFormTest {
         assertTrue("it wrapped onto a further line", last.getY() > parts[0].getY());
     }
 
+    /** The recurring bug: a plain panel (or a tabbed pane) in a settings scroll pane stayed wider than the window. */
+    @Test
+    public void anyContentInAScrollPaneFollowsTheWindowWidthAndShrinksAgain() {
+        ComicForm form = new ComicForm();
+        form.row("Search engines", ComicControls.textField("", 20), new JButton("Reset"));
+        form.row("", ComicForm.hint(repeat('w', 60) + " " + repeat('x', 300)));
+        javax.swing.JPanel plain = new javax.swing.JPanel(new java.awt.BorderLayout());
+        plain.add(form, java.awt.BorderLayout.CENTER);
+        javax.swing.JTabbedPane tabs = ComicControls.tabbedPane();
+        tabs.addTab("Engines", plain);
+        JComponent card = ComicForm.fit(tabs);
+        for (int width : new int[] {1400, 500, 900, 360}) {
+            java.util.List<String> overflows = ComicLayoutAudit.overflows(card, width, 600);
+            assertTrue(width + ": " + overflows, overflows.isEmpty());
+        }
+    }
+
+    /** Too narrow for label + field side by side: the label goes above the field instead of clipping it. */
+    @Test
+    public void narrowFormPutsLabelsAboveFieldsAndBackWhenWide() {
+        ComicForm form = new ComicForm();
+        form.row("A rather long label for a narrow window", ComicControls.textField("", 20), new JButton("Reset"));
+        JScrollPane page = ComicForm.page(form);
+        assertTrue(ComicLayoutAudit.overflows(page, 300, 400).isEmpty());
+        assertTrue(form.isStacked());
+        assertTrue(ComicLayoutAudit.overflows(page, 900, 400).isEmpty());
+        assertFalse(form.isStacked());
+    }
+
     private static void layout(JComponent component, int width, int height) {
         component.setSize(new Dimension(width, height));
         // No peer in a headless test, so validate() is a no-op: lay the tree out top-down by hand,
