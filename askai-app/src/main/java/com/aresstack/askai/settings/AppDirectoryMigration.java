@@ -34,7 +34,8 @@ public final class AppDirectoryMigration {
             report.addAll(migrate(legacy, AskAiPaths.appDirectory()));
         }
         for (String line : report) {
-            System.err.println("[askai] " + line);
+            // the per-file list is its own category (off by default, Settings > General > Logging)
+            System.err.println((line.startsWith("  ") ? "[data-migration] " : "[askai] ") + line);
         }
         return report;
     }
