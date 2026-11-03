@@ -18,6 +18,16 @@ The seven Merlin pictures of the AskAI setup wizard.
 | `wizard-5-knowledge-research.png` | Step “Knowledge & research” |
 | `wizard-6-setup-complete.png` | Step “Check” (final check) |
 | `wizard-7-audio-voice.png` | Step “Voice” |
+| `merlin-1-network.png` | Step “Network” (cut-out, transparent background) – used |
+| `merlin-2-ai-runtime.png` | Step “AI runtime”, before and after a runtime answers – used |
+| `merlin-3-chat-model.png` | Step “Chat model” – used |
+| `merlin-4-knowledge.png` | Step “Knowledge” – used |
+| `merlin-5-check.png` | Step “Check” – used |
+| `merlin-6-voice.png` | Step “Voice” – used |
+
+The wizard shows the `merlin-*` cut-outs; they grow to fill the free space of each step. The `wizard-*` scenes stay
+as alternatives (`wizard-1-runtime-install.png` remains the general fallback). The script only scales the cut-outs
+down to 900 px height, without rounded corners.
 
 Regenerating the copies after an original changed (Python 3 with Pillow):
 

@@ -59,18 +59,20 @@ final class WizardGuide {
 
     private static final String[] ON_ENTER = {
             null,
+            "First a voice for me: pick one per language and download it, then I can read aloud to you.",
             "Here we connect me with an AI runtime. As soon as that works, I can talk to you.",
             "Now I'm choosing a brain for myself. Pick the model we'll chat with.",
             "Here I learn how to search, read and rank knowledge. The better I can do that, the less I have to "
                     + "guess. You can skip this step and do it later in the settings.",
-            "Almost done. Let me check whether I can really do everything I claim.",
-            "And if typing is too tedious for you, I can also read my answers aloud to you."
+            "Almost done. Let me check whether I can really do everything I claim."
     };
 
     private static final String[] WHAT_TO_DO = {
             "Choose how AskAI reaches the internet: without a proxy, via the Windows proxy settings or a proxy of "
                     + "your own. In company networks, also trust the Windows certificates. Then click “Test "
                     + "connection”. Working offline? Then just skip this step.",
+            "Pick a voice per language and click “Download selected voices”, or keep the Windows voice. You can skip "
+                    + "this step and change voices later in the settings.",
             "Enter the address of your Ollama server – on your own machine that is usually http://localhost:11434 – "
                     + "and click “Test connection”. No Ollama yet? “Download Ollama” takes you to it. AskAI's own "
                     + "local runtime counts too, as soon as it has a model.",
@@ -80,25 +82,24 @@ final class WizardGuide {
                     + "reranker is optional but improves the ranking of sources. The sentence models split texts "
                     + "into sentences; “Install sentence models” fetches the missing ones.",
             "Nothing else: I save everything and check it. If something is red, jump to that step above, fix it, "
-                    + "and then click “Check again”.",
-            "Pick a voice per language and install it, or keep the Windows voice. You can skip this step and "
-                    + "change voices later in the chat settings."
+                    + "and then click “Check again”. “Finish” ends the setup – even if something is still red."
     };
 
     private static final String[] WHY_NEEDED = {
             "Models, voices and web searches come from the internet. If the proxy or the certificates are wrong, "
                     + "every download fails – better to find out now.",
+            "With a local voice I read answers aloud without your text leaving your computer. The voices are not "
+                    + "part of AskAI, they have to be downloaded once.",
             "The runtime is my head: without it I can neither answer nor understand texts.",
             "The chat model phrases my answers. Everything else – research, summaries, tools – builds on it.",
             "The embedding model finds the passages that match your question, even when other words are used. The "
                     + "reranker sorts them by relevance, and the sentence models cut sources into clean sentences.",
             "So that you don't only notice in everyday use that something is missing: I check every building "
-                    + "block for real once.",
-            "With a local voice I read answers aloud without your text leaving your computer."
+                    + "block for real once."
     };
 
-    private static final String[] TOPIC = {"Network and security", "AI runtime", "Chat model",
-            "Knowledge and research", "Final check", "Voice"};
+    private static final String[] TOPIC = {"Network and security", "Voice", "AI runtime", "Chat model",
+            "Knowledge and research", "Final check"};
 
     /** The introduction: in detail on the first start, as a reunion when called later. */
     String greeting(boolean returning) {
