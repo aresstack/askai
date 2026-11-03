@@ -151,12 +151,19 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
                     launchOptions.setArgs(launch.args());
                 }
                 browser = playwright.firefox().launch(launchOptions);
+            } else if (BrowserExecutables.FIREFOX.equals(channel)) {
+                // The local Firefox (chosen location, else autodetected), launched as the chat browser does.
+                browser = playwright.firefox().launch(Playwright4jDriver.localFirefoxOptions(options.headless));
             } else {
                 BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions().setHeadless(options.headless);
                 if (executableOverride != null) {
                     launchOptions.setExecutablePath(executableOverride);
                 } else {
                     launchOptions.setChannel(channel);
+                    String chosen = BrowserExecutables.configured(channel);
+                    if (!chosen.isEmpty()) {
+                        launchOptions.setExecutablePath(java.nio.file.Paths.get(chosen));
+                    }
                 }
                 browser = playwright.chromium().launch(launchOptions);
             }
