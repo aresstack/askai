@@ -95,6 +95,8 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** The Ollama address before the wizard tried another one (restored on cancel); {@code null}: untouched. */
     private String originalOllamaUrl;
+    /** The saved network settings before the model browser needed the draft's; restored on cancel. */
+    private AppConfiguration originalNetwork;
     /** Counts wizard runs ended by a cancel; a runtime result from an earlier run must not touch the model. */
     private int cancellations;
     private PiperReadAloudService witchService;
@@ -128,6 +130,33 @@ public final class AskAiSetupActions implements SetupActions {
     private java.util.function.Supplier<List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>>
             pluginSetup;
     private com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostState;
+
+    private java.util.function.Supplier<? extends Component> modelBrowser;
+
+    /** The model browser the wizard opens for "Install…" (a fresh one each time, so it never leaves the app). */
+    public void setModelBrowser(java.util.function.Supplier<? extends Component> modelBrowser) {
+        this.modelBrowser = modelBrowser;
+    }
+
+    @Override
+    public void openModelBrowser(Component parent, SetupDraft draft) {
+        if (modelBrowser == null) {
+            return;
+        }
+        useDraftNetworkForBrowser(draft);
+        Window owner = parent == null ? null : SwingUtilities.getWindowAncestor(parent);
+        final JDialog dialog = new JDialog(owner, "Install a model", JDialog.ModalityType.APPLICATION_MODAL);
+        ComicButton close = new ComicButton("Close");
+        close.addActionListener(e -> dialog.dispose());
+        JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        south.add(close);
+        dialog.getContentPane().add(modelBrowser.get(), BorderLayout.CENTER);
+        dialog.getContentPane().add(south, BorderLayout.SOUTH);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dialog.setSize(new Dimension(1100, 760));
+        dialog.setLocationRelativeTo(parent);
+        dialog.setVisible(true); // blocks until closed; downloads started there keep their own progress
+    }
 
     /** Connects the plugins' setup sections (search browser, search provider) and the host state they write to. */
     public void setPluginSetup(
@@ -250,6 +279,26 @@ public final class AskAiSetupActions implements SetupActions {
         return withNetwork(draft.toBuilder(), configuration.load()).build();
     }
 
+    /**
+     * The model browser's Hugging Face client and installers read the saved network settings, so the wizard's
+     * proxy and certificate choice is saved while it is open; "Cancel" restores what was saved before.
+     */
+    private void useDraftNetworkForBrowser(SetupDraft draft) {
+        if (draft == null) {
+            return;
+        }
+        try {
+            AppConfiguration stored = configuration.load();
+            if (originalNetwork == null) {
+                originalNetwork = stored;
+            }
+            configuration.save(stored.withNetworkConfiguration(proxyOf(draft, stored), trustOf(draft, stored),
+                    stored.getHttpClientConfiguration()));
+        } catch (RuntimeException e) {
+            // the browser still opens with the saved settings
+        }
+    }
+
     // ------------------------------------------------------------------ AI runtime
 
     @Override
@@ -301,6 +350,16 @@ public final class AskAiSetupActions implements SetupActions {
         if (originalOllamaUrl != null) {
             model.setOllamaBaseUrl(originalOllamaUrl);
             originalOllamaUrl = null;
+        }
+        if (originalNetwork != null) {
+            try {
+                configuration.save(configuration.load().withNetworkConfiguration(
+                        originalNetwork.getProxyConfiguration(), originalNetwork.getCertificateTrustConfiguration(),
+                        originalNetwork.getHttpClientConfiguration()));
+            } catch (RuntimeException e) {
+                // nothing more to restore
+            }
+            originalNetwork = null;
         }
         stopWitch();
     }
@@ -483,7 +542,8 @@ public final class AskAiSetupActions implements SetupActions {
     }
 
     @Override
-    public void installVoice(final SetupDraft draft, final String voiceId, final Progress progress,
+    public void installVoice(final SetupDraft draft, final String voiceId, final boolean reinstall,
+                             final Progress progress,
                              final BiConsumer<String, String> done) {
         final PiperVoice voice = PiperVoiceCatalog.findById(voiceId);
         if (voice == null) {
@@ -495,8 +555,14 @@ public final class AskAiSetupActions implements SetupActions {
                 AppConfiguration stored = configuration.load();
                 ConfiguredConnections network = new ConfiguredConnections(proxyOf(draft, stored),
                         trustOf(draft, stored), stored.getHttpClientConfiguration());
-                new PiperInstaller(piperStore, ttsSettings, network::open).install(voice,
-                        (stage, bytesDone, bytesTotal) -> deliver(() -> progress.update(stage, bytesDone, bytesTotal)));
+                PiperInstaller installer = new PiperInstaller(piperStore, ttsSettings, network::open);
+                PiperInstaller.Progress report =
+                        (stage, bytesDone, bytesTotal) -> deliver(() -> progress.update(stage, bytesDone, bytesTotal));
+                if (reinstall) {
+                    installer.reinstall(voice, report);
+                } else {
+                    installer.install(voice, report);
+                }
                 deliver(() -> done.accept(voice.getDisplayName() + " installed.", null));
             } catch (Exception e) {
                 deliver(() -> done.accept(null, message(e)));
@@ -553,6 +619,7 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** Writes the draft through the same paths the settings pages use. */
     private void save(SetupDraft draft) {
+        originalNetwork = null; // the draft's network settings are the saved ones from now on
         AppConfiguration stored = configuration.load();
         configuration.save(stored.withNetworkConfiguration(proxyOf(draft, stored), trustOf(draft, stored),
                 stored.getHttpClientConfiguration()));

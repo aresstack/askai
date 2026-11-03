@@ -285,7 +285,7 @@ public class SetupWizardPanelTest {
         });
         wizard.nextButton().doClick();
         wizard.voiceGermanChoice().setSelectedItem("Thorsten (German)");
-        wizard.voiceInstallButton().doClick();
+        wizard.voiceGermanButton().doClick();
         assertTrue("the voice download counts as network test", wizard.isDone(SetupWizardPanel.STEP_NETWORK));
 
         wizard.nextButton().doClick();
@@ -301,10 +301,81 @@ public class SetupWizardPanelTest {
         wizard.proxyModeChoice().setSelectedItem(SetupWizardPanel.LABEL_PROXY_MANUAL);
         wizard.voiceGermanChoice().setSelectedItem("Thorsten (German)");
 
-        wizard.voiceInstallButton().doClick();
+        wizard.voiceGermanButton().doClick();
 
         assertEquals("the download is the network test", SetupWizardPanel.PROXY_MANUAL, fake.voiceDraft.proxyMode());
         assertTrue(wizard.isDone(SetupWizardPanel.STEP_NETWORK));
+    }
+
+    @Test
+    public void eachVoiceHasItsOwnDownloadOrReinstallButtonBesideItsChoice() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.voiceGermanChoice().setSelectedItem(SetupWizardPanel.WINDOWS_VOICE);
+        assertFalse("the Windows voice needs no download", wizard.voiceGermanButton().isVisible());
+
+        wizard.voiceGermanChoice().setSelectedItem("Thorsten (German)");
+        assertTrue(wizard.voiceGermanButton().isVisible());
+        assertEquals("Download", wizard.voiceGermanButton().getText());
+        wizard.voiceEnglishChoice().setSelectedItem("Amy (English) (installed)");
+        assertEquals("installed voices offer a reinstall", "Reinstall", wizard.voiceEnglishButton().getText());
+
+        wizard.voiceGermanButton().doClick();
+        assertEquals("Reinstall", wizard.voiceGermanButton().getText());
+        wizard.voiceEnglishButton().doClick();
+
+        assertEquals(Arrays.asList("de_DE-thorsten-medium install", "en_US-amy-medium reinstall"),
+                fake.voiceInstalls);
+    }
+
+    @Test
+    public void theChatModelStepGoesOnOnlyWithAnInstalledModelButCanAlwaysBeSkipped() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_CHAT);
+        wizard.chatModelChoice().setSelectedItem("mistral");
+        assertFalse("not installed: Next waits", wizard.nextButton().isEnabled());
+        assertTrue("Skip always goes on", wizard.skipButton().isEnabled());
+
+        wizard.chatModelChoice().setSelectedItem("llama3.2");
+
+        assertTrue(wizard.nextButton().isEnabled());
+    }
+
+    @Test
+    public void theRecommendedChatModelHasItsOwnQuickInstallButton() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_CHAT);
+        assertTrue(wizard.chatRecommendedButton().isVisible());
+
+        wizard.chatRecommendedButton().doClick();
+
+        assertEquals(Collections.singletonList(SetupActions.RECOMMENDED_CHAT_MODEL), fake.pulled);
+        assertEquals(SetupActions.RECOMMENDED_CHAT_MODEL, wizard.chatModelChoice().getSelectedItem());
+
+        wizard.chatAlternativeButton().doClick();
+
+        assertEquals(Arrays.asList(SetupActions.RECOMMENDED_CHAT_MODEL, SetupActions.ALTERNATIVE_CHAT_MODEL),
+                fake.pulled);
+        assertEquals(SetupActions.ALTERNATIVE_CHAT_MODEL, wizard.chatModelChoice().getSelectedItem());
+    }
+
+    @Test
+    public void installOpensTheModelBrowserAndSelectsWhatWasInstalledThere() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_CHAT);
+        wizard.proxyModeChoice().setSelectedItem(SetupWizardPanel.LABEL_PROXY_MANUAL);
+        wizard.chatModelChoice().setSelectedItem("llama3.2");
+
+        wizard.chatInstallButton().doClick();
+
+        assertEquals(1, fake.browserOpened);
+        assertEquals("the browser downloads with the step's proxy", SetupWizardPanel.PROXY_MANUAL,
+                fake.browserDraft.proxyMode());
+        assertEquals("mistral", wizard.chatModelChoice().getSelectedItem());
+        assertFalse("installed meanwhile: nothing left to download", wizard.chatDownloadButton().isVisible());
     }
 
     @Test
@@ -332,7 +403,7 @@ public class SetupWizardPanelTest {
     @Test
     public void everyStepShowsItsOwnPicture() {
         SetupWizardPanel wizard = wizard(new Fake());
-        String[] expected = {"voice", "ai-runtime", "chat-model", "knowledge", "voice", "check"};
+        String[] expected = {"network-security", "ai-runtime", "chat-model", "knowledge", "voice", "check"};
         int[] steps = {SetupWizardPanel.STEP_VOICE, SetupWizardPanel.STEP_RUNTIME, SetupWizardPanel.STEP_CHAT,
                 SetupWizardPanel.STEP_KNOWLEDGE, SetupWizardPanel.STEP_DICTATION, SetupWizardPanel.STEP_CHECK};
         for (int i = 0; i < steps.length; i++) {
@@ -580,10 +651,22 @@ public class SetupWizardPanelTest {
         SetupDraft savedVoices;
         boolean thorstenInstalled;
         SetupDraft voiceDraft;
+        final List<String> voiceInstalls = new ArrayList<String>();
         List<String> pulled = new ArrayList<String>();
         int rerankerInstalls;
         int finishes;
         List<String> audioModels = new ArrayList<String>();
+        final List<String> browserInstalled = new ArrayList<String>();
+        int browserOpened;
+        SetupDraft browserDraft;
+
+        @Override
+        public void openModelBrowser(java.awt.Component parent, SetupDraft draft) {
+            browserOpened++;
+            browserDraft = draft;
+            browserInstalled.add("mistral");
+            audioModels.add(SetupActions.RECOMMENDED_AUDIO_MODEL);
+        }
         Boolean micHeard = Boolean.TRUE;
         String testedMicrophone;
         boolean holdAudio;
@@ -619,7 +702,9 @@ public class SetupWizardPanelTest {
 
         @Override
         public void loadModels(SetupDraft draft, Consumer<SetupModels> done) {
-            done.accept(new SetupModels(Arrays.asList("llama3.2", "qwen3"), Collections.singletonList(
+            List<String> chat = new ArrayList<String>(Arrays.asList("llama3.2", "qwen3"));
+            chat.addAll(browserInstalled);
+            done.accept(new SetupModels(chat, Collections.singletonList(
                     "nomic-embed-text"), rerankerInstalls > 0 ? Collections.singletonList("ms-marco-MiniLM-L6-v2")
                     : Collections.<String>emptyList(), sentenceInstalled
                     ? Collections.singletonList("opennlp-de-sent") : Collections.<String>emptyList(),
@@ -646,9 +731,10 @@ public class SetupWizardPanelTest {
         }
 
         @Override
-        public void installVoice(SetupDraft draft, String voiceId, Progress progress,
+        public void installVoice(SetupDraft draft, String voiceId, boolean reinstall, Progress progress,
                                  BiConsumer<String, String> done) {
             voiceDraft = draft;
+            voiceInstalls.add(voiceId + (reinstall ? " reinstall" : " install"));
             progress.update("Downloading", 50, 100);
             thorstenInstalled = true;
             done.accept("installed", null);

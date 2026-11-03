@@ -77,7 +77,7 @@ public final class SetupWizardPanel extends JPanel {
      * Witch's picture per step: cut-outs with a transparent background (copies of the third set in
      * docs/images/setup-wizard/originals/v3).
      */
-    private static final String[] STEP_MASCOTS = {"wizard/v3-06-voice.png", "wizard/v3-02-ai-runtime.png",
+    private static final String[] STEP_MASCOTS = {"wizard/v3-01-network-security.png", "wizard/v3-02-ai-runtime.png",
             "wizard/v3-03-chat-model.png", "wizard/v3-04-knowledge.png", "wizard/v3-06-voice.png",
             "wizard/v3-05-check.png"};
     /** The runtime step shows this picture until a runtime answers (the same cut-out as once it answers). */
@@ -186,6 +186,16 @@ public final class SetupWizardPanel extends JPanel {
     // Step 3: chat model
     private final JComboBox<String> chatModel = ComicControls.comboBox();
     private final ComicButton modelsRefresh = new ComicButton("Reload models");
+    private final ComicButton chatInstall = new ComicButton("Install…");
+    private final ComicButton chatRecommended = new ComicButton("Install " + SetupActions.RECOMMENDED_CHAT_MODEL,
+            ComicButton.Accent.ACTION);
+    private final ComicButton chatAlternative = new ComicButton("Install " + SetupActions.ALTERNATIVE_CHAT_MODEL,
+            ComicButton.Accent.ACTION);
+    private final ComicButton embeddingInstall = new ComicButton("Install…");
+    private final ComicButton audioInstall = new ComicButton("Install…");
+    /** Models installed before the model browser opened: what is new afterwards gets selected. */
+    private List<String> chatBeforeBrowser;
+    private List<String> embeddingsBeforeBrowser;
     private final JLabel modelsStatus = statusLabel();
     private boolean modelsLoaded;
     private boolean modelsLoading;
@@ -228,7 +238,8 @@ public final class SetupWizardPanel extends JPanel {
     // Step 6: voice (optional)
     private final JComboBox<String> voiceGerman = ComicControls.comboBox();
     private final JComboBox<String> voiceEnglish = ComicControls.comboBox();
-    private final ComicButton voiceInstall = new ComicButton("Download voice", ComicButton.Accent.ACTION);
+    private final ComicButton voiceGermanAction = new ComicButton("Download", ComicButton.Accent.ACTION);
+    private final ComicButton voiceEnglishAction = new ComicButton("Download", ComicButton.Accent.ACTION);
     private final ComicButton voiceRetry = new ComicButton("Reload voices");
     private final ModelDownload chatDownload = new ModelDownload("Download model");
     private final ModelDownload embeddingDownload = new ModelDownload("Download model");
@@ -338,26 +349,17 @@ public final class SetupWizardPanel extends JPanel {
                 + "company networks AskAI can also trust the certificates of the Windows certificate stores. Then "
                 + "download a voice: the download uses exactly these settings, so a moving progress bar means the "
                 + "network works. Working offline? Keep the Windows voice and skip this step.");
-        rows.field("Proxy", proxyMode);
+        rows.stretched("Proxy", inline(proxyMode, networkTest, networkAdvanced));
         manualProxyParts.addAll(rows.field("Proxy host", proxyHost));
         manualProxyParts.addAll(rows.field("Proxy port", proxyPort));
         rows.field("", trustWindows);
-        JPanel actions = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        actions.add(networkTest);
-        actions.add(networkAdvanced);
-        rows.field("", actions);
-        rows.field("", networkStatus);
+        rows.stretched("", new StatusLine(null, networkStatus).panel);
         rows.heading("Voice");
-        rows.field("German", voiceGerman);
-        rows.field("English", voiceEnglish);
-        JPanel voiceActions = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        voiceActions.add(voiceInstall);
-        voiceActions.add(voiceRetry);
-        rows.field("", voiceActions);
+        rows.stretched("German", inline(voiceGerman, voiceGermanAction));
+        rows.stretched("English", inline(voiceEnglish, voiceEnglishAction));
         voiceProgress.setStringPainted(true);
         voiceProgress.setVisible(false);
-        rows.stretched("", voiceProgress);
-        rows.field("", voiceStatus);
+        rows.stretched("", inline(new StatusLine(voiceProgress, voiceStatus).panel, voiceRetry));
         return rows.panel();
     }
 
@@ -365,12 +367,8 @@ public final class SetupWizardPanel extends JPanel {
         Rows rows = new Rows(STEP_RUNTIME, "AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
                 + "runtime. One of them must answer; the final check shows which one does.");
-        rows.field("Ollama address", ollamaUrl);
-        JPanel actions = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        actions.add(runtimeTest);
-        actions.add(runtimeDownload);
-        rows.field("", actions);
-        rows.field("Ollama", ollamaStatus);
+        rows.stretched("Ollama address", inline(ollamaUrl, runtimeTest, runtimeDownload));
+        rows.stretched("", new StatusLine(null, ollamaStatus).panel);
         return rows.panel();
     }
 
@@ -379,14 +377,10 @@ public final class SetupWizardPanel extends JPanel {
         rows.note("The chat model answers in the chat and is the main model of all plugins (research agent, "
                 + "summaries, tools). The list shows the models installed in Ollama and in AskAI's local runtime.");
         chatModel.setEditable(true);
-        rows.field("Chat model", chatModel);
-        JPanel reload = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        reload.add(chatDownload.button);
-        reload.add(modelsRefresh);
-        reload.add(modelsStatus);
-        rows.field("", reload);
-        rows.stretched("", chatDownload.bar);
-        rows.field("", chatDownload.status);
+        rows.stretched("Chat model", inline(chatModel, chatDownload.button, chatRecommended, chatAlternative, modelsRefresh,
+                chatInstall));
+        rows.stretched("", chatDownload.line.panel);
+        rows.stretched("", new StatusLine(null, modelsStatus).panel);
         return rows.panel();
     }
 
@@ -399,31 +393,14 @@ public final class SetupWizardPanel extends JPanel {
         embeddingDimension.setEditable(false);
         embeddingDimension.setToolTipText("Vector length, measured with a real embedding call");
         dimensionMeasure.setToolTipText("Measure the vector length of the embedding model again");
-        JPanel embedding = transparent(new GridBagLayout());
-        GridBagConstraints c = new GridBagConstraints();
-        c.gridx = 0;
-        c.fill = GridBagConstraints.HORIZONTAL;
-        c.weightx = 1;
-        embedding.add(embeddingModel, c);
-        c = new GridBagConstraints();
-        c.gridx = 1;
-        c.insets = new Insets(0, 8, 0, 4);
-        embedding.add(embeddingDimension, c);
-        c = new GridBagConstraints();
-        c.gridx = 2;
-        embedding.add(dimensionMeasure, c);
-        rows.stretched("Embedding model", embedding);
-        rows.field("", embeddingDownload.row());
-        rows.stretched("", embeddingDownload.bar);
-        rows.field("Reranker", rerankerModel);
-        rows.field("", rerankerDownload.row());
-        rows.stretched("", rerankerDownload.bar);
-        rows.field("Sentences (German)", sentenceGerman);
-        rows.field("Sentences (English)", sentenceEnglish);
-        JPanel actions = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        actions.add(sentenceInstall);
-        actions.add(knowledgeStatus);
-        rows.field("", actions);
+        rows.stretched("Embedding model", inline(embeddingModel, embeddingDimension, dimensionMeasure,
+                embeddingDownload.button, embeddingInstall));
+        rows.stretched("", embeddingDownload.line.panel);
+        rows.stretched("Reranker", inline(rerankerModel, rerankerDownload.button));
+        rows.stretched("", rerankerDownload.line.panel);
+        rows.stretched("Sentences (German)", inline(sentenceGerman, sentenceInstall));
+        rows.stretched("Sentences (English)", inline(sentenceEnglish));
+        rows.stretched("", new StatusLine(null, knowledgeStatus).panel);
         researchRows = rows;
         return rows.panel();
     }
@@ -446,8 +423,7 @@ public final class SetupWizardPanel extends JPanel {
             try {
                 com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage page = contribution.createSetupPage(context);
                 if (page != null && page.getComponent() != null) {
-                    researchRows.heading(contribution.getDisplayName());
-                    researchRows.block(page.getComponent());
+                    researchRows.section(contribution.getDisplayName(), page.getComponent());
                     pluginPages.add(page);
                 }
             } catch (RuntimeException | LinkageError broken) {
@@ -462,17 +438,12 @@ public final class SetupWizardPanel extends JPanel {
         Rows rows = new Rows(STEP_DICTATION, "Dictation");
         rows.note("Optional: speak instead of typing. AskAI records with your microphone and an audio-capable "
                 + "model in your AI runtime writes down what you said. Skip this step if you only type.");
-        rows.field("Microphone", microphone);
-        JPanel micActions = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        micActions.add(micTest);
-        micActions.add(micStatus);
-        rows.field("", micActions);
+        rows.stretched("Microphone", inline(microphone, micTest));
         micLevel.setVisible(false);
-        rows.stretched("", micLevel);
-        rows.field("Audio model", audioModel);
-        rows.field("", audioDownload.row());
-        rows.stretched("", audioDownload.bar);
-        rows.field("", audioStatus);
+        rows.stretched("", new StatusLine(micLevel, micStatus).panel);
+        rows.stretched("Audio model", inline(audioModel, audioDownload.button, audioInstall));
+        rows.stretched("", audioDownload.line.panel);
+        rows.stretched("", new StatusLine(null, audioStatus).panel);
         return rows.panel();
     }
 
@@ -525,6 +496,13 @@ public final class SetupWizardPanel extends JPanel {
         runtimeTest.addActionListener(e -> checkRuntime());
         runtimeDownload.addActionListener(e -> setup.openRuntimeDownload());
         modelsRefresh.addActionListener(e -> refreshModels());
+        chatInstall.setToolTipText("Find and install a model from Hugging Face, the Ollama library or AskAI's "
+                + "local runtime");
+        embeddingInstall.setToolTipText(chatInstall.getToolTipText());
+        audioInstall.setToolTipText(chatInstall.getToolTipText());
+        chatInstall.addActionListener(e -> browseModels(false));
+        embeddingInstall.addActionListener(e -> browseModels(false));
+        audioInstall.addActionListener(e -> browseModels(true));
         chatModel.addActionListener(e -> updateButtons());
         embeddingModel.addActionListener(e -> {
             if (!busy) {
@@ -537,6 +515,17 @@ public final class SetupWizardPanel extends JPanel {
         });
         sentenceInstall.addActionListener(e -> installSentenceModels());
         chatDownload.button.addActionListener(e -> pull(chatDownload, chatModel));
+        chatRecommended.setToolTipText("Download the recommended chat model through Ollama and select it");
+        chatRecommended.addActionListener(e -> {
+            chatModel.setSelectedItem(SetupActions.RECOMMENDED_CHAT_MODEL);
+            pull(chatDownload, chatModel);
+        });
+        chatAlternative.setToolTipText("Download " + SetupActions.ALTERNATIVE_CHAT_MODEL + " – answers better than "
+                + SetupActions.RECOMMENDED_CHAT_MODEL + " but needs more memory");
+        chatAlternative.addActionListener(e -> {
+            chatModel.setSelectedItem(SetupActions.ALTERNATIVE_CHAT_MODEL);
+            pull(chatDownload, chatModel);
+        });
         micTest.addActionListener(e -> testMicrophone());
         audioDownload.button.addActionListener(e -> pullAudioModel());
         embeddingDownload.button.addActionListener(e -> pull(embeddingDownload, embeddingModel));
@@ -545,7 +534,8 @@ public final class SetupWizardPanel extends JPanel {
         checkInstallMissing.addActionListener(e -> installMissingModels());
         voiceGerman.addActionListener(e -> updateButtons());
         voiceEnglish.addActionListener(e -> updateButtons());
-        voiceInstall.addActionListener(e -> installVoices());
+        voiceGermanAction.addActionListener(e -> installVoice(voiceGerman));
+        voiceEnglishAction.addActionListener(e -> installVoice(voiceEnglish));
         voiceRetry.addActionListener(e -> loadVoices());
     }
 
@@ -812,7 +802,8 @@ public final class SetupWizardPanel extends JPanel {
         nextButton.setVisible(!voice);
         finishButton.setVisible(voice);
         // Every step can be passed over: a missing or failed check is only a hint, never a lock.
-        nextButton.setEnabled(!voice && !busy && !installing());
+        // The chat model step goes on only with an installed model chosen; "Skip" always goes on.
+        nextButton.setEnabled(!voice && !busy && !installing() && (step != STEP_CHAT || chatModelReady()));
         finishButton.setEnabled(voice && !busy && !installing());
         cancelButton.setVisible(!voice);
         // “Skip” in every step: on without a check; in the last step finish without changing the voices.
@@ -832,10 +823,19 @@ public final class SetupWizardPanel extends JPanel {
         networkAdvanced.setEnabled(!busy);
         runtimeTest.setEnabled(!busy && !runtimeChecking);
         modelsRefresh.setEnabled(!busy && !modelsLoading);
+        chatInstall.setEnabled(!busy && !modelsLoading);
+        embeddingInstall.setEnabled(!busy && !modelsLoading);
+        audioInstall.setEnabled(!busy && !audioLoading);
         dimensionMeasure.setEnabled(!busy && !text(embeddingModel).isEmpty());
         // Offer a download only for a model that is not there yet.
         chatDownload.button.setEnabled(!chatDownload.running && !text(chatModel).isEmpty());
-        chatDownload.button.setVisible(!text(chatModel).isEmpty() && !installedChat.contains(text(chatModel)));
+        chatDownload.button.setVisible(!text(chatModel).isEmpty() && !installedChat.contains(text(chatModel))
+                && !SetupActions.RECOMMENDED_CHAT_MODEL.equals(text(chatModel))
+                && !SetupActions.ALTERNATIVE_CHAT_MODEL.equals(text(chatModel)));
+        chatRecommended.setVisible(!installedChat.contains(SetupActions.RECOMMENDED_CHAT_MODEL));
+        chatRecommended.setEnabled(!chatDownload.running);
+        chatAlternative.setVisible(!installedChat.contains(SetupActions.ALTERNATIVE_CHAT_MODEL));
+        chatAlternative.setEnabled(!chatDownload.running);
         embeddingDownload.button.setEnabled(!embeddingDownload.running && !text(embeddingModel).isEmpty());
         embeddingDownload.button.setVisible(!text(embeddingModel).isEmpty()
                 && !installedEmbeddings.contains(text(embeddingModel)));
@@ -850,8 +850,8 @@ public final class SetupWizardPanel extends JPanel {
         sentenceInstall.setVisible(sentenceModelsMissing());
         checkInstallMissing.setVisible(pendingFixes > 0 || !missingLocalModels().isEmpty());
         checkInstallMissing.setEnabled(!busy && pendingFixes == 0);
-        voiceInstall.setVisible(!missingVoices().isEmpty());
-        voiceInstall.setEnabled(!busy && !installing());
+        voiceAction(voiceGerman, voiceGermanAction);
+        voiceAction(voiceEnglish, voiceEnglishAction);
         voiceRetry.setVisible(voicesLoadFailed);
         voiceRetry.setEnabled(!busy && !installing());
         voiceGerman.setEnabled(!installing());
@@ -1026,7 +1026,65 @@ public final class SetupWizardPanel extends JPanel {
         });
     }
 
+    /**
+     * Opens AskAI's model browser (Hugging Face, Ollama library, local runtime) over the wizard; afterwards the
+     * lists are read again and a model installed meanwhile is selected.
+     */
+    private void browseModels(boolean audio) {
+        final List<String> chatBefore = new ArrayList<String>(installedChat);
+        final List<String> embeddingsBefore = new ArrayList<String>(installedEmbeddings);
+        final List<String> audioBefore = new ArrayList<String>(installedAudio);
+        setup.openModelBrowser(this, collect()); // modal: returns when the browser is closed
+        if (closed) {
+            return;
+        }
+        if (audio) {
+            final String current = choice(audioModel, AUDIO_AUTOMATIC);
+            setup.loadAudioModels(collect(), models -> {
+                if (closed) {
+                    return;
+                }
+                String added = firstNew(models, audioBefore);
+                loadAudioModels(added == null ? current : added);
+            });
+            return;
+        }
+        chatBeforeBrowser = chatBefore;
+        embeddingsBeforeBrowser = embeddingsBefore;
+        modelsLoaded = false;
+        refreshModels();
+    }
+
+    /** An installed chat model is chosen: only then may "Next" leave the chat model step. */
+    private boolean chatModelReady() {
+        return installedChat.contains(text(chatModel));
+    }
+
+    /** The first entry of {@code now} that was not in {@code before}; {@code null} if none. */
+    static String firstNew(List<String> now, List<String> before) {
+        if (now != null) {
+            for (String name : now) {
+                if (!before.contains(name)) {
+                    return name;
+                }
+            }
+        }
+        return null;
+    }
+
     private void applyModels(SetupActions.SetupModels models) {
+        if (chatBeforeBrowser != null) { // back from the model browser: select what was installed there
+            String chat = firstNew(models.chat(), chatBeforeBrowser);
+            String embedding = firstNew(models.embeddings(), embeddingsBeforeBrowser);
+            chatBeforeBrowser = null;
+            embeddingsBeforeBrowser = null;
+            if (chat != null) {
+                chatModel.setSelectedItem(chat);
+            }
+            if (embedding != null) {
+                embeddingModel.setSelectedItem(embedding);
+            }
+        }
         boolean wasBusy = busy;
         busy = true; // filling the lists is no user change
         try {
@@ -1054,7 +1112,8 @@ public final class SetupWizardPanel extends JPanel {
         installedSentenceGerman = models.sentenceGerman();
         installedSentenceEnglish = models.sentenceEnglish();
         modelsStatus.setText(!models.problem().isEmpty() ? shorten(models.problem())
-                : count == 0 ? "No chat model installed yet – “Download model” fetches the suggested one."
+                : count == 0 ? "No chat model installed yet – “Install " + SetupActions.RECOMMENDED_CHAT_MODEL
+                + "” fetches the recommended one."
                 : count == 1 ? "1 chat model available." : count + " chat models available.");
         updateButtons();
         measureDimension();
@@ -1296,37 +1355,38 @@ public final class SetupWizardPanel extends JPanel {
         return voicesLoaded && missingVoices().isEmpty();
     }
 
-    private void installVoices() {
-        final List<SetupActions.VoiceOffer> queue = missingVoices();
-        if (queue.isEmpty()) {
+    /** The button behind a voice choice: "Download" for a missing Piper voice, "Reinstall" for an installed one. */
+    private void voiceAction(JComboBox<String> combo, ComicButton button) {
+        SetupActions.VoiceOffer offer = voiceByLabel.get(text(combo));
+        button.setVisible(offer != null); // the Windows voice needs no download
+        if (offer != null) {
+            button.setText(offer.isInstalled() ? "Reinstall" : "Download");
+            button.setToolTipText(offer.isInstalled() ? "Download " + offer.label() + " again"
+                    : "Download " + offer.label() + " through the network settings above");
+        }
+        button.setEnabled(!busy && !installing());
+    }
+
+    private void installVoice(JComboBox<String> combo) {
+        SetupActions.VoiceOffer offer = voiceByLabel.get(text(combo));
+        if (offer == null || installing()) {
             return;
         }
         voiceInstalling = true;
         clearError(STEP_VOICE);
         updateButtons();
-        installVoice(queue, 0);
+        installVoice(offer, offer.isInstalled());
     }
 
-    private void installVoice(final List<SetupActions.VoiceOffer> queue, final int index) {
+    private void installVoice(final SetupActions.VoiceOffer offer, final boolean reinstall) {
         if (closed) {
             return;
         }
-        if (index >= queue.size()) {
-            voiceInstalling = false;
-            voiceStatus.setText("Voices installed.");
-            voiceProgress.setVisible(false);
-            // The download went through the configured network: that is as good as a passed network test.
-            done[STEP_NETWORK] = true;
-            clearError(STEP_NETWORK);
-            loadVoices();
-            return;
-        }
-        final SetupActions.VoiceOffer offer = queue.get(index);
         voiceStatus.setText("Connecting for " + offer.label() + " …");
         voiceProgress.setIndeterminate(true);
         voiceProgress.setString("Connecting …");
         voiceProgress.setVisible(true);
-        setup.installVoice(collect(), offer.id(), (stage, bytesDone, bytesTotal) -> {
+        setup.installVoice(collect(), offer.id(), reinstall, (stage, bytesDone, bytesTotal) -> {
             if (closed) {
                 return;
             }
@@ -1349,7 +1409,13 @@ public final class SetupWizardPanel extends JPanel {
                 loadVoices();
                 return;
             }
-            installVoice(queue, index + 1);
+            voiceInstalling = false;
+            voiceProgress.setVisible(false);
+            voiceStatus.setText(offer.label() + (reinstall ? " reinstalled." : " installed."));
+            // The download went through the configured network: that is as good as a passed network test.
+            done[STEP_NETWORK] = true;
+            clearError(STEP_NETWORK);
+            loadVoices();
         });
     }
 
@@ -1895,8 +1961,32 @@ public final class SetupWizardPanel extends JPanel {
         return rerankerDownload.button;
     }
 
-    ComicButton voiceInstallButton() {
-        return voiceInstall;
+    ComicButton voiceGermanButton() {
+        return voiceGermanAction;
+    }
+
+    ComicButton voiceEnglishButton() {
+        return voiceEnglishAction;
+    }
+
+    JButton chatRecommendedButton() {
+        return chatRecommended;
+    }
+
+    JButton chatAlternativeButton() {
+        return chatAlternative;
+    }
+
+    JButton chatInstallButton() {
+        return chatInstall;
+    }
+
+    JButton audioInstallButton() {
+        return audioInstall;
+    }
+
+    JComboBox<String> voiceEnglishChoice() {
+        return voiceEnglish;
     }
 
     JComboBox<String> voiceGermanChoice() {
@@ -1923,23 +2013,89 @@ public final class SetupWizardPanel extends JPanel {
 
     /** Rows of a step: heading, note, then label and field. */
     /** A model download with its own button, progress bar and status line; never blocks the navigation. */
+    /**
+     * A field with its actions on the same line: the field takes the width, the buttons sit to its right (as
+     * “Measure” next to the embedding model).
+     */
+    private static JPanel inline(JComponent field, JComponent... actions) {
+        JPanel line = transparent(new GridBagLayout());
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.weightx = 1;
+        line.add(field, c);
+        for (int i = 0; i < actions.length; i++) {
+            c = new GridBagConstraints();
+            c.gridx = i + 1;
+            c.insets = new Insets(0, 8, 0, 0);
+            line.add(actions[i], c);
+        }
+        return line;
+    }
+
+    /**
+     * A progress bar (optional) and a message under a field. Takes no room while both are empty, so a step
+     * shows no gaps between its fields.
+     */
+    private static final class StatusLine {
+        final JPanel panel = transparent(new GridBagLayout());
+        private final JComponent bar;
+        private final JLabel status;
+
+        StatusLine(JComponent bar, JLabel status) {
+            this.bar = bar;
+            this.status = status;
+            GridBagConstraints c = new GridBagConstraints();
+            c.gridx = 0;
+            c.gridy = 0;
+            c.anchor = GridBagConstraints.WEST;
+            c.fill = GridBagConstraints.HORIZONTAL;
+            c.weightx = 1;
+            if (bar != null) {
+                panel.add(bar, c);
+                c = (GridBagConstraints) c.clone();
+                c.gridy = 1;
+            }
+            panel.add(status, c);
+            status.addPropertyChangeListener("text", e -> sync());
+            if (bar != null) {
+                bar.addComponentListener(new java.awt.event.ComponentAdapter() {
+                    @Override
+                    public void componentShown(java.awt.event.ComponentEvent e) {
+                        sync();
+                    }
+
+                    @Override
+                    public void componentHidden(java.awt.event.ComponentEvent e) {
+                        sync();
+                    }
+                });
+            }
+            sync();
+        }
+
+        private void sync() {
+            String text = status.getText();
+            boolean message = text != null && !text.trim().isEmpty();
+            status.setVisible(message);
+            panel.setVisible(message || (bar != null && bar.isVisible()));
+            panel.revalidate();
+        }
+    }
+
     private final class ModelDownload {
         final ComicButton button;
         final JProgressBar bar = ComicControls.progressBar(0, 1000);
         final JLabel status = statusLabel();
+        /** Progress bar and message below the field; hidden while there is nothing to show. */
+        final StatusLine line;
         boolean running;
 
         ModelDownload(String label) {
             button = new ComicButton(label, ComicButton.Accent.ACTION);
             bar.setStringPainted(true);
             bar.setVisible(false);
-        }
-
-        JPanel row() {
-            JPanel row = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
-            row.add(button);
-            row.add(status);
-            return row;
+            line = new StatusLine(bar, status);
         }
 
         SetupActions.Progress progress() {
@@ -1998,6 +2154,20 @@ public final class SetupWizardPanel extends JPanel {
             c.fill = GridBagConstraints.HORIZONTAL;
             c.weightx = 1;
             c.insets = new Insets(2, 0, 4, 0);
+            panel.add(component, c);
+            row++;
+        }
+
+        /** A plugin's section: its name in the label column, its content flush with the fields above. */
+        void section(String label, JComponent component) {
+            GridBagConstraints c = constraints(0);
+            c.anchor = GridBagConstraints.NORTHWEST;
+            c.insets = new Insets(12, 0, 3, 10);
+            panel.add(fieldLabel(label), c);
+            c = constraints(1);
+            c.fill = GridBagConstraints.HORIZONTAL;
+            c.weightx = 1;
+            c.insets = new Insets(10, 0, 3, 0);
             panel.add(component, c);
             row++;
         }
@@ -2092,6 +2262,19 @@ public final class SetupWizardPanel extends JPanel {
             mascot.setOnFigureClicked(point -> witchMenu().show(mascot, point.x, point.y));
             mascots[index] = mascot;
             page.add(mascot, BorderLayout.CENTER);
+            // Wrapping texts know their height only once they know their width: lay out once more when the
+            // width changes, so the form takes exactly its room and the Witch gets the rest.
+            page.addComponentListener(new java.awt.event.ComponentAdapter() {
+                private int width = -1;
+
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent e) {
+                    if (page.getWidth() != width) {
+                        width = page.getWidth();
+                        javax.swing.SwingUtilities.invokeLater(page::revalidate);
+                    }
+                }
+            });
             return page;
         }
     }
