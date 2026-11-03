@@ -89,6 +89,10 @@ final class BrowserLocationControl {
 
     /** Shows the stored location of {@code newChannel} (camoufox, firefox, chrome or msedge). */
     void setChannel(String newChannel) {
+        if (recheck.isRunning()) {
+            recheck.stop();
+            persist(); // a pending edit belongs to the channel it was typed for
+        }
         channel = newChannel == null || newChannel.trim().isEmpty()
                 ? ResearchRuntimeSettings.CAMOUFOX_CHANNEL : newChannel.trim();
         loading = true;
@@ -177,7 +181,7 @@ final class BrowserLocationControl {
     void refresh() {
         field.setEnabled(installing == null);
         browse.setEnabled(installing == null);
-        if (!camoufox()) {
+        if (!camoufox() && installing == null) {
             download.setVisible(false);
             progress.setVisible(false);
             String detected;
@@ -257,13 +261,16 @@ final class BrowserLocationControl {
             installing = null;
             poll.stop();
             if (phase == CamoufoxInstaller.Phase.READY && !done.equals(placeholder)) {
-                loading = true;
-                try {
-                    field.setText(done);
-                } finally {
-                    loading = false;
+                if (camoufox()) {
+                    loading = true;
+                    try {
+                        field.setText(done);
+                    } finally {
+                        loading = false;
+                    }
                 }
-                persist();
+                // Stored for Camoufox even when another channel is shown meanwhile.
+                ResearchRuntimeSettings.saveCamoufoxFolder(store, done);
             }
             refresh();
         }
