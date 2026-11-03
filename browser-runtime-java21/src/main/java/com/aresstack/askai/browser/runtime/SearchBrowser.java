@@ -164,9 +164,19 @@ public final class SearchBrowser implements AutoCloseable {
                 playwright = Playwright.create(new Playwright.CreateOptions().setEnv(env));
             }
             boolean camoufox = CamoufoxProvisioning.CHANNEL.equals(channel);
-            browser = camoufox ? launchCamoufox(playwright, wantHeadless)
-                    : playwright.chromium().launch(new BrowserType.LaunchOptions().setChannel(channel)
-                            .setHeadless(wantHeadless));
+            if (camoufox) {
+                browser = launchCamoufox(playwright, wantHeadless);
+            } else if (BrowserExecutables.FIREFOX.equals(channel)) {
+                browser = playwright.firefox().launch(Playwright4jDriver.localFirefoxOptions(wantHeadless));
+            } else {
+                BrowserType.LaunchOptions chromium = new BrowserType.LaunchOptions().setChannel(channel)
+                        .setHeadless(wantHeadless);
+                String chosen = BrowserExecutables.configured(channel);
+                if (!chosen.isEmpty()) {
+                    chromium.setExecutablePath(java.nio.file.Paths.get(chosen));
+                }
+                browser = playwright.chromium().launch(chromium);
+            }
             browserHeadless = wantHeadless;
             // The one context of this browser: the provider opens its pages here, cookies stay between searches.
             browser.newContext(camoufox

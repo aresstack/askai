@@ -408,7 +408,7 @@ public class ManualSearchWiringTest {
         assertTrue("stale completed is ignored", manualEntries(fx.sink.completed).isEmpty());
 
         // The matching completion renders and clears the correlation.
-        manualSearchEvent(fx, 4L, "R1", "completed", "3 Treffer");
+        manualSearchEvent(fx, 4L, "R1", "completed", "3 Treffer", "3");
         assertEquals(1, manualEntries(fx.sink.completed).size());
         assertEquals("manual-search-R1|3 Treffer", manualEntries(fx.sink.completed).get(0));
     }
@@ -496,6 +496,18 @@ public class ManualSearchWiringTest {
         assertFalse("nothing to review → no review tag", offered);
     }
 
+    @Test
+    public void aSearchWithoutAcceptedSourcesIsNoSuccess() {
+        Fx fx = new Fx();
+        fx.session.dispatch(ResearchCommandType.START, null);
+        completeTurn(fx, 1L);
+        fx.session.setManualWebSearchPort(new FixedRequestIdPort("R1"));
+        fx.session.requestManualWebSearch("wearables");
+        manualSearchEvent(fx, 2L, "R1", "completed", "0 Treffer", "0");
+        assertTrue("no green completion for 0 sources", manualEntries(fx.sink.completed).isEmpty());
+        assertFalse("the query stays offered", fx.session.wasManuallySearched("wearables"));
+    }
+
     private static List<String> manualEntries(List<String> entries) {
         List<String> out = new ArrayList<String>();
         for (String entry : entries) {
@@ -523,7 +535,7 @@ public class ManualSearchWiringTest {
         assertEquals("both suggestions render initially", 2, view.getSuggestionButtons().size());
 
         fx.session.requestManualWebSearch("wearables audio video");
-        manualSearchEvent(fx, 3L, "R1", "completed", "3 Treffer"); // the search covered the first query
+        manualSearchEvent(fx, 3L, "R1", "completed", "3 Treffer", "3"); // the search covered the first query
 
         assertTrue(fx.session.wasManuallySearched("wearables audio video"));
         List<javax.swing.AbstractButton> remaining = view.getSuggestionButtons();

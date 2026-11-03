@@ -77,7 +77,8 @@ public final class PlaywrightCapabilityProbe {
         if (executable == null) {
             return new PlaywrightReadiness(PlaywrightReadiness.Status.BROWSER_NOT_INSTALLED,
                     "No installed browser found for channel '" + channel
-                            + "'. Install Google Chrome or Microsoft Edge; AskAI never downloads these browsers.");
+                            + "'. Install it or choose its location under Research Agent \u2192 Browser; AskAI never downloads"
+                            + " Firefox, Chrome or Edge.");
         }
         return new PlaywrightReadiness(PlaywrightReadiness.Status.READY,
                 "channel=" + channel + " executable=" + executable);
@@ -97,48 +98,7 @@ public final class PlaywrightCapabilityProbe {
         }
 
         public String browserExecutable(String channel) {
-            for (String candidate : candidatePaths(channel)) {
-                File file = new File(candidate);
-                if (file.isFile()) {
-                    return file.getAbsolutePath();
-                }
-            }
-            return null;
-        }
-
-        /** Standard install locations only — discovery, never installation. */
-        private static List<String> candidatePaths(String channel) {
-            List<String> paths = new ArrayList<String>();
-            String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-            boolean chrome = !"msedge".equals(channel);
-            if (os.contains("win")) {
-                String programFiles = System.getenv("ProgramFiles");
-                String programFilesX86 = System.getenv("ProgramFiles(x86)");
-                String localAppData = System.getenv("LOCALAPPDATA");
-                for (String root : new String[]{programFiles, programFilesX86, localAppData}) {
-                    if (root == null) {
-                        continue;
-                    }
-                    if (chrome) {
-                        paths.add(root + "\\Google\\Chrome\\Application\\chrome.exe");
-                    } else {
-                        paths.add(root + "\\Microsoft\\Edge\\Application\\msedge.exe");
-                    }
-                }
-            } else if (os.contains("mac")) {
-                paths.add(chrome ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-                        : "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge");
-            } else {
-                if (chrome) {
-                    paths.add("/usr/bin/google-chrome");
-                    paths.add("/usr/bin/google-chrome-stable");
-                    paths.add("/opt/google/chrome/chrome");
-                } else {
-                    paths.add("/usr/bin/microsoft-edge");
-                    paths.add("/opt/microsoft/msedge/msedge");
-                }
-            }
-            return paths;
+            return BrowserExecutables.effective(channel);
         }
     }
 }

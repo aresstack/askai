@@ -134,10 +134,20 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 context = playwright.firefox().launchPersistentContext(profile.directory(),
                         camoufoxOptions(camoufoxExecutable, camoufoxLaunch, headless));
                 browser = context.browser();
+            } else if (BrowserExecutables.FIREFOX.equals(channel)) {
+                // The local Firefox over WebDriver BiDi, as Camoufox runs (without its fingerprint patches).
+                browser = playwright.firefox().launch(localFirefoxOptions(headless));
+                stage = "CONTEXT_CREATE";
+                context = browser.newContext(new Browser.NewContextOptions().setAcceptDownloads(false));
             } else {
-                browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
+                BrowserType.LaunchOptions chromium = new BrowserType.LaunchOptions()
                         .setChannel(channel)
-                        .setHeadless(headless));
+                        .setHeadless(headless);
+                String chosen = BrowserExecutables.configured(channel);
+                if (!chosen.isEmpty()) {
+                    chromium.setExecutablePath(java.nio.file.Paths.get(chosen));
+                }
+                browser = playwright.chromium().launch(chromium);
                 stage = "CONTEXT_CREATE";
                 context = browser.newContext(new Browser.NewContextOptions().setAcceptDownloads(false));
             }
@@ -189,6 +199,18 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     + ", after " + elapsedMillis + " ms): " + firstLine(ex)
                     + (report == null ? "" : " (full report: " + report + ")"));
         }
+    }
+
+    /** Launch options of the local Firefox (chosen location, else autodetected). */
+    static BrowserType.LaunchOptions localFirefoxOptions(boolean headless) {
+        String executable = BrowserExecutables.effective(BrowserExecutables.FIREFOX);
+        if (executable == null) {
+            throw new IllegalStateException("No Firefox found; choose its location under Research Agent \u2192 Browser");
+        }
+        return new BrowserType.LaunchOptions()
+                .setChannel("moz-firefox")
+                .setExecutablePath(java.nio.file.Paths.get(executable))
+                .setHeadless(headless);
     }
 
     @Override

@@ -30,9 +30,24 @@ public final class ResearchRuntimeDefaults {
         if (ResearchRuntimeSettings.CAMOUFOX_CHANNEL.equals(configured)) {
             return configured; // managed: the browser runtime downloads and verifies its own Camoufox
         }
+        if ("firefox".equals(configured)) {
+            return configured; // the local Firefox: no Chromium fallback; the readiness probe reports a missing one
+        }
         String channel = "msedge".equals(configured) ? "msedge" : "chrome";
+        if (chosenExecutableExists(channel)) {
+            return channel; // the user's own location of this browser: never swapped for the other one
+        }
         String other = "msedge".equals(channel) ? "chrome" : "msedge";
         return pickChannel(channel, browserInstalled(channel), browserInstalled(other), other);
+    }
+
+    private static boolean chosenExecutableExists(String channel) {
+        try {
+            String chosen = com.aresstack.askai.browser.runtime.BrowserExecutables.configured(channel);
+            return !chosen.isEmpty() && new File(chosen).isFile();
+        } catch (RuntimeException | LinkageError unavailable) {
+            return false;
+        }
     }
 
     /** Pure channel decision, separated from the file-system probe for testability. */
