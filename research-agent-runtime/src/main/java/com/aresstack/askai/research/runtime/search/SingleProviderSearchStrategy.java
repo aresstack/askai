@@ -85,11 +85,11 @@ public final class SingleProviderSearchStrategy implements SearchStrategy {
                     diagnostics.add("result page " + (page + 1) + " skipped: search cancelled");
                     break;
                 }
-                if (!budget.beforeToolCall()) {
-                    diagnostics.add("result page " + (page + 1) + " skipped: search budget exhausted");
+                if (!pause(cancellation)) {
                     break;
                 }
-                if (!pause(cancellation)) {
+                if (!budget.beforeToolCall()) {
+                    diagnostics.add("result page " + (page + 1) + " skipped: search budget exhausted");
                     break;
                 }
             }
