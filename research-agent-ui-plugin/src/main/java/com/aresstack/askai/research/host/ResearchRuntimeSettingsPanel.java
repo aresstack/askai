@@ -94,14 +94,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             "Use AI reranker (semantic model instead of BM25; applies to new sessions)", false);
     /** Bot-control MCP (default ON): run_command/session_state/chat_history + service-endpoint.json. */
     private final JCheckBox botControlMcp = ComicControls.checkBox(
-            "Bot control via MCP (applies to new sessions)", true);
+            "Enable MCP server (bot control; applies to new sessions)", false);
     /** Square, margin-less info button (Unicode \u24D8): opens the live connection/tool details. */
     private final javax.swing.JButton botTools = new ComicButton("\u24D8");
     /** The live session behind this settings page (nullable: store-only construction in tests). */
     private final com.aresstack.askai.research.agent.ResearchAgentSession session;
     /** ChatGPT connector (default OFF): AskAI as its own public MCP+OAuth face behind the TLS proxy. */
     private final JCheckBox chatGptConnector = ComicControls.checkBox(
-            "ChatGPT connector (public endpoint behind the reverse proxy; applies to new sessions)", false);
+            "ChatGPT connector (public endpoint behind the reverse proxy)", false);
     private final JTextField connectorOrigin = placeholderField("https://askai.example.com", 38);
     private final JTextField connectorPort = ComicControls.textField(6);
     private final JTextField connectorClientId =
@@ -283,27 +283,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ? "Streamable HTTP (MCP JSON-RPC): " + liveEndpoint.connectionUrl()
                 : "This session has no bot endpoint (disabled or not a productive session)");
         form.add(row("", useAiReranker));
-        JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        botRow.setOpaque(false);
-        botRow.add(botControlMcp);
-        botRow.add(javax.swing.Box.createHorizontalStrut(6));
-        botRow.add(botTools);
-        form.add(row("", botRow));
-        form.add(row("", chatGptConnector));
-        form.add(row("Public origin:", connectorOrigin));
-        JPanel connectorDetails = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        connectorDetails.setOpaque(false);
-        connectorDetails.add(connectorPort);
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(12));
-        connectorDetails.add(new JLabel("Client ID:"));
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(4));
-        connectorDetails.add(connectorClientId);
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(12));
-        connectorDetails.add(new JLabel("Secret:"));
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(4));
-        connectorDetails.add(connectorClientSecret);
-        form.add(row("Connector port:", connectorDetails));
-        form.add(row("Central OAuth issuer:", connectorCentralIssuer));
+        // Bot control + the public MCP server (ChatGPT connector) live on their own "MCP" tab (mcpView()).
         // The initial-search PROVIDER selection + its provider-specific settings live on their own
         // "Search" gear tab (SearchProviderCardsPanel), not as shared fields here.
         form.add(row("Browser channel:", browserChannel));
@@ -365,6 +345,13 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 // Persisted immediately; running sessions keep their endpoint until they close.
                 ResearchRuntimeSettings.saveBotControlMcp(ResearchRuntimeSettingsPanel.this.store,
                         botControlMcp.isSelected());
+                // The connector key is app-wide (bot control is per chat): switching the server off
+                // clears the connector flag itself, so no chat's frozen value can stop another's listener.
+                if (!botControlMcp.isSelected()) {
+                    chatGptConnector.setSelected(false);
+                }
+                updateMcpFieldsEnabled();
+                persistConnectorSettings();
             }
         });
         ResearchRuntimeSettings.ChatGptConnectorSettings connector =
@@ -386,9 +373,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                         + "issuer URL to validate its JWTs instead; /oauth/* is then served centrally.");
         chatGptConnector.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
+                updateMcpFieldsEnabled();
                 persistConnectorSettings();
             }
         });
+        updateMcpFieldsEnabled();
         llmNarration.setSelected(ResearchRuntimeSettings.loadLlmNarration(store));
         llmNarration.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
@@ -799,6 +788,79 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         }, "research-runtime-check");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * The built-in MCP server as its own "MCP" tab: the switch on top (default OFF), its settings below
+     * (editable only while switched on), then the local bot-control endpoint.
+     */
+    public javax.swing.JComponent mcpView() {
+        if (mcpView != null) {
+            return mcpView;
+        }
+        JPanel form = new JPanel();
+        form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
+        form.setOpaque(false);
+        JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        botRow.setOpaque(false);
+        botRow.add(botControlMcp);
+        botRow.add(javax.swing.Box.createHorizontalStrut(6));
+        botRow.add(botTools);
+        form.add(row("", botRow));
+        form.add(row("", chatGptConnector));
+        form.add(row("Public origin:", connectorOrigin));
+        form.add(row("Connector port:", connectorPort));
+        form.add(row("Client ID:", connectorClientId));
+        form.add(row("Client secret:", connectorClientSecret));
+        form.add(row("Central OAuth issuer:", connectorCentralIssuer));
+        for (java.awt.Component child : form.getComponents()) {
+            if (child instanceof javax.swing.JComponent) {
+                ((javax.swing.JComponent) child).setAlignmentX(LEFT_ALIGNMENT);
+            }
+        }
+        // Field edits persist when the field loses focus (the Save button sits on the Runtime tab).
+        java.awt.event.FocusAdapter persistOnLeave = new java.awt.event.FocusAdapter() {
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persistConnectorSettingsQuietly();
+            }
+        };
+        connectorOrigin.addFocusListener(persistOnLeave);
+        connectorPort.addFocusListener(persistOnLeave);
+        connectorClientId.addFocusListener(persistOnLeave);
+        connectorClientSecret.addFocusListener(persistOnLeave);
+        connectorCentralIssuer.addFocusListener(persistOnLeave);
+        mcpView = form;
+        return mcpView;
+    }
+
+    private javax.swing.JComponent mcpView;
+
+    /** The server's settings are only editable while the server is switched on. */
+    private void updateMcpFieldsEnabled() {
+        boolean server = botControlMcp.isSelected();
+        chatGptConnector.setEnabled(server);
+        boolean on = server && chatGptConnector.isSelected();
+        connectorOrigin.setEnabled(on);
+        connectorPort.setEnabled(on);
+        connectorClientId.setEnabled(on);
+        connectorClientSecret.setEnabled(on);
+        connectorCentralIssuer.setEnabled(on);
+    }
+
+    /** Stores the edited fields without (re)starting the listener; Save or the switch applies them. */
+    private void persistConnectorSettingsQuietly() {
+        int port;
+        try {
+            port = Integer.parseInt(connectorPort.getText().trim());
+        } catch (NumberFormatException invalid) {
+            port = 8082;
+        }
+        ResearchRuntimeSettings.saveChatGptConnectorSettings(store,
+                new ResearchRuntimeSettings.ChatGptConnectorSettings(
+                        chatGptConnector.isSelected(), port, connectorOrigin.getText().trim(),
+                        connectorClientId.getText().trim(),
+                        new String(connectorClientSecret.getPassword()).trim(),
+                        connectorCentralIssuer.getText().trim()));
     }
 
     /** The requirements-check output, shown by the host as its own "Check results" tab. */
