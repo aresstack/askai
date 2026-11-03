@@ -13,7 +13,6 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
-import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -40,15 +39,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     // requirements are met; otherwise new sessions run the demo backend with a visible notice.
     // (A persisted FAKE value remains a developer-only override in the store.)
     private final JLabel backendStatus = new JLabel(" ");
-    /** DEFAULT language for NEW research sessions (English default, German translation) — persisted. */
-    private final JComboBox<String> agentLanguage =
-            ComicControls.<String>comboBox(new String[]{"English", "Deutsch"});
-    /** LLM narration (default off): milestone texts phrased by the main model, validated, with fallback. */
-    private final JCheckBox llmNarration = ComicControls.checkBox(
-            "AI-phrased guidance (uses the main model; applies to new sessions)", false);
-    /** Scoping orientation tags (default off = long-standing behaviour): suggestions on every broad turn. */
-    private final JCheckBox alwaysSuggest = ComicControls.checkBox(
-            "Immer Suchvorschläge anbieten (Orientierungs-Tags; applies to new sessions)", false);
     /** Answer budget per agent model turn (tokens) — the longest contracted answer is the source review. */
     private final JTextField agentMaxTokens = ComicControls.textField(6);
     // Konzeptpapier tool-round loop: work budget and error tolerance, deliberately separate.
@@ -91,17 +81,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField scopeCheckDuplicateCeiling = ComicControls.textField(4);
     /** AI reranker opt-in (default OFF = lexical BM25 scoring, no model load). */
     private final JCheckBox useAiReranker = ComicControls.checkBox(
-            "KI-Reranker verwenden (semantisches Modell statt BM25; gilt für neue Sessions)", false);
+            "Use AI reranker (semantic model instead of BM25; applies to new sessions)", false);
     /** Bot-control MCP (default ON): run_command/session_state/chat_history + service-endpoint.json. */
     private final JCheckBox botControlMcp = ComicControls.checkBox(
-            "Bot control via MCP (applies to new sessions)", true);
+            "Enable MCP server (bot control; applies to new sessions)", false);
     /** Square, margin-less info button (Unicode \u24D8): opens the live connection/tool details. */
     private final javax.swing.JButton botTools = new ComicButton("\u24D8");
     /** The live session behind this settings page (nullable: store-only construction in tests). */
     private final com.aresstack.askai.research.agent.ResearchAgentSession session;
     /** ChatGPT connector (default OFF): AskAI as its own public MCP+OAuth face behind the TLS proxy. */
     private final JCheckBox chatGptConnector = ComicControls.checkBox(
-            "ChatGPT connector (public endpoint behind the reverse proxy; applies to new sessions)", false);
+            "ChatGPT connector (public endpoint behind the reverse proxy)", false);
     private final JTextField connectorOrigin = placeholderField("https://askai.example.com", 38);
     private final JTextField connectorPort = ComicControls.textField(6);
     private final JTextField connectorClientId =
@@ -111,19 +101,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     /** Non-empty = central mode: the AresStack webserver issues the tokens; AskAI only validates. */
     private final JTextField connectorCentralIssuer =
             placeholderField("https://askai.example.com (empty = local OAuth)", 38);
-    /**
-     * Initial-search source (applies to new sessions): the legacy browser SERP (default) or one of the
-     * REST search providers. Provider credentials are NOT configured here — they live in
-     * {@code ${user.home}/agents/research/providers/} (brave.json, brightdata.json, dataforseo.json).
-     */
-    private final JComboBox<String> browserChannel = ComicControls.<String>comboBox(
-            new String[]{ResearchRuntimeSettings.CAMOUFOX_CHANNEL, "chrome", "msedge"});
     // The reranker model is chosen centrally in AskAI (Configuration → AI models), NOT here. Any previously
     // persisted plugin-side selection is carried through unchanged so it is never lost on save.
     private String carriedRerankerModel = "";
-    private final JCheckBox headless = ComicControls.checkBox("Run the browser headless", true);
-    private final JCheckBox allowPrivate = ComicControls.checkBox(
-            "Allow private/loopback targets (development only)", false);
     private final JButton save = new ComicButton("Save");
     private final JButton check = new ComicButton("Check requirements");
     private final JLabel busy = new JLabel(" ");
@@ -140,109 +120,56 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         this.store = store;
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-        JPanel form = new JPanel();
-        form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
-        form.add(row("Backend:", backendStatus));
-        form.add(row("Language / Sprache:", agentLanguage));
-        form.add(row("", llmNarration));
-        form.add(row("", alwaysSuggest));
-        form.add(row("Agent-Antwortbudget (Tokens):", agentMaxTokens));
-        JPanel searchLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        searchLimits.setOpaque(false);
-        searchLimits.add(labelled("Quellenziel", searchTargetSources));
-        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Seiten", searchMaxPages));
-        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Tool-Calls", searchMaxToolCalls));
-        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Minuten", searchMaxMinutes));
-        searchLimits.add(labelled("Tool-Timeout (s)", browserToolTimeout));
-        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Fehler", searchMaxErrors));
-        form.add(row("Such-Limits:", searchLimits));
-        JPanel reviewLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        reviewLimits.setOpaque(false);
-        reviewLimits.add(labelled("Quellen", reviewMaxSources));
-        reviewLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        reviewLimits.add(labelled("Zeichen/Quelle", reviewMaxChars));
-        form.add(row("Review-Kontext:", reviewLimits));
-        JPanel conceptLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        conceptLimits.setOpaque(false);
-        conceptLimits.add(labelled("Tool rounds", conceptToolRounds));
-        conceptLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        conceptLimits.add(labelled("Repairs", conceptRepairAttempts));
-        form.add(row("Concept loop:", conceptLimits));
-        JPanel scopeCheckRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckRow.setOpaque(false);
-        scopeCheckRow.add(labelled("Breite (Konzepte)", scopeCheckTargetProbes));
-        scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Beispiele je Pfosten", scopeCheckControlsPerAnchor));
-        scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Max. Themen", scopeCheckMaxTopics));
-        scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Timeout (s)", scopeCheckTimeout));
-        scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        final javax.swing.JButton scopeCheckAdvancedToggle =
-                new ComicButton("Erweitert…");
-        scopeCheckRow.add(scopeCheckAdvancedToggle);
-        form.add(row("Scope-Prüfung:", scopeCheckRow));
-        JPanel scopeCheckModelRow = new JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckModelRow.setOpaque(false);
-        scopeCheckModelRow.add(labelled("Gen-Temp", scopeCheckGenTemperature));
-        scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Gen-Tokens", scopeCheckGenMaxTokens));
-        scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Wahl-Temp", scopeCheckChooserTemperature));
-        scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Wahl-Tokens", scopeCheckChooserMaxTokens));
-        scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Wahl-Timeout (s)", scopeCheckChoiceTimeout));
-        final JPanel scopeCheckModelSettings = row("  erweitert (Modell):", scopeCheckModelRow);
-        scopeCheckModelSettings.setVisible(false);
-        form.add(scopeCheckModelSettings);
-        JPanel scopeCheckCalibrationRow = new JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckCalibrationRow.setOpaque(false);
-        scopeCheckCalibrationRow.add(labelled("near", scopeCheckNearSimilarity));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Hint-Margin", scopeCheckHintBoundaryMargin));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Mission-Q", scopeCheckMissionQuantile));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Mission-Slack", scopeCheckMissionMargin));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Nachbar-Q", scopeCheckNeighborQuantile));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Nachbar-Slack", scopeCheckNeighborMargin));
-        final JPanel scopeCheckCalibrationSettings =
-                row("  erweitert (Kalibrierung):", scopeCheckCalibrationRow);
-        scopeCheckCalibrationSettings.setVisible(false);
-        form.add(scopeCheckCalibrationSettings);
-        JPanel scopeCheckSweepRow = new JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckSweepRow.setOpaque(false);
-        scopeCheckSweepRow.add(labelled("Min. Pfosten", scopeCheckMinNegotiated));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Min. Beispiele", scopeCheckMinNeighbors));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Boundary-Margin", scopeCheckBoundaryMargin));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Novelty-Gap", scopeCheckNoveltyGap));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Novelty-Gewicht", scopeCheckNoveltyWeight));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Dublette ≥", scopeCheckDuplicateCeiling));
-        final JPanel scopeCheckSweepSettings =
-                row("  erweitert (Sweep):", scopeCheckSweepRow);
-        scopeCheckSweepSettings.setVisible(false);
-        form.add(scopeCheckSweepSettings);
+        // Grouped like every other settings page: label left, fields right (wrapping onto further lines
+        // instead of running off the dialog's right edge), buttons beside their field.
+        com.aresstack.comiccontrols.control.ComicForm agent =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Agent");
+        agent.row("Backend", group(backendStatus));
+        agent.row("Answer budget (tokens)", group(agentMaxTokens));
+        agent.row("", useAiReranker);
+
+        com.aresstack.comiccontrols.control.ComicForm limits =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Limits");
+        limits.row("Search run", group(labelled("Source target", searchTargetSources),
+                labelled("Pages", searchMaxPages), labelled("Tool calls", searchMaxToolCalls),
+                labelled("Minutes", searchMaxMinutes), labelled("Tool timeout (s)", browserToolTimeout),
+                labelled("Errors", searchMaxErrors)));
+        limits.row("Review context", group(labelled("Sources", reviewMaxSources),
+                labelled("Chars/source", reviewMaxChars)));
+        limits.row("Concept loop", group(labelled("Tool rounds", conceptToolRounds),
+                labelled("Repairs", conceptRepairAttempts)));
+
+        com.aresstack.comiccontrols.control.ComicForm scope =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Scope check");
+        final javax.swing.JButton scopeCheckAdvancedToggle = new ComicButton("Advanced…");
+        scope.row("Topic space", group(labelled("Breadth (concepts)", scopeCheckTargetProbes),
+                labelled("Examples per post", scopeCheckControlsPerAnchor),
+                labelled("Max. topics", scopeCheckMaxTopics), labelled("Timeout (s)", scopeCheckTimeout)),
+                scopeCheckAdvancedToggle);
+        // The ADVANCED knobs (model + provisional calibration/sweep values) stay hidden until asked for.
+        final com.aresstack.comiccontrols.control.ComicForm scopeAdvanced =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Scope check: advanced");
+        scopeAdvanced.row("Model", group(labelled("Gen temp", scopeCheckGenTemperature),
+                labelled("Gen tokens", scopeCheckGenMaxTokens),
+                labelled("Choice temp", scopeCheckChooserTemperature),
+                labelled("Choice tokens", scopeCheckChooserMaxTokens),
+                labelled("Choice timeout (s)", scopeCheckChoiceTimeout)));
+        scopeAdvanced.row("Calibration", group(labelled("near", scopeCheckNearSimilarity),
+                labelled("Hint margin", scopeCheckHintBoundaryMargin),
+                labelled("Mission Q", scopeCheckMissionQuantile),
+                labelled("Mission slack", scopeCheckMissionMargin),
+                labelled("Neighbor Q", scopeCheckNeighborQuantile),
+                labelled("Neighbor slack", scopeCheckNeighborMargin)));
+        scopeAdvanced.row("Sweep", group(labelled("Min. posts", scopeCheckMinNegotiated),
+                labelled("Min. examples", scopeCheckMinNeighbors),
+                labelled("Boundary margin", scopeCheckBoundaryMargin),
+                labelled("Novelty gap", scopeCheckNoveltyGap),
+                labelled("Novelty weight", scopeCheckNoveltyWeight),
+                labelled("Duplicate ≥", scopeCheckDuplicateCeiling)));
+        scopeAdvanced.setVisible(false);
         scopeCheckAdvancedToggle.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
-                boolean show = !scopeCheckModelSettings.isVisible();
-                scopeCheckModelSettings.setVisible(show);
-                scopeCheckCalibrationSettings.setVisible(show);
-                scopeCheckSweepSettings.setVisible(show);
+                scopeAdvanced.setVisible(!scopeAdvanced.isVisible());
                 revalidate();
                 repaint();
             }
@@ -260,69 +187,25 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         botTools.setEnabled(liveEndpoint != null);
         botTools.setToolTipText(liveEndpoint != null
                 ? "Streamable HTTP (MCP JSON-RPC): " + liveEndpoint.connectionUrl()
-                : "Diese Session hat keinen Bot-Endpoint (deaktiviert oder keine produktive Session)");
-        form.add(row("", useAiReranker));
-        JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        botRow.setOpaque(false);
-        botRow.add(botControlMcp);
-        botRow.add(javax.swing.Box.createHorizontalStrut(6));
-        botRow.add(botTools);
-        form.add(row("", botRow));
-        form.add(row("", chatGptConnector));
-        form.add(row("Public origin:", connectorOrigin));
-        JPanel connectorDetails = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        connectorDetails.setOpaque(false);
-        connectorDetails.add(connectorPort);
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(12));
-        connectorDetails.add(new JLabel("Client-ID:"));
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(4));
-        connectorDetails.add(connectorClientId);
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(12));
-        connectorDetails.add(new JLabel("Secret:"));
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(4));
-        connectorDetails.add(connectorClientSecret);
-        form.add(row("Connector port:", connectorDetails));
-        form.add(row("Central OAuth issuer:", connectorCentralIssuer));
-        // The initial-search PROVIDER selection + its provider-specific settings live on their own
-        // "Search" gear tab (SearchProviderCardsPanel), not as shared fields here.
-        form.add(row("Browser channel:", browserChannel));
-        form.add(row("", headless));
-        // Transparency does not depend on a visible browser window: the chat shows the visited sites.
-        JLabel headlessHint = new JLabel(new com.aresstack.askai.research.agent.ResearchPlaybook(
-                com.aresstack.askai.research.agent.ResearchLanguage.fromCode(
-                        ResearchRuntimeSettings.loadLanguage(store))).headlessHint());
-        headlessHint.setEnabled(false);
-        form.add(row("", headlessHint));
-        form.add(row("", allowPrivate));
-        JPanel buttons = new JPanel();
-        buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
-        buttons.add(save);
-        buttons.add(Box.createHorizontalStrut(8));
-        buttons.add(check);
-        buttons.add(Box.createHorizontalStrut(8));
-        buttons.add(busy);
-        form.add(buttons);
-        add(form, BorderLayout.NORTH);
+                : "This session has no bot endpoint (disabled or not a productive session)");
+        // Bot control + the public MCP server (ChatGPT connector) live on their own "MCP" tab (mcpView()); browser
+        // channel, headless and private targets on the "Browser" tab (BrowserBasicsRows); language and guidance
+        // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
+        com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
+        actions.actions(save, check, busy);
+        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, scope, scopeAdvanced);
+        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, scope, scopeAdvanced, actions),
+                BorderLayout.NORTH);
 
         results.setEditable(false);
         results.setLineWrap(false);
-        add(new JScrollPane(results), BorderLayout.CENTER);
+        // The check output is NOT part of the form: it lives on its own tab (see resultsView()).
 
         // Persisted values first, then the automatic browser-channel decision.
         apply(ResearchRuntimeDefaults.complete(ResearchRuntimeSettings.load(store)));
-        // The combo persists the DEFAULT language for NEW research sessions; running sessions keep
-        // their own session-local language (live-switchable at the session, never globally from here).
-        String languageCode = ResearchRuntimeSettings.loadLanguage(store);
-        agentLanguage.setSelectedIndex("de".equals(languageCode) ? 1 : 0);
-        agentLanguage.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent event) {
-                String code = agentLanguage.getSelectedIndex() == 1 ? "de" : "en";
-                ResearchRuntimeSettings.saveLanguage(ResearchRuntimeSettingsPanel.this.store, code);
-            }
-        });
         useAiReranker.setSelected(ResearchRuntimeSettings.loadUseAiReranker(store));
-        useAiReranker.setToolTipText("Aus: Suchtreffer werden lexikalisch per BM25 bewertet — schnell, "
-                + "ohne Modell. An: das konfigurierte Cross-Encoder-Modell bewertet semantisch.");
+        useAiReranker.setToolTipText("Off: search hits are scored lexically with BM25 — fast, "
+                + "no model. On: the configured cross-encoder model scores them semantically.");
         useAiReranker.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 ResearchRuntimeSettings.saveUseAiReranker(ResearchRuntimeSettingsPanel.this.store,
@@ -335,6 +218,13 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 // Persisted immediately; running sessions keep their endpoint until they close.
                 ResearchRuntimeSettings.saveBotControlMcp(ResearchRuntimeSettingsPanel.this.store,
                         botControlMcp.isSelected());
+                // The connector key is app-wide (bot control is per chat): switching the server off
+                // clears the connector flag itself, so no chat's frozen value can stop another's listener.
+                if (!botControlMcp.isSelected()) {
+                    chatGptConnector.setSelected(false);
+                }
+                updateMcpFieldsEnabled();
+                persistConnectorSettings();
             }
         });
         ResearchRuntimeSettings.ChatGptConnectorSettings connector =
@@ -356,29 +246,15 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                         + "issuer URL to validate its JWTs instead; /oauth/* is then served centrally.");
         chatGptConnector.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
+                updateMcpFieldsEnabled();
                 persistConnectorSettings();
             }
         });
-        llmNarration.setSelected(ResearchRuntimeSettings.loadLlmNarration(store));
-        llmNarration.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent event) {
-                // Like the language: persisted immediately; running sessions keep their narrator.
-                ResearchRuntimeSettings.saveLlmNarration(ResearchRuntimeSettingsPanel.this.store,
-                        llmNarration.isSelected());
-            }
-        });
-        alwaysSuggest.setSelected(ResearchRuntimeSettings.loadAlwaysOfferSearchSuggestions(store));
-        alwaysSuggest.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent event) {
-                // Persisted immediately; the flag reaches the agent at the NEXT session launch.
-                ResearchRuntimeSettings.saveAlwaysOfferSearchSuggestions(
-                        ResearchRuntimeSettingsPanel.this.store, alwaysSuggest.isSelected());
-            }
-        });
+        updateMcpFieldsEnabled();
         agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
-        agentMaxTokens.setToolTipText("Antwort-Budget des Agenten in Tokens pro Modell-Turn (die längste "
-                + "Antwort ist die Quellen-Auswertung). Ein zu kleiner Wert schneidet Antworten ab. "
-                + "Gilt für neue Sessions.");
+        agentMaxTokens.setToolTipText("The agent's answer budget in tokens per model turn (the longest "
+                + "answer is the source review). Too small a value truncates answers. "
+                + "Applies to new sessions.");
         agentMaxTokens.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 persistAgentMaxTokens();
@@ -393,31 +269,31 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindScopeCheckSettings();
         bindLimit(searchTargetSources, ResearchRuntimeSettings.KEY_SEARCH_TARGET_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_TARGET_SOURCES,
-                "Die Suche endet regulär bei so vielen akzeptierten Quellen (gilt für neue Sessions).");
+                "The search ends normally after this many accepted sources (applies to new sessions).");
         bindLimit(searchMaxPages, ResearchRuntimeSettings.KEY_SEARCH_MAX_PAGES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_PAGES,
-                "Sicherheitslimit: maximal besuchte Seiten pro Suchlauf.");
+                "Safety limit: maximum pages visited per search run.");
         bindLimit(searchMaxToolCalls, ResearchRuntimeSettings.KEY_SEARCH_MAX_TOOL_CALLS,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_TOOL_CALLS,
-                "Sicherheitslimit: maximale Tool-Aufrufe pro Suchlauf.");
+                "Safety limit: maximum tool calls per search run.");
         bindLimit(searchMaxMinutes, ResearchRuntimeSettings.KEY_SEARCH_MAX_MINUTES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_MINUTES,
-                "Sicherheitslimit (Timeout): maximale Laufzeit in Minuten; Wartezeiten auf den "
-                        + "Nutzer zählen nicht.");
+                "Safety limit (timeout): maximum run time in minutes; time spent waiting for the "
+                        + "user does not count.");
         bindLimit(searchMaxErrors, ResearchRuntimeSettings.KEY_SEARCH_MAX_ERRORS,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_ERRORS,
-                "Sicherheitslimit: maximale AUFEINANDERFOLGENDE technische Fehler, bevor der Lauf endet.");
+                "Safety limit: maximum CONSECUTIVE technical errors before the run ends.");
         bindLimit(browserToolTimeout, ResearchRuntimeSettings.KEY_BROWSER_TOOL_TIMEOUT_SECONDS,
                 ResearchRuntimeSettings.DEFAULT_BROWSER_TOOL_TIMEOUT_SECONDS,
-                "Timeout je Browser-Aufruf in Sekunden. Muss die komplette Suchmaschinen-Phase "
-                        + "abdecken (mehrere Engines und Ergebnisseiten, sequenziell mit Auswertung) — "
-                        + "zu klein wird als 'Browser nicht verfügbar' fehlgedeutet und bricht jede Suche ab.");
+                "Timeout per browser call in seconds. Must cover the whole search engine phase "
+                        + "(several engines and result pages, sequential with evaluation) — "
+                        + "too small is misread as 'browser unavailable' and aborts every search.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
-                "Wie viele Quellen eine Auswertung höchstens liest (neueste zuerst).");
+                "Maximum number of sources one review reads (newest first).");
         bindLimit(reviewMaxChars, ResearchRuntimeSettings.KEY_REVIEW_MAX_CHARS,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_CHARS,
-                "Wie viele Zeichen je Quelle in die Auswertung gelangen.");
+                "How many characters per source go into the review.");
         bindLimit(conceptToolRounds, ResearchRuntimeSettings.KEY_CONCEPT_TOOL_ROUNDS,
                 ResearchRuntimeSettings.DEFAULT_CONCEPT_TOOL_ROUNDS,
                 "How many model-tool cycles ONE concept turn may make (work budget).");
@@ -426,6 +302,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "How many rejected concept steps may be corrected per turn "
                         + "(error tolerance, separate from the work budget).");
         refreshBackendStatus();
+        // The "Browser" tab changes the channel: the status follows whenever this tab is shown again.
+        addHierarchyListener(new java.awt.event.HierarchyListener() {
+            public void hierarchyChanged(java.awt.event.HierarchyEvent event) {
+                if ((event.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
+                    refreshBackendStatus();
+                }
+            }
+        });
 
         save.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
@@ -434,19 +318,23 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         });
         check.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
+                showResults();
                 runCheck();
             }
         });
     }
 
-    /** The panel state as the SAME typed model the factory reads — no second mapping. */
+    /**
+     * The settings NEW sessions get, as the SAME typed model the factory reads — no second mapping. The browser
+     * fields come from the store (the "Browser" tab saves them on every change).
+     */
     ResearchRuntimeSettings currentSettings() {
         // Saving from the panel always persists the automatic mode (this also migrates stores where an
         // old default once wrote FAKE); the demo backend is chosen by the FACTORY only when the
         // requirements are not met.
-        return new ResearchRuntimeSettings(ResearchBackendMode.ACP,
-                String.valueOf(browserChannel.getSelectedItem()), headless.isSelected(),
-                allowPrivate.isSelected(), carriedRerankerModel);
+        ResearchRuntimeSettings stored = ResearchRuntimeDefaults.complete(ResearchRuntimeSettings.load(store));
+        return new ResearchRuntimeSettings(ResearchBackendMode.ACP, stored.getBrowserChannel(),
+                stored.isHeadless(), stored.isAllowPrivateNetworks(), carriedRerankerModel);
     }
 
     /** The live projection of what NEW sessions will do — computed, never chosen. */
@@ -459,11 +347,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     }
 
     private void apply(ResearchRuntimeSettings settings) {
-        browserChannel.setSelectedItem(settings.getBrowserChannel());
         // Carry any previously persisted reranker selection through invisibly (chosen centrally now).
         carriedRerankerModel = settings.getSelectedRerankerModel();
-        headless.setSelected(settings.isHeadless());
-        allowPrivate.setSelected(settings.isAllowPrivateNetworks());
     }
 
     /** A text field with a gray in-field placeholder, shown while the field is empty. */
@@ -506,6 +391,48 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         };
     }
 
+    /** Several small fields on one line of the field column; wraps onto further lines when the dialog is narrow. */
+    private static JPanel group(javax.swing.JComponent... parts) {
+        JPanel line = new WrapGroup();
+        for (javax.swing.JComponent part : parts) {
+            line.add(part);
+        }
+        return line;
+    }
+
+    /**
+     * The wrapping field line: it may shrink to its widest part (the form never clips or scrolls sideways), is as
+     * tall as its wrapped rows at the CURRENT width, and lays the form out again when a resize changes that height.
+     */
+    private static final class WrapGroup extends JPanel {
+        private static final long serialVersionUID = 1L;
+        private static final int GAP = 12;
+
+        WrapGroup() {
+            super(new com.aresstack.comiccontrols.control.WrapRowLayout(java.awt.FlowLayout.LEFT, GAP, 2));
+            setOpaque(false);
+            addComponentListener(new java.awt.event.ComponentAdapter() {
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent event) {
+                    if (getLayout().preferredLayoutSize(WrapGroup.this).height != getHeight()) {
+                        revalidate();
+                    }
+                }
+            });
+        }
+
+        @Override
+        public java.awt.Dimension getMinimumSize() {
+            int widest = 0;
+            for (java.awt.Component part : getComponents()) {
+                widest = Math.max(widest, part.getPreferredSize().width);
+            }
+            java.awt.Insets insets = getInsets();
+            return new java.awt.Dimension(widest + 2 * GAP + insets.left + insets.right,
+                    getLayout().preferredLayoutSize(this).height);
+        }
+    }
+
     /** A tiny "Label: [field]" group for compact multi-field limit rows. */
     private static JPanel labelled(String label, JTextField field) {
         JPanel group = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
@@ -520,78 +447,78 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         com.aresstack.askai.research.scope.ScopeSweepConfiguration d =
                 com.aresstack.askai.research.scope.ScopeSweepConfiguration.defaults();
         bindLimit(scopeCheckTargetProbes, ResearchRuntimeSettings.KEY_SCOPE_CHECK_TARGET_PROBES,
-                d.targetBroadProbes, "Wie viele breite Konzepte eine Themenraum-Prüfung erzeugt. "
-                        + "Kleine Hauptmodelle (2B-Klasse) halten 50 oft nicht durch — dann 20 "
-                        + "einstellen.");
+                d.targetBroadProbes, "How many broad concepts a topic-space check generates. "
+                        + "Small main models (2B class) often cannot sustain 50 — set 20 "
+                        + "then.");
         bindLimit(scopeCheckControlsPerAnchor,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CONTROLS_PER_ANCHOR, d.controlsPerAnchor,
-                "Lokale Kalibrierungs-Beispiele je ausgehandeltem Zaunpfosten");
+                "Local calibration examples per negotiated fence post");
         bindLimit(scopeCheckMaxTopics, ResearchRuntimeSettings.KEY_SCOPE_CHECK_MAX_TOPICS,
                 d.selectorParameters.maximumCandidates,
-                "Höchstens so viele unerforschte Themen je Prüfung vorschlagen");
+                "Suggest at most this many unexplored topics per check");
         bindLimit(scopeCheckTimeout, ResearchRuntimeSettings.KEY_SCOPE_CHECK_TIMEOUT_SECONDS,
-                d.generationTimeoutSeconds, "Timeout der Themen-Generierung in Sekunden");
+                d.generationTimeoutSeconds, "Topic generation timeout in seconds");
         bindDecimal(scopeCheckGenTemperature,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_GEN_TEMPERATURE, d.generatorTemperature,
-                "Temperatur der Themen-Generierung (Breite braucht Vielfalt)");
+                "Topic generation temperature (breadth needs variety)");
         bindLimit(scopeCheckGenMaxTokens, ResearchRuntimeSettings.KEY_SCOPE_CHECK_GEN_MAX_TOKENS,
-                d.generatorMaxOutputTokens, "Token-Budget der Themen-Generierung");
+                d.generatorMaxOutputTokens, "Topic generation token budget");
         bindDecimal(scopeCheckChooserTemperature,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOOSER_TEMPERATURE, d.chooserTemperature,
-                "Temperatur der Fragen-Auswahl (fokussiert, nicht kreativ)");
+                "Question choice temperature (focused, not creative)");
         bindLimit(scopeCheckChooserMaxTokens,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOOSER_MAX_TOKENS,
-                d.chooserMaxOutputTokens, "Token-Budget der Fragen-Auswahl");
+                d.chooserMaxOutputTokens, "Question choice token budget");
         bindLimit(scopeCheckChoiceTimeout,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOICE_TIMEOUT_SECONDS,
-                d.choiceTimeoutSeconds, "Timeout der Fragen-Auswahl in Sekunden");
-        String spike = " (Mess-Spike: Formel bewusst vorläufig, wird nach produktiven "
-                + "Messungen eingefroren)";
+                d.choiceTimeoutSeconds, "Question choice timeout in seconds");
+        String spike = " (measurement spike: formula deliberately provisional, frozen after productive "
+                + "measurements)";
         bindDecimal(scopeCheckNearSimilarity,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEAR_SIMILARITY,
-                d.fenceThresholds.nearSimilarity, "Z2-Hint: ab dieser Cosine gilt "
-                        + "\u201enahe an einem Pfosten\u201c" + spike);
+                d.fenceThresholds.nearSimilarity, "Z2 hint: from this cosine on a topic counts as "
+                        + "\u201cnear a post\u201d" + spike);
         bindDecimal(scopeCheckHintBoundaryMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_HINT_BOUNDARY_MARGIN,
-                d.fenceThresholds.boundaryMargin, "Z2-Hint-Boundary-Margin" + spike);
+                d.fenceThresholds.boundaryMargin, "Z2 hint boundary margin" + spike);
         bindDecimal(scopeCheckMissionQuantile,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MISSION_QUANTILE,
                 d.calibrationParameters.missionRelevanceQuantile,
-                "Quantil der Anker-Missionsrelevanz (0=Minimum)" + spike);
+                "Quantile of the anchors' mission relevance (0=minimum)" + spike);
         bindDecimal(scopeCheckMissionMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MISSION_MARGIN,
                 d.calibrationParameters.missionRelevanceMargin,
-                "Slack unter dem Missions-Quantil" + spike);
+                "Slack below the mission quantile" + spike);
         bindDecimal(scopeCheckNeighborQuantile,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEIGHBOR_QUANTILE,
                 d.calibrationParameters.neighborSimilarityQuantile,
-                "Quantil der Anker-Nachbar-Cosines (0=Minimum)" + spike);
+                "Quantile of the anchor-neighbor cosines (0=minimum)" + spike);
         bindDecimal(scopeCheckNeighborMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEIGHBOR_MARGIN,
                 d.calibrationParameters.neighborSimilarityMargin,
-                "Slack unter dem Nachbar-Quantil" + spike);
+                "Slack below the neighbor quantile" + spike);
         bindLimit(scopeCheckMinNegotiated,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MIN_NEGOTIATED,
                 d.calibrationParameters.minimumNegotiatedAnchors,
-                "Mindestzahl ausgehandelter IN/OUT-Pfosten für eine belastbare Kalibrierung");
+                "Minimum negotiated IN/OUT posts for a reliable calibration");
         bindLimit(scopeCheckMinNeighbors,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MIN_NEIGHBORS,
                 d.calibrationParameters.minimumNeighborSamples,
-                "Mindestzahl gültiger Nachbar-Beispiele");
+                "Minimum valid neighbor examples");
         bindDecimal(scopeCheckBoundaryMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_BOUNDARY_MARGIN, d.boundaryMargin,
-                "|margin| unter diesem Wert = echte IN/OUT-Grenzfrage" + spike);
+                "|margin| below this value = genuine IN/OUT boundary question" + spike);
         bindDecimal(scopeCheckNoveltyGap,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NOVELTY_GAP, d.sweepNoveltyGap,
-                "Sweep-relative Novelty-Linie: Median minus dieser Wert" + spike);
+                "Sweep-relative novelty line: median minus this value" + spike);
         bindDecimal(scopeCheckNoveltyWeight,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NOVELTY_WEIGHT,
                 d.selectorParameters.noveltyWeight,
-                "Gewicht der Neuheit in der Themen-Diversität");
+                "Weight of novelty in topic diversity");
         bindDecimal(scopeCheckDuplicateCeiling,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_DUPLICATE_CEILING,
                 d.selectorParameters.duplicateSimilarityCeiling,
-                "Ab dieser Ähnlichkeit gelten zwei Themen als Wortvarianten");
+                "From this similarity on two topics count as word variants");
     }
 
     /** Like {@link #bindLimit} for decimal knobs (temperatures, cosines, margins). */
@@ -710,7 +637,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                     : "ChatGPT connector: NOT running - " + failure);
             if (!runtime.isRunning()) {
                 javax.swing.JOptionPane.showMessageDialog(this,
-                        "Der ChatGPT-Connector konnte nicht starten:\n" + failure,
+                        "The ChatGPT connector could not start:\n" + failure,
                         "ChatGPT connector", javax.swing.JOptionPane.WARNING_MESSAGE);
             }
         } else {
@@ -770,6 +697,104 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         worker.start();
     }
 
+    /**
+     * The built-in MCP server as its own "MCP" tab: the switch on top (default OFF), its settings below
+     * (editable only while switched on), then the local bot-control endpoint.
+     */
+    public javax.swing.JComponent mcpView() {
+        if (mcpView != null) {
+            return mcpView;
+        }
+        JPanel form = new JPanel();
+        form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
+        form.setOpaque(false);
+        JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        botRow.setOpaque(false);
+        botRow.add(botControlMcp);
+        botRow.add(javax.swing.Box.createHorizontalStrut(6));
+        botRow.add(botTools);
+        form.add(row("", botRow));
+        form.add(row("", chatGptConnector));
+        form.add(row("Public origin:", connectorOrigin));
+        form.add(row("Connector port:", connectorPort));
+        form.add(row("Client ID:", connectorClientId));
+        form.add(row("Client secret:", connectorClientSecret));
+        form.add(row("Central OAuth issuer:", connectorCentralIssuer));
+        for (java.awt.Component child : form.getComponents()) {
+            if (child instanceof javax.swing.JComponent) {
+                ((javax.swing.JComponent) child).setAlignmentX(LEFT_ALIGNMENT);
+            }
+        }
+        // Field edits persist when the field loses focus (the Save button sits on the Runtime tab).
+        java.awt.event.FocusAdapter persistOnLeave = new java.awt.event.FocusAdapter() {
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persistConnectorSettingsQuietly();
+            }
+        };
+        connectorOrigin.addFocusListener(persistOnLeave);
+        connectorPort.addFocusListener(persistOnLeave);
+        connectorClientId.addFocusListener(persistOnLeave);
+        connectorClientSecret.addFocusListener(persistOnLeave);
+        connectorCentralIssuer.addFocusListener(persistOnLeave);
+        mcpView = form;
+        return mcpView;
+    }
+
+    private javax.swing.JComponent mcpView;
+
+    /** The server's settings are only editable while the server is switched on. */
+    private void updateMcpFieldsEnabled() {
+        boolean server = botControlMcp.isSelected();
+        chatGptConnector.setEnabled(server);
+        boolean on = server && chatGptConnector.isSelected();
+        connectorOrigin.setEnabled(on);
+        connectorPort.setEnabled(on);
+        connectorClientId.setEnabled(on);
+        connectorClientSecret.setEnabled(on);
+        connectorCentralIssuer.setEnabled(on);
+    }
+
+    /** Stores the edited fields without (re)starting the listener; Save or the switch applies them. */
+    private void persistConnectorSettingsQuietly() {
+        int port;
+        try {
+            port = Integer.parseInt(connectorPort.getText().trim());
+        } catch (NumberFormatException invalid) {
+            port = 8082;
+        }
+        ResearchRuntimeSettings.saveChatGptConnectorSettings(store,
+                new ResearchRuntimeSettings.ChatGptConnectorSettings(
+                        chatGptConnector.isSelected(), port, connectorOrigin.getText().trim(),
+                        connectorClientId.getText().trim(),
+                        new String(connectorClientSecret.getPassword()).trim(),
+                        connectorCentralIssuer.getText().trim()));
+    }
+
+    /** The requirements-check output, shown by the host as its own "Check results" tab. */
+    public javax.swing.JComponent resultsView() {
+        if (resultsView == null) {
+            resultsView = new JScrollPane(results);
+        }
+        return resultsView;
+    }
+
+    private javax.swing.JComponent resultsView;
+
+    /** Brings the check output's tab to the front (if the panel sits in a tabbed pane). */
+    private void showResults() {
+        javax.swing.JComponent view = resultsView();
+        javax.swing.JTabbedPane tabs = (javax.swing.JTabbedPane)
+                SwingUtilities.getAncestorOfClass(javax.swing.JTabbedPane.class, this);
+        if (tabs != null) {
+            for (int i = 0; i < tabs.getTabCount(); i++) {
+                if (SwingUtilities.isDescendingFrom(view, (java.awt.Component) tabs.getComponentAt(i))) {
+                    tabs.setSelectedIndex(i);
+                    return;
+                }
+            }
+        }
+    }
+
     private static JPanel row(String label, javax.swing.JComponent field) {
         JPanel row = new JPanel();
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
@@ -789,9 +814,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         }
         StringBuilder html = new StringBuilder("<html><body style='width:520px'>")
                 .append("<b>Transport:</b> Streamable HTTP (MCP JSON-RPC), 127.0.0.1, "
-                        + "Token im URL-Pfad<br>")
-                .append("<b>Verbindungsdatei:</b> &lt;Projekt&gt;/service-endpoint.json "
-                        + "(URL, Token, Usage-Guide)<br><br>")
+                        + "token in the URL path<br>")
+                .append("<b>Connection file:</b> &lt;project&gt;/service-endpoint.json "
+                        + "(URL, token, usage guide)<br><br>")
                 .append("<b>Tools (live):</b><br>");
         for (java.util.Map.Entry<String, String> tool : endpoint.toolCatalog().entrySet()) {
             html.append("<b>").append(tool.getKey()).append("</b> \u2014 ")

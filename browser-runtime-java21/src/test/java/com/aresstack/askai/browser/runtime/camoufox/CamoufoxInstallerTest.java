@@ -56,6 +56,58 @@ class CamoufoxInstallerTest {
     }
 
     @Test
+    void anExistingInstallationIsReportedInstalledBeforeAnyDownloadAlsoWhenMovedOrRenamed() throws Exception {
+        Path mirror = temporary.resolve("mirror");
+        CamoufoxDistribution distribution = publish(mirror, true, "fixed");
+        Path executable = new CamoufoxInstaller(temporary.resolve("browser"), distribution, TARGET).installBlocking();
+        Files.delete(mirror.resolve(distribution.archiveName(TARGET)));
+
+        CamoufoxInstaller fresh = new CamoufoxInstaller(temporary.resolve("browser"), distribution, TARGET);
+        assertEquals(CamoufoxInstaller.Phase.READY, fresh.status().phase(), "found, not 'not installed yet'");
+
+        Path renamed = temporary.resolve("elsewhere").resolve("my-camoufox");
+        Files.createDirectories(renamed.getParent());
+        Files.move(executable.getParent(), renamed);
+        CamoufoxInstaller moved = new CamoufoxInstaller(renamed.getParent(), distribution, TARGET, renamed);
+        assertTrue(moved.isInstalled());
+        assertEquals(renamed.resolve("camoufox"), moved.awaitExecutable(Duration.ofSeconds(5)));
+    }
+
+    @Test
+    void downloadsThroughTheHostConnectorWhenOneIsSet() throws Exception {
+        Path mirror = temporary.resolve("mirror");
+        CamoufoxDistribution published = publish(mirror, true, "fixed");
+        com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            Path file = mirror.resolve(exchange.getRequestURI().getPath().substring(1));
+            byte[] body = Files.readAllBytes(file);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+        server.start();
+        List<String> opened = new ArrayList<>();
+        CamoufoxInstaller.useConnector(url -> {
+            opened.add(url);
+            // stands in for the host's proxy/certificate settings
+            return (java.net.HttpURLConnection) new java.net.URL(url).openConnection(java.net.Proxy.NO_PROXY);
+        });
+        try {
+            CamoufoxDistribution viaHttp = published.from(
+                    java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/"));
+            Path executable = new CamoufoxInstaller(temporary.resolve("browser"), viaHttp, TARGET).installBlocking();
+
+            assertTrue(Files.isRegularFile(executable));
+            assertEquals(List.of(viaHttp.archiveUrl(TARGET).toString()), opened);
+        } finally {
+            CamoufoxInstaller.useConnector(null);
+            server.stop(0);
+        }
+    }
+
+    @Test
     void installsIntoAConfiguredRootWithSpaces() throws Exception {
         CamoufoxDistribution distribution = publish(temporary.resolve("mirror"), true, "fixed");
         // BrowserInstallation hands BROWSER_DIR over as this root (ArgosConfigTest covers the resolution).

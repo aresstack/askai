@@ -71,7 +71,13 @@ public final class AskAiFrame extends JFrame {
     private static final String INSTALL_VIEW = "install";
     /** The application pages inside the Settings (formerly own screens behind the gear menu). */
     private static final String SETTINGS_CONNECTIONS = "Connections";
-    private static final String SETTINGS_AI_MODELS = "AI models";
+    private static final String SETTINGS_AI_MODELS = OllamaChatPanel.SETTINGS_AI_MODELS;
+    /** The application's one read-aloud voice install section (the Voices tab under Models > Setup). */
+    private final SpeechOutputModelsPanel speechVoicesPanel = new SpeechOutputModelsPanel(
+            new com.aresstack.askai.tts.PiperTtsStore(), new com.aresstack.askai.tts.TtsSettingsStore());
+    /** The application's one Whisper dictation-model installer (the "Dictation" tab under Models > Setup). */
+    private final WhisperModelsPanel whisperModelsPanel =
+            new WhisperModelsPanel(new com.aresstack.askai.stt.whisper.WhisperStore());
     private static final String SETTINGS_NETWORK = "Network";
     private static final String SETTINGS_PLUGINS = "Plugins";
     private static final String ABOUT_VIEW = "about";
@@ -101,9 +107,15 @@ public final class AskAiFrame extends JFrame {
 
     private final ApplicationStateService applicationState;
     private OllamaConfigPanel configPanel;
+    /** Whether the setup wizard opens on its own; see {@link com.aresstack.askai.ui.setup.SetupWizardState}. */
+    private final com.aresstack.askai.ui.setup.SetupWizardState setupWizardState =
+            com.aresstack.askai.ui.setup.SetupWizardState.forAskAi();
+    private com.aresstack.askai.ui.setup.AskAiSetupActions setupActions;
     private ChatWorkspacePanel chatWorkspace;
     private com.aresstack.askai.plugin.host.ChatWorkspaceHostPanel chatWorkspaceHost;
     private com.aresstack.askai.plugin.host.WorkspacePluginService pluginService;
+    /** The host-wide plugin state (e.g. the research search strategy) the setup wizard's plugin sections write. */
+    private com.aresstack.askai.plugin.api.service.WorkspaceStateStore pluginHostState;
     private com.aresstack.askai.plugin.host.PluginEnablementService pluginEnablement;
     private java.io.File pluginsDirectory;
     private com.aresstack.askai.plugin.host.AgentSessionCoordinator agentCoordinator;
@@ -144,6 +156,12 @@ public final class AskAiFrame extends JFrame {
         ComicTheme.install(AskAiTheme.active());
         this.configurationRepository = configurationRepository;
         this.askAiService = askAiService;
+        // Plugin downloads (e.g. the search browser) go through the saved network settings, read anew each time.
+        com.aresstack.askai.plugin.api.service.HostNetwork.configure(url -> {
+            com.aresstack.askai.config.AppConfiguration stored = configurationRepository.load();
+            return new com.aresstack.askai.net.ConfiguredConnections(stored.getProxyConfiguration(),
+                    stored.getCertificateTrustConfiguration(), stored.getHttpClientConfiguration()).open(url);
+        });
         this.model = new AskAiModel(configurationRepository);
         // R0.3: the VIRTUAL container service is the single source of every model list —
         // remote Ollama and AskAI's local model runtime aggregated with per-source fault isolation.
@@ -233,7 +251,8 @@ public final class AskAiFrame extends JFrame {
      * Solon's HTTP server runs a NON-daemon {@code HTTP-Dispatcher} thread that is otherwise never released, so
      * once research has booted Solon the JVM cannot exit naturally (the app hung on close). Stopping it here lets
      * every remaining thread (EDT after dispose, the plugin-shutdown worker once it completes) finish so the JVM
-     * exits on its own — no {@code System.exit}/{@code halt} needed. Idempotent.
+     * should exit on its own; {@link ExitWatchdog} forces the exit (and logs the blocking threads) if it does
+     * not within the grace period. Idempotent.
      */
     private MainWindowTray mainWindowTray;
 
@@ -242,6 +261,9 @@ public final class AskAiFrame extends JFrame {
             return; // idempotent
         }
         shutdownLog("performShutdown begin");
+        // Safety net: if a library thread (JGroups, HTTP, audio, browser, executors, ...) stays alive or a
+        // teardown step hangs, the watchdog logs the culprits and exits the JVM after a grace period.
+        ExitWatchdog.arm();
         if (chatWorkspaceHost != null) {
             try {
                 chatWorkspaceHost.shutdown();
@@ -272,12 +294,18 @@ public final class AskAiFrame extends JFrame {
     /** Leaves AskAI through the regular shutdown path (dispose -> windowClosed -> performShutdown). */
     private void exitApplication() {
         mainWindowTray.removeTrayIcon();
+        // Arm the hard exit before any teardown can block (EDT, shutdown hooks, native processes).
+        ExitWatchdog.arm();
         dispose();
     }
 
     /** Kept for the existing launcher: builds the frame and makes it visible. */
     public void showFrame() {
         setVisible(true);
+        // First start (or a setup interrupted before): the setup wizard opens over the fresh window.
+        if (setupWizardState.shouldOpenAtStartup()) {
+            javax.swing.SwingUtilities.invokeLater(() -> openSetupWizard(true));
+        }
     }
 
     private void buildUserInterface() {
@@ -435,12 +463,132 @@ public final class AskAiFrame extends JFrame {
         }
     }
 
-    /** An application page as a Settings category: scrollable, without the old screen footer. */
+    /** The settings pages an agent plugin contributes (empty when it has none or is not selectable). */
+    private java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution>
+            pluginSettingsContributions(String pluginId) {
+        com.aresstack.askai.plugin.pf4j.api.AgentPluginExtension extension =
+                pluginService == null ? null : pluginService.getSelectableAgentExtension(pluginId);
+        java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution> contributions =
+                extension == null ? null : extension.getSettingsContributions();
+        return contributions == null
+                ? java.util.Collections.<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution>emptyList()
+                : contributions;
+    }
+
+    /**
+     * Settings → Plugins → "Settings…" (and double-click): shows the plugin's settings straight from the
+     * plugin and its persisted configuration — the defaults every NEW chat of this agent starts from. No chat
+     * tab is switched, no session is started and no model (reranker etc.) is needed.
+     */
+    private void openPluginSettings(String pluginId) {
+        java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution> contributions =
+                pluginSettingsContributions(pluginId);
+        if (contributions.isEmpty()) {
+            return;
+        }
+        // The same store the sessions use as their template ("agent.<id>."): writes here reach new chats.
+        com.aresstack.askai.plugin.api.service.WorkspaceStateStore store =
+                new com.aresstack.askai.plugin.host.ApplicationStateWorkspaceStateStore(
+                        applicationState, "agent." + pluginId + ".");
+        javax.swing.JComponent content;
+        String title;
+        if (contributions.size() == 1) {
+            content = contributions.get(0).createPluginSettingsComponent(store);
+            title = contributions.get(0).getDisplayName();
+        } else {
+            javax.swing.JTabbedPane tabs = com.aresstack.comiccontrols.control.ComicControls.tabbedPane();
+            for (com.aresstack.askai.plugin.api.agent.AgentSettingsContribution contribution : contributions) {
+                javax.swing.JComponent page = contribution.createPluginSettingsComponent(store);
+                if (page != null) {
+                    tabs.addTab(contribution.getDisplayName(), page);
+                }
+            }
+            content = tabs.getTabCount() == 0 ? null : tabs;
+            title = pluginId;
+        }
+        if (content == null) {
+            javax.swing.JOptionPane.showMessageDialog(this, "This plugin has no settings of its own.",
+                    "Plugin settings", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        final javax.swing.JDialog dialog = new javax.swing.JDialog(this, title + " settings", true);
+        javax.swing.JButton close = new com.aresstack.comiccontrols.control.ComicButton("Close");
+        close.addActionListener(event -> dialog.dispose());
+        javax.swing.JPanel buttons = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT));
+        buttons.setOpaque(false);
+        buttons.add(close);
+        javax.swing.JPanel root = new javax.swing.JPanel(new java.awt.BorderLayout());
+        root.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        root.add(content, java.awt.BorderLayout.CENTER); // each tab fits and scrolls itself
+        root.add(buttons, java.awt.BorderLayout.SOUTH);
+        dialog.setContentPane(root);
+        dialog.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
+        dialog.setSize(900, 680);
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true); // panels commit on removal from the hierarchy (dialog close)
+    }
+
+    /**
+     * An application page as a Settings category, without the old screen footer. The pages scroll
+     * themselves (ComicForm pages scroll vertically only; the plugin table scrolls inside its own pane),
+     * so no second scroll pane is wrapped around them.
+     */
     private static javax.swing.JComponent settingsPage(javax.swing.JComponent page) {
-        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(page);
-        scroll.setBorder(javax.swing.BorderFactory.createEmptyBorder());
-        scroll.getVerticalScrollBar().setUnitIncrement(14);
-        return scroll;
+        return page;
+    }
+
+    /**
+     * Lays the setup wizard over the whole window. {@code firstStart}: Witch introduces himself once a runtime
+     * answers and “Finish” plays the hand-over; afterwards the wizard no longer opens on its own. From the
+     * settings it greets as a reunion and changes nothing when cancelled.
+     */
+    private void openSetupWizard(final boolean firstStart) {
+        final com.aresstack.askai.ui.setup.AskAiSetupActions actions = setupActions();
+        com.aresstack.askai.ui.setup.SetupWizardOverlay.show(getRootPane(), actions.currentDraft(), actions,
+                com.aresstack.comiccontrols.theme.ComicPalette.defaultPalette(), firstStart, completed -> {
+                    if (completed) {
+                        setupWizardState.markCompleted();
+                    }
+                });
+    }
+
+    /** The wizard's adapter onto AskAI's settings and services (built on first use, then kept). */
+    private com.aresstack.askai.ui.setup.AskAiSetupActions setupActions() {
+        if (setupActions == null) {
+            com.aresstack.askai.localmodels.LocalModelRuntimeManager local =
+                    askAiService.localRuntimeManager();
+            setupActions = new com.aresstack.askai.ui.setup.AskAiSetupActions(model, configurationRepository,
+                    (VirtualOllamaContainerService) ollamaService, local,
+                    local == null ? null : new com.aresstack.askai.localmodels.LocalRerankerModelCatalog(local),
+                    new com.aresstack.askai.localmodels.LocalNlpModelStore(), new Runnable() {
+                        public void run() {
+                            catalogRefreshService.refresh(); // new models and selections reach every chat tab
+                            if (configPanel != null) {
+                                configPanel.reloadFromModel(); // its Save must not write the old address back
+                            }
+                            refreshConnectionStatus();
+                        }
+                    });
+            setupActions.setModelBrowser(dictation -> {
+                ModelSearchPanel browser = new ModelSearchPanel(configurationRepository, askAiService, null, null,
+                        new WhisperModelsPanel(new com.aresstack.askai.stt.whisper.WhisperStore()),
+                        askAiService.localRuntimeManager() == null ? null
+                                : new LocalRuntimeModelsPanel(askAiService, new Runnable() {
+                                    public void run() {
+                                        catalogRefreshService.refresh();
+                                    }
+                                }));
+                if (dictation) {
+                    browser.openDictationModels();
+                }
+                return browser;
+            });
+            setupActions.setPluginSetup(() -> pluginService == null
+                    ? java.util.Collections.<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>
+                            emptyList()
+                    : pluginService.getSetupContributions(), pluginHostState);
+        }
+        return setupActions;
     }
 
     /** An icon drawn scaled to {@code size} pixels (the 15px stroke glyphs at title-bar size). */
@@ -661,6 +809,7 @@ public final class AskAiFrame extends JFrame {
         com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostState =
                 new com.aresstack.askai.plugin.host.ApplicationStateWorkspaceStateStore(applicationState, "");
         this.pluginEnablement = new com.aresstack.askai.plugin.host.PluginEnablementService(hostState);
+        this.pluginHostState = hostState;
         this.pluginsDirectory = pluginsRoot.toFile();
         com.aresstack.askai.plugin.host.WorkspacePluginService pluginService =
                 new com.aresstack.askai.plugin.host.WorkspacePluginService(pluginsRoot, HOST_PLUGIN_VERSION, 1,
@@ -1047,6 +1196,8 @@ public final class AskAiFrame extends JFrame {
                 () -> activityCoordinator.scopePhaseLabel(activityScope));
         // Tab close ENDS this tab's agent session(s) off-EDT (its ChatSessionId is the scope).
         final com.aresstack.askai.plugin.host.AgentSessionCoordinator closerCoordinator = agentCoordinator;
+        // Settings > General > "Setup wizard…": the first-start wizard, callable again (Witch greets as a reunion).
+        chat.setSetupWizardOpener(() -> openSetupWizard(false));
         chat.setTabSessionCloser(new OllamaChatPanel.TabSessionCloser() {
             public void closeSessionsForTab(String scope) {
                 closerCoordinator.closeSessionsForScope(scope);
@@ -1149,6 +1300,15 @@ public final class AskAiFrame extends JFrame {
                         audioProfileRepository, applicationState, historyStore);
                 chat.setInstallAudioModelHandler(installHandler);
                 chat.setAudioProcessingSettingsHandler(audioHandler);
+                chat.setSpeechVoicesPanel(speechVoicesPanel);
+                chat.setWhisperModelsPanel(whisperModelsPanel);
+                // "Install models…" beside the Whisper selector opens Models > Setup > Dictation.
+                chat.setWhisperInstallOpener(() -> {
+                    showScreen(INSTALL_VIEW);
+                    if (installSearchPanel != null) {
+                        installSearchPanel.openDictationModels();
+                    }
+                });
                 // A persisted title/timestamp must reach an OPEN chat list right away.
                 chat.setHistoryChangedListener(new Runnable() {
                     public void run() {
@@ -1273,15 +1433,18 @@ public final class AskAiFrame extends JFrame {
                     }
                 });
         final ModelSearchPanel modelSearchPanel =
-                new ModelSearchPanel(configurationRepository, askAiService, nlpModelsPanel);
-        // 🔊 discovery entries in the HuggingFace suggestions are a SHORTCUT: they open the
-        // active chat's settings on Audio & Dictation, where the voices are installed and chosen.
+                new ModelSearchPanel(configurationRepository, askAiService, nlpModelsPanel, speechVoicesPanel,
+                        whisperModelsPanel,
+                        askAiService.localRuntimeManager() == null ? null
+                                : new LocalRuntimeModelsPanel(askAiService, new Runnable() {
+                                    public void run() {
+                                        catalogRefreshService.refresh();
+                                    }
+                                }));
+        // 🔊 discovery entries in the HuggingFace suggestions are a SHORTCUT to the Voices tab.
         modelSearchPanel.setSpeechOutputOpener(new java.util.function.Consumer<String>() {
             public void accept(String voiceId) {
-                OllamaChatPanel chat = activeChat();
-                if (chat != null) {
-                    chat.openSpeechOutputSettings(voiceId);
-                }
+                modelSearchPanel.openVoices(voiceId);
             }
         });
         modelsScreen().addPage(PAGE_SETUP, modelSearchPanel, null);
@@ -1309,12 +1472,15 @@ public final class AskAiFrame extends JFrame {
         chatWorkspace.addApplicationSettingsPage(SETTINGS_CONNECTIONS, settingsPage(configPanel));
         // Central AI-model selection (reranker + embeddings) owned by AskAI for all plugins. The reranker
         // catalog needs the local runtime; when there is none, the panel simply offers no rerank models.
-        chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(new AiModelsPanel(model,
+        AiModelsPanel aiModelsPanel = new AiModelsPanel(model,
                 askAiService.localRuntimeManager() == null ? null
                         : new com.aresstack.askai.localmodels.LocalRerankerModelCatalog(
                                 askAiService.localRuntimeManager()),
                 nlpModelCatalog,
-                (VirtualOllamaContainerService) ollamaService)));
+                (VirtualOllamaContainerService) ollamaService);
+        // The read-aloud voices (Piper) are installed under Models > Setup > Voices (one section for the whole
+        // application); every chat's voice selector follows installs/removals there.
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsPanel));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
         chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,
                 settingsPage(new ProxyPanel(configurationRepository)));
@@ -1326,9 +1492,19 @@ public final class AskAiFrame extends JFrame {
         audioScreen().addPage(PAGE_AUDIO_PROCESSING, audioProcessingPanel, null);
         // Settings → Plugins: the real PF4J catalog (enable/disable, details), built after the host so
         // pluginService/enablement exist.
-        chatWorkspace.addApplicationSettingsPage(SETTINGS_PLUGINS, settingsPage(
+        com.aresstack.askai.plugin.host.PluginManagementPanel pluginsPanel =
                 new com.aresstack.askai.plugin.host.PluginManagementPanel(
-                        pluginService, pluginEnablement, pluginsDirectory)));
+                        pluginService, pluginEnablement, pluginsDirectory);
+        pluginsPanel.setSettingsOpener(new com.aresstack.askai.plugin.host.PluginManagementPanel.SettingsOpener() {
+            public boolean hasSettings(String pluginId) {
+                return !pluginSettingsContributions(pluginId).isEmpty();
+            }
+
+            public void openSettings(String pluginId) {
+                openPluginSettings(pluginId);
+            }
+        });
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_PLUGINS, settingsPage(pluginsPanel));
         wireBatchComponent();
         return contentPanel;
     }

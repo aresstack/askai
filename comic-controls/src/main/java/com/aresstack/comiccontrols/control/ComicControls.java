@@ -136,6 +136,27 @@ public final class ComicControls {
         return spinner;
     }
 
+    /** A whole-number spinner for settings: {@code value} in {@code min..max}, an editor of {@code columns} digits. */
+    public static JSpinner integerSpinner(int value, int min, int max, int step, int columns) {
+        JSpinner spinner = themedSpinner(new javax.swing.SpinnerNumberModel(
+                Math.max(min, Math.min(max, value)), min, max, step));
+        fitColumns(spinner, columns);
+        return spinner;
+    }
+
+    /** Sizes a spinner's editor to {@code columns} digits (plain digits, no thousands grouping). */
+    public static void fitColumns(JSpinner spinner, int columns) {
+        javax.swing.JComponent editor = spinner.getEditor();
+        if (editor instanceof JSpinner.DefaultEditor) {
+            javax.swing.JFormattedTextField text = ((JSpinner.DefaultEditor) editor).getTextField();
+            if (editor instanceof JSpinner.NumberEditor) {
+                ((JSpinner.NumberEditor) editor).getFormat().setGroupingUsed(false);
+                text.setValue(text.getValue()); // re-render the current value without the grouping separator
+            }
+            text.setColumns(columns);
+        }
+    }
+
     static final class ThemedSpinner extends JSpinner {
         private static final long serialVersionUID = 1L;
 
@@ -319,6 +340,43 @@ public final class ComicControls {
                 setUI(new ComicTabbedPaneUI());
             }
         };
+    }
+
+    /**
+     * Comic tabs whose LAST tab is painted at the right edge of a single tab run (e.g. a
+     * "Technical details" tab set apart from the content tabs). With wrapped runs the tabs stay
+     * in their normal positions.
+     */
+    public static JTabbedPane tabbedPaneWithTrailingTab() {
+        return new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public void updateUI() {
+                setUI(new TrailingTabUI());
+            }
+        };
+    }
+
+    private static final class TrailingTabUI extends ComicTabbedPaneUI {
+        @Override
+        protected java.awt.LayoutManager createLayoutManager() {
+            return new TabbedPaneLayout() {
+                @Override
+                protected void calculateTabRects(int tabPlacement, int tabCount) {
+                    super.calculateTabRects(tabPlacement, tabCount);
+                    if (tabCount < 2 || runCount != 1) {
+                        return;
+                    }
+                    java.awt.Insets insets = tabPane.getInsets();
+                    java.awt.Insets area = getTabAreaInsets(tabPlacement);
+                    java.awt.Rectangle last = rects[tabCount - 1];
+                    java.awt.Rectangle previous = rects[tabCount - 2];
+                    int x = tabPane.getWidth() - insets.right - area.right - last.width;
+                    last.x = Math.max(previous.x + previous.width, x);
+                }
+            };
+        }
     }
 
     // ------------------------------------------------------------------ list

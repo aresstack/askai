@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -39,12 +38,27 @@ public final class PiperInstaller {
         void onProgress(String stage, long bytesDone, long bytesTotal);
     }
 
+    /** Opens the download connections; lets the caller route them through AskAI's network settings. */
+    public interface Connector {
+        HttpURLConnection open(String url) throws IOException;
+    }
+
     private final PiperTtsStore store;
     private final TtsSettingsStore settings;
+    private final Connector connector;
 
     public PiperInstaller(PiperTtsStore store, TtsSettingsStore settings) {
+        this(store, settings, com.aresstack.askai.plugin.api.service.HostNetwork::open); // AskAI's network settings
+    }
+
+    /** @param connector opens each download, e.g. with the configured proxy and certificate trust */
+    public PiperInstaller(PiperTtsStore store, TtsSettingsStore settings, Connector connector) {
+        if (connector == null) {
+            throw new IllegalArgumentException("connector must not be null");
+        }
         this.store = store;
         this.settings = settings;
+        this.connector = connector;
     }
 
     /**
@@ -58,6 +72,17 @@ public final class PiperInstaller {
         if (!store.isVoiceInstalled(voice)) {
             installVoice(voice, progress);
         }
+    }
+
+    /**
+     * Installs the engine if missing and downloads the voice again even when it is installed; the old files are
+     * replaced only after the new download passed its hash check. Blocking; run OFF the EDT.
+     */
+    public void reinstall(PiperVoice voice, Progress progress) throws IOException {
+        if (!store.isEngineInstalled()) {
+            installEngine(progress);
+        }
+        installVoice(voice, progress);
     }
 
     // ------------------------------------------------------------------ engine
@@ -90,7 +115,7 @@ public final class PiperInstaller {
     }
 
     /** Extract with a zip-slip guard: every entry must stay under {@code target}. */
-    static void extractZip(Path zip, Path target) throws IOException {
+    public static void extractZip(Path zip, Path target) throws IOException {
         Path root = target.toAbsolutePath().normalize();
         try (ZipInputStream in = new ZipInputStream(Files.newInputStream(zip))) {
             ZipEntry entry;
@@ -208,7 +233,7 @@ public final class PiperInstaller {
 
     private HttpURLConnection open(String url) throws IOException {
         int timeoutMillis = settings.load().getNetworkTimeoutSeconds() * 1000;
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection connection = connector.open(url);
         connection.setConnectTimeout(timeoutMillis);
         connection.setReadTimeout(timeoutMillis);
         connection.setInstanceFollowRedirects(true);
@@ -220,7 +245,7 @@ public final class PiperInstaller {
         return connection;
     }
 
-    static String sha256(Path file) throws IOException {
+    public static String sha256(Path file) throws IOException {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");

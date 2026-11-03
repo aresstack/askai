@@ -26,9 +26,6 @@ public final class BrightDataSearchConfigurationValidator {
         ConfigurationValidation.requireText(
                 configuration.getAsynchronousResultEndpoint(),
                 "asynchronousResultEndpoint");
-        ConfigurationValidation.requireText(
-                configuration.getZone(),
-                "zone");
         ConfigurationValidation.requireNonNull(
                 configuration.getExecutionMode(),
                 "executionMode");
@@ -82,6 +79,13 @@ public final class BrightDataSearchConfigurationValidator {
 
             throw new IllegalArgumentException(
                     "apiKey must be configured when Bright Data is enabled");
+        }
+
+        // No default zone: it is the name of a zone in the user's own Bright Data account.
+        if (configuration.isEnabled()
+                && (configuration.getZone() == null || configuration.getZone().trim().isEmpty())) {
+            throw new IllegalArgumentException(
+                    "zone must be configured when Bright Data is enabled (the SERP API zone of your account)");
         }
     }
 }

@@ -86,6 +86,28 @@ public final class PiperTtsStore {
     }
 
     /**
+     * The Piper voice that speaks this language for the given selection, or {@code null} when Piper is not
+     * selected or nothing is ready (the caller then falls back to the Windows voice). An explicitly chosen
+     * voice wins when it is ready and matches the language; otherwise — no voice chosen yet (the default) or
+     * the chosen one was removed — the first ready installed voice of that language speaks.
+     */
+    public PiperVoice voiceFor(TextToSpeechSettings.Selection selection, String languageCode) {
+        if (selection == null || selection.getEngine() != TextToSpeechSettings.Engine.PIPER) {
+            return null;
+        }
+        PiperVoice chosen = PiperVoiceCatalog.findById(selection.getVoiceId());
+        if (chosen != null && chosen.getLanguageCode().equals(languageCode) && isReadyToSpeak(chosen)) {
+            return chosen;
+        }
+        for (PiperVoice voice : installedVoices(languageCode)) {
+            if (isReadyToSpeak(voice)) {
+                return voice;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Remove the voice's directory completely, so a later install starts CLEAN (the installer
      * stages + moves, so there is no partial state to inherit). The shared engine stays — other
      * voices use it. Fails loudly when files resist deletion (e.g. the voice is speaking right

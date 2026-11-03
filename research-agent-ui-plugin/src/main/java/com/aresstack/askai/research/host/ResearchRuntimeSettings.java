@@ -20,7 +20,25 @@ public final class ResearchRuntimeSettings {
     static final String KEY_BROWSER_CHANNEL_CAMOUFOX_SWITCH = "research.runtime.browserChannel.camoufoxSwitch";
     /** The managed Camoufox browser (downloaded once by the browser runtime) — the default channel. */
     public static final String CAMOUFOX_CHANNEL = "camoufox";
+    /** The RESEARCH browser (pages visited while researching): visible by default. */
     static final String KEY_HEADLESS = "research.runtime.headless";
+    /**
+     * The SEARCH browser (Browser (SERP) provider): headless by default. App-wide — one search browser serves all
+     * chats — so the key carries the GLOBAL prefix.
+     */
+    static final String KEY_SEARCH_BROWSER_HEADLESS = WorkspaceStateStore.GLOBAL_KEY_PREFIX
+            + "research.runtime.searchBrowserHeadless";
+
+    /** Whether the search browser runs headless (default {@code true}). */
+    public static boolean loadSearchBrowserHeadless(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_SEARCH_BROWSER_HEADLESS, true);
+    }
+
+    public static void saveSearchBrowserHeadless(WorkspaceStateStore store, boolean headless) {
+        if (store != null) {
+            store.putBoolean(KEY_SEARCH_BROWSER_HEADLESS, headless);
+        }
+    }
     /** Conversation-policy thresholds (documented defaults; adjustable WITHOUT a rebuild via
      *  the env hand-off — the same mechanism as the concept loop budgets; a settings-UI row
      *  can layer on loadPositiveInt later). */
@@ -70,6 +88,32 @@ public final class ResearchRuntimeSettings {
     static final String KEY_SEARCH_URL = "research.runtime.searchUrl";
     static final String KEY_ALLOW_PRIVATE = "research.runtime.allowPrivateNetworks";
     static final String KEY_LANGUAGE = "research.runtime.language";
+    /** The folder of the search browser (Camoufox) chosen in the setup; "" = AskAI's automatic choice. */
+    static final String KEY_CAMOUFOX_FOLDER = "research.runtime.camoufoxFolder";
+
+    public static String loadCamoufoxFolder(WorkspaceStateStore store) {
+        return store == null ? "" : store.get(KEY_CAMOUFOX_FOLDER, "").trim();
+    }
+
+    public static void saveCamoufoxFolder(WorkspaceStateStore store, String folder) {
+        if (store != null) {
+            store.put(KEY_CAMOUFOX_FOLDER, folder == null ? "" : folder.trim());
+        }
+        applyCamoufoxFolder(store);
+    }
+
+    /** Browsers started from now on use the chosen Camoufox folder, when it holds the verified installation. */
+    public static void applyCamoufoxFolder(WorkspaceStateStore store) {
+        String folder = loadCamoufoxFolder(store);
+        if (folder.isEmpty()) {
+            return; // the automatic choice (or a location configured at launch) stays
+        }
+        try {
+            com.aresstack.askai.browser.runtime.InProcessBrowser.useCamoufox(folder);
+        } catch (RuntimeException | LinkageError unavailable) {
+            // no browser runtime here: nothing to configure
+        }
+    }
     static final String KEY_RERANKER_MODEL = "research.runtime.selectedRerankerModel";
 
     static final String KEY_LLM_NARRATION = "research.runtime.llmNarration";
@@ -391,7 +435,7 @@ public final class ResearchRuntimeSettings {
      * GUI-only; no endpoint is registered and no connection file is written. Applies to NEW sessions.
      */
     public static boolean loadBotControlMcp(WorkspaceStateStore store) {
-        return store == null || store.getBoolean(KEY_BOT_CONTROL, true);
+        return store != null && store.getBoolean(KEY_BOT_CONTROL, false);
     }
 
     /**
@@ -583,7 +627,7 @@ public final class ResearchRuntimeSettings {
     }
 
     public static ResearchRuntimeSettings defaults() {
-        return new ResearchRuntimeSettings(ResearchBackendMode.FAKE, CAMOUFOX_CHANNEL, true);
+        return new ResearchRuntimeSettings(ResearchBackendMode.FAKE, CAMOUFOX_CHANNEL, false);
     }
 
     /** True when a mode value was ever persisted (the FAKE developer override requires an explicit one). */
@@ -603,7 +647,8 @@ public final class ResearchRuntimeSettings {
         }
         return new ResearchRuntimeSettings(mode,
                 browserChannel(store),
-                store.getBoolean(KEY_HEADLESS, true),
+                // Browsing is visible by default (the search browser has its own, headless default).
+                store.getBoolean(KEY_HEADLESS, false),
                 store.getBoolean(KEY_ALLOW_PRIVATE, false),
                 store.get(KEY_RERANKER_MODEL, ""));
     }

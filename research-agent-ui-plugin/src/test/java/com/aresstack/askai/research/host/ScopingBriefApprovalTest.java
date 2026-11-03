@@ -167,7 +167,8 @@ public class ScopingBriefApprovalTest {
     public void aForegroundAgentTurnInFlightReportsBusy() {
         Fx fx = new Fx();
         fx.session.dispatch(ResearchCommandType.START, null); // SCOPING/RUNNING
-        // Do NOT complete the turn: the greeting bootstrap's agentTurnInFlight is still set.
+        fx.session.submitPrompt("Hasenhaltung");
+        // Do NOT complete the turn: the user turn's agentTurnInFlight is still set.
         fx.session.researchBriefStore().updateWorkingCopy("# Brief\nx", 1000L);
         assertFalse("a foreground agent turn blocks the action",
                 fx.session.canApproveScopingBriefAndContinue());
@@ -272,14 +273,14 @@ public class ScopingBriefApprovalTest {
         return false;
     }
 
-    /** SCOPING/NEW → SCOPING/RUNNING, clear the greeting bootstrap's busy flag, then store a real brief. */
+    /** SCOPING/NEW → SCOPING/RUNNING, deliver a terminal event, then store a real brief. */
     private static void toScopingRunningWithBrief(Fx fx, String brief) {
         fx.session.dispatch(ResearchCommandType.START, null);
         completeTurn(fx, 1L);
         fx.session.researchBriefStore().updateWorkingCopy(brief, 1000L);
     }
 
-    /** Deliver a terminal COMPLETED event so {@code agentTurnInFlight} (set by activate()) is cleared. */
+    /** Deliver a terminal COMPLETED event so a pending {@code agentTurnInFlight} is cleared. */
     private static void completeTurn(Fx fx, long seq) {
         fx.session.onEvent(ResearchBackendEvent.builder(ResearchBackendEventType.COMPLETED)
                 .envelope("evt-complete-" + seq, "s1", "p1", seq, 0L, seq, null).build());

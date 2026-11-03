@@ -33,7 +33,7 @@ import java.util.List;
  * hint was recorded somewhere.
  * <p>
  * The per-engine settings live IN the row: an unselected row reads as plain text
- * ("Bing — 3 Seiten, Pause 1,5 s"), the SELECTED row shows the two spinners (result pages, request
+ * ("Bing — 3 pages, delay 1.5 s"), the SELECTED row shows the two spinners (result pages, request
  * delay in seconds) inline — no separate editor column beside the list.
  * <p>
  * Engines the catalog knows but the stored configuration does not mention (a newly shipped one) appear at
@@ -84,8 +84,8 @@ final class SearchEngineOrderEditor extends JPanel {
         rowsPanel.setBackground(listBackground());
         rowsPanel.setOpaque(true);
 
-        pagesSpinner.setToolTipText("Wie viele Ergebnisseiten dieser Suchmaschine eine Suche abruft "
-                + "(sequenziell, mit Auswertung zwischen den Abrufen)");
+        pagesSpinner.setToolTipText("How many result pages of this engine one search fetches "
+                + "(sequentially, evaluated between fetches)");
         pagesSpinner.setMaximumSize(new Dimension(56, 24));
         pagesSpinner.addChangeListener(new javax.swing.event.ChangeListener() {
             public void stateChanged(javax.swing.event.ChangeEvent event) {
@@ -94,8 +94,8 @@ final class SearchEngineOrderEditor extends JPanel {
                 }
             }
         });
-        delaySpinner.setToolTipText("Pause in Sekunden vor jedem weiteren Abruf dieser Suchmaschine "
-                + "(0 = aus; bis zu drei Nachkommastellen)");
+        delaySpinner.setToolTipText("Delay in seconds before each further request to this engine "
+                + "(0 = off; up to three decimals)");
         delaySpinner.setEditor(new javax.swing.JSpinner.NumberEditor(delaySpinner, "0.###"));
         delaySpinner.setMaximumSize(new Dimension(64, 24));
         delaySpinner.addChangeListener(new javax.swing.event.ChangeListener() {
@@ -174,7 +174,9 @@ final class SearchEngineOrderEditor extends JPanel {
         panel.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         Color foreground = selected ? selectionForeground() : UIManager.getColor("List.foreground");
 
-        final JCheckBox box = ComicControls.checkBox(selected ? row.displayName : summaryFor(row));
+        final JCheckBox box = ComicControls.checkBox(
+                selected && !BrowserSearchEngineCatalog.runsInSearchBrowser(row.engineId)
+                        ? row.displayName : summaryFor(row));
         box.setSelected(row.enabled);
         box.setOpaque(false);
         box.setForeground(foreground);
@@ -186,18 +188,18 @@ final class SearchEngineOrderEditor extends JPanel {
         });
         panel.add(box);
 
-        if (selected) {
+        if (selected && !BrowserSearchEngineCatalog.runsInSearchBrowser(row.engineId)) {
             // The spinners live IN the selected row — the shared instances are synced to it first.
             syncingSpinners = true;
             pagesSpinner.setValue(row.resultPages);
             delaySpinner.setValue(row.delayMillis / 1000.0);
             syncingSpinners = false;
             panel.add(Box.createHorizontalStrut(10));
-            panel.add(inlineLabel("Seiten:", foreground));
+            panel.add(inlineLabel("Pages:", foreground));
             panel.add(Box.createHorizontalStrut(3));
             panel.add(pagesSpinner);
             panel.add(Box.createHorizontalStrut(10));
-            panel.add(inlineLabel("Pause (s):", foreground));
+            panel.add(inlineLabel("Delay (s):", foreground));
             panel.add(Box.createHorizontalStrut(3));
             panel.add(delaySpinner);
         }
@@ -218,14 +220,18 @@ final class SearchEngineOrderEditor extends JPanel {
         return label;
     }
 
-    /** {@code "Bing  — 3 Seiten, Pause 1,5 s"} — the unselected row is pure text, delay only when on. */
+    /** {@code "Bing  — 3 pages, delay 1.5 s"} — the unselected row is pure text, delay only when on. */
     private static String summaryFor(Row row) {
+        if (BrowserSearchEngineCatalog.runsInSearchBrowser(row.engineId)) {
+            // The search browser fetches Google's first result page only; pages and delay do not apply.
+            return row.displayName + "  — search browser, first result page";
+        }
         String delay = row.delayMillis > 0
-                ? ", Pause " + BrowserSearchEngineSelection
-                        .formatDelaySeconds(row.delayMillis).replace('.', ',') + " s"
+                ? ", delay " + BrowserSearchEngineSelection
+                        .formatDelaySeconds(row.delayMillis) + " s"
                 : "";
         return row.displayName + "  — " + row.resultPages
-                + (row.resultPages == 1 ? " Seite" : " Seiten") + delay;
+                + (row.resultPages == 1 ? " page" : " pages") + delay;
     }
 
     private static Color listBackground() {

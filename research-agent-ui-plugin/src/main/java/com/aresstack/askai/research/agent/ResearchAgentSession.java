@@ -117,6 +117,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         this.sink = host.getConversationSink();
         this.uiExecutor = host.getUiExecutor();
         this.hostStateStore = host.getStateStore();
+        com.aresstack.askai.research.host.ResearchRuntimeSettings.applyCamoufoxFolder(hostStateStore);
         // Session-LOCAL language: seeded from the persisted default, then owned by THIS session alone —
         // two parallel research tabs switch independently, nothing is process-global.
         this.sessionLanguage = new SessionResearchLanguage(ResearchLanguage.fromCode(
@@ -427,13 +428,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             boolean freshState =
                     com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(current.getPhaseId())
                     && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW.equals(current.getStateId());
-            if (freshState) {
-                // The model-backed TeamAgent (runtime process) OWNS the greeting: send ONE bootstrap turn so
-                // its model-generated greeting arrives as an assistant message. On success the runtime signals
-                // GREETING_DONE and the host advances the state one step (see handleGreetingDone).
-                beginAgentTurn(); // busy + preempt visualizer; cleared by the greeting turn's terminal event
-                backend.submitPrompt(handle, new ResearchPrompt("", ""));
-            } else {
+            // A fresh chat (SCOPING/NEW) stays EMPTY: no bootstrap turn, no model call. The user writes first;
+            // the scoping starts with the user's first message (see startScopingOnFirstMessage).
+            if (!freshState) {
                 // Restored session: the conversation text comes back from the persisted transcript, but the
                 // interactive buttons do not. Re-derive the decision buttons from the live state
                 // (non-persisted, so they never duplicate/accumulate across restarts), and bring back the
@@ -921,7 +918,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             new java.util.concurrent.atomic.AtomicLong();
 
     public void submitPrompt(String text, String activeSectionId) {
-        if (handle == null) {
+        if (handle == null || disposed) {
+            // Never drop a prompt silently: keep the user's turn visible and say why nothing happens.
+            echoUserMessage(text);
+            reportSubmitProblem("The research agent is not running for this chat. "
+                    + "Switch the mode again or open a new chat to restart it.");
             return;
         }
         if (productiveResources != null && !productiveResources.isClosed()) {
@@ -970,6 +971,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 technicalLog("stale decision tombstone superseded by a substantive turn");
             }
             echoUserMessage(text);
+            startScopingOnFirstMessage();
             // KISS (live-gate 4): the mission is bookkeeping, not intelligence — the user's
             // FIRST message IS the mission until they restate it. No model turn ever begs
             // for setMission again.
@@ -984,7 +986,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 technicalLog("[scope-check] boundary question consumed by this user turn");
             }
             beginAgentTurn(); // busy + preempt visualizer; cleared by the turn's terminal event
-            backend.submitPrompt(handle, new ResearchPrompt(text, activeSectionId));
+            try {
+                backend.submitPrompt(handle, new ResearchPrompt(text, activeSectionId));
+            } catch (RuntimeException submitFailed) {
+                // An immediate failure (e.g. the model endpoint answers 500 at once) must release the
+                // composer and show the reason — the user's message is already in the chat above.
+                setAgentTurnInFlight(false);
+                reportSubmitProblem("Your message could not be sent to the research agent: "
+                        + (submitFailed.getMessage() == null ? submitFailed.toString()
+                                : submitFailed.getMessage()));
+            }
             return;
         }
         // FAKE mode: host-side explainability + the deterministic backend, unchanged. Meta questions are
@@ -1044,12 +1055,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * The model-backed greeting was delivered successfully: advance the scope state ONE step (SCOPING/NEW →
-     * SCOPING/RUNNING via START). The greeting depends only on the state, so after this a restart sees a
-     * non-fresh state and never greets again (the persisted chat shows the prior greeting instead). Idempotent
-     * and only meaningful while still at SCOPING/NEW.
+     * SCOPING/NEW → SCOPING/RUNNING when the user sends the first message of a fresh chat — synchronously,
+     * BEFORE the turn reaches the runtime, so the turn's concept writes are allowed and the runtime answers
+     * the topic directly. Also the handler of the runtime's GREETING_DONE signal. Idempotent.
      */
-    private void handleGreetingDone() {
+    private void startScopingOnFirstMessage() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return;
         }
@@ -1080,6 +1090,21 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
     }
 
+
+    /** A visible problem bubble for a prompt that could not be delivered (never a silent drop). */
+    private void reportSubmitProblem(final String text) {
+        technicalLog("[submit] " + text);
+        if (sink == null) {
+            System.err.println("[research] " + text);
+            return;
+        }
+        final String messageId = messageIds.next("problem");
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                sink.showProblem(messageId, text);
+            }
+        });
+    }
 
     /** An agent utterance from the playbook/dialog, routed through the shared sink on the UI thread. */
     private void sayAsAgent(final String text) {
@@ -1981,7 +2006,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 handleScopeProposal(event.getText(), event.getTechnicalDetail());
                 break;
             case GREETING_DONE:
-                handleGreetingDone();
+                startScopingOnFirstMessage();
                 break;
             case SCOPE_UPDATE:
                 applyScopeUpdate(event.getText());

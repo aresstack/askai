@@ -94,6 +94,12 @@ public final class ProviderConfigurationService {
         DataForSeoSearchConfiguration configuration = store.load(
                 file,
                 DataForSeoSearchConfiguration.class);
+        if (configuration.isEnabled()
+                && (configuration.getApiKey() == null || !configuration.getApiKey().isPresent())) {
+            // A file from before the single API key (login/password) has no key: keep it editable, disabled,
+            // so the settings dialog opens and the key can be entered once.
+            configuration.setEnabled(false);
+        }
         dataForSeoValidator.validate(configuration);
         return configuration;
     }
@@ -164,14 +170,14 @@ public final class ProviderConfigurationService {
 
     public void saveDataForSeo(
             DataForSeoSearchConfiguration configuration,
-            char[] password) {
+            char[] apiKey) {
 
         try {
-            configuration.setPassword(
-                    secretValueService.encrypt(password));
+            configuration.setApiKey(
+                    secretValueService.encrypt(apiKey));
             saveDataForSeo(configuration);
         } finally {
-            SecretArrays.clear(password);
+            SecretArrays.clear(apiKey);
         }
     }
 

@@ -2,6 +2,7 @@ package com.aresstack.askai.ui;
 
 import com.aresstack.comiccontrols.theme.ThemeColor;
 import com.aresstack.comiccontrols.control.ComicControls;
+import com.aresstack.comiccontrols.control.ComicForm;
 import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.askai.tts.PiperInstaller;
 import com.aresstack.askai.tts.PiperTtsStore;
@@ -12,7 +13,6 @@ import com.aresstack.askai.tts.TtsSettingsStore;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -31,7 +31,7 @@ import java.util.concurrent.Executors;
  * {@code rhasspy/piper-voices}) with one click, exactly where the voice is chosen. The engine and
  * every voice run ENTIRELY on the CPU — the GPU stays free for the AI models (GPU acceleration:
  * coming soon). After a successful install the user is asked whether to use the voice right away.
- * The 🔊 entries in Models → Setup → Hugging Face are only a SHORTCUT that opens this section.
+ * The 🔊 entries in Models → Setup → Hugging Face are only a SHORTCUT to this (Voices) tab.
  * Mirrors {@link NlpModelsPanel}: pure UI orchestration, installs off the EDT, errors shown,
  * never swallowed.
  */
@@ -59,7 +59,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
     private final Map<String, JPanel> rowByVoice = new LinkedHashMap<String, JPanel>();
     private final JLabel error = new JLabel(" ");
     /** Fires after a voice install (and its adoption choice) so the owner's selector can reload. */
-    private Runnable onVoicesChanged;
+    private final java.util.List<Runnable> voicesChangedListeners = new java.util.ArrayList<Runnable>();
 
     /** Productive wiring: real installer + a background thread + the EDT + a JOptionPane prompt. */
     public SpeechOutputModelsPanel(PiperTtsStore store, TtsSettingsStore settings) {
@@ -69,7 +69,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
 
     SpeechOutputModelsPanel(PiperTtsStore store, TtsSettingsStore settings, InstallAction installer,
                             AdoptPrompt adoptPrompt, Executor background, Executor ui) {
-        super(new BorderLayout(8, 8));
+        super(new BorderLayout());
         this.store = store;
         this.settings = settings;
         this.installer = installer;
@@ -81,41 +81,49 @@ public final class SpeechOutputModelsPanel extends JPanel {
     }
 
     private void buildUserInterface() {
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        JPanel rows = new JPanel();
-        rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
-        rows.setBorder(ComicControls.titledBorder("Read-aloud voices (Piper)"));
-        JLabel intro = new JLabel("<html>The default speech output is the Windows voice — it needs"
-                + " no download. These model voices sound far more natural.<br>"
-                + "<b>CPU (recommended)</b> — the GPU stays free for the AI models.&nbsp;&nbsp;·"
-                + "&nbsp;&nbsp;GPU acceleration — <i>coming soon</i>.</html>");
-        JPanel introRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        introRow.add(intro);
-        rows.add(introRow);
+        setOpaque(false);
+        ComicForm rows = ComicForm.titled("Read-aloud voices (Piper)");
+        rows.note("Piper is the default speech output: the first installed voice of a language reads"
+                + " aloud; until one is installed the Windows voice speaks. Model voices sound far more natural. CPU (recommended) — the GPU stays free for the AI"
+                + " models; GPU acceleration is coming soon.");
         for (PiperVoice voice : PiperVoiceCatalog.curated()) {
-            rows.add(buildRow(voice));
+            rows.component(buildRow(voice));
         }
-        // Full transparency about the downloads — and that the Models route is only a shortcut.
-        JLabel sources = new JLabel("<html><i>Downloads: voices from HuggingFace"
-                + " “rhasspy/piper-voices”; the engine once (~21 MB) from the pinned"
-                + " Piper 2023.11.14-2 release on GitHub. Stored under"
-                + " %APPDATA%\\.askai\\tts.<br>"
-                + "The 🔊 entries under Models &gt; Setup &gt; Hugging Face are just a"
-                + " shortcut that opens this section.</i></html>");
-        JPanel sourcesRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        sourcesRow.add(sources);
-        rows.add(sourcesRow);
-        add(rows, BorderLayout.NORTH);
-        add(error, BorderLayout.SOUTH);
+        // Full transparency about the downloads.
+        rows.note("Downloads: voices from HuggingFace “rhasspy/piper-voices”; the engine once (~21 MB)"
+                + " from the pinned Piper 2023.11.14-2 release on GitHub. Stored under"
+                + " %APPDATA%\\.askai\\tts.");
+        rows.component(error);
+        add(rows, BorderLayout.CENTER);
     }
 
     /** Owner hook: reload the speech-output selector after installs/adoption. */
     public void setOnVoicesChanged(Runnable listener) {
-        this.onVoicesChanged = listener;
+        voicesChangedListeners.clear();
+        addVoicesChangedListener(listener);
+    }
+
+    /** Another owner (e.g. each chat's voice selector) that reloads after installs/adoption. */
+    public void addVoicesChangedListener(Runnable listener) {
+        if (listener != null) {
+            voicesChangedListeners.add(listener);
+        }
+    }
+
+    /** Forgets a listener registered with {@link #addVoicesChangedListener(Runnable)} (a closed chat). */
+    public void removeVoicesChangedListener(Runnable listener) {
+        voicesChangedListeners.remove(listener);
+    }
+
+    private void fireVoicesChanged() {
+        for (Runnable listener : new java.util.ArrayList<Runnable>(voicesChangedListeners)) {
+            listener.run();
+        }
     }
 
     private JPanel buildRow(final PiperVoice voice) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        row.setOpaque(false);
         row.add(new JLabel(voice.getLanguage() + " — " + voice.getDisplayName()
                 + "  ·  ~" + voice.getApproximateSizeMb() + " MB"));
         JLabel status = new JLabel();
@@ -168,8 +176,18 @@ public final class SpeechOutputModelsPanel extends JPanel {
                 continue;
             }
             TextToSpeechSettings.Selection selection = tts.selectionFor(voice.getLanguageCode());
-            boolean inUse = selection.getEngine() == TextToSpeechSettings.Engine.PIPER
-                    && voice.getId().equals(selection.getVoiceId());
+            boolean inUse = false;
+            if (selection.getEngine() == TextToSpeechSettings.Engine.PIPER) {
+                // The explicit choice, or — Piper default without one — the first installed voice.
+                java.util.List<PiperVoice> installed = store.installedVoices(voice.getLanguageCode());
+                String speaking = installed.isEmpty() ? "" : installed.get(0).getId();
+                for (PiperVoice candidate : installed) {
+                    if (candidate.getId().equals(selection.getVoiceId())) {
+                        speaking = candidate.getId();
+                    }
+                }
+                inUse = voice.getId().equals(speaking);
+            }
             boolean isInstalled = store.isVoiceInstalled(voice);
             status.setText(!isInstalled ? "Not installed"
                     : inUse ? "Installed · in use" : "Installed");
@@ -179,7 +197,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
         }
     }
 
-    /** Remove the voice cleanly (reinstallable); a selection pointing at it returns to Windows. */
+    /** Remove the voice cleanly (reinstallable); a selection pointing at it returns to the Piper default. */
     private void onUninstall(final PiperVoice voice) {
         final JButton button = buttonByVoice.get(voice.getId());
         final JLabel status = statusByVoice.get(voice.getId());
@@ -200,8 +218,10 @@ public final class SpeechOutputModelsPanel extends JPanel {
                             current.selectionFor(voice.getLanguageCode());
                     if (selection.getEngine() == TextToSpeechSettings.Engine.PIPER
                             && voice.getId().equals(selection.getVoiceId())) {
+                        // Back to the Piper default: another installed voice of the language takes
+                        // over, the Windows voice only while none is left.
                         settings.save(current.withSelection(voice.getLanguageCode(),
-                                TextToSpeechSettings.Engine.WINDOWS, ""));
+                                TextToSpeechSettings.Engine.PIPER, ""));
                     }
                 } catch (Exception ex) {
                     failure = ex;
@@ -213,9 +233,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
                             error.setText("Uninstall failed: " + describe(outcome));
                         }
                         refresh();
-                        if (onVoicesChanged != null) {
-                            onVoicesChanged.run(); // the selector drops the removed voice
-                        }
+                        fireVoicesChanged(); // the selector drops the removed voice
                     }
                 });
             }
@@ -255,9 +273,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
                         if (outcome == null) {
                             offerAdoption(voice);
                             refresh();
-                            if (onVoicesChanged != null) {
-                                onVoicesChanged.run();
-                            }
+                            fireVoicesChanged();
                         } else {
                             error.setText("Install failed: " + describe(outcome));
                             refresh();
@@ -270,7 +286,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
 
     /**
      * The frustration-free hand-over: use the fresh voice right away — FOR ITS LANGUAGE — or
-     * leave that language on the Windows default.
+     * leave that language on its current choice.
      */
     private void offerAdoption(PiperVoice voice) {
         if (!adoptPrompt.confirmUseNow(voice)) {
@@ -320,7 +336,9 @@ public final class SpeechOutputModelsPanel extends JPanel {
     }
 
     private static InstallAction installActionOver(PiperTtsStore store, TtsSettingsStore settings) {
-        final PiperInstaller installer = new PiperInstaller(store, settings);
+        // Downloads follow AskAI's network settings (proxy, PAC, Windows certificates), read fresh per download.
+        final PiperInstaller installer = new PiperInstaller(store, settings,
+                com.aresstack.askai.plugin.api.service.HostNetwork::open);
         return new InstallAction() {
             public void install(PiperVoice voice, PiperInstaller.Progress progress) throws Exception {
                 installer.install(voice, progress);

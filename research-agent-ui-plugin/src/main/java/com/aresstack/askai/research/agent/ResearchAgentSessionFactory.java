@@ -160,6 +160,9 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 // selection is published as a per-session snapshot; the agent's implementation is ready.
                 ResearchRuntimeSettings.loadSearchStrategy(hostContext.getStateStore()),
                 embeddingSnapshots);
+        // The shared search browser follows the persisted window setting (Search → Browser (SERP)).
+        com.aresstack.askai.research.host.InProcessResearchRuntime.shared().setSearchBrowserHeadless(
+                ResearchRuntimeSettings.loadSearchBrowserHeadless(hostContext.getStateStore()));
         // The knowledge worker's OpenNLP sentence resolver uses the SAME persisted session language ("en"/"de").
         factory.setResearchLanguageCode(ResearchRuntimeSettings.loadLanguage(hostContext.getStateStore()));
         factory.setBotControlMcpEnabled(

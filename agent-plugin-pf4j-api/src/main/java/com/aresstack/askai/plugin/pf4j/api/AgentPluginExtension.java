@@ -38,6 +38,14 @@ public interface AgentPluginExtension extends ExtensionPoint {
     }
 
     /**
+     * Sections for AskAI's first-start setup wizard: what this agent needs so the user can start right away
+     * (downloads, keys). Not session-based – the wizard runs before any chat tab. Default: none.
+     */
+    default List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> getSetupContributions() {
+        return java.util.Collections.emptyList();
+    }
+
+    /**
      * Persistent components shown ABOVE the chat composer while this agent is the active one of the current
      * tab (e.g. active-phase controls). Generic and session-based; the host builds and disposes them on
      * session/agent/tab change. Default: none.

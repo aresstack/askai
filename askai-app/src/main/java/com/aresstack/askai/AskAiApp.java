@@ -20,10 +20,15 @@ public final class AskAiApp {
     }
 
     public static void main(String[] args) {
+        // Console categories ([browser], [local-runtime], ...) switchable in Settings > General > Logging.
+        com.aresstack.askai.settings.ConsoleLogSettings.apply();
+        com.aresstack.askai.plugin.api.service.HostLog.installConsoleFilter();
         holdDevPluginRunLock();
         // askai #51: the data of the former .askai-java8 folder moves into .askai before anything reads it.
         com.aresstack.askai.settings.AppDirectoryMigration.run();
         final AppConfigurationRepository configurationRepository = new AppConfigurationRepository();
+        // BASIC proxy credentials for HTTPS tunnels; the JDK reads this once, before the first HTTP connection.
+        com.aresstack.askai.net.ConfiguredConnections.allowBasicProxyTunneling();
         // Must be set before any networking (java.net.InetAddress reads it once, at class init).
         if (configurationRepository.load().getHttpClientConfiguration().isPreferIpv6()) {
             System.setProperty("java.net.preferIPv6Addresses", "true");

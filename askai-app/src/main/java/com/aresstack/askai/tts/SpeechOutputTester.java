@@ -35,7 +35,13 @@ public final class SpeechOutputTester {
                 ? "Dies ist ein Test der Sprachausgabe."
                 : "This is a test of the speech output.";
         if (selection.getEngine() == TextToSpeechSettings.Engine.PIPER) {
-            PiperVoice voice = PiperVoiceCatalog.findById(selection.getVoiceId());
+            PiperVoice voice = selection.getVoiceId().isEmpty()
+                    ? store.voiceFor(selection, languageCode) // Piper default: the first ready voice
+                    : PiperVoiceCatalog.findById(selection.getVoiceId());
+            if (voice == null && selection.getVoiceId().isEmpty()) {
+                return "No Piper voice is installed for this language — install one under"
+                        + " Models > Setup > Voices (until then the Windows voice reads aloud).";
+            }
             if (voice == null) {
                 return "Selected voice id is unknown: \"" + selection.getVoiceId() + "\"";
             }

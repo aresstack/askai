@@ -7,9 +7,10 @@ import java.util.Map;
 /**
  * Persisted speech-output (read-aloud) settings, PER LANGUAGE — like the per-language NLP models:
  * German and English each get their own engine/voice choice, so an English answer is never read
- * with a German voice. The per-language default is deliberately {@link Engine#WINDOWS} — the OS
- * voice needs no download and always works; a Piper MODEL voice is an explicit opt-in (chat
- * settings → Audio &amp; Dictation). Kept OUT of {@code AppConfiguration} on purpose: these
+ * with a German voice. The per-language default is {@link Engine#PIPER} with no explicit voice: the first
+ * installed Piper voice of that language speaks, and until one is installed the Windows OS voice reads
+ * aloud (it needs no download). Switching a language to {@link Engine#WINDOWS} is an explicit choice
+ * (Settings → Speech → Speech output). Kept OUT of {@code AppConfiguration} on purpose: these
  * settings live in their own small properties file (see {@link TtsSettingsStore}).
  */
 public final class TextToSpeechSettings {
@@ -24,12 +25,14 @@ public final class TextToSpeechSettings {
     /** One language's choice: the engine, and (for PIPER) the selected voice id. */
     public static final class Selection {
         public static final Selection WINDOWS_DEFAULT = new Selection(Engine.WINDOWS, "");
+        /** The default: Piper, the first installed voice of the language (Windows until one exists). */
+        public static final Selection PIPER_DEFAULT = new Selection(Engine.PIPER, "");
 
         private final Engine engine;
         private final String voiceId;
 
         public Selection(Engine engine, String voiceId) {
-            this.engine = engine == null ? Engine.WINDOWS : engine;
+            this.engine = engine == null ? Engine.PIPER : engine;
             this.voiceId = voiceId == null ? "" : voiceId.trim();
         }
 
@@ -112,10 +115,10 @@ public final class TextToSpeechSettings {
                 DEFAULT_NETWORK_TIMEOUT_SECONDS);
     }
 
-    /** @return this language's choice; unknown/unset languages are the Windows default. */
+    /** @return this language's choice; unknown/unset languages are the Piper default. */
     public Selection selectionFor(String languageCode) {
         Selection selection = languageCode == null ? null : byLanguage.get(languageCode.trim());
-        return selection == null ? Selection.WINDOWS_DEFAULT : selection;
+        return selection == null ? Selection.PIPER_DEFAULT : selection;
     }
 
     public TextToSpeechSettings withSelection(String languageCode, Engine engine, String voiceId) {
@@ -191,12 +194,12 @@ public final class TextToSpeechSettings {
 
     public static Engine parseEngine(String value) {
         if (value == null) {
-            return Engine.WINDOWS;
+            return Engine.PIPER;
         }
         try {
             return Engine.valueOf(value.trim());
         } catch (IllegalArgumentException invalid) {
-            return Engine.WINDOWS;
+            return Engine.PIPER;
         }
     }
 }

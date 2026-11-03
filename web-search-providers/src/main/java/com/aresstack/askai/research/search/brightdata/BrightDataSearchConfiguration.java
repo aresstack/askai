@@ -17,7 +17,7 @@ public final class BrightDataSearchConfiguration {
     private String asynchronousResultEndpoint =
             "https://api.brightdata.com/serp/get_result";
     private EncryptedSecret apiKey;
-    private String zone = "serp_api1";
+    private String zone = ""; // the user's own SERP API zone; no default
     private String customer;
     private BrightDataExecutionMode executionMode =
             BrightDataExecutionMode.SYNCHRONOUS;

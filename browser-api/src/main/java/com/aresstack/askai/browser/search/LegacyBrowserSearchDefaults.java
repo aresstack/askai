@@ -27,18 +27,22 @@ public final class LegacyBrowserSearchDefaults {
     }
 
     /**
-     * The engines a fresh installation searches with: DuckDuckGo first, Bing behind it, and only until
-     * one of them delivers. Bing is a safety net, not the obligatory first browser visit it used to be.
+     * The engines a fresh installation searches with: Google first (in the search browser), DuckDuckGo behind it,
+     * and only until one of them delivers. Bing stays in the list but off — DuckDuckGo's results come from Bing.
+     * Google fetches its first result page only (the search browser does not page).
      */
     public static com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engineSelection() {
         return new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection(
                 Arrays.asList(
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
+                                        .GOOGLE, true, 1),
+                        new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
+                                com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
                                         .DUCKDUCKGO, true),
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
-                                        .BING, true)),
+                                        .BING, false)),
                 com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
     }
 

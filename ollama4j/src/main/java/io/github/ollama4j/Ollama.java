@@ -112,6 +112,24 @@ public final class Ollama {
         require(httpClient.delete("/api/delete", OllamaJson.toJson(body)));
     }
 
+    /**
+     * Load (warm up) a model: an empty {@code /api/generate} with {@code keep_alive}, as in ollama-manager.
+     * A purely numeric keep_alive (e.g. {@code -1} = forever) is sent as a number, anything else as a duration.
+     */
+    public void loadModel(String modelName, String keepAlive) throws OllamaException {
+        Map body = new LinkedHashMap();
+        body.put("model", modelName);
+        body.put("prompt", "");
+        body.put("stream", Boolean.FALSE);
+        String value = keepAlive == null ? "" : keepAlive.trim();
+        if (value.matches("-?\\d+")) {
+            body.put("keep_alive", Integer.valueOf(value));
+        } else if (!value.isEmpty()) {
+            body.put("keep_alive", value);
+        }
+        require(httpClient.post("/api/generate", OllamaJson.toJson(body)));
+    }
+
     public void unloadModel(String modelName) throws OllamaException {
         Map body = new LinkedHashMap();
         body.put("model", modelName);

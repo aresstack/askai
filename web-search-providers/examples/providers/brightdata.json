@@ -5,7 +5,7 @@
   "asynchronousRequestEndpoint": "https://api.brightdata.com/serp/req",
   "asynchronousResultEndpoint": "https://api.brightdata.com/serp/get_result",
   "apiKey": null,
-  "zone": "serp_api1",
+  "zone": "",
   "customer": null,
   "executionMode": "SYNCHRONOUS",
   "searchEngine": "GOOGLE",

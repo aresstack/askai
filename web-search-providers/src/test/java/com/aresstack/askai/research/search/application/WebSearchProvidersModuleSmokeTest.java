@@ -49,11 +49,11 @@ public final class WebSearchProvidersModuleSmokeTest {
 
             BrightDataSearchConfiguration brightData = service.loadOrCreateBrightData();
             brightData.setEnabled(true);
+            brightData.setZone("test-zone");
             service.saveBrightData(brightData, "brightdata-secret-PLAINTEXT".toCharArray());
 
             DataForSeoSearchConfiguration dataForSeo = service.loadOrCreateDataForSeo();
             dataForSeo.setEnabled(true);
-            dataForSeo.setUsername("smoke-login");
             service.saveDataForSeo(dataForSeo, "dataforseo-secret-PLAINTEXT".toCharArray());
 
             SerpApiSearchConfiguration serpApi = service.loadOrCreateSerpApi();

@@ -2,6 +2,7 @@ package com.aresstack.askai.ui;
 
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicForm;
 import com.aresstack.comiccontrols.theme.ThemeColor;
 import com.aresstack.askai.AskAiModel;
 import com.aresstack.askai.audio.AudioProfileRepository;
@@ -115,6 +116,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     private static final String MIC_SYSTEM_DEFAULT = "System default";
     private static final String AUDIO_MODEL_AUTOMATIC = "Automatic";
+    /** The languages offered for transcription; "auto" lets the model detect it. Editable for others. */
+    private static final String[] STT_LANGUAGES = {"auto", "de", "en", "fr", "es", "it", "nl", "pt"};
     /** Delete leftover dictation temp files older than this many milliseconds on startup/close. */
     private static final long TEMP_TTL_MILLIS = 24L * 60L * 60L * 1000L;
 
@@ -135,7 +138,6 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     private String pendingRestoreModel;
 
     private final JComboBox<String> modelCombo;
-    private final JTextField keepAliveField;
     private final JTextArea systemPromptArea;
     private final ChatTranscript transcript;
     private final ChatComposerPanel composer;
@@ -202,13 +204,35 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     // Dictation controls.
     private final JComboBox<String> audioModelCombo = ComicControls.<String>comboBox();
+    // The dictation settings moved here from Connections. They are application-wide (one AskAiModel shared by
+    // all tabs), so every open of the settings reloads them (another tab may have changed them meanwhile).
+    private javax.swing.JCheckBox sttEnabledBox;
+    private JComboBox<String> sttLanguageCombo;
+    private JTextField sttPromptField;
+    private String sttPromptShown = "";
+    private javax.swing.JSpinner sttMaxFileSize;
+    private com.aresstack.comiccontrols.control.ComicDurationField sttTimeout;
+    private boolean updatingDictationSettings;
+    private static final String DICTATION_ENGINE_WHISPER = "Whisper";
+    private static final String DICTATION_ENGINE_OLLAMA = "Ollama";
+    private static final String WHISPER_NO_MODEL = "No Whisper model installed (Ollama transcribes)";
+    private final JComboBox<String> dictationEngineCombo = ComicControls.<String>comboBox(
+            new String[]{DICTATION_ENGINE_WHISPER, DICTATION_ENGINE_OLLAMA});
+    private final JComboBox<Object> whisperModelCombo = ComicControls.<Object>comboBox();
+    private JPanel whisperModelRow;
+    private WhisperModelsPanel whisperModelsPanel;
+    private final Runnable whisperModelsListener = () -> onUi(this::refreshDictationBackend);
     private final JComboBox<AudioProcessingProfile> audioProfileCombo = ComicControls.<AudioProcessingProfile>comboBox();
     private final JComboBox<String> micCombo = ComicControls.<String>comboBox();
     private final JButton micRefreshButton = new ComicButton("Refresh");
     private final JButton testMicButton = new ComicButton("Test microphone");
-    // Speech output (read-aloud), PER LANGUAGE: the Windows voice of that language by default,
-    // or an installed Piper model voice — an English answer is never read with a German voice.
-    private static final String SPEECH_OUTPUT_WINDOWS = "Windows voice (default)";
+    // Speech output (read-aloud), PER LANGUAGE: an engine switch (Piper = default, or the Windows voice)
+    // plus that language's installed Piper voices — an English answer is never read with a German voice.
+    private static final String SPEECH_ENGINE_PIPER = "Piper";
+    private static final String SPEECH_ENGINE_WINDOWS = "Windows voice";
+    private static final String SPEECH_OUTPUT_NO_VOICE = "No voice installed (Windows voice speaks)";
+    private final java.util.Map<String, JComboBox<String>> speechEngineCombos =
+            new java.util.LinkedHashMap<String, JComboBox<String>>();
     private final java.util.Map<String, JComboBox<Object>> speechOutputCombos =
             new java.util.LinkedHashMap<String, JComboBox<Object>>();
     private boolean updatingSpeechOutputCombo;
@@ -216,7 +240,12 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             new com.aresstack.askai.tts.TtsSettingsStore();
     private final com.aresstack.askai.tts.PiperTtsStore piperTtsStore =
             new com.aresstack.askai.tts.PiperTtsStore();
-    /** The voice INSTALL section embedded right below the selector (built with the audio card). */
+    // Dictation backend: Whisper (local, default) or Ollama — read fresh per recording.
+    private final com.aresstack.askai.stt.whisper.WhisperStore whisperStore =
+            new com.aresstack.askai.stt.whisper.WhisperStore();
+    private final com.aresstack.askai.stt.whisper.DictationSettingsStore dictationSettingsStore =
+            new com.aresstack.askai.stt.whisper.DictationSettingsStore();
+    /** The application's voice INSTALL section (Models > Setup > Voices), shared by all chats. */
     private SpeechOutputModelsPanel speechVoicesPanel;
     // Playback output (recording preview + tests): persisted device across JavaSound/OpenAL/VLC.
     private final javax.swing.JComboBox<Object> playbackOutputCombo =
@@ -250,6 +279,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     // Dictation runtime.
     private final ExecutorService dictationExecutor;
+    /** Sends party messages in order, off the EDT (channel.send may block on flow control). */
+    private final ExecutorService partyOutbox = Executors.newSingleThreadExecutor(new DaemonThreadFactory());
     private final SpeechDictationService dictation;
     private final SpeechToTextReadinessService readiness;
     private final File workDir;
@@ -338,7 +369,6 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                         cellHasFocus);
             }
         });
-        this.keepAliveField = ComicControls.textField(model.getDefaultKeepAlive(), 6);
         this.systemPromptArea = ComicControls.textArea("You are a concise local assistant.", 2, 40);
         this.transcript = new ChatTranscript();
         this.transcript.applyColors(model.getChatColors());
@@ -589,9 +619,14 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                         model.getSpeechToTextConfiguration().getAudioProcessingProfileId());
             }
         });
-        AudioModelResolver resolver = audioModelResolver();
-        SpeechTranscriber transcriber = new OllamaSpeechTranscriber(baseUrl, timeout);
-        ServerProbe probe = new OllamaServerProbe(baseUrl);
+        // Whisper (default) when chosen and installed, otherwise the Ollama audio model — decided per recording.
+        AudioModelResolver resolver = com.aresstack.askai.stt.whisper.DictationBackendRouting.resolver(
+                audioModelResolver(), this::activeWhisperModel);
+        SpeechTranscriber transcriber = com.aresstack.askai.stt.whisper.DictationBackendRouting.transcriber(
+                new OllamaSpeechTranscriber(baseUrl, timeout),
+                new com.aresstack.askai.stt.whisper.WhisperSpeechTranscriber(whisperStore, timeout));
+        ServerProbe probe = com.aresstack.askai.stt.whisper.DictationBackendRouting.probe(
+                new OllamaServerProbe(baseUrl), this::activeWhisperModel);
         DictationListener listener = new DictationListener() {
             public void onState(final DictationState state, final String message) {
                 onUi(new Runnable() {
@@ -903,15 +938,34 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     }
 
     private TabSessionCloser tabSessionCloser;
+    private final JButton setupWizardButton = new ComicButton("Setup wizard…");
 
     public void setTabSessionCloser(TabSessionCloser closer) {
         this.tabSessionCloser = closer;
+    }
+
+    /** Opens the setup wizard again from Settings &gt; General &gt; "Setup wizard…" (set by the frame). */
+    private Runnable setupWizardOpener;
+
+    public void setSetupWizardOpener(Runnable opener) {
+        this.setupWizardOpener = opener;
     }
 
     /** Release this session's resources when its tab closes: abort the chat, dictation and file work. */
     public void disposeSession() {
         stopChat();
         shutdownDictation();
+        // Let go of the application-lifetime voice panel, or this closed chat would stay reachable.
+        if (speechVoicesPanel != null) {
+            speechVoicesPanel.removeVoicesChangedListener(speechVoicesListener);
+        }
+        if (loggingListener != null) {
+            com.aresstack.askai.plugin.api.service.HostLog.removeChangeListener(loggingListener);
+            loggingListener = null;
+        }
+        if (whisperModelsPanel != null) {
+            whisperModelsPanel.removeModelsChangedListener(whisperModelsListener);
+        }
         // END (not just pause) THIS tab's agent session so its research run, browser, agent process, model
         // watcher and registry entry are torn down; a fresh tab starts a fresh session, never resumes this one.
         if (tabSessionCloser != null) {
@@ -937,11 +991,11 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     /** The chat categories (group "CHAT"): the chat itself and the built-in Party mode. */
     public static final String SETTINGS_CHAT = "Chat";
     private static final String SETTINGS_PARTY = "Party";
-    /** The tabs of the "Chat" category. */
-    private static final String CHAT_TAB_CONVERSATION = "Conversation";
-    private static final String CHAT_TAB_AUDIO = "Audio & Dictation";
-    private static final String CHAT_TAB_TECHNICAL = "Technical Details";
-    private static final String[] APP_SETTINGS_CATEGORIES = {SETTINGS_GENERAL, SETTINGS_APPEARANCE};
+    /** Dictation and speech output: application-wide, not chat-specific (its own category). */
+    private static final String SETTINGS_SPEECH = "Speech";
+    /** The application page that carries the read-aloud voice installation (owned by the frame). */
+    public static final String SETTINGS_AI_MODELS = "AI models";
+    private static final String[] APP_SETTINGS_CATEGORIES = {SETTINGS_GENERAL, SETTINGS_APPEARANCE, SETTINGS_SPEECH};
     private static final String[] CHAT_SETTINGS_CATEGORIES = {SETTINGS_CHAT, SETTINGS_PARTY};
 
     /**
@@ -959,7 +1013,6 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     private java.awt.CardLayout settingsCardLayout;
     private JPanel settingsCards;
-    private javax.swing.JTabbedPane chatSettingsTabs;
 
     /**
      * The chat settings dialog content, Outlook-style: a category list on the left selects one
@@ -1073,6 +1126,28 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         if (settingsPagesPane == null) {
             buildSettingsPanes();
         }
+        refreshDictationSettings();
+        syncAgentSettingsPages(); // the agent may have been (de)selected since the panes were built
+    }
+
+    /** Shows the current application-wide dictation values (another tab may have changed them). */
+    private void refreshDictationSettings() {
+        if (sttEnabledBox == null) {
+            return;
+        }
+        SpeechToTextConfiguration stt = model.getSpeechToTextConfiguration();
+        updatingDictationSettings = true;
+        try {
+            sttEnabledBox.setSelected(stt.isEnabled());
+            sttLanguageCombo.setSelectedItem(stt.getLanguage().isEmpty() ? "auto" : stt.getLanguage());
+            sttPromptField.setText(stt.getPrompt());
+            sttPromptShown = sttPromptField.getText();
+            sttMaxFileSize.setValue(stt.getMaxFileSizeMb());
+            sttTimeout.setSeconds(stt.getTimeoutSeconds());
+        } finally {
+            updatingDictationSettings = false;
+        }
+        refreshDictationBackend();
     }
 
     private JComponent buildSettingsContent() {
@@ -1093,25 +1168,19 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         settingsCards = cards;
         JComponent[] partyCards = buildPartyCards();
         java.util.List<String> categories = new java.util.ArrayList<String>();
-        // SETTINGS group — application-wide. General carries the notifications (it used to hold only chat
-        // request parameters, which are chat settings and moved to Chat > Conversation).
+        // SETTINGS group — application-wide. General carries the notifications and the audio devices;
+        // Speech carries dictation and speech output (used in the chat, but not chat-specific).
         cards.add(settingsCard(buildGeneralCard()), SETTINGS_GENERAL);
         cards.add(settingsCard(buildAppearanceCard()), SETTINGS_APPEARANCE);
+        cards.add(settingsCard(buildSpeechCard()), SETTINGS_SPEECH);
         categories.addAll(java.util.Arrays.asList(APP_SETTINGS_CATEGORIES));
         // The application pages (formerly separate screens in the gear menu), shared by all tabs.
         for (java.util.Map.Entry<String, JComponent> page : applicationSettingsPages.entrySet()) {
             cards.add(page.getValue(), page.getKey());
             categories.add(page.getKey());
         }
-        // CHAT group. Chat: ONE category with its sub-pages as tabs, like Party; every tab scrolls on its
-        // own, so the tabbed pane itself is not wrapped in another scroll pane.
-        javax.swing.JTabbedPane chat = ComicControls.tabbedPane();
-        chat.addTab(CHAT_TAB_CONVERSATION, settingsCard(buildConversationCard()));
-        chat.addTab(CHAT_TAB_AUDIO, settingsCard(buildAudioCard()));
-        // The technical log is already scrollable — no settingsCard wrapper (no double scroll pane).
-        chat.addTab(CHAT_TAB_TECHNICAL, buildTechnicalDetails());
-        chatSettingsTabs = chat;
-        cards.add(chat, SETTINGS_CHAT);
+        // CHAT group. Chat: what is really THIS chat's — the system prompt and its technical log.
+        cards.add(settingsCard(buildConversationCard()), SETTINGS_CHAT);
         // Party: the built-in chat MODE, its sub-pages as tabs.
         javax.swing.JTabbedPane party = ComicControls.tabbedPane();
         party.addTab("Identity & Room", settingsCard(partyCards[0]));
@@ -1120,26 +1189,13 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         party.addTab("History", settingsCard(partyCards[3]));
         cards.add(party, SETTINGS_PARTY);
         categories.addAll(java.util.Arrays.asList(CHAT_SETTINGS_CATEGORIES));
-        // Chat modes contributed by plugins (e.g. Research Agent), hooked in dynamically after Party:
-        // only while the agent session is ACTIVE in this tab; each page gets the live session so its
-        // values stay session-based (two tabs never reconfigure each other).
-        if (agentSettingsContributions != null && agentSettingsSession != null) {
-            com.aresstack.askai.plugin.api.agent.AgentSession session = agentSettingsSession.get();
-            if (session != null) {
-                for (com.aresstack.askai.plugin.api.agent.AgentSettingsContribution contribution
-                        : agentSettingsContributions.get()) {
-                    JComponent component = contribution.createSettingsComponent(session);
-                    if (component != null) {
-                        String name = contribution.getDisplayName();
-                        cards.add(settingsCard(component), name);
-                        categories.add(name);
-                    }
-                }
-            }
+        // Chat modes contributed by plugins (e.g. Research Agent) follow after Party; they are synced on
+        // EVERY open (syncAgentSettingsPages), not only when the panes are first built.
+        final javax.swing.DefaultListModel<String> navigationModel = new javax.swing.DefaultListModel<String>();
+        for (String category : categories) {
+            navigationModel.addElement(category);
         }
-
-        final javax.swing.JList<String> navigation =
-                ComicControls.<String>list(categories.toArray(new String[0]));
+        final javax.swing.JList<String> navigation = ComicControls.<String>list(navigationModel);
         settingsNavigation = navigation; // openSpeechOutputSettings jumps to a category directly
         navigation.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
         navigation.setSelectedIndex(0);
@@ -1159,15 +1215,75 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         settingsPagesPane = cards;
     }
 
+    /** The plugin chat-mode categories currently in the settings (name → the session they were built for). */
+    private final java.util.Map<String, Object> agentSettingsPages = new java.util.LinkedHashMap<String, Object>();
+
+    /**
+     * Brings the plugin chat-mode categories (e.g. "Research Agent") in line with the agent that is active in
+     * THIS tab right now: adds them when the agent was selected after the settings were first built, drops
+     * them when it was deselected, rebuilds them for a new session. Unchanged pages are kept as they are.
+     */
+    private void syncAgentSettingsPages() {
+        if (settingsCards == null || settingsNavigation == null) {
+            return;
+        }
+        com.aresstack.askai.plugin.api.agent.AgentSession session =
+                agentSettingsSession == null ? null : agentSettingsSession.get();
+        java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution> contributions =
+                session == null || agentSettingsContributions == null
+                        ? java.util.Collections.<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution>
+                                emptyList()
+                        : agentSettingsContributions.get();
+        java.util.List<String> wanted = new java.util.ArrayList<String>();
+        for (com.aresstack.askai.plugin.api.agent.AgentSettingsContribution contribution : contributions) {
+            wanted.add(contribution.getDisplayName());
+        }
+        boolean upToDate = wanted.equals(new java.util.ArrayList<String>(agentSettingsPages.keySet()));
+        for (Object built : agentSettingsPages.values()) {
+            upToDate &= built == session;
+        }
+        if (upToDate) {
+            return;
+        }
+        javax.swing.DefaultListModel<String> model =
+                (javax.swing.DefaultListModel<String>) settingsNavigation.getModel();
+        String selected = settingsNavigation.getSelectedValue();
+        for (String name : agentSettingsPages.keySet()) {
+            model.removeElement(name);
+            for (java.awt.Component card : settingsCards.getComponents()) {
+                if (name.equals(card.getName())) {
+                    settingsCards.remove(card);
+                }
+            }
+        }
+        agentSettingsPages.clear();
+        for (com.aresstack.askai.plugin.api.agent.AgentSettingsContribution contribution : contributions) {
+            JComponent component = contribution.createSettingsComponent(session);
+            if (component != null) {
+                String name = contribution.getDisplayName();
+                JComponent card = settingsCard(component);
+                card.setName(name);
+                settingsCards.add(card, name);
+                model.addElement(name);
+                agentSettingsPages.put(name, session);
+            }
+        }
+        if (selected != null && model.contains(selected)) {
+            settingsNavigation.setSelectedValue(selected, false);
+            settingsCardLayout.show(settingsCards, selected);
+        } else {
+            settingsNavigation.setSelectedIndex(0);
+        }
+        settingsCards.revalidate();
+        settingsCards.repaint();
+    }
+
     /**
      * The Appearance card: the theme choice. Selecting an entry applies it IMMEDIATELY to every open
      * window (live preview, no restart) and persists it as {@code ui.theme}.
      */
     private JComponent buildAppearanceCard() {
-        JPanel column = settingsColumn();
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.add(new JLabel("Theme"));
+        ComicForm theme = ComicForm.titled("Theme");
         final javax.swing.JComboBox<String> themes = com.aresstack.comiccontrols.control.ComicControls.comboBox(
                 com.aresstack.askai.ui.theme.ThemeSwitcher.displayNames());
         themes.setSelectedIndex(com.aresstack.askai.ui.theme.ThemeSwitcher.indexOf(
@@ -1182,29 +1298,15 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             model.setUiTheme(chosen.name());
             model.saveSettings();
         });
-        row.add(themes);
-        column.add(row);
+        theme.row("Theme", themes);
+        theme.note("Applies immediately to every open window.");
         // The chat bubble colors belong to the look, too (moved here from General).
-        JComponent colors = buildColorSettings();
-        colors.setAlignmentX(Component.LEFT_ALIGNMENT);
-        column.add(colors);
-        return column;
+        return ComicForm.stack(theme, buildColorSettings());
     }
 
-    /** Wraps a card in a scroll pane so long cards stay usable at small dialog sizes. */
+    /** Wraps a card in the vertical-only settings scroll pane so long cards stay usable at small sizes. */
     private static JComponent settingsCard(JComponent card) {
-        JScrollPane scroll = new JScrollPane(card);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.getVerticalScrollBar().setUnitIncrement(14);
-        return scroll;
-    }
-
-    /** A vertical card container with a consistent inner margin. */
-    private static JPanel settingsColumn() {
-        JPanel column = new JPanel();
-        column.setLayout(new javax.swing.BoxLayout(column, javax.swing.BoxLayout.Y_AXIS));
-        column.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        return column;
+        return ComicForm.scroll(card);
     }
 
     /**
@@ -1212,123 +1314,188 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
      * category).
      */
     private JComponent buildGeneralCard() {
+        ComicForm setup = ComicForm.titled("Setup");
+        setupWizardButton.setToolTipText("Opens the setup wizard from the first start");
+        setupWizardButton.addActionListener(event -> {
+            if (setupWizardOpener != null) {
+                setupWizardOpener.run();
+            }
+        });
+        setup.note("Walk through network, AI runtime, models, knowledge and voice again.");
+        setup.actions(setupWizardButton);
+
         JComponent notifications = buildNotificationsCard();
-        notifications.setBorder(BorderFactory.createCompoundBorder(
-                ComicControls.titledBorder("Notifications"), notifications.getBorder()));
-        notifications.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JPanel card = settingsColumn();
-        card.add(notifications);
-        card.add(javax.swing.Box.createVerticalGlue());
-        return card;
+        JComponent devices = buildAudioDevicesForm();
+        ComicForm logging = buildLoggingForm();
+        ComicForm.alignLabels((ComicForm) notifications, (ComicForm) devices, logging);
+        return ComicForm.stack(setup, notifications, devices, logging);
     }
 
-    /** Chat &gt; Conversation: chat request parameters and the system prompt. */
+    /**
+     * General &gt; Logging: one switch per console category (the {@code [browser]}, {@code [local-runtime]}
+     * ... prefix of a log line). Takes effect at once, for the host and all plugins, and is stored.
+     */
+    /** Refreshes the Logging switches; removed in {@link #disposeSession()} so a closed chat is released. */
+    private Runnable loggingListener;
+
+    private ComicForm buildLoggingForm() {
+        ComicForm form = ComicForm.titled("Logging");
+        final JPanel boxes = new JPanel(new java.awt.GridLayout(0, 3, 8, 0));
+        boxes.setOpaque(false);
+        final Runnable rebuild = new Runnable() {
+            public void run() {
+                boxes.removeAll();
+                for (final String category : com.aresstack.askai.plugin.api.service.HostLog.categories()) {
+                    final javax.swing.JCheckBox box = ComicControls.checkBox(category,
+                            com.aresstack.askai.plugin.api.service.HostLog.isEnabled(category));
+                    box.addActionListener(event -> {
+                        com.aresstack.askai.plugin.api.service.HostLog.setEnabled(category, box.isSelected());
+                        com.aresstack.askai.settings.ConsoleLogSettings.save();
+                    });
+                    boxes.add(box);
+                }
+                boxes.revalidate();
+                boxes.repaint();
+            }
+        };
+        rebuild.run();
+        // New categories appear as soon as something logs under them (listener runs on the logging thread).
+        final java.util.concurrent.atomic.AtomicBoolean queued = new java.util.concurrent.atomic.AtomicBoolean();
+        if (loggingListener != null) {
+            com.aresstack.askai.plugin.api.service.HostLog.removeChangeListener(loggingListener);
+        }
+        loggingListener = () -> {
+            if (queued.compareAndSet(false, true)) {
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    queued.set(false);
+                    rebuild.run();
+                });
+            }
+        };
+        com.aresstack.askai.plugin.api.service.HostLog.addChangeListener(loggingListener);
+        JButton allOn = new ComicButton("All on");
+        allOn.addActionListener(event -> {
+            com.aresstack.askai.plugin.api.service.HostLog.setDisabled(java.util.Collections.<String>emptyList());
+            com.aresstack.askai.settings.ConsoleLogSettings.save();
+        });
+        JButton allOff = new ComicButton("All off");
+        allOff.addActionListener(event -> {
+            com.aresstack.askai.plugin.api.service.HostLog.setDisabled(
+                    com.aresstack.askai.plugin.api.service.HostLog.categories());
+            com.aresstack.askai.settings.ConsoleLogSettings.save();
+        });
+        form.row("Console output", boxes, allOn, allOff);
+        form.note("Each switch covers the console lines starting with that [category]. "
+                + "Lines without a category (errors with stack traces) are always shown.");
+        return form;
+    }
+
+    /** Chat: this chat's system prompt and its technical log (both belong to THIS chat only). */
     private JComponent buildConversationCard() {
-        JPanel card = settingsColumn();
-
-        JPanel params = partySettingsRow();
-        params.add(new JLabel("keep_alive"));
-        params.add(keepAliveField);
-        card.add(params);
-
-        JPanel system = new JPanel(new BorderLayout(6, 2));
-        system.setBorder(ComicControls.titledBorder("System prompt"));
+        ComicForm form = ComicForm.titled("Conversation");
         systemPromptArea.setLineWrap(true);
         systemPromptArea.setWrapStyleWord(true);
+        systemPromptArea.setRows(5);
         JScrollPane systemScroll = new JScrollPane(systemPromptArea);
-        systemScroll.setPreferredSize(new Dimension(440, 120));
-        system.add(systemScroll, BorderLayout.CENTER);
-        system.setAlignmentX(Component.LEFT_ALIGNMENT);
-        system.setMaximumSize(new Dimension(Integer.MAX_VALUE, 170));
-        card.add(system);
-
-        return card;
+        systemScroll.setPreferredSize(new Dimension(100, 120));
+        form.area("System prompt", systemScroll);
+        form.note("Model settings (which model, how long it stays loaded) are under Settings > AI models.");
+        ComicForm technical = ComicForm.titled("Technical details");
+        JScrollPane logScroll = (JScrollPane) buildTechnicalDetails();
+        logScroll.setPreferredSize(new Dimension(100, 320));
+        technical.component(logScroll);
+        technical.note("The technical log of this chat: requests, timings and errors.");
+        return ComicForm.stack(form, technical);
     }
 
-    /** Audio & Dictation: the audio model, the transcription profile and the microphone. */
-    private JComponent buildAudioCard() {
-        JPanel card = settingsColumn();
-        // Form discipline: ONE label column — every dropdown starts at the same x (tab stop),
-        // no ragged left edges. Labels are collected and widened to the longest one at the end.
-        java.util.List<JLabel> formLabels = new java.util.ArrayList<JLabel>();
-
-        JPanel modelRow = partySettingsRow();
-        JLabel audioModelLabel = new JLabel("Audio model");
-        formLabels.add(audioModelLabel);
-        modelRow.add(audioModelLabel);
+    /** Speech: dictation (input) and speech output — application-wide, used by every chat. */
+    private JComponent buildSpeechCard() {
+        ComicForm input = ComicForm.titled("Dictation (speech-to-text)");
+        final SpeechToTextConfiguration sttNow = model.getSpeechToTextConfiguration();
+        sttEnabledBox = ComicControls.checkBox(
+                "Dictate with the microphone (transcribe recordings and audio files)", sttNow.isEnabled());
+        sttEnabledBox.addActionListener(event -> {
+            model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                    .withEnabled(sttEnabledBox.isSelected()));
+            model.saveSettings();
+            refreshDictationControls();
+        });
+        input.check(sttEnabledBox);
+        // Backend: Whisper (local whisper.cpp, the default — like Piper for the output) or an Ollama audio model.
+        // Whisper without an installed model hands over to Ollama, so dictation never just stops working.
+        dictationEngineCombo.setEditable(false);
+        dictationEngineCombo.setToolTipText("Whisper (default): transcribes locally on the CPU, no Ollama needed."
+                + " Ollama: an audio-capable model on the Ollama server (address under Settings > Connections).");
+        dictationEngineCombo.addActionListener(event -> persistDictationEngine());
+        input.row("Backend", dictationEngineCombo);
+        whisperModelCombo.setEditable(false);
+        whisperModelCombo.setPrototypeDisplayValue("No Whisper model installed (Ollama transcribes)");
+        whisperModelCombo.setToolTipText("The installed Whisper model. Install models under Models > Setup >"
+                + " Dictation.");
+        whisperModelCombo.addActionListener(event -> persistWhisperModelSelection());
+        JButton installWhisperButton = new ComicButton("Install models…");
+        installWhisperButton.setToolTipText("Opens Models > Setup > Dictation, where Whisper models are installed.");
+        installWhisperButton.addActionListener(event -> openWhisperInstall());
+        whisperModelRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        whisperModelRow.setOpaque(false);
+        whisperModelRow.add(whisperModelCombo);
+        whisperModelRow.add(installWhisperButton);
         audioModelCombo.setEditable(false); // only /api/show-verified models, never free text
-        audioModelCombo.setPreferredSize(new Dimension(200, audioModelCombo.getPreferredSize().height));
+        audioModelCombo.setPrototypeDisplayValue("gemma4:e2b-it-q8_0 (automatic)"); // stable width, also while empty
+        audioModelCombo.setToolTipText("Audio-capable models installed in Ollama. Automatic picks a verified"
+                + " one (the last model that worked first). Install more under Settings > AI models.");
         audioModelCombo.addActionListener(event -> persistAudioModelSelection());
-        modelRow.add(audioModelCombo);
-        card.add(modelRow);
+        JPanel modelCell = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        modelCell.setOpaque(false);
+        modelCell.add(whisperModelRow);
+        modelCell.add(audioModelCombo);
+        input.row("Model", modelCell);
+        refreshDictationBackend();
 
-        JPanel profileRow = partySettingsRow();
-        JLabel profileLabel = new JLabel("Transcription profile");
-        formLabels.add(profileLabel);
-        profileRow.add(profileLabel);
-        audioProfileCombo.setPreferredSize(new Dimension(240, audioProfileCombo.getPreferredSize().height));
+        sttLanguageCombo = ComicControls.<String>comboBox(STT_LANGUAGES);
+        sttLanguageCombo.setEditable(true);
+        sttLanguageCombo.setSelectedItem(sttNow.getLanguage().isEmpty() ? "auto" : sttNow.getLanguage());
+        sttLanguageCombo.setToolTipText("The language spoken in recordings; \"auto\" lets the model detect it."
+                + " Type another ISO code if yours is missing.");
+        sttLanguageCombo.addActionListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
+            Object language = sttLanguageCombo.getSelectedItem();
+            model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                    .withLanguage(language == null ? "auto" : String.valueOf(language).trim()));
+            model.saveSettings();
+        });
+        input.row("Language", sttLanguageCombo);
+
+        sttPromptField = ComicControls.textField(sttNow.getPrompt(), 30);
+        sttPromptShown = sttPromptField.getText();
+        sttPromptField.setToolTipText("Optional context given to the transcription model (names, jargon).");
+        Runnable persistPrompt = () -> {
+            // Only a real edit of the shown text is saved — leaving the field unchanged never writes.
+            if (!sttPromptField.getText().equals(sttPromptShown)) {
+                sttPromptShown = sttPromptField.getText();
+                model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                        .withPrompt(sttPromptField.getText()));
+                model.saveSettings();
+            }
+        };
+        sttPromptField.addActionListener(event -> persistPrompt.run());
+        sttPromptField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persistPrompt.run();
+            }
+        });
+        input.row("Context prompt", sttPromptField);
+
         audioProfileCombo.setToolTipText("Choose the audio-processing profile used for microphone transcription.");
         audioProfileCombo.addActionListener(event -> persistAudioProfileSelection());
-        profileRow.add(audioProfileCombo);
         JButton editProfilesButton = new ComicButton("Edit profiles…");
         editProfilesButton.addActionListener(event -> openAudioProcessingSettings());
-        profileRow.add(editProfilesButton);
-        card.add(profileRow);
+        input.row("Transcription profile", audioProfileCombo, editProfilesButton);
 
-        JPanel micRow = partySettingsRow();
-        JLabel micLabel = new JLabel("Microphone");
-        formLabels.add(micLabel);
-        micRow.add(micLabel);
-        micCombo.setPreferredSize(new Dimension(240, micCombo.getPreferredSize().height));
-        micCombo.addActionListener(event -> persistMicrophoneSelection());
-        micRow.add(micCombo);
-        micRefreshButton.addActionListener(event -> refreshMicrophones());
-        micRow.add(micRefreshButton);
-        testMicButton.addActionListener(event -> testMicrophone());
-        micRow.add(testMicButton);
-        card.add(micRow);
-
-        // Playback output: the device the recording preview (Play beside Save) and the audio
-        // tests use — JavaSound, OpenAL or the VLC sidecar. Persisted; VLC appears once vlc.exe
-        // is known (below). This selection used to hide unpersisted in the DSP test panel.
-        JPanel playbackRow = partySettingsRow();
-        JLabel playbackLabel = new JLabel("Playback output");
-        formLabels.add(playbackLabel);
-        playbackRow.add(playbackLabel);
-        playbackOutputCombo.setPreferredSize(
-                new Dimension(240, playbackOutputCombo.getPreferredSize().height));
-        playbackOutputCombo.setToolTipText("Where recording previews and audio tests play:"
-                + " Java Sound, OpenAL or VLC (external process).");
-        playbackOutputCombo.addActionListener(event -> persistPlaybackOutputSelection());
-        playbackRow.add(playbackOutputCombo);
-        JButton playbackTestButton = new ComicButton("Test");
-        playbackTestButton.setToolTipText("Play a short beep through the selected output.");
-        playbackTestButton.addActionListener(event -> testPlaybackOutput());
-        playbackRow.add(playbackTestButton);
-        card.add(playbackRow);
-
-        JPanel vlcRow = partySettingsRow();
-        JLabel vlcLabel = new JLabel("VLC executable");
-        formLabels.add(vlcLabel);
-        vlcRow.add(vlcLabel);
-        vlcPathField.setEditable(false);
-        vlcPathField.setToolTipText("The vlc.exe used for the VLC output backend."
-                + " Empty = automatic detection.");
-        vlcRow.add(vlcPathField);
-        JButton vlcBrowseButton = new ComicButton("Browse…");
-        vlcBrowseButton.setToolTipText("Select vlc.exe to enable the VLC output backend.");
-        vlcBrowseButton.addActionListener(event -> browseVlcExecutable());
-        vlcRow.add(vlcBrowseButton);
-        JButton vlcClearButton = new ComicButton("Clear");
-        vlcClearButton.setToolTipText("Remove the manual path and fall back to automatic detection.");
-        vlcClearButton.addActionListener(event -> {
-            vlcInstallation.setExecutable(null);
-            updateVlcPathField();
-            refreshPlaybackOutputs(); // the VLC entry follows the executable's availability
-        });
-        vlcRow.add(vlcClearButton);
-        updateVlcPathField();
-        card.add(vlcRow);
+        input.note("The microphone is chosen under Settings > General > Audio devices.");
 
         // Hands-free transcription — both ON gives the Gemini feel: talk, pause, it sends.
         final javax.swing.JCheckBox autoSendBox = ComicControls.checkBox(
@@ -1341,18 +1508,15 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                     .withAutoSendTranscription(autoSendBox.isSelected()));
             model.saveSettings();
         });
-        JPanel autoSendRow = partySettingsRow();
-        autoSendRow.add(autoSendBox);
-        card.add(autoSendRow);
+        input.check(autoSendBox);
 
         final javax.swing.JCheckBox autoStopBox = ComicControls.checkBox(
                 "Stop recording after a silence of",
                 model.getSpeechToTextConfiguration().isAutoStopOnSilence());
         autoStopBox.setToolTipText("On: when you pause speaking for the configured time, the"
                 + " recording stops by itself (and transcribes).");
-        final javax.swing.JSpinner silenceSpinner = ComicControls.spinner(
-                new javax.swing.SpinnerNumberModel(
-                        model.getSpeechToTextConfiguration().getAutoStopSilenceSeconds(), 1, 60, 1));
+        final javax.swing.JSpinner silenceSpinner = ComicControls.integerSpinner(
+                model.getSpeechToTextConfiguration().getAutoStopSilenceSeconds(), 1, 60, 1, 3);
         java.awt.event.ActionListener persistAutoStop = event -> {
             model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
                     .withAutoStopOnSilence(autoStopBox.isSelected())
@@ -1361,15 +1525,10 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         };
         autoStopBox.addActionListener(persistAutoStop);
         silenceSpinner.addChangeListener(event -> persistAutoStop.actionPerformed(null));
-        JPanel autoStopRow = partySettingsRow();
-        autoStopRow.add(autoStopBox);
-        autoStopRow.add(silenceSpinner);
-        autoStopRow.add(new JLabel("seconds · signal above"));
         // The same noise gate as the draggable line in the recording waveform — two handles,
         // ONE setting: levels below this percent count as background noise, not as speech.
-        final javax.swing.JSpinner thresholdSpinner = ComicControls.spinner(
-                new javax.swing.SpinnerNumberModel(
-                        model.getSpeechToTextConfiguration().getSignalThresholdPercent(), 0, 95, 1));
+        final javax.swing.JSpinner thresholdSpinner = ComicControls.integerSpinner(
+                model.getSpeechToTextConfiguration().getSignalThresholdPercent(), 0, 95, 1, 3);
         thresholdSpinner.setToolTipText("Signal threshold (percent of full scale): what counts as"
                 + " SPEECH. Also draggable as the line inside the recording waveform.");
         thresholdSpinner.addChangeListener(event -> {
@@ -1377,33 +1536,59 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                     .withSignalThresholdPercent((Integer) thresholdSpinner.getValue()));
             model.saveSettings();
         });
-        autoStopRow.add(thresholdSpinner);
-        autoStopRow.add(new JLabel("%"));
-        card.add(autoStopRow);
+        input.inline(autoStopBox, silenceSpinner, new JLabel("seconds, when the signal stays below"),
+                thresholdSpinner, new JLabel("%"));
 
-        // One selector PER LANGUAGE (like the NLP models): the session's language switch decides
-        // which of these voices reads an answer aloud.
+        sttMaxFileSize = ComicControls.integerSpinner(
+                sttNow.getMaxFileSizeMb(), 1, 100000, 10, 6);
+        sttMaxFileSize.setToolTipText("Larger recordings or audio files are not sent for transcription.");
+        sttMaxFileSize.addChangeListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
+            model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                    .withMaxFileSizeMb(((Number) sttMaxFileSize.getValue()).intValue()));
+            model.saveSettings();
+        });
+        input.row("Max file size", sttMaxFileSize, new JLabel("MB"));
+        sttTimeout = new com.aresstack.comiccontrols.control.ComicDurationField(24 * 3600);
+        sttTimeout.setSeconds(sttNow.getTimeoutSeconds());
+        sttTimeout.setToolTipText("How long one transcription may take before AskAI gives up.");
+        sttTimeout.addChangeListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
+            long seconds = sttTimeout.getSeconds();
+            model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                    .withTimeoutSeconds(seconds > 0 ? (int) Math.min(Integer.MAX_VALUE, seconds)
+                            : SpeechToTextConfiguration.DEFAULT_TIMEOUT_SECONDS));
+            model.saveSettings();
+        });
+        input.row("Timeout", sttTimeout);
+
+        ComicForm speech = ComicForm.titled("Speech output (text-to-speech)");
+        // One engine switch + voice selector PER LANGUAGE (like the NLP models): the session's language
+        // switch decides which of these voices reads an answer aloud.
         for (final String language : com.aresstack.askai.tts.TextToSpeechSettings.LANGUAGE_CODES) {
-            JPanel speechRow = partySettingsRow();
-            JLabel speechLabel = new JLabel("Speech output · " + speechLanguageLabel(language));
-            formLabels.add(speechLabel);
-            speechRow.add(speechLabel);
+            JComboBox<String> engine = ComicControls.<String>comboBox(
+                    new String[]{SPEECH_ENGINE_PIPER, SPEECH_ENGINE_WINDOWS});
+            engine.setEditable(false);
+            engine.setToolTipText("Piper (default): natural model voices, entirely on the CPU — the GPU stays"
+                    + " free. Windows voice: the operating system's voice, no download needed.");
+            engine.addActionListener(event -> persistSpeechOutputSelection(language));
+            speechEngineCombos.put(language, engine);
             JComboBox<Object> combo = ComicControls.<Object>comboBox();
-            combo.setEditable(false); // Windows default or an INSTALLED Piper voice
-            combo.setPreferredSize(new Dimension(240, combo.getPreferredSize().height));
-            combo.setToolTipText("The read-aloud voice for " + speechLanguageLabel(language)
-                    + " answers. Model voices run entirely on the CPU — the GPU stays free."
-                    + " Install voices right below.");
+            combo.setEditable(false); // only INSTALLED Piper voices of this language
+            combo.setToolTipText("The Piper voice for " + speechLanguageLabel(language)
+                    + " answers. Install voices under Models > Setup > Voices.");
             combo.addActionListener(event -> persistSpeechOutputSelection(language));
             speechOutputCombos.put(language, combo);
-            speechRow.add(combo);
             JButton speechTestButton = new ComicButton("Test");
             speechTestButton.setToolTipText("Speak a sample sentence with the selected "
                     + speechLanguageLabel(language) + " voice — failures show their reason.");
             speechTestButton.addActionListener(event ->
                     runSpeechOutputTest(language, speechTestButton));
-            speechRow.add(speechTestButton);
-            card.add(speechRow);
+            speech.row("Voice · " + speechLanguageLabel(language), engine, combo, speechTestButton);
         }
         // Read-aloud starts ACTIVE by default: new research answers are spoken without pressing
         // Play (engine-independent — applies to the Windows voice too).
@@ -1420,9 +1605,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 appendTech("read-aloud auto-start not saved: " + notSaved.getMessage());
             }
         });
-        JPanel readAloudRow = partySettingsRow();
-        readAloudRow.add(readAloudAutoBox);
-        card.add(readAloudRow);
+        speech.check(readAloudAutoBox);
         // NLP-powered read-aloud refinements (both default ON; without the NLP models — Models >
         // Setup > NLP — everything silently degrades to the plain single-voice behavior).
         final javax.swing.JCheckBox mixedSplitBox = ComicControls.checkBox(
@@ -1440,15 +1623,9 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 appendTech("mixed-language split not saved: " + notSaved.getMessage());
             }
         });
-        JPanel mixedRow = partySettingsRow();
-        mixedRow.add(mixedSplitBox);
-        card.add(mixedRow);
+        speech.check(mixedSplitBox);
         // Chunk granularity is the USER'S choice; every chunk synthesizes in a background batch
         // (worker pool), only playback is strictly in reading order — no gaps from synthesis.
-        JPanel chunkingRow = partySettingsRow();
-        JLabel chunkingLabel = new JLabel("Synthesis chunks");
-        formLabels.add(chunkingLabel);
-        chunkingRow.add(chunkingLabel);
         final javax.swing.JComboBox<com.aresstack.askai.tts.TextToSpeechSettings.Chunking>
                 chunkingCombo = ComicControls.<com.aresstack.askai.tts
                         .TextToSpeechSettings.Chunking>comboBox(
@@ -1457,9 +1634,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         chunkingCombo.setToolTipText("How the read-aloud text is cut for synthesis: the whole"
                 + " answer, per paragraph, or per sentence. All chunks synthesize in the"
                 + " background batch; playback stays in reading order.");
-        final javax.swing.JSpinner workersSpinner = ComicControls.spinner(
-                new javax.swing.SpinnerNumberModel(
-                        ttsSettingsStore.load().getSynthesisWorkers(), 1, 8, 1));
+        final javax.swing.JSpinner workersSpinner = ComicControls.integerSpinner(
+                ttsSettingsStore.load().getSynthesisWorkers(), 1, 8, 1, 2);
         workersSpinner.setToolTipText("Parallel synthesis workers (CPU processes) preparing the"
                 + " chunks in the background.");
         java.awt.event.ActionListener persistChunking = event -> {
@@ -1474,44 +1650,88 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         };
         chunkingCombo.addActionListener(persistChunking);
         workersSpinner.addChangeListener(event -> persistChunking.actionPerformed(null));
-        chunkingRow.add(chunkingCombo);
-        chunkingRow.add(new JLabel("Workers"));
-        chunkingRow.add(workersSpinner);
-        card.add(chunkingRow);
-        alignFormLabels(formLabels);
-        // Voices are installed RIGHT HERE, below the selector — the 🔊 entries in Models > Setup
-        // are only a shortcut to this section (the panel says so, plus the download sources).
-        speechVoicesPanel = new SpeechOutputModelsPanel(piperTtsStore, ttsSettingsStore);
-        speechVoicesPanel.setOnVoicesChanged(new Runnable() {
-            public void run() {
-                refreshSpeechOutputVoices();
-            }
-        });
-        speechVoicesPanel.setAlignmentX(Component.LEFT_ALIGNMENT); // BoxLayout column, like the rows
-        card.add(speechVoicesPanel);
+        speech.row("Synthesis chunks", chunkingCombo, new JLabel("Workers"), workersSpinner);
+        speech.note("Voices are installed under Models > Setup > Voices.");
+        ComicForm.alignLabels(input, speech);
+        JComponent card = ComicForm.stack(input, speech);
         // Populate NOW: on the dialog's FIRST open the combos are created here, AFTER
         // openSettingsDialog's refresh already ran against the not-yet-built map — without this
         // call both selectors would sit empty until the dialog is opened a second time.
         refreshSpeechOutputVoices();
-        refreshPlaybackOutputs();
         return card;
     }
 
-    /** Opens the settings dialog on Audio &amp; Dictation and marks the recommended voice's row. */
+    /** General > Audio devices: microphone, playback output and the VLC executable (hardware, not chat). */
+    private JComponent buildAudioDevicesForm() {
+        ComicForm playback = ComicForm.titled("Audio devices");
+        micCombo.addActionListener(event -> persistMicrophoneSelection());
+        micRefreshButton.addActionListener(event -> refreshMicrophones());
+        testMicButton.addActionListener(event -> testMicrophone());
+        playback.row("Microphone", micCombo, micRefreshButton, testMicButton);
+        // Playback output: the device the recording preview (Play beside Save) and the audio
+        // tests use — JavaSound, OpenAL or the VLC sidecar. Persisted; VLC appears once vlc.exe
+        // is known (below). This selection used to hide unpersisted in the DSP test panel.
+        playbackOutputCombo.setToolTipText("Where recording previews and audio tests play:"
+                + " Java Sound, OpenAL or VLC (external process).");
+        playbackOutputCombo.addActionListener(event -> persistPlaybackOutputSelection());
+        JButton playbackTestButton = new ComicButton("Test");
+        playbackTestButton.setToolTipText("Play a short beep through the selected output.");
+        playbackTestButton.addActionListener(event -> testPlaybackOutput());
+        playback.row("Playback output", playbackOutputCombo, playbackTestButton);
+
+        vlcPathField.setEditable(false);
+        vlcPathField.setToolTipText("The vlc.exe used for the VLC output backend."
+                + " Empty = automatic detection.");
+        JButton vlcBrowseButton = new ComicButton("Browse…");
+        vlcBrowseButton.setToolTipText("Select vlc.exe to enable the VLC output backend.");
+        vlcBrowseButton.addActionListener(event -> browseVlcExecutable());
+        JButton vlcClearButton = new ComicButton("Clear");
+        vlcClearButton.setToolTipText("Remove the manual path and fall back to automatic detection.");
+        vlcClearButton.addActionListener(event -> {
+            vlcInstallation.setExecutable(null);
+            updateVlcPathField();
+            refreshPlaybackOutputs(); // the VLC entry follows the executable's availability
+        });
+        updateVlcPathField();
+        playback.row("VLC executable", vlcPathField, vlcBrowseButton, vlcClearButton);
+
+        refreshPlaybackOutputs();
+        return playback;
+    }
+
+    /** Opens the Settings on AI models (where the voices are installed) and marks the recommended voice's row. */
     public void openSpeechOutputSettings(String voiceId) {
         if (settingsOpener != null) {
-            settingsOpener.accept(SETTINGS_CHAT);
+            settingsOpener.accept(SETTINGS_AI_MODELS);
         } else {
             openSettingsDialog();
-            selectSettingsCategory(SETTINGS_CHAT);
-        }
-        if (chatSettingsTabs != null) {
-            chatSettingsTabs.setSelectedIndex(chatSettingsTabs.indexOfTab(CHAT_TAB_AUDIO));
+            selectSettingsCategory(SETTINGS_AI_MODELS);
         }
         if (speechVoicesPanel != null) {
             speechVoicesPanel.highlightVoice(voiceId);
         }
     }
+
+    /**
+     * The application's ONE voice-install section (Models > Setup > Voices, owned by the frame):
+     * this chat's voice selectors reload whenever a voice is installed or removed there.
+     */
+    public void setSpeechVoicesPanel(SpeechOutputModelsPanel panel) {
+        if (speechVoicesPanel != null) {
+            speechVoicesPanel.removeVoicesChangedListener(speechVoicesListener);
+        }
+        this.speechVoicesPanel = panel;
+        if (panel != null) {
+            panel.addVoicesChangedListener(speechVoicesListener);
+        }
+    }
+
+    /** This chat's registration on the shared voice panel — removed again when the chat closes. */
+    private final Runnable speechVoicesListener = new Runnable() {
+        public void run() {
+            refreshSpeechOutputVoices();
+        }
+    };
 
     /**
      * The speech-output "Test" run: speaks the persisted selection IN THIS APP (same classes and
@@ -1684,16 +1904,6 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     }
 
     /** Tab-stop form alignment: every label gets the widest label's width (FlowLayout rows). */
-    private static void alignFormLabels(java.util.List<JLabel> labels) {
-        int width = 0;
-        for (JLabel label : labels) {
-            width = Math.max(width, label.getPreferredSize().width);
-        }
-        for (JLabel label : labels) {
-            label.setPreferredSize(new Dimension(width, label.getPreferredSize().height));
-        }
-    }
-
     /** Human label for a speech-output language code (the selector row captions). */
     private static String speechLanguageLabel(String languageCode) {
         if ("de".equals(languageCode)) {
@@ -1705,7 +1915,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         return languageCode;
     }
 
-    /** Reloads every language's combo: the Windows default plus that language's INSTALLED voices. */
+    /** Reloads every language's engine switch and voice combo (that language's INSTALLED Piper voices). */
     private void refreshSpeechOutputVoices() {
         if (speechVoicesPanel != null) {
             speechVoicesPanel.refresh(); // install rows and combos always tell the same story
@@ -1717,21 +1927,29 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                     : speechOutputCombos.entrySet()) {
                 String language = entry.getKey();
                 JComboBox<Object> combo = entry.getValue();
+                JComboBox<String> engine = speechEngineCombos.get(language);
                 com.aresstack.askai.tts.TextToSpeechSettings.Selection selection =
                         tts.selectionFor(language);
+                boolean piper = selection.getEngine()
+                        == com.aresstack.askai.tts.TextToSpeechSettings.Engine.PIPER;
+                if (engine != null) {
+                    engine.setSelectedItem(piper ? SPEECH_ENGINE_PIPER : SPEECH_ENGINE_WINDOWS);
+                }
                 combo.removeAllItems();
-                combo.addItem(SPEECH_OUTPUT_WINDOWS);
-                Object desired = SPEECH_OUTPUT_WINDOWS;
-                for (com.aresstack.askai.tts.PiperVoice voice
-                        : piperTtsStore.installedVoices(language)) {
+                java.util.List<com.aresstack.askai.tts.PiperVoice> voices =
+                        piperTtsStore.installedVoices(language);
+                if (voices.isEmpty()) {
+                    combo.addItem(SPEECH_OUTPUT_NO_VOICE);
+                }
+                Object desired = voices.isEmpty() ? SPEECH_OUTPUT_NO_VOICE : voices.get(0);
+                for (com.aresstack.askai.tts.PiperVoice voice : voices) {
                     combo.addItem(voice);
-                    if (selection.getEngine()
-                            == com.aresstack.askai.tts.TextToSpeechSettings.Engine.PIPER
-                            && voice.getId().equals(selection.getVoiceId())) {
-                        desired = voice; // a selected-but-uninstalled voice falls back to Windows
+                    if (voice.getId().equals(selection.getVoiceId())) {
+                        desired = voice; // no or an uninstalled choice → the first installed voice
                     }
                 }
                 combo.setSelectedItem(desired);
+                combo.setEnabled(piper && !voices.isEmpty());
             }
         } finally {
             updatingSpeechOutputCombo = false;
@@ -1742,20 +1960,28 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         if (updatingSpeechOutputCombo) {
             return;
         }
+        JComboBox<String> engine = speechEngineCombos.get(language);
         JComboBox<Object> combo = speechOutputCombos.get(language);
+        boolean piper = engine == null || !SPEECH_ENGINE_WINDOWS.equals(engine.getSelectedItem());
         Object selected = combo == null ? null : combo.getSelectedItem();
         com.aresstack.askai.tts.TextToSpeechSettings current = ttsSettingsStore.load();
-        com.aresstack.askai.tts.TextToSpeechSettings updated =
-                selected instanceof com.aresstack.askai.tts.PiperVoice
-                        ? current.withSelection(language,
-                                com.aresstack.askai.tts.TextToSpeechSettings.Engine.PIPER,
-                                ((com.aresstack.askai.tts.PiperVoice) selected).getId())
-                        : current.withSelection(language,
-                                com.aresstack.askai.tts.TextToSpeechSettings.Engine.WINDOWS, "");
+        com.aresstack.askai.tts.TextToSpeechSettings updated = !piper
+                ? current.withSelection(language,
+                        com.aresstack.askai.tts.TextToSpeechSettings.Engine.WINDOWS, "")
+                : current.withSelection(language,
+                        com.aresstack.askai.tts.TextToSpeechSettings.Engine.PIPER,
+                        selected instanceof com.aresstack.askai.tts.PiperVoice
+                                ? ((com.aresstack.askai.tts.PiperVoice) selected).getId() : "");
         try {
             ttsSettingsStore.save(updated);
         } catch (java.io.IOException notSaved) {
             appendTech("speech-output selection not saved: " + notSaved.getMessage());
+        }
+        if (combo != null) {
+            combo.setEnabled(piper && selected instanceof com.aresstack.askai.tts.PiperVoice);
+        }
+        if (speechVoicesPanel != null) {
+            speechVoicesPanel.refresh(); // "in use" follows the switch
         }
     }
 
@@ -1765,27 +1991,21 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
      * mute bell.  Settings apply immediately.
      */
     private JComponent buildNotificationsCard() {
-        JPanel card = settingsColumn();
+        ComicForm card = ComicForm.titled("Notifications");
 
         // Every control persists and re-applies immediately, so what you toggle takes effect at
         // once (no separate Apply needed) — and the notifier config always matches the UI.
         final javax.swing.JCheckBox textBox = ComicControls.checkBox(
                 "Show a desktop text notification", partySettings.notifyText());
-        JPanel textRow = partySettingsRow();
-        textRow.add(textBox);
-        card.add(textRow);
+        card.check(textBox);
 
         final javax.swing.JCheckBox backgroundBox = ComicControls.checkBox(
                 "Only when the window is in the background", partySettings.notifyBackgroundOnly());
-        JPanel backgroundRow = partySettingsRow();
-        backgroundRow.add(backgroundBox);
-        card.add(backgroundRow);
+        card.check(backgroundBox);
 
         final javax.swing.JCheckBox soundBox = ComicControls.checkBox(
                 "Play a notification sound", partySettings.notifySound());
-        JPanel soundRow = partySettingsRow();
-        soundRow.add(soundBox);
-        card.add(soundRow);
+        card.check(soundBox);
 
         final JComboBox<String> soundTypeCombo = ComicControls.<String>comboBox(new String[] {
                 com.aresstack.askai.notify.DesktopNotifier.SOUND_CLICK,
@@ -1793,15 +2013,11 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 com.aresstack.askai.notify.DesktopNotifier.SOUND_BEEP,
                 com.aresstack.askai.notify.DesktopNotifier.SOUND_CHIME});
         soundTypeCombo.setSelectedItem(partySettings.notifySoundType());
+        card.row("Sound", soundTypeCombo);
         final javax.swing.JSlider volumeSlider =
                 ComicControls.slider(0, 100, partySettings.notifyVolume());
-        volumeSlider.setPreferredSize(new Dimension(120, volumeSlider.getPreferredSize().height));
-        JPanel soundConfigRow = partySettingsRow();
-        soundConfigRow.add(new JLabel("Sound"));
-        soundConfigRow.add(soundTypeCombo);
-        soundConfigRow.add(new JLabel("Volume"));
-        soundConfigRow.add(volumeSlider);
-        card.add(soundConfigRow);
+        volumeSlider.setPreferredSize(new Dimension(160, volumeSlider.getPreferredSize().height));
+        card.row("Volume", volumeSlider);
 
         final JComboBox<String> deviceCombo = ComicControls.<String>comboBox();
         for (String name : com.aresstack.askai.notify.DesktopNotifier.outputDeviceNames()) {
@@ -1810,11 +2026,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         String device = partySettings.notifySoundDevice();
         deviceCombo.setSelectedItem(device == null || device.isEmpty()
                 ? com.aresstack.askai.notify.DesktopNotifier.SYSTEM_DEFAULT_DEVICE : device);
-        deviceCombo.setPreferredSize(new Dimension(260, deviceCombo.getPreferredSize().height));
-        JPanel deviceRow = partySettingsRow();
-        deviceRow.add(new JLabel("Sound device"));
-        deviceRow.add(deviceCombo);
-        card.add(deviceRow);
+        card.row("Sound device", deviceCombo);
 
         // Persist + re-apply on any change.
         final Runnable persist = new Runnable() {
@@ -1852,16 +2064,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             notifier.notifyMessage("AskAI", "This is a test notification.");
             notifier.setMuted(wasMuted);
         });
-        JPanel actionsRow = partySettingsRow();
-        actionsRow.add(testButton);
-        card.add(actionsRow);
-
-        JLabel note = new JLabel(
-                "The mute bell in the composer appears while a switch is on; it silences everything.");
-        note.setFont(note.getFont().deriveFont(note.getFont().getSize2D() - 2f));
-        JPanel noteRow = partySettingsRow();
-        noteRow.add(note);
-        card.add(noteRow);
+        card.actions(testButton);
+        card.note("The mute bell in the composer appears while a switch is on; it silences everything.");
         return card;
     }
 
@@ -2004,121 +2208,71 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         };
 
         // ---- Card 1: identity & room
-        JPanel identityCard = settingsColumn();
-        JPanel identityRow = partySettingsRow();
-        identityRow.add(new JLabel("Display name"));
-        identityRow.add(nameField);
-        identityRow.add(new JLabel("Preferred color"));
-        identityRow.add(colorCombo);
-        identityCard.add(identityRow);
-        JPanel roomRow = partySettingsRow();
-        roomRow.add(new JLabel("Room"));
-        roomRow.add(roomField);
-        roomRow.add(new JLabel("Secret"));
-        roomRow.add(secretField);
-        identityCard.add(roomRow);
-        identityCard.add(partyApplyRow(applyAction));
+        ComicForm identity = ComicForm.titled("Identity");
+        nameField.setToolTipText("How the other participants see you.");
+        identity.row("Display name", nameField);
+        colorCombo.setToolTipText("Your bubble color in the room; automatic picks a free one.");
+        identity.row("Preferred color", colorCombo);
+        ComicForm room = ComicForm.titled("Room");
+        room.row("Room", roomField);
+        room.row("Secret", secretField);
+        ComicForm identityActions = new ComicForm();
+        identityActions.actions(partyApplyButton(applyAction));
+        ComicForm.alignLabels(identity, room);
+        JComponent identityCard = ComicForm.stack(identity, room, identityActions);
 
         // ---- Card 2: network
-        JPanel networkCard = settingsColumn();
-        JPanel discoveryRow = partySettingsRow();
-        discoveryRow.add(discoveryBox);
-        discoveryRow.add(new JLabel("Interface"));
-        discoveryRow.add(interfaceField);
-        networkCard.add(discoveryRow);
-        JPanel peersRow = partySettingsRow();
-        peersRow.add(new JLabel("Manual peers"));
-        peersRow.add(peersField);
-        networkCard.add(peersRow);
+        ComicForm network = ComicForm.titled("Network");
+        network.check(discoveryBox);
+        network.row("Interface", interfaceField);
+        network.row("Manual peers", peersField);
+        network.note("Manual peers: host or host:port, comma-separated — for networks that block multicast.");
         JButton diagnosticsButton = new ComicButton("Network diagnostics");
         diagnosticsButton.setToolTipText("Check multicast/firewall readiness of the local network interfaces");
         diagnosticsButton.addActionListener(event -> {
             appendTech(JGroupsGroupChatTransport.diagnoseMulticast());
             setStatus("Network diagnostics written to Technical details.");
         });
-        JPanel networkActions = partyApplyRow(applyAction);
-        networkActions.add(diagnosticsButton);
-        networkCard.add(networkActions);
+        ComicForm networkActions = new ComicForm();
+        networkActions.actions(partyApplyButton(applyAction), diagnosticsButton);
+        JComponent networkCard = ComicForm.stack(network, networkActions);
 
         // ---- Card 3: bot
-        JPanel botCard = settingsColumn();
-        JPanel botRow = partySettingsRow();
-        botRow.add(new JLabel("Bot"));
-        botRow.add(botPolicyCombo);
-        botCard.add(botRow);
-        JPanel mentionsRow = partySettingsRow();
-        mentionsRow.add(modelMentionsBox);
-        botCard.add(mentionsRow);
-        JPanel gateRow = partySettingsRow();
-        gateRow.add(gateBox);
-        botCard.add(gateRow);
-        JPanel thinkingRow = partySettingsRow();
-        thinkingRow.add(new JLabel("Always thinking — gate"));
-        thinkingRow.add(gateThinkingCombo);
-        thinkingRow.add(new JLabel("correction"));
-        thinkingRow.add(correctionThinkingCombo);
-        botCard.add(thinkingRow);
-        JPanel contextRow = partySettingsRow();
-        contextRow.add(new JLabel("Bot context"));
-        contextRow.add(contextModeCombo);
-        botCard.add(contextRow);
-        JPanel promptRow = partySettingsRow();
-        promptRow.add(new JLabel("Bot system prompt (empty = default)"));
-        botCard.add(promptRow);
+        ComicForm bot = ComicForm.titled("Bot");
+        bot.row("Answers", botPolicyCombo);
+        bot.check(modelMentionsBox);
+        bot.check(gateBox);
+        bot.row("Thinking for the gate", gateThinkingCombo);
+        bot.row("Thinking for corrections", correctionThinkingCombo);
+        bot.row("Context", contextModeCombo);
+        ComicForm prompts = ComicForm.titled("Prompts");
+        botPromptArea.setRows(5);
         JScrollPane promptScroll = new JScrollPane(botPromptArea);
-        promptScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JPanel promptFieldRow = partySettingsRow();
-        promptFieldRow.add(promptScroll);
-        botCard.add(promptFieldRow);
-        JPanel alwaysLabelRow = partySettingsRow();
-        alwaysLabelRow.add(new JLabel("When to chime in — always policy (empty = default)"));
-        botCard.add(alwaysLabelRow);
+        promptScroll.setPreferredSize(new Dimension(100, 110));
+        prompts.area("Bot system prompt (empty = built-in default)", promptScroll);
+        alwaysPromptArea.setRows(5);
         JScrollPane alwaysScroll = new JScrollPane(alwaysPromptArea);
-        alwaysScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JPanel alwaysFieldRow = partySettingsRow();
-        alwaysFieldRow.add(alwaysScroll);
-        botCard.add(alwaysFieldRow);
-        botCard.add(partyApplyRow(applyAction));
+        alwaysScroll.setPreferredSize(new Dimension(100, 110));
+        prompts.area("When to chime in under the \"always\" policy (empty = built-in default)", alwaysScroll);
+        ComicForm botActions = new ComicForm();
+        botActions.actions(partyApplyButton(applyAction));
+        JComponent botCard = ComicForm.stack(bot, prompts, botActions);
 
         // ---- Card 4: history
-        JPanel historyCard = settingsColumn();
-        JPanel folderRow = partySettingsRow();
-        folderRow.add(new JLabel("History folder"));
-        folderRow.add(historyField);
-        historyCard.add(folderRow);
-        JPanel ageRow = partySettingsRow();
-        ageRow.add(ageCapBox);
-        ageRow.add(ageDaysSpinner);
-        ageRow.add(new JLabel("days"));
-        historyCard.add(ageRow);
-        JPanel sizeRow = partySettingsRow();
-        sizeRow.add(sizeCapBox);
-        sizeRow.add(sizeMbSpinner);
-        sizeRow.add(new JLabel("MB"));
-        historyCard.add(sizeRow);
-        JPanel recordRow = partySettingsRow();
-        recordRow.add(new JLabel("Max single message"));
-        recordRow.add(recordMbSpinner);
-        recordRow.add(new JLabel("MB"));
-        historyCard.add(recordRow);
-        JLabel retentionNote = new JLabel(
-                "Caps are applied when the room is (re)joined. Empty history folder = no persistence.");
-        retentionNote.setFont(retentionNote.getFont().deriveFont(retentionNote.getFont().getSize2D() - 2f));
-        JPanel retentionNoteRow = partySettingsRow();
-        retentionNoteRow.add(retentionNote);
-        historyCard.add(retentionNoteRow);
-        JLabel historyNote = new JLabel(
-                "History lives on the participants' machines. Messages no reachable peer remembers cannot be restored.");
-        historyNote.setFont(historyNote.getFont().deriveFont(historyNote.getFont().getSize2D() - 2f));
-        JPanel noteRow = partySettingsRow();
-        noteRow.add(historyNote);
-        historyCard.add(noteRow);
+        ComicForm history = ComicForm.titled("History");
+        history.row("History folder", historyField);
+        history.inline(ageCapBox, ageDaysSpinner, new JLabel("days"));
+        history.inline(sizeCapBox, sizeMbSpinner, new JLabel("MB"));
+        history.row("Max single message", recordMbSpinner, new JLabel("MB"));
+        history.note("Caps are applied when the room is (re)joined. Empty history folder = no persistence."
+                + " History lives on the participants' machines; messages no reachable peer remembers"
+                + " cannot be restored.");
         JButton clearHistoryButton = new ComicButton("Clear history now");
         clearHistoryButton.setToolTipText("Delete this room's stored history on this machine");
         clearHistoryButton.addActionListener(event -> clearPartyHistory());
-        JPanel historyActions = partyApplyRow(applyAction);
-        historyActions.add(clearHistoryButton);
-        historyCard.add(historyActions);
+        ComicForm historyActions = new ComicForm();
+        historyActions.actions(partyApplyButton(applyAction), clearHistoryButton);
+        JComponent historyCard = ComicForm.stack(history, historyActions);
 
         return new JComponent[] {identityCard, networkCard, botCard, historyCard};
     }
@@ -2157,20 +2311,12 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         return combo;
     }
 
-    /** A row with an "Apply party settings" button wired to the shared apply action. */
-    private static JPanel partyApplyRow(java.awt.event.ActionListener applyAction) {
+    /** The "Apply party settings" button wired to the shared apply action. */
+    private static JButton partyApplyButton(java.awt.event.ActionListener applyAction) {
         JButton applyButton = new ComicButton("Apply party settings");
         applyButton.setToolTipText("Saved immediately; network changes take effect on the next join");
         applyButton.addActionListener(applyAction);
-        JPanel row = partySettingsRow();
-        row.add(applyButton);
-        return row;
-    }
-
-    private static JPanel partySettingsRow() {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        return row;
+        return applyButton;
     }
 
     /**
@@ -2232,21 +2378,21 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     /** Color pickers for the chat bubble colors — persisted and applied to the transcript immediately. */
     private JComponent buildColorSettings() {
-        JPanel colors = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-        colors.setBorder(ComicControls.titledBorder("Colors"));
-        colors.add(colorButton("Background",
+        ComicForm colors = ComicForm.titled("Chat colors");
+        java.util.List<JButton> swatches = new java.util.ArrayList<JButton>();
+        swatches.add(colorButton("Background",
                 () -> model.getChatColors().getTranscriptBackground(),
                 c -> model.setChatColors(model.getChatColors().withTranscriptBackground(c))));
-        colors.add(colorButton("Your bubble",
+        swatches.add(colorButton("Your bubble",
                 () -> model.getChatColors().getUserBackground(),
                 c -> model.setChatColors(model.getChatColors().withUserBackground(c))));
-        colors.add(colorButton("Your text",
+        swatches.add(colorButton("Your text",
                 () -> model.getChatColors().getUserForeground(),
                 c -> model.setChatColors(model.getChatColors().withUserForeground(c))));
-        colors.add(colorButton("Reply bubble",
+        swatches.add(colorButton("Reply bubble",
                 () -> model.getChatColors().getAssistantBackground(),
                 c -> model.setChatColors(model.getChatColors().withAssistantBackground(c))));
-        colors.add(colorButton("Reply text",
+        swatches.add(colorButton("Reply text",
                 () -> model.getChatColors().getAssistantForeground(),
                 c -> model.setChatColors(model.getChatColors().withAssistantForeground(c))));
         JButton reset = new ComicButton("Reset");
@@ -2259,7 +2405,9 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 refresh.run();
             }
         });
-        colors.add(reset);
+        swatches.add(reset);
+        colors.actions(swatches.toArray(new JButton[0]));
+        colors.note("Click a swatch to pick a color; changes apply to the transcript immediately.");
         return colors;
     }
 
@@ -2877,7 +3025,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 },
                 new Supplier<String>() {
                     public String get() {
-                        return keepAliveField.getText();
+                        return model.getDefaultKeepAlive();
                     }
                 },
                 new Supplier<List<String>>() {
@@ -3561,7 +3709,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         ThinkingOption thinking = modelSupportsThinking && !"off".equals(reasoningEffort)
                 ? ThinkingOption.ofLevel(reasoningEffort) : ThinkingOption.defaultOption();
         OllamaService.ChatRequest request = new OllamaService.ChatRequest(
-                modelName, keepAliveField.getText(), buildConversation(), thinking);
+                modelName, model.getDefaultKeepAlive(), buildConversation(), thinking);
         chatTask = ollamaService.streamChat(request, new OllamaService.ChatListener() {
             public void onThinkingDelta(final String delta) {
                 onUi(new Runnable() {
@@ -3646,9 +3794,31 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             setStatus("Write a message before sending.");
             return;
         }
-        PartySession session = partySession;
-        if (session != null && session.submitMessage(userPrompt)) {
+        final PartySession session = partySession;
+        if (session != null && session.isReady()) {
+            // The network send runs off the EDT; on failure the text returns to the composer.
             composer.clearMessage();
+            partyOutbox.execute(new Runnable() {
+                public void run() {
+                    boolean sent;
+                    try {
+                        sent = session.submitMessage(userPrompt);
+                    } catch (RuntimeException ex) {
+                        sent = false;
+                    }
+                    if (!sent) {
+                        onUi(new Runnable() {
+                            public void run() {
+                                // Never drop either text: a newer draft is kept below the failed one.
+                                String draft = composer.getMessage();
+                                composer.setMessage(draft.trim().isEmpty()
+                                        ? userPrompt : userPrompt + "\n\n" + draft);
+                                setStatus("Your party message could not be sent — it is back in the composer.");
+                            }
+                        });
+                    }
+                }
+            });
         } else {
             // Lossless: the text stays in the composer and is submitted once the join succeeds.
             partySendPending = true;
@@ -4097,9 +4267,105 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 || dictationState == DictationState.TRANSCRIBING;
     }
 
+    /** The application's Whisper install section (Settings > AI models); this chat's selector follows it. */
+    public void setWhisperModelsPanel(WhisperModelsPanel panel) {
+        if (whisperModelsPanel != null) {
+            whisperModelsPanel.removeModelsChangedListener(whisperModelsListener);
+        }
+        whisperModelsPanel = panel;
+        if (panel != null) {
+            panel.addModelsChangedListener(whisperModelsListener);
+        }
+    }
+
+    /** Shows the dictation backend and the matching model selector (Whisper models or Ollama audio models). */
+    private void refreshDictationBackend() {
+        if (whisperModelRow == null) {
+            return;
+        }
+        com.aresstack.askai.stt.whisper.DictationSettings settings = dictationSettingsStore.load();
+        boolean whisper = settings.getEngine() == com.aresstack.askai.stt.whisper.DictationSettings.Engine.WHISPER;
+        updatingDictationSettings = true;
+        try {
+            dictationEngineCombo.setSelectedItem(whisper ? DICTATION_ENGINE_WHISPER : DICTATION_ENGINE_OLLAMA);
+            whisperModelCombo.removeAllItems();
+            java.util.List<com.aresstack.askai.stt.whisper.WhisperModel> installed = whisperStore.installedModels();
+            if (installed.isEmpty() || !whisperStore.isEngineInstalled()) {
+                whisperModelCombo.addItem(WHISPER_NO_MODEL);
+                whisperModelCombo.setSelectedItem(WHISPER_NO_MODEL);
+            } else {
+                for (com.aresstack.askai.stt.whisper.WhisperModel candidate : installed) {
+                    whisperModelCombo.addItem(candidate);
+                }
+                whisperModelCombo.setSelectedItem(whisperStore.modelFor(settings.withEngine(
+                        com.aresstack.askai.stt.whisper.DictationSettings.Engine.WHISPER)));
+            }
+            whisperModelCombo.setEnabled(!installed.isEmpty() && whisperStore.isEngineInstalled());
+        } finally {
+            updatingDictationSettings = false;
+        }
+        whisperModelRow.setVisible(whisper);
+        audioModelCombo.setVisible(!whisper);
+        whisperModelRow.revalidate();
+    }
+
+    private void persistDictationEngine() {
+        if (updatingDictationSettings) {
+            return;
+        }
+        com.aresstack.askai.stt.whisper.DictationSettings.Engine engine =
+                DICTATION_ENGINE_OLLAMA.equals(dictationEngineCombo.getSelectedItem())
+                        ? com.aresstack.askai.stt.whisper.DictationSettings.Engine.OLLAMA
+                        : com.aresstack.askai.stt.whisper.DictationSettings.Engine.WHISPER;
+        saveDictationSettings(dictationSettingsStore.load().withEngine(engine));
+        refreshDictationBackend();
+    }
+
+    private void persistWhisperModelSelection() {
+        if (updatingDictationSettings) {
+            return;
+        }
+        Object selected = whisperModelCombo.getSelectedItem();
+        if (selected instanceof com.aresstack.askai.stt.whisper.WhisperModel) {
+            saveDictationSettings(dictationSettingsStore.load().withWhisperModelId(
+                    ((com.aresstack.askai.stt.whisper.WhisperModel) selected).getId()));
+        }
+    }
+
+    private void saveDictationSettings(com.aresstack.askai.stt.whisper.DictationSettings settings) {
+        try {
+            dictationSettingsStore.save(settings);
+        } catch (java.io.IOException notSaved) {
+            appendTech("dictation backend not saved: " + notSaved.getMessage());
+        }
+        refreshDictationControls();
+    }
+
+    private Runnable whisperInstallOpener;
+
+    /** Where "Install models…" goes: Models > Setup > Dictation (set by the frame). */
+    public void setWhisperInstallOpener(Runnable opener) {
+        this.whisperInstallOpener = opener;
+    }
+
+    private void openWhisperInstall() {
+        if (whisperInstallOpener != null) {
+            whisperInstallOpener.run();
+        }
+    }
+
+    /** The Whisper model that transcribes the next recording, or null when Ollama does. */
+    private com.aresstack.askai.stt.whisper.WhisperModel activeWhisperModel() {
+        return whisperStore.modelFor(dictationSettingsStore.load());
+    }
+
     private void startDictationWithReadiness() {
         if (chatBusy || fileBusy || micTestSession != null) {
             setDictationStatus("Busy — finish the chat / file transcription / mic test first.");
+            return;
+        }
+        if (activeWhisperModel() != null) {
+            handleReadiness(ReadinessStatus.READY); // Whisper runs locally: no Ollama check needed
             return;
         }
         checkingReadiness = true;
@@ -4239,8 +4505,9 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     }
 
     private void persistLastAudioModel(String modelUsed) {
-        if (modelUsed == null || modelUsed.trim().isEmpty()) {
-            return; // a failed attempt must not overwrite the last successful model
+        if (modelUsed == null || modelUsed.trim().isEmpty()
+                || com.aresstack.askai.stt.whisper.WhisperSpeechTranscriber.isWhisperModel(modelUsed)) {
+            return; // a failed attempt (or a Whisper run) must not overwrite the last successful Ollama model
         }
         SpeechToTextConfiguration current = model.getSpeechToTextConfiguration();
         if (modelUsed.equals(current.getLastAudioModel())) {
@@ -4502,6 +4769,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         notifier.dispose();
         cleanupOldRecordings();
         dictationExecutor.shutdownNow();
+        partyOutbox.shutdownNow();
     }
 
     // ------------------------------------------------------------------ chat timers + busy

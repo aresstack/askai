@@ -41,10 +41,10 @@ public final class ModuleAsyncSearchGenerationFactoryTest {
             service.saveBrave(brave, "brave-secret".toCharArray());
             BrightDataSearchConfiguration brightData = service.loadOrCreateBrightData();
             brightData.setEnabled(true);
+            brightData.setZone("test-zone");
             service.saveBrightData(brightData, "bd-secret".toCharArray());
             DataForSeoSearchConfiguration dataForSeo = service.loadOrCreateDataForSeo();
             dataForSeo.setEnabled(true);
-            dataForSeo.setUsername("login");
             service.saveDataForSeo(dataForSeo, "dfs-secret".toCharArray());
         } finally {
             setup.close();
@@ -84,6 +84,7 @@ public final class ModuleAsyncSearchGenerationFactoryTest {
         try {
             BrightDataSearchConfiguration brightData = setup.getConfigurationService().loadOrCreateBrightData();
             brightData.setEnabled(true);
+            brightData.setZone("test-zone");
             setup.getConfigurationService().saveBrightData(brightData, "bd-secret".toCharArray());
         } finally {
             setup.close();

@@ -41,6 +41,18 @@ public final class InProcessResearchRuntime implements AutoCloseable {
         return instance;
     }
 
+    /** The search browser's headless setting (Search → Browser (SERP)); the next search follows it. */
+    public void setSearchBrowserHeadless(boolean headless) {
+        shared.setSearchBrowserHeadless(headless);
+    }
+
+    /** Applies the setting to the running instance, if there is one; a later instance gets it at session start. */
+    public static synchronized void applySearchBrowserHeadless(boolean headless) {
+        if (instance != null) {
+            instance.setSearchBrowserHeadless(headless);
+        }
+    }
+
     InProcessMcpServerRegistry registry() {
         return registry;
     }

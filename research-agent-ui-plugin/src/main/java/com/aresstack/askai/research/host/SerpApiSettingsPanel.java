@@ -3,8 +3,8 @@ package com.aresstack.askai.research.host;
 import com.aresstack.askai.research.search.config.ProviderConfigurationService;
 import com.aresstack.askai.research.search.serpapi.SerpApiSearchConfiguration;
 import com.aresstack.askai.research.search.serpapi.SerpApiSearchEngine;
-import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.control.ComicControls;
+import com.aresstack.comiccontrols.control.ComicForm;
 
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
@@ -14,30 +14,29 @@ import javax.swing.JPasswordField;
 import javax.swing.JTextField;
 import java.awt.BorderLayout;
 
-import static com.aresstack.askai.research.host.ProviderForm.hint;
-import static com.aresstack.askai.research.host.ProviderForm.row;
-import static com.aresstack.askai.research.host.ProviderForm.text;
-import static com.aresstack.askai.research.host.ProviderForm.trimToNull;
+import static com.aresstack.askai.research.host.ProviderSettingsForm.text;
+import static com.aresstack.askai.research.host.ProviderSettingsForm.trimToNull;
 
 /**
- * Settings card for SerpApi ({@code serpapi.json}). The API key is written AES-GCM encrypted by
- * {@link ProviderConfigurationService#saveSerpApi(SerpApiSearchConfiguration, char[])}; the stored key is never shown.
- * An empty key field keeps the saved key. The search itself runs in Serp4J.
+ * Settings for SerpApi ({@code serpapi.json}) in the shared {@link ProviderSettingsForm} frame. The API key
+ * is written AES-GCM encrypted by
+ * {@link ProviderConfigurationService#saveSerpApi(SerpApiSearchConfiguration, char[])}; the stored key is
+ * never shown, an empty field keeps it. The provider is enabled exactly when a key is stored. The search
+ * itself runs in Serp4J.
  */
 public final class SerpApiSettingsPanel extends JPanel {
 
     private final ProviderConfigurationService configurations;
-    private final JCheckBox enabled = ComicControls.checkBox("Use SerpApi for the initial search");
-    private final JPasswordField apiKey = ComicControls.passwordField(28);
-    private final JLabel apiKeyHint = new JLabel(" ");
+    private final JPasswordField apiKey = ProviderSettingsForm.secretField();
+    private final JLabel apiKeyStatus = ProviderSettingsForm.status();
     private final JComboBox<SerpApiSearchEngine> engine =
             ComicControls.<SerpApiSearchEngine>comboBox(SerpApiSearchEngine.values());
-    private final JTextField country = ComicControls.textField(6);
-    private final JTextField language = ComicControls.textField(6);
+    private final JComboBox<RegionChoices.Choice> country = RegionChoices.countries(false);
+    private final JComboBox<RegionChoices.Choice> language = RegionChoices.languages();
     private final JTextField location = ComicControls.textField(24);
     private final JTextField googleDomain = ComicControls.textField(16);
     private final JCheckBox resolveGoto = ComicControls.checkBox("Resolve Google /goto links to the target URL");
-    private final JLabel status = new JLabel(" ");
+    private final JLabel status = ProviderSettingsForm.message();
     /** Draft the edits are applied to; an invalid file falls back to defaults so the UI can repair it. */
     private SerpApiSearchConfiguration draft;
     private String lastError = "";
@@ -45,31 +44,24 @@ public final class SerpApiSettingsPanel extends JPanel {
     public SerpApiSettingsPanel(ProviderConfigurationService configurations) {
         super(new BorderLayout());
         this.configurations = configurations;
-        JPanel p = ProviderForm.column();
-        p.add(row("", enabled));
-        JPanel key = new JPanel(new BorderLayout(4, 0));
-        key.add(apiKey, BorderLayout.CENTER);
-        apiKeyHint.setEnabled(false);
-        key.add(apiKeyHint, BorderLayout.SOUTH);
-        p.add(row("API key:", key));
-        p.add(hint("The stored key is never shown. Leave the field empty to keep it; type a new one to replace "
-                + "it (encrypted on save). SerpApi only accepts the key as URL parameter; Serp4J masks it in every "
-                + "log and error text."));
-        p.add(row("Search engine:", engine));
-        p.add(row("Country:", country));
-        p.add(row("Language:", language));
-        p.add(row("Location:", location));
-        p.add(row("Google domain:", googleDomain));
-        p.add(row("", resolveGoto));
-        javax.swing.JButton saveNow = new ComicButton("Save SerpApi settings");
-        saveNow.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent e) {
-                save();
-            }
-        });
-        p.add(row("", saveNow));
-        p.add(row("", status));
-        add(p, BorderLayout.NORTH);
+        ProviderSettingsForm form = ProviderSettingsForm.create();
+        ComicForm credentials = form.credentials();
+        ProviderSettingsForm.secretRow(credentials, "API key:", apiKey, apiKeyStatus,
+                "Leave empty to keep the stored key; a typed key replaces it (encrypted on save). "
+                        + "SerpApi takes the key as URL parameter; Serp4J masks it in logs and errors.");
+        credentials.row("", status);
+        ComicForm options = form.searchOptions();
+        options.row("Search engine:", engine);
+        options.row("Country:", country);
+        country.setToolTipText("Country the results are localised for");
+        options.row("Language:", language);
+        language.setToolTipText("Language of the results");
+        options.row("City / region:", location);
+        location.setToolTipText("Optional city or region, e.g. Berlin, Germany");
+        options.row("Google domain:", googleDomain);
+        googleDomain.setToolTipText("Optional, e.g. google.de");
+        form.advanced().check(resolveGoto);
+        add(form.build(), BorderLayout.NORTH);
         load();
     }
 
@@ -82,12 +74,11 @@ public final class SerpApiSettingsPanel extends JPanel {
             c = new SerpApiSearchConfiguration();
         }
         draft = c;
-        enabled.setSelected(c.isEnabled());
         boolean stored = c.getApiKey() != null && c.getApiKey().isPresent();
-        apiKeyHint.setText(stored ? "A key is stored." : "No key stored.");
+        apiKeyStatus.setText(stored ? "A key is stored." : "No key stored.");
         engine.setSelectedItem(c.getSearchEngine() == null ? SerpApiSearchEngine.GOOGLE : c.getSearchEngine());
-        country.setText(text(c.getCountry()));
-        language.setText(text(c.getLanguage()));
+        RegionChoices.select(country, c.getCountry());
+        RegionChoices.select(language, c.getLanguage());
         location.setText(text(c.getLocation()));
         googleDomain.setText(text(c.getGoogleDomain()));
         resolveGoto.setSelected(c.isResolveGoogleGotoUrls());
@@ -97,8 +88,8 @@ public final class SerpApiSettingsPanel extends JPanel {
     public boolean save() {
         try {
             SerpApiSearchConfiguration c = draft;
-            apply(c);
             char[] typed = apiKey.getPassword();
+            apply(c, typed);
             if (typed.length > 0) {
                 configurations.saveSerpApi(c, typed); // clears the array
                 apiKey.setText("");
@@ -121,11 +112,12 @@ public final class SerpApiSettingsPanel extends JPanel {
         return lastError;
     }
 
-    private void apply(SerpApiSearchConfiguration c) {
-        c.setEnabled(enabled.isSelected());
+    private void apply(SerpApiSearchConfiguration c, char[] typed) {
+        boolean stored = c.getApiKey() != null && c.getApiKey().isPresent();
+        c.setEnabled(ProviderSettingsForm.enabled(stored, typed));
         c.setSearchEngine((SerpApiSearchEngine) engine.getSelectedItem());
-        c.setCountry(trimToNull(country.getText()));
-        c.setLanguage(trimToNull(language.getText()));
+        c.setCountry(RegionChoices.selected(country));
+        c.setLanguage(RegionChoices.selected(language));
         c.setLocation(trimToNull(location.getText()));
         c.setGoogleDomain(trimToNull(googleDomain.getText()));
         c.setResolveGoogleGotoUrls(resolveGoto.isSelected());

@@ -116,13 +116,18 @@ public final class OllamaModelsPanel extends JPanel {
         toolbar.add(refreshButton);
         toolbar.add(installedStatusLabel);
         panel.add(toolbar, BorderLayout.NORTH);
-        panel.add(new JScrollPane(installedCardsPanel), BorderLayout.CENTER);
+        JScrollPane scroll = new JScrollPane(installedCardsPanel,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        panel.add(scroll, BorderLayout.CENTER);
         showInstalledPlaceholder("Open Models or click Refresh to load the models.");
         return panel;
     }
 
     private static JPanel createCardsPanel() {
-        JPanel panel = new JPanel();
+        // Tracks the viewport width: cards are always as wide as the visible list (long text lines are
+        // clipped with "..." inside the card) and the list never scrolls horizontally.
+        JPanel panel = new WidthTrackingPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
         return panel;
@@ -272,7 +277,8 @@ public final class OllamaModelsPanel extends JPanel {
                     addSectionHeader(installedCardsPanel, container);
                     lastContainer = container;
                 }
-                installedCardsPanel.add(OllamaModelCard.running(entry.getValue()));
+                installedCardsPanel.add(OllamaModelCard.running(entry.getValue())
+                        .withLoadToggle(loadToggle(entry.getValue().getDisplayName(), true)));
                 installedCardsPanel.add(Box.createVerticalStrut(6));
             }
             for (final OllamaModelInfo modelInfo : ordered) {
@@ -311,19 +317,20 @@ public final class OllamaModelsPanel extends JPanel {
                                     confirmAndDelete(modelInfo.getDisplayName());
                                 }
                             });
+                    if (canRerank) {
+                        localCard.withUseMenu(useMenu(modelInfo.getDisplayName(),
+                                () -> java.util.EnumSet.of(ModelUsePurpose.RERANKER)));
+                    }
+                    // The local runtime has no empty-prompt warm-up (/api/generate rejects it), so a local model
+                    // only offers Unload while it runs; it is loaded by its first real request.
+                    if (running != null) {
+                        localCard.withLoadToggle(loadToggle(modelInfo.getDisplayName(), true));
+                    }
                     installedCardsPanel.add(localCard);
                     installedCardsPanel.add(Box.createVerticalStrut(6));
                     loadCapabilities(modelInfo.getDisplayName(), localCard);
                     continue;
                 }
-                Runnable useInChat = new Runnable() {
-                    @Override
-                    public void run() {
-                        if (useInChatHandler != null) {
-                            useInChatHandler.useInChat(modelInfo.getDisplayName());
-                        }
-                    }
-                };
                 // Stateless: route to HF search or a local projector file — never guess/store encoder state.
                 Runnable searchAddOns = new Runnable() {
                     @Override
@@ -341,13 +348,23 @@ public final class OllamaModelsPanel extends JPanel {
                         }
                     }
                 };
-                OllamaModelCard card = OllamaModelCard.installed(modelInfo, running, searchAddOns, localAddOn, useInChat,
+                OllamaModelCard card = OllamaModelCard.installed(modelInfo, running, searchAddOns, localAddOn, null,
                         new Runnable() {
                     @Override
                     public void run() {
                         confirmAndDelete(modelInfo.getDisplayName());
                     }
                 });
+                // Embeddings is offered only once /api/show reports the embedding capability (checked at click
+                // time, so it appears as soon as the capabilities have loaded).
+                final OllamaModelCard useCard = card;
+                card.withUseMenu(useMenu(modelInfo.getDisplayName(), () -> useCard.shownCapabilities()
+                        .contains(ModelCapability.EMBEDDING)
+                        || ModelUsePurpose.EMBEDDINGS.isSelected(model.getAiModelSelections(),
+                                modelInfo.getDisplayName())
+                        ? java.util.EnumSet.of(ModelUsePurpose.CHAT, ModelUsePurpose.EMBEDDINGS)
+                        : java.util.EnumSet.of(ModelUsePurpose.CHAT)));
+                card.withLoadToggle(loadToggle(modelInfo.getDisplayName(), running != null));
                 installedCardsPanel.add(card);
                 installedCardsPanel.add(Box.createVerticalStrut(6));
                 loadCapabilities(modelInfo.getDisplayName(), card);
@@ -527,6 +544,83 @@ public final class OllamaModelsPanel extends JPanel {
         refreshCards(installedCardsPanel);
     }
 
+    /**
+     * The "Use" popup of a model card: one check item per purpose, checked when this model currently holds it.
+     * Checking assigns the model (the previous holder is replaced, so it is un-checked everywhere); un-checking
+     * clears the purpose. Chat goes through the chat window so its model selector follows.
+     */
+    private java.util.function.Supplier<javax.swing.JPopupMenu> useMenu(final String modelName,
+                                                                         final java.util.function.Supplier<java.util.Set<ModelUsePurpose>> offered) {
+        return () -> {
+            java.util.Set<ModelUsePurpose> purposes = offered.get();
+            javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+            com.aresstack.askai.config.AiModelSelections selections = model.getAiModelSelections();
+            for (final ModelUsePurpose purpose : purposes) {
+                final javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(purpose.label(),
+                        purpose.isSelected(selections, modelName));
+                item.addActionListener(event -> use(modelName, purpose, item.isSelected()));
+                menu.add(item);
+            }
+            return menu;
+        };
+    }
+
+    private void use(String modelName, ModelUsePurpose purpose, boolean use) {
+        if (purpose == ModelUsePurpose.CHAT) {
+            if (use && useInChatHandler != null) {
+                useInChatHandler.useInChat(modelName);
+            } else {
+                model.persistMainModel(purpose.apply(model.getAiModelSelections(), modelName, use).getMainModel());
+            }
+        } else {
+            com.aresstack.askai.config.AiModelSelections next =
+                    purpose.apply(model.getAiModelSelections(), modelName, use);
+            model.persistRerankerAndEmbeddingsModels(next.getRerankerModel(), next.getEmbeddingsModel());
+        }
+        installedStatusLabel.setText((use ? "Using " : "No longer using ") + modelName + " for "
+                + purpose.label().toLowerCase(java.util.Locale.ROOT) + ".");
+    }
+
+    /**
+     * The Load/Unload action of a model card, as in ollama-manager: load = empty /api/generate with the
+     * configured chat keep_alive, unload = keep_alive 0. Afterwards the list is refreshed from /api/ps, so the
+     * card moves to/from the top and its button flips; on failure the button is re-enabled.
+     */
+    private java.util.function.Consumer<OllamaModelCard> loadToggle(final String modelName, final boolean running) {
+        return card -> {
+            installedStatusLabel.setText((running ? "Unloading " : "Loading ") + modelName + " ...");
+            OllamaService.ActionListener listener = new OllamaService.ActionListener() {
+                @Override
+                public void onComplete(final String message) {
+                    onUi(new Runnable() {
+                        @Override
+                        public void run() {
+                            installedStatusLabel.setText(message);
+                            refreshModels();
+                        }
+                    });
+                }
+
+                @Override
+                public void onError(final Exception ex) {
+                    onUi(new Runnable() {
+                        @Override
+                        public void run() {
+                            installedStatusLabel.setText("Could not " + (running ? "unload " : "load ")
+                                    + modelName + ": " + ex.getMessage());
+                            card.resetLoadToggle();
+                        }
+                    });
+                }
+            };
+            if (running) {
+                ollamaService.unloadModel(modelName, listener);
+            } else {
+                ollamaService.loadModel(modelName, model.getDefaultKeepAlive(), listener);
+            }
+        };
+    }
+
     private void confirmAndDelete(final String modelName) {
         int answer = JOptionPane.showConfirmDialog(this,
                 "Delete model '" + modelName + "' from Ollama?",
@@ -578,5 +672,36 @@ public final class OllamaModelsPanel extends JPanel {
 
     private static void onUi(Runnable runnable) {
         SwingUtilities.invokeLater(runnable);
+    }
+
+    /** Card list column that always fits the viewport width and scrolls only vertically. */
+    static final class WidthTrackingPanel extends JPanel implements javax.swing.Scrollable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public java.awt.Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(java.awt.Rectangle visibleRect, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(java.awt.Rectangle visibleRect, int orientation, int direction) {
+            return Math.max(16, (orientation == javax.swing.SwingConstants.VERTICAL
+                    ? visibleRect.height : visibleRect.width) - 16);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 }

@@ -18,7 +18,7 @@ import java.util.stream.Stream;
 /**
  * Where AskAI finds the managed Camoufox (the Argos distribution: pinned, patched, SHA-256 verified) and keeps
  * its browser profile ({@code <APPDATA>/.askai/browser-profiles}). An existing installation (configured,
- * Argos' or AskAI's own) is reused; a download into {@code <APPDATA>/.askai/browser} happens only when
+ * or AskAI's own) is reused; a download into {@code <APPDATA>/.askai/browser} happens only when
  * none exists. Later starts only verify.
  *
  * <p>While the installer runs, a progress line {@value #PROGRESS_MARKER} goes to STDERR every few seconds:
@@ -48,46 +48,84 @@ final class CamoufoxProvisioning {
     static final String ROOT_ENV = "ASKAI_CAMOUFOX_ROOT";
 
     /**
-     * Where the Camoufox installation lives. An existing verified installation is always reused and never
-     * downloaded again: first the explicitly configured location ({@value #ROOT_PROPERTY} /
-     * {@value #ROOT_ENV}), then Argos' installation ({@code ~/.argos/browser}), then AskAI's own directory.
-     * Only when none of them holds the pinned distribution is AskAI's own directory the download target.
+     * The root of the Camoufox installation in use (see {@link #installer()}).
      */
     static Path browserRoot() {
-        Path configured = configuredRoot();
-        if (configured != null) {
-            return configured;
-        }
-        for (Path candidate : new Path[]{
-                Paths.get(System.getProperty("user.home"), ".argos", "browser"),
-                appDirectory().resolve("browser")}) {
-            if (installedUnder(candidate)) {
-                return candidate;
-            }
-        }
-        return appDirectory().resolve("browser");
+        return installer().root();
     }
 
-    private static Path configuredRoot() {
+    /**
+     * The installer of the Camoufox in use. An existing verified installation is always reused and never
+     * downloaded again: first the explicitly configured location ({@value #ROOT_PROPERTY} / {@value #ROOT_ENV}),
+     * then AskAI's own directory. Only when none of them
+     * holds the pinned distribution is AskAI's own directory the download target.
+     */
+    static CamoufoxInstaller installer() {
         String value = System.getProperty(ROOT_PROPERTY, "").trim();
         if (value.isEmpty()) {
             String env = System.getenv(ROOT_ENV);
             value = env == null ? "" : env.trim();
         }
-        if (value.isEmpty()) {
-            return null;
+        if (!value.isEmpty()) {
+            Path path = Paths.get(value).toAbsolutePath().normalize();
+            if (inspect(path) == Found.VERIFIED) {
+                return installerFor(path);
+            }
+            throw new IllegalStateException("No verified Camoufox " + installDirectoryName() + " under " + path
+                    + " (" + ROOT_PROPERTY + " / " + ROOT_ENV + "); nothing is downloaded for a configured location");
         }
-        Path path = Paths.get(value).toAbsolutePath().normalize();
-        if (installedUnder(path)) {
-            return path;
+        Path found = foundInstallation();
+        return CamoufoxInstaller.shared(found != null ? found.getParent() : defaultRoot(), null);
+    }
+
+    /** What a folder chosen for Camoufox holds. */
+    enum Found {
+        /** The pinned, verified distribution: below it, or the folder is the installation itself. */
+        VERIFIED,
+        /** A Camoufox or an unfinished installation that does not verify: never downloaded over. */
+        FOREIGN,
+        /** Nothing: a download target. */
+        NONE
+    }
+
+    static Found inspect(Path chosen) {
+        if (installedUnder(chosen) || isVerifiedInstallation(chosen)) {
+            return Found.VERIFIED;
         }
-        // The variable may also name the installation directory itself.
-        Path parent = path.getParent();
-        if (parent != null && path.getFileName().toString().equals(installDirectoryName()) && installedUnder(parent)) {
-            return parent;
+        String executable = CamoufoxDistribution.executableName(CamoufoxDistribution.currentTarget());
+        if (Files.exists(chosen.resolve(executable)) || Files.exists(chosen.resolve(installDirectoryName()))) {
+            return Found.FOREIGN;
         }
-        throw new IllegalStateException("No verified Camoufox " + installDirectoryName() + " under " + path
-                + " (" + ROOT_PROPERTY + " / " + ROOT_ENV + "); nothing is downloaded for a configured location");
+        return Found.NONE;
+    }
+
+    /**
+     * The installer for a chosen folder: the folder itself when it is a verified installation (any name),
+     * otherwise the folder as root that holds (or will hold) {@code <release>-<target>}.
+     */
+    static CamoufoxInstaller installerFor(Path chosen) {
+        Path folder = chosen.toAbsolutePath().normalize();
+        if (!installedUnder(folder) && isVerifiedInstallation(folder)) {
+            return CamoufoxInstaller.shared(folder.getParent(), folder, null);
+        }
+        return CamoufoxInstaller.shared(folder, null);
+    }
+
+    /** A verified installation found without configuration (AskAI's own directory), or {@code null}. */
+    static Path foundInstallation() {
+        Path root = defaultRoot();
+        return installedUnder(root) ? root.resolve(installDirectoryName()) : null;
+    }
+
+    /** Where AskAI downloads Camoufox when nothing else is chosen. */
+    static Path defaultRoot() {
+        return appDirectory().resolve("browser");
+    }
+
+    private static boolean isVerifiedInstallation(Path folder) {
+        Path parent = folder.getParent();
+        return parent != null && Files.isDirectory(folder) && new CamoufoxInstaller(parent,
+                CamoufoxDistribution.builtIn(), CamoufoxDistribution.currentTarget(), folder).isInstalled();
     }
 
     private static boolean installedUnder(Path root) {
@@ -104,7 +142,11 @@ final class CamoufoxProvisioning {
      * when none exists is it downloaded and installed first (blocking).
      */
     static Path ensureInstalled() {
-        CamoufoxInstaller installer = CamoufoxInstaller.shared(browserRoot(), null);
+        return awaitInstalled(installer());
+    }
+
+    /** Installs (or verifies) with {@code installer}, logging the progress, and returns the executable. */
+    static Path awaitInstalled(CamoufoxInstaller installer) {
         while (true) {
             try {
                 Path executable = installer.awaitExecutable(PROGRESS_INTERVAL);

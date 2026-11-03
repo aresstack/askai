@@ -85,7 +85,7 @@ public final class DefaultSpeechToTextService implements SpeechToTextService {
             throws SpeechToTextException {
         if (!configuration.isEnabled()) {
             throw new SpeechToTextException(
-                    "Speech-to-Text is disabled. Enable it under Configuration > Connections.");
+                    "Dictation is disabled. Enable it under Settings > Speech > Dictation.");
         }
         File file = request.getAudioFile();
         if (file == null || !file.isFile()) {
@@ -104,7 +104,7 @@ public final class DefaultSpeechToTextService implements SpeechToTextService {
         }
         if (request.getModelName().length() == 0) {
             throw new SpeechToTextException("No STT model configured and no chat model selected. "
-                    + "Set a Speech-to-Text model under Configuration > Connections.");
+                    + "Choose a dictation model under Settings > Speech > Dictation.");
         }
     }
 

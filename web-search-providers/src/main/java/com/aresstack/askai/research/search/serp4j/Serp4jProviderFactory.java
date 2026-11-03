@@ -116,10 +116,9 @@ public final class Serp4jProviderFactory {
     public WebSearchProvider createDataForSeo(DataForSeoSearchConfiguration configuration) {
         CredentialKey login = DataForSeoSearchProvider.loginKey(DATA_FOR_SEO_ID);
         CredentialKey password = DataForSeoSearchProvider.passwordKey(DATA_FOR_SEO_ID);
-        HostCredentialProvider credentials = HostCredentialProvider.builder(secretValueService)
-                .plain(login, configuration.getUsername())
-                .encrypted(password, configuration.getPassword())
-                .build();
+        // DataForSEO hands out one API key = Base64(login:password); it is split only in-process, per request.
+        DataForSeoApiKeyCredentialProvider credentials = new DataForSeoApiKeyCredentialProvider(
+                secretValueService, configuration.getApiKey(), login, password);
         SearchEngine engine = configuration.getSearchEngine() == null
                 ? SearchEngine.GOOGLE : configuration.getSearchEngine().getSearchEngine();
         AhcHttpTransport transport = transport(configuration.getTransport());

@@ -2,6 +2,7 @@ package com.aresstack.askai.research.host;
 
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicForm;
 import com.aresstack.comiccontrols.theme.ThemeColor;
 import com.aresstack.askai.browser.search.DefaultLegacyBrowserSearchSettingsValidator;
 import com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults;
@@ -12,13 +13,10 @@ import com.aresstack.askai.browser.search.SettingsValidationResult;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
@@ -32,73 +30,102 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The Legacy-Browser-Search settings surface (A2d), generated from the
- * {@link LegacyBrowserSearchSettingsCatalog} so every field automatically shows its NAME,
- * description, EFFECTIVE value, DEFAULT value, allowed range and a reset-to-default. Prompts get a
- * multi-line editor whose value IS the productive default text (never an empty editor with a
- * placeholder) plus the available template variables. Saving validates hard and shows the concrete
- * violations; changes apply to NEW research sessions only — the running session keeps its immutable
- * {@link SearchProcessingProfileSnapshot}, which is displayed here.
+ * One half of the browser settings, generated from the {@link LegacyBrowserSearchSettingsCatalog} so every
+ * field automatically shows its NAME, description, EFFECTIVE value, DEFAULT value, allowed range and a
+ * reset-to-default. The catalog is split by WHAT it configures (see {@link BrowserSettingsSplit}):
+ * {@link #browsing} — how the browser opens and reads pages (tab "Browser"), {@link #serpSearch} — how the
+ * browser search finds and extracts hits (tab "Search", provider "Browser (SERP)"). Both halves write the
+ * SAME store keys; a save merges the half's fields into the stored full set, validates that set hard and
+ * shows the concrete violations. Changes apply to NEW research sessions only — the running session keeps
+ * its immutable {@link SearchProcessingProfileSnapshot}.
  */
 final class LegacyBrowserSearchSettingsPanel extends JPanel {
 
     private final WorkspaceStateStore store;
     private final Map<String, String> defaults;
     private final Map<String, FieldEditor> editors = new LinkedHashMap<String, FieldEditor>();
-    private final JTextArea problems = ComicControls.textArea(4, 60);
-    private final JLabel revisionLabel = new JLabel();
+    private final JTextArea status = ComicControls.textArea(2, 20);
+    private final String idleText;
 
-    LegacyBrowserSearchSettingsPanel(WorkspaceStateStore store,
-                                     SearchProcessingProfileSnapshot activeProfile) {
+    /** The browsing half: {@code leading} rows (channel, headless, …) open its first page. */
+    static LegacyBrowserSearchSettingsPanel browsing(WorkspaceStateStore store,
+            SearchProcessingProfileSnapshot activeProfile, java.util.function.Consumer<ComicForm> leading) {
+        return new LegacyBrowserSearchSettingsPanel(store, activeProfile, BrowserSettingsSplit.BROWSING_PAGES,
+                BrowserSettingsSplit::browsingPage, leading);
+    }
+
+    /** The SERP-search half (only meaningful while the browser is the search provider). */
+    static LegacyBrowserSearchSettingsPanel serpSearch(WorkspaceStateStore store,
+            SearchProcessingProfileSnapshot activeProfile) {
+        return serpSearch(store, activeProfile, null);
+    }
+
+    /** The SERP-search half; {@code leading} rows (the search browser's own switches) open its first page. */
+    static LegacyBrowserSearchSettingsPanel serpSearch(WorkspaceStateStore store,
+            SearchProcessingProfileSnapshot activeProfile, java.util.function.Consumer<ComicForm> leading) {
+        return new LegacyBrowserSearchSettingsPanel(store, activeProfile, BrowserSettingsSplit.SEARCH_PAGES,
+                BrowserSettingsSplit::searchPage, leading);
+    }
+
+    private LegacyBrowserSearchSettingsPanel(WorkspaceStateStore store,
+            SearchProcessingProfileSnapshot activeProfile, List<String> pages,
+            java.util.function.Function<LegacyBrowserSearchSettingsCatalog.Field, String> pageOf,
+            java.util.function.Consumer<ComicForm> leading) {
         super(new BorderLayout(8, 8));
+        setOpaque(false);
         this.store = store;
         this.defaults = LegacyBrowserSearchSettingsCodec
                 .toValues(LegacyBrowserSearchDefaults.create());
 
-        JPanel header = new JPanel();
-        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
-        header.add(bold(new JLabel("Legacy Browser Search")));
-        header.add(gray(new JLabel(
-                "Changes apply to NEW research sessions only — a running session keeps its own "
-                        + "immutable settings snapshot.")));
-        if (activeProfile != null) {
-            header.add(gray(new JLabel("This session uses profile '" + activeProfile.profileId
-                    + "', revision " + activeProfile.profileRevision
-                    + " (digest " + shortDigest(activeProfile.settingsDigest) + ").")));
+        // Sub-pages as a list on the LEFT: the long section names never fit in one tab row.
+        JTabbedPane tabs = ComicControls.tabbedPane(JTabbedPane.LEFT);
+        Map<String, ComicForm> forms = new LinkedHashMap<String, ComicForm>();
+        for (String page : pages) {
+            forms.put(page, new ComicForm());
         }
-        header.add(revisionLabel);
-        refreshRevisionLabel();
-        add(header, BorderLayout.NORTH);
-
-        JTabbedPane tabs = ComicControls.tabbedPane();
-        Map<String, JPanel> sectionPanels = new LinkedHashMap<String, JPanel>();
-        for (String section : LegacyBrowserSearchSettingsCatalog.sections()) {
-            JPanel panel = new JPanel();
-            panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-            panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-            sectionPanels.put(section, panel);
-            JScrollPane scroll = new JScrollPane(panel);
-            scroll.getVerticalScrollBar().setUnitIncrement(16);
-            tabs.addTab(section, scroll);
+        if (leading != null) {
+            leading.accept(forms.get(pages.get(0)));
         }
         Map<String, String> effective = effectiveValues();
         for (LegacyBrowserSearchSettingsCatalog.Field field
                 : LegacyBrowserSearchSettingsCatalog.fields()) {
-            sectionPanels.get(field.section).add(fieldRow(field, effective.get(field.key)));
-            sectionPanels.get(field.section).add(Box.createVerticalStrut(10));
+            String page = pageOf.apply(field);
+            if (page != null && forms.containsKey(page)) {
+                addField(forms.get(page), field, effective.get(field.key));
+            }
+        }
+        for (Map.Entry<String, ComicForm> entry : forms.entrySet()) {
+            ComicForm form = entry.getValue();
+            form.setBorder(BorderFactory.createEmptyBorder(ComicForm.PAGE_MARGIN,
+                    ComicForm.PAGE_MARGIN, ComicForm.PAGE_MARGIN, ComicForm.PAGE_MARGIN));
+            tabs.addTab(entry.getKey(), ComicForm.page(form));
         }
         add(tabs, BorderLayout.CENTER);
 
-        JPanel south = new JPanel(new BorderLayout(4, 4));
-        problems.setEditable(false);
-        problems.setForeground(ThemeColor.of("research.settingsErrorText"));
-        problems.setLineWrap(true);
-        problems.setWrapStyleWord(true);
-        south.add(new JScrollPane(problems), BorderLayout.CENTER);
-        JPanel buttons = new JPanel();
+        // One line at the bottom: what Save does (or what it just did) left, the buttons right of it.
+        idleText = "Changes apply to new research sessions.";
+        String profileInfo = activeProfile == null ? null
+                : "This session uses profile '" + activeProfile.profileId + "' (revision "
+                        + activeProfile.profileRevision + ", digest "
+                        + shortDigest(activeProfile.settingsDigest) + ").";
+        status.setEditable(false);
+        status.setFocusable(false);
+        status.setOpaque(false);
+        status.setLineWrap(true);
+        status.setWrapStyleWord(true);
+        status.setBorder(BorderFactory.createEmptyBorder());
+        status.setToolTipText(profileInfo);
+        showIdle();
+        JScrollPane statusScroll = ComicForm.scroll(status);
+        JPanel south = new JPanel(new BorderLayout(8, 0));
+        south.setOpaque(false);
+        south.add(statusScroll, BorderLayout.CENTER);
+        JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
+        buttons.setOpaque(false);
         JButton save = new ComicButton("Save");
         save.addActionListener(e -> save());
         JButton resetAll = new ComicButton("Reset all to defaults");
+        resetAll.setToolTipText("Resets the fields of this tab (not yet saved)");
         resetAll.addActionListener(e -> {
             for (Map.Entry<String, FieldEditor> entry : editors.entrySet()) {
                 entry.getValue().set(defaults.get(entry.getKey()));
@@ -110,47 +137,60 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
         add(south, BorderLayout.SOUTH);
     }
 
+    /** The store keys this half edits (tests, and the save merge). */
+    java.util.Set<String> editedKeys() {
+        return java.util.Collections.unmodifiableSet(editors.keySet());
+    }
+
+    private void showIdle() {
+        status.setForeground(ThemeColor.of("research.settingsHintText"));
+        status.setText(idleText + " Stored revision: " + LegacyBrowserSearchSettingsStore.revision(store) + ".");
+    }
+
     private Map<String, String> effectiveValues() {
         Map<String, String> effective = new LinkedHashMap<String, String>(defaults);
         effective.putAll(LegacyBrowserSearchSettingsStore.loadValues(store));
         return effective;
     }
 
-    private JComponent fieldRow(final LegacyBrowserSearchSettingsCatalog.Field field, String value) {
-        JPanel row = new JPanel();
-        row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0,
-                ThemeColor.of("research.settingsRowDivider")));
-        row.add(bold(new JLabel(field.label)));
-        row.add(gray(new JLabel("<html>" + escape(field.description) + "</html>")));
-
+    /**
+     * One field as a form row: label left, editor right with its Reset button on the same line; the
+     * description, default and range go into the tooltip plus a short muted hint. Multi-line editors
+     * (prompts, lists, engine order) take the full width below their label.
+     */
+    private void addField(ComicForm form, final LegacyBrowserSearchSettingsCatalog.Field field,
+                          String value) {
         final FieldEditor editor = createEditor(field, value);
         editors.put(field.key, editor);
         JComponent component = editor.component();
-        component.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.add(component);
 
-        StringBuilder meta = new StringBuilder("Default: " + display(defaults.get(field.key)));
         String range = rangeText(field);
+        StringBuilder meta = new StringBuilder("Default: " + display(defaults.get(field.key)));
         if (!range.isEmpty()) {
-            meta.append("   Range: ").append(range);
+            meta.append(" \u00b7 Range: ").append(range);
         }
         if (!field.templateVariables.isEmpty()) {
-            meta.append("   Variables: ").append(field.templateVariables);
+            meta.append(" \u00b7 Variables: ").append(field.templateVariables);
         }
-        JPanel metaRow = new JPanel();
-        metaRow.setLayout(new BoxLayout(metaRow, BoxLayout.X_AXIS));
-        metaRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        metaRow.add(gray(new JLabel(meta.toString())));
-        metaRow.add(Box.createHorizontalStrut(12));
+        String tooltip = "<html><b>" + escape(field.label) + "</b><br>" + escape(field.description)
+                + "<br><i>" + escape(meta.toString()) + "</i></html>";
+        component.setToolTipText(tooltip);
+
         JButton reset = new ComicButton("Reset");
-        reset.setFont(reset.getFont().deriveFont(11f));
+        reset.setToolTipText("Reset to default: " + display(defaults.get(field.key)));
         reset.addActionListener(e -> editor.set(defaults.get(field.key)));
-        metaRow.add(reset);
-        metaRow.add(Box.createHorizontalGlue());
-        row.add(metaRow);
-        return row;
+
+        boolean multiLine = field.kind == LegacyBrowserSearchSettingsCatalog.Kind.TEXT_LIST
+                || field.kind == LegacyBrowserSearchSettingsCatalog.Kind.PROMPT
+                || field.kind == LegacyBrowserSearchSettingsCatalog.Kind.ENGINE_LIST;
+        if (multiLine) {
+            form.area(field.label, component);
+            form.row("", ComicForm.hint(field.description + " " + meta), reset);
+        } else {
+            form.row(field.label, component, reset);
+            form.row("", ComicForm.hint(field.description
+                    + (range.isEmpty() ? "" : " (" + range + ")")));
+        }
     }
 
     private FieldEditor createEditor(LegacyBrowserSearchSettingsCatalog.Field field, String value) {
@@ -179,7 +219,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
             case TEXT_LIST:
             case PROMPT:
                 final JTextArea area = ComicControls.textArea(value,
-                        field.kind == LegacyBrowserSearchSettingsCatalog.Kind.PROMPT ? 8 : 5, 60);
+                        field.kind == LegacyBrowserSearchSettingsCatalog.Kind.PROMPT ? 8 : 4, 20);
                 area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
                 final JScrollPane scroll = new JScrollPane(area);
                 scroll.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -188,7 +228,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
                     void set(String v) { area.setText(v); }
                 };
             default:
-                final JTextField text = ComicControls.textField(value, 24);
+                final JTextField text = ComicControls.textField(value, 12);
                 text.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
                         text.getPreferredSize().height));
                 return new FieldEditor(text) {
@@ -199,7 +239,8 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
     }
 
     private void save() {
-        Map<String, String> values = new LinkedHashMap<String, String>();
+        // The OTHER half's fields keep what is stored right now (re-read, so its own save is never undone).
+        Map<String, String> values = effectiveValues();
         for (Map.Entry<String, FieldEditor> entry : editors.entrySet()) {
             values.put(entry.getKey(), entry.getValue().get());
         }
@@ -211,20 +252,15 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
                 .validate(decoded.settings).violations);
         if (!all.isEmpty()) {
             // Invalid settings are NEVER silently corrected or saved — the user sees each violation.
-            problems.setForeground(ThemeColor.of("research.settingsErrorText"));
-            problems.setText("Not saved — please fix:\n"
+            status.setForeground(ThemeColor.of("research.settingsErrorText"));
+            status.setText("Not saved — please fix:\n"
                     + new SettingsValidationResult(all).describe());
+            status.setCaretPosition(0);
             return;
         }
         LegacyBrowserSearchSettingsStore.saveValues(store, values);
-        refreshRevisionLabel();
-        problems.setText("Saved. New research sessions will use revision "
-                + LegacyBrowserSearchSettingsStore.revision(store) + ".");
-        problems.setForeground(ThemeColor.of("research.settingsSuccessText"));
-    }
-
-    private void refreshRevisionLabel() {
-        gray(revisionLabel).setText("Stored global settings revision: "
+        status.setForeground(ThemeColor.of("research.settingsSuccessText"));
+        status.setText("Saved. New research sessions will use revision "
                 + LegacyBrowserSearchSettingsStore.revision(store) + ".");
     }
 
@@ -256,16 +292,8 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
         return digest.length() > 12 ? digest.substring(0, 12) : digest;
     }
 
-    private static JLabel bold(JLabel label) {
-        label.setFont(label.getFont().deriveFont(Font.BOLD));
-        return label;
-    }
 
-    private static JLabel gray(JLabel label) {
-        label.setForeground(ThemeColor.of("research.settingsHintText"));
-        label.setFont(label.getFont().deriveFont(11f));
-        return label;
-    }
+
 
     private static String escape(String text) {
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
