@@ -282,13 +282,7 @@ public final class PiperReadAloudService implements SpeechSynthesisPort {
     }
 
     private PiperVoice activeVoice(TextToSpeechSettings current, String languageCode) {
-        TextToSpeechSettings.Selection selection = current.selectionFor(languageCode);
-        if (selection.getEngine() != TextToSpeechSettings.Engine.PIPER) {
-            return null;
-        }
-        PiperVoice voice = PiperVoiceCatalog.findById(selection.getVoiceId());
-        // The selected voice must MATCH the language — a stale cross-language id never speaks.
-        return voice != null && voice.getLanguageCode().equals(languageCode)
-                && store.isReadyToSpeak(voice) ? voice : null;
+        // Piper is the default engine; without a ready voice for this language the Windows voice speaks.
+        return store.voiceFor(current.selectionFor(languageCode), languageCode);
     }
 }

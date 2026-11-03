@@ -92,8 +92,17 @@ public final class TtsSettingsStore {
     /** The pre-per-language format chose ONE voice; it lands in that voice's own language. */
     private static void migrateLegacySingleSelection(
             Properties properties, Map<String, TextToSpeechSettings.Selection> selections) {
-        if (TextToSpeechSettings.parseEngine(properties.getProperty(LEGACY_KEY_ENGINE))
-                != TextToSpeechSettings.Engine.PIPER) {
+        String legacyEngine = properties.getProperty(LEGACY_KEY_ENGINE);
+        if (legacyEngine == null) {
+            return;
+        }
+        if (TextToSpeechSettings.parseEngine(legacyEngine) == TextToSpeechSettings.Engine.WINDOWS) {
+            // An explicit legacy Windows choice stays Windows (the default is Piper now).
+            for (String language : TextToSpeechSettings.LANGUAGE_CODES) {
+                if (!selections.containsKey(language)) {
+                    selections.put(language, TextToSpeechSettings.Selection.WINDOWS_DEFAULT);
+                }
+            }
             return;
         }
         PiperVoice voice = PiperVoiceCatalog.findById(properties.getProperty(LEGACY_KEY_VOICE));

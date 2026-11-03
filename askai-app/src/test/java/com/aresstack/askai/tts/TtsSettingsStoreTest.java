@@ -17,12 +17,12 @@ public class TtsSettingsStoreTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void missingFileYieldsTheWindowsDefaultForEveryLanguage() {
+    public void missingFileYieldsThePiperDefaultForEveryLanguage() {
         TtsSettingsStore store = new TtsSettingsStore(
                 temp.getRoot().toPath().resolve("nope.properties"));
         TextToSpeechSettings settings = store.load();
         for (String language : TextToSpeechSettings.LANGUAGE_CODES) {
-            assertEquals(TextToSpeechSettings.Engine.WINDOWS,
+            assertEquals(TextToSpeechSettings.Engine.PIPER,
                     settings.selectionFor(language).getEngine());
             assertEquals("", settings.selectionFor(language).getVoiceId());
         }
@@ -41,8 +41,8 @@ public class TtsSettingsStoreTest {
         TextToSpeechSettings loaded = store.load();
         assertEquals(TextToSpeechSettings.Engine.PIPER, loaded.selectionFor("de").getEngine());
         assertEquals("de_DE-thorsten-high", loaded.selectionFor("de").getVoiceId());
-        assertEquals("English stays on its own Windows default",
-                TextToSpeechSettings.Engine.WINDOWS, loaded.selectionFor("en").getEngine());
+        assertEquals("English stays on its own default (no explicit voice)",
+                "", loaded.selectionFor("en").getVoiceId());
 
         store.save(loaded.withSelection("en", TextToSpeechSettings.Engine.PIPER,
                 "en_US-lessac-high"));
@@ -60,7 +60,7 @@ public class TtsSettingsStoreTest {
         assertEquals(TextToSpeechSettings.Engine.PIPER, loaded.selectionFor("de").getEngine());
         assertEquals("de_DE-thorsten-medium", loaded.selectionFor("de").getVoiceId());
         assertEquals("the German legacy choice never leaks into English",
-                TextToSpeechSettings.Engine.WINDOWS, loaded.selectionFor("en").getEngine());
+                "", loaded.selectionFor("en").getVoiceId());
     }
 
     @Test
@@ -108,10 +108,22 @@ public class TtsSettingsStoreTest {
     }
 
     @Test
-    public void anUnknownEngineFallsBackToWindows() {
-        assertEquals(TextToSpeechSettings.Engine.WINDOWS,
+    public void anUnknownEngineFallsBackToThePiperDefault() {
+        assertEquals(TextToSpeechSettings.Engine.PIPER,
                 TextToSpeechSettings.parseEngine("KOKORO"));
+        assertEquals(TextToSpeechSettings.Engine.WINDOWS,
+                TextToSpeechSettings.parseEngine("WINDOWS"));
         assertEquals(TextToSpeechSettings.Engine.PIPER,
                 TextToSpeechSettings.parseEngine(" PIPER "));
+    }
+
+    @Test
+    public void anExplicitLegacyWindowsChoiceStaysWindows() throws Exception {
+        Path file = temp.getRoot().toPath().resolve("legacy-windows.properties");
+        Files.write(file, "tts.engine=WINDOWS\n".getBytes(StandardCharsets.UTF_8));
+        TextToSpeechSettings loaded = new TtsSettingsStore(file).load();
+        for (String language : TextToSpeechSettings.LANGUAGE_CODES) {
+            assertEquals(TextToSpeechSettings.Engine.WINDOWS, loaded.selectionFor(language).getEngine());
+        }
     }
 }
