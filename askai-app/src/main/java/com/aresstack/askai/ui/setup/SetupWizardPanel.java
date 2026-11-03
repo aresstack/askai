@@ -55,28 +55,29 @@ public final class SetupWizardPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
 
-    static final String[] STEP_NAMES = {"Network", "AI runtime", "Chat model", "Knowledge", "Check", "Voice"};
+    static final String[] STEP_NAMES = {"Network", "Voice", "AI runtime", "Chat model", "Knowledge", "Check"};
     static final int STEP_NETWORK = 0;
-    static final int STEP_RUNTIME = 1;
-    static final int STEP_CHAT = 2;
-    static final int STEP_KNOWLEDGE = 3;
-    static final int STEP_CHECK = 4;
-    /** Optional; the basic setup is saved by the final check before. */
-    static final int STEP_VOICE = 5;
+    /** Right after the network: the voices must be downloaded first, then Merlin can speak in every later step. */
+    static final int STEP_VOICE = 1;
+    static final int STEP_RUNTIME = 2;
+    static final int STEP_CHAT = 3;
+    static final int STEP_KNOWLEDGE = 4;
+    /** The last step: saves and checks everything; “Finish” ends the setup here. */
+    static final int STEP_CHECK = 5;
 
     /**
      * Merlin's picture per step: cut-outs with a transparent background (copies of the originals in
      * docs/images/setup-wizard).
      */
-    private static final String[] STEP_MASCOTS = {"wizard/merlin-1-network.png", "wizard/merlin-2-ai-runtime.png",
-            "wizard/merlin-3-chat-model.png", "wizard/merlin-4-knowledge.png", "wizard/merlin-5-check.png",
-            "wizard/merlin-6-voice.png"};
+    private static final String[] STEP_MASCOTS = {"wizard/merlin-1-network.png", "wizard/merlin-6-voice.png",
+            "wizard/merlin-2-ai-runtime.png", "wizard/merlin-3-chat-model.png", "wizard/merlin-4-knowledge.png",
+            "wizard/merlin-5-check.png"};
     /** The runtime step shows this picture until a runtime answers (the same cut-out as once it answers). */
     static final String RUNTIME_INSTALL_MASCOT = "wizard/merlin-2-ai-runtime.png";
     /** Per step: Merlin's place in the free space (alternating, so it feels alive). */
     private static final SetupWizardMascot.Placement[] MASCOT_PLACEMENTS = {SetupWizardMascot.Placement.RIGHT,
             SetupWizardMascot.Placement.LEFT, SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.LEFT,
-            SetupWizardMascot.Placement.CENTER, SetupWizardMascot.Placement.RIGHT};
+            SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.CENTER};
     /**
      * Per step: Merlin's largest height in logical pixels. Larger than any free space on purpose: Merlin grows to
      * fill the free space of the step instead of standing small in a corner.
@@ -102,7 +103,7 @@ public final class SetupWizardPanel extends JPanel {
     /** Label of the check {@link SetupActions#finish} reports when the settings could not be written. */
     static final String SAVING_CHECK = "Saving the settings";
     private static final String SKIP_STEP_HINT = "Go to the next step without a check; your entries stay";
-    private static final String SKIP_VOICE_HINT = "Finish without changing the voices; the setup is already saved";
+    private static final String SKIP_VOICE_HINT = "Finish the setup now; your entries are saved";
     static final String VOICES_SKIPPED = "Ready. The voices stay as they are; change them later in the chat "
             + "settings under Audio & Dictation.";
 
@@ -197,7 +198,7 @@ public final class SetupWizardPanel extends JPanel {
     // Step 6: voice (optional)
     private final JComboBox<String> voiceGerman = ComicControls.comboBox();
     private final JComboBox<String> voiceEnglish = ComicControls.comboBox();
-    private final ComicButton voiceInstall = new ComicButton("Install selected voices", ComicButton.Accent.ACTION);
+    private final ComicButton voiceInstall = new ComicButton("Download selected voices", ComicButton.Accent.ACTION);
     private final ComicButton voiceRetry = new ComicButton("Reload voices");
     private final JLabel voiceStatus = statusLabel();
     /** Label in the voice choices → voice id. */
@@ -636,17 +637,10 @@ public final class SetupWizardPanel extends JPanel {
 
     // ------------------------------------------------------------------ navigation
 
-    /** “Skip”: on to the next step; in the last step finish without changing the voices. */
+    /** “Skip”: on to the next step; in the last step finish the setup right away. */
     private void skip() {
-        if (step == STEP_VOICE) {
-            if (busy || installing() || handingOff) {
-                return;
-            }
-            voiceStatus.setText(VOICES_SKIPPED);
-            saveDraftThen(() -> {
-                close();
-                complete();
-            });
+        if (step == STEP_CHECK) {
+            finish();
         } else {
             jumpTo(step + 1);
         }
@@ -657,6 +651,9 @@ public final class SetupWizardPanel extends JPanel {
             return;
         }
         draft = collect();
+        if (step == STEP_VOICE && index != STEP_VOICE) {
+            saveVoicesOnLeaving();
+        }
         step = index;
         cards.show(deck, STEP_NAMES[index]);
         for (SetupWizardMascot mascot : mascots) {
@@ -687,7 +684,7 @@ public final class SetupWizardPanel extends JPanel {
         done[STEP_KNOWLEDGE] = !text(embeddingModel).isEmpty() && positive(embeddingDimension.getText());
         done[STEP_VOICE] = voicesReady();
         trail.show(step, done);
-        boolean voice = step == STEP_VOICE;
+        boolean voice = step == STEP_CHECK; // the last step: “Finish” instead of “Next”
         backButton.setEnabled(step > 0 && !busy && !installing());
         nextButton.setVisible(!voice);
         finishButton.setVisible(voice);
@@ -1200,6 +1197,21 @@ public final class SetupWizardPanel extends JPanel {
                 }
             }
             then.run();
+        });
+    }
+
+    /**
+     * Leaving the voice step stores the chosen, installed voices right away, so Merlin speaks with them from the
+     * next step on. Voices that are not installed yet are left out silently; the step stays skippable.
+     */
+    private void saveVoicesOnLeaving() {
+        if (!voicesReady() || installing()) {
+            return;
+        }
+        setup.saveVoices(collect(), error -> {
+            if (!closed && error != null) {
+                fail(STEP_VOICE, "The voices could not be saved: " + error);
+            }
         });
     }
 
