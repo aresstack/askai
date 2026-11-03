@@ -137,7 +137,7 @@ public final class ResearchRuntimeSettings {
             return; // the automatic choice (or a location configured at launch) stays
         }
         try {
-            com.aresstack.askai.browser.playwright.InProcessBrowser.useCamoufox(folder);
+            com.aresstack.askai.browser.playwright.CamoufoxSetup.useCamoufox(folder);
         } catch (RuntimeException | LinkageError unavailable) {
             // no browser runtime here: nothing to configure
         }

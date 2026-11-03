@@ -1,6 +1,6 @@
 package com.aresstack.askai.research.runtime;
 
-import com.aresstack.askai.browser.playwright.InProcessBrowser;
+import com.aresstack.askai.browser.playwright.PlaywrightBrowserRuntime;
 import com.aresstack.askai.browser.search.SearchResultCandidate;
 import com.aresstack.askai.browser.search.UrlResolutionStatus;
 import com.aresstack.askai.research.runtime.acquire.WebAcquisitionText;
@@ -71,7 +71,8 @@ public class InProcessGoogleSearchLiveTest {
             return; // Google listed direct links this time: nothing to navigate
         }
         // Only now, when a hit is opened, is its /goto link resolved: by the research browser's normal navigation.
-        InProcessBrowser browser = InProcessBrowser.start(channel, true, false, null);
+        PlaywrightBrowserRuntime browser = PlaywrightBrowserRuntime.start(
+                new PlaywrightBrowserRuntime.Options(channel, true, false, null, null, false));
         try {
             String gotoUrl = unresolved.get(0).navigationUrl();
             String page = browser.call("web_open", Collections.<String, Object>singletonMap("url", gotoUrl));

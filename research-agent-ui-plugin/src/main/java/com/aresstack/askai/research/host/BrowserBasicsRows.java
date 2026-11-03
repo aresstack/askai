@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
-import com.aresstack.askai.research.acp.ResearchBackendMode;
+import com.aresstack.askai.research.agentwire.ResearchBackendMode;
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicForm;
 

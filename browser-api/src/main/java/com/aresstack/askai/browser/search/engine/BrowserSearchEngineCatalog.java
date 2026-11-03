@@ -15,7 +15,6 @@ public final class BrowserSearchEngineCatalog {
     public static final String GOOGLE = "google";
     public static final String DUCKDUCKGO = "duckduckgo";
     public static final String BING = "bing";
-    public static final String GOOGLE = "google";
     /**
      * The engine a dev/test {@code --search-url=} override installs. It is not part of the catalog: it
      * exists only when someone hands the sidecar an explicit template, and it then REPLACES the
@@ -31,8 +30,10 @@ public final class BrowserSearchEngineCatalog {
     private static final List<BrowserSearchEngine> ENGINES = Collections.unmodifiableList(
             new ArrayList<BrowserSearchEngine>(Arrays.asList(
                     new BrowserSearchEngine(GOOGLE, "Google", Arrays.asList(
-                            "https://www.google.com/search?q={query}"),
-                            Arrays.asList("https://www.google.com/search?q={query}&start={offset0}"),
+                            new BrowserSearchEngine.SearchForm("https://www.google.com/",
+                                    Arrays.asList("textarea[name=q]", "input[name=q]"),
+                                    Arrays.asList("#pnnext", "a[aria-label='Next page']",
+                                            "a[aria-label='Nächste Seite']"))),
                             10),
                     new BrowserSearchEngine(DUCKDUCKGO, "DuckDuckGo", Arrays.asList(
                             // Server-rendered start pages of the SAME provider: the plain HTML one first,
@@ -51,12 +52,6 @@ public final class BrowserSearchEngineCatalog {
                             new BrowserSearchEngine.SearchForm("https://www.bing.com/",
                                     Arrays.asList("#sb_form_q", "textarea[name=q]", "input[name=q]"),
                                     Arrays.asList("a.sb_pagN", "a[aria-label='Next page']",
-                                            "a[aria-label='Nächste Seite']"))),
-                            10),
-                    new BrowserSearchEngine(GOOGLE, "Google", Arrays.asList(
-                            new BrowserSearchEngine.SearchForm("https://www.google.com/",
-                                    Arrays.asList("textarea[name=q]", "input[name=q]"),
-                                    Arrays.asList("#pnnext", "a[aria-label='Next page']",
                                             "a[aria-label='Nächste Seite']"))),
                             10))));
 
