@@ -38,7 +38,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     // There is deliberately NO backend-mode field: productive is simply THE mode whenever its
     // requirements are met; otherwise new sessions run the demo backend with a visible notice.
     // (A persisted FAKE value remains a developer-only override in the store.)
-    private final JLabel backendStatus = new JLabel(" ");
+    private final javax.swing.JTextArea backendStatus = com.aresstack.comiccontrols.control.ComicForm.text(" ");
     /** Answer budget per agent model turn (tokens) — the longest contracted answer is the source review. */
     private final JTextField agentMaxTokens = ComicControls.textField(6);
     // Konzeptpapier tool-round loop: work budget and error tolerance, deliberately separate.
@@ -148,7 +148,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // instead of running off the dialog's right edge), buttons beside their field.
         com.aresstack.comiccontrols.control.ComicForm agent =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Agent");
-        agent.row("Backend", group(backendStatus));
+        agent.row("Backend", backendStatus);
         agent.row("Answer budget (tokens)", group(agentMaxTokens));
         agent.row("", useAiReranker);
 
