@@ -509,6 +509,25 @@ public final class WorkspacePluginService {
                 : generation.agentDescriptors();
     }
 
+    /** The setup-wizard sections of all selectable agents, in discovery order; a failing plugin is left out. */
+    public List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> getSetupContributions() {
+        List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> all =
+                new ArrayList<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>();
+        for (com.aresstack.askai.plugin.api.agent.AgentPluginDescriptor descriptor : getSelectableAgentDescriptors()) {
+            try {
+                AgentPluginExtension extension = getSelectableAgentExtension(descriptor.getId());
+                List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> contributions =
+                        extension == null ? null : extension.getSetupContributions();
+                if (contributions != null) {
+                    all.addAll(contributions);
+                }
+            } catch (RuntimeException | LinkageError broken) {
+                // A plugin built against an older API or failing here must not break the wizard.
+            }
+        }
+        return all;
+    }
+
     public List<PluginCatalogEntry> getCatalog() {
         PluginRuntimeGeneration generation = activeGeneration;
         return generation == null ? Collections.<PluginCatalogEntry>emptyList() : generation.entries();
