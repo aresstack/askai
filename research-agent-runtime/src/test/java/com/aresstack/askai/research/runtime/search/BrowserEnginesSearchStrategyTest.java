@@ -77,6 +77,17 @@ public class BrowserEnginesSearchStrategyTest {
     }
 
     @Test
+    public void cancelledBeforeTheFirstEngineIsANeutralEmptyResult() throws Exception {
+        Fake google = new Fake("https://a.example/");
+        InitialSearchResult result = new BrowserEnginesSearchStrategy(
+                selection(EngineAcquisitionMode.FIRST_USABLE, "google:on"), google, null)
+                .search(REQUEST, () -> true, BUDGET);
+        assertEquals(0, google.calls);
+        assertTrue(result.candidates.isEmpty());
+        assertFalse(result.status == InitialSearchStatus.TECHNICAL_PROBLEM);
+    }
+
+    @Test
     public void allEnabledMergesWithoutDuplicates() throws Exception {
         Fake google = new Fake("https://a.example/", "https://same.example/");
         Fake pages = new Fake("https://same.example/", "https://c.example/");

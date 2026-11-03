@@ -95,9 +95,11 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
         List<SearchChallengeState> challenges = new ArrayList<SearchChallengeState>();
         List<String> diagnostics = new ArrayList<String>();
         boolean cleanSearch = false;
+        boolean cancelled = false;
         Exception lastFailure = null;
         for (int i = 0; i < steps.size(); i++) {
             if (cancellation != null && cancellation.isCancelled()) {
+                cancelled = true;
                 break;
             }
             InitialSearchResult result;
@@ -130,6 +132,11 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
         if (!candidates.isEmpty()) {
             return new InitialSearchResult(candidates, new ArrayList<String>(hosts), challenges, diagnostics,
                     InitialSearchStatus.RESULTS);
+        }
+        if (cancelled) {
+            // A neutral empty result: the caller's cancellation gate reports the user's stop, not a failure.
+            diagnostics.add("browser search cancelled");
+            return InitialSearchResult.empty(diagnostics);
         }
         if (cleanSearch) {
             return new InitialSearchResult(candidates, new ArrayList<String>(hosts), challenges, diagnostics,
