@@ -54,8 +54,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
     private final com.aresstack.askai.research.search.security.SecretValueService secrets;
 
     private final JCheckBox enabled = ComicControls.checkBox("Use DataForSEO for the initial search");
-    /** The ONE credential DataForSEO's dashboard shows: the API key (Base64 of "login:password"). */
-    private final JPasswordField apiKey = ComicControls.passwordField(28);
+    private final JTextField username = ComicControls.textField(28);
+    private final JPasswordField password = ComicControls.passwordField(28);
     private final JLabel passwordHint = new JLabel(" ");
     private final JTextField endpointBase = ComicControls.textField(28);
 
@@ -93,41 +93,9 @@ public final class DataForSeoSettingsPanel extends JPanel {
         tabs.addTab("SERP", scroll(buildSerp()));
         tabs.addTab("Advanced", scroll(buildAdvanced()));
         tabs.addTab("Playground", buildPlayground());
-        fitHeightToSelectedTab(tabs);
         add(tabs, BorderLayout.CENTER);
         loadFromDraft();
         wireListeners();
-    }
-
-    /**
-     * A JTabbedPane is as tall as its TALLEST tab (here the Playground); the short form tabs then sit on a
-     * large empty block. Size it to the SELECTED tab instead.
-     */
-    private static void fitHeightToSelectedTab(final JTabbedPane tabs) {
-        final Runnable fit = new Runnable() {
-            public void run() {
-                tabs.setPreferredSize(null);
-                java.awt.Component selected = tabs.getSelectedComponent();
-                if (selected == null || tabs.getTabCount() == 0) {
-                    return;
-                }
-                int tallest = 0;
-                for (int i = 0; i < tabs.getTabCount(); i++) {
-                    tallest = Math.max(tallest, tabs.getComponentAt(i).getPreferredSize().height);
-                }
-                java.awt.Dimension natural = tabs.getPreferredSize();
-                int chrome = natural.height - tallest; // tab header + borders
-                tabs.setPreferredSize(new java.awt.Dimension(natural.width,
-                        chrome + selected.getPreferredSize().height + 24)); // + room for wrapped hints
-                tabs.revalidate();
-            }
-        };
-        tabs.addChangeListener(new javax.swing.event.ChangeListener() {
-            public void stateChanged(javax.swing.event.ChangeEvent e) {
-                fit.run();
-            }
-        });
-        fit.run();
     }
 
     // ------------------------------------------------------------------ tabs
@@ -135,16 +103,15 @@ public final class DataForSeoSettingsPanel extends JPanel {
     private JComponent buildAccount() {
         JPanel p = column();
         p.add(row("", enabled));
-        JPanel key = new JPanel(new BorderLayout(8, 0));
-        key.setOpaque(false);
-        key.add(apiKey, BorderLayout.CENTER);
+        p.add(row("API login:", username));
+        JPanel pw = new JPanel(new BorderLayout(4, 0));
+        pw.add(password, BorderLayout.CENTER);
         passwordHint.setEnabled(false);
-        key.add(passwordHint, BorderLayout.EAST); // status right beside the field
-        p.add(row("API key:", key));
+        pw.add(passwordHint, BorderLayout.SOUTH);
+        p.add(row("API password:", pw));
         p.add(row("API endpoint:", endpointBase));
-        p.add(hint("Paste the API key from the DataForSEO dashboard (API Access). The stored key is never"
-                + " shown: leave the field empty to keep it, paste a new one to replace it (encrypted on"
-                + " save)."));
+        p.add(hint("The stored password is never shown. Leave it empty to keep the saved credential; "
+                + "type a new one to replace it (encrypted on save)."));
         return p;
     }
 
@@ -244,7 +211,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
     private void loadFromDraft() {
         DataForSeoSearchConfiguration c = draft.configuration();
         enabled.setSelected(c.isEnabled());
-        apiKey.setText("");
+        username.setText(nullToEmpty(c.getUsername()));
+        password.setText("");
         passwordHint.setText(draft.hasStoredPassword() ? "Saved credential" : "No credential stored");
         endpointBase.setText(nullToEmpty(c.getEndpointBase()));
         engine.setSelectedItem(c.getSearchEngine());
@@ -268,17 +236,9 @@ public final class DataForSeoSettingsPanel extends JPanel {
     public void applyToDraft() {
         DataForSeoSearchConfiguration c = draft.configuration();
         c.setEnabled(enabled.isSelected());
-        char[] typed = apiKey.getPassword();
-        DataForSeoApiKey parsed = DataForSeoApiKey.parse(typed);
-        if (parsed != null) {
-            c.setUsername(parsed.login);
-            draft.setNewPassword(parsed.password);
-        } else {
-            draft.setNewPassword(null); // empty field: keep the stored credential
-        }
-        if (typed != null) {
-            java.util.Arrays.fill(typed, '\0');
-        }
+        c.setUsername(emptyToNull(username.getText().trim()));
+        char[] typed = password.getPassword();
+        draft.setNewPassword(typed != null && typed.length > 0 ? typed : null);
         c.setEndpointBase(emptyToNull(endpointBase.getText().trim()));
         c.setSearchEngine((DataForSeoSearchEngine) engine.getSelectedItem());
         c.setLocationName(emptyToNull(locationName.getText().trim()));
@@ -438,7 +398,10 @@ public final class DataForSeoSettingsPanel extends JPanel {
     }
 
     private static JComponent scroll(JComponent content) {
-        return ResearchSettingsContribution.fitted(content); // fits the width, as tall as its content
+        JScrollPane scroll = new JScrollPane(content);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getVerticalScrollBar().setUnitIncrement(14);
+        return scroll;
     }
 
     private static JPanel row(String label, JComponent field) {
@@ -466,7 +429,10 @@ public final class DataForSeoSettingsPanel extends JPanel {
     }
 
     private static JComponent hint(String text) {
-        return ProviderForm.hint(text); // one shared hint style
+        JLabel l = new JLabel("<html><body style='width:420px'>" + text + "</body></html>");
+        l.setEnabled(false);
+        l.setBorder(BorderFactory.createEmptyBorder(2, 0, 6, 0));
+        return l;
     }
 
     private static String nullToEmpty(String value) {
