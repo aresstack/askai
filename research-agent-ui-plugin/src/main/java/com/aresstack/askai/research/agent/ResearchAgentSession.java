@@ -117,6 +117,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         this.sink = host.getConversationSink();
         this.uiExecutor = host.getUiExecutor();
         this.hostStateStore = host.getStateStore();
+        com.aresstack.askai.research.host.ResearchRuntimeSettings.applyCamoufoxFolder(hostStateStore);
         // Session-LOCAL language: seeded from the persisted default, then owned by THIS session alone —
         // two parallel research tabs switch independently, nothing is process-global.
         this.sessionLanguage = new SessionResearchLanguage(ResearchLanguage.fromCode(
