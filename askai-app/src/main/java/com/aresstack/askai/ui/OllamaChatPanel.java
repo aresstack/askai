@@ -1083,6 +1083,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         if (settingsPagesPane == null) {
             buildSettingsPanes();
         }
+        syncAgentSettingsPages(); // the agent may have been (de)selected since the panes were built
     }
 
     private JComponent buildSettingsContent() {
@@ -1124,26 +1125,13 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         party.addTab("History", settingsCard(partyCards[3]));
         cards.add(party, SETTINGS_PARTY);
         categories.addAll(java.util.Arrays.asList(CHAT_SETTINGS_CATEGORIES));
-        // Chat modes contributed by plugins (e.g. Research Agent), hooked in dynamically after Party:
-        // only while the agent session is ACTIVE in this tab; each page gets the live session so its
-        // values stay session-based (two tabs never reconfigure each other).
-        if (agentSettingsContributions != null && agentSettingsSession != null) {
-            com.aresstack.askai.plugin.api.agent.AgentSession session = agentSettingsSession.get();
-            if (session != null) {
-                for (com.aresstack.askai.plugin.api.agent.AgentSettingsContribution contribution
-                        : agentSettingsContributions.get()) {
-                    JComponent component = contribution.createSettingsComponent(session);
-                    if (component != null) {
-                        String name = contribution.getDisplayName();
-                        cards.add(settingsCard(component), name);
-                        categories.add(name);
-                    }
-                }
-            }
+        // Chat modes contributed by plugins (e.g. Research Agent) follow after Party; they are synced on
+        // EVERY open (syncAgentSettingsPages), not only when the panes are first built.
+        final javax.swing.DefaultListModel<String> navigationModel = new javax.swing.DefaultListModel<String>();
+        for (String category : categories) {
+            navigationModel.addElement(category);
         }
-
-        final javax.swing.JList<String> navigation =
-                ComicControls.<String>list(categories.toArray(new String[0]));
+        final javax.swing.JList<String> navigation = ComicControls.<String>list(navigationModel);
         settingsNavigation = navigation; // openSpeechOutputSettings jumps to a category directly
         navigation.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
         navigation.setSelectedIndex(0);
@@ -1161,6 +1149,69 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         cards.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         settingsNavigationPane = navigationScroll;
         settingsPagesPane = cards;
+    }
+
+    /** The plugin chat-mode categories currently in the settings (name → the session they were built for). */
+    private final java.util.Map<String, Object> agentSettingsPages = new java.util.LinkedHashMap<String, Object>();
+
+    /**
+     * Brings the plugin chat-mode categories (e.g. "Research Agent") in line with the agent that is active in
+     * THIS tab right now: adds them when the agent was selected after the settings were first built, drops
+     * them when it was deselected, rebuilds them for a new session. Unchanged pages are kept as they are.
+     */
+    private void syncAgentSettingsPages() {
+        if (settingsCards == null || settingsNavigation == null) {
+            return;
+        }
+        com.aresstack.askai.plugin.api.agent.AgentSession session =
+                agentSettingsSession == null ? null : agentSettingsSession.get();
+        java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution> contributions =
+                session == null || agentSettingsContributions == null
+                        ? java.util.Collections.<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution>
+                                emptyList()
+                        : agentSettingsContributions.get();
+        java.util.List<String> wanted = new java.util.ArrayList<String>();
+        for (com.aresstack.askai.plugin.api.agent.AgentSettingsContribution contribution : contributions) {
+            wanted.add(contribution.getDisplayName());
+        }
+        boolean upToDate = wanted.equals(new java.util.ArrayList<String>(agentSettingsPages.keySet()));
+        for (Object built : agentSettingsPages.values()) {
+            upToDate &= built == session;
+        }
+        if (upToDate) {
+            return;
+        }
+        javax.swing.DefaultListModel<String> model =
+                (javax.swing.DefaultListModel<String>) settingsNavigation.getModel();
+        String selected = settingsNavigation.getSelectedValue();
+        for (String name : agentSettingsPages.keySet()) {
+            model.removeElement(name);
+            for (java.awt.Component card : settingsCards.getComponents()) {
+                if (name.equals(card.getName())) {
+                    settingsCards.remove(card);
+                }
+            }
+        }
+        agentSettingsPages.clear();
+        for (com.aresstack.askai.plugin.api.agent.AgentSettingsContribution contribution : contributions) {
+            JComponent component = contribution.createSettingsComponent(session);
+            if (component != null) {
+                String name = contribution.getDisplayName();
+                JComponent card = settingsCard(component);
+                card.setName(name);
+                settingsCards.add(card, name);
+                model.addElement(name);
+                agentSettingsPages.put(name, session);
+            }
+        }
+        if (selected != null && model.contains(selected)) {
+            settingsNavigation.setSelectedValue(selected, false);
+            settingsCardLayout.show(settingsCards, selected);
+        } else {
+            settingsNavigation.setSelectedIndex(0);
+        }
+        settingsCards.revalidate();
+        settingsCards.repaint();
     }
 
     /**
