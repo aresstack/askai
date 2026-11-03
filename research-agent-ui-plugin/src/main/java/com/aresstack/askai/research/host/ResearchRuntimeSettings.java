@@ -467,7 +467,7 @@ public final class ResearchRuntimeSettings {
      * GUI-only; no endpoint is registered and no connection file is written. Applies to NEW sessions.
      */
     public static boolean loadBotControlMcp(WorkspaceStateStore store) {
-        return store == null || store.getBoolean(KEY_BOT_CONTROL, true);
+        return store != null && store.getBoolean(KEY_BOT_CONTROL, false);
     }
 
     /**
