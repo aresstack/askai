@@ -75,6 +75,9 @@ public final class AskAiFrame extends JFrame {
     /** The application's one read-aloud voice install section (the Voices tab under Models > Setup). */
     private final SpeechOutputModelsPanel speechVoicesPanel = new SpeechOutputModelsPanel(
             new com.aresstack.askai.tts.PiperTtsStore(), new com.aresstack.askai.tts.TtsSettingsStore());
+    /** The application's one Whisper dictation-model install section (Settings > AI models). */
+    private final WhisperModelsPanel whisperModelsPanel =
+            new WhisperModelsPanel(new com.aresstack.askai.stt.whisper.WhisperStore());
     private static final String SETTINGS_NETWORK = "Network";
     private static final String SETTINGS_PLUGINS = "Plugins";
     private static final String ABOUT_VIEW = "about";
@@ -1253,6 +1256,7 @@ public final class AskAiFrame extends JFrame {
                 chat.setInstallAudioModelHandler(installHandler);
                 chat.setAudioProcessingSettingsHandler(audioHandler);
                 chat.setSpeechVoicesPanel(speechVoicesPanel);
+                chat.setWhisperModelsPanel(whisperModelsPanel);
                 // A persisted title/timestamp must reach an OPEN chat list right away.
                 chat.setHistoryChangedListener(new Runnable() {
                     public void run() {
@@ -1423,6 +1427,8 @@ public final class AskAiFrame extends JFrame {
                 (VirtualOllamaContainerService) ollamaService);
         // The read-aloud voices (Piper) are installed under Models > Setup > Voices (one section for the whole
         // application); every chat's voice selector follows installs/removals there.
+        // Whisper dictation models (the default dictation backend) are installed right on this page.
+        aiModelsPanel.addSection(whisperModelsPanel);
         chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsPanel));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
         chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,

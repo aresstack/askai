@@ -213,6 +213,15 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     private javax.swing.JSpinner sttMaxFileSize;
     private com.aresstack.comiccontrols.control.ComicDurationField sttTimeout;
     private boolean updatingDictationSettings;
+    private static final String DICTATION_ENGINE_WHISPER = "Whisper";
+    private static final String DICTATION_ENGINE_OLLAMA = "Ollama";
+    private static final String WHISPER_NO_MODEL = "No Whisper model installed (Ollama transcribes)";
+    private final JComboBox<String> dictationEngineCombo = ComicControls.<String>comboBox(
+            new String[]{DICTATION_ENGINE_WHISPER, DICTATION_ENGINE_OLLAMA});
+    private final JComboBox<Object> whisperModelCombo = ComicControls.<Object>comboBox();
+    private JPanel whisperModelRow;
+    private WhisperModelsPanel whisperModelsPanel;
+    private final Runnable whisperModelsListener = () -> onUi(this::refreshDictationBackend);
     private final JComboBox<AudioProcessingProfile> audioProfileCombo = ComicControls.<AudioProcessingProfile>comboBox();
     private final JComboBox<String> micCombo = ComicControls.<String>comboBox();
     private final JButton micRefreshButton = new ComicButton("Refresh");
@@ -231,6 +240,11 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             new com.aresstack.askai.tts.TtsSettingsStore();
     private final com.aresstack.askai.tts.PiperTtsStore piperTtsStore =
             new com.aresstack.askai.tts.PiperTtsStore();
+    // Dictation backend: Whisper (local, default) or Ollama — read fresh per recording.
+    private final com.aresstack.askai.stt.whisper.WhisperStore whisperStore =
+            new com.aresstack.askai.stt.whisper.WhisperStore();
+    private final com.aresstack.askai.stt.whisper.DictationSettingsStore dictationSettingsStore =
+            new com.aresstack.askai.stt.whisper.DictationSettingsStore();
     /** The application's voice INSTALL section (Models > Setup > Voices), shared by all chats. */
     private SpeechOutputModelsPanel speechVoicesPanel;
     // Playback output (recording preview + tests): persisted device across JavaSound/OpenAL/VLC.
@@ -605,8 +619,12 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                         model.getSpeechToTextConfiguration().getAudioProcessingProfileId());
             }
         });
-        AudioModelResolver resolver = audioModelResolver();
-        SpeechTranscriber transcriber = new OllamaSpeechTranscriber(baseUrl, timeout);
+        // Whisper (default) when chosen and installed, otherwise the Ollama audio model — decided per recording.
+        AudioModelResolver resolver = com.aresstack.askai.stt.whisper.DictationBackendRouting.resolver(
+                audioModelResolver(), this::activeWhisperModel);
+        SpeechTranscriber transcriber = com.aresstack.askai.stt.whisper.DictationBackendRouting.transcriber(
+                new OllamaSpeechTranscriber(baseUrl, timeout),
+                new com.aresstack.askai.stt.whisper.WhisperSpeechTranscriber(whisperStore, timeout));
         ServerProbe probe = new OllamaServerProbe(baseUrl);
         DictationListener listener = new DictationListener() {
             public void onState(final DictationState state, final String message) {
@@ -940,6 +958,9 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         if (speechVoicesPanel != null) {
             speechVoicesPanel.removeVoicesChangedListener(speechVoicesListener);
         }
+        if (whisperModelsPanel != null) {
+            whisperModelsPanel.removeModelsChangedListener(whisperModelsListener);
+        }
         // END (not just pause) THIS tab's agent session so its research run, browser, agent process, model
         // watcher and registry entry are torn down; a fresh tab starts a fresh session, never resumes this one.
         if (tabSessionCloser != null) {
@@ -1121,6 +1142,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         } finally {
             updatingDictationSettings = false;
         }
+        refreshDictationBackend();
     }
 
     private JComponent buildSettingsContent() {
@@ -1334,18 +1356,36 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             refreshDictationControls();
         });
         input.check(sttEnabledBox);
-        // Transcription runs on the Ollama server (its OpenAI-compatible /v1/audio/transcriptions endpoint).
-        // Piper is speech OUTPUT only (see below), so it is no transcription backend.
-        JLabel sttBackendLabel = new JLabel("Ollama (address under Settings > Connections)");
-        sttBackendLabel.setToolTipText("Recordings are transcribed by an audio-capable model on the Ollama"
-                + " server. Piper reads answers aloud — it cannot transcribe.");
-        input.row("Backend", sttBackendLabel);
+        // Backend: Whisper (local whisper.cpp, the default — like Piper for the output) or an Ollama audio model.
+        // Whisper without an installed model hands over to Ollama, so dictation never just stops working.
+        dictationEngineCombo.setEditable(false);
+        dictationEngineCombo.setToolTipText("Whisper (default): transcribes locally on the CPU, no Ollama needed."
+                + " Ollama: an audio-capable model on the Ollama server (address under Settings > Connections).");
+        dictationEngineCombo.addActionListener(event -> persistDictationEngine());
+        input.row("Backend", dictationEngineCombo);
+        whisperModelCombo.setEditable(false);
+        whisperModelCombo.setPrototypeDisplayValue("No Whisper model installed (Ollama transcribes)");
+        whisperModelCombo.setToolTipText("The installed Whisper model. Install models under Settings > AI models"
+                + " > Dictation models (Whisper).");
+        whisperModelCombo.addActionListener(event -> persistWhisperModelSelection());
+        JButton installWhisperButton = new ComicButton("Install models…");
+        installWhisperButton.setToolTipText("Opens Settings > AI models > Dictation models (Whisper).");
+        installWhisperButton.addActionListener(event -> openAiModelsSettings());
+        whisperModelRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        whisperModelRow.setOpaque(false);
+        whisperModelRow.add(whisperModelCombo);
+        whisperModelRow.add(installWhisperButton);
         audioModelCombo.setEditable(false); // only /api/show-verified models, never free text
         audioModelCombo.setPrototypeDisplayValue("gemma4:e2b-it-q8_0 (automatic)"); // stable width, also while empty
         audioModelCombo.setToolTipText("Audio-capable models installed in Ollama. Automatic picks a verified"
                 + " one (the last model that worked first). Install more under Settings > AI models.");
         audioModelCombo.addActionListener(event -> persistAudioModelSelection());
-        input.row("Model", audioModelCombo);
+        JPanel modelCell = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        modelCell.setOpaque(false);
+        modelCell.add(whisperModelRow);
+        modelCell.add(audioModelCombo);
+        input.row("Model", modelCell);
+        refreshDictationBackend();
 
         sttLanguageCombo = ComicControls.<String>comboBox(STT_LANGUAGES);
         sttLanguageCombo.setEditable(true);
@@ -4162,9 +4202,101 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 || dictationState == DictationState.TRANSCRIBING;
     }
 
+    /** The application's Whisper install section (Settings > AI models); this chat's selector follows it. */
+    public void setWhisperModelsPanel(WhisperModelsPanel panel) {
+        if (whisperModelsPanel != null) {
+            whisperModelsPanel.removeModelsChangedListener(whisperModelsListener);
+        }
+        whisperModelsPanel = panel;
+        if (panel != null) {
+            panel.addModelsChangedListener(whisperModelsListener);
+        }
+    }
+
+    /** Shows the dictation backend and the matching model selector (Whisper models or Ollama audio models). */
+    private void refreshDictationBackend() {
+        if (whisperModelRow == null) {
+            return;
+        }
+        com.aresstack.askai.stt.whisper.DictationSettings settings = dictationSettingsStore.load();
+        boolean whisper = settings.getEngine() == com.aresstack.askai.stt.whisper.DictationSettings.Engine.WHISPER;
+        updatingDictationSettings = true;
+        try {
+            dictationEngineCombo.setSelectedItem(whisper ? DICTATION_ENGINE_WHISPER : DICTATION_ENGINE_OLLAMA);
+            whisperModelCombo.removeAllItems();
+            java.util.List<com.aresstack.askai.stt.whisper.WhisperModel> installed = whisperStore.installedModels();
+            if (installed.isEmpty() || !whisperStore.isEngineInstalled()) {
+                whisperModelCombo.addItem(WHISPER_NO_MODEL);
+                whisperModelCombo.setSelectedItem(WHISPER_NO_MODEL);
+            } else {
+                for (com.aresstack.askai.stt.whisper.WhisperModel candidate : installed) {
+                    whisperModelCombo.addItem(candidate);
+                }
+                whisperModelCombo.setSelectedItem(whisperStore.modelFor(settings.withEngine(
+                        com.aresstack.askai.stt.whisper.DictationSettings.Engine.WHISPER)));
+            }
+            whisperModelCombo.setEnabled(!installed.isEmpty() && whisperStore.isEngineInstalled());
+        } finally {
+            updatingDictationSettings = false;
+        }
+        whisperModelRow.setVisible(whisper);
+        audioModelCombo.setVisible(!whisper);
+        whisperModelRow.revalidate();
+    }
+
+    private void persistDictationEngine() {
+        if (updatingDictationSettings) {
+            return;
+        }
+        com.aresstack.askai.stt.whisper.DictationSettings.Engine engine =
+                DICTATION_ENGINE_OLLAMA.equals(dictationEngineCombo.getSelectedItem())
+                        ? com.aresstack.askai.stt.whisper.DictationSettings.Engine.OLLAMA
+                        : com.aresstack.askai.stt.whisper.DictationSettings.Engine.WHISPER;
+        saveDictationSettings(dictationSettingsStore.load().withEngine(engine));
+        refreshDictationBackend();
+    }
+
+    private void persistWhisperModelSelection() {
+        if (updatingDictationSettings) {
+            return;
+        }
+        Object selected = whisperModelCombo.getSelectedItem();
+        if (selected instanceof com.aresstack.askai.stt.whisper.WhisperModel) {
+            saveDictationSettings(dictationSettingsStore.load().withWhisperModelId(
+                    ((com.aresstack.askai.stt.whisper.WhisperModel) selected).getId()));
+        }
+    }
+
+    private void saveDictationSettings(com.aresstack.askai.stt.whisper.DictationSettings settings) {
+        try {
+            dictationSettingsStore.save(settings);
+        } catch (java.io.IOException notSaved) {
+            appendTech("dictation backend not saved: " + notSaved.getMessage());
+        }
+        refreshDictationControls();
+    }
+
+    /** Opens Settings > AI models (where the Whisper models are installed). */
+    private void openAiModelsSettings() {
+        if (settingsOpener != null) {
+            settingsOpener.accept(SETTINGS_AI_MODELS);
+        } else {
+            selectSettingsCategory(SETTINGS_AI_MODELS);
+        }
+    }
+
+    /** The Whisper model that transcribes the next recording, or null when Ollama does. */
+    private com.aresstack.askai.stt.whisper.WhisperModel activeWhisperModel() {
+        return whisperStore.modelFor(dictationSettingsStore.load());
+    }
+
     private void startDictationWithReadiness() {
         if (chatBusy || fileBusy || micTestSession != null) {
             setDictationStatus("Busy — finish the chat / file transcription / mic test first.");
+            return;
+        }
+        if (activeWhisperModel() != null) {
+            handleReadiness(ReadinessStatus.READY); // Whisper runs locally: no Ollama check needed
             return;
         }
         checkingReadiness = true;
@@ -4304,8 +4436,9 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     }
 
     private void persistLastAudioModel(String modelUsed) {
-        if (modelUsed == null || modelUsed.trim().isEmpty()) {
-            return; // a failed attempt must not overwrite the last successful model
+        if (modelUsed == null || modelUsed.trim().isEmpty()
+                || com.aresstack.askai.stt.whisper.WhisperSpeechTranscriber.isWhisperModel(modelUsed)) {
+            return; // a failed attempt (or a Whisper run) must not overwrite the last successful Ollama model
         }
         SpeechToTextConfiguration current = model.getSpeechToTextConfiguration();
         if (modelUsed.equals(current.getLastAudioModel())) {
