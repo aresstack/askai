@@ -33,6 +33,7 @@ public final class WebSearchProvidersModuleResilienceTest {
         ProviderConfigurationService service = setup.getConfigurationService();
         BrightDataSearchConfiguration brightData = service.loadOrCreateBrightData();
         brightData.setEnabled(true);
+        brightData.setZone("test-zone");
         service.saveBrightData(brightData, "bd-secret".toCharArray());
         DataForSeoSearchConfiguration dataForSeo = service.loadOrCreateDataForSeo();
         dataForSeo.setEnabled(true);
