@@ -204,6 +204,15 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     // Dictation controls.
     private final JComboBox<String> audioModelCombo = ComicControls.<String>comboBox();
+    // The dictation settings moved here from Connections. They are application-wide (one AskAiModel shared by
+    // all tabs), so every open of the settings reloads them (another tab may have changed them meanwhile).
+    private javax.swing.JCheckBox sttEnabledBox;
+    private JComboBox<String> sttLanguageCombo;
+    private JTextField sttPromptField;
+    private String sttPromptShown = "";
+    private javax.swing.JSpinner sttMaxFileSize;
+    private com.aresstack.comiccontrols.control.ComicDurationField sttTimeout;
+    private boolean updatingDictationSettings;
     private final JComboBox<AudioProcessingProfile> audioProfileCombo = ComicControls.<AudioProcessingProfile>comboBox();
     private final JComboBox<String> micCombo = ComicControls.<String>comboBox();
     private final JButton micRefreshButton = new ComicButton("Refresh");
@@ -1089,6 +1098,26 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         if (settingsPagesPane == null) {
             buildSettingsPanes();
         }
+        refreshDictationSettings();
+    }
+
+    /** Shows the current application-wide dictation values (another tab may have changed them). */
+    private void refreshDictationSettings() {
+        if (sttEnabledBox == null) {
+            return;
+        }
+        SpeechToTextConfiguration stt = model.getSpeechToTextConfiguration();
+        updatingDictationSettings = true;
+        try {
+            sttEnabledBox.setSelected(stt.isEnabled());
+            sttLanguageCombo.setSelectedItem(stt.getLanguage().isEmpty() ? "auto" : stt.getLanguage());
+            sttPromptField.setText(stt.getPrompt());
+            sttPromptShown = sttPromptField.getText();
+            sttMaxFileSize.setValue(stt.getMaxFileSizeMb());
+            sttTimeout.setSeconds(stt.getTimeoutSeconds());
+        } finally {
+            updatingDictationSettings = false;
+        }
     }
 
     private JComponent buildSettingsContent() {
@@ -1243,7 +1272,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     private JComponent buildSpeechCard() {
         ComicForm input = ComicForm.titled("Dictation (speech-to-text)");
         final SpeechToTextConfiguration sttNow = model.getSpeechToTextConfiguration();
-        final javax.swing.JCheckBox sttEnabledBox = ComicControls.checkBox(
+        sttEnabledBox = ComicControls.checkBox(
                 "Dictate with the microphone (transcribe recordings and audio files)", sttNow.isEnabled());
         sttEnabledBox.addActionListener(event -> {
             model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
@@ -1265,12 +1294,15 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         audioModelCombo.addActionListener(event -> persistAudioModelSelection());
         input.row("Model", audioModelCombo);
 
-        final JComboBox<String> sttLanguageCombo = ComicControls.<String>comboBox(STT_LANGUAGES);
+        sttLanguageCombo = ComicControls.<String>comboBox(STT_LANGUAGES);
         sttLanguageCombo.setEditable(true);
         sttLanguageCombo.setSelectedItem(sttNow.getLanguage().isEmpty() ? "auto" : sttNow.getLanguage());
         sttLanguageCombo.setToolTipText("The language spoken in recordings; \"auto\" lets the model detect it."
                 + " Type another ISO code if yours is missing.");
         sttLanguageCombo.addActionListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
             Object language = sttLanguageCombo.getSelectedItem();
             model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
                     .withLanguage(language == null ? "auto" : String.valueOf(language).trim()));
@@ -1278,10 +1310,13 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         });
         input.row("Language", sttLanguageCombo);
 
-        final JTextField sttPromptField = ComicControls.textField(sttNow.getPrompt(), 30);
+        sttPromptField = ComicControls.textField(sttNow.getPrompt(), 30);
+        sttPromptShown = sttPromptField.getText();
         sttPromptField.setToolTipText("Optional context given to the transcription model (names, jargon).");
         Runnable persistPrompt = () -> {
-            if (!sttPromptField.getText().trim().equals(model.getSpeechToTextConfiguration().getPrompt())) {
+            // Only a real edit of the shown text is saved — leaving the field unchanged never writes.
+            if (!sttPromptField.getText().equals(sttPromptShown)) {
+                sttPromptShown = sttPromptField.getText();
                 model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
                         .withPrompt(sttPromptField.getText()));
                 model.saveSettings();
@@ -1346,20 +1381,25 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         input.inline(autoStopBox, silenceSpinner, new JLabel("seconds, when the signal stays below"),
                 thresholdSpinner, new JLabel("%"));
 
-        final javax.swing.JSpinner sttMaxFileSize = ComicControls.integerSpinner(
+        sttMaxFileSize = ComicControls.integerSpinner(
                 sttNow.getMaxFileSizeMb(), 1, 100000, 10, 6);
         sttMaxFileSize.setToolTipText("Larger recordings or audio files are not sent for transcription.");
         sttMaxFileSize.addChangeListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
             model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
                     .withMaxFileSizeMb(((Number) sttMaxFileSize.getValue()).intValue()));
             model.saveSettings();
         });
         input.row("Max file size", sttMaxFileSize, new JLabel("MB"));
-        final com.aresstack.comiccontrols.control.ComicDurationField sttTimeout =
-                new com.aresstack.comiccontrols.control.ComicDurationField(24 * 3600);
+        sttTimeout = new com.aresstack.comiccontrols.control.ComicDurationField(24 * 3600);
         sttTimeout.setSeconds(sttNow.getTimeoutSeconds());
         sttTimeout.setToolTipText("How long one transcription may take before AskAI gives up.");
         sttTimeout.addChangeListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
             long seconds = sttTimeout.getSeconds();
             model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
                     .withTimeoutSeconds(seconds > 0 ? (int) Math.min(Integer.MAX_VALUE, seconds)

@@ -116,4 +116,14 @@ public class TtsSettingsStoreTest {
         assertEquals(TextToSpeechSettings.Engine.PIPER,
                 TextToSpeechSettings.parseEngine(" PIPER "));
     }
+
+    @Test
+    public void anExplicitLegacyWindowsChoiceStaysWindows() throws Exception {
+        Path file = temp.getRoot().toPath().resolve("legacy-windows.properties");
+        Files.write(file, "tts.engine=WINDOWS\n".getBytes(StandardCharsets.UTF_8));
+        TextToSpeechSettings loaded = new TtsSettingsStore(file).load();
+        for (String language : TextToSpeechSettings.LANGUAGE_CODES) {
+            assertEquals(TextToSpeechSettings.Engine.WINDOWS, loaded.selectionFor(language).getEngine());
+        }
+    }
 }
