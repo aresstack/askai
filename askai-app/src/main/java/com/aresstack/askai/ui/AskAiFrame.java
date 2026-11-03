@@ -222,6 +222,11 @@ public final class AskAiFrame extends JFrame {
         this.applicationState = new ApplicationStateService();
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent event) {
+                // Arm the hard exit before any teardown can block (EDT, shutdown hooks, native processes).
+                ExitWatchdog.arm();
+            }
+
             public void windowClosed(WindowEvent event) {
                 performShutdown();
             }
@@ -250,7 +255,7 @@ public final class AskAiFrame extends JFrame {
         shutdownLog("performShutdown begin");
         // Safety net: if a library thread (JGroups, HTTP, audio, browser, executors, ...) stays alive or a
         // teardown step hangs, the watchdog logs the culprits and exits the JVM after a grace period.
-        ExitWatchdog.start(ExitWatchdog.DEFAULT_GRACE_MILLIS);
+        ExitWatchdog.arm();
         if (chatWorkspaceHost != null) {
             try {
                 chatWorkspaceHost.shutdown();
