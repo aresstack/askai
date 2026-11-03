@@ -55,8 +55,16 @@ public interface SetupActions {
     /** The read-aloud voices AskAI offers (installed ones marked). */
     void loadVoices(Consumer<List<VoiceOffer>> done);
 
-    /** Downloads and installs a voice (engine first, if missing); {@code progress} gets short status lines. */
-    void installVoice(String voiceId, Consumer<String> progress, BiConsumer<String, String> done);
+    /** Download progress: a short stage text and the bytes so far of {@code total} ({@code total <= 0}: unknown). */
+    interface Progress {
+        void update(String stage, long done, long total);
+    }
+
+    /**
+     * Downloads and installs a voice (engine first, if missing) through the draft's network settings, so a running
+     * download also proves the proxy and certificate settings.
+     */
+    void installVoice(SetupDraft draft, String voiceId, Progress progress, BiConsumer<String, String> done);
 
     /** Stores the draft's voice choice per language; {@code done} gets {@code null} or the error. */
     void saveVoices(SetupDraft draft, Consumer<String> done);
@@ -129,6 +137,39 @@ public interface SetupActions {
         public boolean reachable() {
             return ollamaVersion != null || localRuntime;
         }
+    }
+
+    /** Suggested when no chat model is installed yet: small enough for an ordinary PC, good enough to chat. */
+    String RECOMMENDED_CHAT_MODEL = "qwen3:8b";
+    /** Suggested when no embedding model is installed yet. */
+    String RECOMMENDED_EMBEDDING_MODEL = "nomic-embed-text";
+    /** The reranker the research agent asks for; it runs in AskAI's own local runtime (Ollama has none). */
+    String RECOMMENDED_RERANKER = "cross-encoder/ms-marco-MiniLM-L6-v2";
+
+    /** Lets Ollama download a model ({@code done}: the model name or the error). */
+    default void pullModel(SetupDraft draft, String model, Progress progress, BiConsumer<String, String> done) {
+        done.accept(null, "downloading models is not available here");
+    }
+
+    /**
+     * Installs {@link #RECOMMENDED_RERANKER} into AskAI's local runtime through the draft's network settings
+     * ({@code done}: the reranker's model name or the error).
+     */
+    default void installReranker(SetupDraft draft, Progress progress, BiConsumer<String, String> done) {
+        done.accept(null, "installing a reranker is not available here");
+    }
+
+    /**
+     * The sections agent plugins contribute to the research step (e.g. the search browser download and the
+     * search provider). Default: none.
+     */
+    default List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> pluginSetup() {
+        return java.util.Collections.emptyList();
+    }
+
+    /** What plugin setup pages get from the host; {@code null} when there is no host state. */
+    default com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext pluginSetupContext() {
+        return null;
     }
 
     /** The installed models per role. */

@@ -197,7 +197,8 @@ public class SetupWizardPanelTest {
         wizard.finishButton().doClick();
 
         assertTrue(finished[0]);
-        assertNull("a voice that is not installed is not stored", fake.savedVoices);
+        assertTrue("a voice that is not installed is not stored",
+                fake.savedVoices == null || fake.savedVoices.voiceGerman().isEmpty());
     }
 
     @Test
@@ -244,8 +245,8 @@ public class SetupWizardPanelTest {
     public void theVoiceStepComesRightAfterTheNetworkAndStoresTheVoicesOnLeaving() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
-        wizard.nextButton().doClick();
-        assertEquals(SetupWizardPanel.STEP_VOICE, wizard.step());
+        assertEquals("network and voice share the first step", SetupWizardPanel.STEP_VOICE, wizard.step());
+        assertEquals(SetupWizardPanel.STEP_NETWORK, wizard.step());
         assertNull(fake.savedVoices);
 
         wizard.nextButton().doClick();
@@ -257,7 +258,6 @@ public class SetupWizardPanelTest {
     @Test
     public void withoutAVoiceTheWizardOnlyThinks() {
         SetupWizardPanel wizard = wizard(new Fake());
-        wizard.nextButton().doClick();
         assertFalse(wizard.isWitchAwake());
         assertEquals(WizardGuide.THOUGHT_SILENT, wizard.mascotOf(SetupWizardPanel.STEP_VOICE).spokenText());
     }
@@ -292,6 +292,136 @@ public class SetupWizardPanelTest {
 
         assertTrue("awake without any AI runtime", wizard.isWitchAwake());
         assertFalse(spoken.isEmpty());
+    }
+
+    @Test
+    public void theVoiceDownloadUsesTheProxyOfTheStepAndShowsItsProgress() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.proxyModeChoice().setSelectedItem(SetupWizardPanel.LABEL_PROXY_MANUAL);
+        wizard.voiceGermanChoice().setSelectedItem("Thorsten (German)");
+
+        wizard.voiceInstallButton().doClick();
+
+        assertEquals("the download is the network test", SetupWizardPanel.PROXY_MANUAL, fake.voiceDraft.proxyMode());
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_NETWORK));
+    }
+
+    @Test
+    public void aMissingChatModelCanBeDownloadedRightInTheStep() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_CHAT);
+        wizard.chatModelChoice().setSelectedItem("mistral");
+        assertTrue("offered for a model that is not installed", wizard.chatDownloadButton().isVisible());
+
+        wizard.chatDownloadButton().doClick();
+
+        assertEquals(Collections.singletonList("mistral"), fake.pulled);
+        assertEquals("the name Ollama lists it under", "mistral:latest", wizard.draft().chatModel());
+    }
+
+    @Test
+    public void pulledModelsKeepTheNameOllamaListsThemUnder() {
+        assertEquals("nomic-embed-text:latest", AskAiSetupActions.canonicalOllamaName("nomic-embed-text"));
+        assertEquals("qwen3:8b", AskAiSetupActions.canonicalOllamaName("qwen3:8b"));
+        assertEquals("hf.co/user/model:latest", AskAiSetupActions.canonicalOllamaName("hf.co/user/model"));
+        assertEquals("registry:5000/model:latest", AskAiSetupActions.canonicalOllamaName("registry:5000/model"));
+    }
+
+    @Test
+    public void everyStepShowsItsOwnPicture() {
+        SetupWizardPanel wizard = wizard(new Fake());
+        String[] expected = {"voice", "ai-runtime", "chat-model", "knowledge", "check"};
+        int[] steps = {SetupWizardPanel.STEP_VOICE, SetupWizardPanel.STEP_RUNTIME, SetupWizardPanel.STEP_CHAT,
+                SetupWizardPanel.STEP_KNOWLEDGE, SetupWizardPanel.STEP_CHECK};
+        for (int i = 0; i < steps.length; i++) {
+            String resource = wizard.mascotOf(steps[i]).art().resource();
+            assertTrue(SetupWizardPanel.STEP_NAMES[steps[i]] + " shows " + resource,
+                    resource.contains(expected[i]) || resource.equals(SetupWizardPanel.CHECK_SUCCESS_MASCOT));
+        }
+    }
+
+    @Test
+    public void aChosenButNotInstalledRerankerCanBeInstalled() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = new SetupWizardPanel(SetupDraft.builder().ollamaBaseUrl("http://localhost:11434")
+                .rerankerModel("local/cross-encoder/ms-marco-MiniLM-L6-v2:latest").build(), fake,
+                ComicPalette.defaultPalette());
+        wizard.jumpTo(SetupWizardPanel.STEP_KNOWLEDGE);
+        assertTrue("a local reranker that is only chosen must be installable",
+                wizard.rerankerInstallButton().isVisible());
+    }
+
+    @Test
+    public void theCheckPageInstallsMissingLocalModelsAndChecksAgain() {
+        Fake fake = new Fake();
+        fake.checks = Arrays.asList(SetupCheck.ok("AI runtime", "Ollama 0.9.0"),
+                SetupCheck.failed("Reranker", "local/cross-encoder/ms-marco-MiniLM-L6-v2:latest is not installed"),
+                SetupCheck.failed("Sentence model (German)", "apache-opennlp/sentence-de is not installed"));
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
+        assertTrue(wizard.checkInstallMissingButton().isVisible());
+        int checksBefore = fake.finishes;
+        fake.checks = Collections.singletonList(SetupCheck.ok("AI runtime", "Ollama 0.9.0"));
+
+        wizard.checkInstallMissingButton().doClick();
+
+        assertEquals(1, fake.rerankerInstalls);
+        assertEquals(1, fake.sentenceInstalls);
+        assertEquals("checked again after the installation", checksBefore + 1, fake.finishes);
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_CHECK));
+        assertFalse(wizard.checkInstallMissingButton().isVisible());
+    }
+
+    @Test
+    public void theRequiredRerankerIsInstalledAndSelectedInTheKnowledgeStep() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_KNOWLEDGE);
+        assertTrue(wizard.rerankerInstallButton().isVisible());
+
+        wizard.rerankerInstallButton().doClick();
+
+        assertEquals(1, fake.rerankerInstalls);
+        assertEquals("ms-marco-MiniLM-L6-v2", wizard.draft().rerankerModel());
+    }
+
+    @Test
+    public void pluginSectionsAppearInTheResearchStepAndAreSavedWithTheSetup() {
+        Fake fake = new Fake();
+        final int[] saved = {0};
+        final javax.swing.JLabel section = new javax.swing.JLabel("search browser");
+        fake.contributions.add(new com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution() {
+            @Override
+            public String getDisplayName() {
+                return "Web search";
+            }
+
+            @Override
+            public com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage createSetupPage(
+                    com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext context) {
+                return new com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage() {
+                    @Override
+                    public javax.swing.JComponent getComponent() {
+                        return section;
+                    }
+
+                    @Override
+                    public void save() {
+                        saved[0]++;
+                    }
+                };
+            }
+        });
+        SetupWizardPanel wizard = wizard(fake);
+        assertNull("built when the research step opens", section.getParent());
+
+        wizard.jumpTo(SetupWizardPanel.STEP_KNOWLEDGE);
+        assertNotNull(section.getParent());
+
+        wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
+        assertTrue("saved with the final check", saved[0] > 0);
     }
 
     @Test
@@ -385,6 +515,12 @@ public class SetupWizardPanelTest {
         SetupDraft finished;
         SetupDraft savedVoices;
         boolean thorstenInstalled;
+        SetupDraft voiceDraft;
+        List<String> pulled = new ArrayList<String>();
+        int rerankerInstalls;
+        int finishes;
+        List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> contributions =
+                new ArrayList<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>();
         boolean cancelled;
 
         @Override
@@ -415,7 +551,8 @@ public class SetupWizardPanelTest {
         @Override
         public void loadModels(SetupDraft draft, Consumer<SetupModels> done) {
             done.accept(new SetupModels(Arrays.asList("llama3.2", "qwen3"), Collections.singletonList(
-                    "nomic-embed-text"), Collections.<String>emptyList(), sentenceInstalled
+                    "nomic-embed-text"), rerankerInstalls > 0 ? Collections.singletonList("ms-marco-MiniLM-L6-v2")
+                    : Collections.<String>emptyList(), sentenceInstalled
                     ? Collections.singletonList("opennlp-de-sent") : Collections.<String>emptyList(),
                     Collections.<String>emptyList(), ""));
         }
@@ -440,9 +577,35 @@ public class SetupWizardPanelTest {
         }
 
         @Override
-        public void installVoice(String voiceId, Consumer<String> progress, BiConsumer<String, String> done) {
+        public void installVoice(SetupDraft draft, String voiceId, Progress progress,
+                                 BiConsumer<String, String> done) {
+            voiceDraft = draft;
+            progress.update("Downloading", 50, 100);
             thorstenInstalled = true;
             done.accept("installed", null);
+        }
+
+        @Override
+        public void pullModel(SetupDraft draft, String model, Progress progress, BiConsumer<String, String> done) {
+            pulled.add(model);
+            progress.update("pulling", 1, 2);
+            done.accept(AskAiSetupActions.canonicalOllamaName(model), null);
+        }
+
+        @Override
+        public void installReranker(SetupDraft draft, Progress progress, BiConsumer<String, String> done) {
+            rerankerInstalls++;
+            done.accept("ms-marco-MiniLM-L6-v2", null);
+        }
+
+        @Override
+        public List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> pluginSetup() {
+            return contributions;
+        }
+
+        @Override
+        public com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext pluginSetupContext() {
+            return () -> null;
         }
 
         @Override
@@ -454,6 +617,7 @@ public class SetupWizardPanelTest {
         @Override
         public void finish(SetupDraft draft, Consumer<List<SetupCheck>> done) {
             finished = draft;
+            finishes++;
             done.accept(checks);
         }
 

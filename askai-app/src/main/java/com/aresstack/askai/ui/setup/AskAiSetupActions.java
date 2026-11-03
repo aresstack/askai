@@ -4,6 +4,7 @@ import com.aresstack.askai.agent.model.nlp.NlpCapability;
 import com.aresstack.askai.agent.model.reranker.RerankerModelCatalog;
 import com.aresstack.askai.AskAiModel;
 import com.aresstack.askai.client.AskAiOllamaClient;
+import com.aresstack.askai.client.OllamaPullProgress;
 import com.aresstack.askai.config.AiModelSelections;
 import com.aresstack.askai.config.AppConfiguration;
 import com.aresstack.askai.config.AppConfigurationRepository;
@@ -11,11 +12,13 @@ import com.aresstack.askai.hf.HuggingFaceClient;
 import com.aresstack.askai.hf.HuggingFaceConnectionTestResult;
 import com.aresstack.askai.localmodels.ApacheOpenNlpModelCatalogProvider;
 import com.aresstack.askai.localmodels.HttpNlpDownloadClient;
+import com.aresstack.askai.localmodels.LocalModelInstaller;
 import com.aresstack.askai.localmodels.LocalModelRuntimeManager;
 import com.aresstack.askai.localmodels.LocalNlpModelCatalog;
 import com.aresstack.askai.localmodels.LocalNlpModelStore;
 import com.aresstack.askai.localmodels.NlpModelCatalogEntry;
 import com.aresstack.askai.localmodels.NlpModelInstaller;
+import com.aresstack.askai.net.ConfiguredConnections;
 import com.aresstack.askai.net.CertificateTrustConfiguration;
 import com.aresstack.askai.net.ProxyConfiguration;
 import com.aresstack.askai.service.OllamaService;
@@ -61,7 +64,7 @@ public final class AskAiSetupActions implements SetupActions {
     /** Where the wizard's “Download Ollama…” leads. */
     static final String OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
     /** The language Witch speaks in (his lines are English). */
-    private static final String MERLIN_LANGUAGE = "en";
+    private static final String WITCH_LANGUAGE = "en";
     private static final String[] SENTENCE_LANGUAGES = {"de", "en"};
 
     private final AskAiModel model;
@@ -75,6 +78,15 @@ public final class AskAiSetupActions implements SetupActions {
     private final PiperTtsStore piperStore = new PiperTtsStore();
     private final ExecutorService worker = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "askai-setup-wizard");
+        thread.setDaemon(true);
+        return thread;
+    });
+    /**
+     * Long downloads (voice, sentence models, reranker) run here, next to {@link #worker}: a slow or stalled
+     * download must never queue the readiness checks behind it, or Finish would wait for it.
+     */
+    private final ExecutorService installs = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "askai-setup-wizard-install");
         thread.setDaemon(true);
         return thread;
     });
@@ -109,6 +121,39 @@ public final class AskAiSetupActions implements SetupActions {
         this.rerankers = rerankers;
         this.nlpStore = nlpStore;
         this.onSaved = onSaved;
+    }
+
+    private java.util.function.Supplier<List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>>
+            pluginSetup;
+    private com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostState;
+
+    /** Connects the plugins' setup sections (search browser, search provider) and the host state they write to. */
+    public void setPluginSetup(
+            java.util.function.Supplier<List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>>
+                    contributions,
+            com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostState) {
+        this.pluginSetup = contributions;
+        this.hostState = hostState;
+    }
+
+    @Override
+    public List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> pluginSetup() {
+        if (pluginSetup == null || hostState == null) {
+            return Collections.emptyList();
+        }
+        try {
+            List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> all = pluginSetup.get();
+            return all == null ? Collections.<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>
+                    emptyList() : all;
+        } catch (RuntimeException unavailable) {
+            return Collections.emptyList();
+        }
+    }
+
+    @Override
+    public com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext pluginSetupContext() {
+        final com.aresstack.askai.plugin.api.service.WorkspaceStateStore store = hostState;
+        return store == null ? null : () -> store;
     }
 
     /** The wizard's starting point: AskAI's settings as they are now. */
@@ -288,6 +333,73 @@ public final class AskAiSetupActions implements SetupActions {
     }
 
     @Override
+    public void pullModel(SetupDraft draft, final String model, final Progress progress,
+                          final BiConsumer<String, String> done) {
+        if (model == null || model.trim().isEmpty()) {
+            done.accept(null, "no model name");
+            return;
+        }
+        final String name = canonicalOllamaName(model.trim());
+        ollama.pullModel(name, new OllamaService.PullListener() {
+            @Override
+            public void onProgress(final OllamaPullProgress p) {
+                deliver(() -> progress.update(p.getStatus(), p.getCompleted(), p.getTotal()));
+            }
+
+            @Override
+            public void onComplete(String message) {
+                deliver(() -> done.accept(name, null));
+            }
+
+            @Override
+            public void onError(final Exception ex) {
+                deliver(() -> done.accept(null, message(ex)));
+            }
+        });
+    }
+
+    /**
+     * The name Ollama lists a pulled model under: without a tag it is stored as {@code :latest}, and AskAI compares
+     * configured names literally against {@code /api/tags} (embedding digest lookup), so the wizard keeps that name.
+     */
+    static String canonicalOllamaName(String model) {
+        int slash = model.lastIndexOf('/');
+        return model.indexOf(':', slash + 1) >= 0 ? model : model + ":latest";
+    }
+
+    @Override
+    public void installReranker(final SetupDraft draft, final Progress progress,
+                                final BiConsumer<String, String> done) {
+        if (localRuntime == null) {
+            done.accept(null, "AskAI's local model runtime is not available in this installation");
+            return;
+        }
+        final AppConfiguration stored = configuration.load();
+        install(() -> {
+            try {
+                HuggingFaceClient client = new HuggingFaceClient(proxyOf(draft, stored), trustOf(draft, stored),
+                        stored.getHttpClientConfiguration(), stored.getHuggingFaceToken());
+                final String name = new LocalModelInstaller(client, localRuntime).install(RECOMMENDED_RERANKER,
+                        new LocalModelInstaller.Listener() {
+                            @Override
+                            public void onStep(final String step) {
+                                deliver(() -> progress.update(step, 0, 0));
+                            }
+
+                            @Override
+                            public void onDownloadProgress(final String file, final long completed,
+                                                           final long total) {
+                                deliver(() -> progress.update(file, completed, total));
+                            }
+                        });
+                deliver(() -> done.accept(name, null));
+            } catch (Exception e) {
+                deliver(() -> done.accept(null, message(e)));
+            }
+        });
+    }
+
+    @Override
     public void embeddingDimension(SetupDraft draft, final BiConsumer<Integer, String> done) {
         if (draft.embeddingModel().isEmpty()) {
             done.accept(null, "no embedding model chosen");
@@ -309,7 +421,7 @@ public final class AskAiSetupActions implements SetupActions {
 
     @Override
     public void installSentenceModels(final Consumer<String> progress, final BiConsumer<String, String> done) {
-        background(() -> {
+        install(() -> {
             NlpModelInstaller installer = new NlpModelInstaller(new HttpNlpDownloadClient(), nlpStore);
             int installed = 0;
             try {
@@ -363,18 +475,20 @@ public final class AskAiSetupActions implements SetupActions {
     }
 
     @Override
-    public void installVoice(final String voiceId, final Consumer<String> progress,
+    public void installVoice(final SetupDraft draft, final String voiceId, final Progress progress,
                              final BiConsumer<String, String> done) {
         final PiperVoice voice = PiperVoiceCatalog.findById(voiceId);
         if (voice == null) {
             done.accept(null, "unknown voice " + voiceId);
             return;
         }
-        background(() -> {
+        install(() -> {
             try {
-                new PiperInstaller(piperStore, ttsSettings).install(voice, (stage, bytesDone, bytesTotal) ->
-                        deliver(() -> progress.accept(bytesTotal > 0
-                                ? stage + " " + (100 * bytesDone / bytesTotal) + " %" : stage)));
+                AppConfiguration stored = configuration.load();
+                ConfiguredConnections network = new ConfiguredConnections(proxyOf(draft, stored),
+                        trustOf(draft, stored), stored.getHttpClientConfiguration());
+                new PiperInstaller(piperStore, ttsSettings, network::open).install(voice,
+                        (stage, bytesDone, bytesTotal) -> deliver(() -> progress.update(stage, bytesDone, bytesTotal)));
                 deliver(() -> done.accept(voice.getDisplayName() + " installed.", null));
             } catch (Exception e) {
                 deliver(() -> done.accept(null, message(e)));
@@ -395,10 +509,17 @@ public final class AskAiSetupActions implements SetupActions {
         }
     }
 
+    /**
+     * Writes a picked Piper voice. "Windows voice" only replaces a Piper voice that was chosen before; otherwise the
+     * language keeps its stored (default) selection, so the wizard never overrides the default engine by itself.
+     */
     private static TextToSpeechSettings withVoice(TextToSpeechSettings settings, String language, String voiceId) {
-        return voiceId.isEmpty()
-                ? settings.withSelection(language, TextToSpeechSettings.Engine.WINDOWS, "")
-                : settings.withSelection(language, TextToSpeechSettings.Engine.PIPER, voiceId);
+        if (voiceId.isEmpty()) {
+            return piperVoiceOf(settings, language).isEmpty()
+                    ? settings
+                    : settings.withSelection(language, TextToSpeechSettings.Engine.WINDOWS, "");
+        }
+        return settings.withSelection(language, TextToSpeechSettings.Engine.PIPER, voiceId);
     }
 
     // ------------------------------------------------------------------ finish
@@ -472,7 +593,8 @@ public final class AskAiSetupActions implements SetupActions {
         }
 
         if (draft.rerankerModel().isEmpty()) {
-            checks.add(SetupCheck.ok("Reranker", "none chosen (optional)"));
+            checks.add(SetupCheck.failed("Reranker", "none chosen – the web research needs one; install the "
+                    + "recommended reranker in the Knowledge step"));
         } else if (rerankers != null && quietly(rerankers::listInstalledRerankModels)
                 .contains(draft.rerankerModel())) {
             checks.add(SetupCheck.ok("Reranker", draft.rerankerModel()));
@@ -568,13 +690,13 @@ public final class AskAiSetupActions implements SetupActions {
         return new WizardVoice() {
             @Override
             public boolean isAvailable() {
-                return service.isModelVoiceActive(MERLIN_LANGUAGE);
+                return service.isModelVoiceActive(WITCH_LANGUAGE);
             }
 
             @Override
             public void speak(final String text) {
                 service.stop(); // a new line replaces the one still being spoken
-                speaker.execute(() -> service.speak(text, MERLIN_LANGUAGE));
+                speaker.execute(() -> service.speak(text, WITCH_LANGUAGE));
             }
 
             @Override
@@ -600,6 +722,10 @@ public final class AskAiSetupActions implements SetupActions {
 
     private void background(Runnable task) {
         worker.execute(task);
+    }
+
+    private void install(Runnable task) {
+        installs.execute(task);
     }
 
     private static void deliver(Runnable result) {

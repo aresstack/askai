@@ -75,6 +75,12 @@ public final class InProcessBrowser implements AutoCloseable {
         return CamoufoxProvisioning.installOnly();
     }
 
+    /** What the managed Camoufox installation is doing right now (for a progress bar, e.g. in the setup wizard). */
+    public static com.aresstack.askai.browser.playwright.camoufox.CamoufoxInstaller.Status camoufoxStatus() {
+        return com.aresstack.askai.browser.playwright.camoufox.CamoufoxInstaller
+                .shared(CamoufoxProvisioning.browserRoot(), null).status();
+    }
+
     @Override
     public void close() {
         if (closed) {

@@ -39,12 +39,27 @@ public final class PiperInstaller {
         void onProgress(String stage, long bytesDone, long bytesTotal);
     }
 
+    /** Opens the download connections; lets the caller route them through AskAI's network settings. */
+    public interface Connector {
+        HttpURLConnection open(String url) throws IOException;
+    }
+
     private final PiperTtsStore store;
     private final TtsSettingsStore settings;
+    private final Connector connector;
 
     public PiperInstaller(PiperTtsStore store, TtsSettingsStore settings) {
+        this(store, settings, url -> (HttpURLConnection) new URL(url).openConnection());
+    }
+
+    /** @param connector opens each download, e.g. with the configured proxy and certificate trust */
+    public PiperInstaller(PiperTtsStore store, TtsSettingsStore settings, Connector connector) {
+        if (connector == null) {
+            throw new IllegalArgumentException("connector must not be null");
+        }
         this.store = store;
         this.settings = settings;
+        this.connector = connector;
     }
 
     /**
@@ -208,7 +223,7 @@ public final class PiperInstaller {
 
     private HttpURLConnection open(String url) throws IOException {
         int timeoutMillis = settings.load().getNetworkTimeoutSeconds() * 1000;
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection connection = connector.open(url);
         connection.setConnectTimeout(timeoutMillis);
         connection.setReadTimeout(timeoutMillis);
         connection.setInstanceFollowRedirects(true);

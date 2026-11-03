@@ -71,6 +71,12 @@ public final class ResearchAgentPluginExtension implements AgentPluginExtension 
     }
 
     @Override
+    public List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> getSetupContributions() {
+        return java.util.Collections.<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>
+                singletonList(new com.aresstack.askai.research.host.ResearchSetupContribution());
+    }
+
+    @Override
     public List<com.aresstack.askai.plugin.api.agent.composer.ComposerAccessoryContribution>
             getComposerAccessories() {
         // ABOVE the composer: the scoping controls (map + suggestions + query). OVER the

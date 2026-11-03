@@ -88,6 +88,9 @@ dependencies {
 
 test {
     useJUnit()
+    // As AskAiApp.main sets it before the first HTTP connection (the JDK reads it once per JVM); without it the
+    // proxy-tunnel test depends on which test opened a connection first.
+    systemProperty 'jdk.http.auth.tunneling.disabledSchemes', ''
     doFirst {
         // C2c: the opt-in real-model smoke drives the productive (in-process) LocalModelRuntimeManager.
         // Gated by -Daskai.local.realModelSmoke=true, so a normal build never downloads models.

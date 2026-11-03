@@ -61,7 +61,6 @@ final class WizardGuide {
 
     private static final String[] ON_ENTER = {
             null,
-            "First a voice for me: pick one per language and download it, then I can read aloud to you.",
             "Here we connect me with an AI runtime. As soon as that works, I can talk to you.",
             "Now I'm choosing a brain for myself. Pick the model we'll chat with.",
             "Here I learn how to search, read and rank knowledge. The better I can do that, the less I have to "
@@ -71,28 +70,26 @@ final class WizardGuide {
 
     private static final String[] WHAT_TO_DO = {
             "Choose how AskAI reaches the internet: without a proxy, via the Windows proxy settings or a proxy of "
-                    + "your own. In company networks, also trust the Windows certificates. Then click “Test "
-                    + "connection” – or simply download a voice in the next step: if the download runs, the network works. "
-                    + "Working offline? Then just skip this step.",
-            "Pick a voice per language and click “Download selected voices”, or keep the Windows voice. You can skip "
-                    + "this step and change voices later in the settings.",
+                    + "your own; in company networks also trust the Windows certificates. Then pick my voice and "
+                    + "click “Download voice”: if the progress bar moves, your network settings work. Working "
+                    + "offline? Keep the Windows voice and skip this step.",
             "Enter the address of your Ollama server – on your own machine that is usually http://localhost:11434 – "
                     + "and click “Test connection”. No Ollama yet? “Download Ollama” takes you to it. AskAI's own "
                     + "local runtime counts too, as soon as it has a model.",
-            "Choose the model we'll chat with. It is also the main model of all plugins. Missing one? Install it "
-                    + "later under Models; “Reload models” fetches the list again.",
+            "Choose the model we'll chat with. It is also the main model of all plugins. Not installed yet? "
+                    + "“Download model” lets Ollama fetch it – the suggestion is a good start.",
             "Choose an embedding model for the knowledge search – I'll measure its vector length myself. A "
-                    + "reranker is optional but improves the ranking of sources. The sentence models split texts "
-                    + "into sentences; “Install sentence models” fetches the missing ones.",
+                    + "reranker ranks the sources and is required for web research: “Install recommended reranker” "
+                    + "puts it into AskAI's own runtime. The sentence models split texts into sentences; “Install "
+                    + "sentence models” fetches the missing ones.",
             "Nothing else: I save everything and check it. If something is red, jump to that step above, fix it, "
                     + "and then click “Check again”. “Finish” ends the setup – even if something is still red."
     };
 
     private static final String[] WHY_NEEDED = {
             "Models, voices and web searches come from the internet. If the proxy or the certificates are wrong, "
-                    + "every download fails – better to find out now.",
-            "With a local voice I read answers aloud without your text leaving your computer. The voices are not "
-                    + "part of AskAI, they have to be downloaded once.",
+                    + "every download fails – the voice download finds that out right away. And with a local voice I "
+                    + "read answers aloud without your text leaving your computer.",
             "The runtime is my head: without it I can neither answer nor understand texts.",
             "The chat model phrases my answers. Everything else – research, summaries, tools – builds on it.",
             "The embedding model finds the passages that match your question, even when other words are used. The "
@@ -101,7 +98,7 @@ final class WizardGuide {
                     + "block for real once."
     };
 
-    private static final String[] TOPIC = {"Network and security", "Voice", "AI runtime", "Chat model",
+    private static final String[] TOPIC = {"Connection and voice", "AI runtime", "Chat model",
             "Knowledge and research", "Final check"};
 
     /** The introduction: in detail on the first start, as a reunion when called later. */
