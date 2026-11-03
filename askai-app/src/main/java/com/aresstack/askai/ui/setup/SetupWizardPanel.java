@@ -128,7 +128,8 @@ public final class SetupWizardPanel extends JPanel {
     private final ComicButton nextButton = new ComicButton("Next", ComicButton.Accent.ACTION);
     private final ComicButton finishButton = new ComicButton("Finish", ComicButton.Accent.ACTION);
     private final ComicButton skipButton = new ComicButton("Skip");
-    private final List<SetupWizardMascot> mascots = new ArrayList<SetupWizardMascot>();
+    /** Witch per step, indexed by step (not by the order the pages are built in). */
+    private final SetupWizardMascot[] mascots = new SetupWizardMascot[STEP_NAMES.length];
 
     private SetupDraft draft;
     private int step;
@@ -199,11 +200,18 @@ public final class SetupWizardPanel extends JPanel {
     private final List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage> pluginPages =
             new ArrayList<com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage>();
     private List<String> installedEmbeddings = Collections.emptyList();
+    private List<String> installedRerankers = Collections.emptyList();
+    private List<String> installedSentenceGerman = Collections.emptyList();
+    private List<String> installedSentenceEnglish = Collections.emptyList();
 
     // Step 5: final check
     private final JPanel checkRows = transparent(new GridBagLayout());
     private final JLabel checkStatus = statusLabel();
     private final ComicButton checkRetry = new ComicButton("Check again");
+    /** On the check page when local models are missing: installs them right there, then checks again. */
+    private final ComicButton checkInstallMissing = new ComicButton("Install missing models");
+    /** Installs started by {@link #checkInstallMissing} that have not finished yet. */
+    private int pendingFixes;
     private List<SetupCheck> lastChecks = Collections.emptyList();
     /** The draft the last passed final check saved (without the voices, which the last step saves itself). */
     private String checkedDraft = "";
@@ -301,7 +309,7 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private JPanel connectionStep() {
-        Rows rows = new Rows("Connection and voice");
+        Rows rows = new Rows(STEP_CONNECTION, "Connection and voice");
         rows.note("AskAI downloads models and voices and searches the web. Choose how it reaches the internet; in "
                 + "company networks AskAI can also trust the certificates of the Windows certificate stores. Then "
                 + "download a voice: the download uses exactly these settings, so a moving progress bar means the "
@@ -330,7 +338,7 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private JPanel runtimeStep() {
-        Rows rows = new Rows("AI runtime");
+        Rows rows = new Rows(STEP_RUNTIME, "AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
                 + "runtime. One of them must answer; the final check shows which one does.");
         rows.field("Ollama address", ollamaUrl);
@@ -343,7 +351,7 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private JPanel chatStep() {
-        Rows rows = new Rows("Chat model");
+        Rows rows = new Rows(STEP_CHAT, "Chat model");
         rows.note("The chat model answers in the chat and is the main model of all plugins (research agent, "
                 + "summaries, tools). The list shows the models installed in Ollama and in AskAI's local runtime.");
         chatModel.setEditable(true);
@@ -359,7 +367,7 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private JPanel knowledgeStep() {
-        Rows rows = new Rows("Knowledge and research");
+        Rows rows = new Rows(STEP_KNOWLEDGE, "Knowledge and research");
         rows.note("The research agent finds matching passages with the embedding model, ranks them with the "
                 + "reranker and splits sources into sentences with the OpenNLP sentence models. The reranker is "
                 + "required for web research; it runs in AskAI's own local runtime, so install it here.");
@@ -427,11 +435,15 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private JPanel checkStep() {
-        Rows rows = new Rows("Final check");
-        rows.note("The settings are saved and then checked for real. “Next” is only possible once AskAI is ready.");
+        Rows rows = new Rows(STEP_CHECK, "Final check");
+        rows.note("The settings are saved and then checked for real. Nothing here blocks you: missing local models "
+                + "can be installed right here, and “Finish” ends the setup either way.");
         rows.wide(checkRows);
         rows.field("", checkStatus);
-        rows.field("", buttonRow(checkRetry));
+        JPanel checkActions = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        checkActions.add(checkInstallMissing);
+        checkActions.add(checkRetry);
+        rows.field("", checkActions);
         return rows.panel();
     }
 
@@ -486,6 +498,7 @@ public final class SetupWizardPanel extends JPanel {
         embeddingDownload.button.addActionListener(e -> pull(embeddingDownload, embeddingModel));
         rerankerDownload.button.addActionListener(e -> installReranker());
         checkRetry.addActionListener(e -> runFinalCheck());
+        checkInstallMissing.addActionListener(e -> installMissingModels());
         voiceGerman.addActionListener(e -> updateButtons());
         voiceEnglish.addActionListener(e -> updateButtons());
         voiceInstall.addActionListener(e -> installVoices());
@@ -780,8 +793,12 @@ public final class SetupWizardPanel extends JPanel {
         embeddingDownload.button.setVisible(!text(embeddingModel).isEmpty()
                 && !installedEmbeddings.contains(text(embeddingModel)));
         rerankerDownload.button.setEnabled(!rerankerDownload.running);
-        rerankerDownload.button.setVisible(text(rerankerModel).isEmpty());
+        // The reranker is a local model: offer the installation whenever the chosen one is not installed.
+        rerankerDownload.button.setVisible(!installedRerankers.contains(text(rerankerModel)));
         sentenceInstall.setEnabled(!busy && !installing());
+        sentenceInstall.setVisible(sentenceModelsMissing());
+        checkInstallMissing.setVisible(pendingFixes > 0 || !missingLocalModels().isEmpty());
+        checkInstallMissing.setEnabled(!busy && pendingFixes == 0);
         voiceInstall.setVisible(!missingVoices().isEmpty());
         voiceInstall.setEnabled(!busy && !installing());
         voiceRetry.setVisible(voicesLoadFailed);
@@ -979,6 +996,9 @@ public final class SetupWizardPanel extends JPanel {
         }
         installedChat = models.chat();
         installedEmbeddings = models.embeddings();
+        installedRerankers = models.rerankers();
+        installedSentenceGerman = models.sentenceGerman();
+        installedSentenceEnglish = models.sentenceEnglish();
         modelsStatus.setText(!models.problem().isEmpty() ? shorten(models.problem())
                 : count == 0 ? "No chat model installed yet – “Download model” fetches the suggested one."
                 : count == 1 ? "1 chat model available." : count + " chat models available.");
@@ -1027,6 +1047,13 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private void installSentenceModels() {
+        installSentenceModels(null);
+    }
+
+    private void installSentenceModels(final Runnable after) {
+        if (sentenceInstalling) {
+            return;
+        }
         sentenceInstalling = true;
         clearError(STEP_KNOWLEDGE);
         knowledgeStatus.setText("Installing sentence models …");
@@ -1043,6 +1070,10 @@ public final class SetupWizardPanel extends JPanel {
             if (error != null) {
                 knowledgeStatus.setText(" ");
                 fail(STEP_KNOWLEDGE, "The sentence models could not be installed: " + error);
+                if (after != null) {
+                    fixFailures.append("Sentence models: ").append(error).append('\n');
+                    after.run();
+                }
                 return;
             }
             knowledgeStatus.setText(message == null || message.isEmpty() ? "Sentence models installed." : message);
@@ -1051,6 +1082,9 @@ public final class SetupWizardPanel extends JPanel {
             }
             modelsLoaded = false;
             refreshModels();
+            if (after != null) {
+                after.run();
+            }
         });
     }
 
@@ -1379,6 +1413,10 @@ public final class SetupWizardPanel extends JPanel {
 
     /** Installs the recommended reranker into AskAI's local runtime and selects it. */
     private void installReranker() {
+        installReranker(null);
+    }
+
+    private void installReranker(final Runnable after) {
         if (rerankerDownload.running) {
             return;
         }
@@ -1388,6 +1426,13 @@ public final class SetupWizardPanel extends JPanel {
                 return;
             }
             rerankerDownload.end(error == null ? "Reranker installed." : "Installation failed: " + error);
+            if (after != null) {
+                if (error == null) {
+                    installedRerankers = append(installedRerankers, model);
+                } else {
+                    fixFailures.append("Reranker: ").append(error).append('\n');
+                }
+            }
             if (error == null) {
                 if (((javax.swing.DefaultComboBoxModel<String>) rerankerModel.getModel()).getIndexOf(model) < 0) {
                     rerankerModel.addItem(model);
@@ -1396,7 +1441,74 @@ public final class SetupWizardPanel extends JPanel {
                 modelsLoaded = false;
                 refreshModels();
             }
+            if (after != null) {
+                after.run();
+            }
         });
+    }
+
+    private final StringBuilder fixFailures = new StringBuilder();
+
+    /** The local models the last check found missing: reranker and/or sentence models. */
+    private List<String> missingLocalModels() {
+        List<String> missing = new ArrayList<String>();
+        for (SetupCheck check : lastChecks) {
+            if (!check.isOk() && (check.label().equals("Reranker") || check.label().startsWith("Sentence model"))) {
+                missing.add(check.label());
+            }
+        }
+        return missing;
+    }
+
+    /**
+     * Installs on the check page what the last check found missing (the reranker into AskAI's local runtime, the
+     * sentence models into the model folder), then checks again – the user never has to go back for it.
+     */
+    private void installMissingModels() {
+        List<String> missing = missingLocalModels();
+        if (missing.isEmpty() || pendingFixes > 0) {
+            return;
+        }
+        boolean reranker = missing.contains("Reranker");
+        boolean sentences = missing.size() > (reranker ? 1 : 0);
+        fixFailures.setLength(0);
+        clearError(STEP_CHECK);
+        pendingFixes = (reranker ? 1 : 0) + (sentences ? 1 : 0);
+        checkStatus.setText(reranker && sentences ? "Installing the reranker and the sentence models …"
+                : reranker ? "Installing the reranker …" : "Installing the sentence models …");
+        Runnable oneDone = () -> {
+            pendingFixes--;
+            if (pendingFixes > 0 || closed) {
+                updateButtons();
+                return;
+            }
+            if (fixFailures.length() > 0) {
+                checkStatus.setText("Not everything could be installed.");
+                fail(STEP_CHECK, fixFailures.toString().trim());
+                updateButtons();
+            } else {
+                runFinalCheck();
+            }
+        };
+        if (reranker) {
+            installReranker(oneDone);
+        }
+        if (sentences) {
+            installSentenceModels(oneDone);
+        }
+        updateButtons();
+    }
+
+    private boolean sentenceModelsMissing() {
+        return installedSentenceGerman.isEmpty() || installedSentenceEnglish.isEmpty()
+                || (!text(sentenceGerman).isEmpty() && !installedSentenceGerman.contains(text(sentenceGerman)))
+                || (!text(sentenceEnglish).isEmpty() && !installedSentenceEnglish.contains(text(sentenceEnglish)));
+    }
+
+    private static List<String> append(List<String> list, String value) {
+        List<String> copy = new ArrayList<String>(list);
+        copy.add(value);
+        return copy;
     }
 
     private boolean installing() {
@@ -1537,7 +1649,7 @@ public final class SetupWizardPanel extends JPanel {
 
     /** Witch of a step (in step order). */
     SetupWizardMascot mascotOf(int index) {
-        return mascots.get(index);
+        return mascots[index];
     }
 
     static String mascotResource(int index) {
@@ -1566,6 +1678,10 @@ public final class SetupWizardPanel extends JPanel {
 
     JButton networkTestButton() {
         return networkTest;
+    }
+
+    JButton checkInstallMissingButton() {
+        return checkInstallMissing;
     }
 
     JButton sentenceInstallButton() {
@@ -1684,9 +1800,11 @@ public final class SetupWizardPanel extends JPanel {
 
     private final class Rows {
         private final JPanel panel = transparent(new GridBagLayout());
+        private final int step;
         private int row;
 
-        Rows(String heading) {
+        Rows(int step, String heading) {
+            this.step = step;
             panel.setBorder(BorderFactory.createEmptyBorder(6, 4, 6, 4));
             JLabel title = new JLabel(heading);
             title.setFont(ResearchUiTypography.semiBold(15f));
@@ -1791,13 +1909,13 @@ public final class SetupWizardPanel extends JPanel {
         JPanel panel() {
             JPanel page = transparent(new BorderLayout());
             page.add(panel, BorderLayout.NORTH);
-            int index = mascots.size();
+            int index = step;
             SetupWizardMascot.Art stepArt = SetupWizardMascot.Art.load(STEP_MASCOTS[index]);
             final SetupWizardMascot mascot = new SetupWizardMascot(stepArt != null ? stepArt
                     : SetupWizardMascot.Art.load(), MASCOT_HEIGHTS[index], MASCOT_PLACEMENTS[index],
                     SetupWizardMascot.DEFAULT_GAP, SetupWizardMascot.DEFAULT_SIDE_INSET, palette);
             mascot.setOnFigureClicked(point -> witchMenu().show(mascot, point.x, point.y));
-            mascots.add(mascot);
+            mascots[index] = mascot;
             page.add(mascot, BorderLayout.CENTER);
             return page;
         }

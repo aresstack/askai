@@ -95,6 +95,9 @@ dependencies {
 
 test {
     useJUnit()
+    // As AskAiApp.main sets it before the first HTTP connection (the JDK reads it once per JVM); without it the
+    // proxy-tunnel test depends on which test opened a connection first.
+    systemProperty 'jdk.http.auth.tunneling.disabledSchemes', ''
     inputs.files(configurations.ffmpegJars)
     doFirst {
         systemProperty 'askai.test.ffmpegJars', configurations.ffmpegJars.files.collect { it.absolutePath }

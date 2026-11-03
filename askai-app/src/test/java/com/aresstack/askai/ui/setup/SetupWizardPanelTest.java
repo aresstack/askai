@@ -330,6 +330,51 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void everyStepShowsItsOwnPicture() {
+        SetupWizardPanel wizard = wizard(new Fake());
+        String[] expected = {"voice", "ai-runtime", "chat-model", "knowledge", "check"};
+        int[] steps = {SetupWizardPanel.STEP_VOICE, SetupWizardPanel.STEP_RUNTIME, SetupWizardPanel.STEP_CHAT,
+                SetupWizardPanel.STEP_KNOWLEDGE, SetupWizardPanel.STEP_CHECK};
+        for (int i = 0; i < steps.length; i++) {
+            String resource = wizard.mascotOf(steps[i]).art().resource();
+            assertTrue(SetupWizardPanel.STEP_NAMES[steps[i]] + " shows " + resource,
+                    resource.contains(expected[i]) || resource.equals(SetupWizardPanel.CHECK_SUCCESS_MASCOT));
+        }
+    }
+
+    @Test
+    public void aChosenButNotInstalledRerankerCanBeInstalled() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = new SetupWizardPanel(SetupDraft.builder().ollamaBaseUrl("http://localhost:11434")
+                .rerankerModel("local/cross-encoder/ms-marco-MiniLM-L6-v2:latest").build(), fake,
+                ComicPalette.defaultPalette());
+        wizard.jumpTo(SetupWizardPanel.STEP_KNOWLEDGE);
+        assertTrue("a local reranker that is only chosen must be installable",
+                wizard.rerankerInstallButton().isVisible());
+    }
+
+    @Test
+    public void theCheckPageInstallsMissingLocalModelsAndChecksAgain() {
+        Fake fake = new Fake();
+        fake.checks = Arrays.asList(SetupCheck.ok("AI runtime", "Ollama 0.9.0"),
+                SetupCheck.failed("Reranker", "local/cross-encoder/ms-marco-MiniLM-L6-v2:latest is not installed"),
+                SetupCheck.failed("Sentence model (German)", "apache-opennlp/sentence-de is not installed"));
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
+        assertTrue(wizard.checkInstallMissingButton().isVisible());
+        int checksBefore = fake.finishes;
+        fake.checks = Collections.singletonList(SetupCheck.ok("AI runtime", "Ollama 0.9.0"));
+
+        wizard.checkInstallMissingButton().doClick();
+
+        assertEquals(1, fake.rerankerInstalls);
+        assertEquals(1, fake.sentenceInstalls);
+        assertEquals("checked again after the installation", checksBefore + 1, fake.finishes);
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_CHECK));
+        assertFalse(wizard.checkInstallMissingButton().isVisible());
+    }
+
+    @Test
     public void theRequiredRerankerIsInstalledAndSelectedInTheKnowledgeStep() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
@@ -473,6 +518,7 @@ public class SetupWizardPanelTest {
         SetupDraft voiceDraft;
         List<String> pulled = new ArrayList<String>();
         int rerankerInstalls;
+        int finishes;
         List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> contributions =
                 new ArrayList<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>();
         boolean cancelled;
@@ -571,6 +617,7 @@ public class SetupWizardPanelTest {
         @Override
         public void finish(SetupDraft draft, Consumer<List<SetupCheck>> done) {
             finished = draft;
+            finishes++;
             done.accept(checks);
         }
 
