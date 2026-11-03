@@ -72,18 +72,19 @@ public class SpeechOutputModelsPanelTest {
         assertEquals(TextToSpeechSettings.Engine.PIPER,
                 selected.selectionFor(voice.getLanguageCode()).getEngine());
         assertEquals(voice.getId(), selected.selectionFor(voice.getLanguageCode()).getVoiceId());
-        assertEquals("adopting a German voice never touches English",
-                TextToSpeechSettings.Engine.WINDOWS, selected.selectionFor("en").getEngine());
+        assertEquals("adopting a German voice never touches English", "",
+                selected.selectionFor("en").getVoiceId());
     }
 
     @Test
-    public void installWithoutAdoptionKeepsTheWindowsDefault() throws Exception {
+    public void installWithoutAdoptionKeepsThePiperDefaultWithoutAnExplicitVoice() throws Exception {
         SpeechOutputModelsPanel panel = buildPanel(fakeInstall(), false);
         PiperVoice voice = PiperVoiceCatalog.curated().get(1);
         panel.installButton(voice.getId()).doClick();
-        assertEquals("Installed", panel.statusText(voice.getId()));
-        assertEquals(TextToSpeechSettings.Engine.WINDOWS,
+        assertEquals(TextToSpeechSettings.Engine.PIPER,
                 settings.load().selectionFor(voice.getLanguageCode()).getEngine());
+        assertEquals("no explicit voice is written", "",
+                settings.load().selectionFor(voice.getLanguageCode()).getVoiceId());
     }
 
     @Test
@@ -100,9 +101,11 @@ public class SpeechOutputModelsPanelTest {
                 store.isVoiceInstalled(voice));
         assertFalse("no dangling directory",
                 java.nio.file.Files.exists(store.voiceDirectory(voice)));
-        assertEquals("the selection returns to the Windows default",
-                TextToSpeechSettings.Engine.WINDOWS,
+        assertEquals("the selection returns to the Piper default",
+                TextToSpeechSettings.Engine.PIPER,
                 settings.load().selectionFor(voice.getLanguageCode()).getEngine());
+        assertEquals("no explicit voice is left behind", "",
+                settings.load().selectionFor(voice.getLanguageCode()).getVoiceId());
 
         panel.installButton(voice.getId()).doClick(); // fresh install works again
         assertTrue(store.isVoiceInstalled(voice));
@@ -149,7 +152,7 @@ public class SpeechOutputModelsPanelTest {
         assertTrue(panel.errorText().contains("network unplugged"));
         assertEquals("Not installed", panel.statusText(voice.getId()));
         assertTrue(panel.installButton(voice.getId()).isEnabled());
-        assertEquals(TextToSpeechSettings.Engine.WINDOWS,
-                settings.load().selectionFor(voice.getLanguageCode()).getEngine());
+        assertEquals("a failed install selects nothing", "",
+                settings.load().selectionFor(voice.getLanguageCode()).getVoiceId());
     }
 }

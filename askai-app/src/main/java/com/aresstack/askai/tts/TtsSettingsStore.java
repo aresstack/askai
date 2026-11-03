@@ -92,8 +92,9 @@ public final class TtsSettingsStore {
     /** The pre-per-language format chose ONE voice; it lands in that voice's own language. */
     private static void migrateLegacySingleSelection(
             Properties properties, Map<String, TextToSpeechSettings.Selection> selections) {
-        if (TextToSpeechSettings.parseEngine(properties.getProperty(LEGACY_KEY_ENGINE))
-                != TextToSpeechSettings.Engine.PIPER) {
+        String legacyEngine = properties.getProperty(LEGACY_KEY_ENGINE);
+        if (legacyEngine == null
+                || TextToSpeechSettings.parseEngine(legacyEngine) != TextToSpeechSettings.Engine.PIPER) {
             return;
         }
         PiperVoice voice = PiperVoiceCatalog.findById(properties.getProperty(LEGACY_KEY_VOICE));

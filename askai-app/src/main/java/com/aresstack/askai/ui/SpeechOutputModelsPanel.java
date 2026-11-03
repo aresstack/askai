@@ -83,8 +83,8 @@ public final class SpeechOutputModelsPanel extends JPanel {
     private void buildUserInterface() {
         setOpaque(false);
         ComicForm rows = ComicForm.titled("Read-aloud voices (Piper)");
-        rows.note("The default speech output is the Windows voice — it needs no download. These model"
-                + " voices sound far more natural. CPU (recommended) — the GPU stays free for the AI"
+        rows.note("Piper is the default speech output: the first installed voice of a language reads"
+                + " aloud; until one is installed the Windows voice speaks. Model voices sound far more natural. CPU (recommended) — the GPU stays free for the AI"
                 + " models; GPU acceleration is coming soon.");
         for (PiperVoice voice : PiperVoiceCatalog.curated()) {
             rows.component(buildRow(voice));
@@ -177,8 +177,18 @@ public final class SpeechOutputModelsPanel extends JPanel {
                 continue;
             }
             TextToSpeechSettings.Selection selection = tts.selectionFor(voice.getLanguageCode());
-            boolean inUse = selection.getEngine() == TextToSpeechSettings.Engine.PIPER
-                    && voice.getId().equals(selection.getVoiceId());
+            boolean inUse = false;
+            if (selection.getEngine() == TextToSpeechSettings.Engine.PIPER) {
+                // The explicit choice, or — Piper default without one — the first installed voice.
+                java.util.List<PiperVoice> installed = store.installedVoices(voice.getLanguageCode());
+                String speaking = installed.isEmpty() ? "" : installed.get(0).getId();
+                for (PiperVoice candidate : installed) {
+                    if (candidate.getId().equals(selection.getVoiceId())) {
+                        speaking = candidate.getId();
+                    }
+                }
+                inUse = voice.getId().equals(speaking);
+            }
             boolean isInstalled = store.isVoiceInstalled(voice);
             status.setText(!isInstalled ? "Not installed"
                     : inUse ? "Installed · in use" : "Installed");
@@ -188,7 +198,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
         }
     }
 
-    /** Remove the voice cleanly (reinstallable); a selection pointing at it returns to Windows. */
+    /** Remove the voice cleanly (reinstallable); a selection pointing at it returns to the Piper default. */
     private void onUninstall(final PiperVoice voice) {
         final JButton button = buttonByVoice.get(voice.getId());
         final JLabel status = statusByVoice.get(voice.getId());
@@ -209,8 +219,10 @@ public final class SpeechOutputModelsPanel extends JPanel {
                             current.selectionFor(voice.getLanguageCode());
                     if (selection.getEngine() == TextToSpeechSettings.Engine.PIPER
                             && voice.getId().equals(selection.getVoiceId())) {
+                        // Back to the Piper default: another installed voice of the language takes
+                        // over, the Windows voice only while none is left.
                         settings.save(current.withSelection(voice.getLanguageCode(),
-                                TextToSpeechSettings.Engine.WINDOWS, ""));
+                                TextToSpeechSettings.Engine.PIPER, ""));
                     }
                 } catch (Exception ex) {
                     failure = ex;
@@ -275,7 +287,7 @@ public final class SpeechOutputModelsPanel extends JPanel {
 
     /**
      * The frustration-free hand-over: use the fresh voice right away — FOR ITS LANGUAGE — or
-     * leave that language on the Windows default.
+     * leave that language on its current choice.
      */
     private void offerAdoption(PiperVoice voice) {
         if (!adoptPrompt.confirmUseNow(voice)) {

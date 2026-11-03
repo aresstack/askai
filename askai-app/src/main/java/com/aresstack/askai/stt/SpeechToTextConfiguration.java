@@ -179,6 +179,41 @@ public final class SpeechToTextConfiguration {
         return autoStopSilenceSeconds;
     }
 
+    public SpeechToTextConfiguration withEnabled(boolean value) {
+        return new SpeechToTextConfiguration(value, backend, modelName, language, prompt, maxFileSizeMb,
+                timeoutSeconds, microphoneDeviceId, audioModelAutomatic, lastAudioModel,
+                audioProcessingProfileId, autoSendTranscription, autoStopOnSilence,
+                autoStopSilenceSeconds, signalThresholdPercent);
+    }
+
+    public SpeechToTextConfiguration withLanguage(String value) {
+        return new SpeechToTextConfiguration(enabled, backend, modelName, value, prompt, maxFileSizeMb,
+                timeoutSeconds, microphoneDeviceId, audioModelAutomatic, lastAudioModel,
+                audioProcessingProfileId, autoSendTranscription, autoStopOnSilence,
+                autoStopSilenceSeconds, signalThresholdPercent);
+    }
+
+    public SpeechToTextConfiguration withPrompt(String value) {
+        return new SpeechToTextConfiguration(enabled, backend, modelName, language, value, maxFileSizeMb,
+                timeoutSeconds, microphoneDeviceId, audioModelAutomatic, lastAudioModel,
+                audioProcessingProfileId, autoSendTranscription, autoStopOnSilence,
+                autoStopSilenceSeconds, signalThresholdPercent);
+    }
+
+    public SpeechToTextConfiguration withMaxFileSizeMb(int value) {
+        return new SpeechToTextConfiguration(enabled, backend, modelName, language, prompt, value,
+                timeoutSeconds, microphoneDeviceId, audioModelAutomatic, lastAudioModel,
+                audioProcessingProfileId, autoSendTranscription, autoStopOnSilence,
+                autoStopSilenceSeconds, signalThresholdPercent);
+    }
+
+    public SpeechToTextConfiguration withTimeoutSeconds(int value) {
+        return new SpeechToTextConfiguration(enabled, backend, modelName, language, prompt, maxFileSizeMb,
+                value, microphoneDeviceId, audioModelAutomatic, lastAudioModel,
+                audioProcessingProfileId, autoSendTranscription, autoStopOnSilence,
+                autoStopSilenceSeconds, signalThresholdPercent);
+    }
+
     public SpeechToTextConfiguration withModelName(String value) {
         return new SpeechToTextConfiguration(enabled, backend, value, language, prompt, maxFileSizeMb,
                 timeoutSeconds, microphoneDeviceId, audioModelAutomatic, lastAudioModel,
@@ -209,9 +244,10 @@ public final class SpeechToTextConfiguration {
 
 
     public SpeechToTextConfiguration withAudioProcessingProfileId(String value) {
+        // Keeps the noise gate: the 14-argument constructor used here before reset it to the default.
         return new SpeechToTextConfiguration(enabled, backend, modelName, language, prompt, maxFileSizeMb,
                 timeoutSeconds, microphoneDeviceId, audioModelAutomatic, lastAudioModel, value,
-                autoSendTranscription, autoStopOnSilence, autoStopSilenceSeconds);
+                autoSendTranscription, autoStopOnSilence, autoStopSilenceSeconds, signalThresholdPercent);
     }
 
     public SpeechToTextConfiguration withAutoSendTranscription(boolean value) {
