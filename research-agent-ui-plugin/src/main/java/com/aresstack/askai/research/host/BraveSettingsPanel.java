@@ -33,10 +33,10 @@ public final class BraveSettingsPanel extends JPanel {
         this.configurations = configurations;
         JPanel p = ProviderForm.column();
         p.add(row("", enabled));
-        JPanel key = new JPanel(new BorderLayout(4, 0));
+        JPanel key = new JPanel(new BorderLayout(8, 0));
         key.add(apiKey, BorderLayout.CENTER);
         apiKeyHint.setEnabled(false);
-        key.add(apiKeyHint, BorderLayout.SOUTH);
+        key.add(apiKeyHint, BorderLayout.EAST); // status right beside the field
         p.add(row("API key:", key));
         p.add(hint("The stored key is never shown. Leave the field empty to keep it; type a new one to replace it "
                 + "(encrypted on save). The key is sent as a header, never in the URL."));

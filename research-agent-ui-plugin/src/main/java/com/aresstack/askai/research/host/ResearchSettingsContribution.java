@@ -43,11 +43,13 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
         final SearchProviderCardsPanel searchProviders = new SearchProviderCardsPanel(store);
         JTabbedPane tabs = ComicControls.tabbedPane();
         tabs.addTab("General", buildGeneralTab(store));
-        tabs.addTab("Runtime", new ResearchRuntimeSettingsPanel(store, research));
+        ResearchRuntimeSettingsPanel runtime = new ResearchRuntimeSettingsPanel(store, research);
+        tabs.addTab("Runtime", fitted(runtime));
         // The provider PICKER + each provider's own settings card (browser default, full DataForSEO
         // editor). The old shared engine/locale fields are gone — each provider owns its full config.
-        tabs.addTab("Search", searchProviders);
+        tabs.addTab("Search", fitted(searchProviders));
         tabs.addTab("Browser SERP", new LegacyBrowserSearchSettingsPanel(store, profile));
+        tabs.addTab("Check results", runtime.resultsView());
         // The DataForSEO draft + provider selection persist when the gear dialog is disposed; unsaved
         // provider drafts are dropped. The host's settings dialog does not expose an explicit Save hook,
         // so the panel commits on removal from the hierarchy (dialog close).
@@ -60,6 +62,46 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
             }
         });
         return tabs;
+    }
+
+    /**
+     * A tab that fits the dialog: the content takes the tab's WIDTH (rows wrap instead of running off
+     * the right edge), keeps its own height at the top (no stretched blank area) and scrolls
+     * vertically only when it really is taller than the tab.
+     */
+    static JComponent fitted(final JComponent content) {
+        WidthTracking column = new WidthTracking();
+        column.add(content, java.awt.BorderLayout.NORTH);
+        return com.aresstack.comiccontrols.control.ComicForm.scroll(column);
+    }
+
+    private static final class WidthTracking extends javax.swing.JPanel implements javax.swing.Scrollable {
+        private static final long serialVersionUID = 1L;
+
+        WidthTracking() {
+            super(new java.awt.BorderLayout());
+            setOpaque(false);
+        }
+
+        public java.awt.Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        public int getScrollableUnitIncrement(java.awt.Rectangle visible, int orientation, int direction) {
+            return 14;
+        }
+
+        public int getScrollableBlockIncrement(java.awt.Rectangle visible, int orientation, int direction) {
+            return Math.max(14, visible.height - 28);
+        }
+
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 
     /** General research-UI preferences — the first, non-technical tab. */
