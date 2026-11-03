@@ -46,18 +46,31 @@ public final class ResearchVisualizeButtons {
                 "Visualize sources");
         button.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
-                ResearchMindmapAction.open(session, new ResearchMindmapAction.OverlayHost() {
-                    public void showDiagram(String mermaidSource, String title) {
-                        context.showDiagramOverlay(mermaidSource, title);
-                    }
-
-                    public void showHint(JComponent content, String title) {
-                        context.showTranscriptOverlay(content, title);
-                    }
-                });
+                ResearchMindmapAction.open(session, sourcesOverlay(context));
             }
         });
         return button;
+    }
+
+    /**
+     * The Sources pane's overlay route. The button sits in the source DETAIL row, i.e. a source is
+     * selected and its full text covers the chat in the main area — an overlay on the (hidden)
+     * transcript would stay invisible and only surface after switching to another pane (the
+     * "mindmap shows up in the Concept tab" bug). So the main area is handed back to the chat
+     * FIRST, then the overlay opens on top of it, visibly, while the Sources pane stays active.
+     */
+    static ResearchMindmapAction.OverlayHost sourcesOverlay(final ArtifactViewContext context) {
+        return new ResearchMindmapAction.OverlayHost() {
+            public void showDiagram(String mermaidSource, String title) {
+                context.clearMainContent();
+                context.showDiagramOverlay(mermaidSource, title);
+            }
+
+            public void showHint(JComponent content, String title) {
+                context.clearMainContent();
+                context.showTranscriptOverlay(content, title);
+            }
+        };
     }
 
     private static ComicButton iconButton(javax.swing.Icon icon, String tooltip) {

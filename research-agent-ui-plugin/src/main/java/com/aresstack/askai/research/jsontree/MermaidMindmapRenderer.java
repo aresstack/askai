@@ -16,12 +16,22 @@ public final class MermaidMindmapRenderer {
     }
 
     /**
-     * @param rootTitle the label of the synthetic single root Mermaid requires; the forest's
-     *                  roots become its first-level branches. An empty forest renders as the
-     *                  bare root — an honest "no structure yet" diagram, never an error.
+     * @param rootTitle the label of the synthetic root, used ONLY when the forest has no single
+     *                  root of its own: a forest with exactly one root renders that root as the
+     *                  CENTER (never a helper node like "Concept" above it); several roots hang
+     *                  under {@code rootTitle}. An empty forest renders as the bare root — an
+     *                  honest "no structure yet" diagram, never an error.
      */
     public static String render(StructuralForest forest, String rootTitle) {
         StringBuilder out = new StringBuilder("mindmap\n");
+        if (forest.getRoots().size() == 1) {
+            StructuralNode center = forest.getRoots().get(0);
+            out.append("  root((").append(label(center.getName())).append("))\n");
+            for (StructuralNode child : center.getChildren()) {
+                renderNode(out, child, 2);
+            }
+            return out.toString();
+        }
         out.append("  root((").append(label(rootTitle)).append("))\n");
         for (StructuralNode root : forest.getRoots()) {
             renderNode(out, root, 2);

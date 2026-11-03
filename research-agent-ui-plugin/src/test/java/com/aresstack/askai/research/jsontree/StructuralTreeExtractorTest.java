@@ -59,12 +59,18 @@ public class StructuralTreeExtractorTest {
         StructuralForest forest = extract("{\"FreeRTOS\": [ {\"Tasks\": [], \"Queues\": [], "
                 + "\"importance\": 0.9, \"settings\": {\"whatever\": []} } ]}");
         String mermaid = MermaidMindmapRenderer.render(forest, "Konzept");
-        assertEquals("mindmap\n"
-                + "  root((Konzept))\n"
-                + "    (FreeRTOS)\n"
-                + "      (Tasks)\n"
-                + "      (Queues)\n", mermaid);
+        assertEquals("the single root is the center — no synthetic Konzept node above it",
+                "mindmap\n"
+                + "  root((FreeRTOS))\n"
+                + "    (Tasks)\n"
+                + "    (Queues)\n", mermaid);
         assertTrue("no metadata leaks into the diagram", !mermaid.contains("importance"));
+    }
+
+    @Test
+    public void severalRootsHangUnderTheTitleRoot() {
+        assertEquals("mindmap\n  root((Konzept))\n    (A)\n    (B)\n",
+                MermaidMindmapRenderer.render(extract("{\"A\": [], \"B\": []}"), "Konzept"));
     }
 
     @Test

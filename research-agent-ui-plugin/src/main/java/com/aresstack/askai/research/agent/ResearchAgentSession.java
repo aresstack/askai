@@ -4636,7 +4636,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 mindmapRootTitle(), sources);
     }
 
-    /** The brief's first content line (headings unwrapped) as the mindmap root, else "Recherche". */
+    /** The brief's first content line (headings unwrapped) as the mindmap root, else null (no helper root). */
     private String mindmapRootTitle() {
         try {
             com.aresstack.askai.research.store.FileResearchBriefStore store = researchBriefStore();
@@ -4650,9 +4650,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 }
             }
         } catch (RuntimeException ignored) {
-            // A broken brief store never blocks the mindmap — the generic root is fine.
+            // A broken brief store never blocks the mindmap — the mindmap picks its own center.
         }
-        return "Recherche";
+        return null;
     }
 
     // ------------------------------------------------------------------ run progress / outcome cards

@@ -12,7 +12,7 @@ import javax.swing.JLabel;
  */
 final class ResearchMindmapAction {
 
-    static final String OVERLAY_TITLE = "Quellen-Mindmap";
+    static final String OVERLAY_TITLE = "Sources Mindmap";
 
     /** The two overlay routes a context offers (diagram source vs plain hint component). */
     interface OverlayHost {
@@ -28,7 +28,7 @@ final class ResearchMindmapAction {
         String mermaid = session.buildSourceMindmapMermaid();
         if (mermaid == null) {
             JLabel hint = new JLabel(
-                    "Noch keine bewerteten Quellen — erst suchen (Websuche), dann visualisieren.");
+                    "No rated sources yet — run a web search first, then visualize.");
             hint.setBorder(BorderFactory.createEmptyBorder(24, 24, 24, 24));
             host.showHint(hint, OVERLAY_TITLE);
             return;
