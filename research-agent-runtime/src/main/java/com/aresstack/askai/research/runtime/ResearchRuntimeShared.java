@@ -15,6 +15,8 @@ public final class ResearchRuntimeShared implements AutoCloseable {
 
     private final String searchBrowserChannel;
     private SearchBrowser searchBrowser;
+    /** The search browser's window setting (default headless); the next search follows a change. */
+    private volatile boolean searchBrowserHeadless = true;
     private AsyncSearchProviderRegistry searchProviderRegistry;
     private boolean closed;
 
@@ -30,9 +32,14 @@ public final class ResearchRuntimeShared implements AutoCloseable {
             throw new IllegalStateException("research runtime resources are closed");
         }
         if (searchBrowser == null) {
-            searchBrowser = new SearchBrowser(searchBrowserChannel);
+            searchBrowser = new SearchBrowser(searchBrowserChannel, () -> searchBrowserHeadless);
         }
         return searchBrowser;
+    }
+
+    /** Whether the search browser runs headless; a running browser in the other mode restarts at the next search. */
+    public void setSearchBrowserHeadless(boolean headless) {
+        this.searchBrowserHeadless = headless;
     }
 
     /** The search-provider registry; opened on first use. */
