@@ -21,6 +21,7 @@ public final class ModelSearchPanel extends JPanel {
     private final OllamaInstallPanel huggingFacePanel;
     private final SpeechOutputModelsPanel voicesPanel;
     public static final String VOICES_TAB_TITLE = "Voices";
+    public static final String DICTATION_TAB_TITLE = "Dictation";
 
     public ModelSearchPanel(AppConfigurationRepository configurationRepository, AskAiService askAiService) {
         this(configurationRepository, askAiService, null, null, null);
@@ -42,6 +43,13 @@ public final class ModelSearchPanel extends JPanel {
     public ModelSearchPanel(AppConfigurationRepository configurationRepository, AskAiService askAiService,
                             NlpModelsPanel nlpModelsPanel, SpeechOutputModelsPanel voicesPanel,
                             LocalRuntimeModelsPanel localModelsPanel) {
+        this(configurationRepository, askAiService, nlpModelsPanel, voicesPanel, null, localModelsPanel);
+    }
+
+    /** @param dictationPanel the Whisper dictation-model installer; added as the "Dictation" tab when non-null */
+    public ModelSearchPanel(AppConfigurationRepository configurationRepository, AskAiService askAiService,
+                            NlpModelsPanel nlpModelsPanel, SpeechOutputModelsPanel voicesPanel,
+                            WhisperModelsPanel dictationPanel, LocalRuntimeModelsPanel localModelsPanel) {
         super(new BorderLayout());
         this.huggingFacePanel = new OllamaInstallPanel(configurationRepository, askAiService);
         this.tabs = ComicControls.tabbedPane();
@@ -53,6 +61,9 @@ public final class ModelSearchPanel extends JPanel {
         this.voicesPanel = voicesPanel;
         if (voicesPanel != null) {
             tabs.addTab(VOICES_TAB_TITLE, ComicForm.page(voicesPanel));
+        }
+        if (dictationPanel != null) {
+            tabs.addTab(DICTATION_TAB_TITLE, ComicForm.page(dictationPanel));
         }
         if (localModelsPanel != null) {
             tabs.addTab(LocalRuntimeModelsPanel.TAB_TITLE, localModelsPanel);
@@ -79,6 +90,15 @@ public final class ModelSearchPanel extends JPanel {
             }
         }
         voicesPanel.highlightVoice(voiceId);
+    }
+
+    /** Selects the Dictation tab (Whisper models), e.g. from "Install models…" in Settings > Speech. */
+    public void openDictationModels() {
+        for (int i = 0; i < tabs.getTabCount(); i++) {
+            if (DICTATION_TAB_TITLE.equals(tabs.getTitleAt(i))) {
+                tabs.setSelectedIndex(i);
+            }
+        }
     }
 
     /** The tab titles in order (for diagnostics/tests). */
