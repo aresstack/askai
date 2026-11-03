@@ -353,6 +353,12 @@ public class SetupWizardPanelTest {
 
         assertEquals(Collections.singletonList(SetupActions.RECOMMENDED_CHAT_MODEL), fake.pulled);
         assertEquals(SetupActions.RECOMMENDED_CHAT_MODEL, wizard.chatModelChoice().getSelectedItem());
+
+        wizard.chatAlternativeButton().doClick();
+
+        assertEquals(Arrays.asList(SetupActions.RECOMMENDED_CHAT_MODEL, SetupActions.ALTERNATIVE_CHAT_MODEL),
+                fake.pulled);
+        assertEquals(SetupActions.ALTERNATIVE_CHAT_MODEL, wizard.chatModelChoice().getSelectedItem());
     }
 
     @Test

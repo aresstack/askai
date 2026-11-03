@@ -150,6 +150,8 @@ public interface SetupActions {
 
     /** Suggested when no chat model is installed yet: small enough for an ordinary PC, good enough to chat. */
     String RECOMMENDED_CHAT_MODEL = "gemma4:e2b";
+    /** The stronger alternative offered beside the recommended chat model (needs more memory). */
+    String ALTERNATIVE_CHAT_MODEL = "llama3.1:8b";
     /** Suggested when no embedding model is installed yet. */
     String RECOMMENDED_EMBEDDING_MODEL = "nomic-embed-text";
     /** The reranker the research agent asks for; it runs in AskAI's own local runtime (Ollama has none). */

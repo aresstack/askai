@@ -189,6 +189,8 @@ public final class SetupWizardPanel extends JPanel {
     private final ComicButton chatInstall = new ComicButton("Install…");
     private final ComicButton chatRecommended = new ComicButton("Install " + SetupActions.RECOMMENDED_CHAT_MODEL,
             ComicButton.Accent.ACTION);
+    private final ComicButton chatAlternative = new ComicButton("Install " + SetupActions.ALTERNATIVE_CHAT_MODEL,
+            ComicButton.Accent.ACTION);
     private final ComicButton embeddingInstall = new ComicButton("Install…");
     private final ComicButton audioInstall = new ComicButton("Install…");
     /** Models installed before the model browser opened: what is new afterwards gets selected. */
@@ -375,7 +377,7 @@ public final class SetupWizardPanel extends JPanel {
         rows.note("The chat model answers in the chat and is the main model of all plugins (research agent, "
                 + "summaries, tools). The list shows the models installed in Ollama and in AskAI's local runtime.");
         chatModel.setEditable(true);
-        rows.stretched("Chat model", inline(chatModel, chatDownload.button, chatRecommended, modelsRefresh,
+        rows.stretched("Chat model", inline(chatModel, chatDownload.button, chatRecommended, chatAlternative, modelsRefresh,
                 chatInstall));
         rows.stretched("", chatDownload.line.panel);
         rows.stretched("", new StatusLine(null, modelsStatus).panel);
@@ -516,6 +518,12 @@ public final class SetupWizardPanel extends JPanel {
         chatRecommended.setToolTipText("Download the recommended chat model through Ollama and select it");
         chatRecommended.addActionListener(e -> {
             chatModel.setSelectedItem(SetupActions.RECOMMENDED_CHAT_MODEL);
+            pull(chatDownload, chatModel);
+        });
+        chatAlternative.setToolTipText("Download " + SetupActions.ALTERNATIVE_CHAT_MODEL + " – answers better than "
+                + SetupActions.RECOMMENDED_CHAT_MODEL + " but needs more memory");
+        chatAlternative.addActionListener(e -> {
+            chatModel.setSelectedItem(SetupActions.ALTERNATIVE_CHAT_MODEL);
             pull(chatDownload, chatModel);
         });
         micTest.addActionListener(e -> testMicrophone());
@@ -822,9 +830,12 @@ public final class SetupWizardPanel extends JPanel {
         // Offer a download only for a model that is not there yet.
         chatDownload.button.setEnabled(!chatDownload.running && !text(chatModel).isEmpty());
         chatDownload.button.setVisible(!text(chatModel).isEmpty() && !installedChat.contains(text(chatModel))
-                && !SetupActions.RECOMMENDED_CHAT_MODEL.equals(text(chatModel)));
+                && !SetupActions.RECOMMENDED_CHAT_MODEL.equals(text(chatModel))
+                && !SetupActions.ALTERNATIVE_CHAT_MODEL.equals(text(chatModel)));
         chatRecommended.setVisible(!installedChat.contains(SetupActions.RECOMMENDED_CHAT_MODEL));
         chatRecommended.setEnabled(!chatDownload.running);
+        chatAlternative.setVisible(!installedChat.contains(SetupActions.ALTERNATIVE_CHAT_MODEL));
+        chatAlternative.setEnabled(!chatDownload.running);
         embeddingDownload.button.setEnabled(!embeddingDownload.running && !text(embeddingModel).isEmpty());
         embeddingDownload.button.setVisible(!text(embeddingModel).isEmpty()
                 && !installedEmbeddings.contains(text(embeddingModel)));
@@ -1960,6 +1971,10 @@ public final class SetupWizardPanel extends JPanel {
 
     JButton chatRecommendedButton() {
         return chatRecommended;
+    }
+
+    JButton chatAlternativeButton() {
+        return chatAlternative;
     }
 
     JButton chatInstallButton() {
