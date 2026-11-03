@@ -151,6 +151,7 @@ public final class ComicControls {
             javax.swing.JFormattedTextField text = ((JSpinner.DefaultEditor) editor).getTextField();
             if (editor instanceof JSpinner.NumberEditor) {
                 ((JSpinner.NumberEditor) editor).getFormat().setGroupingUsed(false);
+                text.setValue(text.getValue()); // re-render the current value without the grouping separator
             }
             text.setColumns(columns);
         }

@@ -197,6 +197,10 @@ public final class SearchProviderCardsPanel extends JPanel {
         });
         dialog.setContentPane(content);
         dialog.getRootPane().setDefaultButton(save);
+        // Every provider dialog has the same width (ProviderSettingsForm.DIALOG_WIDTH); the wrapping notes know their
+        // height only once laid out at that width, so pack a second time after the first layout.
+        dialog.pack();
+        dialog.validate();
         dialog.pack();
         java.awt.GraphicsConfiguration display = owner != null ? owner.getGraphicsConfiguration() : null;
         java.awt.Rectangle screen = display != null ? display.getBounds() : new java.awt.Rectangle(0, 0, 1280, 900);
