@@ -1,13 +1,15 @@
 package com.aresstack.askai.ui;
 
-import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicForm;
+import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.askai.config.AppConfigurationRepository;
 import com.aresstack.askai.service.AskAiService;
 
+import javax.swing.BorderFactory;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 
 /**
  * The Setup view's model-search container: two clearly separated sources in tabs — HuggingFace
@@ -52,9 +54,10 @@ public final class ModelSearchPanel extends JPanel {
                             WhisperModelsPanel dictationPanel, LocalRuntimeModelsPanel localModelsPanel) {
         super(new BorderLayout());
         this.huggingFacePanel = new OllamaInstallPanel(configurationRepository, askAiService);
-        this.tabs = ComicControls.tabbedPane();
+        final OllamaLibraryPanel libraryPanel = new OllamaLibraryPanel(askAiService);
+        this.tabs = ComicControls.tabbedPaneWithTrailingTab();
         tabs.addTab("Hugging Face", huggingFacePanel);
-        tabs.addTab("Ollama Library", new OllamaLibraryPanel(askAiService));
+        tabs.addTab("Ollama Library", libraryPanel);
         if (nlpModelsPanel != null) {
             tabs.addTab(NlpModelsPanel.TAB_TITLE, nlpModelsPanel);
         }
@@ -68,8 +71,28 @@ public final class ModelSearchPanel extends JPanel {
         if (localModelsPanel != null) {
             tabs.addTab(LocalRuntimeModelsPanel.TAB_TITLE, localModelsPanel);
         }
+        // "Technical details": the log of the source tab used last (Hugging Face or Ollama Library),
+        // filling the whole area. Always the last tab, painted right-aligned.
+        final CardLayout logCards = new CardLayout();
+        final JPanel technicalDetails = new JPanel(logCards);
+        technicalDetails.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        technicalDetails.add(huggingFacePanel.technicalDetails(), HF_LOG);
+        technicalDetails.add(libraryPanel.technicalDetails(), LIBRARY_LOG);
+        tabs.addTab(TECHNICAL_DETAILS, technicalDetails);
+        tabs.addChangeListener(event -> {
+            java.awt.Component selected = tabs.getSelectedComponent();
+            if (selected == huggingFacePanel) {
+                logCards.show(technicalDetails, HF_LOG);
+            } else if (selected == libraryPanel) {
+                logCards.show(technicalDetails, LIBRARY_LOG);
+            }
+        });
         add(tabs, BorderLayout.CENTER);
     }
+
+    public static final String TECHNICAL_DETAILS = "Technical details";
+    private static final String HF_LOG = "hf";
+    private static final String LIBRARY_LOG = "library";
 
     /**
      * Wires where a 🔊 speech-output discovery entry lands (voice id → the chat settings' Audio

@@ -44,6 +44,7 @@ import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
+import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
@@ -98,7 +99,7 @@ public final class OllamaInstallPanel extends JPanel {
     private final JLabel repoCapabilityLabel = new JLabel(" ");
     private final JLabel importStatusLabel = new JLabel(" ");
     // Always-visible one-line summary of the latest step/result/error; the full history lives in the
-    // collapsed "Technical details" log so the panel isn't dominated by technical output.
+    // owner's "Technical details" tab so the panel isn't dominated by technical output.
     private final JLabel statusLine = new JLabel(" ");
     private final JTextArea logArea;
     private final JToggleButton originalsToggle = new ComicToggleButton("Originals", true);
@@ -224,16 +225,17 @@ public final class OllamaInstallPanel extends JPanel {
         listsSplit.setContinuousLayout(true);
         listsSplit.setBorder(null);
 
-        JPanel bottom = new JPanel(new BorderLayout(6, 6));
+        // The install settings live in the "Details" tab of the GGUF files area; only the action
+        // buttons and status lines stay below the lists. The log moved to the owner's
+        // "Technical details" tab.
+        JPanel bottom = new JPanel(new BorderLayout(6, 2));
         bottom.add(buildForm(), BorderLayout.NORTH);
         bottom.add(buildCenter(), BorderLayout.CENTER);
 
-        javax.swing.JSplitPane mainSplit = new javax.swing.JSplitPane(
-                javax.swing.JSplitPane.VERTICAL_SPLIT, listsSplit, bottom);
-        mainSplit.setResizeWeight(0.45d);
-        mainSplit.setContinuousLayout(true);
-        mainSplit.setBorder(null);
-        add(mainSplit, BorderLayout.CENTER);
+        JPanel main = new JPanel(new BorderLayout(6, 6));
+        main.add(listsSplit, BorderLayout.CENTER);
+        main.add(bottom, BorderLayout.SOUTH);
+        add(main, BorderLayout.CENTER);
 
         progressBar.setStringPainted(true);
         JPanel progressRow = new JPanel(new BorderLayout(6, 0));
@@ -532,13 +534,20 @@ public final class OllamaInstallPanel extends JPanel {
             }
         });
         JScrollPane filesScroll = new JScrollPane(filesList);
-        filesScroll.setBorder(ComicControls.titledBorder("GGUF files"));
-        return filesScroll;
+        filesScroll.setBorder(BorderFactory.createEmptyBorder());
+        JTabbedPane filesTabs = ComicControls.tabbedPane(JTabbedPane.BOTTOM);
+        filesTabs.addTab("Files", filesScroll);
+        filesTabs.addTab("Details", buildSettingsCard());
+        JPanel filesArea = new JPanel(new BorderLayout());
+        filesArea.setBorder(ComicControls.titledBorder("GGUF files"));
+        filesArea.add(filesTabs, BorderLayout.CENTER);
+        return filesArea;
     }
 
-    private JComponent buildForm() {
+    /** The rarely needed install settings, shown on the "Details" card of the GGUF files area. */
+    private JComponent buildSettingsCard() {
         JPanel form = new JPanel(new GridBagLayout());
-        form.setBorder(ComicControls.titledBorder("Install"));
+        form.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
         GridBagConstraints constraints = new GridBagConstraints();
         constraints.insets = new Insets(3, 4, 3, 4);
         constraints.fill = GridBagConstraints.HORIZONTAL;
@@ -549,6 +558,17 @@ public final class OllamaInstallPanel extends JPanel {
         addRow(form, constraints, 2, "Install as", installAsField);
         quantizationLabel.setToolTipText("Derived from the selected GGUF file name; not manually configurable");
         addRow(form, constraints, 3, "Quantization", quantizationLabel);
+        GridBagConstraints filler = new GridBagConstraints();
+        filler.gridy = 4;
+        filler.weighty = 1.0d;
+        form.add(new JPanel(), filler);
+        JScrollPane scroll = new JScrollPane(form);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        return scroll;
+    }
+
+    private JComponent buildForm() {
+        JPanel form = new JPanel(new GridBagLayout());
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
         JButton filesButton = new ComicButton("Load GGUF files");
@@ -576,6 +596,7 @@ public final class OllamaInstallPanel extends JPanel {
         GridBagConstraints buttonConstraints = new GridBagConstraints();
         buttonConstraints.gridx = 0;
         buttonConstraints.gridy = 4;
+        buttonConstraints.weightx = 1.0d;
         buttonConstraints.gridwidth = 2;
         buttonConstraints.anchor = GridBagConstraints.WEST;
         form.add(buttons, buttonConstraints);
@@ -635,15 +656,19 @@ public final class OllamaInstallPanel extends JPanel {
         logArea.setEditable(false);
         logArea.setLineWrap(true);
         logArea.setWrapStyleWord(true);
-        JScrollPane scroll = new JScrollPane(logArea);
-        scroll.setPreferredSize(new java.awt.Dimension(scroll.getPreferredSize().width, 180));
-        // Technical output stays out of the way by default: the concise status line stays visible,
-        // the full log lives in a collapsed "Technical details" section.
+        technicalDetails = new JScrollPane(logArea);
+        // The concise status line stays visible; the full log is the owner's "Technical details" tab.
         JPanel center = new JPanel(new BorderLayout(0, 4));
         statusLine.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         center.add(statusLine, BorderLayout.NORTH);
-        center.add(new CollapsiblePanel("Technical details", scroll, false), BorderLayout.CENTER);
         return center;
+    }
+
+    private JComponent technicalDetails;
+
+    /** The technical log, shown by the owner in its "Technical details" tab. */
+    public JComponent technicalDetails() {
+        return technicalDetails;
     }
 
     /**
