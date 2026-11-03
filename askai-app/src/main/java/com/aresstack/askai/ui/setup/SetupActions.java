@@ -56,7 +56,16 @@ public interface SetupActions {
      * Installs the curated OpenNLP sentence models that are still missing (German and English); {@code progress}
      * gets one line per model.
      */
-    void installSentenceModels(Consumer<String> progress, BiConsumer<String, String> done);
+    default void installSentenceModels(Consumer<String> progress, BiConsumer<String, String> done) {
+        installSentenceModels(null, false, progress, done);
+    }
+
+    /**
+     * Installs the curated OpenNLP sentence models of one language ({@code "de"}, {@code "en"}; {@code null} for
+     * both); with {@code reinstall} installed ones are downloaded again.
+     */
+    void installSentenceModels(String language, boolean reinstall, Consumer<String> progress,
+                               BiConsumer<String, String> done);
 
     // ------------------------------------------------------------------ voice
 
