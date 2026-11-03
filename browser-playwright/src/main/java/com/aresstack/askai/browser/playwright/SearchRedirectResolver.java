@@ -75,7 +75,7 @@ final class SearchRedirectResolver {
         String path = pathOf(lower);
         if (host.endsWith("bing.com") && path.startsWith("/ck/")) {
             String encoded = queryParameter(url, "u");
-            String target = decodeBingTarget(encoded);
+            String target = decodeBingTarget(encoded, url);
             return target == null ? new Resolution(Status.UNRESOLVED, "")
                     : new Resolution(Status.RESOLVED, target);
         }
@@ -119,8 +119,13 @@ final class SearchRedirectResolver {
                 && token != null && !token.isEmpty();
     }
 
-    /** Bing encodes the target as {@code a1} + base64url; anything else is unresolved. */
-    private static String decodeBingTarget(String encoded) {
+    /**
+     * Bing encodes the target as {@code a1} + base64url; anything else is unresolved. Its own tabs (Images, Videos,
+     * Maps, Shopping, ...) carry a RELATIVE target such as {@code /images/search?q=...}: that is resolved against
+     * the wrapper's origin, so the link counts as Bing-internal instead of an unresolved hit that lazy resolution
+     * (askai #41) would keep as a result.
+     */
+    private static String decodeBingTarget(String encoded, String wrapper) {
         if (encoded == null || !encoded.startsWith("a1")) {
             return null;
         }
@@ -128,7 +133,15 @@ final class SearchRedirectResolver {
             String base64 = encoded.substring(2);
             byte[] decoded = Base64.getUrlDecoder().decode(padBase64(base64));
             String target = new String(decoded, StandardCharsets.UTF_8);
-            return target.startsWith("http") ? target : null;
+            if (target.startsWith("http")) {
+                return target;
+            }
+            if (target.startsWith("/") && !target.startsWith("//")) {
+                int scheme = wrapper.indexOf("://");
+                int slash = wrapper.indexOf('/', scheme + 3);
+                return slash < 0 ? null : wrapper.substring(0, slash) + target;
+            }
+            return null;
         } catch (RuntimeException notBase64) {
             return null;
         }

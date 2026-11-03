@@ -28,6 +28,16 @@ public class SearchRedirectResolverTest {
     }
 
     @Test
+    public void bingTabWrappersWithARelativeTargetResolveToBingItself() {
+        SearchRedirectResolver.Resolution images =
+                SearchRedirectResolver.resolve(bingWrapped("/images/search?q=kaninchen&FORM=HDRSC2"));
+        assertEquals(SearchRedirectResolver.Status.RESOLVED, images.getStatus());
+        assertEquals("https://www.bing.com/images/search?q=kaninchen&FORM=HDRSC2", images.getTargetUrl());
+        assertEquals("a protocol-relative target is never guessed", SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve(bingWrapped("//evil.example/x")).getStatus());
+    }
+
+    @Test
     public void googleUrlAndDuckDuckGoWrappersDecodeTheirParameter() {
         SearchRedirectResolver.Resolution google = SearchRedirectResolver.resolve(
                 "https://www.google.com/url?q=https%3A%2F%2Fexample.org%2Fa&sa=U");

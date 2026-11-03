@@ -125,7 +125,7 @@ public class ResearchRuntimeModeTest {
     @Test
     public void settingsRoundTripThroughTheStore() {
         MemoryStore store = new MemoryStore();
-        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "camoufox", false)
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "msedge", false)
                 .save(store);
         ResearchRuntimeSettings loaded = ResearchRuntimeSettings.load(store);
         assertEquals(ResearchBackendMode.ACP, loaded.getMode());

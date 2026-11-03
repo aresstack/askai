@@ -12,6 +12,7 @@ import com.aresstack.askai.browser.search.SearchResultCandidate;
 import com.aresstack.askai.browser.search.SearchResultExtractionResult;
 import com.aresstack.askai.browser.search.analysis.LegacySearchResultExtractor;
 import com.google.gson.Gson;
+import com.aresstack.askai.browser.search.UrlResolutionStatus;
 import org.junit.Test;
 
 import java.io.InputStream;
@@ -41,6 +42,10 @@ import static org.junit.Assert.assertTrue;
  * {@code /goto}) took about 1.5 s per link through the browser, and after the first burst of direct requests Google
  * answered with a check page instead of a redirect. So {@code /goto} is never a source URL, it stays
  * {@code UNRESOLVED} ({@link OpaqueRedirectStrategy#DISCARD}), and the attempt names the reason.</p>
+ *
+ * <p>Since askai #41/#47 (lazy resolution, Angelo 2026-11-02) such a hit is no longer dropped: it is kept as an
+ * UNVERIFIED candidate whose navigation URL is the raw {@code /goto} link, and only the browser resolves it when the
+ * hit is opened. It is still never a verified target and never a Google URL as source.</p>
  */
 public class GoogleGotoRegressionTest {
 
@@ -66,9 +71,14 @@ public class GoogleGotoRegressionTest {
         for (SearchResultCandidate candidate : extraction.candidates) {
             assertFalse("a Google wrapper is never a source: " + candidate.resolvedTargetUrl,
                     candidate.resolvedTargetUrl.contains("google.com"));
+            if (candidate.rawSearchHref.contains("/goto")) {
+                assertEquals("lazy resolution (#41): kept unverified", UrlResolutionStatus.UNRESOLVED,
+                        candidate.urlResolution);
+                assertFalse("never a verified target", candidate.hasVerifiedTarget());
+                assertEquals("the browser opens the raw /goto link", candidate.rawSearchHref,
+                        candidate.navigationUrl());
+            }
         }
-        assertNotEquals("no invented results from a page whose results are all opaque",
-                SearchPageAnalysisOutcome.ORGANIC_RESULTS, extraction.outcome);
     }
 
     @Test
