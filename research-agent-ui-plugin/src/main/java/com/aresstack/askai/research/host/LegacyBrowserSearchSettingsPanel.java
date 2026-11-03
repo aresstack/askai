@@ -2,6 +2,7 @@ package com.aresstack.askai.research.host;
 
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicForm;
 import com.aresstack.comiccontrols.theme.ThemeColor;
 import com.aresstack.askai.browser.search.DefaultLegacyBrowserSearchSettingsValidator;
 import com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults;
@@ -12,7 +13,6 @@ import com.aresstack.askai.browser.search.SettingsValidationResult;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -45,7 +45,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
     private final WorkspaceStateStore store;
     private final Map<String, String> defaults;
     private final Map<String, FieldEditor> editors = new LinkedHashMap<String, FieldEditor>();
-    private final JTextArea problems = ComicControls.textArea(4, 60);
+    private final JTextArea problems = ComicControls.textArea(3, 20);
     private final JLabel revisionLabel = new JLabel();
 
     LegacyBrowserSearchSettingsPanel(WorkspaceStateStore store,
@@ -56,36 +56,38 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
                 .toValues(LegacyBrowserSearchDefaults.create());
 
         JPanel header = new JPanel();
+        header.setOpaque(false);
         header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
-        header.add(bold(new JLabel("Legacy Browser Search")));
-        header.add(gray(new JLabel(
-                "Changes apply to NEW research sessions only — a running session keeps its own "
-                        + "immutable settings snapshot.")));
+        header.setBorder(BorderFactory.createEmptyBorder(4, 4, 0, 4));
+        header.add(left(bold(new JLabel("Legacy Browser Search"))));
+        String info = "Changes apply to NEW research sessions only \u2014 a running session keeps"
+                + " its own immutable settings snapshot.";
         if (activeProfile != null) {
-            header.add(gray(new JLabel("This session uses profile '" + activeProfile.profileId
-                    + "', revision " + activeProfile.profileRevision
-                    + " (digest " + shortDigest(activeProfile.settingsDigest) + ").")));
+            info += " This session uses profile '" + activeProfile.profileId
+                    + "' (revision " + activeProfile.profileRevision + ", digest "
+                    + shortDigest(activeProfile.settingsDigest) + ").";
         }
-        header.add(revisionLabel);
+        header.add(left(ComicForm.hint(info)));
+        header.add(left(revisionLabel));
         refreshRevisionLabel();
         add(header, BorderLayout.NORTH);
 
-        JTabbedPane tabs = ComicControls.tabbedPane();
-        Map<String, JPanel> sectionPanels = new LinkedHashMap<String, JPanel>();
+        // Sub-pages as a list on the LEFT: seven long section names never fit in one tab row.
+        JTabbedPane tabs = ComicControls.tabbedPane(JTabbedPane.LEFT);
+        Map<String, ComicForm> forms = new LinkedHashMap<String, ComicForm>();
         for (String section : LegacyBrowserSearchSettingsCatalog.sections()) {
-            JPanel panel = new JPanel();
-            panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-            panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-            sectionPanels.put(section, panel);
-            JScrollPane scroll = new JScrollPane(panel);
-            scroll.getVerticalScrollBar().setUnitIncrement(16);
-            tabs.addTab(section, scroll);
+            forms.put(section, new ComicForm());
         }
         Map<String, String> effective = effectiveValues();
         for (LegacyBrowserSearchSettingsCatalog.Field field
                 : LegacyBrowserSearchSettingsCatalog.fields()) {
-            sectionPanels.get(field.section).add(fieldRow(field, effective.get(field.key)));
-            sectionPanels.get(field.section).add(Box.createVerticalStrut(10));
+            addField(forms.get(field.section), field, effective.get(field.key));
+        }
+        for (Map.Entry<String, ComicForm> entry : forms.entrySet()) {
+            ComicForm form = entry.getValue();
+            form.setBorder(BorderFactory.createEmptyBorder(ComicForm.PAGE_MARGIN,
+                    ComicForm.PAGE_MARGIN, ComicForm.PAGE_MARGIN, ComicForm.PAGE_MARGIN));
+            tabs.addTab(entry.getKey(), ComicForm.page(form));
         }
         add(tabs, BorderLayout.CENTER);
 
@@ -116,41 +118,44 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
         return effective;
     }
 
-    private JComponent fieldRow(final LegacyBrowserSearchSettingsCatalog.Field field, String value) {
-        JPanel row = new JPanel();
-        row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0,
-                ThemeColor.of("research.settingsRowDivider")));
-        row.add(bold(new JLabel(field.label)));
-        row.add(gray(new JLabel("<html>" + escape(field.description) + "</html>")));
-
+    /**
+     * One field as a form row: label left, editor right with its Reset button on the same line; the
+     * description, default and range go into the tooltip plus a short muted hint. Multi-line editors
+     * (prompts, lists, engine order) take the full width below their label.
+     */
+    private void addField(ComicForm form, final LegacyBrowserSearchSettingsCatalog.Field field,
+                          String value) {
         final FieldEditor editor = createEditor(field, value);
         editors.put(field.key, editor);
         JComponent component = editor.component();
-        component.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.add(component);
 
-        StringBuilder meta = new StringBuilder("Default: " + display(defaults.get(field.key)));
         String range = rangeText(field);
+        StringBuilder meta = new StringBuilder("Default: " + display(defaults.get(field.key)));
         if (!range.isEmpty()) {
-            meta.append("   Range: ").append(range);
+            meta.append(" \u00b7 Range: ").append(range);
         }
         if (!field.templateVariables.isEmpty()) {
-            meta.append("   Variables: ").append(field.templateVariables);
+            meta.append(" \u00b7 Variables: ").append(field.templateVariables);
         }
-        JPanel metaRow = new JPanel();
-        metaRow.setLayout(new BoxLayout(metaRow, BoxLayout.X_AXIS));
-        metaRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        metaRow.add(gray(new JLabel(meta.toString())));
-        metaRow.add(Box.createHorizontalStrut(12));
+        String tooltip = "<html><b>" + escape(field.label) + "</b><br>" + escape(field.description)
+                + "<br><i>" + escape(meta.toString()) + "</i></html>";
+        component.setToolTipText(tooltip);
+
         JButton reset = new ComicButton("Reset");
-        reset.setFont(reset.getFont().deriveFont(11f));
+        reset.setToolTipText("Reset to default: " + display(defaults.get(field.key)));
         reset.addActionListener(e -> editor.set(defaults.get(field.key)));
-        metaRow.add(reset);
-        metaRow.add(Box.createHorizontalGlue());
-        row.add(metaRow);
-        return row;
+
+        boolean multiLine = field.kind == LegacyBrowserSearchSettingsCatalog.Kind.TEXT_LIST
+                || field.kind == LegacyBrowserSearchSettingsCatalog.Kind.PROMPT
+                || field.kind == LegacyBrowserSearchSettingsCatalog.Kind.ENGINE_LIST;
+        if (multiLine) {
+            form.area(field.label, component);
+            form.row("", ComicForm.hint(field.description + " " + meta), reset);
+        } else {
+            form.row(field.label, component, reset);
+            form.row("", ComicForm.hint(field.description
+                    + (range.isEmpty() ? "" : " (" + range + ")")));
+        }
     }
 
     private FieldEditor createEditor(LegacyBrowserSearchSettingsCatalog.Field field, String value) {
@@ -179,7 +184,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
             case TEXT_LIST:
             case PROMPT:
                 final JTextArea area = ComicControls.textArea(value,
-                        field.kind == LegacyBrowserSearchSettingsCatalog.Kind.PROMPT ? 8 : 5, 60);
+                        field.kind == LegacyBrowserSearchSettingsCatalog.Kind.PROMPT ? 8 : 4, 20);
                 area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
                 final JScrollPane scroll = new JScrollPane(area);
                 scroll.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -188,7 +193,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
                     void set(String v) { area.setText(v); }
                 };
             default:
-                final JTextField text = ComicControls.textField(value, 24);
+                final JTextField text = ComicControls.textField(value, 12);
                 text.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE,
                         text.getPreferredSize().height));
                 return new FieldEditor(text) {
@@ -254,6 +259,11 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
 
     private static String shortDigest(String digest) {
         return digest.length() > 12 ? digest.substring(0, 12) : digest;
+    }
+
+    private static <T extends JComponent> T left(T component) {
+        component.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return component;
     }
 
     private static JLabel bold(JLabel label) {
