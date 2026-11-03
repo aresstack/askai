@@ -207,8 +207,8 @@ public final class SetupWizardPanel extends JPanel {
     private final JComboBox<String> rerankerModel = ComicControls.comboBox();
     private final JComboBox<String> sentenceGerman = ComicControls.comboBox();
     private final JComboBox<String> sentenceEnglish = ComicControls.comboBox();
-    private final ComicButton sentenceInstall = new ComicButton("Install sentence models",
-            ComicButton.Accent.ACTION);
+    private final ComicButton sentenceGermanAction = new ComicButton("Download", ComicButton.Accent.ACTION);
+    private final ComicButton sentenceEnglishAction = new ComicButton("Download", ComicButton.Accent.ACTION);
     private final JLabel knowledgeStatus = statusLabel();
     private String measuredFor = "";
     private boolean sentenceInstalling;
@@ -398,8 +398,8 @@ public final class SetupWizardPanel extends JPanel {
         rows.stretched("", embeddingDownload.line.panel);
         rows.stretched("Reranker", inline(rerankerModel, rerankerDownload.button));
         rows.stretched("", rerankerDownload.line.panel);
-        rows.stretched("Sentences (German)", inline(sentenceGerman, sentenceInstall));
-        rows.stretched("Sentences (English)", inline(sentenceEnglish));
+        rows.stretched("Sentences (German)", inline(sentenceGerman, sentenceGermanAction));
+        rows.stretched("Sentences (English)", inline(sentenceEnglish, sentenceEnglishAction));
         rows.stretched("", new StatusLine(null, knowledgeStatus).panel);
         researchRows = rows;
         return rows.panel();
@@ -513,7 +513,8 @@ public final class SetupWizardPanel extends JPanel {
             measuredFor = "";
             measureDimension();
         });
-        sentenceInstall.addActionListener(e -> installSentenceModels());
+        sentenceGermanAction.addActionListener(e -> installSentenceModels("de"));
+        sentenceEnglishAction.addActionListener(e -> installSentenceModels("en"));
         chatDownload.button.addActionListener(e -> pull(chatDownload, chatModel));
         chatRecommended.setToolTipText("Download the recommended chat model through Ollama and select it");
         chatRecommended.addActionListener(e -> {
@@ -846,8 +847,8 @@ public final class SetupWizardPanel extends JPanel {
         done[STEP_DICTATION] = dictationLoaded && !installedAudio.isEmpty();
         // The reranker is a local model: offer the installation whenever the chosen one is not installed.
         rerankerDownload.button.setVisible(!installedRerankers.contains(text(rerankerModel)));
-        sentenceInstall.setEnabled(!busy && !installing());
-        sentenceInstall.setVisible(sentenceModelsMissing());
+        sentenceAction(sentenceGermanAction, installedSentenceGerman, "German");
+        sentenceAction(sentenceEnglishAction, installedSentenceEnglish, "English");
         checkInstallMissing.setVisible(pendingFixes > 0 || !missingLocalModels().isEmpty());
         checkInstallMissing.setEnabled(!busy && pendingFixes == 0);
         voiceAction(voiceGerman, voiceGermanAction);
@@ -1159,11 +1160,26 @@ public final class SetupWizardPanel extends JPanel {
         });
     }
 
-    private void installSentenceModels() {
-        installSentenceModels(null);
+    /** "Download" while a language has no sentence model, "Reinstall" once it has one. */
+    private void sentenceAction(ComicButton button, List<String> installed, String language) {
+        boolean present = !installed.isEmpty();
+        button.setText(present ? "Reinstall" : "Download");
+        button.setToolTipText((present ? "Download the " : "Install the ") + language
+                + " OpenNLP sentence model" + (present ? " again" : ""));
+        button.setEnabled(!busy && !installing());
+    }
+
+    private void installSentenceModels(String language) {
+        boolean reinstall = "de".equals(language) ? !installedSentenceGerman.isEmpty()
+                : !installedSentenceEnglish.isEmpty();
+        installSentenceModels(language, reinstall, null);
     }
 
     private void installSentenceModels(final Runnable after) {
+        installSentenceModels(null, false, after);
+    }
+
+    private void installSentenceModels(String language, boolean reinstall, final Runnable after) {
         if (sentenceInstalling) {
             return;
         }
@@ -1171,7 +1187,7 @@ public final class SetupWizardPanel extends JPanel {
         clearError(STEP_KNOWLEDGE);
         knowledgeStatus.setText("Installing sentence models …");
         updateButtons();
-        setup.installSentenceModels(line -> {
+        setup.installSentenceModels(language, reinstall, line -> {
             if (!closed) {
                 knowledgeStatus.setText(shorten(line));
             }
@@ -1716,12 +1732,6 @@ public final class SetupWizardPanel extends JPanel {
         updateButtons();
     }
 
-    private boolean sentenceModelsMissing() {
-        return installedSentenceGerman.isEmpty() || installedSentenceEnglish.isEmpty()
-                || (!text(sentenceGerman).isEmpty() && !installedSentenceGerman.contains(text(sentenceGerman)))
-                || (!text(sentenceEnglish).isEmpty() && !installedSentenceEnglish.contains(text(sentenceEnglish)));
-    }
-
     private static List<String> append(List<String> list, String value) {
         List<String> copy = new ArrayList<String>(list);
         copy.add(value);
@@ -1925,8 +1935,12 @@ public final class SetupWizardPanel extends JPanel {
         return checkInstallMissing;
     }
 
-    JButton sentenceInstallButton() {
-        return sentenceInstall;
+    JButton sentenceGermanButton() {
+        return sentenceGermanAction;
+    }
+
+    JButton sentenceEnglishButton() {
+        return sentenceEnglishAction;
     }
 
     JCheckBox trustWindowsBox() {

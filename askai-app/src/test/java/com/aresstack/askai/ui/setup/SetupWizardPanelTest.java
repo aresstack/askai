@@ -144,9 +144,16 @@ public class SetupWizardPanelTest {
         assertEquals("768", wizard.embeddingDimensionField().getText());
         assertTrue(wizard.isDone(SetupWizardPanel.STEP_KNOWLEDGE));
 
-        wizard.sentenceInstallButton().doClick();
+        assertEquals("Download", wizard.sentenceGermanButton().getText());
+        wizard.sentenceGermanButton().doClick();
         assertEquals(1, fake.sentenceInstalls);
         assertEquals("opennlp-de-sent", wizard.draft().nlpSentenceGerman());
+        assertEquals("Reinstall", wizard.sentenceGermanButton().getText());
+        assertEquals("each language on its own", "Download", wizard.sentenceEnglishButton().getText());
+
+        wizard.sentenceGermanButton().doClick();
+        wizard.sentenceEnglishButton().doClick();
+        assertEquals(Arrays.asList("de install", "de reinstall", "en install"), fake.sentenceRequests);
     }
 
     @Test
@@ -658,6 +665,7 @@ public class SetupWizardPanelTest {
         List<String> audioModels = new ArrayList<String>();
         final List<String> browserInstalled = new ArrayList<String>();
         int browserOpened;
+        final List<String> sentenceRequests = new ArrayList<String>();
         SetupDraft browserDraft;
 
         @Override
@@ -717,7 +725,9 @@ public class SetupWizardPanelTest {
         }
 
         @Override
-        public void installSentenceModels(Consumer<String> progress, BiConsumer<String, String> done) {
+        public void installSentenceModels(String language, boolean reinstall, Consumer<String> progress,
+                                          BiConsumer<String, String> done) {
+            sentenceRequests.add(language + (reinstall ? " reinstall" : " install"));
             sentenceInstalls++;
             sentenceInstalled = true;
             progress.accept("Downloading opennlp-de-sent …");
