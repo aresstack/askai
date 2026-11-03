@@ -25,6 +25,8 @@ import java.util.Set;
  *   <li>{@link EngineAcquisitionMode#ALL_ENABLED}: every step runs; the candidates are merged in step order
  *       (a URL already found is not added twice).</li>
  * </ul>
+ * A failure carrying the browser's BROWSER_CLOSED marker (the user closed the window) is rethrown at once, so
+ * the caller ends the run as the user's stop instead of trying the next engine.
  * When no step delivers, the result is {@link InitialSearchStatus#NO_RESULTS} if some step searched cleanly,
  * else the last failure is rethrown or reported as {@link InitialSearchStatus#TECHNICAL_PROBLEM}.
  */
@@ -102,6 +104,9 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
             try {
                 result = steps.get(i).search(request, cancellation, budget);
             } catch (ToolInvoker.ToolFailure | ToolInvoker.EndpointUnavailable | RuntimeException failure) {
+                if (closedByUser(failure)) {
+                    throw failure; // the user's stop: never fall back to another engine or merge it away
+                }
                 diagnostics.add("browser search: " + stepNames.get(i) + " failed: " + failure.getMessage());
                 lastFailure = failure;
                 continue;
@@ -141,5 +146,10 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
         }
         return new InitialSearchResult(candidates, new ArrayList<String>(hosts), challenges, diagnostics,
                 InitialSearchStatus.TECHNICAL_PROBLEM);
+    }
+
+    /** The browser runtime's typed marker for "the user closed the browser window". */
+    private static boolean closedByUser(Exception failure) {
+        return failure.getMessage() != null && failure.getMessage().contains("BROWSER_CLOSED");
     }
 }

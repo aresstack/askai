@@ -56,6 +56,27 @@ public class BrowserEnginesSearchStrategyTest {
     }
 
     @Test
+    public void aClosedBrowserIsTheUsersStopAndNeverFallsBack() {
+        Fake pages = new Fake() {
+            @Override
+            public InitialSearchResult search(InitialSearchRequest r, CancellationSignal c, SearchBudgetGate b) {
+                calls++;
+                throw new IllegalStateException("BROWSER_CLOSED — the browser window was closed by the user.");
+            }
+        };
+        Fake google = new Fake();
+        try {
+            new BrowserEnginesSearchStrategy(
+                    selection(EngineAcquisitionMode.ALL_ENABLED, "duckduckgo:on", "google:on"), google, pages)
+                    .search(REQUEST, NOT_CANCELLED, BUDGET);
+            org.junit.Assert.fail("the close must reach the caller");
+        } catch (Exception closed) {
+            assertTrue(closed.getMessage().contains("BROWSER_CLOSED"));
+        }
+        assertEquals(0, google.calls);
+    }
+
+    @Test
     public void allEnabledMergesWithoutDuplicates() throws Exception {
         Fake google = new Fake("https://a.example/", "https://same.example/");
         Fake pages = new Fake("https://same.example/", "https://c.example/");
