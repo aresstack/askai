@@ -506,7 +506,7 @@ public final class AskAiFrame extends JFrame {
         buttons.add(close);
         javax.swing.JPanel root = new javax.swing.JPanel(new java.awt.BorderLayout());
         root.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        root.add(content, java.awt.BorderLayout.CENTER); // each tab fits and scrolls itself
+        root.add(com.aresstack.comiccontrols.control.ComicForm.fit(content), java.awt.BorderLayout.CENTER);
         root.add(buttons, java.awt.BorderLayout.SOUTH);
         dialog.setContentPane(root);
         dialog.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);

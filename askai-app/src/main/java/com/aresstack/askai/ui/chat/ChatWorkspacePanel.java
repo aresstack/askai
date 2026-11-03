@@ -825,7 +825,7 @@ public final class ChatWorkspacePanel extends JPanel {
 
     /** Registers an application page in the Settings (call before the Settings are first opened). */
     public void addApplicationSettingsPage(String category, JComponent page) {
-        applicationSettingsPages.put(category, page);
+        applicationSettingsPages.put(category, com.aresstack.comiccontrols.control.ComicForm.fit(page));
     }
 
     /** Opens the Settings (drawer pane + main area) on the current page; no-op without an active chat panel. */

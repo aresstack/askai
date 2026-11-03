@@ -1187,7 +1187,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         party.addTab("Network", settingsCard(partyCards[1]));
         party.addTab("Bot", settingsCard(partyCards[2]));
         party.addTab("History", settingsCard(partyCards[3]));
-        cards.add(party, SETTINGS_PARTY);
+        cards.add(ComicForm.fit(party), SETTINGS_PARTY);
         categories.addAll(java.util.Arrays.asList(CHAT_SETTINGS_CATEGORIES));
         // Chat modes contributed by plugins (e.g. Research Agent) follow after Party; they are synced on
         // EVERY open (syncAgentSettingsPages), not only when the panes are first built.
@@ -1306,7 +1306,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     /** Wraps a card in the vertical-only settings scroll pane so long cards stay usable at small sizes. */
     private static JComponent settingsCard(JComponent card) {
-        return ComicForm.scroll(card);
+        return ComicForm.fit(card);
     }
 
     /**

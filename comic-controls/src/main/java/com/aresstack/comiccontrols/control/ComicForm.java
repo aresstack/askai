@@ -62,7 +62,13 @@ public class ComicForm extends JPanel {
     /** The smallest width a stretching field may shrink to before the page would need to scroll. */
     private static final int MIN_FIELD_WIDTH = 80;
 
+    /** Below this width of the field column the labels move above the fields. */
+    private static final int MIN_FIELD_COLUMN = 160;
+
     private final List<JLabel> labels = new ArrayList<JLabel>();
+    /** {label, field cell} of every two-column row, for the narrow-window layout. */
+    private final List<JComponent[]> pairs = new ArrayList<JComponent[]>();
+    private boolean stacked;
     private int nextRow;
 
     /** An untitled form (no border); use {@link #titled(String)} for a comic group frame. */
@@ -116,9 +122,10 @@ public class ComicForm extends JPanel {
             cell = line;
             stretch = true; // the line always spans the column; its own layout decides what stretches
         }
-        addLabel(label, cell);
+        JLabel caption = addLabel(label, cell);
         GridBagConstraints c = fieldConstraints(stretch);
         add(stretch ? limitShrink(cell) : cell, c);
+        pairs.add(new JComponent[] {caption, cell});
         nextRow++;
         return this;
     }
@@ -144,7 +151,7 @@ public class ComicForm extends JPanel {
             JLabel caption = new JLabel(label);
             GridBagConstraints c = new GridBagConstraints();
             c.gridx = 0;
-            c.gridy = nextRow++;
+            c.gridy = 2 * (nextRow++);
             c.gridwidth = 2;
             c.anchor = GridBagConstraints.WEST;
             c.insets = new Insets(nextRow == 1 ? 0 : ROW_GAP, 0, 2, 0);
@@ -152,7 +159,7 @@ public class ComicForm extends JPanel {
         }
         GridBagConstraints c = new GridBagConstraints();
         c.gridx = 0;
-        c.gridy = nextRow++;
+        c.gridy = 2 * (nextRow++);
         c.gridwidth = 2;
         c.weightx = 1;
         c.fill = GridBagConstraints.HORIZONTAL;
@@ -184,7 +191,7 @@ public class ComicForm extends JPanel {
     private ComicForm spanning(JComponent component, boolean stretch) {
         GridBagConstraints c = new GridBagConstraints();
         c.gridx = 0;
-        c.gridy = nextRow++;
+        c.gridy = 2 * (nextRow++);
         c.gridwidth = 2;
         c.weightx = 1;
         c.anchor = GridBagConstraints.WEST;
@@ -194,7 +201,7 @@ public class ComicForm extends JPanel {
         return this;
     }
 
-    private void addLabel(String text, JComponent field) {
+    private JLabel addLabel(String text, JComponent field) {
         JLabel label = new JLabel(text == null ? "" : text);
         if (field != null) {
             label.setLabelFor(field);
@@ -202,16 +209,71 @@ public class ComicForm extends JPanel {
         labels.add(label);
         GridBagConstraints c = new GridBagConstraints();
         c.gridx = 0;
-        c.gridy = nextRow;
+        c.gridy = 2 * nextRow;
         c.anchor = GridBagConstraints.WEST;
         c.insets = new Insets(nextRow == 0 ? 0 : ROW_GAP, 0, 0, LABEL_GAP);
         add(label, c);
+        return label;
+    }
+
+    // ------------------------------------------------------------------ narrow windows
+
+    @Override
+    public void doLayout() {
+        boolean narrow = tooNarrowForTwoColumns();
+        if (narrow != stacked) {
+            stacked = narrow;
+            applyColumns();
+            revalidate(); // our preferred height changed: the page must give us the new height
+        }
+        super.doLayout();
+    }
+
+    /** Whether label column + gap + the widest field line's minimum no longer fit the current width. */
+    private boolean tooNarrowForTwoColumns() {
+        if (pairs.isEmpty() || getWidth() <= 0) {
+            return false;
+        }
+        Insets insets = getInsets();
+        int available = getWidth() - insets.left - insets.right;
+        int labelColumn = 0;
+        int fieldColumn = MIN_FIELD_COLUMN;
+        for (JComponent[] pair : pairs) {
+            labelColumn = Math.max(labelColumn, pair[0].getPreferredSize().width);
+            fieldColumn = Math.max(fieldColumn, pair[1].getMinimumSize().width);
+        }
+        return available < labelColumn + LABEL_GAP + fieldColumn;
+    }
+
+    /**
+     * Two columns (label left, field right) while they fit; in a window too narrow for both, each label
+     * moves above its field instead of the fields being squeezed out of the window.
+     */
+    private void applyColumns() {
+        GridBagLayout grid = (GridBagLayout) getLayout();
+        for (JComponent[] pair : pairs) {
+            GridBagConstraints label = grid.getConstraints(pair[0]);
+            GridBagConstraints field = grid.getConstraints(pair[1]);
+            int row = label.gridy;
+            label.gridwidth = stacked ? 2 : 1;
+            field.gridx = stacked ? 0 : 1;
+            field.gridy = stacked ? row + 1 : row;
+            field.gridwidth = stacked ? 2 : 1;
+            field.insets = new Insets(stacked ? 2 : label.insets.top, 0, 0, 0);
+            grid.setConstraints(pair[0], label);
+            grid.setConstraints(pair[1], field);
+        }
+    }
+
+    /** Whether the labels currently sit above their fields (narrow window). */
+    boolean isStacked() {
+        return stacked;
     }
 
     private GridBagConstraints fieldConstraints(boolean stretch) {
         GridBagConstraints c = new GridBagConstraints();
         c.gridx = 1;
-        c.gridy = nextRow;
+        c.gridy = 2 * nextRow;
         c.weightx = 1;
         c.anchor = GridBagConstraints.WEST;
         c.fill = stretch ? GridBagConstraints.HORIZONTAL : GridBagConstraints.NONE;
@@ -249,7 +311,7 @@ public class ComicForm extends JPanel {
 
     /** A small, muted, wrapping text for hints below a group of fields. */
     public static JComponent hint(String text) {
-        JTextArea area = new JTextArea(text == null ? "" : text);
+        JTextArea area = new WrappingText(text == null ? "" : text);
         area.setEditable(false);
         area.setFocusable(false);
         area.setLineWrap(true);
@@ -259,8 +321,47 @@ public class ComicForm extends JPanel {
         JLabel reference = new JLabel();
         area.setFont(reference.getFont().deriveFont(reference.getFont().getSize2D() - 1f));
         area.setForeground(ThemeColor.of("comic.hintText"));
-        // A wrapping text area reports its single-line width as preferred; cap it so the page decides.
-        area.setMinimumSize(new Dimension(MIN_FIELD_WIDTH, 0));
+        return area;
+    }
+
+    /**
+     * A text that wraps at whatever width the form gives it: it never asks for more width than a short
+     * field (so it can't widen the page), and when a resize changes its line count it re-lays the form
+     * out, so no line is cut off — neither when the window grows nor when it shrinks.
+     */
+    static final class WrappingText extends JTextArea {
+        private static final long serialVersionUID = 1L;
+
+        WrappingText(String text) {
+            super(text);
+            addComponentListener(new java.awt.event.ComponentAdapter() {
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent event) {
+                    if (getPreferredSize().height != getHeight()) {
+                        revalidate();
+                    }
+                }
+            });
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            Dimension pref = super.getPreferredSize();
+            return new Dimension(Math.min(pref.width, MIN_FIELD_WIDTH), pref.height);
+        }
+
+        /** Narrow, but never lower than its wrapped lines (GridBag falls back to minimums when tight). */
+        @Override
+        public Dimension getMinimumSize() {
+            return getPreferredSize();
+        }
+    }
+
+    /** A plain, wrapping status text in the field column (a JLabel would run out of a narrow window). */
+    public static JTextArea text(String text) {
+        JTextArea area = (JTextArea) hint(text);
+        area.setFont(new JLabel().getFont());
+        area.setForeground(new JLabel().getForeground());
         return area;
     }
 
@@ -319,13 +420,111 @@ public class ComicForm extends JPanel {
 
     /** A borderless, vertical-only scroll pane around a page stack (or any width-tracking content). */
     public static JScrollPane scroll(JComponent content) {
-        JScrollPane scroll = new JScrollPane(content);
+        // A view that is not Scrollable is sized by JViewport to max(preferred, viewport): wider than the
+        // window as soon as one hint or field prefers more, and it never shrinks again with the window.
+        // That was THE recurring "content runs out of the frame" bug — so every view gets bound here.
+        JComponent view = content instanceof Scrollable ? content : new Fit(content);
+        JScrollPane scroll = new JScrollPane(view);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.getVerticalScrollBar().setUnitIncrement(14);
         scroll.setOpaque(false);
         scroll.getViewport().setOpaque(false);
         return scroll;
+    }
+
+    /**
+     * THE single entry point for putting any settings content into a slot of a window (a settings card,
+     * a tab, a plugin dialog): the content always takes exactly the slot's WIDTH, follows every resize at
+     * once, and scrolls vertically only. A {@link JScrollPane} is already bound and stays as it is; the
+     * tabs of a {@link JTabbedPane} are fitted one by one; anything else goes into {@link #scroll}.
+     */
+    public static JComponent fit(JComponent content) {
+        if (content == null || content instanceof JScrollPane) {
+            return content;
+        }
+        if (content instanceof javax.swing.JTabbedPane) {
+            javax.swing.JTabbedPane tabs = (javax.swing.JTabbedPane) content;
+            for (int i = 0; i < tabs.getTabCount(); i++) {
+                Component tab = tabs.getComponentAt(i);
+                if (tab instanceof JComponent && !(tab instanceof JScrollPane)) {
+                    // Release the tab's component first: re-parenting it into the wrapper would drop the tab.
+                    tabs.setComponentAt(i, new JPanel());
+                    tabs.setComponentAt(i, fit((JComponent) tab));
+                }
+            }
+            return tabs;
+        }
+        return scroll(content);
+    }
+
+    /**
+     * Binds a non-{@link Scrollable} view to its viewport: always the viewport's width; the viewport's
+     * height too when the content can live with it (its minimum fits — e.g. it scrolls inside itself, or
+     * it is short), so nested scroll panes scroll instead of the whole page; otherwise its own height.
+     * A short content stays at the top at its preferred height and is never spread over the viewport.
+     */
+    static final class Fit extends JPanel implements Scrollable {
+        private static final long serialVersionUID = 1L;
+        private final JComponent content;
+
+        Fit(JComponent content) {
+            super(null);
+            this.content = content;
+            setOpaque(false);
+            // A former tab component comes back hidden (JTabbedPane hides unselected tabs).
+            content.setVisible(true);
+            add(content);
+        }
+
+        JComponent content() {
+            return content;
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            return content.getPreferredSize();
+        }
+
+        @Override
+        public Dimension getMinimumSize() {
+            return content.getMinimumSize();
+        }
+
+        @Override
+        public void doLayout() {
+            int height = Math.min(getHeight(), content.getPreferredSize().height);
+            height = Math.max(height, Math.min(getHeight(), content.getMinimumSize().height));
+            content.setBounds(0, 0, getWidth(), height);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 14;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return Math.max(14, (orientation == javax.swing.SwingConstants.VERTICAL
+                    ? visibleRect.height : visibleRect.width) - 14);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            Component parent = getParent();
+            return parent instanceof JViewport
+                    && parent.getHeight() >= content.getMinimumSize().height;
+        }
     }
 
     /**
