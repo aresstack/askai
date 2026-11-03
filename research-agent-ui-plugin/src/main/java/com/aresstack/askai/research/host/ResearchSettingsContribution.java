@@ -52,6 +52,7 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
         // What the browser itself does with EVERY provider: open and read the hits.
         tabs.addTab("Browser", LegacyBrowserSearchSettingsPanel.browsing(store, profile,
                 form -> BrowserBasicsRows.addTo(form, store)));
+        tabs.addTab("MCP", fitted(runtime.mcpView()));
         tabs.addTab("Check results", runtime.resultsView());
         // The DataForSEO draft + provider selection persist when the gear dialog is disposed; unsaved
         // provider drafts are dropped. The host's settings dialog does not expose an explicit Save hook,

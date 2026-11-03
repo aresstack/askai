@@ -84,14 +84,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             "Use AI reranker (semantic model instead of BM25; applies to new sessions)", false);
     /** Bot-control MCP (default ON): run_command/session_state/chat_history + service-endpoint.json. */
     private final JCheckBox botControlMcp = ComicControls.checkBox(
-            "Bot control via MCP (applies to new sessions)", true);
+            "Enable MCP server (bot control; applies to new sessions)", false);
     /** Square, margin-less info button (Unicode \u24D8): opens the live connection/tool details. */
     private final javax.swing.JButton botTools = new ComicButton("\u24D8");
     /** The live session behind this settings page (nullable: store-only construction in tests). */
     private final com.aresstack.askai.research.agent.ResearchAgentSession session;
     /** ChatGPT connector (default OFF): AskAI as its own public MCP+OAuth face behind the TLS proxy. */
     private final JCheckBox chatGptConnector = ComicControls.checkBox(
-            "ChatGPT connector (public endpoint behind the reverse proxy; applies to new sessions)", false);
+            "ChatGPT connector (public endpoint behind the reverse proxy)", false);
     private final JTextField connectorOrigin = placeholderField("https://askai.example.com", 38);
     private final JTextField connectorPort = ComicControls.textField(6);
     private final JTextField connectorClientId =
@@ -120,127 +120,56 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         this.store = store;
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-        JPanel form = new JPanel();
-        form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
-        form.add(row("Backend:", backendStatus));
-        form.add(row("Answer budget (tokens):", agentMaxTokens));
-        JPanel searchLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        searchLimits.setOpaque(false);
-        searchLimits.add(labelled("Source target", searchTargetSources));
-        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Pages", searchMaxPages));
-        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Tool-Calls", searchMaxToolCalls));
-        form.add(row("Search limits:", searchLimits));
-        // Second line: the row fits the dialog width instead of running off its right edge.
-        JPanel searchLimits2 = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        searchLimits2.setOpaque(false);
-        searchLimits2.add(labelled("Minutes", searchMaxMinutes));
-        searchLimits2.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits2.add(labelled("Tool-Timeout (s)", browserToolTimeout));
-        searchLimits2.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits2.add(labelled("Errors", searchMaxErrors));
-        form.add(row("", searchLimits2));
-        JPanel reviewLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        reviewLimits.setOpaque(false);
-        reviewLimits.add(labelled("Sources", reviewMaxSources));
-        reviewLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        reviewLimits.add(labelled("Chars/source", reviewMaxChars));
-        form.add(row("Review context:", reviewLimits));
-        JPanel conceptLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        conceptLimits.setOpaque(false);
-        conceptLimits.add(labelled("Tool rounds", conceptToolRounds));
-        conceptLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        conceptLimits.add(labelled("Repairs", conceptRepairAttempts));
-        form.add(row("Concept loop:", conceptLimits));
-        JPanel scopeCheckRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckRow.setOpaque(false);
-        scopeCheckRow.add(labelled("Breadth (concepts)", scopeCheckTargetProbes));
-        scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Examples per post", scopeCheckControlsPerAnchor));
-        form.add(row("Scope check:", scopeCheckRow));
-        JPanel scopeCheckRow2 = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckRow2.setOpaque(false);
-        scopeCheckRow2.add(labelled("Max. topics", scopeCheckMaxTopics));
-        scopeCheckRow2.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow2.add(labelled("Timeout (s)", scopeCheckTimeout));
-        scopeCheckRow2.add(javax.swing.Box.createHorizontalStrut(10));
-        final javax.swing.JButton scopeCheckAdvancedToggle =
-                new ComicButton("Advanced…");
-        scopeCheckRow2.add(scopeCheckAdvancedToggle);
-        form.add(row("", scopeCheckRow2));
-        JPanel scopeCheckModelRow = new JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckModelRow.setOpaque(false);
-        scopeCheckModelRow.add(labelled("Gen temp", scopeCheckGenTemperature));
-        scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Gen tokens", scopeCheckGenMaxTokens));
-        scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Choice temp", scopeCheckChooserTemperature));
-        JPanel scopeCheckModelRowB = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckModelRowB.setOpaque(false);
-        scopeCheckModelRowB.add(labelled("Choice tokens", scopeCheckChooserMaxTokens));
-        scopeCheckModelRowB.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRowB.add(labelled("Choice timeout (s)", scopeCheckChoiceTimeout));
-        final JPanel scopeCheckModelSettings = row("  Advanced (model):", scopeCheckModelRow);
-        final JPanel scopeCheckModelSettingsB = row("", scopeCheckModelRowB);
-        scopeCheckModelSettings.setVisible(false);
-        scopeCheckModelSettingsB.setVisible(false);
-        form.add(scopeCheckModelSettings);
-        form.add(scopeCheckModelSettingsB);
-        JPanel scopeCheckCalibrationRow = new JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckCalibrationRow.setOpaque(false);
-        scopeCheckCalibrationRow.add(labelled("near", scopeCheckNearSimilarity));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Hint margin", scopeCheckHintBoundaryMargin));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Mission Q", scopeCheckMissionQuantile));
-        JPanel scopeCheckCalibrationRowB = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckCalibrationRowB.setOpaque(false);
-        scopeCheckCalibrationRowB.add(labelled("Mission slack", scopeCheckMissionMargin));
-        scopeCheckCalibrationRowB.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRowB.add(labelled("Neighbor Q", scopeCheckNeighborQuantile));
-        scopeCheckCalibrationRowB.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRowB.add(labelled("Neighbor slack", scopeCheckNeighborMargin));
-        final JPanel scopeCheckCalibrationSettings =
-                row("  Advanced (calibration):", scopeCheckCalibrationRow);
-        final JPanel scopeCheckCalibrationSettingsB = row("", scopeCheckCalibrationRowB);
-        scopeCheckCalibrationSettings.setVisible(false);
-        scopeCheckCalibrationSettingsB.setVisible(false);
-        form.add(scopeCheckCalibrationSettings);
-        form.add(scopeCheckCalibrationSettingsB);
-        JPanel scopeCheckSweepRow = new JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckSweepRow.setOpaque(false);
-        scopeCheckSweepRow.add(labelled("Min. posts", scopeCheckMinNegotiated));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Min. examples", scopeCheckMinNeighbors));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Boundary margin", scopeCheckBoundaryMargin));
-        JPanel scopeCheckSweepRowB = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        scopeCheckSweepRowB.setOpaque(false);
-        scopeCheckSweepRowB.add(labelled("Novelty gap", scopeCheckNoveltyGap));
-        scopeCheckSweepRowB.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRowB.add(labelled("Novelty weight", scopeCheckNoveltyWeight));
-        scopeCheckSweepRowB.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRowB.add(labelled("Duplicate ≥", scopeCheckDuplicateCeiling));
-        final JPanel scopeCheckSweepSettings =
-                row("  Advanced (sweep):", scopeCheckSweepRow);
-        final JPanel scopeCheckSweepSettingsB = row("", scopeCheckSweepRowB);
-        scopeCheckSweepSettings.setVisible(false);
-        scopeCheckSweepSettingsB.setVisible(false);
-        form.add(scopeCheckSweepSettings);
-        form.add(scopeCheckSweepSettingsB);
+        // Grouped like every other settings page: label left, fields right (wrapping onto further lines
+        // instead of running off the dialog's right edge), buttons beside their field.
+        com.aresstack.comiccontrols.control.ComicForm agent =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Agent");
+        agent.row("Backend", group(backendStatus));
+        agent.row("Answer budget (tokens)", group(agentMaxTokens));
+        agent.row("", useAiReranker);
+
+        com.aresstack.comiccontrols.control.ComicForm limits =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Limits");
+        limits.row("Search run", group(labelled("Source target", searchTargetSources),
+                labelled("Pages", searchMaxPages), labelled("Tool calls", searchMaxToolCalls),
+                labelled("Minutes", searchMaxMinutes), labelled("Tool timeout (s)", browserToolTimeout),
+                labelled("Errors", searchMaxErrors)));
+        limits.row("Review context", group(labelled("Sources", reviewMaxSources),
+                labelled("Chars/source", reviewMaxChars)));
+        limits.row("Concept loop", group(labelled("Tool rounds", conceptToolRounds),
+                labelled("Repairs", conceptRepairAttempts)));
+
+        com.aresstack.comiccontrols.control.ComicForm scope =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Scope check");
+        final javax.swing.JButton scopeCheckAdvancedToggle = new ComicButton("Advanced…");
+        scope.row("Topic space", group(labelled("Breadth (concepts)", scopeCheckTargetProbes),
+                labelled("Examples per post", scopeCheckControlsPerAnchor),
+                labelled("Max. topics", scopeCheckMaxTopics), labelled("Timeout (s)", scopeCheckTimeout)),
+                scopeCheckAdvancedToggle);
+        // The ADVANCED knobs (model + provisional calibration/sweep values) stay hidden until asked for.
+        final com.aresstack.comiccontrols.control.ComicForm scopeAdvanced =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Scope check: advanced");
+        scopeAdvanced.row("Model", group(labelled("Gen temp", scopeCheckGenTemperature),
+                labelled("Gen tokens", scopeCheckGenMaxTokens),
+                labelled("Choice temp", scopeCheckChooserTemperature),
+                labelled("Choice tokens", scopeCheckChooserMaxTokens),
+                labelled("Choice timeout (s)", scopeCheckChoiceTimeout)));
+        scopeAdvanced.row("Calibration", group(labelled("near", scopeCheckNearSimilarity),
+                labelled("Hint margin", scopeCheckHintBoundaryMargin),
+                labelled("Mission Q", scopeCheckMissionQuantile),
+                labelled("Mission slack", scopeCheckMissionMargin),
+                labelled("Neighbor Q", scopeCheckNeighborQuantile),
+                labelled("Neighbor slack", scopeCheckNeighborMargin)));
+        scopeAdvanced.row("Sweep", group(labelled("Min. posts", scopeCheckMinNegotiated),
+                labelled("Min. examples", scopeCheckMinNeighbors),
+                labelled("Boundary margin", scopeCheckBoundaryMargin),
+                labelled("Novelty gap", scopeCheckNoveltyGap),
+                labelled("Novelty weight", scopeCheckNoveltyWeight),
+                labelled("Duplicate ≥", scopeCheckDuplicateCeiling)));
+        scopeAdvanced.setVisible(false);
         scopeCheckAdvancedToggle.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
-                boolean show = !scopeCheckModelSettings.isVisible();
-                scopeCheckModelSettings.setVisible(show);
-                scopeCheckModelSettingsB.setVisible(show);
-                scopeCheckCalibrationSettings.setVisible(show);
-                scopeCheckCalibrationSettingsB.setVisible(show);
-                scopeCheckSweepSettings.setVisible(show);
-                scopeCheckSweepSettingsB.setVisible(show);
+                scopeAdvanced.setVisible(!scopeAdvanced.isVisible());
                 revalidate();
                 repaint();
             }
@@ -259,41 +188,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         botTools.setToolTipText(liveEndpoint != null
                 ? "Streamable HTTP (MCP JSON-RPC): " + liveEndpoint.connectionUrl()
                 : "This session has no bot endpoint (disabled or not a productive session)");
-        form.add(row("", useAiReranker));
-        JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        botRow.setOpaque(false);
-        botRow.add(botControlMcp);
-        botRow.add(javax.swing.Box.createHorizontalStrut(6));
-        botRow.add(botTools);
-        form.add(row("", botRow));
-        form.add(row("", chatGptConnector));
-        form.add(row("Public origin:", connectorOrigin));
-        JPanel connectorDetails = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-        connectorDetails.setOpaque(false);
-        connectorDetails.add(connectorPort);
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(12));
-        connectorDetails.add(new JLabel("Client ID:"));
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(4));
-        connectorDetails.add(connectorClientId);
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(12));
-        connectorDetails.add(new JLabel("Secret:"));
-        connectorDetails.add(javax.swing.Box.createHorizontalStrut(4));
-        connectorDetails.add(connectorClientSecret);
-        form.add(row("Connector port:", connectorDetails));
-        form.add(row("Central OAuth issuer:", connectorCentralIssuer));
-        // Browser channel, headless and private targets live on the "Browser" tab (BrowserBasicsRows); the
-        // provider selection and the browser search's own settings on the "Search" tab.
-        JPanel buttons = new JPanel();
-        buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
-        buttons.add(save);
-        buttons.add(Box.createHorizontalStrut(8));
-        buttons.add(check);
-        buttons.add(Box.createHorizontalStrut(8));
-        buttons.add(busy);
-        buttons.add(Box.createHorizontalGlue());
-        buttons.setOpaque(false);
-        form.add(row("", buttons));
-        add(form, BorderLayout.NORTH);
+        // Bot control + the public MCP server (ChatGPT connector) live on their own "MCP" tab (mcpView()); browser
+        // channel, headless and private targets on the "Browser" tab (BrowserBasicsRows); language and guidance
+        // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
+        com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
+        actions.actions(save, check, busy);
+        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, scope, scopeAdvanced);
+        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, scope, scopeAdvanced, actions),
+                BorderLayout.NORTH);
 
         results.setEditable(false);
         results.setLineWrap(false);
@@ -316,6 +218,13 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 // Persisted immediately; running sessions keep their endpoint until they close.
                 ResearchRuntimeSettings.saveBotControlMcp(ResearchRuntimeSettingsPanel.this.store,
                         botControlMcp.isSelected());
+                // The connector key is app-wide (bot control is per chat): switching the server off
+                // clears the connector flag itself, so no chat's frozen value can stop another's listener.
+                if (!botControlMcp.isSelected()) {
+                    chatGptConnector.setSelected(false);
+                }
+                updateMcpFieldsEnabled();
+                persistConnectorSettings();
             }
         });
         ResearchRuntimeSettings.ChatGptConnectorSettings connector =
@@ -337,9 +246,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                         + "issuer URL to validate its JWTs instead; /oauth/* is then served centrally.");
         chatGptConnector.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
+                updateMcpFieldsEnabled();
                 persistConnectorSettings();
             }
         });
+        updateMcpFieldsEnabled();
         agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
         agentMaxTokens.setToolTipText("The agent's answer budget in tokens per model turn (the longest "
                 + "answer is the source review). Too small a value truncates answers. "
@@ -478,6 +389,48 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 }
             }
         };
+    }
+
+    /** Several small fields on one line of the field column; wraps onto further lines when the dialog is narrow. */
+    private static JPanel group(javax.swing.JComponent... parts) {
+        JPanel line = new WrapGroup();
+        for (javax.swing.JComponent part : parts) {
+            line.add(part);
+        }
+        return line;
+    }
+
+    /**
+     * The wrapping field line: it may shrink to its widest part (the form never clips or scrolls sideways), is as
+     * tall as its wrapped rows at the CURRENT width, and lays the form out again when a resize changes that height.
+     */
+    private static final class WrapGroup extends JPanel {
+        private static final long serialVersionUID = 1L;
+        private static final int GAP = 12;
+
+        WrapGroup() {
+            super(new com.aresstack.comiccontrols.control.WrapRowLayout(java.awt.FlowLayout.LEFT, GAP, 2));
+            setOpaque(false);
+            addComponentListener(new java.awt.event.ComponentAdapter() {
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent event) {
+                    if (getLayout().preferredLayoutSize(WrapGroup.this).height != getHeight()) {
+                        revalidate();
+                    }
+                }
+            });
+        }
+
+        @Override
+        public java.awt.Dimension getMinimumSize() {
+            int widest = 0;
+            for (java.awt.Component part : getComponents()) {
+                widest = Math.max(widest, part.getPreferredSize().width);
+            }
+            java.awt.Insets insets = getInsets();
+            return new java.awt.Dimension(widest + 2 * GAP + insets.left + insets.right,
+                    getLayout().preferredLayoutSize(this).height);
+        }
     }
 
     /** A tiny "Label: [field]" group for compact multi-field limit rows. */
@@ -742,6 +695,79 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         }, "research-runtime-check");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * The built-in MCP server as its own "MCP" tab: the switch on top (default OFF), its settings below
+     * (editable only while switched on), then the local bot-control endpoint.
+     */
+    public javax.swing.JComponent mcpView() {
+        if (mcpView != null) {
+            return mcpView;
+        }
+        JPanel form = new JPanel();
+        form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
+        form.setOpaque(false);
+        JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        botRow.setOpaque(false);
+        botRow.add(botControlMcp);
+        botRow.add(javax.swing.Box.createHorizontalStrut(6));
+        botRow.add(botTools);
+        form.add(row("", botRow));
+        form.add(row("", chatGptConnector));
+        form.add(row("Public origin:", connectorOrigin));
+        form.add(row("Connector port:", connectorPort));
+        form.add(row("Client ID:", connectorClientId));
+        form.add(row("Client secret:", connectorClientSecret));
+        form.add(row("Central OAuth issuer:", connectorCentralIssuer));
+        for (java.awt.Component child : form.getComponents()) {
+            if (child instanceof javax.swing.JComponent) {
+                ((javax.swing.JComponent) child).setAlignmentX(LEFT_ALIGNMENT);
+            }
+        }
+        // Field edits persist when the field loses focus (the Save button sits on the Runtime tab).
+        java.awt.event.FocusAdapter persistOnLeave = new java.awt.event.FocusAdapter() {
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persistConnectorSettingsQuietly();
+            }
+        };
+        connectorOrigin.addFocusListener(persistOnLeave);
+        connectorPort.addFocusListener(persistOnLeave);
+        connectorClientId.addFocusListener(persistOnLeave);
+        connectorClientSecret.addFocusListener(persistOnLeave);
+        connectorCentralIssuer.addFocusListener(persistOnLeave);
+        mcpView = form;
+        return mcpView;
+    }
+
+    private javax.swing.JComponent mcpView;
+
+    /** The server's settings are only editable while the server is switched on. */
+    private void updateMcpFieldsEnabled() {
+        boolean server = botControlMcp.isSelected();
+        chatGptConnector.setEnabled(server);
+        boolean on = server && chatGptConnector.isSelected();
+        connectorOrigin.setEnabled(on);
+        connectorPort.setEnabled(on);
+        connectorClientId.setEnabled(on);
+        connectorClientSecret.setEnabled(on);
+        connectorCentralIssuer.setEnabled(on);
+    }
+
+    /** Stores the edited fields without (re)starting the listener; Save or the switch applies them. */
+    private void persistConnectorSettingsQuietly() {
+        int port;
+        try {
+            port = Integer.parseInt(connectorPort.getText().trim());
+        } catch (NumberFormatException invalid) {
+            port = 8082;
+        }
+        ResearchRuntimeSettings.saveChatGptConnectorSettings(store,
+                new ResearchRuntimeSettings.ChatGptConnectorSettings(
+                        chatGptConnector.isSelected(), port, connectorOrigin.getText().trim(),
+                        connectorClientId.getText().trim(),
+                        new String(connectorClientSecret.getPassword()).trim(),
+                        connectorCentralIssuer.getText().trim()));
     }
 
     /** The requirements-check output, shown by the host as its own "Check results" tab. */

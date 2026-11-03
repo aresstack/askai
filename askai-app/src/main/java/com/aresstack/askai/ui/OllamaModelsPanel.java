@@ -116,13 +116,18 @@ public final class OllamaModelsPanel extends JPanel {
         toolbar.add(refreshButton);
         toolbar.add(installedStatusLabel);
         panel.add(toolbar, BorderLayout.NORTH);
-        panel.add(new JScrollPane(installedCardsPanel), BorderLayout.CENTER);
+        JScrollPane scroll = new JScrollPane(installedCardsPanel,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        panel.add(scroll, BorderLayout.CENTER);
         showInstalledPlaceholder("Open Models or click Refresh to load the models.");
         return panel;
     }
 
     private static JPanel createCardsPanel() {
-        JPanel panel = new JPanel();
+        // Tracks the viewport width: cards are always as wide as the visible list (long text lines are
+        // clipped with "..." inside the card) and the list never scrolls horizontally.
+        JPanel panel = new WidthTrackingPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
         return panel;
@@ -667,5 +672,36 @@ public final class OllamaModelsPanel extends JPanel {
 
     private static void onUi(Runnable runnable) {
         SwingUtilities.invokeLater(runnable);
+    }
+
+    /** Card list column that always fits the viewport width and scrolls only vertically. */
+    static final class WidthTrackingPanel extends JPanel implements javax.swing.Scrollable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public java.awt.Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(java.awt.Rectangle visibleRect, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(java.awt.Rectangle visibleRect, int orientation, int direction) {
+            return Math.max(16, (orientation == javax.swing.SwingConstants.VERTICAL
+                    ? visibleRect.height : visibleRect.width) - 16);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 }
