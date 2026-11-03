@@ -76,18 +76,18 @@ public interface SetupActions {
     default void cancelled() {
     }
 
-    // ------------------------------------------------------------------ Merlin
+    // ------------------------------------------------------------------ Witch
 
     /**
-     * A free question to Merlin: one call of the draft's chat model (frame {@code system}, question
+     * A free question to Witch: one call of the draft's chat model (frame {@code system}, question
      * {@code question}), without tools and history. Result is the answer or ({@code null}, message).
      */
     default void ask(SetupDraft draft, String system, String question, BiConsumer<String, String> done) {
         done.accept(null, "Free questions are not available here.");
     }
 
-    /** Merlin's own voice, or {@code null} for speech bubbles only. */
-    default WizardVoice merlinVoice() {
+    /** Witch's own voice, or {@code null} for speech bubbles only. */
+    default WizardVoice witchVoice() {
         return null;
     }
 

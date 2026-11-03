@@ -17,7 +17,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/** The wizard's flow against a synchronous fake of {@link SetupActions}: steps, checks, Merlin, finish, cancel. */
+/** The wizard's flow against a synchronous fake of {@link SetupActions}: steps, checks, Witch, finish, cancel. */
 public class SetupWizardPanelTest {
 
     @Test
@@ -90,10 +90,10 @@ public class SetupWizardPanelTest {
     }
 
     @Test
-    public void theRuntimeStepChecksRightAwayWakesMerlinAndPreselectsTheModels() {
+    public void theRuntimeStepChecksRightAwayWakesWitchAndPreselectsTheModels() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
-        assertFalse("Merlin is silent until a runtime answers", wizard.isMerlinAwake());
+        assertFalse("Witch is silent until a runtime answers", wizard.isWitchAwake());
         assertEquals(SetupWizardPanel.RUNTIME_INSTALL_MASCOT,
                 wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).art().resource());
 
@@ -102,7 +102,7 @@ public class SetupWizardPanelTest {
         assertEquals(SetupWizardPanel.STEP_RUNTIME, wizard.step());
         assertEquals(1, fake.runtimeChecks);
         assertTrue(wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
-        assertTrue(wizard.isMerlinAwake());
+        assertTrue(wizard.isWitchAwake());
         assertEquals(WizardGuide.FIRST_GREETING, wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).spokenText());
         assertEquals("the connecting picture once a runtime answers", SetupWizardPanel.mascotResource(
                 SetupWizardPanel.STEP_RUNTIME), wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).art().resource());
@@ -120,7 +120,7 @@ public class SetupWizardPanelTest {
         wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
         assertFalse(wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
         assertNotNull(wizard.errorOf(SetupWizardPanel.STEP_RUNTIME));
-        assertFalse(wizard.isMerlinAwake());
+        assertFalse(wizard.isWitchAwake());
         assertEquals(SetupWizardPanel.RUNTIME_INSTALL_MASCOT,
                 wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).art().resource());
     }
@@ -251,14 +251,14 @@ public class SetupWizardPanelTest {
         wizard.nextButton().doClick();
 
         assertEquals(SetupWizardPanel.STEP_RUNTIME, wizard.step());
-        assertNotNull("the voices are stored before the next step, so Merlin can use them", fake.savedVoices);
+        assertNotNull("the voices are stored before the next step, so Witch can use them", fake.savedVoices);
     }
 
     @Test
     public void withoutAVoiceTheWizardOnlyThinks() {
         SetupWizardPanel wizard = wizard(new Fake());
         wizard.nextButton().doClick();
-        assertFalse(wizard.isMerlinAwake());
+        assertFalse(wizard.isWitchAwake());
         assertEquals(WizardGuide.THOUGHT_SILENT, wizard.mascotOf(SetupWizardPanel.STEP_VOICE).spokenText());
     }
 
@@ -290,7 +290,7 @@ public class SetupWizardPanelTest {
 
         wizard.nextButton().doClick();
 
-        assertTrue("awake without any AI runtime", wizard.isMerlinAwake());
+        assertTrue("awake without any AI runtime", wizard.isWitchAwake());
         assertFalse(spoken.isEmpty());
     }
 
@@ -327,19 +327,19 @@ public class SetupWizardPanelTest {
     public void aLaterCallGreetsAsAReunion() {
         SetupWizardPanel wizard = wizard(new Fake());
         wizard.welcomeBack();
-        assertTrue(wizard.isMerlinAwake());
+        assertTrue(wizard.isWitchAwake());
         assertEquals(WizardGuide.WELCOME_BACK, wizard.mascotOf(SetupWizardPanel.STEP_NETWORK).spokenText());
     }
 
     @Test
-    public void merlinsMenuOffersTheFixedAnswersAndAFreeQuestionOnlyWithAChatModel() {
+    public void witchsMenuOffersTheFixedAnswersAndAFreeQuestionOnlyWithAChatModel() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
-        assertFalse(wizard.canAskMerlin());
-        assertEquals(4, wizard.merlinMenu().getComponentCount());
+        assertFalse(wizard.canAskWitch());
+        assertEquals(4, wizard.witchMenu().getComponentCount());
         wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
-        assertTrue(wizard.canAskMerlin());
-        wizard.askMerlin("What is an embedding?");
+        assertTrue(wizard.canAskWitch());
+        wizard.askWitch("What is an embedding?");
         assertEquals("Fake answer", wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).spokenText());
     }
 

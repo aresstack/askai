@@ -1,9 +1,9 @@
 package com.aresstack.askai.ui.setup;
 
 /**
- * Merlin, the setup wizard's companion: his personality as fixed lines per step. Everything here is deterministic so
+ * Witch, the setup wizard's companion: his personality as fixed lines per step. Everything here is deterministic so
  * that setup, failures and hints are always right; the chat model only joins for a free question
- * ({@link #systemPrompt(int)}). Until an AI runtime answers, Merlin stays silent; then he introduces himself (in
+ * ({@link #systemPrompt(int)}). Until an AI runtime answers, Witch stays silent; then he introduces himself (in
  * detail on the first start, as a reunion when called again from the settings) and says a short line in each step.
  * Knows neither Swing nor speech output; that is {@link WizardNarrator}'s job.
  *
@@ -12,9 +12,9 @@ package com.aresstack.askai.ui.setup;
  */
 final class WizardGuide {
 
-    static final String NAME = "Dark Mage";
+    static final String NAME = "Witch";
 
-    static final String FIRST_GREETING = "Ah, wonderful – now I can finally talk to you! I'm the Dark Mage, your personal "
+    static final String FIRST_GREETING = "Ah, wonderful – now I can finally talk to you! I'm the Witch, your personal "
             + "assistant. I'll walk you through the rest of the setup – and afterwards you won't get rid of me that "
             + "easily.";
     static final String WELCOME_BACK = "There you are again. What shall we change about my setup this time?";
@@ -30,12 +30,12 @@ final class WizardGuide {
             + "in this step.";
 
     /**
-     * The hand-over after the first successful setup: Merlin passes on to his daughter (the chat assistant with her
+     * The hand-over after the first successful setup: Witch passes on to his daughter (the chat assistant with her
      * voice), who considers him superfluous; he keeps the last word. Per line: who speaks, what.
      */
     private static final Line[] HANDOFF = {
             new Line(true, "That's it, we're done. From here on, my daughter takes over."),
-            new Line(false, "Thanks, Dad. You're not needed any more. We have AI now."),
+            new Line(false, "Thanks, Mum. You're not needed any more. We have AI now."),
             new Line(true, "Of course, my child."),
             new Line(true, "Just call me when the AI doesn't know what to do – you'll find me in the settings.")
     };
@@ -48,13 +48,13 @@ final class WizardGuide {
         return HANDOFF[index];
     }
 
-    /** One line of the hand-over: Merlin or the chat assistant. */
+    /** One line of the hand-over: Witch or the chat assistant. */
     static final class Line {
-        final boolean merlin;
+        final boolean witch;
         final String text;
 
-        Line(boolean merlin, String text) {
-            this.merlin = merlin;
+        Line(boolean witch, String text) {
+            this.witch = witch;
             this.text = text;
         }
     }
@@ -109,7 +109,7 @@ final class WizardGuide {
         return returning ? WELCOME_BACK : FIRST_GREETING;
     }
 
-    /** Merlin's line on entering a step; {@code null} when he says nothing there. */
+    /** Witch's line on entering a step; {@code null} when he says nothing there. */
     String enteredStep(int step) {
         return at(ON_ENTER, step);
     }
@@ -129,17 +129,17 @@ final class WizardGuide {
         return at(WHY_NEEDED, step);
     }
 
-    /** Number of steps Merlin knows lines for. */
+    /** Number of steps Witch knows lines for. */
     static int steps() {
         return TOPIC.length;
     }
 
     /**
-     * The frame of a free question to the chat model: Merlin's role, the current step and its fixed hints, so the
+     * The frame of a free question to the chat model: Witch's role, the current step and its fixed hints, so the
      * answer fits the setup. Contains no user input and no credentials.
      */
     String systemPrompt(int step) {
-        return "You are the Dark Mage, a friendly, slightly mischievous hooded wizard and the personal assistant in AskAI, a "
+        return "You are the Witch, a friendly, slightly mischievous hooded witch and the personal assistant in AskAI, a "
                 + "desktop app for local AI chat and web research. The user is setting you up right now. Answer in "
                 + "the user's language, briefly (at most three sentences), kindly and concretely, without Markdown. "
                 + "Do not invent menu items or settings. Current step: " + at(TOPIC, step) + ". What to do here: "

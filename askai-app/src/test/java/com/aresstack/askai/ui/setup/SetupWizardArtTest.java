@@ -13,7 +13,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Merlin's pictures: every step finds its copy on the class path, and every copy has its unedited original in
+ * Witch's pictures: every step finds its copy on the class path, and every copy has its unedited original in
  * {@code docs/images/setup-wizard/originals} (the originals are kept, only copies are scaled).
  */
 public class SetupWizardArtTest {
@@ -49,7 +49,7 @@ public class SetupWizardArtTest {
             assertTrue("original of " + copy.getName(), original.isFile());
             BufferedImage image = ImageIO.read(original);
             BufferedImage scaled = ImageIO.read(copy);
-            if (copy.getName().startsWith("merlin-")) {
+            if (copy.getName().startsWith("witch-")) {
                 assertEquals("original keeps its size", 1024, image.getWidth());
                 assertEquals(1536, image.getHeight());
                 assertEquals(900, scaled.getHeight());
