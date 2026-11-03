@@ -49,6 +49,7 @@ public final class WebSearchProvidersModuleSmokeTest {
 
             BrightDataSearchConfiguration brightData = service.loadOrCreateBrightData();
             brightData.setEnabled(true);
+            brightData.setZone("test-zone");
             service.saveBrightData(brightData, "brightdata-secret-PLAINTEXT".toCharArray());
 
             DataForSeoSearchConfiguration dataForSeo = service.loadOrCreateDataForSeo();
