@@ -94,14 +94,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             "Use AI reranker (semantic model instead of BM25; applies to new sessions)", false);
     /** Bot-control MCP (default ON): run_command/session_state/chat_history + service-endpoint.json. */
     private final JCheckBox botControlMcp = ComicControls.checkBox(
-            "Bot control via MCP (applies to new sessions)", true);
+            "Enable MCP server (bot control; applies to new sessions)", false);
     /** Square, margin-less info button (Unicode \u24D8): opens the live connection/tool details. */
     private final javax.swing.JButton botTools = new ComicButton("\u24D8");
     /** The live session behind this settings page (nullable: store-only construction in tests). */
     private final com.aresstack.askai.research.agent.ResearchAgentSession session;
     /** ChatGPT connector (default OFF): AskAI as its own public MCP+OAuth face behind the TLS proxy. */
     private final JCheckBox chatGptConnector = ComicControls.checkBox(
-            "Enable MCP server (public endpoint behind the reverse proxy)", false);
+            "ChatGPT connector (public endpoint behind the reverse proxy)", false);
     private final JTextField connectorOrigin = placeholderField("https://askai.example.com", 38);
     private final JTextField connectorPort = ComicControls.textField(6);
     private final JTextField connectorClientId =
@@ -345,6 +345,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 // Persisted immediately; running sessions keep their endpoint until they close.
                 ResearchRuntimeSettings.saveBotControlMcp(ResearchRuntimeSettingsPanel.this.store,
                         botControlMcp.isSelected());
+                updateMcpFieldsEnabled();
+                persistConnectorSettings();
             }
         });
         ResearchRuntimeSettings.ChatGptConnectorSettings connector =
@@ -710,7 +712,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // in the session directory; OFF stops only the listener, the running sessions stay registered.
         com.aresstack.askai.research.connector.ChatGptConnectorRuntime runtime =
                 com.aresstack.askai.research.connector.ChatGptConnectorRuntime.get();
-        if (settings.isEnabled()) {
+        if (settings.isEnabled() && botControlMcp.isSelected()) {
             runtime.ensureStarted(new com.aresstack.askai.research.connector.ConnectorConfig(
                     settings.getPort(), settings.getPublicOrigin(), settings.getClientId(),
                     settings.getClientSecret(),
@@ -794,19 +796,18 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         JPanel form = new JPanel();
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
         form.setOpaque(false);
-        form.add(row("", chatGptConnector));
-        form.add(row("Public origin:", connectorOrigin));
-        form.add(row("Port:", connectorPort));
-        form.add(row("Client ID:", connectorClientId));
-        form.add(row("Client secret:", connectorClientSecret));
-        form.add(row("Central OAuth issuer:", connectorCentralIssuer));
         JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         botRow.setOpaque(false);
         botRow.add(botControlMcp);
         botRow.add(javax.swing.Box.createHorizontalStrut(6));
         botRow.add(botTools);
-        form.add(Box.createVerticalStrut(8));
-        form.add(row("Local bot control:", botRow));
+        form.add(row("", botRow));
+        form.add(row("", chatGptConnector));
+        form.add(row("Public origin:", connectorOrigin));
+        form.add(row("Connector port:", connectorPort));
+        form.add(row("Client ID:", connectorClientId));
+        form.add(row("Client secret:", connectorClientSecret));
+        form.add(row("Central OAuth issuer:", connectorCentralIssuer));
         for (java.awt.Component child : form.getComponents()) {
             if (child instanceof javax.swing.JComponent) {
                 ((javax.swing.JComponent) child).setAlignmentX(LEFT_ALIGNMENT);
@@ -831,7 +832,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
 
     /** The server's settings are only editable while the server is switched on. */
     private void updateMcpFieldsEnabled() {
-        boolean on = chatGptConnector.isSelected();
+        boolean server = botControlMcp.isSelected();
+        chatGptConnector.setEnabled(server);
+        boolean on = server && chatGptConnector.isSelected();
         connectorOrigin.setEnabled(on);
         connectorPort.setEnabled(on);
         connectorClientId.setEnabled(on);
