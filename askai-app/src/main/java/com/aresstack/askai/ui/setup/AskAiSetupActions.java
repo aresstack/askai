@@ -487,15 +487,16 @@ public final class AskAiSetupActions implements SetupActions {
     }
 
     @Override
-    public void installSentenceModels(final Consumer<String> progress, final BiConsumer<String, String> done) {
+    public void installSentenceModels(final String language, final boolean reinstall,
+                                      final Consumer<String> progress, final BiConsumer<String, String> done) {
         install(() -> {
             NlpModelInstaller installer = new NlpModelInstaller(new HttpNlpDownloadClient(), nlpStore);
             int installed = 0;
             try {
-                for (NlpModelCatalogEntry entry : missingSentenceModels()) {
+                for (NlpModelCatalogEntry entry : sentenceModels(language, reinstall)) {
                     final String name = entry.getModelId();
                     deliver(() -> progress.accept("Downloading " + name + " …"));
-                    if (installer.install(entry) == NlpModelInstaller.Outcome.INSTALLED) {
+                    if (installer.install(entry, reinstall) == NlpModelInstaller.Outcome.INSTALLED) {
                         installed++;
                     }
                 }
@@ -511,11 +512,17 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** The curated sentence models for German and English that are not installed yet. */
     List<NlpModelCatalogEntry> missingSentenceModels() {
+        return sentenceModels(null, false);
+    }
+
+    /** The curated sentence models of {@code language} (both if {@code null}); all of them, or the missing ones. */
+    List<NlpModelCatalogEntry> sentenceModels(String language, boolean all) {
         List<NlpModelCatalogEntry> missing = new ArrayList<NlpModelCatalogEntry>();
         for (NlpModelCatalogEntry entry : new ApacheOpenNlpModelCatalogProvider().availableModels()) {
             if (entry.getCapability() == NlpCapability.SENTENCE_DETECTION
                     && java.util.Arrays.asList(SENTENCE_LANGUAGES).contains(entry.getLanguageCode())
-                    && nlpStore.find(entry.getModelId()) == null) {
+                    && (language == null || language.equals(entry.getLanguageCode()))
+                    && (all || nlpStore.find(entry.getModelId()) == null)) {
                 missing.add(entry);
             }
         }

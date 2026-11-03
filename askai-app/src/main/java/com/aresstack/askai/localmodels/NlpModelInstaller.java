@@ -30,8 +30,13 @@ public final class NlpModelInstaller {
     }
 
     public Outcome install(NlpModelCatalogEntry entry) throws IOException {
+        return install(entry, false);
+    }
+
+    /** @param reinstall download again even when the verified model is installed (it is replaced after the checks) */
+    public Outcome install(NlpModelCatalogEntry entry, boolean reinstall) throws IOException {
         NlpModelDescriptor existing = store.find(entry.getModelId());
-        if (existing != null && new File(existing.getArtifactPath()).isFile()
+        if (!reinstall && existing != null && new File(existing.getArtifactPath()).isFile()
                 && existing.getSha256().equalsIgnoreCase(entry.getExpectedSha256())
                 && !entry.getExpectedSha256().isEmpty()) {
             return Outcome.ALREADY_INSTALLED; // idempotent — no re-download
