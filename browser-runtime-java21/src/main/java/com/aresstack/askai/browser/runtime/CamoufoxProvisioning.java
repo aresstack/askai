@@ -18,7 +18,7 @@ import java.util.stream.Stream;
 /**
  * Where AskAI finds the managed Camoufox (the Argos distribution: pinned, patched, SHA-256 verified) and keeps
  * its browser profile ({@code <APPDATA>/.askai/browser-profiles}). An existing installation (configured,
- * Argos' or AskAI's own) is reused; a download into {@code <APPDATA>/.askai/browser} happens only when
+ * or AskAI's own) is reused; a download into {@code <APPDATA>/.askai/browser} happens only when
  * none exists. Later starts only verify.
  *
  * <p>While the installer runs, a progress line {@value #PROGRESS_MARKER} goes to STDERR every few seconds:
@@ -57,7 +57,7 @@ final class CamoufoxProvisioning {
     /**
      * The installer of the Camoufox in use. An existing verified installation is always reused and never
      * downloaded again: first the explicitly configured location ({@value #ROOT_PROPERTY} / {@value #ROOT_ENV}),
-     * then Argos' installation ({@code ~/.argos/browser}), then AskAI's own directory. Only when none of them
+     * then AskAI's own directory. Only when none of them
      * holds the pinned distribution is AskAI's own directory the download target.
      */
     static CamoufoxInstaller installer() {
@@ -111,16 +111,10 @@ final class CamoufoxProvisioning {
         return CamoufoxInstaller.shared(folder, null);
     }
 
-    /** A verified installation found without configuration (Argos' or AskAI's own), or {@code null}. */
+    /** A verified installation found without configuration (AskAI's own directory), or {@code null}. */
     static Path foundInstallation() {
-        for (Path candidate : new Path[]{
-                Paths.get(System.getProperty("user.home"), ".argos", "browser"),
-                defaultRoot()}) {
-            if (installedUnder(candidate)) {
-                return candidate.resolve(installDirectoryName());
-            }
-        }
-        return null;
+        Path root = defaultRoot();
+        return installedUnder(root) ? root.resolve(installDirectoryName()) : null;
     }
 
     /** Where AskAI downloads Camoufox when nothing else is chosen. */

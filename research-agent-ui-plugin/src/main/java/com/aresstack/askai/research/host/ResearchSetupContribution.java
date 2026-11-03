@@ -98,7 +98,7 @@ public final class ResearchSetupContribution implements AgentSetupContribution {
             String stored = ResearchRuntimeSettings.loadCamoufoxFolder(context.getHostStateStore());
             if (stored.isEmpty()) {
                 try {
-                    stored = InProcessBrowser.foundCamoufox(); // e.g. Argos' Camoufox: used, never downloaded again
+                    stored = InProcessBrowser.foundCamoufox(); // AskAI's own installation: used, never downloaded again
                 } catch (RuntimeException | LinkageError unavailable) {
                     stored = "";
                 }
