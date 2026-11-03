@@ -705,18 +705,9 @@ public final class ResearchAgentSession {
         return searchProviderRegistry;
     }
 
-    /** AskAI's headless search browser (askai #31): one per process, started on the first search. */
-    private com.aresstack.askai.browser.playwright.SearchBrowser searchBrowser;
-
-    private synchronized com.aresstack.askai.browser.playwright.SearchBrowser ensureSearchBrowser() {
-        if (searchBrowser == null) {
-            final com.aresstack.askai.browser.playwright.SearchBrowser browser =
-                    new com.aresstack.askai.browser.playwright.SearchBrowser(
-                            System.getenv().getOrDefault("ASKAI_SEARCH_BROWSER_CHANNEL", "camoufox"));
-            Runtime.getRuntime().addShutdownHook(new Thread(browser::close, "research-search-browser-close"));
-            searchBrowser = browser;
-        }
-        return searchBrowser;
+    /** AskAI's headless search browser (askai #31/#48): the JVM's one shared instance, started on the first search. */
+    private com.aresstack.askai.browser.playwright.SearchBrowser ensureSearchBrowser() {
+        return ResearchRuntimeShared.process().searchBrowser();
     }
 
     public void cancel() {

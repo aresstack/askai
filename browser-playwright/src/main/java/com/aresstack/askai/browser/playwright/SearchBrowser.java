@@ -53,15 +53,28 @@ public final class SearchBrowser implements AutoCloseable {
     });
 
     private final String channel;
+    /** Read before every (re)start: a changed setting takes effect with the next search. */
+    private final java.util.function.BooleanSupplier headless;
     private final ExecutorService owner;
     private volatile boolean closed;
     // Touched only on the owner thread.
     private Playwright playwright;
     private Browser browser;
+    private boolean browserHeadless;
     private int launches;
 
     /** @param channel {@code camoufox} (default) or a Chromium channel such as {@code chrome} / {@code msedge} */
     public SearchBrowser(String channel) {
+        this(channel, () -> true);
+    }
+
+    /**
+     * @param channel  {@code camoufox} (default) or a Chromium channel such as {@code chrome} / {@code msedge}
+     * @param headless whether the browser runs without a window; asked before every search, and a browser that
+     *                 runs in the other mode is started again
+     */
+    public SearchBrowser(String channel, java.util.function.BooleanSupplier headless) {
+        this.headless = headless == null ? () -> true : headless;
         this.channel = channel == null || channel.trim().isEmpty() ? CamoufoxProvisioning.CHANNEL : channel.trim();
         this.owner = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "search-browser-owner");
@@ -138,7 +151,8 @@ public final class SearchBrowser implements AutoCloseable {
     }
 
     private Browser ensureBrowser(PlaywrightSearchProvider provider) {
-        if (browser != null && browser.isConnected()) {
+        boolean wantHeadless = headless.getAsBoolean();
+        if (browser != null && browser.isConnected() && browserHeadless == wantHeadless) {
             return browser;
         }
         closeBrowserQuietly();
@@ -150,16 +164,18 @@ public final class SearchBrowser implements AutoCloseable {
                 playwright = Playwright.create(new Playwright.CreateOptions().setEnv(env));
             }
             boolean camoufox = CamoufoxProvisioning.CHANNEL.equals(channel);
-            browser = camoufox ? launchCamoufox(playwright)
+            browser = camoufox ? launchCamoufox(playwright, wantHeadless)
                     : playwright.chromium().launch(new BrowserType.LaunchOptions().setChannel(channel)
-                            .setHeadless(true));
+                            .setHeadless(wantHeadless));
+            browserHeadless = wantHeadless;
             // The one context of this browser: the provider opens its pages here, cookies stay between searches.
             browser.newContext(camoufox
                     ? new Browser.NewContextOptions().setAcceptDownloads(false).setViewportSize(null)
                             .setColorScheme(null).setReducedMotion(null).setForcedColors(null).setContrast(null)
                     : new Browser.NewContextOptions().setAcceptDownloads(false));
             launches++;
-            System.err.println("[search-browser] started " + channel + " headless (start " + launches + ")");
+            System.err.println("[search-browser] started " + channel + (wantHeadless ? " headless" : " visible")
+                    + " (start " + launches + ")");
             return browser;
         } catch (RuntimeException e) {
             closeBrowserQuietly();
@@ -170,7 +186,7 @@ public final class SearchBrowser implements AutoCloseable {
         }
     }
 
-    private static Browser launchCamoufox(Playwright playwright) {
+    private static Browser launchCamoufox(Playwright playwright, boolean headless) {
         Path executable = CamoufoxProvisioning.ensureInstalled();
         CamoufoxLaunch launch;
         try {
@@ -184,7 +200,7 @@ public final class SearchBrowser implements AutoCloseable {
         BrowserType.LaunchOptions options = new BrowserType.LaunchOptions()
                 .setChannel("moz-firefox")
                 .setExecutablePath(executable)
-                .setHeadless(true)
+                .setHeadless(headless)
                 .setEnv(environment)
                 .setFirefoxUserPrefs(prefs);
         if (!launch.args().isEmpty()) {

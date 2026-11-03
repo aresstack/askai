@@ -224,6 +224,20 @@ public class ResearchRuntimeModeTest {
     }
 
     @Test
+    public void browsingIsVisibleAndSearchingHeadlessByDefaultAndBothAreSeparate() {
+        MemoryStore store = new MemoryStore();
+        assertEquals("research browser: visible by default", false, ResearchRuntimeSettings.load(store).isHeadless());
+        assertEquals("search browser: headless by default", true,
+                ResearchRuntimeSettings.loadSearchBrowserHeadless(store));
+        ResearchRuntimeSettings.saveSearchBrowserHeadless(store, false);
+        assertEquals(false, ResearchRuntimeSettings.loadSearchBrowserHeadless(store));
+        assertEquals("the search switch leaves browsing alone", false, ResearchRuntimeSettings.load(store).isHeadless());
+        new ResearchRuntimeSettings(ResearchBackendMode.ACP, "camoufox", true).save(store);
+        assertEquals("the browsing switch leaves searching alone", false,
+                ResearchRuntimeSettings.loadSearchBrowserHeadless(store));
+    }
+
+    @Test
     public void panelReadsAndWritesTheSameTypedMapper() {
         MemoryStore store = new MemoryStore();
         new ResearchRuntimeSettings(ResearchBackendMode.ACP, "camoufox", false)

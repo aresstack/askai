@@ -64,6 +64,17 @@ public class SearchProviderCardsPanelTest {
         SearchProviderCardsPanel panel = new SearchProviderCardsPanel(new MemoryStore());
         assertEquals("provider row and settings", 2, panel.getComponentCount());
         assertSame(null, panel.configureButton().getParent());
+        assertTrue("Browser (SERP) shows the browser search's own settings, not a pointer to another tab",
+                contains(panel, LegacyBrowserSearchSettingsPanel.class));
+    }
+
+    private static boolean contains(Container root, Class<?> type) {
+        for (Component child : root.getComponents()) {
+            if (type.isInstance(child) || (child instanceof Container && contains((Container) child, type))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isInside(Component component, Container container) {
