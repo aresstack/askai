@@ -103,6 +103,8 @@ public final class PartySession implements GroupChatSubmissionTarget {
     /** addressedMessageId → bot host that currently holds the claim (for failover). */
     private final Map<String, String> pendingBotWork = new LinkedHashMap<String, String>();
 
+    /** Message IDs already handed to the UI (local replay and live delivery may overlap). */
+    private final java.util.Set<String> seenMessageIds = new java.util.HashSet<String>();
     private Participant self;
     private long nextSequence = 1;
     private volatile boolean joined;
@@ -249,6 +251,11 @@ public final class PartySession implements GroupChatSubmissionTarget {
     // ------------------------------------------------------------------ event handling
 
     private void handleIncoming(GroupChatMessage message, boolean fromHistory) {
+        synchronized (this) {
+            if (!seenMessageIds.add(message.getMessageId())) {
+                return; // already shown (history replay overlapping queued live delivery)
+            }
+        }
         if (message.isBotMessage()) {
             String addressed = message.getReplyToMessageId();
             if (addressed != null

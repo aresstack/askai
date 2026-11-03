@@ -3513,9 +3513,10 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                     if (!sent) {
                         onUi(new Runnable() {
                             public void run() {
-                                if (composer.getMessage().trim().isEmpty()) {
-                                    composer.setMessage(userPrompt);
-                                }
+                                // Never drop either text: a newer draft is kept below the failed one.
+                                String draft = composer.getMessage();
+                                composer.setMessage(draft.trim().isEmpty()
+                                        ? userPrompt : userPrompt + "\n\n" + draft);
                                 setStatus("Your party message could not be sent — it is back in the composer.");
                             }
                         });
