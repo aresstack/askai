@@ -1367,8 +1367,10 @@ public final class SetupWizardPanel extends JPanel {
             if (closed) {
                 return;
             }
-            download.end(error == null ? name + " is installed." : "Download failed: " + error);
+            download.end(error == null ? model + " is installed." : "Download failed: " + error);
             if (error == null) {
+                // Keep the name Ollama lists it under (e.g. with ":latest"); the refresh keeps the field's value.
+                field.setSelectedItem(model);
                 modelsLoaded = false;
                 refreshModels();
             }

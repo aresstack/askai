@@ -81,6 +81,15 @@ public final class AskAiSetupActions implements SetupActions {
         thread.setDaemon(true);
         return thread;
     });
+    /**
+     * Long downloads (voice, sentence models, reranker) run here, next to {@link #worker}: a slow or stalled
+     * download must never queue the readiness checks behind it, or Finish would wait for it.
+     */
+    private final ExecutorService installs = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "askai-setup-wizard-install");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /** The Ollama address before the wizard tried another one (restored on cancel); {@code null}: untouched. */
     private String originalOllamaUrl;
@@ -330,7 +339,7 @@ public final class AskAiSetupActions implements SetupActions {
             done.accept(null, "no model name");
             return;
         }
-        final String name = model.trim();
+        final String name = canonicalOllamaName(model.trim());
         ollama.pullModel(name, new OllamaService.PullListener() {
             @Override
             public void onProgress(final OllamaPullProgress p) {
@@ -349,6 +358,15 @@ public final class AskAiSetupActions implements SetupActions {
         });
     }
 
+    /**
+     * The name Ollama lists a pulled model under: without a tag it is stored as {@code :latest}, and AskAI compares
+     * configured names literally against {@code /api/tags} (embedding digest lookup), so the wizard keeps that name.
+     */
+    static String canonicalOllamaName(String model) {
+        int slash = model.lastIndexOf('/');
+        return model.indexOf(':', slash + 1) >= 0 ? model : model + ":latest";
+    }
+
     @Override
     public void installReranker(final SetupDraft draft, final Progress progress,
                                 final BiConsumer<String, String> done) {
@@ -357,7 +375,7 @@ public final class AskAiSetupActions implements SetupActions {
             return;
         }
         final AppConfiguration stored = configuration.load();
-        background(() -> {
+        install(() -> {
             try {
                 HuggingFaceClient client = new HuggingFaceClient(proxyOf(draft, stored), trustOf(draft, stored),
                         stored.getHttpClientConfiguration(), stored.getHuggingFaceToken());
@@ -403,7 +421,7 @@ public final class AskAiSetupActions implements SetupActions {
 
     @Override
     public void installSentenceModels(final Consumer<String> progress, final BiConsumer<String, String> done) {
-        background(() -> {
+        install(() -> {
             NlpModelInstaller installer = new NlpModelInstaller(new HttpNlpDownloadClient(), nlpStore);
             int installed = 0;
             try {
@@ -464,7 +482,7 @@ public final class AskAiSetupActions implements SetupActions {
             done.accept(null, "unknown voice " + voiceId);
             return;
         }
-        background(() -> {
+        install(() -> {
             try {
                 AppConfiguration stored = configuration.load();
                 ConfiguredConnections network = new ConfiguredConnections(proxyOf(draft, stored),
@@ -491,10 +509,17 @@ public final class AskAiSetupActions implements SetupActions {
         }
     }
 
+    /**
+     * Writes a picked Piper voice. "Windows voice" only replaces a Piper voice that was chosen before; otherwise the
+     * language keeps its stored (default) selection, so the wizard never overrides the default engine by itself.
+     */
     private static TextToSpeechSettings withVoice(TextToSpeechSettings settings, String language, String voiceId) {
-        return voiceId.isEmpty()
-                ? settings.withSelection(language, TextToSpeechSettings.Engine.WINDOWS, "")
-                : settings.withSelection(language, TextToSpeechSettings.Engine.PIPER, voiceId);
+        if (voiceId.isEmpty()) {
+            return piperVoiceOf(settings, language).isEmpty()
+                    ? settings
+                    : settings.withSelection(language, TextToSpeechSettings.Engine.WINDOWS, "");
+        }
+        return settings.withSelection(language, TextToSpeechSettings.Engine.PIPER, voiceId);
     }
 
     // ------------------------------------------------------------------ finish
@@ -697,6 +722,10 @@ public final class AskAiSetupActions implements SetupActions {
 
     private void background(Runnable task) {
         worker.execute(task);
+    }
+
+    private void install(Runnable task) {
+        installs.execute(task);
     }
 
     private static void deliver(Runnable result) {

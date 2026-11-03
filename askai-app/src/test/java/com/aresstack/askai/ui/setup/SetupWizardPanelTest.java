@@ -318,7 +318,15 @@ public class SetupWizardPanelTest {
         wizard.chatDownloadButton().doClick();
 
         assertEquals(Collections.singletonList("mistral"), fake.pulled);
-        assertEquals("mistral", wizard.draft().chatModel());
+        assertEquals("the name Ollama lists it under", "mistral:latest", wizard.draft().chatModel());
+    }
+
+    @Test
+    public void pulledModelsKeepTheNameOllamaListsThemUnder() {
+        assertEquals("nomic-embed-text:latest", AskAiSetupActions.canonicalOllamaName("nomic-embed-text"));
+        assertEquals("qwen3:8b", AskAiSetupActions.canonicalOllamaName("qwen3:8b"));
+        assertEquals("hf.co/user/model:latest", AskAiSetupActions.canonicalOllamaName("hf.co/user/model"));
+        assertEquals("registry:5000/model:latest", AskAiSetupActions.canonicalOllamaName("registry:5000/model"));
     }
 
     @Test
@@ -535,7 +543,7 @@ public class SetupWizardPanelTest {
         public void pullModel(SetupDraft draft, String model, Progress progress, BiConsumer<String, String> done) {
             pulled.add(model);
             progress.update("pulling", 1, 2);
-            done.accept(model, null);
+            done.accept(AskAiSetupActions.canonicalOllamaName(model), null);
         }
 
         @Override
