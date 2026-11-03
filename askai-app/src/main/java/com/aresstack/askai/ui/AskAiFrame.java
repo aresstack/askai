@@ -205,8 +205,16 @@ public final class AskAiFrame extends JFrame {
         });
         this.audioProfileRepository = new FileAudioProfileRepository();
         this.applicationState = new ApplicationStateService();
-        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        // Closing hides the window into the system tray (Open / Exit there); without a tray it exits as before.
+        this.mainWindowTray = new MainWindowTray(this, this::exitApplication);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent event) {
+                if (!mainWindowTray.hideToTray()) {
+                    exitApplication();
+                }
+            }
+
             public void windowClosed(WindowEvent event) {
                 performShutdown();
             }
@@ -227,6 +235,8 @@ public final class AskAiFrame extends JFrame {
      * every remaining thread (EDT after dispose, the plugin-shutdown worker once it completes) finish so the JVM
      * exits on its own — no {@code System.exit}/{@code halt} needed. Idempotent.
      */
+    private MainWindowTray mainWindowTray;
+
     private void performShutdown() {
         if (!shuttingDown.compareAndSet(false, true)) {
             return; // idempotent
@@ -257,6 +267,12 @@ public final class AskAiFrame extends JFrame {
             agentRuntimeServices.shutdown();
         }
         shutdownLog("performShutdown done (JVM will exit naturally)");
+    }
+
+    /** Leaves AskAI through the regular shutdown path (dispose -> windowClosed -> performShutdown). */
+    private void exitApplication() {
+        mainWindowTray.removeTrayIcon();
+        dispose();
     }
 
     /** Kept for the existing launcher: builds the frame and makes it visible. */
