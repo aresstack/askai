@@ -95,6 +95,8 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** The Ollama address before the wizard tried another one (restored on cancel); {@code null}: untouched. */
     private String originalOllamaUrl;
+    /** The saved network settings before the model browser needed the draft's; restored on cancel. */
+    private AppConfiguration originalNetwork;
     /** Counts wizard runs ended by a cancel; a runtime result from an earlier run must not touch the model. */
     private int cancellations;
     private PiperReadAloudService witchService;
@@ -137,10 +139,11 @@ public final class AskAiSetupActions implements SetupActions {
     }
 
     @Override
-    public void openModelBrowser(Component parent) {
+    public void openModelBrowser(Component parent, SetupDraft draft) {
         if (modelBrowser == null) {
             return;
         }
+        useDraftNetworkForBrowser(draft);
         Window owner = parent == null ? null : SwingUtilities.getWindowAncestor(parent);
         final JDialog dialog = new JDialog(owner, "Install a model", JDialog.ModalityType.APPLICATION_MODAL);
         ComicButton close = new ComicButton("Close");
@@ -276,6 +279,26 @@ public final class AskAiSetupActions implements SetupActions {
         return withNetwork(draft.toBuilder(), configuration.load()).build();
     }
 
+    /**
+     * The model browser's Hugging Face client and installers read the saved network settings, so the wizard's
+     * proxy and certificate choice is saved while it is open; "Cancel" restores what was saved before.
+     */
+    private void useDraftNetworkForBrowser(SetupDraft draft) {
+        if (draft == null) {
+            return;
+        }
+        try {
+            AppConfiguration stored = configuration.load();
+            if (originalNetwork == null) {
+                originalNetwork = stored;
+            }
+            configuration.save(stored.withNetworkConfiguration(proxyOf(draft, stored), trustOf(draft, stored),
+                    stored.getHttpClientConfiguration()));
+        } catch (RuntimeException e) {
+            // the browser still opens with the saved settings
+        }
+    }
+
     // ------------------------------------------------------------------ AI runtime
 
     @Override
@@ -327,6 +350,16 @@ public final class AskAiSetupActions implements SetupActions {
         if (originalOllamaUrl != null) {
             model.setOllamaBaseUrl(originalOllamaUrl);
             originalOllamaUrl = null;
+        }
+        if (originalNetwork != null) {
+            try {
+                configuration.save(configuration.load().withNetworkConfiguration(
+                        originalNetwork.getProxyConfiguration(), originalNetwork.getCertificateTrustConfiguration(),
+                        originalNetwork.getHttpClientConfiguration()));
+            } catch (RuntimeException e) {
+                // nothing more to restore
+            }
+            originalNetwork = null;
         }
         stopWitch();
     }
@@ -586,6 +619,7 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** Writes the draft through the same paths the settings pages use. */
     private void save(SetupDraft draft) {
+        originalNetwork = null; // the draft's network settings are the saved ones from now on
         AppConfiguration stored = configuration.load();
         configuration.save(stored.withNetworkConfiguration(proxyOf(draft, stored), trustOf(draft, stored),
                 stored.getHttpClientConfiguration()));

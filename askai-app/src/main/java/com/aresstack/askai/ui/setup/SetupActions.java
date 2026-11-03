@@ -38,9 +38,10 @@ public interface SetupActions {
 
     /**
      * Opens AskAI's model browser (Hugging Face, Ollama library, local runtime) as a modal dialog over
-     * {@code parent}; returns when it is closed. Without a browser nothing happens.
+     * {@code parent}; returns when it is closed. Its downloads use the draft's network settings. Without a
+     * browser nothing happens.
      */
-    default void openModelBrowser(Component parent) {
+    default void openModelBrowser(Component parent, SetupDraft draft) {
     }
 
     // ------------------------------------------------------------------ models

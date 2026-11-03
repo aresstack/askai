@@ -366,11 +366,14 @@ public class SetupWizardPanelTest {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
         wizard.jumpTo(SetupWizardPanel.STEP_CHAT);
+        wizard.proxyModeChoice().setSelectedItem(SetupWizardPanel.LABEL_PROXY_MANUAL);
         wizard.chatModelChoice().setSelectedItem("llama3.2");
 
         wizard.chatInstallButton().doClick();
 
         assertEquals(1, fake.browserOpened);
+        assertEquals("the browser downloads with the step's proxy", SetupWizardPanel.PROXY_MANUAL,
+                fake.browserDraft.proxyMode());
         assertEquals("mistral", wizard.chatModelChoice().getSelectedItem());
         assertFalse("installed meanwhile: nothing left to download", wizard.chatDownloadButton().isVisible());
     }
@@ -655,10 +658,12 @@ public class SetupWizardPanelTest {
         List<String> audioModels = new ArrayList<String>();
         final List<String> browserInstalled = new ArrayList<String>();
         int browserOpened;
+        SetupDraft browserDraft;
 
         @Override
-        public void openModelBrowser(java.awt.Component parent) {
+        public void openModelBrowser(java.awt.Component parent, SetupDraft draft) {
             browserOpened++;
+            browserDraft = draft;
             browserInstalled.add("mistral");
             audioModels.add(SetupActions.RECOMMENDED_AUDIO_MODEL);
         }

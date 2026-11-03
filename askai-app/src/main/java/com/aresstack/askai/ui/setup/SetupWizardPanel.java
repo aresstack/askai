@@ -1034,7 +1034,7 @@ public final class SetupWizardPanel extends JPanel {
         final List<String> chatBefore = new ArrayList<String>(installedChat);
         final List<String> embeddingsBefore = new ArrayList<String>(installedEmbeddings);
         final List<String> audioBefore = new ArrayList<String>(installedAudio);
-        setup.openModelBrowser(this); // modal: returns when the browser is closed
+        setup.openModelBrowser(this, collect()); // modal: returns when the browser is closed
         if (closed) {
             return;
         }
