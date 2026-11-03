@@ -1487,6 +1487,15 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * Render a user web search lifecycle event as a transient activity, correlated by requestId so late events
      * of a superseded or cancelled run are ignored. It changes NO phase and NO state — a pure service surface.
      */
+    /** The accepted-source count a "completed" manual-search event carries (0 when absent). */
+    private static int acceptedCount(ResearchBackendEvent event) {
+        try {
+            return Integer.parseInt(event.getPublicMessage().trim());
+        } catch (RuntimeException noCount) {
+            return 0;
+        }
+    }
+
     private void applyManualSearch(ResearchBackendEvent event) {
         if (sink == null) {
             return;
@@ -1524,6 +1533,26 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             setAgentTurnInFlight(true);
         } else if ("progress".equals(subKind)) {
             sink.updateToolActivity(activityId, "Websuche", message);
+        } else if ("completed".equals(subKind) && acceptedCount(event) == 0) {
+            // An honest search that accepted NO source is not a success: no green check, the query stays
+            // offered, and the line's retry arrow repeats it (like a failure, but worded as "no hits").
+            String noHits = "Websuche ohne Ergebnisse: keine passende Quelle gefunden.";
+            sink.failToolActivity(activityId, noHits);
+            sink.showProblem(publish("manual-search-empty-" + requestId), noHits);
+            stopManualSearchBrowser();
+            final String retryQuery = activeManualSearchQuery;
+            try {
+                sink.markInfoStatus(publish("manual-search-line-" + requestId), false,
+                        retryQuery == null || retryQuery.trim().isEmpty() ? null : new Runnable() {
+                            public void run() {
+                                requestManualWebSearch(retryQuery);
+                            }
+                        });
+            } catch (RuntimeException | LinkageError decorationOnly) {
+                System.err.println("[manual-search] info-status decoration failed: " + decorationOnly);
+            }
+            setAgentTurnInFlight(false);
+            activeManualSearchRequestId = null;
         } else if ("completed".equals(subKind)) {
             sink.completeToolActivity(activityId, message);
             // This query is now covered: remember it so the agent's suggestions never re-offer it, and the

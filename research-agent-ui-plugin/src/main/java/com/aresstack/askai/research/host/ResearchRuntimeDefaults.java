@@ -30,6 +30,9 @@ public final class ResearchRuntimeDefaults {
         if (ResearchRuntimeSettings.CAMOUFOX_CHANNEL.equals(configured)) {
             return configured; // managed: the browser runtime downloads and verifies its own Camoufox
         }
+        if ("firefox".equals(configured)) {
+            return configured; // the local Firefox: no Chromium fallback; the readiness probe reports a missing one
+        }
         String channel = "msedge".equals(configured) ? "msedge" : "chrome";
         String other = "msedge".equals(channel) ? "chrome" : "msedge";
         return pickChannel(channel, browserInstalled(channel), browserInstalled(other), other);
