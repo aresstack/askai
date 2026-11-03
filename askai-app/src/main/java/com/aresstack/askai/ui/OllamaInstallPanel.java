@@ -204,6 +204,7 @@ public final class OllamaInstallPanel extends JPanel {
         if (filterState.getSearchText().length() > 0) {
             searchCombo.getEditor().setItem(filterState.getSearchText());
         }
+        installSearchTextPersistence();
         refreshCatalogsInBackground();
     }
 
@@ -1205,6 +1206,32 @@ public final class OllamaInstallPanel extends JPanel {
         filterState.setSearchText(query);
         persistFilterState();
         return filterState.toCriteria(query);
+    }
+
+    /**
+     * Persists the search text whenever the user edits it (debounced), not only when a search runs.
+     * Before, clearing the field was never saved, so the last searched text (e.g. "au") came back
+     * after every restart.
+     */
+    private void installSearchTextPersistence() {
+        java.awt.Component editor = searchCombo.getEditor().getEditorComponent();
+        if (!(editor instanceof javax.swing.text.JTextComponent)) {
+            return;
+        }
+        final javax.swing.text.JTextComponent text = (javax.swing.text.JTextComponent) editor;
+        final javax.swing.Timer saveTimer = new javax.swing.Timer(600, event -> {
+            String current = text.getText() == null ? "" : text.getText().trim();
+            if (!current.equals(filterState.getSearchText())) {
+                filterState.setSearchText(current);
+                persistFilterState();
+            }
+        });
+        saveTimer.setRepeats(false);
+        text.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { saveTimer.restart(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { saveTimer.restart(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { saveTimer.restart(); }
+        });
     }
 
     /** Saves the current filter selection into configuration (serialized, alongside the token etc.). */
