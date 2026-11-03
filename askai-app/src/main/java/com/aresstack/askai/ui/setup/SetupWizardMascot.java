@@ -108,10 +108,10 @@ public final class SetupWizardMascot extends JComponent {
         bubble.setHeaderColor(chat.getAssistantForeground());
         bubble.setVisible(false);
         add(bubble);
-        question = new ComicSearchBar("Ask Merlin …", "Your own question to Merlin; Enter sends it", colors);
+        question = new ComicSearchBar("Ask the Dark Mage …", "Your own question to the Dark Mage; Enter sends it", colors);
         question.setVisible(false);
         question.addSearchAction(e -> submitQuestion());
-        question.getTextField().getAccessibleContext().setAccessibleName("Question to Merlin");
+        question.getTextField().getAccessibleContext().setAccessibleName("Question to the Dark Mage");
         add(question);
         MouseAdapter mouse = new MouseAdapter() {
             @Override
@@ -125,7 +125,7 @@ public final class SetupWizardMascot extends JComponent {
             public void mouseMoved(MouseEvent e) {
                 boolean active = onFigureClicked != null && onFigure(e.getPoint());
                 setCursor(active ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
-                setToolTipText(active ? "Ask Merlin" : null);
+                setToolTipText(active ? "Ask the Dark Mage" : null);
             }
         };
         addMouseListener(mouse);

@@ -12,9 +12,9 @@ package com.aresstack.askai.ui.setup;
  */
 final class WizardGuide {
 
-    static final String NAME = "Merlin";
+    static final String NAME = "Dark Mage";
 
-    static final String FIRST_GREETING = "Ah, wonderful – now I can finally talk to you! I'm Merlin, your personal "
+    static final String FIRST_GREETING = "Ah, wonderful – now I can finally talk to you! I'm the Dark Mage, your personal "
             + "assistant. I'll walk you through the rest of the setup – and afterwards you won't get rid of me that "
             + "easily.";
     static final String WELCOME_BACK = "There you are again. What shall we change about my setup this time?";
@@ -139,7 +139,7 @@ final class WizardGuide {
      * answer fits the setup. Contains no user input and no credentials.
      */
     String systemPrompt(int step) {
-        return "You are Merlin, a friendly, slightly mischievous wizard and the personal assistant in AskAI, a "
+        return "You are the Dark Mage, a friendly, slightly mischievous hooded wizard and the personal assistant in AskAI, a "
                 + "desktop app for local AI chat and web research. The user is setting you up right now. Answer in "
                 + "the user's language, briefly (at most three sentences), kindly and concretely, without Markdown. "
                 + "Do not invent menu items or settings. Current step: " + at(TOPIC, step) + ". What to do here: "
