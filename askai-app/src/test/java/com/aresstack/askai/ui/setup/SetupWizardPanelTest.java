@@ -421,6 +421,35 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void dictationUsesWhisperByDefaultWithADownloadOrReinstallButtonBesideTheModel() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
+        assertEquals(SetupWizardPanel.ENGINE_WHISPER, wizard.dictationEngineChoice().getSelectedItem());
+        assertEquals("the recommended model comes first", "Small (recommended)",
+                wizard.whisperModelChoice().getSelectedItem());
+        assertEquals("Download", wizard.whisperButton().getText());
+        assertFalse(wizard.isDone(SetupWizardPanel.STEP_DICTATION));
+        assertEquals("nothing installed yet: automatic", "", wizard.draft().whisperModel());
+
+        wizard.whisperButton().doClick();
+
+        assertEquals(Collections.singletonList("small install"), fake.whisperInstalls);
+        assertEquals("Reinstall", wizard.whisperButton().getText());
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_DICTATION));
+        assertEquals("small", wizard.draft().whisperModel());
+        assertFalse(wizard.draft().dictationWithOllama());
+
+        wizard.whisperButton().doClick();
+        assertEquals(Arrays.asList("small install", "small reinstall"), fake.whisperInstalls);
+
+        wizard.dictationEngineChoice().setSelectedItem(SetupWizardPanel.ENGINE_OLLAMA);
+        assertTrue(wizard.draft().dictationWithOllama());
+        assertFalse("Whisper's row hides with Ollama", wizard.whisperButton().getParent().isVisible());
+        assertTrue(wizard.audioModelChoice().getParent().isVisible());
+    }
+
+    @Test
     public void dictationPicksAndTestsTheMicrophoneAndDownloadsAnAudioModel() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
@@ -667,6 +696,26 @@ public class SetupWizardPanelTest {
         int browserOpened;
         final List<String> sentenceRequests = new ArrayList<String>();
         SetupDraft browserDraft;
+
+        boolean whisperSmallInstalled;
+        final List<String> whisperInstalls = new ArrayList<String>();
+
+        @Override
+        public void loadWhisperModels(Consumer<List<VoiceOffer>> done) {
+            done.accept(Arrays.asList(new VoiceOffer("small", "Small (recommended)", "", whisperSmallInstalled),
+                    new VoiceOffer("base", "Base (fastest, smallest)", "", false)));
+        }
+
+        @Override
+        public void installWhisper(SetupDraft draft, String modelId, boolean reinstall, Progress progress,
+                                   BiConsumer<String, String> done) {
+            whisperInstalls.add(modelId + (reinstall ? " reinstall" : " install"));
+            progress.update("Downloading model", 1, 2);
+            if (modelId.equals("small")) {
+                whisperSmallInstalled = true;
+            }
+            done.accept("Whisper installed.", null);
+        }
 
         @Override
         public void openModelBrowser(java.awt.Component parent, SetupDraft draft) {

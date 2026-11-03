@@ -24,6 +24,8 @@ public final class SetupDraft {
     private final String voiceEnglish;
     private final String microphone;
     private final String audioModel;
+    private final boolean dictationWithOllama;
+    private final String whisperModel;
 
     private SetupDraft(Builder b) {
         this.ollamaBaseUrl = clean(b.ollamaBaseUrl);
@@ -40,6 +42,8 @@ public final class SetupDraft {
         this.voiceEnglish = clean(b.voiceEnglish);
         this.microphone = clean(b.microphone);
         this.audioModel = clean(b.audioModel);
+        this.dictationWithOllama = b.dictationWithOllama;
+        this.whisperModel = clean(b.whisperModel);
     }
 
     public static Builder builder() {
@@ -63,6 +67,8 @@ public final class SetupDraft {
         b.voiceEnglish = voiceEnglish;
         b.microphone = microphone;
         b.audioModel = audioModel;
+        b.dictationWithOllama = dictationWithOllama;
+        b.whisperModel = whisperModel;
         return b;
     }
 
@@ -133,6 +139,16 @@ public final class SetupDraft {
         return audioModel;
     }
 
+    /** Dictation runs on the Ollama audio model instead of Whisper (Whisper on this computer is the default). */
+    public boolean dictationWithOllama() {
+        return dictationWithOllama;
+    }
+
+    /** The Whisper model id for dictation; empty: the first installed one. */
+    public String whisperModel() {
+        return whisperModel;
+    }
+
     private static String clean(String value) {
         return value == null ? "" : value.trim();
     }
@@ -144,7 +160,8 @@ public final class SetupDraft {
                 + ", windowsTrust=" + trustWindowsStores + ", chat='" + chatModel + "', embedding='" + embeddingModel
                 + "', reranker='" + rerankerModel + "', nlp=" + nlpSentenceGerman + '/' + nlpSentenceEnglish
                 + ", voices=" + voiceGerman + '/' + voiceEnglish + ", microphone='" + microphone + "', audio='"
-                + audioModel + "'}";
+                + audioModel + "', dictationEngine=" + (dictationWithOllama ? "ollama" : "whisper") + ", whisper='"
+                + whisperModel + "'}";
     }
 
     /** Mutable builder; {@link #build()} trims every text. */
@@ -163,6 +180,8 @@ public final class SetupDraft {
         private String voiceEnglish;
         private String microphone;
         private String audioModel;
+        private boolean dictationWithOllama;
+        private String whisperModel;
 
         private Builder() {
         }
@@ -214,6 +233,13 @@ public final class SetupDraft {
         public Builder dictation(String microphone, String audioModel) {
             this.microphone = microphone;
             this.audioModel = audioModel;
+            return this;
+        }
+
+        /** @param withOllama transcribe with the Ollama audio model; else with Whisper ({@code model}, "" = auto) */
+        public Builder dictationEngine(boolean withOllama, String model) {
+            this.dictationWithOllama = withOllama;
+            this.whisperModel = model;
             return this;
         }
 
