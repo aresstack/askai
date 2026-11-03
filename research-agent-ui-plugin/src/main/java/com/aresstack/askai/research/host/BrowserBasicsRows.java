@@ -21,7 +21,7 @@ final class BrowserBasicsRows {
     static void addTo(ComicForm form, final WorkspaceStateStore store) {
         ResearchRuntimeSettings current = ResearchRuntimeDefaults.complete(ResearchRuntimeSettings.load(store));
         final JComboBox<String> channel = ComicControls.<String>comboBox(
-                new String[]{ResearchRuntimeSettings.CAMOUFOX_CHANNEL, "chrome", "msedge"});
+                new String[]{ResearchRuntimeSettings.CAMOUFOX_CHANNEL, "firefox", "chrome", "msedge"});
         channel.setSelectedItem(current.getBrowserChannel());
         channel.setToolTipText("The browser that searches and opens the hits (applies to new sessions)");
         final JCheckBox headless = ComicControls.checkBox("Run the research browser headless", current.isHeadless());
@@ -40,10 +40,18 @@ final class BrowserBasicsRows {
                     headless.isSelected(), allowPrivate.isSelected(), stored.getSelectedRerankerModel())
                     .save(store);
         };
-        channel.addActionListener(e -> persist.run());
+        final BrowserLocationControl location = new BrowserLocationControl(store);
+        location.setChannel(String.valueOf(channel.getSelectedItem()));
+        channel.addActionListener(e -> {
+            persist.run();
+            location.setChannel(String.valueOf(channel.getSelectedItem()));
+        });
         headless.addActionListener(e -> persist.run());
         allowPrivate.addActionListener(e -> persist.run());
         form.row("Browser channel", channel);
+        form.row("Browser location", location.field(), location.browseButton(), location.downloadButton());
+        form.row("", location.status());
+        form.row("", location.progress());
         form.row("", headless);
         form.row("", ComicForm.hint(headlessHint + " Off (default): you see the pages the research opens."));
         form.row("", allowPrivate);

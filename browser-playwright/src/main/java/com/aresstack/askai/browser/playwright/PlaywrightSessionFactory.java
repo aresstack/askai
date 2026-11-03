@@ -61,8 +61,11 @@ final class PlaywrightSessionFactory {
         }
     }
 
-    /** camoufox (the default, also for a missing value), chrome or msedge. */
+    /** camoufox (the default, also for a missing value), firefox, chrome or msedge. */
     static String normalizeChannel(String channel) {
+        if (BrowserExecutables.FIREFOX.equalsIgnoreCase(channel)) {
+            return BrowserExecutables.FIREFOX;
+        }
         if ("msedge".equalsIgnoreCase(channel)) {
             return "msedge";
         }

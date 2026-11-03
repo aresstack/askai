@@ -221,6 +221,11 @@ final class Playwright4jDriver implements PlaywrightDriver {
                 context = playwright.firefox().launchPersistentContext(profile.directory(),
                         camoufoxOptions(camoufoxExecutable, camoufoxLaunch, headless));
                 browser = context.browser();
+            } else if (BrowserExecutables.FIREFOX.equals(channel)) {
+                // The local Firefox over WebDriver BiDi, as Camoufox runs (without its fingerprint patches).
+                browser = playwright.firefox().launch(localFirefoxOptions(headless));
+                stage = "CONTEXT_CREATE";
+                context = browser.newContext(new Browser.NewContextOptions().setAcceptDownloads(false));
             } else if (!"false".equalsIgnoreCase(System.getProperty(ADDON_PROPERTY))) {
                 // Chrome/Edge with the research extension (issue #23, stage 4): a persistent profile of its own per
                 // start, the extension next to it, loaded over the DevTools protocol (ChromeResearchExtension).
@@ -241,8 +246,13 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     }
                 }
                 stage = "BROWSER_LAUNCH";
-                context = playwright.chromium().launchPersistentContext(chromeProfile,
-                        ChromeResearchExtension.options(channel, headless));
+                BrowserType.LaunchPersistentContextOptions chromeOptions =
+                        ChromeResearchExtension.options(channel, headless);
+                String chosenChrome = BrowserExecutables.configured(channel);
+                if (!chosenChrome.isEmpty()) {
+                    chromeOptions.setExecutablePath(java.nio.file.Paths.get(chosenChrome));
+                }
+                context = playwright.chromium().launchPersistentContext(chromeProfile, chromeOptions);
                 browser = context.browser();
                 if (bridge != null) {
                     stage = "ADDON_LOAD";
@@ -257,9 +267,14 @@ final class Playwright4jDriver implements PlaywrightDriver {
                     }
                 }
             } else {
-                browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
+                BrowserType.LaunchOptions chromium = new BrowserType.LaunchOptions()
                         .setChannel(channel)
-                        .setHeadless(headless));
+                        .setHeadless(headless);
+                String chosen = BrowserExecutables.configured(channel);
+                if (!chosen.isEmpty()) {
+                    chromium.setExecutablePath(java.nio.file.Paths.get(chosen));
+                }
+                browser = playwright.chromium().launch(chromium);
                 stage = "CONTEXT_CREATE";
                 context = browser.newContext(new Browser.NewContextOptions().setAcceptDownloads(false));
             }
@@ -357,6 +372,18 @@ final class Playwright4jDriver implements PlaywrightDriver {
         }
         page.onClose(driver.activeTabCloseWatcher());
         return driver;
+    }
+
+    /** Launch options of the local Firefox (chosen location, else autodetected). */
+    static BrowserType.LaunchOptions localFirefoxOptions(boolean headless) {
+        String executable = BrowserExecutables.effective(BrowserExecutables.FIREFOX);
+        if (executable == null) {
+            throw new IllegalStateException("No Firefox found; choose its location under Research Agent \u2192 Browser");
+        }
+        return new BrowserType.LaunchOptions()
+                .setChannel("moz-firefox")
+                .setExecutablePath(java.nio.file.Paths.get(executable))
+                .setHeadless(headless);
     }
 
     @Override

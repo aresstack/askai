@@ -102,8 +102,36 @@ public final class ResearchRuntimeSettings {
         applyCamoufoxFolder(store);
     }
 
-    /** Browsers started from now on use the chosen Camoufox folder, when it holds the verified installation. */
+    /** The executable chosen for a local browser channel (firefox, chrome, msedge); "" = autodetect. */
+    static final String KEY_BROWSER_EXECUTABLE_PREFIX = "research.runtime.browserExecutable.";
+
+    public static String loadBrowserExecutable(WorkspaceStateStore store, String channel) {
+        return store == null ? "" : store.get(KEY_BROWSER_EXECUTABLE_PREFIX + channel, "").trim();
+    }
+
+    public static void saveBrowserExecutable(WorkspaceStateStore store, String channel, String path) {
+        if (store != null) {
+            store.put(KEY_BROWSER_EXECUTABLE_PREFIX + channel, path == null ? "" : path.trim());
+        }
+        applyBrowserExecutable(channel, loadBrowserExecutable(store, channel));
+    }
+
+    private static void applyBrowserExecutable(String channel, String path) {
+        try {
+            com.aresstack.askai.browser.playwright.BrowserExecutables.use(channel, path);
+        } catch (RuntimeException | LinkageError unavailable) {
+            // no browser runtime here: nothing to configure
+        }
+    }
+
+    /**
+     * Browsers started from now on use the chosen Camoufox folder (when it holds the verified installation) and
+     * the chosen Firefox/Chrome/Edge executables.
+     */
     public static void applyCamoufoxFolder(WorkspaceStateStore store) {
+        for (String channel : new String[]{"firefox", "chrome", "msedge"}) {
+            applyBrowserExecutable(channel, loadBrowserExecutable(store, channel));
+        }
         String folder = loadCamoufoxFolder(store);
         if (folder.isEmpty()) {
             return; // the automatic choice (or a location configured at launch) stays
