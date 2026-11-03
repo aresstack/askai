@@ -74,6 +74,17 @@ public final class PiperInstaller {
         }
     }
 
+    /**
+     * Installs the engine if missing and downloads the voice again even when it is installed; the old files are
+     * replaced only after the new download passed its hash check. Blocking; run OFF the EDT.
+     */
+    public void reinstall(PiperVoice voice, Progress progress) throws IOException {
+        if (!store.isEngineInstalled()) {
+            installEngine(progress);
+        }
+        installVoice(voice, progress);
+    }
+
     // ------------------------------------------------------------------ engine
 
     void installEngine(Progress progress) throws IOException {

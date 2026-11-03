@@ -36,7 +36,21 @@ public final class SearchProviderCardsPanel extends JPanel {
     private final WorkspaceStateStore store;
     private final JComboBox<String> source = ComicControls.<String>comboBox(PROVIDER_LABELS);
     private final CardLayout cards = new CardLayout();
-    private final JPanel cardHost = new JPanel(cards);
+    /** As tall as the card shown, not as the tallest card (a short card leaves no empty block below it). */
+    private final JPanel cardHost = new JPanel(cards) {
+        @Override
+        public Dimension getPreferredSize() {
+            for (java.awt.Component card : getComponents()) {
+                if (card.isVisible()) {
+                    Dimension size = card.getPreferredSize();
+                    java.awt.Insets insets = getInsets();
+                    return new Dimension(size.width + insets.left + insets.right,
+                            size.height + insets.top + insets.bottom);
+                }
+            }
+            return super.getPreferredSize();
+        }
+    };
 
     private final ResearchProviderServices providers;
     private final DataForSeoSettingsDraft dataForSeoDraft;
@@ -80,6 +94,7 @@ public final class SearchProviderCardsPanel extends JPanel {
             public void actionPerformed(ActionEvent e) {
                 int i = Math.max(0, source.getSelectedIndex());
                 cards.show(cardHost, PROVIDER_LABELS[i]);
+                cardHost.revalidate();
                 persistSelection();
             }
         });

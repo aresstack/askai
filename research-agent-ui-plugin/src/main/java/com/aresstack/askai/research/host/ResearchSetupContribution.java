@@ -14,6 +14,8 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JTextArea;
+import javax.swing.UIManager;
 import javax.swing.Timer;
 import java.awt.Component;
 import java.awt.FlowLayout;
@@ -47,27 +49,28 @@ public final class ResearchSetupContribution implements AgentSetupContribution {
         Page(AgentSetupContext context) {
             panel.setOpaque(false);
             panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-            JLabel intro = new JLabel("<html><body style='width:520px'>The research agent searches the web in its "
-                    + "own browser (Camoufox). It is downloaded once – about 1.3 GB – through the network "
-                    + "settings above; download it now so the first research starts right away.</body></html>");
-            add(intro);
-            JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+            add(note("The research agent searches the web in its own browser (Camoufox). It is downloaded once – "
+                    + "about 1.3 GB – through the network settings above; download it now so the first research "
+                    + "starts right away."));
+            JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             row.setOpaque(false);
+            row.setBorder(BorderFactory.createEmptyBorder(6, 0, 4, 0));
             row.add(download);
+            row.add(javax.swing.Box.createHorizontalStrut(8));
             row.add(browserStatus);
             add(row);
             progress.setStringPainted(true);
             progress.setVisible(false);
             add(progress);
-            JLabel providerIntro = new JLabel("<html><body style='width:520px'>Search provider: Google in the "
-                    + "browser needs no key. With a SerpApi, Brave, DataForSEO or Bright Data key the agent can "
-                    + "search through that service instead.</body></html>");
-            providerIntro.setBorder(BorderFactory.createEmptyBorder(10, 0, 4, 0));
+            JTextArea providerIntro = note("Search provider: Google in the browser needs no key. With a SerpApi, "
+                    + "Brave, DataForSEO or Bright Data key the agent can search through that service instead.");
+            providerIntro.setBorder(BorderFactory.createEmptyBorder(10, 0, 2, 0));
             add(providerIntro);
             SearchProviderCardsPanel cards;
             try {
                 cards = new SearchProviderCardsPanel(context.getHostStateStore());
-                cards.setOpaque(false);
+                cards.setBorder(BorderFactory.createEmptyBorder());
+                transparent(cards);
                 add(cards);
             } catch (RuntimeException unavailable) {
                 cards = null;
@@ -76,6 +79,37 @@ public final class ResearchSetupContribution implements AgentSetupContribution {
             download.addActionListener(e -> startDownload());
             poll = new Timer(500, e -> refresh());
             refresh();
+        }
+
+        /** A wrapping text in the wizard's plain style (it takes the width of the field column). */
+        private static JTextArea note(String text) {
+            JTextArea note = com.aresstack.comiccontrols.control.ComicControls.textArea(text);
+            note.setColumns(20); // a small preferred width: the column decides, the text wraps into it
+            note.setEditable(false);
+            note.setFocusable(false);
+            note.setLineWrap(true);
+            note.setWrapStyleWord(true);
+            note.setOpaque(false);
+            note.setBorder(BorderFactory.createEmptyBorder());
+            java.awt.Font font = UIManager.getFont("Label.font");
+            if (font != null) {
+                note.setFont(font.deriveFont(java.awt.Font.PLAIN));
+            }
+            note.setForeground(UIManager.getColor("Label.foreground"));
+            return note;
+        }
+
+        /** The provider cards keep the wizard's background instead of grey panels. */
+        private static void transparent(java.awt.Container container) {
+            if (container instanceof JPanel) {
+                ((JPanel) container).setOpaque(false);
+            }
+            for (java.awt.Component child : container.getComponents()) {
+                if (child instanceof java.awt.Container && !(child instanceof javax.swing.text.JTextComponent)
+                        && !(child instanceof javax.swing.JComboBox)) {
+                    transparent((java.awt.Container) child);
+                }
+            }
         }
 
         private void add(JComponent component) {

@@ -14,7 +14,20 @@ import java.util.Map;
 final class ExitWatchdog {
 
     /** Grace period before forcing the exit; longer than the recorder finalization bound (10 s). */
-    static final long DEFAULT_GRACE_MILLIS = 20000L;
+    static final long DEFAULT_GRACE_MILLIS = 12000L;
+
+    /** Time {@link System#exit} (i.e. the shutdown hooks) may take before the JVM is halted. */
+    static final long HALT_AFTER_EXIT_MILLIS = 3000L;
+
+    private static final java.util.concurrent.atomic.AtomicBoolean ARMED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** Starts the production watchdog exactly once (window closing and performShutdown both call this). */
+    static void arm() {
+        if (ARMED.compareAndSet(false, true)) {
+            start(DEFAULT_GRACE_MILLIS);
+        }
+    }
 
     interface Exiter {
         void exit(int status);
@@ -25,8 +38,8 @@ final class ExitWatchdog {
 
     static Thread start(long graceMillis) {
         return start(graceMillis, new Exiter() {
-            public void exit(int status) {
-                System.exit(status);
+            public void exit(final int status) {
+                exitOrHalt(status, HALT_AFTER_EXIT_MILLIS);
             }
         });
     }
@@ -35,18 +48,19 @@ final class ExitWatchdog {
         Thread watchdog = new Thread(new Runnable() {
             public void run() {
                 long deadline = System.currentTimeMillis() + graceMillis;
-                List<Thread> blocking = blockingThreads();
-                while (!blocking.isEmpty() && System.currentTimeMillis() < deadline) {
+                // Keep waiting for the whole grace period even when no thread blocks right now: the JVM may
+                // already be running (possibly hanging) shutdown hooks, which are non-daemon threads too.
+                while (System.currentTimeMillis() < deadline) {
                     try {
                         Thread.sleep(200L);
                     } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
                         return;
                     }
-                    blocking = blockingThreads();
                 }
+                List<Thread> blocking = blockingThreads();
                 if (blocking.isEmpty()) {
-                    return; // the JVM exits on its own
+                    return; // the JVM is exiting on its own
                 }
                 System.err.println("[shutdown] " + blocking.size()
                         + " non-daemon thread(s) still alive after window close; forcing exit:");
@@ -66,6 +80,29 @@ final class ExitWatchdog {
         watchdog.setDaemon(true);
         watchdog.start();
         return watchdog;
+    }
+
+    /**
+     * {@link System#exit} runs the shutdown hooks and blocks until they finish; a hook that hangs (runtime
+     * stop, Solon, browser close) would keep the process alive forever. So exit runs on its own daemon thread
+     * and the JVM is halted if it has not terminated after {@code haltAfterMillis}.
+     */
+    static void exitOrHalt(final int status, long haltAfterMillis) {
+        Thread exiter = new Thread(new Runnable() {
+            public void run() {
+                System.exit(status);
+            }
+        }, "askai-exit");
+        exiter.setDaemon(true);
+        exiter.start();
+        try {
+            Thread.sleep(haltAfterMillis);
+        } catch (InterruptedException ignored) {
+            // fall through to halt
+        }
+        System.err.println("[shutdown] shutdown hooks did not finish within " + haltAfterMillis + " ms; halting");
+        System.err.flush();
+        Runtime.getRuntime().halt(status);
     }
 
     /** Live non-daemon threads that keep the JVM running (the JVM's own DestroyJavaVM excluded). */
