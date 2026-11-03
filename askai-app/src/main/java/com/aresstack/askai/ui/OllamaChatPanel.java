@@ -265,6 +265,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     // Dictation runtime.
     private final ExecutorService dictationExecutor;
+    /** Sends party messages in order, off the EDT (channel.send may block on flow control). */
+    private final ExecutorService partyOutbox = Executors.newSingleThreadExecutor(new DaemonThreadFactory());
     private final SpeechDictationService dictation;
     private final SpeechToTextReadinessService readiness;
     private final File workDir;
@@ -3687,9 +3689,31 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             setStatus("Write a message before sending.");
             return;
         }
-        PartySession session = partySession;
-        if (session != null && session.submitMessage(userPrompt)) {
+        final PartySession session = partySession;
+        if (session != null && session.isReady()) {
+            // The network send runs off the EDT; on failure the text returns to the composer.
             composer.clearMessage();
+            partyOutbox.execute(new Runnable() {
+                public void run() {
+                    boolean sent;
+                    try {
+                        sent = session.submitMessage(userPrompt);
+                    } catch (RuntimeException ex) {
+                        sent = false;
+                    }
+                    if (!sent) {
+                        onUi(new Runnable() {
+                            public void run() {
+                                // Never drop either text: a newer draft is kept below the failed one.
+                                String draft = composer.getMessage();
+                                composer.setMessage(draft.trim().isEmpty()
+                                        ? userPrompt : userPrompt + "\n\n" + draft);
+                                setStatus("Your party message could not be sent — it is back in the composer.");
+                            }
+                        });
+                    }
+                }
+            });
         } else {
             // Lossless: the text stays in the composer and is submitted once the join succeeds.
             partySendPending = true;
@@ -4543,6 +4567,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         notifier.dispose();
         cleanupOldRecordings();
         dictationExecutor.shutdownNow();
+        partyOutbox.shutdownNow();
     }
 
     // ------------------------------------------------------------------ chat timers + busy
