@@ -958,6 +958,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     /** Release this session's resources when its tab closes: abort the chat, dictation and file work. */
     public void disposeSession() {
         stopChat();
+        modelWarmup.release();
         shutdownDictation();
         // Let go of the application-lifetime voice panel, or this closed chat would stay reachable.
         if (speechVoicesPanel != null) {
