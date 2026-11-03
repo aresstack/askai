@@ -94,6 +94,7 @@ public final class CamoufoxInstaller {
             new java.util.concurrent.ConcurrentHashMap<>();
 
     private final Path root;
+    private final Path installDirectory;
     private final CamoufoxDistribution distribution;
     private final String target;
     private final AtomicLong downloaded = new AtomicLong();
@@ -103,17 +104,36 @@ public final class CamoufoxInstaller {
     private CompletableFuture<Path> running;
 
     public CamoufoxInstaller(Path root, CamoufoxDistribution distribution, String target) {
+        this(root, distribution, target, null);
+    }
+
+    /**
+     * @param installDirectory the installation folder; {@code null} = {@code <root>/<release>-<target>}. An
+     *                         explicit one lets a verified installation that was moved or renamed (e.g.
+     *                         {@code G:\camoufox-156}) be used as it is
+     */
+    public CamoufoxInstaller(Path root, CamoufoxDistribution distribution, String target, Path installDirectory) {
         this.root = root.toAbsolutePath().normalize();
         this.distribution = distribution;
         this.target = target;
+        this.installDirectory = installDirectory != null ? installDirectory.toAbsolutePath().normalize()
+                : this.root.resolve(distribution.name() + "-" + target);
     }
 
     /** The one installer of this process for {@code root}, optionally from a mirror. */
-    public static synchronized CamoufoxInstaller shared(Path root, URI mirror) {
-        if (shared == null || !shared.root.equals(root.toAbsolutePath().normalize())) {
-            CamoufoxDistribution distribution = CamoufoxDistribution.builtIn();
+    public static CamoufoxInstaller shared(Path root, URI mirror) {
+        return shared(root, null, mirror);
+    }
+
+    /** The one installer of this process for the installation folder {@code installDirectory} below {@code root}. */
+    public static synchronized CamoufoxInstaller shared(Path root, Path installDirectory, URI mirror) {
+        Path normalized = root.toAbsolutePath().normalize();
+        CamoufoxDistribution distribution = CamoufoxDistribution.builtIn();
+        Path install = installDirectory != null ? installDirectory.toAbsolutePath().normalize()
+                : normalized.resolve(distribution.name() + "-" + CamoufoxDistribution.currentTarget());
+        if (shared == null || !shared.root.equals(normalized) || !shared.installDirectory.equals(install)) {
             shared = new CamoufoxInstaller(root, mirror == null ? distribution : distribution.from(mirror),
-                    CamoufoxDistribution.currentTarget());
+                    CamoufoxDistribution.currentTarget(), install);
         }
         return shared;
     }
@@ -123,7 +143,7 @@ public final class CamoufoxInstaller {
     }
 
     public Path installDirectory() {
-        return root.resolve(distribution.name() + "-" + target);
+        return installDirectory;
     }
 
     public Path executable() {
@@ -136,6 +156,9 @@ public final class CamoufoxInstaller {
     }
 
     public Status status() {
+        if (phase == Phase.NOT_INSTALLED && isInstalled()) {
+            phase = Phase.READY; // installed before (or by another process): nothing to download
+        }
         return new Status(phase, downloaded.get(), size, failure);
     }
 

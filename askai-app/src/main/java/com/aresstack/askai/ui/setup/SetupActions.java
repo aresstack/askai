@@ -45,7 +45,7 @@ public interface SetupActions {
      * {@code parent}; returns when it is closed. Its downloads use the draft's network settings. Without a
      * browser nothing happens.
      */
-    default void openModelBrowser(Component parent, SetupDraft draft) {
+    default void openModelBrowser(Component parent, SetupDraft draft, boolean dictation) {
     }
 
     // ------------------------------------------------------------------ models

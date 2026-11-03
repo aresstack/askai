@@ -21,6 +21,20 @@ public class CamoufoxChannelTest {
     public TemporaryFolder temporary = new TemporaryFolder();
 
     @Test
+    public void aFolderWithAForeignCamoufoxIsNeverDownloadedOver() throws Exception {
+        Path empty = temporary.newFolder("empty").toPath();
+        assertEquals("NONE", InProcessBrowser.inspectCamoufox(empty.toString()));
+        Path foreign = temporary.newFolder("camoufox-156").toPath();
+        Path executable = foreign.resolve(com.aresstack.askai.browser.playwright.camoufox.CamoufoxDistribution
+                .executableName(com.aresstack.askai.browser.playwright.camoufox.CamoufoxDistribution.currentTarget()));
+        Files.write(executable, new byte[]{1, 2, 3});
+        assertEquals("FOREIGN", InProcessBrowser.inspectCamoufox(foreign.toString()));
+        assertEquals(1, InProcessBrowser.installCamoufox(foreign.toString()));
+        assertTrue("the foreign Camoufox stays untouched", Files.isRegularFile(executable));
+        assertEquals(1, Files.list(foreign).count());
+    }
+
+    @Test
     public void aConfiguredLocationWithoutInstallationFailsInsteadOfDownloading() throws Exception {
         Path empty = temporary.newFolder("no-camoufox").toPath();
         String old = System.setProperty(CamoufoxProvisioning.ROOT_PROPERTY, empty.toString());

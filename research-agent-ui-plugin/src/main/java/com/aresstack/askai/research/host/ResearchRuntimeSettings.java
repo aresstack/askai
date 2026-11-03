@@ -70,6 +70,32 @@ public final class ResearchRuntimeSettings {
     static final String KEY_SEARCH_URL = "research.runtime.searchUrl";
     static final String KEY_ALLOW_PRIVATE = "research.runtime.allowPrivateNetworks";
     static final String KEY_LANGUAGE = "research.runtime.language";
+    /** The folder of the search browser (Camoufox) chosen in the setup; "" = AskAI's automatic choice. */
+    static final String KEY_CAMOUFOX_FOLDER = "research.runtime.camoufoxFolder";
+
+    public static String loadCamoufoxFolder(WorkspaceStateStore store) {
+        return store == null ? "" : store.get(KEY_CAMOUFOX_FOLDER, "").trim();
+    }
+
+    public static void saveCamoufoxFolder(WorkspaceStateStore store, String folder) {
+        if (store != null) {
+            store.put(KEY_CAMOUFOX_FOLDER, folder == null ? "" : folder.trim());
+        }
+        applyCamoufoxFolder(store);
+    }
+
+    /** Browsers started from now on use the chosen Camoufox folder, when it holds the verified installation. */
+    public static void applyCamoufoxFolder(WorkspaceStateStore store) {
+        String folder = loadCamoufoxFolder(store);
+        if (folder.isEmpty()) {
+            return; // the automatic choice (or a location configured at launch) stays
+        }
+        try {
+            com.aresstack.askai.browser.playwright.InProcessBrowser.useCamoufox(folder);
+        } catch (RuntimeException | LinkageError unavailable) {
+            // no browser runtime here: nothing to configure
+        }
+    }
     static final String KEY_RERANKER_MODEL = "research.runtime.selectedRerankerModel";
 
     static final String KEY_LLM_NARRATION = "research.runtime.llmNarration";

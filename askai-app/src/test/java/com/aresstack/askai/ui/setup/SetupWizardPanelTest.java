@@ -15,6 +15,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /** The wizard's flow against a synchronous fake of {@link SetupActions}: steps, checks, Witch, finish, cancel. */
@@ -425,6 +426,7 @@ public class SetupWizardPanelTest {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
         wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
+        wizard.ollamaStatusLabel().setText("Connected (version 0.9.0)");
         wizard.setSize(1060, 800);
         layoutAll(wizard);
         java.awt.Rectangle download = wizard.runtimeDownloadButton().getBounds();
@@ -432,6 +434,13 @@ public class SetupWizardPanelTest {
         assertEquals("same column", download.x, manager.x);
         assertEquals("just as wide", download.width, manager.width);
         assertTrue("below", manager.y > download.y);
+        java.awt.Component url = wizard.ollamaUrlField();
+        java.awt.Rectangle status = wizard.ollamaStatusLabel().getParent().getBounds();
+        assertTrue("the status shares the manager's line",
+                Math.abs((status.y + status.height / 2) - (manager.y + manager.height / 2)) <= 3);
+        assertTrue("the label sits level with the address, not in the middle of both lines",
+                Math.abs(wizard.ollamaAddressLabel().getY() + wizard.ollamaAddressLabel().getHeight() / 2
+                        - (url.getParent().getY() + url.getY() + url.getHeight() / 2)) <= 3);
 
         wizard.runtimeManagerButton().doClick();
 
@@ -444,22 +453,30 @@ public class SetupWizardPanelTest {
         SetupWizardPanel wizard = wizard(fake);
         wizard.jumpTo(SetupWizardPanel.STEP_DICTATION);
         assertEquals(SetupWizardPanel.ENGINE_WHISPER, wizard.dictationEngineChoice().getSelectedItem());
-        assertEquals("the recommended model comes first", "Small (recommended)",
+        assertEquals("the recommended Base model comes first", "Base (recommended)",
                 wizard.whisperModelChoice().getSelectedItem());
-        assertEquals("Download", wizard.whisperButton().getText());
+        assertTrue("quick install for Base", wizard.whisperRecommendedButton().isVisible());
+        assertEquals("Install Base", wizard.whisperRecommendedButton().getText());
+        assertFalse("no second Download beside the quick button", wizard.whisperButton().isVisible());
         assertFalse(wizard.isDone(SetupWizardPanel.STEP_DICTATION));
         assertEquals("nothing installed yet: automatic", "", wizard.draft().whisperModel());
 
-        wizard.whisperButton().doClick();
+        wizard.whisperRecommendedButton().doClick();
 
-        assertEquals(Collections.singletonList("small install"), fake.whisperInstalls);
+        assertEquals(Collections.singletonList("base install"), fake.whisperInstalls);
+        assertFalse(wizard.whisperRecommendedButton().isVisible());
         assertEquals("Reinstall", wizard.whisperButton().getText());
         assertTrue(wizard.isDone(SetupWizardPanel.STEP_DICTATION));
-        assertEquals("small", wizard.draft().whisperModel());
+        assertEquals("base", wizard.draft().whisperModel());
         assertFalse(wizard.draft().dictationWithOllama());
 
+        wizard.whisperModelChoice().setSelectedItem("Small (more accurate)");
+        assertEquals("Download", wizard.whisperButton().getText());
         wizard.whisperButton().doClick();
-        assertEquals(Arrays.asList("small install", "small reinstall"), fake.whisperInstalls);
+        assertEquals(Arrays.asList("base install", "small install"), fake.whisperInstalls);
+
+        wizard.whisperBrowseButton().doClick();
+        assertTrue("Install… opens the browser on the Dictation tab", fake.browserOnDictation);
 
         wizard.dictationEngineChoice().setSelectedItem(SetupWizardPanel.ENGINE_OLLAMA);
         assertTrue(wizard.draft().dictationWithOllama());
@@ -608,9 +625,28 @@ public class SetupWizardPanelTest {
 
         wizard.jumpTo(SetupWizardPanel.STEP_KNOWLEDGE);
         assertNotNull(section.getParent());
+        SetupWizardMascot witch = wizard.mascotOf(SetupWizardPanel.STEP_KNOWLEDGE);
+        java.awt.Container column = witch.getParent();
+        assertSame("the Witch sits in the label column, beside the section", section.getParent(),
+                column.getParent());
+        assertEquals("Web search", ((javax.swing.JLabel) column.getComponent(0)).getText());
+        assertTrue(witch.getPreferredSize().height > 0);
+        assertEquals("one Witch per step", 1, countMascots(section.getParent().getParent()));
 
         wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
         assertTrue("saved with the final check", saved[0] > 0);
+    }
+
+    private static int countMascots(java.awt.Container container) {
+        int count = 0;
+        for (java.awt.Component child : container.getComponents()) {
+            if (child instanceof SetupWizardMascot) {
+                count++;
+            } else if (child instanceof java.awt.Container) {
+                count += countMascots((java.awt.Container) child);
+            }
+        }
+        return count;
     }
 
     @Test
@@ -714,14 +750,16 @@ public class SetupWizardPanelTest {
         int browserOpened;
         final List<String> sentenceRequests = new ArrayList<String>();
         SetupDraft browserDraft;
+        boolean browserOnDictation;
 
         boolean whisperSmallInstalled;
+        boolean whisperBaseInstalled;
         final List<String> whisperInstalls = new ArrayList<String>();
 
         @Override
         public void loadWhisperModels(Consumer<List<VoiceOffer>> done) {
-            done.accept(Arrays.asList(new VoiceOffer("small", "Small (recommended)", "", whisperSmallInstalled),
-                    new VoiceOffer("base", "Base (fastest, smallest)", "", false)));
+            done.accept(Arrays.asList(new VoiceOffer("base", "Base (recommended)", "", whisperBaseInstalled),
+                    new VoiceOffer("small", "Small (more accurate)", "", whisperSmallInstalled)));
         }
 
         @Override
@@ -731,6 +769,9 @@ public class SetupWizardPanelTest {
             progress.update("Downloading model", 1, 2);
             if (modelId.equals("small")) {
                 whisperSmallInstalled = true;
+            }
+            if (modelId.equals("base")) {
+                whisperBaseInstalled = true;
             }
             done.accept("Whisper installed.", null);
         }
@@ -743,7 +784,8 @@ public class SetupWizardPanelTest {
         }
 
         @Override
-        public void openModelBrowser(java.awt.Component parent, SetupDraft draft) {
+        public void openModelBrowser(java.awt.Component parent, SetupDraft draft, boolean dictation) {
+            browserOnDictation = dictation;
             browserOpened++;
             browserDraft = draft;
             browserInstalled.add("mistral");

@@ -56,6 +56,24 @@ class CamoufoxInstallerTest {
     }
 
     @Test
+    void anExistingInstallationIsReportedInstalledBeforeAnyDownloadAlsoWhenMovedOrRenamed() throws Exception {
+        Path mirror = temporary.resolve("mirror");
+        CamoufoxDistribution distribution = publish(mirror, true, "fixed");
+        Path executable = new CamoufoxInstaller(temporary.resolve("browser"), distribution, TARGET).installBlocking();
+        Files.delete(mirror.resolve(distribution.archiveName(TARGET)));
+
+        CamoufoxInstaller fresh = new CamoufoxInstaller(temporary.resolve("browser"), distribution, TARGET);
+        assertEquals(CamoufoxInstaller.Phase.READY, fresh.status().phase(), "found, not 'not installed yet'");
+
+        Path renamed = temporary.resolve("G").resolve("camoufox-156");
+        Files.createDirectories(renamed.getParent());
+        Files.move(executable.getParent(), renamed);
+        CamoufoxInstaller moved = new CamoufoxInstaller(renamed.getParent(), distribution, TARGET, renamed);
+        assertTrue(moved.isInstalled());
+        assertEquals(renamed.resolve("camoufox"), moved.awaitExecutable(Duration.ofSeconds(5)));
+    }
+
+    @Test
     void downloadsThroughTheHostConnectorWhenOneIsSet() throws Exception {
         Path mirror = temporary.resolve("mirror");
         CamoufoxDistribution published = publish(mirror, true, "fixed");

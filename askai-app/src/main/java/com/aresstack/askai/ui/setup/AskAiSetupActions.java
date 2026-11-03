@@ -136,15 +136,16 @@ public final class AskAiSetupActions implements SetupActions {
             pluginSetup;
     private com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostState;
 
-    private java.util.function.Supplier<? extends Component> modelBrowser;
+    /** Builds a fresh model browser; {@code true} opens it on the Dictation (Whisper) tab. */
+    private java.util.function.Function<Boolean, ? extends Component> modelBrowser;
 
     /** The model browser the wizard opens for "Install…" (a fresh one each time, so it never leaves the app). */
-    public void setModelBrowser(java.util.function.Supplier<? extends Component> modelBrowser) {
+    public void setModelBrowser(java.util.function.Function<Boolean, ? extends Component> modelBrowser) {
         this.modelBrowser = modelBrowser;
     }
 
     @Override
-    public void openModelBrowser(Component parent, SetupDraft draft) {
+    public void openModelBrowser(Component parent, SetupDraft draft, boolean dictation) {
         if (modelBrowser == null) {
             return;
         }
@@ -155,7 +156,7 @@ public final class AskAiSetupActions implements SetupActions {
         close.addActionListener(e -> dialog.dispose());
         JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         south.add(close);
-        dialog.getContentPane().add(modelBrowser.get(), BorderLayout.CENTER);
+        dialog.getContentPane().add(modelBrowser.apply(dictation), BorderLayout.CENTER);
         dialog.getContentPane().add(south, BorderLayout.SOUTH);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         dialog.setSize(new Dimension(1100, 760));
