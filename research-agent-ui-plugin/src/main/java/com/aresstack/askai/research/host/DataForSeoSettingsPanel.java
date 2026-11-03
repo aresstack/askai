@@ -180,8 +180,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
         apiKeyHint.setText(draft.hasStoredApiKey() ? "A key is stored." : "No key stored.");
         endpointBase.setText(nullToEmpty(c.getEndpointBase()));
         engine.setSelectedItem(c.getSearchEngine());
-        RegionChoices.select(location, c.getLocationCode() != null
-                ? String.valueOf(c.getLocationCode()) : c.getLocationName());
+        RegionChoices.select(location, c.getLocationCode() != null ? String.valueOf(c.getLocationCode())
+                : c.getLocationName() != null ? c.getLocationName() : "2276");
         RegionChoices.select(language, c.getLanguageCode() != null ? c.getLanguageCode() : c.getLanguageName());
         device.setSelectedItem(c.getDevice() == DataForSeoDevice.MOBILE ? "Mobile" : "Desktop");
         refreshOsChoices();

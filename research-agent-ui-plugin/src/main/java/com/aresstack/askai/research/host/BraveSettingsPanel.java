@@ -25,7 +25,7 @@ public final class BraveSettingsPanel extends JPanel {
     private final JPasswordField apiKey = ProviderSettingsForm.secretField();
     private final JLabel apiKeyStatus = ProviderSettingsForm.status();
     private final JComboBox<RegionChoices.Choice> country = RegionChoices.countries(true);
-    private final JComboBox<RegionChoices.Choice> searchLanguage = RegionChoices.languages();
+    private final JComboBox<RegionChoices.Choice> searchLanguage = RegionChoices.braveLanguages();
     private final JComboBox<RegionChoices.Choice> uiLanguage = RegionChoices.locales();
     private final JSpinner count = ProviderSettingsForm.number(20, 1, 20, 3);
     private final JLabel status = ProviderSettingsForm.message();

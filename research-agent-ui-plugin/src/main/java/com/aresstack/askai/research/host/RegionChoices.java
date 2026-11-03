@@ -74,7 +74,7 @@ final class RegionChoices {
             int numeric = Integer.parseInt(entry.substring(2));
             list.add(new Choice(String.valueOf(2000 + numeric), countryName(entry.substring(0, 2))));
         }
-        return combo(list);
+        return combo(list, false); // DataForSEO requires a location, so there is no "not set" entry
     }
 
     /** Languages by English name; the code is the two-letter ISO 639-1 code. */
@@ -85,6 +85,30 @@ final class RegionChoices {
             if (!name.isEmpty() && !name.equalsIgnoreCase(code)) {
                 list.add(new Choice(code, name));
             }
+        }
+        return combo(list);
+    }
+
+    /** Brave's own {@code search_lang} values (not plain ISO 639-1, e.g. {@code zh-hans}, {@code jp}). */
+    private static final String[][] BRAVE_LANGUAGES = {
+            {"ar", "Arabic"}, {"eu", "Basque"}, {"bn", "Bengali"}, {"bg", "Bulgarian"}, {"ca", "Catalan"},
+            {"zh-hans", "Chinese (Simplified)"}, {"zh-hant", "Chinese (Traditional)"}, {"hr", "Croatian"},
+            {"cs", "Czech"}, {"da", "Danish"}, {"nl", "Dutch"}, {"en", "English"}, {"en-gb", "English (UK)"},
+            {"et", "Estonian"}, {"fi", "Finnish"}, {"fr", "French"}, {"gl", "Galician"}, {"de", "German"},
+            {"gu", "Gujarati"}, {"he", "Hebrew"}, {"hi", "Hindi"}, {"hu", "Hungarian"}, {"is", "Icelandic"},
+            {"it", "Italian"}, {"jp", "Japanese"}, {"kn", "Kannada"}, {"ko", "Korean"}, {"lv", "Latvian"},
+            {"lt", "Lithuanian"}, {"ms", "Malay"}, {"ml", "Malayalam"}, {"mr", "Marathi"},
+            {"nb", "Norwegian Bokmål"}, {"pl", "Polish"}, {"pt-br", "Portuguese (Brazil)"},
+            {"pt-pt", "Portuguese (Portugal)"}, {"pa", "Punjabi"}, {"ro", "Romanian"}, {"ru", "Russian"},
+            {"sr", "Serbian"}, {"sk", "Slovak"}, {"sl", "Slovenian"}, {"es", "Spanish"}, {"sv", "Swedish"},
+            {"ta", "Tamil"}, {"te", "Telugu"}, {"th", "Thai"}, {"tr", "Turkish"}, {"uk", "Ukrainian"},
+            {"vi", "Vietnamese"}};
+
+    /** Search languages Brave accepts, by name. */
+    static JComboBox<Choice> braveLanguages() {
+        List<Choice> list = new ArrayList<Choice>();
+        for (String[] entry : BRAVE_LANGUAGES) {
+            list.add(new Choice(entry[0], entry[1]));
         }
         return combo(list);
     }
@@ -110,7 +134,8 @@ final class RegionChoices {
             return;
         }
         String wanted = value.trim();
-        for (int i = 1; i < combo.getItemCount(); i++) {
+        int first = firstEntry(combo);
+        for (int i = first; i < combo.getItemCount(); i++) {
             Choice c = combo.getItemAt(i);
             if (c.code.equalsIgnoreCase(wanted) || c.name.equalsIgnoreCase(wanted)) {
                 combo.setSelectedIndex(i);
@@ -118,8 +143,12 @@ final class RegionChoices {
             }
         }
         Choice unknown = new Choice(wanted, wanted);
-        combo.insertItemAt(unknown, 1);
-        combo.setSelectedIndex(1);
+        combo.insertItemAt(unknown, first);
+        combo.setSelectedIndex(first);
+    }
+
+    private static int firstEntry(JComboBox<Choice> combo) {
+        return combo.getItemCount() > 0 && combo.getItemAt(0).code == null ? 1 : 0;
     }
 
     /** The stored code of the selection, or null for "(provider default)". */
@@ -134,13 +163,19 @@ final class RegionChoices {
     }
 
     private static JComboBox<Choice> combo(List<Choice> list) {
+        return combo(list, true);
+    }
+
+    private static JComboBox<Choice> combo(List<Choice> list, boolean withNotSet) {
         Collections.sort(list, new Comparator<Choice>() {
             @Override
             public int compare(Choice a, Choice b) {
                 return a.name.compareToIgnoreCase(b.name);
             }
         });
-        list.add(0, new Choice(null, NOT_SET));
+        if (withNotSet) {
+            list.add(0, new Choice(null, NOT_SET));
+        }
         JComboBox<Choice> combo = ComicControls.comboBox(list.toArray(new Choice[0]));
         combo.setMaximumRowCount(16);
         return combo;
