@@ -53,6 +53,12 @@ public final class LocalRuntimeModelsPanel extends JPanel {
         this.models = sorted(LocalModelCatalog.runnable());
         buildUserInterface();
         refresh();
+        // Installs/removals elsewhere (Installed models, Hugging Face tab, wizard): re-read on every show.
+        addHierarchyListener(event -> {
+            if ((event.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
+                refresh();
+            }
+        });
     }
 
     /** Rerankers first (Research needs one), then embeddings, then text generation. */
