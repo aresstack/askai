@@ -2632,7 +2632,16 @@ public final class SetupWizardPanel extends JPanel {
             mascot.setOnFigureClicked(point -> witchMenu().show(mascot, point.x, point.y));
             mascots[step] = mascot;
             final JPanel form = panel;
-            JPanel page = transparent(null);
+            // Form and Witch overlap: Swing must not assume disjoint children when repainting one of them.
+            JPanel page = new JPanel(null) {
+                private static final long serialVersionUID = 1L;
+
+                @Override
+                public boolean isOptimizedDrawingEnabled() {
+                    return false;
+                }
+            };
+            page.setOpaque(false);
             page.setLayout(new java.awt.LayoutManager() {
                 @Override
                 public void addLayoutComponent(String name, Component comp) {
