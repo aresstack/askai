@@ -338,12 +338,8 @@ public final class SpeechOutputModelsPanel extends JPanel {
 
     private static InstallAction installActionOver(PiperTtsStore store, TtsSettingsStore settings) {
         // Downloads follow AskAI's network settings (proxy, PAC, Windows certificates), read fresh per download.
-        final PiperInstaller installer = new PiperInstaller(store, settings, url -> {
-            com.aresstack.askai.config.AppConfiguration stored =
-                    new com.aresstack.askai.config.AppConfigurationRepository().load();
-            return new com.aresstack.askai.net.ConfiguredConnections(stored.getProxyConfiguration(),
-                    stored.getCertificateTrustConfiguration(), stored.getHttpClientConfiguration()).open(url);
-        });
+        final PiperInstaller installer = new PiperInstaller(store, settings,
+                com.aresstack.askai.plugin.api.service.HostNetwork::open);
         return new InstallAction() {
             public void install(PiperVoice voice, PiperInstaller.Progress progress) throws Exception {
                 installer.install(voice, progress);

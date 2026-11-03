@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -49,7 +48,7 @@ public final class PiperInstaller {
     private final Connector connector;
 
     public PiperInstaller(PiperTtsStore store, TtsSettingsStore settings) {
-        this(store, settings, url -> (HttpURLConnection) new URL(url).openConnection());
+        this(store, settings, com.aresstack.askai.plugin.api.service.HostNetwork::open); // AskAI's network settings
     }
 
     /** @param connector opens each download, e.g. with the configured proxy and certificate trust */

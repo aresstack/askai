@@ -74,6 +74,21 @@ public final class CamoufoxInstaller {
     private static final String MARKER = ".argos-verified";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static CamoufoxInstaller shared;
+    /** How downloads reach the internet; set by the host so they go through its proxy and certificates. */
+    private static volatile Connector connector;
+
+    /** Opens the download connection (unconnected) the host's way. */
+    public interface Connector {
+        java.net.HttpURLConnection open(String url) throws IOException;
+    }
+
+    /**
+     * Lets downloads go through the host's network settings (proxy, PAC, certificates, proxy login). Without it
+     * Java's HttpClient downloads directly, which fails behind a company proxy.
+     */
+    public static void useConnector(Connector value) {
+        connector = value;
+    }
     /** File locks belong to the JVM, so installers of one root in this process queue here first. */
     private static final java.util.concurrent.ConcurrentHashMap<Path, Object> ROOT_LOCKS =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -245,6 +260,20 @@ public final class CamoufoxInstaller {
             if (!Files.isRegularFile(file)) throw new IOException("Camoufox archive not found: " + file);
             size = Files.size(file);
             return Files.newInputStream(file);
+        }
+        Connector configured = connector;
+        if (configured != null) {
+            java.net.HttpURLConnection connection = configured.open(url.toString());
+            connection.setConnectTimeout(30_000);
+            connection.setReadTimeout(120_000);
+            connection.setInstanceFollowRedirects(true);
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                connection.disconnect();
+                throw new IOException("download source answered HTTP " + status + " for " + safe(url));
+            }
+            size = connection.getContentLengthLong();
+            return connection.getInputStream();
         }
         HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(30)).build();

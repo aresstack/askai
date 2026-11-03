@@ -87,7 +87,8 @@ public final class HttpNlpDownloadClient implements NlpDownloadClient {
         }
 
         public Response open(String url) throws IOException {
-            HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+            // AskAI's proxy, PAC, certificates and proxy login (the setup wizard's unsaved ones while it runs)
+            HttpURLConnection connection = com.aresstack.askai.plugin.api.service.HostNetwork.open(url);
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(timeoutMillis);
             connection.setReadTimeout(timeoutMillis);
