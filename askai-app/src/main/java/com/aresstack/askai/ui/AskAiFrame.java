@@ -223,11 +223,14 @@ public final class AskAiFrame extends JFrame {
         });
         this.audioProfileRepository = new FileAudioProfileRepository();
         this.applicationState = new ApplicationStateService();
-        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        // Closing hides the window into the system tray (Open / Exit there); without a tray it exits as before.
+        this.mainWindowTray = new MainWindowTray(this, this::exitApplication);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent event) {
-                // Arm the hard exit before any teardown can block (EDT, shutdown hooks, native processes).
-                ExitWatchdog.arm();
+                if (!mainWindowTray.hideToTray()) {
+                    exitApplication();
+                }
             }
 
             public void windowClosed(WindowEvent event) {
@@ -251,6 +254,8 @@ public final class AskAiFrame extends JFrame {
      * should exit on its own; {@link ExitWatchdog} forces the exit (and logs the blocking threads) if it does
      * not within the grace period. Idempotent.
      */
+    private MainWindowTray mainWindowTray;
+
     private void performShutdown() {
         if (!shuttingDown.compareAndSet(false, true)) {
             return; // idempotent
@@ -284,6 +289,14 @@ public final class AskAiFrame extends JFrame {
             agentRuntimeServices.shutdown();
         }
         shutdownLog("performShutdown done (JVM will exit naturally)");
+    }
+
+    /** Leaves AskAI through the regular shutdown path (dispose -> windowClosed -> performShutdown). */
+    private void exitApplication() {
+        mainWindowTray.removeTrayIcon();
+        // Arm the hard exit before any teardown can block (EDT, shutdown hooks, native processes).
+        ExitWatchdog.arm();
+        dispose();
     }
 
     /** Kept for the existing launcher: builds the frame and makes it visible. */
