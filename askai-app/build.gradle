@@ -79,7 +79,12 @@ dependencies {
     // Mermaid rendered to a BufferedImage via GraalJS + Batik (no WebView / CDN / external process).
     implementation 'com.aresstack:mermaid-java:0.2.0-beta.2'
 
-    // Silence the "no SLF4J providers" startup warning the slf4j-api 2.x of ollama4j (and Jodd) prints.
+    // SLF4J is HOST-PROVIDED: exactly one slf4j-api (2.x, as PF4J/AHC/Jodd expect) plus a matching 2.x
+    // provider live on the app classpath. Plugins must not bundle slf4j-api (see research-agent-ui-plugin),
+    // otherwise the plugin-first PF4J loader defines its own org.slf4j.LoggerFactory and new chats fail with a
+    // LinkageError (loader constraint violation against the host's binding). A 1.7 binding (StaticLoggerBinder)
+    // is ignored by slf4j-api 2.x and must never come back.
+    implementation 'org.slf4j:slf4j-api:2.0.17'
     runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
     testImplementation 'junit:junit:4.13.2'
     // TEST-ONLY: full GUI-chain reproduction (plugin factory on the APP classpath); the plugin

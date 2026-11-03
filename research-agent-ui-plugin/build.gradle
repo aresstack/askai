@@ -203,12 +203,17 @@ task pluginDistribution(type: Sync) {
         exclude 'agent-workspace-api*.jar'
         exclude 'agent-plugin-pf4j-api*.jar'
         exclude 'comic-controls*.jar' // host-provided visual foundation — same rule as the APIs
+        // SLF4J is host-provided too: a bundled slf4j-api makes PF4J load org.slf4j.LoggerFactory plugin-first
+        // and clash with the host's binding (LinkageError: loader constraint violation on a new chat).
+        exclude 'slf4j-api*.jar'
+        exclude 'slf4j-nop*.jar'
+        exclude 'slf4j-simple*.jar'
     }
     // Regression guard: fail the build if any host-provided shared API slipped into the plugin's lib/.
     doLast {
         def libDir = layout.buildDirectory.dir("plugin-dist/${researchPluginDirName}/lib").get().asFile
         def forbidden = ['agent-model-runtime-api', 'mcp-runtime-api',
-                         'agent-workspace-api', 'agent-plugin-pf4j-api', 'comic-controls']
+                         'agent-workspace-api', 'agent-plugin-pf4j-api', 'comic-controls', 'slf4j-']
         def leaked = (libDir.listFiles() ?: []).findAll { file ->
             forbidden.any { file.name.startsWith(it) }
         }
