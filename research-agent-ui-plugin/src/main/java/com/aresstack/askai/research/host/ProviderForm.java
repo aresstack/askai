@@ -39,6 +39,21 @@ final class ProviderForm {
         return l;
     }
 
+    /** Typing a secret switches its provider on: a key without the tick would silently do nothing. */
+    static void enableOnTyping(javax.swing.text.JTextComponent secret, final javax.swing.JCheckBox enabled) {
+        secret.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                enabled.setSelected(true);
+            }
+
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+            }
+
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+            }
+        });
+    }
+
     static String text(String value) {
         return value == null ? "" : value;
     }
