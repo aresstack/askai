@@ -146,7 +146,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         form.add(row("Language:", agentLanguage));
         form.add(row("", llmNarration));
         form.add(row("", alwaysSuggest));
-        form.add(row("Agent answer budget (tokens):", agentMaxTokens));
+        form.add(row("Answer budget (tokens):", agentMaxTokens));
         JPanel searchLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         searchLimits.setOpaque(false);
         searchLimits.add(labelled("Source target", searchTargetSources));
@@ -154,12 +154,16 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         searchLimits.add(labelled("Pages", searchMaxPages));
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
         searchLimits.add(labelled("Tool-Calls", searchMaxToolCalls));
-        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Minutes", searchMaxMinutes));
-        searchLimits.add(labelled("Tool-Timeout (s)", browserToolTimeout));
-        searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
-        searchLimits.add(labelled("Errors", searchMaxErrors));
         form.add(row("Search limits:", searchLimits));
+        // Second line: the row fits the dialog width instead of running off its right edge.
+        JPanel searchLimits2 = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        searchLimits2.setOpaque(false);
+        searchLimits2.add(labelled("Minutes", searchMaxMinutes));
+        searchLimits2.add(javax.swing.Box.createHorizontalStrut(10));
+        searchLimits2.add(labelled("Tool-Timeout (s)", browserToolTimeout));
+        searchLimits2.add(javax.swing.Box.createHorizontalStrut(10));
+        searchLimits2.add(labelled("Errors", searchMaxErrors));
+        form.add(row("", searchLimits2));
         JPanel reviewLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         reviewLimits.setOpaque(false);
         reviewLimits.add(labelled("Sources", reviewMaxSources));
@@ -177,15 +181,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckRow.add(labelled("Breadth (concepts)", scopeCheckTargetProbes));
         scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
         scopeCheckRow.add(labelled("Examples per post", scopeCheckControlsPerAnchor));
-        scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Max. topics", scopeCheckMaxTopics));
-        scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Timeout (s)", scopeCheckTimeout));
-        scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
+        form.add(row("Scope check:", scopeCheckRow));
+        JPanel scopeCheckRow2 = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        scopeCheckRow2.setOpaque(false);
+        scopeCheckRow2.add(labelled("Max. topics", scopeCheckMaxTopics));
+        scopeCheckRow2.add(javax.swing.Box.createHorizontalStrut(10));
+        scopeCheckRow2.add(labelled("Timeout (s)", scopeCheckTimeout));
+        scopeCheckRow2.add(javax.swing.Box.createHorizontalStrut(10));
         final javax.swing.JButton scopeCheckAdvancedToggle =
                 new ComicButton("Advanced…");
-        scopeCheckRow.add(scopeCheckAdvancedToggle);
-        form.add(row("Scope check:", scopeCheckRow));
+        scopeCheckRow2.add(scopeCheckAdvancedToggle);
+        form.add(row("", scopeCheckRow2));
         JPanel scopeCheckModelRow = new JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         scopeCheckModelRow.setOpaque(false);
@@ -194,13 +200,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckModelRow.add(labelled("Gen tokens", scopeCheckGenMaxTokens));
         scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
         scopeCheckModelRow.add(labelled("Choice temp", scopeCheckChooserTemperature));
-        scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Choice tokens", scopeCheckChooserMaxTokens));
-        scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckModelRow.add(labelled("Choice timeout (s)", scopeCheckChoiceTimeout));
+        JPanel scopeCheckModelRowB = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        scopeCheckModelRowB.setOpaque(false);
+        scopeCheckModelRowB.add(labelled("Choice tokens", scopeCheckChooserMaxTokens));
+        scopeCheckModelRowB.add(javax.swing.Box.createHorizontalStrut(10));
+        scopeCheckModelRowB.add(labelled("Choice timeout (s)", scopeCheckChoiceTimeout));
         final JPanel scopeCheckModelSettings = row("  Advanced (model):", scopeCheckModelRow);
+        final JPanel scopeCheckModelSettingsB = row("", scopeCheckModelRowB);
         scopeCheckModelSettings.setVisible(false);
+        scopeCheckModelSettingsB.setVisible(false);
         form.add(scopeCheckModelSettings);
+        form.add(scopeCheckModelSettingsB);
         JPanel scopeCheckCalibrationRow = new JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         scopeCheckCalibrationRow.setOpaque(false);
@@ -209,16 +219,20 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckCalibrationRow.add(labelled("Hint margin", scopeCheckHintBoundaryMargin));
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
         scopeCheckCalibrationRow.add(labelled("Mission Q", scopeCheckMissionQuantile));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Mission slack", scopeCheckMissionMargin));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Neighbor Q", scopeCheckNeighborQuantile));
-        scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Neighbor slack", scopeCheckNeighborMargin));
+        JPanel scopeCheckCalibrationRowB = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        scopeCheckCalibrationRowB.setOpaque(false);
+        scopeCheckCalibrationRowB.add(labelled("Mission slack", scopeCheckMissionMargin));
+        scopeCheckCalibrationRowB.add(javax.swing.Box.createHorizontalStrut(8));
+        scopeCheckCalibrationRowB.add(labelled("Neighbor Q", scopeCheckNeighborQuantile));
+        scopeCheckCalibrationRowB.add(javax.swing.Box.createHorizontalStrut(8));
+        scopeCheckCalibrationRowB.add(labelled("Neighbor slack", scopeCheckNeighborMargin));
         final JPanel scopeCheckCalibrationSettings =
                 row("  Advanced (calibration):", scopeCheckCalibrationRow);
+        final JPanel scopeCheckCalibrationSettingsB = row("", scopeCheckCalibrationRowB);
         scopeCheckCalibrationSettings.setVisible(false);
+        scopeCheckCalibrationSettingsB.setVisible(false);
         form.add(scopeCheckCalibrationSettings);
+        form.add(scopeCheckCalibrationSettingsB);
         JPanel scopeCheckSweepRow = new JPanel(
                 new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         scopeCheckSweepRow.setOpaque(false);
@@ -227,22 +241,29 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckSweepRow.add(labelled("Min. examples", scopeCheckMinNeighbors));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
         scopeCheckSweepRow.add(labelled("Boundary margin", scopeCheckBoundaryMargin));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Novelty gap", scopeCheckNoveltyGap));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Novelty weight", scopeCheckNoveltyWeight));
-        scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Duplicate ≥", scopeCheckDuplicateCeiling));
+        JPanel scopeCheckSweepRowB = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        scopeCheckSweepRowB.setOpaque(false);
+        scopeCheckSweepRowB.add(labelled("Novelty gap", scopeCheckNoveltyGap));
+        scopeCheckSweepRowB.add(javax.swing.Box.createHorizontalStrut(8));
+        scopeCheckSweepRowB.add(labelled("Novelty weight", scopeCheckNoveltyWeight));
+        scopeCheckSweepRowB.add(javax.swing.Box.createHorizontalStrut(8));
+        scopeCheckSweepRowB.add(labelled("Duplicate ≥", scopeCheckDuplicateCeiling));
         final JPanel scopeCheckSweepSettings =
                 row("  Advanced (sweep):", scopeCheckSweepRow);
+        final JPanel scopeCheckSweepSettingsB = row("", scopeCheckSweepRowB);
         scopeCheckSweepSettings.setVisible(false);
+        scopeCheckSweepSettingsB.setVisible(false);
         form.add(scopeCheckSweepSettings);
+        form.add(scopeCheckSweepSettingsB);
         scopeCheckAdvancedToggle.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 boolean show = !scopeCheckModelSettings.isVisible();
                 scopeCheckModelSettings.setVisible(show);
+                scopeCheckModelSettingsB.setVisible(show);
                 scopeCheckCalibrationSettings.setVisible(show);
+                scopeCheckCalibrationSettingsB.setVisible(show);
                 scopeCheckSweepSettings.setVisible(show);
+                scopeCheckSweepSettingsB.setVisible(show);
                 revalidate();
                 repaint();
             }
@@ -288,10 +309,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         form.add(row("Browser channel:", browserChannel));
         form.add(row("", headless));
         // Transparency does not depend on a visible browser window: the chat shows the visited sites.
-        JLabel headlessHint = new JLabel(new com.aresstack.askai.research.agent.ResearchPlaybook(
+        javax.swing.JTextArea headlessHint = ComicControls.textArea(
+                new com.aresstack.askai.research.agent.ResearchPlaybook(
                 com.aresstack.askai.research.agent.ResearchLanguage.fromCode(
                         ResearchRuntimeSettings.loadLanguage(store))).headlessHint());
-        headlessHint.setEnabled(false);
+        headlessHint.setLineWrap(true); // wraps inside the field column instead of widening the page
+        headlessHint.setWrapStyleWord(true);
+        headlessHint.setEditable(false);
+        headlessHint.setFocusable(false);
+        headlessHint.setOpaque(false);
+        headlessHint.setBorder(BorderFactory.createEmptyBorder());
+        headlessHint.setForeground(com.aresstack.comiccontrols.theme.ThemeColor.of("research.settingsHintText"));
         form.add(row("", headlessHint));
         form.add(row("", allowPrivate));
         JPanel buttons = new JPanel();
@@ -301,12 +329,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         buttons.add(check);
         buttons.add(Box.createHorizontalStrut(8));
         buttons.add(busy);
-        form.add(buttons);
+        buttons.add(Box.createHorizontalGlue());
+        buttons.setOpaque(false);
+        form.add(row("", buttons));
         add(form, BorderLayout.NORTH);
 
         results.setEditable(false);
         results.setLineWrap(false);
-        add(new JScrollPane(results), BorderLayout.CENTER);
+        // The check output is NOT part of the form: it lives on its own tab (see resultsView()).
 
         // Persisted values first, then the automatic browser-channel decision.
         apply(ResearchRuntimeDefaults.complete(ResearchRuntimeSettings.load(store)));
@@ -434,6 +464,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         });
         check.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
+                showResults();
                 runCheck();
             }
         });
@@ -768,6 +799,31 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         }, "research-runtime-check");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /** The requirements-check output, shown by the host as its own "Check results" tab. */
+    public javax.swing.JComponent resultsView() {
+        if (resultsView == null) {
+            resultsView = new JScrollPane(results);
+        }
+        return resultsView;
+    }
+
+    private javax.swing.JComponent resultsView;
+
+    /** Brings the check output's tab to the front (if the panel sits in a tabbed pane). */
+    private void showResults() {
+        javax.swing.JComponent view = resultsView();
+        javax.swing.JTabbedPane tabs = (javax.swing.JTabbedPane)
+                SwingUtilities.getAncestorOfClass(javax.swing.JTabbedPane.class, this);
+        if (tabs != null) {
+            for (int i = 0; i < tabs.getTabCount(); i++) {
+                if (SwingUtilities.isDescendingFrom(view, (java.awt.Component) tabs.getComponentAt(i))) {
+                    tabs.setSelectedIndex(i);
+                    return;
+                }
+            }
+        }
     }
 
     private static JPanel row(String label, javax.swing.JComponent field) {

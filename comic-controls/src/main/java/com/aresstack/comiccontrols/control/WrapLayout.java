@@ -1,4 +1,4 @@
-package com.aresstack.askai.ui;
+package com.aresstack.comiccontrols.control;
 
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
@@ -11,7 +11,7 @@ import java.awt.Insets;
 /**
  * A {@link FlowLayout} that wraps its components to the next line when they exceed the container's
  * width, and reports a correct preferred height for the wrapped layout (plain FlowLayout always
- * reports a single row, which makes it useless inside a vertical scroll pane). Used for the filter
+ * reports a single row, which makes it useless inside a vertical scroll pane). Used e.g. for the filter
  * dialog's quick-pick chip rows so they wrap instead of forcing a horizontal scrollbar.
  *
  * <p>Based on the well-known public-domain WrapLayout by Rob Camick.</p>
