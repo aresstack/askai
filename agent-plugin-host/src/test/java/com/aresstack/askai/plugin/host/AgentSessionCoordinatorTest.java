@@ -102,6 +102,51 @@ public class AgentSessionCoordinatorTest {
     }
 
     @Test
+    public void aPromptGoesToTheVisibleTabsSessionEvenIfAnotherTabsSessionIsStillActive() {
+        final String[] scope = {"tab-A"};
+        AgentSessionCoordinator c = coordinator(new AgentSessionCoordinator.SessionScopeProvider() {
+            public String currentScope() {
+                return scope[0];
+            }
+        });
+        c.setActiveAgent("agent.a");
+        FakeSession tabA = registry.get("agent.a").lastSession;
+        scope[0] = "tab-B"; // the user now looks at tab B, but nobody re-activated the agent for it
+        c.submitText("hi");
+        FakeSession tabB = registry.get("agent.a").lastSession;
+        assertNotSame(tabA, tabB);
+        assertTrue("tab A's (invisible) session must NOT swallow the prompt", tabA.target.submitted.isEmpty());
+        assertEquals(Collections.singletonList("hi"), tabB.target.submitted);
+    }
+
+    @Test
+    public void anUndeliverablePromptStaysVisibleWithAReason() {
+        final List<String> users = new ArrayList<String>();
+        final List<String> bubbles = new ArrayList<String>();
+        registry.put("agent.a", new FakeExtension("agent.a"));
+        AgentSessionCoordinator c = new AgentSessionCoordinator(
+                new AgentSessionCoordinator.AgentExtensionResolver() {
+                    public AgentPluginExtension resolve(String agentId) {
+                        return registry.get(agentId);
+                    }
+                },
+                new AgentSessionCoordinator.AgentHostContextProvider() {
+                    public AgentHostContext create(String agentId, String sessionInstanceId) {
+                        return new SinkHost(new RecordingSink(bubbles));
+                    }
+                }, new InlineUiExecutor());
+        RecordingSink.lastUsers.clear();
+        c.setActiveAgent("agent.a");
+        FakeSession session = registry.get("agent.a").lastSession;
+        session.target.availability = SubmissionAvailability.UNAVAILABLE;
+        c.submitText("hi");
+        assertTrue(session.target.submitted.isEmpty());
+        assertEquals(Collections.singletonList("hi"), RecordingSink.lastUsers);
+        assertEquals(1, bubbles.size());
+        assertTrue(bubbles.get(0).contains("could not be delivered"));
+    }
+
+    @Test
     public void closingATabScopeEndsOnlyThatTabsSessionsAndAFreshTabStartsFresh() throws Exception {
         final String[] scope = {"tab-A"};
         AgentSessionCoordinator c = coordinator(new AgentSessionCoordinator.SessionScopeProvider() {
@@ -598,7 +643,10 @@ public class AgentSessionCoordinatorTest {
             this.bubbles = bubbles;
         }
 
+        static List<String> lastUsers = new ArrayList<String>();
+
         public void appendUserMessage(String messageId, String markdown) {
+            lastUsers.add(markdown);
         }
 
         public void appendAssistantMessage(String messageId, String markdown) {

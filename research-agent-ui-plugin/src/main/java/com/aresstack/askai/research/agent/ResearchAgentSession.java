@@ -922,7 +922,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             new java.util.concurrent.atomic.AtomicLong();
 
     public void submitPrompt(String text, String activeSectionId) {
-        if (handle == null) {
+        if (handle == null || disposed) {
+            // Never drop a prompt silently: keep the user's turn visible and say why nothing happens.
+            echoUserMessage(text);
+            reportSubmitProblem("The research agent is not running for this chat. "
+                    + "Switch the mode again or open a new chat to restart it.");
             return;
         }
         if (productiveResources != null && !productiveResources.isClosed()) {
@@ -985,7 +989,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 technicalLog("[scope-check] boundary question consumed by this user turn");
             }
             beginAgentTurn(); // busy + preempt visualizer; cleared by the turn's terminal event
-            backend.submitPrompt(handle, new ResearchPrompt(text, activeSectionId));
+            try {
+                backend.submitPrompt(handle, new ResearchPrompt(text, activeSectionId));
+            } catch (RuntimeException submitFailed) {
+                // An immediate failure (e.g. the model endpoint answers 500 at once) must release the
+                // composer and show the reason — the user's message is already in the chat above.
+                setAgentTurnInFlight(false);
+                reportSubmitProblem("Your message could not be sent to the research agent: "
+                        + (submitFailed.getMessage() == null ? submitFailed.toString()
+                                : submitFailed.getMessage()));
+            }
             return;
         }
         // FAKE mode: host-side explainability + the deterministic backend, unchanged. Meta questions are
@@ -1081,6 +1094,21 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
     }
 
+
+    /** A visible problem bubble for a prompt that could not be delivered (never a silent drop). */
+    private void reportSubmitProblem(final String text) {
+        technicalLog("[submit] " + text);
+        if (sink == null) {
+            System.err.println("[research] " + text);
+            return;
+        }
+        final String messageId = messageIds.next("problem");
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                sink.showProblem(messageId, text);
+            }
+        });
+    }
 
     /** An agent utterance from the playbook/dialog, routed through the shared sink on the UI thread. */
     private void sayAsAgent(final String text) {

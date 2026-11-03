@@ -624,7 +624,16 @@ public final class ResearchAgentMain {
         boolean freshState = "scoping".equalsIgnoreCase(view.getPhaseId())
                 && "new".equalsIgnoreCase(view.getStateId());
         com.aresstack.askai.research.runtime.team.TeamAgentResult result;
-        if (!teamAgent.hasGreeted() && freshState) {
+        if (!teamAgent.hasGreeted() && freshState && !text.trim().isEmpty()) {
+            // The greeting bootstrap FAILED earlier (e.g. the model endpoint answered 500) and the user has
+            // written since: answer exactly THAT message — a late greeting on top of it read as a doubled
+            // reply. A usable answer ends the fresh state like a greeting would, so no greeting follows.
+            result = conceptAwareRespond(ctx, view, text);
+            emitTeamAgentResult(ctx, result, view.getPhaseId());
+            if (result.isOk()) {
+                ctx.sendMessage(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
+            }
+        } else if (!teamAgent.hasGreeted() && freshState) {
             result = teamAgent.greet(view);
             emitTeamAgentResult(ctx, result, view.getPhaseId());
             if (result.isOk()) {

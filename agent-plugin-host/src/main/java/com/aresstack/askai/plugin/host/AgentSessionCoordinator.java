@@ -560,9 +560,58 @@ public final class AgentSessionCoordinator
 
     @Override
     public void submitText(String text) {
-        if (activeSession != null) {
-            activeSession.getChatTarget().submitText(text);
+        if (text == null || text.trim().isEmpty()) {
+            return;
         }
+        // The coordinator is shared by ALL chat tabs. The active session must belong to the VISIBLE tab:
+        // after deleting/closing/switching chats it could still be another tab's session, which echoed and
+        // persisted the prompt into that (invisible) chat — the user's message seemed to vanish. Re-bind to
+        // the current tab's session first (creates it on first use).
+        String agentId = activeAgentId;
+        if (agentId != null && activeSessionKey != null
+                && !activeSessionKey.equals(sessionKeyFor(agentId))) {
+            setActiveAgent(agentId);
+        }
+        AgentSession session = activeSession;
+        if (session == null) {
+            reportUndeliverable(agentId, text, "The agent session is not running for this chat.");
+            return;
+        }
+        SubmissionAvailability availability = session.getChatTarget().getAvailability();
+        if (availability == SubmissionAvailability.UNAVAILABLE) {
+            reportUndeliverable(agentId, text, "The agent session for this chat has ended or failed to start.");
+            return;
+        }
+        try {
+            session.getChatTarget().submitText(text);
+        } catch (RuntimeException failed) {
+            reportUndeliverable(agentId, text, deepestMessage(failed));
+        }
+    }
+
+    /**
+     * A prompt that cannot reach an agent is NEVER dropped silently: the user's text stays visible in the
+     * current chat, followed by the reason, so the user knows what happened and can retry.
+     */
+    private void reportUndeliverable(String agentId, String text, String reason) {
+        String key = sessionKeyFor(agentId == null ? "agent" : agentId);
+        AgentHostContext host = null;
+        try {
+            host = hostContextProvider.create(agentId, key);
+        } catch (RuntimeException noHost) {
+            // fall through to STDERR
+        }
+        com.aresstack.askai.plugin.api.agent.AgentConversationSink sink =
+                host == null ? null : host.getConversationSink();
+        if (sink == null) {
+            System.err.println("[agent-host] prompt not delivered: " + reason);
+            return;
+        }
+        long stamp = System.nanoTime();
+        sink.appendUserMessage("undelivered-user-" + stamp, text);
+        sink.appendAssistantMessage("undelivered-" + stamp,
+                "Your message could not be delivered to the agent: " + reason
+                + "\n\nSwitch the mode again (or open a new chat) to restart the agent, then resend.");
     }
 
     @Override
