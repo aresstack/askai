@@ -93,6 +93,8 @@ public final class SetupWizardPanel extends JPanel {
      * fill the free space of the step instead of standing small in a corner.
      */
     private static final int[] MASCOT_HEIGHTS = {900, 900, 900, 900, 900, 900};
+    /** Free room above the check step's large Witch, who stands behind its texts and buttons. */
+    static final int CHECK_WITCH_TOP_GAP = 40;
     /** Height of the research step's Witch in the label column (below "Web search"). */
     private static final int SECTION_WITCH_HEIGHT = 150;
 
@@ -2463,10 +2465,14 @@ public final class SetupWizardPanel extends JPanel {
             if (witch == null) {
                 panel.add(fieldLabel(label), c);
             } else {
+                // The column reaches down to the wizard's buttons; Witch stands on its bottom edge, right above them.
                 JPanel column = transparent(new BorderLayout(0, 8));
                 column.add(fieldLabel(label), BorderLayout.NORTH);
                 column.add(witch, BorderLayout.CENTER);
+                c.fill = GridBagConstraints.VERTICAL;
+                c.weighty = 1;
                 panel.add(column, c);
+                fillPage();
             }
             c = constraints(1);
             c.anchor = GridBagConstraints.NORTHWEST; // level with its name, also when the Witch beside is taller
@@ -2574,10 +2580,22 @@ public final class SetupWizardPanel extends JPanel {
             return c;
         }
 
+        /** The form takes the page's whole height (a row with weight fills the rest), not only its own. */
+        private void fillPage() {
+            java.awt.Container page = panel.getParent();
+            if (page != null && page.getLayout() instanceof BorderLayout) {
+                page.remove(panel);
+                page.add(panel, BorderLayout.CENTER);
+            }
+        }
+
         JPanel panel() {
+            int index = step;
+            if (index == STEP_CHECK) {
+                return backdropPage();
+            }
             JPanel page = transparent(new BorderLayout());
             page.add(panel, BorderLayout.NORTH);
-            int index = step;
             SetupWizardMascot.Art stepArt = SetupWizardMascot.Art.load(STEP_MASCOTS[index]);
             final SetupWizardMascot mascot = new SetupWizardMascot(stepArt != null ? stepArt
                     : SetupWizardMascot.Art.load(), MASCOT_HEIGHTS[index], MASCOT_PLACEMENTS[index],
@@ -2587,6 +2605,63 @@ public final class SetupWizardPanel extends JPanel {
             page.add(mascot, BorderLayout.CENTER);
             // Wrapping texts know their height only once they know their width: lay out once more when the
             // width changes, so the form takes exactly its room and the Witch gets the rest.
+            page.addComponentListener(new java.awt.event.ComponentAdapter() {
+                private int width = -1;
+
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent e) {
+                    if (page.getWidth() != width) {
+                        width = page.getWidth();
+                        javax.swing.SwingUtilities.invokeLater(page::revalidate);
+                    }
+                }
+            });
+            return page;
+        }
+
+        /**
+         * The check step: Witch large in the background, centred and standing on the bottom edge, with a little room
+         * above her; the form lies on top of her (the only step where texts and buttons may cover her).
+         */
+        private JPanel backdropPage() {
+            SetupWizardMascot.Art stepArt = SetupWizardMascot.Art.load(STEP_MASCOTS[step]);
+            final SetupWizardMascot mascot = new SetupWizardMascot(stepArt != null ? stepArt
+                    : SetupWizardMascot.Art.load(), MASCOT_HEIGHTS[step], SetupWizardMascot.Placement.CENTER,
+                    CHECK_WITCH_TOP_GAP, SetupWizardMascot.DEFAULT_SIDE_INSET, palette);
+            mascot.setBackdrop(true);
+            mascot.setOnFigureClicked(point -> witchMenu().show(mascot, point.x, point.y));
+            mascots[step] = mascot;
+            final JPanel form = panel;
+            JPanel page = transparent(null);
+            page.setLayout(new java.awt.LayoutManager() {
+                @Override
+                public void addLayoutComponent(String name, Component comp) {
+                }
+
+                @Override
+                public void removeLayoutComponent(Component comp) {
+                }
+
+                @Override
+                public Dimension preferredLayoutSize(java.awt.Container parent) {
+                    return form.getPreferredSize();
+                }
+
+                @Override
+                public Dimension minimumLayoutSize(java.awt.Container parent) {
+                    return form.getMinimumSize();
+                }
+
+                @Override
+                public void layoutContainer(java.awt.Container parent) {
+                    int width = parent.getWidth();
+                    int height = parent.getHeight();
+                    form.setBounds(0, 0, width, Math.min(height, form.getPreferredSize().height));
+                    mascot.setBounds(0, 0, width, height);
+                }
+            });
+            page.add(form); // index 0: painted last, on top of Witch
+            page.add(mascot);
             page.addComponentListener(new java.awt.event.ComponentAdapter() {
                 private int width = -1;
 
