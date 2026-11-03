@@ -176,6 +176,7 @@ public final class SetupWizardPanel extends JPanel {
     private final JTextField ollamaUrl = ComicControls.textField(28);
     private final ComicButton runtimeTest = new ComicButton("Test connection", ComicButton.Accent.ACTION);
     private final ComicButton runtimeDownload = new ComicButton("Download Ollama…");
+    private final ComicButton runtimeManager = new ComicButton("Get Manager…");
     private final JLabel ollamaStatus = statusLabel();
     /** The runtime step's two pictures: the install scene until a runtime answers, then the connecting one. */
     private SetupWizardMascot.Art runtimeInstallArt;
@@ -378,7 +379,18 @@ public final class SetupWizardPanel extends JPanel {
         Rows rows = new Rows(STEP_RUNTIME, "AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
                 + "runtime. One of them must answer; the final check shows which one does.");
-        rows.stretched("Ollama address", inline(ollamaUrl, runtimeTest, runtimeDownload));
+        JPanel runtimeLine = inline(ollamaUrl, runtimeTest, runtimeDownload);
+        // "Get Manager" right under "Download Ollama", in the same column and just as wide.
+        GridBagLayout runtimeLayout = (GridBagLayout) runtimeLine.getLayout();
+        GridBagConstraints download = runtimeLayout.getConstraints(runtimeDownload);
+        download.fill = GridBagConstraints.HORIZONTAL;
+        runtimeLayout.setConstraints(runtimeDownload, download);
+        GridBagConstraints manager = (GridBagConstraints) download.clone();
+        manager.gridy = 1;
+        manager.insets = new Insets(6, 8, 0, 0);
+        runtimeLine.add(runtimeManager, manager);
+        runtimeManager.setToolTipText("The AskAI Ollama Manager: install, start and update Ollama with one click");
+        rows.stretched("Ollama address", runtimeLine);
         rows.stretched("", new StatusLine(null, ollamaStatus).panel);
         return rows.panel();
     }
@@ -513,6 +525,7 @@ public final class SetupWizardPanel extends JPanel {
         }));
         runtimeTest.addActionListener(e -> checkRuntime());
         runtimeDownload.addActionListener(e -> setup.openRuntimeDownload());
+        runtimeManager.addActionListener(e -> setup.openOllamaManagerDownload());
         modelsRefresh.addActionListener(e -> refreshModels());
         chatInstall.setToolTipText("Find and install a model from Hugging Face, the Ollama library or AskAI's "
                 + "local runtime");
@@ -2017,6 +2030,14 @@ public final class SetupWizardPanel extends JPanel {
 
     JComboBox<String> microphoneChoice() {
         return microphone;
+    }
+
+    JButton runtimeManagerButton() {
+        return runtimeManager;
+    }
+
+    JButton runtimeDownloadButton() {
+        return runtimeDownload;
     }
 
     JComboBox<String> dictationEngineChoice() {

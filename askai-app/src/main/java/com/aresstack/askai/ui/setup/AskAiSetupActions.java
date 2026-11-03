@@ -63,6 +63,7 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** Where the wizard's “Download Ollama…” leads. */
     static final String OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
+    static final String OLLAMA_MANAGER_URL = "https://github.com/aresstack/ollama-manager/releases";
     /** How long the microphone test listens. */
     private static final long MIC_TEST_MILLIS = 4000;
     /** The language Witch speaks in (his lines are English). */
@@ -357,6 +358,11 @@ public final class AskAiSetupActions implements SetupActions {
     @Override
     public void openRuntimeDownload() {
         BrowserLauncher.open(OLLAMA_DOWNLOAD_URL);
+    }
+
+    @Override
+    public void openOllamaManagerDownload() {
+        BrowserLauncher.open(OLLAMA_MANAGER_URL);
     }
 
     @Override

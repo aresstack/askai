@@ -421,6 +421,24 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void getManagerSitsRightUnderDownloadOllamaAndOpensTheReleases() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
+        wizard.setSize(1060, 800);
+        layoutAll(wizard);
+        java.awt.Rectangle download = wizard.runtimeDownloadButton().getBounds();
+        java.awt.Rectangle manager = wizard.runtimeManagerButton().getBounds();
+        assertEquals("same column", download.x, manager.x);
+        assertEquals("just as wide", download.width, manager.width);
+        assertTrue("below", manager.y > download.y);
+
+        wizard.runtimeManagerButton().doClick();
+
+        assertEquals(1, fake.managerOpened);
+    }
+
+    @Test
     public void dictationUsesWhisperByDefaultWithADownloadOrReinstallButtonBesideTheModel() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
@@ -717,6 +735,13 @@ public class SetupWizardPanelTest {
             done.accept("Whisper installed.", null);
         }
 
+        int managerOpened;
+
+        @Override
+        public void openOllamaManagerDownload() {
+            managerOpened++;
+        }
+
         @Override
         public void openModelBrowser(java.awt.Component parent, SetupDraft draft) {
             browserOpened++;
@@ -870,4 +895,14 @@ public class SetupWizardPanelTest {
             cancelled = true;
         }
     }
+
+    private static void layoutAll(java.awt.Component component) {
+        component.doLayout();
+        if (component instanceof java.awt.Container) {
+            for (java.awt.Component child : ((java.awt.Container) component).getComponents()) {
+                layoutAll(child);
+            }
+        }
+    }
+
 }

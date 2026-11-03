@@ -36,6 +36,10 @@ public interface SetupActions {
     /** Opens the download page of a runtime (Ollama) in the browser. */
     void openRuntimeDownload();
 
+    /** Opens the releases page of the Ollama Manager in the browser. */
+    default void openOllamaManagerDownload() {
+    }
+
     /**
      * Opens AskAI's model browser (Hugging Face, Ollama library, local runtime) as a modal dialog over
      * {@code parent}; returns when it is closed. Its downloads use the draft's network settings. Without a
