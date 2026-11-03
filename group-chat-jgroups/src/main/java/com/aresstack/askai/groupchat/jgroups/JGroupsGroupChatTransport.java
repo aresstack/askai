@@ -13,6 +13,7 @@ import com.aresstack.askai.groupchat.GroupChatTransport;
 import com.aresstack.askai.groupchat.GroupChatWire;
 import com.aresstack.askai.groupchat.HistoryMerger;
 import com.aresstack.askai.groupchat.Participant;
+import com.aresstack.askai.groupchat.QueuedGroupChatListener;
 import com.aresstack.askai.groupchat.RoomHistoryLog;
 import com.aresstack.askai.groupchat.WireEnvelope;
 
@@ -88,6 +89,16 @@ import java.util.concurrent.ThreadFactory;
  */
 public class JGroupsGroupChatTransport implements GroupChatTransport {
 
+    /*
+     * Locking strategy (P0 deadlock fix):
+     *  - `lock` guards only in-memory state. While holding it the transport performs NO network I/O
+     *    (no channel.send/connect/close) and NO application callback.
+     *  - Application callbacks go through a QueuedGroupChatListener: under `lock` they are only
+     *    enqueued, and are delivered in order on the "askai-party-events" thread with no lock held.
+     *  - Network sends capture an immutable snapshot (channel + encoded bytes) under `lock` and are
+     *    performed after releasing it. JChannel itself is thread-safe.
+     */
+
     /** Overlap window subtracted from the newest local message when requesting history. */
     private static final long HISTORY_OVERLAP_MILLIS = 60_000L;
 
@@ -103,7 +114,7 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
     private JChannel channel;
     private GroupChatRoom room;
     private Participant self;
-    private GroupChatListener listener;
+    private QueuedGroupChatListener listener;
     private DuplicateFilter dedup;
     private RoomHistoryLog historyLog;
     private ColorMap colorMap = ColorMap.EMPTY;
@@ -143,13 +154,13 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         if (room == null || self == null || listener == null) {
             throw new IllegalArgumentException("room, self and listener must not be null");
         }
+        leave(); // idempotent; a transport hosts at most one membership
+        final QueuedGroupChatListener queued = new QueuedGroupChatListener(listener);
+        final JChannel ch;
         synchronized (lock) {
-            if (connected) {
-                leave();
-            }
             this.room = room;
             this.self = self;
-            this.listener = listener;
+            this.listener = queued;
             this.dedup = new DuplicateFilter();
             this.colorMap = ColorMap.EMPTY;
             this.roomEpoch = 0L;
@@ -171,30 +182,66 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
                 this.historyLog = new FileRoomHistoryLog(
                         historyDir, room.getRoomId(), config.getHistoryRetention());
             }
-
             try {
-                JChannel ch = new JChannel(createProtocols(room));
+                ch = new JChannel(createProtocols(room));
                 ch.name(self.getDisplayName());
                 ch.setReceiver(new ChannelReceiver());
                 this.channel = ch;
-                ch.connect(clusterName(room.getRoomId()));
-                this.connected = true;
             } catch (Exception e) {
-                cleanupAfterFailedJoin();
-                listener.onConnectionStateChanged(
-                        GroupChatConnectionState.disconnected("join failed: " + shortReason(e)));
+                failJoin(queued, e);
                 throw new IllegalStateException("Failed to join room " + room.getRoomId(), e);
             }
+        }
 
-            // Announce our profile and ask the room for everybody else's.
-            trySendBroadcast(GroupChatWire.TYPE_PROFILE, GroupChatWire.encodeParticipant(self));
-            trySendBroadcast(GroupChatWire.TYPE_PROFILE_REQUEST, new byte[0]);
-            requestHistoryFromCoordinator();
+        // Network discovery happens without holding the lock: the receive thread may deliver the
+        // first view and peer announcements concurrently (they are accepted while joining).
+        try {
+            ch.connect(clusterName(room.getRoomId()));
+        } catch (Exception e) {
+            synchronized (lock) {
+                if (this.channel == ch) {
+                    failJoin(queued, e);
+                }
+            }
+            closeQuietly(ch);
+            throw new IllegalStateException("Failed to join room " + room.getRoomId(), e);
+        }
+        byte[] profile;
+        byte[] profileRequest;
+        synchronized (lock) {
+            if (this.channel != ch) {
+                // leave() raced the connect; the membership is already gone.
+                closeQuietly(ch);
+                throw new IllegalStateException("Join of room " + room.getRoomId() + " was cancelled");
+            }
+            this.connected = true;
+            profile = encodeEnvelope(GroupChatWire.TYPE_PROFILE, GroupChatWire.encodeParticipant(self));
+            profileRequest = encodeEnvelope(GroupChatWire.TYPE_PROFILE_REQUEST, new byte[0]);
+        }
 
-            listener.onConnectionStateChanged(GroupChatConnectionState.connected(profiles.size()));
-            listener.onParticipantsChanged(snapshotParticipants());
+        // Announce our profile and ask the room for everybody else's.
+        trySendRaw(ch, null, profile);
+        trySendRaw(ch, null, profileRequest);
+        requestHistoryFromCoordinator();
+
+        synchronized (lock) {
+            if (!connected || this.listener != queued) {
+                return;
+            }
+            queued.onConnectionStateChanged(GroupChatConnectionState.connected(profiles.size()));
+            queued.onParticipantsChanged(snapshotParticipants());
             maybeRecomputeColors();
         }
+    }
+
+    /** Under {@code lock}: report the failure and release everything but the channel. */
+    private void failJoin(QueuedGroupChatListener queued, Exception e) {
+        Detached detached = detachLocked();
+        queued.onConnectionStateChanged(
+                GroupChatConnectionState.disconnected("join failed: " + shortReason(e)));
+        queued.shutdown();
+        detached.channel = null; // the caller closes the channel outside the lock
+        releaseAsync(detached);
     }
 
     @Override
@@ -202,9 +249,11 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         if (message == null) {
             throw new IllegalArgumentException("message must not be null");
         }
+        JChannel ch;
+        byte[] bytes;
         synchronized (lock) {
             if (!connected || room == null) {
-                return;
+                throw new IllegalStateException("Not connected to a party room");
             }
             if (!room.getRoomId().equals(message.getRoomId())) {
                 throw new IllegalArgumentException(
@@ -220,34 +269,41 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
                                 + " but message claims senderParticipantId="
                                 + message.getSenderParticipantId());
             }
-            try {
-                broadcastEnvelope(GroupChatWire.TYPE_MESSAGE, GroupChatWire.encodeMessage(message));
-            } catch (Exception e) {
-                throw new IllegalStateException("Failed to send message " + message.getMessageId(), e);
-            }
+            ch = channel;
+            bytes = encodeEnvelope(GroupChatWire.TYPE_MESSAGE, GroupChatWire.encodeMessage(message));
+        }
+        try {
+            ch.send(new Message(null, bytes));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to send message " + message.getMessageId(), e);
         }
     }
 
     @Override
     public void leave() {
-        GroupChatListener departedListener;
+        Detached detached;
+        byte[] leaveBytes = null;
         synchronized (lock) {
-            if (!connected) {
+            if (channel == null && listener == null) {
                 return;
             }
-            departedListener = listener;
-            try {
-                if (channel != null && self != null) {
-                    broadcastEnvelope(GroupChatWire.TYPE_LEAVE, GroupChatWire.encodeParticipant(self));
-                }
-            } catch (Exception ignored) {
-                // Best effort: peers will still notice via the view change.
+            if (connected && self != null && room != null) {
+                leaveBytes = encodeEnvelope(GroupChatWire.TYPE_LEAVE, GroupChatWire.encodeParticipant(self));
             }
-            cleanupAfterFailedJoin();
+            boolean wasConnected = connected;
+            detached = detachLocked();
+            if (detached.listener != null) {
+                if (wasConnected) {
+                    detached.listener.onConnectionStateChanged(GroupChatConnectionState.disconnected(null));
+                }
+                detached.listener.shutdown(); // queued events still drain, later ones are dropped
+            }
         }
-        if (departedListener != null) {
-            departedListener.onConnectionStateChanged(GroupChatConnectionState.disconnected(null));
+        if (detached.channel != null && leaveBytes != null) {
+            // Best effort: peers will still notice via the view change.
+            trySendRaw(detached.channel, null, leaveBytes);
         }
+        release(detached);
     }
 
     @Override
@@ -272,15 +328,19 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         if (claim == null) {
             return;
         }
+        JChannel ch;
+        byte[] bytes;
         synchronized (lock) {
             if (!connected) {
                 return;
             }
-            try {
-                broadcastEnvelope(GroupChatWire.TYPE_BOT_CLAIM, GroupChatWire.encodeBotClaim(claim));
-            } catch (Exception e) {
-                throw new IllegalStateException("Failed to publish bot claim " + claim.getClaimId(), e);
-            }
+            ch = channel;
+            bytes = encodeEnvelope(GroupChatWire.TYPE_BOT_CLAIM, GroupChatWire.encodeBotClaim(claim));
+        }
+        try {
+            ch.send(new Message(null, bytes));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to publish bot claim " + claim.getClaimId(), e);
         }
     }
 
@@ -289,6 +349,8 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         if (self == null) {
             return;
         }
+        JChannel ch;
+        byte[] bytes;
         synchronized (lock) {
             if (!connected || this.self == null) {
                 return;
@@ -298,10 +360,12 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
             }
             this.self = self;
             profiles.put(self.getParticipantId(), self);
-            trySendBroadcast(GroupChatWire.TYPE_PROFILE, GroupChatWire.encodeParticipant(self));
+            ch = channel;
+            bytes = encodeEnvelope(GroupChatWire.TYPE_PROFILE, GroupChatWire.encodeParticipant(self));
             listener.onParticipantsChanged(snapshotParticipants());
             maybeRecomputeColors();
         }
+        trySendRaw(ch, null, bytes);
     }
 
     @Override
@@ -537,46 +601,65 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
     // Wire plumbing
     // ------------------------------------------------------------------
 
-    private void broadcastEnvelope(int type, byte[] payload) throws Exception {
-        channel.send(new Message(null, encodeEnvelope(type, payload)));
-    }
-
-    private void unicastEnvelope(Address dest, int type, byte[] payload) throws Exception {
-        channel.send(new Message(dest, encodeEnvelope(type, payload)));
-    }
-
+    /** Under {@code lock}: wrap a payload into this room's wire envelope. */
     private byte[] encodeEnvelope(int type, byte[] payload) {
         WireEnvelope envelope = new WireEnvelope(GroupChatWire.PROTOCOL_VERSION, type,
                 room.getRoomId(), roomEpoch, payload, null);
         return GroupChatWire.encodeEnvelope(envelope);
     }
 
-    /** Broadcast on the calling thread, swallowing errors (used for best-effort announcements). */
-    private void trySendBroadcast(int type, byte[] payload) {
+    /** Send already encoded bytes, never under {@code lock}; errors are swallowed (best effort). */
+    private static void trySendRaw(JChannel ch, Address dest, byte[] bytes) {
+        if (ch == null || bytes == null) {
+            return;
+        }
         try {
-            broadcastEnvelope(type, payload);
+            ch.send(new Message(dest, bytes));
         } catch (Exception ignored) {
-            // Best effort; a PROFILE_REQUEST from peers will trigger a retry.
+            // Best effort; a PROFILE_REQUEST / view change from peers triggers a retry.
         }
     }
 
-    /** Schedule a send on the async sender (used from JGroups callback threads). */
-    private void sendAsync(final Runnable sendTask) {
+    /**
+     * Schedule a send on the async sender (used from JGroups callback threads). The task encodes
+     * under {@code lock} only when still connected and sends after releasing it.
+     */
+    private void sendAsync(final Address dest, final int type, final byte[] payload) {
         ExecutorService sender = asyncSender;
         if (sender == null || sender.isShutdown()) {
             return;
         }
         try {
-            sender.execute(sendTask);
+            sender.execute(new Runnable() {
+                @Override
+                public void run() {
+                    JChannel ch;
+                    byte[] bytes;
+                    synchronized (lock) {
+                        if (!connected || channel == null) {
+                            return;
+                        }
+                        ch = channel;
+                        bytes = encodeEnvelope(type, payload);
+                    }
+                    trySendRaw(ch, dest, bytes);
+                }
+            });
         } catch (Exception ignored) {
             // Shutting down.
         }
     }
 
+    /** Ask one peer for the history we may have missed; never called under {@code lock}. */
     private void requestHistoryFromCoordinator() {
-        JChannel ch = channel;
-        if (ch == null) {
-            return;
+        JChannel ch;
+        RoomHistoryLog log;
+        synchronized (lock) {
+            if (!connected) {
+                return;
+            }
+            ch = channel;
+            log = historyLog;
         }
         View view = ch.getView();
         if (view == null || view.getMembers().size() < 2) {
@@ -587,8 +670,8 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
             target = view.getMembers().get(1);
         }
         long since = 0L;
-        if (historyLog != null) {
-            List<GroupChatMessage> local = historyLog.readAll();
+        if (log != null) {
+            List<GroupChatMessage> local = log.readAll();
             if (!local.isEmpty()) {
                 long newest = 0L;
                 for (GroupChatMessage message : local) {
@@ -597,13 +680,15 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
                 since = Math.max(0L, newest - HISTORY_OVERLAP_MILLIS);
             }
         }
-        final Address dest = target;
-        final byte[] payload = GroupChatWire.encodeHistoryRequest(since);
-        try {
-            unicastEnvelope(dest, GroupChatWire.TYPE_HISTORY_REQUEST, payload);
-        } catch (Exception ignored) {
-            // Best effort; the next merge triggers another request.
+        byte[] bytes;
+        synchronized (lock) {
+            if (!connected || channel != ch) {
+                return;
+            }
+            bytes = encodeEnvelope(GroupChatWire.TYPE_HISTORY_REQUEST,
+                    GroupChatWire.encodeHistoryRequest(since));
         }
+        trySendRaw(ch, target, bytes); // the next merge triggers another request on failure
     }
 
     // ------------------------------------------------------------------
@@ -636,7 +721,8 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
 
     private void handleEnvelope(WireEnvelope envelope, Address src) {
         synchronized (lock) {
-            if (!connected || room == null) {
+            // Accepted while joining (channel set, connect in progress) and while connected.
+            if (room == null || listener == null || channel == null) {
                 return;
             }
             if (envelope.getProtocolVersion() != GroupChatWire.PROTOCOL_VERSION) {
@@ -653,6 +739,7 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         }
     }
 
+    /** Under {@code lock}; listener calls only enqueue. */
     private void dispatchEnvelope(WireEnvelope envelope, Address src) throws Exception {
         int type = envelope.getType();
         if (type == GroupChatWire.TYPE_MESSAGE) {
@@ -709,23 +796,7 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         if (self == null || src == null || src.equals(channel.getAddress())) {
             return;
         }
-        final Address requester = src;
-        final byte[] payload = GroupChatWire.encodeParticipant(self);
-        sendAsync(new Runnable() {
-            @Override
-            public void run() {
-                synchronized (lock) {
-                    if (!connected) {
-                        return;
-                    }
-                    try {
-                        unicastEnvelope(requester, GroupChatWire.TYPE_PROFILE, payload);
-                    } catch (Exception ignored) {
-                        // Requester will retry on the next view change.
-                    }
-                }
-            }
-        });
+        sendAsync(src, GroupChatWire.TYPE_PROFILE, GroupChatWire.encodeParticipant(self));
     }
 
     private void handleHistoryRequest(long sinceMillis, Address src) {
@@ -739,23 +810,7 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         if (matching.size() > HISTORY_RESPONSE_CAP) {
             matching = matching.subList(matching.size() - HISTORY_RESPONSE_CAP, matching.size());
         }
-        final Address requester = src;
-        final byte[] payload = GroupChatWire.encodeMessageList(matching);
-        sendAsync(new Runnable() {
-            @Override
-            public void run() {
-                synchronized (lock) {
-                    if (!connected) {
-                        return;
-                    }
-                    try {
-                        unicastEnvelope(requester, GroupChatWire.TYPE_HISTORY_RESPONSE, payload);
-                    } catch (Exception ignored) {
-                        // Requester will re-request after the next merge.
-                    }
-                }
-            }
-        });
+        sendAsync(src, GroupChatWire.TYPE_HISTORY_RESPONSE, GroupChatWire.encodeMessageList(matching));
     }
 
     private void handleHistoryResponse(List<GroupChatMessage> messages) {
@@ -796,6 +851,8 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
     // ------------------------------------------------------------------
 
     private void handleViewChange(View view) {
+        boolean resyncHistory = false;
+        boolean reannounce = false;
         synchronized (lock) {
             if (room == null || listener == null) {
                 return;
@@ -837,24 +894,35 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
             if (connected && (newcomers || merge)) {
                 // Re-announce our profile so newcomers/merged peers learn who we are, and after a
                 // merge re-sync history (message IDs dedup any overlap).
-                final boolean resyncHistory = merge;
-                sendAsync(new Runnable() {
-                    @Override
-                    public void run() {
-                        synchronized (lock) {
-                            if (!connected) {
-                                return;
-                            }
-                            trySendBroadcast(GroupChatWire.TYPE_PROFILE,
-                                    GroupChatWire.encodeParticipant(self));
-                            if (resyncHistory) {
-                                requestHistoryFromCoordinator();
-                            }
-                        }
-                    }
-                });
+                reannounce = true;
+                resyncHistory = merge;
             }
             maybeRecomputeColors();
+        }
+        if (reannounce) {
+            final boolean resync = resyncHistory;
+            final Participant announced;
+            synchronized (lock) {
+                announced = self;
+            }
+            if (announced != null) {
+                sendAsync(null, GroupChatWire.TYPE_PROFILE, GroupChatWire.encodeParticipant(announced));
+            }
+            if (resync) {
+                ExecutorService sender = asyncSender;
+                if (sender != null && !sender.isShutdown()) {
+                    try {
+                        sender.execute(new Runnable() {
+                            @Override
+                            public void run() {
+                                requestHistoryFromCoordinator();
+                            }
+                        });
+                    } catch (Exception ignored) {
+                        // Shutting down.
+                    }
+                }
+            }
         }
     }
 
@@ -862,7 +930,10 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
     // Colors (G5 transport side)
     // ------------------------------------------------------------------
 
-    /** When we are the view coordinator: recompute the color map and replicate it if it changed. */
+    /**
+     * Under {@code lock}: when we are the view coordinator, recompute the color map and replicate
+     * it if it changed.
+     */
     private void maybeRecomputeColors() {
         if (!connected || channel == null || !isCoordinator()) {
             return;
@@ -874,18 +945,7 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         }
         colorMap = next;
         listener.onColorMapChanged(next);
-        final byte[] payload = GroupChatWire.encodeColorMap(next);
-        sendAsync(new Runnable() {
-            @Override
-            public void run() {
-                synchronized (lock) {
-                    if (!connected) {
-                        return;
-                    }
-                    trySendBroadcast(GroupChatWire.TYPE_COLOR_MAP, payload);
-                }
-            }
-        });
+        sendAsync(null, GroupChatWire.TYPE_COLOR_MAP, GroupChatWire.encodeColorMap(next));
     }
 
     private boolean isCoordinator() {
@@ -906,28 +966,27 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         return Collections.unmodifiableList(new ArrayList<Participant>(profiles.values()));
     }
 
-    /** Release channel + log + state without emitting events (callers emit what is appropriate). */
-    private void cleanupAfterFailedJoin() {
-        if (asyncSender != null) {
-            asyncSender.shutdownNow();
-            asyncSender = null;
-        }
-        if (channel != null) {
-            try {
-                channel.close();
-            } catch (Exception ignored) {
-                // Closing is best effort.
-            }
-            channel = null;
-        }
-        if (historyLog != null) {
-            try {
-                historyLog.close();
-            } catch (Exception ignored) {
-                // Closing is best effort.
-            }
-            historyLog = null;
-        }
+    /** Resources detached from the transport state, to be released outside {@code lock}. */
+    private static final class Detached {
+        JChannel channel;
+        RoomHistoryLog historyLog;
+        ExecutorService asyncSender;
+        QueuedGroupChatListener listener;
+    }
+
+    /**
+     * Under {@code lock}: reset all membership state without I/O and without events, and hand
+     * the resources that need closing to the caller.
+     */
+    private Detached detachLocked() {
+        Detached detached = new Detached();
+        detached.channel = channel;
+        detached.historyLog = historyLog;
+        detached.asyncSender = asyncSender;
+        detached.listener = listener;
+        channel = null;
+        historyLog = null;
+        asyncSender = null;
         connected = false;
         room = null;
         self = null;
@@ -936,6 +995,45 @@ public class JGroupsGroupChatTransport implements GroupChatTransport {
         profiles.clear();
         addressToParticipant.clear();
         lastViewMembers = new ArrayList<Address>();
+        return detached;
+    }
+
+    /** Close detached resources; must not be called under {@code lock} (channel close blocks). */
+    private static void release(Detached detached) {
+        if (detached.asyncSender != null) {
+            detached.asyncSender.shutdownNow();
+        }
+        closeQuietly(detached.channel);
+        if (detached.historyLog != null) {
+            try {
+                detached.historyLog.close();
+            } catch (Exception ignored) {
+                // Closing is best effort.
+            }
+        }
+    }
+
+    /** Release on a helper thread (used where the caller still holds {@code lock}). */
+    private static void releaseAsync(final Detached detached) {
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                release(detached);
+            }
+        }, "askai-party-release");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void closeQuietly(JChannel ch) {
+        if (ch == null) {
+            return;
+        }
+        try {
+            ch.close();
+        } catch (Exception ignored) {
+            // Closing is best effort.
+        }
     }
 
     private static String shortReason(Exception e) {
