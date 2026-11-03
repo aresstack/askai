@@ -93,8 +93,29 @@ public final class DataForSeoSettingsPanel extends JPanel {
         tabs.addTab("Advanced", scroll(buildAdvanced()));
         tabs.addTab("Playground", buildPlayground());
         add(tabs, BorderLayout.CENTER);
+        fitToSelectedTab(tabs);
         loadFromDraft();
         wireListeners();
+    }
+
+    /**
+     * A JTabbedPane is as tall as its tallest tab (here the Playground), which leaves empty space under the
+     * short Account/SERP/Advanced tabs. Only the selected tab contributes its preferred size.
+     */
+    private static void fitToSelectedTab(JTabbedPane tabs) {
+        Runnable fit = () -> {
+            for (int i = 0; i < tabs.getTabCount(); i++) {
+                java.awt.Component c = tabs.getComponentAt(i);
+                c.setPreferredSize(i == tabs.getSelectedIndex() ? null : new java.awt.Dimension(0, 0));
+            }
+            tabs.revalidate();
+            java.awt.Window w = javax.swing.SwingUtilities.getWindowAncestor(tabs);
+            if (w != null) {
+                w.validate();
+            }
+        };
+        tabs.addChangeListener(e -> fit.run());
+        fit.run();
     }
 
     // ------------------------------------------------------------------ tabs
