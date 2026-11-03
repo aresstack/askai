@@ -3,7 +3,7 @@ package com.aresstack.askai.ui.setup;
 import java.util.function.Consumer;
 
 /**
- * How Merlin says something: always as a speech bubble next to the wizard, additionally spoken when a voice is
+ * How Witch says something: always as a speech bubble next to the wizard, additionally spoken when a voice is
  * selected and available. Without one it stays a bubble; the wizard never depends on speech output. EDT only.
  */
 final class WizardNarrator {

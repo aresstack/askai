@@ -7,7 +7,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/** Merlin knows what to say in every step of the wizard. */
+/** Witch knows what to say in every step of the wizard. */
 public class WizardGuideTest {
 
     private final WizardGuide guide = new WizardGuide();
@@ -20,7 +20,7 @@ public class WizardGuideTest {
             assertNotNull(guide.whyNeeded(step));
             assertTrue(guide.systemPrompt(step).contains(guide.whatToDo(step)));
         }
-        assertNull("before a runtime answers Merlin is silent anyway", guide.enteredStep(0));
+        assertNull("before a runtime answers Witch is silent anyway", guide.enteredStep(0));
         assertNull(guide.whatToDo(WizardGuide.steps()));
     }
 

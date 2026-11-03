@@ -60,7 +60,7 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** Where the wizard's “Download Ollama…” leads. */
     static final String OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
-    /** The language Merlin speaks in (his lines are English). */
+    /** The language Witch speaks in (his lines are English). */
     private static final String MERLIN_LANGUAGE = "en";
     private static final String[] SENTENCE_LANGUAGES = {"de", "en"};
 
@@ -83,8 +83,8 @@ public final class AskAiSetupActions implements SetupActions {
     private String originalOllamaUrl;
     /** Counts wizard runs ended by a cancel; a runtime result from an earlier run must not touch the model. */
     private int cancellations;
-    private PiperReadAloudService merlinService;
-    /** Speaks Merlin's lines: Piper synthesis and playback block until the line is over, never on the EDT. */
+    private PiperReadAloudService witchService;
+    /** Speaks Witch's lines: Piper synthesis and playback block until the line is over, never on the EDT. */
     private final ExecutorService speaker = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "askai-setup-wizard-voice");
         thread.setDaemon(true);
@@ -249,7 +249,7 @@ public final class AskAiSetupActions implements SetupActions {
             model.setOllamaBaseUrl(originalOllamaUrl);
             originalOllamaUrl = null;
         }
-        stopMerlin();
+        stopWitch();
     }
 
     // ------------------------------------------------------------------ models
@@ -533,7 +533,7 @@ public final class AskAiSetupActions implements SetupActions {
         }
     }
 
-    // ------------------------------------------------------------------ Merlin
+    // ------------------------------------------------------------------ Witch
 
     @Override
     public void ask(SetupDraft draft, String system, String question, final BiConsumer<String, String> done) {
@@ -556,15 +556,15 @@ public final class AskAiSetupActions implements SetupActions {
     }
 
     /**
-     * Merlin speaks only with a local model voice chosen for English (like the Enterprise wizard, which only speaks
+     * Witch speaks only with a local model voice chosen for English (like the Enterprise wizard, which only speaks
      * with a chosen TTS model); with the Windows default he stays in his speech bubbles.
      */
     @Override
-    public WizardVoice merlinVoice() {
-        if (merlinService == null) {
-            merlinService = new PiperReadAloudService(ttsSettings, piperStore);
+    public WizardVoice witchVoice() {
+        if (witchService == null) {
+            witchService = new PiperReadAloudService(ttsSettings, piperStore);
         }
-        final PiperReadAloudService service = merlinService;
+        final PiperReadAloudService service = witchService;
         return new WizardVoice() {
             @Override
             public boolean isAvailable() {
@@ -586,13 +586,13 @@ public final class AskAiSetupActions implements SetupActions {
 
     @Override
     public void voices(SetupDraft draft, Consumer<SetupVoices> done) {
-        WizardVoice voice = merlinVoice();
+        WizardVoice voice = witchVoice();
         done.accept(new SetupVoices(voice, voice, SetupVoices.DEFAULT_ASSISTANT_NAME, null));
     }
 
-    private void stopMerlin() {
-        if (merlinService != null) {
-            merlinService.stop();
+    private void stopWitch() {
+        if (witchService != null) {
+            witchService.stop();
         }
     }
 
