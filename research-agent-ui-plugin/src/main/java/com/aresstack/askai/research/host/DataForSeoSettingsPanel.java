@@ -2,6 +2,7 @@ package com.aresstack.askai.research.host;
 
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicForm;
 import com.aresstack.askai.research.search.config.DataForSeoSettingsDraft;
 import com.aresstack.askai.research.search.dataforseo.DataForSeoDevice;
 import com.aresstack.askai.research.search.dataforseo.DataForSeoOperatingSystem;
@@ -10,8 +11,6 @@ import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchConfigurat
 import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchEngine;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -21,19 +20,17 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
-import javax.swing.JSpinner;
 import javax.swing.JTabbedPane;
+import javax.swing.JSpinner;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.table.DefaultTableModel;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.util.List;
 
 /**
  * The provider-specific DataForSEO editor (its own card — the top provider combo only SELECTS it, it never
@@ -42,8 +39,9 @@ import java.util.List;
  * persists the draft on Save. The stored secret is never shown — the API key field stays empty over a
  * "Saved credential" hint, and only a freshly typed API key is (re)encrypted on save.
  *
- * <p>Four tabs: Account, SERP, Advanced, Playground. The Playground runs the SAME productive adapter off
- * the EDT against the CURRENT unsaved draft (a depth or credential can be tried before saving).</p>
+ * <p>Built on the shared {@link ProviderSettingsForm} frame (Credentials, Search options, Advanced) plus a
+ * Playground tab that runs the SAME productive adapter off the EDT against the CURRENT unsaved draft (a
+ * depth or credential can be tried before saving). The provider is enabled exactly when a key is stored.</p>
  */
 public final class DataForSeoSettingsPanel extends JPanel {
 
@@ -53,21 +51,19 @@ public final class DataForSeoSettingsPanel extends JPanel {
     private final DataForSeoPlayground playground;
     private final com.aresstack.askai.research.search.security.SecretValueService secrets;
 
-    private final JCheckBox enabled = ComicControls.checkBox("Use DataForSEO for the initial search");
-    private final JPasswordField apiKey = ComicControls.passwordField(28);
-    private final JLabel apiKeyHint = new JLabel(" ");
+    private final JPasswordField apiKey = ProviderSettingsForm.secretField();
+    private final JLabel apiKeyHint = ProviderSettingsForm.status();
     private final JTextField endpointBase = ComicControls.textField(28);
 
     private final JComboBox<DataForSeoSearchEngine> engine =
             ComicControls.<DataForSeoSearchEngine>comboBox(ENGINES);
     private final JTextField locationName = ComicControls.textField(20);
-    private final JSpinner locationCode =
-            ComicControls.spinner(new SpinnerNumberModel(2276, 1, 9_999_999, 1));
+    private final JSpinner locationCode = ProviderSettingsForm.number(2276, 1, 9_999_999, 8);
     private final JTextField languageName = ComicControls.textField(12);
     private final JTextField languageCode = ComicControls.textField(6);
     private final JComboBox<String> device = ComicControls.<String>comboBox(new String[]{"Desktop", "Mobile"});
     private final JComboBox<String> operatingSystem = ComicControls.<String>comboBox();
-    private final JSpinner depth = ComicControls.spinner(new SpinnerNumberModel(10, 1, 200, 1));
+    private final JSpinner depth = ProviderSettingsForm.number(10, 1, 200, 4);
     private final JCheckBox groupOrganic = ComicControls.checkBox(
             "Group organic results from the same domain");
     private final DefaultTableModel removeFromUrl = new DefaultTableModel(
@@ -87,100 +83,58 @@ public final class DataForSeoSettingsPanel extends JPanel {
         this.draft = draft;
         this.playground = playground;
         this.secrets = secrets;
-        JTabbedPane tabs = ComicControls.tabbedPane();
-        tabs.addTab("Account", scroll(buildAccount()));
-        tabs.addTab("SERP", scroll(buildSerp()));
-        tabs.addTab("Advanced", scroll(buildAdvanced()));
-        tabs.addTab("Playground", buildPlayground());
-        add(tabs, BorderLayout.CENTER);
-        fitToSelectedTab(tabs);
+        ProviderSettingsForm form = ProviderSettingsForm.create();
+        buildCredentials(form.credentials());
+        buildSearchOptions(form.searchOptions());
+        buildAdvanced(form.advanced());
+        form.playground(buildPlayground());
+        add(form.build(), BorderLayout.CENTER);
         loadFromDraft();
         wireListeners();
     }
 
-    /**
-     * A JTabbedPane is as tall as its tallest tab (here the Playground), which leaves empty space under the
-     * short Account/SERP/Advanced tabs. Only the selected tab contributes its preferred size.
-     */
-    private static void fitToSelectedTab(JTabbedPane tabs) {
-        Runnable fit = () -> {
-            for (int i = 0; i < tabs.getTabCount(); i++) {
-                java.awt.Component c = tabs.getComponentAt(i);
-                c.setPreferredSize(i == tabs.getSelectedIndex() ? null : new java.awt.Dimension(0, 0));
-            }
-            tabs.revalidate();
-            java.awt.Window w = javax.swing.SwingUtilities.getWindowAncestor(tabs);
-            if (w != null) {
-                w.validate();
-            }
-        };
-        tabs.addChangeListener(e -> fit.run());
-        fit.run();
+    // ------------------------------------------------------------------ sections
+
+    private void buildCredentials(ComicForm p) {
+        ProviderSettingsForm.secretRow(p, "API key:", apiKey, apiKeyHint,
+                "Base64(login:password), sent as HTTP Basic. Leave empty to keep the saved key; "
+                        + "a typed key replaces it (encrypted on save).");
     }
 
-    // ------------------------------------------------------------------ tabs
-
-    private JComponent buildAccount() {
-        JPanel p = column();
-        p.add(row("", enabled));
-        JPanel key = new JPanel(new BorderLayout(4, 0));
-        key.add(apiKey, BorderLayout.CENTER);
-        apiKeyHint.setEnabled(false);
-        key.add(apiKeyHint, BorderLayout.EAST);
-        p.add(row("API key:", key));
-        p.add(row("API endpoint:", endpointBase));
-        p.add(hint("The DataForSEO API key is Base64(login:password) and is sent as HTTP Basic. "
-                + "It is never shown again. Leave it empty to keep the saved key; "
-                + "type a new one to replace it (encrypted on save)."));
-        return p;
+    private void buildSearchOptions(ComicForm p) {
+        p.row("Search engine:", engine);
+        p.row("Location:", locationName, new JLabel("code"), locationCode);
+        locationName.setToolTipText("DataForSEO location name, e.g. Germany");
+        locationCode.setToolTipText("DataForSEO location code, e.g. 2276 for Germany");
+        p.row("Language:", languageName, new JLabel("code"), languageCode);
+        languageName.setToolTipText("DataForSEO language name, e.g. German");
+        languageCode.setToolTipText("DataForSEO language code, e.g. de");
+        p.row("Device:", device);
+        p.row("Operating system:", operatingSystem);
+        p.row("Depth:", depth);
+        depth.setToolTipText("Results per request, 1 to 200. DataForSEO bills in blocks of 10; "
+                + "a depth above 10 may cost more.");
     }
 
-    private JComponent buildSerp() {
-        JPanel p = column();
-        p.add(row("Search engine:", engine));
-        p.add(row("Search type:", readOnly("Organic Search")));
-        p.add(row("Execution mode:", readOnly("Live")));
-        p.add(row("Result format:", readOnly("Advanced")));
-        JPanel loc = new JPanel(new BorderLayout(4, 0));
-        loc.add(locationName, BorderLayout.CENTER);
-        loc.add(labeled("code", locationCode), BorderLayout.EAST);
-        p.add(row("Location:", loc));
-        JPanel lang = new JPanel(new BorderLayout(4, 0));
-        lang.add(languageName, BorderLayout.CENTER);
-        lang.add(labeled("code", languageCode), BorderLayout.EAST);
-        p.add(row("Language:", lang));
-        p.add(row("Device:", device));
-        p.add(row("Operating system:", operatingSystem));
-        p.add(row("Depth:", depth));
-        p.add(hint("DataForSEO bills organic SERPs in blocks of up to 10; a depth above 10 may increase "
-                + "the request cost. Default 10, maximum 200."));
-        p.add(row("", groupOrganic));
-        p.add(hint("AskAI default: Off, so related pages from the same domain stay independent URL "
-                + "candidates for the discovery pipeline."));
-        p.add(row("Remove URL parameters:", removeFromUrlEditor()));
-        return p;
-    }
-
-    private JComponent buildAdvanced() {
-        JPanel p = column();
-        p.add(hint("Additional DataForSEO charges may apply for some options here."));
-        p.add(hint("The full advanced grid (crawl targets, People-Also-Ask depth, rectangles) is not yet "
-                + "editable in this slice — the underlying settings are preserved untouched."));
-        return p;
+    private void buildAdvanced(ComicForm p) {
+        p.row("API endpoint:", endpointBase);
+        endpointBase.setToolTipText("Leave empty for the default DataForSEO endpoint.");
+        p.row("Request:", readOnly("Organic Search · Live · Advanced"));
+        p.check(groupOrganic);
+        groupOrganic.setToolTipText("Off (default): pages from the same domain stay independent URL candidates.");
+        removeFromUrlRow(p);
+        p.note("Further DataForSEO options (crawl targets, People-Also-Ask depth) are kept from the file "
+                + "as they are; some options may incur additional charges.");
     }
 
     private JComponent buildPlayground() {
         JPanel p = new JPanel(new BorderLayout(6, 6));
         p.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        JPanel top = new JPanel();
-        top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
-        top.add(row("Search term:", playgroundTerm));
-        JPanel actions = new JPanel(new BorderLayout(6, 0));
-        actions.add(runPlayground, BorderLayout.WEST);
-        actions.add(playgroundStatus, BorderLayout.CENTER);
-        top.add(actions);
-        top.add(hint("This request uses the CURRENT unsaved settings and may incur DataForSEO charges. "
-                + "Endpoint: " + playground.endpoint(draft.configuration())));
+        ComicForm top = new ComicForm();
+        top.row("Search term:", playgroundTerm, runPlayground);
+        top.row("", playgroundStatus);
+        top.note("Uses the CURRENT unsaved settings and may incur DataForSEO charges. "
+                + "Endpoint: " + playground.endpoint(draft.configuration()));
         p.add(top, BorderLayout.NORTH);
 
         JTable results = new JTable(playgroundResults);
@@ -191,18 +145,16 @@ public final class DataForSeoSettingsPanel extends JPanel {
         detail.addTab("Organic results", new JScrollPane(results));
         detail.addTab("Effective request", new JScrollPane(requestPreview));
         detail.addTab("Raw response", new JScrollPane(rawResponse));
-        detail.setPreferredSize(new Dimension(560, 260));
+        detail.setPreferredSize(new Dimension(ProviderSettingsForm.DIALOG_WIDTH - 16, 260));
         p.add(detail, BorderLayout.CENTER);
         return p;
     }
 
-    private JComponent removeFromUrlEditor() {
-        JPanel p = new JPanel(new BorderLayout(4, 4));
+    /** The parameter table with its Add/Remove buttons on the same line, right beside it. */
+    private void removeFromUrlRow(ComicForm p) {
         final JTable table = new JTable(removeFromUrl);
         table.setPreferredScrollableViewportSize(new Dimension(240, 60));
         JScrollPane scroll = new JScrollPane(table);
-        p.add(scroll, BorderLayout.CENTER);
-        JPanel buttons = new JPanel(new BorderLayout(4, 0));
         JButton add = new ComicButton("Add");
         JButton remove = new ComicButton("Remove");
         add.addActionListener(new ActionListener() {
@@ -220,19 +172,16 @@ public final class DataForSeoSettingsPanel extends JPanel {
                 }
             }
         });
-        buttons.add(add, BorderLayout.WEST);
-        buttons.add(remove, BorderLayout.EAST);
-        p.add(buttons, BorderLayout.SOUTH);
-        return p;
+        p.row("Remove URL parameters:", scroll, add, remove);
+        scroll.setToolTipText("Query parameters stripped from result URLs (max. 10)");
     }
 
     // ------------------------------------------------------------------ draft <-> ui
 
     private void loadFromDraft() {
         DataForSeoSearchConfiguration c = draft.configuration();
-        enabled.setSelected(c.isEnabled());
         apiKey.setText("");
-        apiKeyHint.setText(draft.hasStoredApiKey() ? "Saved credential" : "No credential stored");
+        apiKeyHint.setText(draft.hasStoredApiKey() ? "A key is stored." : "No key stored.");
         endpointBase.setText(nullToEmpty(c.getEndpointBase()));
         engine.setSelectedItem(c.getSearchEngine());
         locationName.setText(nullToEmpty(c.getLocationName()));
@@ -254,8 +203,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
     /** Writes the current UI into the draft's config — called before save and before a playground run. */
     public void applyToDraft() {
         DataForSeoSearchConfiguration c = draft.configuration();
-        c.setEnabled(enabled.isSelected());
         char[] typed = apiKey.getPassword();
+        c.setEnabled(ProviderSettingsForm.enabled(draft.hasStoredApiKey(), typed));
         draft.setNewApiKey(typed != null && typed.length > 0 ? typed : null);
         c.setEndpointBase(emptyToNull(endpointBase.getText().trim()));
         c.setSearchEngine((DataForSeoSearchEngine) engine.getSelectedItem());
@@ -408,49 +357,10 @@ public final class DataForSeoSettingsPanel extends JPanel {
         }
     }
 
-    private static JPanel column() {
-        JPanel p = new JPanel();
-        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
-        p.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        return p;
-    }
-
-    private static JComponent scroll(JComponent content) {
-        JScrollPane scroll = new JScrollPane(content);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.getVerticalScrollBar().setUnitIncrement(14);
-        return scroll;
-    }
-
-    private static JPanel row(String label, JComponent field) {
-        JPanel p = new JPanel(new BorderLayout(8, 0));
-        p.setBorder(BorderFactory.createEmptyBorder(3, 0, 3, 0));
-        JLabel l = new JLabel(label);
-        l.setPreferredSize(new Dimension(150, 22));
-        p.add(l, BorderLayout.WEST);
-        p.add(field, BorderLayout.CENTER);
-        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, field.getPreferredSize().height + 6));
-        return p;
-    }
-
-    private static JComponent labeled(String label, JComponent field) {
-        JPanel p = new JPanel(new BorderLayout(3, 0));
-        p.add(new JLabel(label), BorderLayout.WEST);
-        p.add(field, BorderLayout.CENTER);
-        return p;
-    }
-
     private static JComponent readOnly(String value) {
         JTextField field = ComicControls.textField(value);
         field.setEditable(false);
         return field;
-    }
-
-    private static JComponent hint(String text) {
-        JLabel l = new JLabel("<html><body style='width:420px'>" + text + "</body></html>");
-        l.setEnabled(false);
-        l.setBorder(BorderFactory.createEmptyBorder(2, 0, 6, 0));
-        return l;
     }
 
     private static String nullToEmpty(String value) {
