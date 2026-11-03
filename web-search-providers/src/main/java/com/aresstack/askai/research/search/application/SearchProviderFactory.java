@@ -19,7 +19,7 @@ import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchProvider;
 import com.aresstack.askai.research.search.dataforseo.DataForSeoSearchResponseMapper;
 import com.aresstack.askai.research.search.http.AsyncHttpClientFactory;
 import com.aresstack.askai.research.search.http.AsyncJsonHttpClient;
-import com.aresstack.askai.research.search.http.EncryptedBasicAuthentication;
+import com.aresstack.askai.research.search.http.EncryptedBasicApiKeyAuthentication;
 import com.aresstack.askai.research.search.http.EncryptedBearerAuthentication;
 import com.aresstack.askai.research.search.http.EncryptedHeaderAuthentication;
 import com.aresstack.askai.research.search.security.SecretValueService;
@@ -156,9 +156,8 @@ public final class SearchProviderFactory {
         AsyncJsonHttpClient client = new AsyncJsonHttpClient(
                 httpClientFactory.create(
                         configuration.getTransport()),
-                new EncryptedBasicAuthentication(
-                        configuration.getUsername(),
-                        configuration.getPassword(),
+                new EncryptedBasicApiKeyAuthentication(
+                        configuration.getApiKey(),
                         secretValueService),
                 configuration.getTransport()
                         .getRequestTimeoutMillis());

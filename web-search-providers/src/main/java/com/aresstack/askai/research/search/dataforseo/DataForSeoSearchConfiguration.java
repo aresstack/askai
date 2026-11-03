@@ -13,8 +13,8 @@ public final class DataForSeoSearchConfiguration {
     private boolean enabled;
     private String endpointBase =
             "https://api.dataforseo.com";
-    private String username;
-    private EncryptedSecret password;
+    /** The DataForSEO API key, i.e. Base64(login:password) exactly as sent in the Basic header. */
+    private EncryptedSecret apiKey;
     private DataForSeoSearchEngine searchEngine =
             DataForSeoSearchEngine.GOOGLE;
     private DataForSeoResultFormat resultFormat =
@@ -95,24 +95,14 @@ public final class DataForSeoSearchConfiguration {
         this.endpointBase = endpointBase;
     }
 
-    public String getUsername() {
-        return username;
+    public EncryptedSecret getApiKey() {
+        return apiKey;
     }
 
-    public void setUsername(
-            String username) {
+    public void setApiKey(
+            EncryptedSecret apiKey) {
 
-        this.username = username;
-    }
-
-    public EncryptedSecret getPassword() {
-        return password;
-    }
-
-    public void setPassword(
-            EncryptedSecret password) {
-
-        this.password = password;
+        this.apiKey = apiKey;
     }
 
     public DataForSeoSearchEngine getSearchEngine() {

@@ -51,13 +51,10 @@ public final class DataForSeoSearchConfigurationValidator {
         }
 
         if (configuration.isEnabled()) {
-            ConfigurationValidation.requireText(
-                    configuration.getUsername(),
-                    "username");
-            if (configuration.getPassword() == null
-                    || !configuration.getPassword().isPresent()) {
+            if (configuration.getApiKey() == null
+                    || !configuration.getApiKey().isPresent()) {
                 throw new IllegalArgumentException(
-                        "password must be configured when DataForSEO is enabled");
+                        "apiKey must be configured when DataForSEO is enabled");
             }
         }
 
