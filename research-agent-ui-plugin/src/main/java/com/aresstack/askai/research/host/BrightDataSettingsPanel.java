@@ -36,10 +36,10 @@ public final class BrightDataSettingsPanel extends JPanel {
         this.configurations = configurations;
         JPanel p = ProviderForm.column();
         p.add(row("", enabled));
-        JPanel key = new JPanel(new BorderLayout(4, 0));
+        JPanel key = new JPanel(new BorderLayout(8, 0));
         key.add(apiKey, BorderLayout.CENTER);
         apiKeyHint.setEnabled(false);
-        key.add(apiKeyHint, BorderLayout.SOUTH);
+        key.add(apiKeyHint, BorderLayout.EAST); // status right beside the field
         p.add(row("API token:", key));
         p.add(row("Zone:", zone));
         p.add(hint("Zone (required): the name of the SERP API zone in your own Bright Data account; AskAI has no "
