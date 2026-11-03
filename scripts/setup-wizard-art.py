@@ -15,7 +15,21 @@ TARGET = os.path.join(ROOT, "askai-app", "src", "main", "resources", "com", "are
 WIDTH, HEIGHT, RADIUS, SUPERSAMPLE = 480, 640, 36, 4
 
 
+CUTOUT_HEIGHT = 900
+
+
+def derive_cutout(path):
+    """Merlin cut-outs (transparent background): only scaled down, no corners - they stand free in the step."""
+    image = Image.open(path).convert("RGBA")
+    width = round(image.width * CUTOUT_HEIGHT / image.height)
+    image.resize((width, CUTOUT_HEIGHT), Image.LANCZOS).save(os.path.join(TARGET, os.path.basename(path)),
+                                                             optimize=True)
+
+
 def derive(path):
+    if os.path.basename(path).startswith("merlin-"):
+        derive_cutout(path)
+        return
     image = Image.open(path).convert("RGBA").resize((WIDTH, HEIGHT), Image.LANCZOS)
     mask = Image.new("L", (WIDTH * SUPERSAMPLE, HEIGHT * SUPERSAMPLE), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, WIDTH * SUPERSAMPLE - 1, HEIGHT * SUPERSAMPLE - 1),

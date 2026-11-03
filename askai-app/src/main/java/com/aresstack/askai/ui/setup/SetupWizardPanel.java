@@ -55,28 +55,34 @@ public final class SetupWizardPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
 
-    static final String[] STEP_NAMES = {"Network", "AI runtime", "Chat model", "Knowledge", "Check", "Voice"};
+    static final String[] STEP_NAMES = {"Network", "Voice", "AI runtime", "Chat model", "Knowledge", "Check"};
     static final int STEP_NETWORK = 0;
-    static final int STEP_RUNTIME = 1;
-    static final int STEP_CHAT = 2;
-    static final int STEP_KNOWLEDGE = 3;
-    static final int STEP_CHECK = 4;
-    /** Optional; the basic setup is saved by the final check before. */
-    static final int STEP_VOICE = 5;
+    /** Right after the network: the voices must be downloaded first, then Merlin can speak in every later step. */
+    static final int STEP_VOICE = 1;
+    static final int STEP_RUNTIME = 2;
+    static final int STEP_CHAT = 3;
+    static final int STEP_KNOWLEDGE = 4;
+    /** The last step: saves and checks everything; “Finish” ends the setup here. */
+    static final int STEP_CHECK = 5;
 
-    /** Merlin's picture per step (copies of the originals in docs/images/setup-wizard). */
-    private static final String[] STEP_MASCOTS = {"wizard/wizard-2-security.png",
-            "wizard/wizard-3-connecting-runtime.png", "wizard/wizard-4-features.png",
-            "wizard/wizard-5-knowledge-research.png", "wizard/wizard-6-setup-complete.png",
-            "wizard/wizard-7-audio-voice.png"};
-    /** The runtime step shows this picture until a runtime answers. */
-    static final String RUNTIME_INSTALL_MASCOT = SetupWizardMascot.RESOURCE;
+    /**
+     * Merlin's picture per step: cut-outs with a transparent background (copies of the originals in
+     * docs/images/setup-wizard).
+     */
+    private static final String[] STEP_MASCOTS = {"wizard/merlin-1-network.png", "wizard/merlin-6-voice.png",
+            "wizard/merlin-2-ai-runtime.png", "wizard/merlin-3-chat-model.png", "wizard/merlin-4-knowledge.png",
+            "wizard/merlin-5-check.png"};
+    /** The runtime step shows this picture until a runtime answers (the same cut-out as once it answers). */
+    static final String RUNTIME_INSTALL_MASCOT = "wizard/merlin-2-ai-runtime.png";
     /** Per step: Merlin's place in the free space (alternating, so it feels alive). */
     private static final SetupWizardMascot.Placement[] MASCOT_PLACEMENTS = {SetupWizardMascot.Placement.RIGHT,
             SetupWizardMascot.Placement.LEFT, SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.LEFT,
-            SetupWizardMascot.Placement.CENTER, SetupWizardMascot.Placement.RIGHT};
-    /** Per step: Merlin's height in logical pixels (matching the usual free space). */
-    private static final int[] MASCOT_HEIGHTS = {200, 220, 240, 120, 150, 220};
+            SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.CENTER};
+    /**
+     * Per step: Merlin's largest height in logical pixels. Larger than any free space on purpose: Merlin grows to
+     * fill the free space of the step instead of standing small in a corner.
+     */
+    private static final int[] MASCOT_HEIGHTS = {900, 900, 900, 900, 900, 900};
 
     /** AskAI proxy modes the step offers directly; every other mode is kept and edited in the network settings. */
     static final String PROXY_NONE = "DISABLED";
@@ -94,8 +100,10 @@ public final class SetupWizardPanel extends JPanel {
 
     private static final int READING_MILLIS_PER_CHARACTER = 60;
     private static final int MIN_READING_MILLIS = 1800;
+    /** Label of the check {@link SetupActions#finish} reports when the settings could not be written. */
+    static final String SAVING_CHECK = "Saving the settings";
     private static final String SKIP_STEP_HINT = "Go to the next step without a check; your entries stay";
-    private static final String SKIP_VOICE_HINT = "Finish without changing the voices; the setup is already saved";
+    private static final String SKIP_VOICE_HINT = "Finish the setup now; your entries are saved";
     static final String VOICES_SKIPPED = "Ready. The voices stay as they are; change them later in the chat "
             + "settings under Audio & Dictation.";
 
@@ -152,7 +160,6 @@ public final class SetupWizardPanel extends JPanel {
     private final ComicButton runtimeTest = new ComicButton("Test connection", ComicButton.Accent.ACTION);
     private final ComicButton runtimeDownload = new ComicButton("Download Ollama…");
     private final JLabel ollamaStatus = statusLabel();
-    private final JLabel localRuntimeStatus = statusLabel();
     /** The runtime step's two pictures: the install scene until a runtime answers, then the connecting one. */
     private SetupWizardMascot.Art runtimeInstallArt;
     private SetupWizardMascot.Art runtimeConnectedArt;
@@ -191,7 +198,7 @@ public final class SetupWizardPanel extends JPanel {
     // Step 6: voice (optional)
     private final JComboBox<String> voiceGerman = ComicControls.comboBox();
     private final JComboBox<String> voiceEnglish = ComicControls.comboBox();
-    private final ComicButton voiceInstall = new ComicButton("Install selected voices", ComicButton.Accent.ACTION);
+    private final ComicButton voiceInstall = new ComicButton("Download selected voices", ComicButton.Accent.ACTION);
     private final ComicButton voiceRetry = new ComicButton("Reload voices");
     private final JLabel voiceStatus = statusLabel();
     /** Label in the voice choices → voice id. */
@@ -294,14 +301,13 @@ public final class SetupWizardPanel extends JPanel {
     private JPanel runtimeStep() {
         Rows rows = new Rows("AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
-                + "runtime. One of them must answer; the other is optional.");
+                + "runtime. One of them must answer; the final check shows which one does.");
         rows.field("Ollama address", ollamaUrl);
         JPanel actions = transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
         actions.add(runtimeTest);
         actions.add(runtimeDownload);
         rows.field("", actions);
         rows.field("Ollama", ollamaStatus);
-        rows.field("Local runtime", localRuntimeStatus);
         return rows.panel();
     }
 
@@ -631,15 +637,10 @@ public final class SetupWizardPanel extends JPanel {
 
     // ------------------------------------------------------------------ navigation
 
-    /** “Skip”: on to the next step; in the last step finish without changing the voices. */
+    /** “Skip”: on to the next step; in the last step finish the setup right away. */
     private void skip() {
-        if (step == STEP_VOICE) {
-            if (!done[STEP_CHECK]) {
-                return;
-            }
-            voiceStatus.setText(VOICES_SKIPPED);
-            close();
-            complete();
+        if (step == STEP_CHECK) {
+            finish();
         } else {
             jumpTo(step + 1);
         }
@@ -650,6 +651,9 @@ public final class SetupWizardPanel extends JPanel {
             return;
         }
         draft = collect();
+        if (step == STEP_VOICE && index != STEP_VOICE) {
+            saveVoicesOnLeaving();
+        }
         step = index;
         cards.show(deck, STEP_NAMES[index]);
         for (SetupWizardMascot mascot : mascots) {
@@ -680,16 +684,16 @@ public final class SetupWizardPanel extends JPanel {
         done[STEP_KNOWLEDGE] = !text(embeddingModel).isEmpty() && positive(embeddingDimension.getText());
         done[STEP_VOICE] = voicesReady();
         trail.show(step, done);
-        boolean voice = step == STEP_VOICE;
+        boolean voice = step == STEP_CHECK; // the last step: “Finish” instead of “Next”
         backButton.setEnabled(step > 0 && !busy && !installing());
         nextButton.setVisible(!voice);
         finishButton.setVisible(voice);
-        nextButton.setEnabled(!voice && done[step] && !busy && !installing());
-        finishButton.setEnabled(voice && done[STEP_CHECK] && done[STEP_VOICE] && !busy && !installing());
+        // Every step can be passed over: a missing or failed check is only a hint, never a lock.
+        nextButton.setEnabled(!voice && !busy && !installing());
+        finishButton.setEnabled(voice && !busy && !installing());
         cancelButton.setVisible(!voice);
-        // “Skip” in every step: on without a check; in the last step finish without voices, which needs the
-        // passed final check first.
-        skipButton.setEnabled(voice ? done[STEP_CHECK] && !busy && !installing() : !busy && !installing());
+        // “Skip” in every step: on without a check; in the last step finish without changing the voices.
+        skipButton.setEnabled(!busy && !installing());
         skipButton.setToolTipText(voice ? SKIP_VOICE_HINT : SKIP_STEP_HINT);
         trail.setNavigable(!busy && !installing() && !handingOff);
         boolean manual = PROXY_MANUAL.equals(selectedProxyMode());
@@ -826,7 +830,6 @@ public final class SetupWizardPanel extends JPanel {
         runtimeChecking = true;
         done[STEP_RUNTIME] = false;
         ollamaStatus.setText("Asking Ollama …");
-        localRuntimeStatus.setText(" ");
         updateButtons();
         setup.checkRuntime(collect(), status -> {
             if (closed || generation != runtimeGeneration) {
@@ -837,8 +840,7 @@ public final class SetupWizardPanel extends JPanel {
                     ? "Connected (version " + status.ollamaVersion() + ")"
                     : "Not reachable" + (status.ollamaProblem().isEmpty() ? "" : ": "
                     + shorten(status.ollamaProblem())));
-            state(localRuntimeStatus, status.localRuntime(), status.localRuntime()
-                    ? "Ready (local models installed)" : "No local models installed (optional)");
+            // AskAI's local runtime has nothing to set up here; the final check reports it.
             done[STEP_RUNTIME] = status.reachable();
             mascotOf(STEP_RUNTIME).setArt(status.reachable() ? runtimeConnectedArt : runtimeInstallArt);
             if (!status.reachable()) {
@@ -1157,7 +1159,66 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private void finish() {
-        if (!done[STEP_CHECK] || !done[STEP_VOICE]) {
+        if (busy || installing() || handingOff) {
+            return;
+        }
+        if (!done[STEP_VOICE]) { // no voice ready: finish anyway, the voices stay as they are
+            saveDraftThen(() -> {
+                close();
+                complete();
+            });
+            return;
+        }
+        saveDraftThen(this::saveVoicesAndClose);
+    }
+
+    /**
+     * Makes sure the entries are in AskAI's settings before the wizard ends: the final check saves them, but a
+     * user who jumped past it (or changed something afterwards) has not been saved yet. A failed check never
+     * blocks; the entries are written all the same.
+     */
+    private void saveDraftThen(Runnable then) {
+        SetupDraft current = collect();
+        if (done[STEP_CHECK] && checkedKey(current).equals(checkedDraft)) {
+            then.run();
+            return;
+        }
+        setBusy(true);
+        setup.finish(current, checks -> {
+            if (closed) {
+                return;
+            }
+            setBusy(false);
+            for (SetupCheck check : checks == null ? Collections.<SetupCheck>emptyList() : checks) {
+                if (SAVING_CHECK.equals(check.label()) && !check.isOk()) {
+                    // A failed readiness check never blocks, but unsaved entries must not be lost silently.
+                    fail(step, "Your entries could not be saved: " + check.detail());
+                    return;
+                }
+            }
+            then.run();
+        });
+    }
+
+    /**
+     * Leaving the voice step stores the chosen, installed voices right away, so Merlin speaks with them from the
+     * next step on. Voices that are not installed yet are left out silently; the step stays skippable.
+     */
+    private void saveVoicesOnLeaving() {
+        if (!voicesReady() || installing()) {
+            return;
+        }
+        setup.saveVoices(collect(), error -> {
+            if (!closed && error != null) {
+                fail(STEP_VOICE, "The voices could not be saved: " + error);
+            }
+        });
+    }
+
+    private void saveVoicesAndClose() {
+        if (!voicesReady()) { // the choice changed while the entries were saved: finish without the voices
+            close();
+            complete();
             return;
         }
         setBusy(true);
@@ -1203,7 +1264,6 @@ public final class SetupWizardPanel extends JPanel {
         }
         networkStatus.setText(" ");
         ollamaStatus.setText(" ");
-        localRuntimeStatus.setText(" ");
     }
 
     private SetupDraft collect() {
