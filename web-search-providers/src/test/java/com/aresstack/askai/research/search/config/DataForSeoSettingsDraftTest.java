@@ -18,7 +18,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * The DataForSEO edit draft: it loads once, edits the working copy directly (no reload on provider
- * switch), preserves the stored secret unless a new password is typed, and persists through the real
+ * switch), preserves the stored secret unless a new API key is typed, and persists through the real
  * provider service — with the corrected depth default (10, max 200).
  */
 public class DataForSeoSettingsDraftTest {
@@ -45,42 +45,39 @@ public class DataForSeoSettingsDraftTest {
     public void editsSurviveWithoutReloadAndPersistOnSave() throws Exception {
         ProviderConfigurationService service = service();
         DataForSeoSettingsDraft draft = DataForSeoSettingsDraft.load(service);
-        draft.configuration().setUsername("me@example.com");
         draft.configuration().setDepth(30);
-        draft.setNewPassword("s3cret".toCharArray());
+        draft.setNewApiKey("s3cret".toCharArray());
         draft.save();
 
         DataForSeoSearchConfiguration reloaded = service.loadOrCreateDataForSeo();
-        assertEquals("me@example.com", reloaded.getUsername());
         assertEquals(30, reloaded.getDepth());
-        assertNotNull("the typed password was encrypted and stored", reloaded.getPassword());
+        assertNotNull("the typed API key was encrypted and stored", reloaded.getApiKey());
     }
 
     @Test
-    public void aStoredSecretIsPreservedWhenNoNewPasswordIsTyped() throws Exception {
+    public void aStoredSecretIsPreservedWhenNoNewApiKeyIsTyped() throws Exception {
         ProviderConfigurationService service = service();
-        // First save WITH a password.
+        // First save WITH an API key.
         DataForSeoSettingsDraft first = DataForSeoSettingsDraft.load(service);
-        first.configuration().setUsername("me@example.com");
-        first.setNewPassword("original".toCharArray());
+        first.setNewApiKey("original".toCharArray());
         first.save();
 
         // Re-open: the draft knows a credential exists but never sees the secret; change only the depth.
         DataForSeoSettingsDraft second = DataForSeoSettingsDraft.load(service);
-        assertTrue("the UI would show 'Saved credential'", second.hasStoredPassword());
-        assertFalse(second.hasPendingPassword());
+        assertTrue("the UI would show 'Saved credential'", second.hasStoredApiKey());
+        assertFalse(second.hasPendingApiKey());
         second.configuration().setDepth(50);
         second.save();
 
         DataForSeoSearchConfiguration reloaded = service.loadOrCreateDataForSeo();
-        assertNotNull("the original secret is still there", reloaded.getPassword());
+        assertNotNull("the original secret is still there", reloaded.getApiKey());
         assertEquals(50, reloaded.getDepth());
     }
 
     @Test
-    public void aFreshDraftHasNoStoredPassword() throws Exception {
+    public void aFreshDraftHasNoStoredApiKey() throws Exception {
         DataForSeoSettingsDraft draft = DataForSeoSettingsDraft.load(service());
-        assertFalse(draft.hasStoredPassword());
-        assertNull(draft.configuration().getPassword());
+        assertFalse(draft.hasStoredApiKey());
+        assertNull(draft.configuration().getApiKey());
     }
 }

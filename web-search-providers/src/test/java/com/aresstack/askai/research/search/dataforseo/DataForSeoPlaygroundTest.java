@@ -17,7 +17,6 @@ public class DataForSeoPlaygroundTest {
     @Test
     public void theRequestPreviewShowsTheEffectiveParametersAndNeverACredential() {
         DataForSeoSearchConfiguration config = new DataForSeoSearchConfiguration();
-        config.setUsername("me@example.com");
         config.setDepth(30);
         String preview = playground.requestPreview(config, "wearables");
 
