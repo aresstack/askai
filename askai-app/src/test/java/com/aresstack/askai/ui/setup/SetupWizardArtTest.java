@@ -13,7 +13,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Merlin's pictures: every step finds its copy on the class path, and every copy has its unedited original in
+ * Witch's pictures: every step finds its copy on the class path, and every copy has its unedited original in
  * {@code docs/images/setup-wizard/originals} (the originals are kept, only copies are scaled).
  */
 public class SetupWizardArtTest {
@@ -26,6 +26,7 @@ public class SetupWizardArtTest {
             assertTrue("the step pictures are cut-outs with a transparent background", art.isCutOut());
         }
         assertNotNull(SetupWizardMascot.Art.load(SetupWizardPanel.RUNTIME_INSTALL_MASCOT));
+        assertNotNull(SetupWizardMascot.Art.load(SetupWizardPanel.CHECK_SUCCESS_MASCOT));
         assertNotNull(SetupWizardMascot.Art.load());
     }
 
@@ -36,8 +37,14 @@ public class SetupWizardArtTest {
         File originals = new File(root, "docs/images/setup-wizard/originals");
         File[] files = copies.listFiles();
         assertNotNull(files);
-        assertEquals(13, files.length);
+        assertEquals(20, files.length);
         for (File copy : files) {
+            if (copy.getName().startsWith("v3-")) { // third set: originals keep their names in v3/wizard
+                File original = new File(originals, "v3/wizard/" + copy.getName().substring(3));
+                assertTrue("original of " + copy.getName(), original.isFile());
+                assertTrue(ImageIO.read(copy).getHeight() <= 900);
+                continue;
+            }
             File original = new File(originals, copy.getName());
             assertTrue("original of " + copy.getName(), original.isFile());
             BufferedImage image = ImageIO.read(original);
