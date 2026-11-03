@@ -322,6 +322,8 @@ public class SetupWizardPanelTest {
         wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
         assertTrue(wizard.isDone(SetupWizardPanel.STEP_CHECK));
         assertEquals(SetupWizardPanel.STEP_CHECK, wizard.step());
+        assertEquals("the success picture once every check passed", SetupWizardPanel.CHECK_SUCCESS_MASCOT,
+                wizard.mascotOf(SetupWizardPanel.STEP_CHECK).art().resource());
     }
 
     private static SetupWizardPanel wizard(Fake fake) {

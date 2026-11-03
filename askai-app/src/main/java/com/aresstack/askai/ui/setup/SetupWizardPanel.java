@@ -66,14 +66,16 @@ public final class SetupWizardPanel extends JPanel {
     static final int STEP_CHECK = 5;
 
     /**
-     * Merlin's picture per step: cut-outs with a transparent background (copies of the originals in
-     * docs/images/setup-wizard).
+     * Merlin's picture per step: cut-outs with a transparent background (copies of the third set in
+     * docs/images/setup-wizard/originals/v3).
      */
-    private static final String[] STEP_MASCOTS = {"wizard/merlin-1-network.png", "wizard/merlin-6-voice.png",
-            "wizard/merlin-2-ai-runtime.png", "wizard/merlin-3-chat-model.png", "wizard/merlin-4-knowledge.png",
-            "wizard/merlin-5-check.png"};
+    private static final String[] STEP_MASCOTS = {"wizard/v3-01-network-security.png", "wizard/v3-06-voice.png",
+            "wizard/v3-02-ai-runtime.png", "wizard/v3-03-chat-model.png", "wizard/v3-04-knowledge.png",
+            "wizard/v3-05-check.png"};
     /** The runtime step shows this picture until a runtime answers (the same cut-out as once it answers). */
-    static final String RUNTIME_INSTALL_MASCOT = "wizard/merlin-2-ai-runtime.png";
+    static final String RUNTIME_INSTALL_MASCOT = "wizard/v3-02-ai-runtime.png";
+    /** The check step shows this picture once every check passed. */
+    static final String CHECK_SUCCESS_MASCOT = "wizard/v3-07-success.png";
     /** Per step: Merlin's place in the free space (alternating, so it feels alive). */
     private static final SetupWizardMascot.Placement[] MASCOT_PLACEMENTS = {SetupWizardMascot.Placement.RIGHT,
             SetupWizardMascot.Placement.LEFT, SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.LEFT,
@@ -163,6 +165,8 @@ public final class SetupWizardPanel extends JPanel {
     /** The runtime step's two pictures: the install scene until a runtime answers, then the connecting one. */
     private SetupWizardMascot.Art runtimeInstallArt;
     private SetupWizardMascot.Art runtimeConnectedArt;
+    private SetupWizardMascot.Art checkPendingArt;
+    private SetupWizardMascot.Art checkSuccessArt;
     private boolean runtimeChecking;
     private int runtimeGeneration;
 
@@ -242,6 +246,8 @@ public final class SetupWizardPanel extends JPanel {
         deck.add(checkStep(), STEP_NAMES[STEP_CHECK]);
         deck.add(voiceStep(), STEP_NAMES[STEP_VOICE]);
         runtimeConnectedArt = mascotOf(STEP_RUNTIME).art();
+        checkPendingArt = mascotOf(STEP_CHECK).art();
+        checkSuccessArt = SetupWizardMascot.Art.load(CHECK_SUCCESS_MASCOT);
         runtimeInstallArt = SetupWizardMascot.Art.load(RUNTIME_INSTALL_MASCOT);
         mascotOf(STEP_RUNTIME).setArt(runtimeInstallArt);
 
@@ -1000,6 +1006,7 @@ public final class SetupWizardPanel extends JPanel {
                 }
             }
             done[STEP_CHECK] = allOk;
+            mascotOf(STEP_CHECK).setArt(allOk && checkSuccessArt != null ? checkSuccessArt : checkPendingArt);
             checkedDraft = allOk ? checkedKey(draft) : "";
             checkStatus.setText(allOk ? "Everything is ready." : "Not ready yet.");
             if (!allOk) {

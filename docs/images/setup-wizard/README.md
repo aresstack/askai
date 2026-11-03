@@ -34,3 +34,10 @@ Regenerating the copies after an original changed (Python 3 with Pillow):
 ```bash
 python3 scripts/setup-wizard-art.py
 ```
+
+## Third set (v3) – used
+
+`originals/v3` holds Angelo's third set unedited (README, preview, sprite sheet, `wizard/01…06`, plus
+`wizard/07-success.png`). The wizard uses the copies `v3-*.png`: Network 01, Voice 06, AI runtime 02, Chat model 03,
+Knowledge 04, Check 05 – and 07 on the Check page once every check passed. The `merlin-*` and `wizard-*` sets stay
+as alternatives.
