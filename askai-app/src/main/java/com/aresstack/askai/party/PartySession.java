@@ -29,6 +29,11 @@ import java.util.UUID;
  * this peer wins the deterministic election, and exposes the composer-facing
  * {@link GroupChatSubmissionTarget}. All callbacks into {@link Ui} happen on transport threads;
  * the UI layer dispatches to the EDT.</p>
+ *
+ * <p>Locking rule (P0 deadlock fix): the session monitor guards only the session's own fields.
+ * No transport method is ever called while holding it, so the transport (which delivers its
+ * events from its own delivery queue, never under its lock) and the session can never wait on
+ * each other.</p>
  */
 public final class PartySession implements GroupChatSubmissionTarget {
 
@@ -100,7 +105,7 @@ public final class PartySession implements GroupChatSubmissionTarget {
 
     private Participant self;
     private long nextSequence = 1;
-    private boolean joined;
+    private volatile boolean joined;
 
     public PartySession(GroupChatTransport transport, GroupChatRoom room, Participant self,
                         java.util.function.Supplier<String> botPolicy, BotResponder botResponder, Ui ui) {
@@ -118,14 +123,20 @@ public final class PartySession implements GroupChatSubmissionTarget {
      * Join the room and replay the locally stored history.  Blocking (network discovery); call
      * off the EDT.
      */
-    public synchronized void join() {
-        transport.join(room, self, new SessionListener());
+    public void join() {
+        Participant joiningAs;
+        synchronized (this) {
+            joiningAs = self;
+        }
+        transport.join(room, joiningAs, new SessionListener());
         joined = true;
         List<GroupChatMessage> history = transport.localHistory();
         for (GroupChatMessage message : history) {
-            if (self.getParticipantId().equals(message.getSenderParticipantId())
-                    && message.getSenderSequence() >= nextSequence) {
-                nextSequence = message.getSenderSequence() + 1;
+            synchronized (this) {
+                if (self.getParticipantId().equals(message.getSenderParticipantId())
+                        && message.getSenderSequence() >= nextSequence) {
+                    nextSequence = message.getSenderSequence() + 1;
+                }
             }
             handleIncoming(message, true);
         }
@@ -133,14 +144,18 @@ public final class PartySession implements GroupChatSubmissionTarget {
     }
 
     /** Leave the room and release transport resources; idempotent. */
-    public synchronized void leave() {
-        if (joined) {
+    public void leave() {
+        boolean wasJoined;
+        synchronized (this) {
+            wasJoined = joined;
             joined = false;
+        }
+        if (wasJoined) {
             transport.leave();
         }
     }
 
-    public synchronized boolean isConnected() {
+    public boolean isConnected() {
         return joined && transport.isConnected();
     }
 
@@ -150,15 +165,19 @@ public final class PartySession implements GroupChatSubmissionTarget {
     }
 
     /** Update this peer's bot readiness (model became available/unavailable) and announce it. */
-    public synchronized void updateBotReadiness() {
+    public void updateBotReadiness() {
         boolean capable = botResponder != null && !PartySettings.BOT_POLICY_OFF.equals(botPolicy.get());
         boolean ready = capable && botResponder.isReady();
-        if (self.isBotCapable() == capable && self.isBotReady() == ready) {
-            return;
+        Participant updated;
+        synchronized (this) {
+            if (self.isBotCapable() == capable && self.isBotReady() == ready) {
+                return;
+            }
+            self = self.withBotFlags(capable, ready);
+            updated = self;
         }
-        self = self.withBotFlags(capable, ready);
         if (joined) {
-            transport.updateSelf(self);
+            transport.updateSelf(updated);
         }
     }
 
@@ -166,22 +185,27 @@ public final class PartySession implements GroupChatSubmissionTarget {
 
     @Override
     public boolean submitMessage(String markdown) {
+        if (!isConnected()) {
+            return false;
+        }
+        List<Participant> members = transport.getParticipants();
         GroupChatMessage message;
         synchronized (this) {
-            if (!isConnected()) {
-                return false;
-            }
             message = new GroupChatMessage.Builder()
                     .messageId(UUID.randomUUID().toString())
                     .roomId(room.getRoomId())
                     .senderParticipantId(self.getParticipantId())
                     .senderSequence(nextSequence++)
                     .mentionedParticipantIds(
-                            MentionParser.extractMentionedIds(markdown, transport.getParticipants()))
+                            MentionParser.extractMentionedIds(markdown, members))
                     .markdown(markdown)
                     .build();
         }
-        transport.send(message);
+        try {
+            transport.send(message);
+        } catch (IllegalStateException notSent) {
+            return false; // disconnected in between: the caller keeps the text (lossless)
+        }
         return true;
     }
 
@@ -197,7 +221,7 @@ public final class PartySession implements GroupChatSubmissionTarget {
     }
 
     /** Handles offered by {@code @} completion: all current participants plus the room bot. */
-    public synchronized List<String> mentionHandles() {
+    public List<String> mentionHandles() {
         List<String> handles = new ArrayList<String>();
         for (Participant participant : transport.getParticipants()) {
             if (!handles.contains(participant.getMentionHandle())) {

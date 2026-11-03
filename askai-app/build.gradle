@@ -35,6 +35,7 @@ dependencies {
     implementation project(':agent-model-runtime-api')
     implementation project(':group-chat-api')
     implementation project(':group-chat-jgroups')
+    testImplementation 'org.jgroups:jgroups:4.2.30.Final' // PartySession + real JGroups regression tests
     implementation project(':audio-dsp')
     implementation project(':audio-openal')
     // PF4J workspace-plugin host (brings agent-workspace-api + agent-plugin-pf4j-api + pf4j transitively).
