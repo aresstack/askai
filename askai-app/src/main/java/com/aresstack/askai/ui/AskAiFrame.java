@@ -466,8 +466,26 @@ public final class AskAiFrame extends JFrame {
                 .equals(chatWorkspaceHost.getInteractionMode())) {
             chatWorkspaceHost.setInteractionMode(com.aresstack.askai.plugin.host.WorkspaceModeEntry.QUESTING_ID);
         }
+        // The mode/agent may already be "Questing + this agent" while the coordinator has no running session
+        // (another tab was active, or an earlier start failed) — then the calls above change nothing and the
+        // plugin's pages never appear. Make sure the session runs; settings pages need it.
+        if (agentCoordinator != null && agentCoordinator.getActiveSession() == null) {
+            agentCoordinator.setActiveAgent(pluginId);
+        }
         final String category = contributions.get(0).getDisplayName();
-        javax.swing.SwingUtilities.invokeLater(() -> openSettings(category));
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            if (agentCoordinator != null && agentCoordinator.getActiveSession() == null) {
+                // The session did not start (the reason is posted as a bubble in the chat): never fail silently.
+                showScreen(CHAT_VIEW);
+                javax.swing.JOptionPane.showMessageDialog(AskAiFrame.this,
+                        "The plugin could not start a session in this chat, so its settings cannot be shown.\n"
+                                + "The chat shows the reason (for example a missing reranker model:"
+                                + " install one under Models > Setup > Local models).",
+                        "Plugin settings", javax.swing.JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            openSettings(category);
+        });
     }
 
     /**
