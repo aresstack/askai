@@ -440,7 +440,7 @@ public final class AskAiFrame extends JFrame {
     }
 
     /**
-     * Lays the setup wizard over the whole window. {@code firstStart}: Merlin introduces himself once a runtime
+     * Lays the setup wizard over the whole window. {@code firstStart}: Witch introduces himself once a runtime
      * answers and “Finish” plays the hand-over; afterwards the wizard no longer opens on its own. From the
      * settings it greets as a reunion and changes nothing when cancelled.
      */
@@ -1079,7 +1079,7 @@ public final class AskAiFrame extends JFrame {
                 () -> activityCoordinator.scopePhaseLabel(activityScope));
         // Tab close ENDS this tab's agent session(s) off-EDT (its ChatSessionId is the scope).
         final com.aresstack.askai.plugin.host.AgentSessionCoordinator closerCoordinator = agentCoordinator;
-        // Settings > General > "Setup wizard…": the first-start wizard, callable again (Merlin greets as a reunion).
+        // Settings > General > "Setup wizard…": the first-start wizard, callable again (Witch greets as a reunion).
         chat.setSetupWizardOpener(() -> openSetupWizard(false));
         chat.setTabSessionCloser(new OllamaChatPanel.TabSessionCloser() {
             public void closeSessionsForTab(String scope) {

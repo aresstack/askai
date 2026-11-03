@@ -28,7 +28,7 @@ import java.util.function.Consumer;
  * ({@link Placement}: bottom left, centre or right) and its height; the width follows the aspect ratio. If he does
  * not fit there completely – because the step's fields reach too far down or an error message takes the room – he
  * is not shown at all; he is never clipped. The component claims no room itself ({@link #getPreferredSize()} is
- * empty), it only gets what the step leaves over, and so never lies over fields or texts. The wizard is Merlin: his
+ * empty), it only gets what the step leaves over, and so never lies over fields or texts. The wizard is Witch: his
  * speech bubble (and on request a question field) appears next to him, a click on him reports to the host
  * ({@link #setOnFigureClicked}).
  *
@@ -51,7 +51,7 @@ public final class SetupWizardMascot extends JComponent {
     static final int DEFAULT_GAP = 12;
     /** Vorgabe für den Abstand zum linken bzw. rechten Rand bei {@link Placement#LEFT}/{@link Placement#RIGHT}. */
     static final int DEFAULT_SIDE_INSET = 24;
-    /** Vorgabe für die größte Breite von Merlins Sprechblase. */
+    /** Vorgabe für die größte Breite von Witchs Sprechblase. */
     static final int DEFAULT_BUBBLE_WIDTH = 340;
     /** Schmaler als das passt keine lesbare Sprechblase neben den Zauberer; dann bleibt sie weg. */
     static final int MIN_BUBBLE_WIDTH = 160;
@@ -99,8 +99,8 @@ public final class SetupWizardMascot extends JComponent {
         setLayout(null);
         ComicPalette colors = palette == null ? ComicPalette.defaultPalette() : palette;
         this.ink = colors.getInk();
-        // Merlin spricht wie der Assistent im Chat (dieselben Blasenfarben); die Spitze zeigt zum Zauberer. Die Seite
-        // einer Blase ist die Seite ihres Sprechers im Verlauf, die Spitze sitzt dort: steht Merlin rechts, ist es eine
+        // Witch spricht wie der Assistent im Chat (dieselben Blasenfarben); die Spitze zeigt zum Zauberer. Die Seite
+        // einer Blase ist die Seite ihres Sprechers im Verlauf, die Spitze sitzt dort: steht Witch rechts, ist es eine
         // „linke“ Blase mit Spitze nach rechts, sonst umgekehrt.
         BubblePalette chat = BubblePalette.themed();
         bubble = new SpeechBubblePanel(placement == Placement.RIGHT ? BubbleSide.LEFT : BubbleSide.RIGHT,
@@ -108,10 +108,10 @@ public final class SetupWizardMascot extends JComponent {
         bubble.setHeaderColor(chat.getAssistantForeground());
         bubble.setVisible(false);
         add(bubble);
-        question = new ComicSearchBar("Ask Merlin …", "Your own question to Merlin; Enter sends it", colors);
+        question = new ComicSearchBar("Ask the Witch …", "Your own question to the Witch; Enter sends it", colors);
         question.setVisible(false);
         question.addSearchAction(e -> submitQuestion());
-        question.getTextField().getAccessibleContext().setAccessibleName("Question to Merlin");
+        question.getTextField().getAccessibleContext().setAccessibleName("Question to the Witch");
         add(question);
         MouseAdapter mouse = new MouseAdapter() {
             @Override
@@ -125,7 +125,7 @@ public final class SetupWizardMascot extends JComponent {
             public void mouseMoved(MouseEvent e) {
                 boolean active = onFigureClicked != null && onFigure(e.getPoint());
                 setCursor(active ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
-                setToolTipText(active ? "Ask Merlin" : null);
+                setToolTipText(active ? "Ask the Witch" : null);
             }
         };
         addMouseListener(mouse);
@@ -148,7 +148,7 @@ public final class SetupWizardMascot extends JComponent {
         this.onFigureClicked = callback;
     }
 
-    /** Merlins Satz in der Sprechblase; {@code null} oder leer leert sie. */
+    /** Witchs Satz in der Sprechblase; {@code null} oder leer leert sie. */
     void say(String text) {
         say(WizardGuide.NAME, text);
     }

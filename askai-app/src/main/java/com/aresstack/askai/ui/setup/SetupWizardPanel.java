@@ -40,11 +40,11 @@ import java.util.Map;
 /**
  * The setup wizard as a reusable component: six steps (network &amp; security, AI runtime, chat model, knowledge
  * &amp; research, final check, voice) with a progress trail, errors in the step concerned and “Back”, “Next”,
- * “Skip”, “Cancel”, at the end “Finish”. Merlin stands in the free space of every step, talks in a speech bubble
+ * “Skip”, “Cancel”, at the end “Finish”. Witch stands in the free space of every step, talks in a speech bubble
  * (and with a voice, if one is installed) and answers questions when clicked. The wizard only uses
  * {@link SetupActions}; property keys and services appear nowhere. Everything on the EDT.
  *
- * <p>Taken over from the Enterprise AI Client's setup wizard with its concept unchanged – step trail, Merlin with
+ * <p>Taken over from the Enterprise AI Client's setup wizard with its concept unchanged – step trail, Witch with
  * speech bubbles and menu, error plate, skippable steps, final check before “Finish”, hand-over to the chat
  * assistant after the first setup, later calls from the settings. Only the steps are AskAI's: KeePass became
  * network &amp; security, the AI service became the AI runtime (Ollama or AskAI's local runtime), the model step
@@ -57,7 +57,7 @@ public final class SetupWizardPanel extends JPanel {
 
     static final String[] STEP_NAMES = {"Network", "Voice", "AI runtime", "Chat model", "Knowledge", "Check"};
     static final int STEP_NETWORK = 0;
-    /** Right after the network: the voices must be downloaded first, then Merlin can speak in every later step. */
+    /** Right after the network: the voices must be downloaded first, then Witch can speak in every later step. */
     static final int STEP_VOICE = 1;
     static final int STEP_RUNTIME = 2;
     static final int STEP_CHAT = 3;
@@ -66,20 +66,22 @@ public final class SetupWizardPanel extends JPanel {
     static final int STEP_CHECK = 5;
 
     /**
-     * Merlin's picture per step: cut-outs with a transparent background (copies of the originals in
-     * docs/images/setup-wizard).
+     * Witch's picture per step: cut-outs with a transparent background (copies of the third set in
+     * docs/images/setup-wizard/originals/v3).
      */
-    private static final String[] STEP_MASCOTS = {"wizard/merlin-1-network.png", "wizard/merlin-6-voice.png",
-            "wizard/merlin-2-ai-runtime.png", "wizard/merlin-3-chat-model.png", "wizard/merlin-4-knowledge.png",
-            "wizard/merlin-5-check.png"};
+    private static final String[] STEP_MASCOTS = {"wizard/v3-01-network-security.png", "wizard/v3-06-voice.png",
+            "wizard/v3-02-ai-runtime.png", "wizard/v3-03-chat-model.png", "wizard/v3-04-knowledge.png",
+            "wizard/v3-05-check.png"};
     /** The runtime step shows this picture until a runtime answers (the same cut-out as once it answers). */
-    static final String RUNTIME_INSTALL_MASCOT = "wizard/merlin-2-ai-runtime.png";
-    /** Per step: Merlin's place in the free space (alternating, so it feels alive). */
+    static final String RUNTIME_INSTALL_MASCOT = "wizard/v3-02-ai-runtime.png";
+    /** The check step shows this picture once every check passed. */
+    static final String CHECK_SUCCESS_MASCOT = "wizard/v3-07-success.png";
+    /** Per step: Witch's place in the free space (alternating, so it feels alive). */
     private static final SetupWizardMascot.Placement[] MASCOT_PLACEMENTS = {SetupWizardMascot.Placement.RIGHT,
             SetupWizardMascot.Placement.LEFT, SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.LEFT,
             SetupWizardMascot.Placement.RIGHT, SetupWizardMascot.Placement.CENTER};
     /**
-     * Per step: Merlin's largest height in logical pixels. Larger than any free space on purpose: Merlin grows to
+     * Per step: Witch's largest height in logical pixels. Larger than any free space on purpose: Witch grows to
      * fill the free space of the step instead of standing small in a corner.
      */
     private static final int[] MASCOT_HEIGHTS = {900, 900, 900, 900, 900, 900};
@@ -131,11 +133,11 @@ public final class SetupWizardPanel extends JPanel {
     private boolean busy;
     private boolean closed;
 
-    // Merlin: fixed lines (WizardGuide), bubble or voice (WizardNarrator)
+    // Witch: fixed lines (WizardGuide), bubble or voice (WizardNarrator)
     private final WizardGuide guide = new WizardGuide();
     private final WizardNarrator narrator = new WizardNarrator(text -> mascotOf(step).say(text));
-    /** Merlin only talks once a runtime answers (or from the start when called again from the settings). */
-    private boolean merlinAwake;
+    /** Witch only talks once a runtime answers (or from the start when called again from the settings). */
+    private boolean witchAwake;
     private boolean handoff;
     private boolean handingOff;
     private SetupVoices handoffVoices;
@@ -163,6 +165,8 @@ public final class SetupWizardPanel extends JPanel {
     /** The runtime step's two pictures: the install scene until a runtime answers, then the connecting one. */
     private SetupWizardMascot.Art runtimeInstallArt;
     private SetupWizardMascot.Art runtimeConnectedArt;
+    private SetupWizardMascot.Art checkPendingArt;
+    private SetupWizardMascot.Art checkSuccessArt;
     private boolean runtimeChecking;
     private int runtimeGeneration;
 
@@ -242,6 +246,8 @@ public final class SetupWizardPanel extends JPanel {
         deck.add(checkStep(), STEP_NAMES[STEP_CHECK]);
         deck.add(voiceStep(), STEP_NAMES[STEP_VOICE]);
         runtimeConnectedArt = mascotOf(STEP_RUNTIME).art();
+        checkPendingArt = mascotOf(STEP_CHECK).art();
+        checkSuccessArt = SetupWizardMascot.Art.load(CHECK_SUCCESS_MASCOT);
         runtimeInstallArt = SetupWizardMascot.Art.load(RUNTIME_INSTALL_MASCOT);
         mascotOf(STEP_RUNTIME).setArt(runtimeInstallArt);
 
@@ -479,22 +485,22 @@ public final class SetupWizardPanel extends JPanel {
         showStep(index);
     }
 
-    // ------------------------------------------------------------------ Merlin
+    // ------------------------------------------------------------------ Witch
 
     /**
-     * A later call (from the settings): the runtime is set up already, Merlin is awake from the start and greets as
+     * A later call (from the settings): the runtime is set up already, Witch is awake from the start and greets as
      * a reunion instead of introducing himself a second time.
      */
     public void welcomeBack() {
-        wakeMerlin(true);
+        wakeWitch(true);
     }
 
-    /** Merlin's voice; without one he only uses speech bubbles. */
+    /** Witch's voice; without one he only uses speech bubbles. */
     public void setVoice(WizardVoice voice) {
         narrator.setVoice(voice);
     }
 
-    /** Ends Merlin's speech output (wizard closed). */
+    /** Ends Witch's speech output (wizard closed). */
     void stopVoice() {
         narrator.stop();
         if (handoffVoices != null) {
@@ -520,17 +526,17 @@ public final class SetupWizardPanel extends JPanel {
         this.readingPace = Math.max(0, millisPerCharacter);
     }
 
-    boolean isMerlinAwake() {
-        return merlinAwake;
+    boolean isWitchAwake() {
+        return witchAwake;
     }
 
-    /** A free question needs Merlin awake and a chat model. */
-    boolean canAskMerlin() {
-        return merlinAwake && !text(chatModel).isEmpty();
+    /** A free question needs Witch awake and a chat model. */
+    boolean canAskWitch() {
+        return witchAwake && !text(chatModel).isEmpty();
     }
 
-    /** The menu on a click on Merlin: fixed answers, skip and (with a chat model) a free question. */
-    JPopupMenu merlinMenu() {
+    /** The menu on a click on Witch: fixed answers, skip and (with a chat model) a free question. */
+    JPopupMenu witchMenu() {
         final int current = step;
         JPopupMenu menu = new JPopupMenu();
         JMenuItem what = new JMenuItem("What do I have to do here?");
@@ -544,16 +550,16 @@ public final class SetupWizardPanel extends JPanel {
         skip.addActionListener(e -> skip());
         menu.add(skip);
         JMenuItem ask = new JMenuItem("Ask your own question …");
-        ask.setEnabled(canAskMerlin());
-        ask.setToolTipText(canAskMerlin() ? null : "Possible once a runtime answers and a chat model is chosen");
-        ask.addActionListener(e -> mascotOf(current).askQuestion(this::askMerlin));
+        ask.setEnabled(canAskWitch());
+        ask.setToolTipText(canAskWitch() ? null : "Possible once a runtime answers and a chat model is chosen");
+        ask.addActionListener(e -> mascotOf(current).askQuestion(this::askWitch));
         menu.add(ask);
         return menu;
     }
 
-    /** The free question to the draft's chat model; Merlin's frame comes from {@link WizardGuide}. */
-    void askMerlin(String question) {
-        if (!canAskMerlin() || question == null || question.trim().isEmpty()) {
+    /** The free question to the draft's chat model; Witch's frame comes from {@link WizardGuide}. */
+    void askWitch(String question) {
+        if (!canAskWitch() || question == null || question.trim().isEmpty()) {
             return;
         }
         narrator.show(WizardGuide.THINKING);
@@ -566,11 +572,11 @@ public final class SetupWizardPanel extends JPanel {
         });
     }
 
-    private void wakeMerlin(boolean returning) {
-        if (merlinAwake) {
+    private void wakeWitch(boolean returning) {
+        if (witchAwake) {
             return;
         }
-        merlinAwake = true;
+        witchAwake = true;
         narrator.say(guide.greeting(returning));
     }
 
@@ -594,7 +600,7 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     /**
-     * Line {@code index} of the hand-over: Merlin with his voice, the chat assistant with hers and her name. Without
+     * Line {@code index} of the hand-over: Witch with his voice, the chat assistant with hers and her name. Without
      * a voice the next line follows after a reading pause; after the last one the wizard closes.
      */
     private void handoffLine(final int index) {
@@ -609,8 +615,8 @@ public final class SetupWizardPanel extends JPanel {
             return;
         }
         WizardGuide.Line line = WizardGuide.handoff(index);
-        mascotOf(step).say(line.merlin ? WizardGuide.NAME : voices.assistantName(), line.text);
-        WizardVoice voice = line.merlin ? voices.merlin() : voices.assistant();
+        mascotOf(step).say(line.witch ? WizardGuide.NAME : voices.assistantName(), line.text);
+        WizardVoice voice = line.witch ? voices.witch() : voices.assistant();
         if (voice != null && voice.isAvailable()) {
             voice.speak(line.text);
         }
@@ -659,8 +665,12 @@ public final class SetupWizardPanel extends JPanel {
         for (SetupWizardMascot mascot : mascots) {
             mascot.say(null);
         }
-        if (merlinAwake) {
+        if (!witchAwake && narrator.canSpeak()) {
+            wakeWitch(false); // a downloaded Piper voice is enough: the wizard speaks without any AI runtime
+        } else if (witchAwake) {
             narrator.say(guide.enteredStep(index));
+        } else {
+            narrator.show(WizardGuide.THOUGHT_SILENT); // only a thought: he has no voice yet
         }
         if (index == STEP_RUNTIME && !done[STEP_RUNTIME] && !runtimeChecking && !busy) {
             checkRuntime(); // the default address usually works: check right away instead of waiting for a click
@@ -735,7 +745,7 @@ public final class SetupWizardPanel extends JPanel {
     private void fail(int index, String message) {
         errors[index] = message;
         updateButtons();
-        if (merlinAwake && index == step) {
+        if (witchAwake && index == step) {
             narrator.say(guide.stepFailed(index));
         }
     }
@@ -854,10 +864,10 @@ public final class SetupWizardPanel extends JPanel {
         });
     }
 
-    /** The runtime answers: Merlin wakes up (or reports), and the model lists are prepared in the background. */
+    /** The runtime answers: Witch wakes up (or reports), and the model lists are prepared in the background. */
     private void runtimeAnswered() {
-        if (!merlinAwake) {
-            wakeMerlin(false);
+        if (!witchAwake) {
+            wakeWitch(false);
         } else if (step == STEP_RUNTIME) {
             narrator.say(WizardGuide.RUNTIME_OK);
         }
@@ -967,7 +977,7 @@ public final class SetupWizardPanel extends JPanel {
                 return;
             }
             knowledgeStatus.setText(message == null || message.isEmpty() ? "Sentence models installed." : message);
-            if (merlinAwake && step == STEP_KNOWLEDGE) {
+            if (witchAwake && step == STEP_KNOWLEDGE) {
                 narrator.say(WizardGuide.SENTENCE_MODELS_OK);
             }
             modelsLoaded = false;
@@ -1000,6 +1010,7 @@ public final class SetupWizardPanel extends JPanel {
                 }
             }
             done[STEP_CHECK] = allOk;
+            mascotOf(STEP_CHECK).setArt(allOk && checkSuccessArt != null ? checkSuccessArt : checkPendingArt);
             checkedDraft = allOk ? checkedKey(draft) : "";
             checkStatus.setText(allOk ? "Everything is ready." : "Not ready yet.");
             if (!allOk) {
@@ -1134,6 +1145,9 @@ public final class SetupWizardPanel extends JPanel {
         if (index >= queue.size()) {
             voiceInstalling = false;
             voiceStatus.setText("Voices installed.");
+            // The download went through the configured network: that is as good as a passed network test.
+            done[STEP_NETWORK] = true;
+            clearError(STEP_NETWORK);
             loadVoices();
             return;
         }
@@ -1201,7 +1215,7 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     /**
-     * Leaving the voice step stores the chosen, installed voices right away, so Merlin speaks with them from the
+     * Leaving the voice step stores the chosen, installed voices right away, so Witch speaks with them from the
      * next step on. Voices that are not installed yet are left out silently; the step stays skippable.
      */
     private void saveVoicesOnLeaving() {
@@ -1377,7 +1391,7 @@ public final class SetupWizardPanel extends JPanel {
         return trail;
     }
 
-    /** Merlin of a step (in step order). */
+    /** Witch of a step (in step order). */
     SetupWizardMascot mascotOf(int index) {
         return mascots.get(index);
     }
@@ -1436,6 +1450,10 @@ public final class SetupWizardPanel extends JPanel {
 
     JComboBox<String> rerankerModelChoice() {
         return rerankerModel;
+    }
+
+    ComicButton voiceInstallButton() {
+        return voiceInstall;
     }
 
     JComboBox<String> voiceGermanChoice() {
@@ -1552,7 +1570,7 @@ public final class SetupWizardPanel extends JPanel {
             final SetupWizardMascot mascot = new SetupWizardMascot(stepArt != null ? stepArt
                     : SetupWizardMascot.Art.load(), MASCOT_HEIGHTS[index], MASCOT_PLACEMENTS[index],
                     SetupWizardMascot.DEFAULT_GAP, SetupWizardMascot.DEFAULT_SIDE_INSET, palette);
-            mascot.setOnFigureClicked(point -> merlinMenu().show(mascot, point.x, point.y));
+            mascot.setOnFigureClicked(point -> witchMenu().show(mascot, point.x, point.y));
             mascots.add(mascot);
             page.add(mascot, BorderLayout.CENTER);
             return page;
@@ -1562,7 +1580,7 @@ public final class SetupWizardPanel extends JPanel {
     /**
      * Error text that wraps at the wizard's width even before its first layout. A wrapping {@link JTextArea}
      * without a width of its own otherwise reports one word per line as its preferred height; the error plate would
-     * take the whole page on a step's first error and push away fields and Merlin.
+     * take the whole page on a step's first error and push away fields and Witch.
      */
     private final class WrappedErrorText extends JTextArea {
         private static final long serialVersionUID = 1L;

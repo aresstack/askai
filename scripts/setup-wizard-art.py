@@ -38,8 +38,19 @@ def derive(path):
     image.save(os.path.join(TARGET, os.path.basename(path)), optimize=True)
 
 
+def derive_v3():
+    """Third set (docs/images/setup-wizard/originals/v3/wizard): cut-outs, only scaled down when taller than 900 px."""
+    for path in sorted(glob.glob(os.path.join(SOURCE, "v3", "wizard", "*.png"))):
+        image = Image.open(path).convert("RGBA")
+        if image.height > CUTOUT_HEIGHT:
+            image = image.resize((round(image.width * CUTOUT_HEIGHT / image.height), CUTOUT_HEIGHT), Image.LANCZOS)
+        image.save(os.path.join(TARGET, "v3-" + os.path.basename(path)), optimize=True)
+        print("derived v3-" + os.path.basename(path))
+
+
 if __name__ == "__main__":
     os.makedirs(TARGET, exist_ok=True)
     for original in sorted(glob.glob(os.path.join(SOURCE, "*.png"))):
         derive(original)
         print("derived", os.path.basename(original))
+    derive_v3()

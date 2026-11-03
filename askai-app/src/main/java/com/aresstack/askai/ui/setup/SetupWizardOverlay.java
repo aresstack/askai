@@ -14,8 +14,8 @@ import java.util.function.Consumer;
  * main window's {@link JLayeredPane}. It covers the whole window, whatever card of the workspace is visible (chat,
  * models, settings). Cancelling leaves the application running unchanged.
  *
- * <p>Used for both entries: the first start ({@code firstStart = true}: Merlin introduces himself once a runtime
- * answers, “Finish” plays the hand-over) and the call from the settings ({@code false}: Merlin is awake from the
+ * <p>Used for both entries: the first start ({@code firstStart = true}: Witch introduces himself once a runtime
+ * answers, “Finish” plays the hand-over) and the call from the settings ({@code false}: Witch is awake from the
  * start and greets as a reunion). Ported from the Enterprise AI Client, where the first start used a separate
  * window because its main window needs a finished setup; AskAI's window runs with defaults, so the overlay serves
  * both.</p>
@@ -65,7 +65,7 @@ public final class SetupWizardOverlay {
         layers.putClientProperty(NAME, run[0]);
         layers.add(run[0].overlay(), JLayeredPane.MODAL_LAYER);
         fit(layers, run[0]);
-        run[0].wizard().setVoice(setup.merlinVoice());
+        run[0].wizard().setVoice(setup.witchVoice());
         run[0].wizard().setHandoff(firstStart);
         if (!firstStart) {
             run[0].wizard().welcomeBack();

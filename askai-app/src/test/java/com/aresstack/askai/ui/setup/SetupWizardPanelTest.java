@@ -17,7 +17,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/** The wizard's flow against a synchronous fake of {@link SetupActions}: steps, checks, Merlin, finish, cancel. */
+/** The wizard's flow against a synchronous fake of {@link SetupActions}: steps, checks, Witch, finish, cancel. */
 public class SetupWizardPanelTest {
 
     @Test
@@ -90,10 +90,10 @@ public class SetupWizardPanelTest {
     }
 
     @Test
-    public void theRuntimeStepChecksRightAwayWakesMerlinAndPreselectsTheModels() {
+    public void theRuntimeStepChecksRightAwayWakesWitchAndPreselectsTheModels() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
-        assertFalse("Merlin is silent until a runtime answers", wizard.isMerlinAwake());
+        assertFalse("Witch is silent until a runtime answers", wizard.isWitchAwake());
         assertEquals(SetupWizardPanel.RUNTIME_INSTALL_MASCOT,
                 wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).art().resource());
 
@@ -102,7 +102,7 @@ public class SetupWizardPanelTest {
         assertEquals(SetupWizardPanel.STEP_RUNTIME, wizard.step());
         assertEquals(1, fake.runtimeChecks);
         assertTrue(wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
-        assertTrue(wizard.isMerlinAwake());
+        assertTrue(wizard.isWitchAwake());
         assertEquals(WizardGuide.FIRST_GREETING, wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).spokenText());
         assertEquals("the connecting picture once a runtime answers", SetupWizardPanel.mascotResource(
                 SetupWizardPanel.STEP_RUNTIME), wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).art().resource());
@@ -120,7 +120,7 @@ public class SetupWizardPanelTest {
         wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
         assertFalse(wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
         assertNotNull(wizard.errorOf(SetupWizardPanel.STEP_RUNTIME));
-        assertFalse(wizard.isMerlinAwake());
+        assertFalse(wizard.isWitchAwake());
         assertEquals(SetupWizardPanel.RUNTIME_INSTALL_MASCOT,
                 wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).art().resource());
     }
@@ -251,7 +251,47 @@ public class SetupWizardPanelTest {
         wizard.nextButton().doClick();
 
         assertEquals(SetupWizardPanel.STEP_RUNTIME, wizard.step());
-        assertNotNull("the voices are stored before the next step, so Merlin can use them", fake.savedVoices);
+        assertNotNull("the voices are stored before the next step, so Witch can use them", fake.savedVoices);
+    }
+
+    @Test
+    public void withoutAVoiceTheWizardOnlyThinks() {
+        SetupWizardPanel wizard = wizard(new Fake());
+        wizard.nextButton().doClick();
+        assertFalse(wizard.isWitchAwake());
+        assertEquals(WizardGuide.THOUGHT_SILENT, wizard.mascotOf(SetupWizardPanel.STEP_VOICE).spokenText());
+    }
+
+    @Test
+    public void aDownloadedVoiceLetsHimSpeakWithoutARuntimeAndProvesTheNetwork() {
+        Fake fake = new Fake();
+        fake.ollamaVersion = null;
+        SetupWizardPanel wizard = wizard(fake);
+        final List<String> spoken = new ArrayList<String>();
+        wizard.setVoice(new WizardVoice() {
+            @Override
+            public boolean isAvailable() {
+                return fake.savedVoices != null;
+            }
+
+            @Override
+            public void speak(String text) {
+                spoken.add(text);
+            }
+
+            @Override
+            public void stop() {
+            }
+        });
+        wizard.nextButton().doClick();
+        wizard.voiceGermanChoice().setSelectedItem("Thorsten (German)");
+        wizard.voiceInstallButton().doClick();
+        assertTrue("the voice download counts as network test", wizard.isDone(SetupWizardPanel.STEP_NETWORK));
+
+        wizard.nextButton().doClick();
+
+        assertTrue("awake without any AI runtime", wizard.isWitchAwake());
+        assertFalse(spoken.isEmpty());
     }
 
     @Test
@@ -287,19 +327,19 @@ public class SetupWizardPanelTest {
     public void aLaterCallGreetsAsAReunion() {
         SetupWizardPanel wizard = wizard(new Fake());
         wizard.welcomeBack();
-        assertTrue(wizard.isMerlinAwake());
+        assertTrue(wizard.isWitchAwake());
         assertEquals(WizardGuide.WELCOME_BACK, wizard.mascotOf(SetupWizardPanel.STEP_NETWORK).spokenText());
     }
 
     @Test
-    public void merlinsMenuOffersTheFixedAnswersAndAFreeQuestionOnlyWithAChatModel() {
+    public void witchsMenuOffersTheFixedAnswersAndAFreeQuestionOnlyWithAChatModel() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
-        assertFalse(wizard.canAskMerlin());
-        assertEquals(4, wizard.merlinMenu().getComponentCount());
+        assertFalse(wizard.canAskWitch());
+        assertEquals(4, wizard.witchMenu().getComponentCount());
         wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
-        assertTrue(wizard.canAskMerlin());
-        wizard.askMerlin("What is an embedding?");
+        assertTrue(wizard.canAskWitch());
+        wizard.askWitch("What is an embedding?");
         assertEquals("Fake answer", wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).spokenText());
     }
 
@@ -322,6 +362,8 @@ public class SetupWizardPanelTest {
         wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
         assertTrue(wizard.isDone(SetupWizardPanel.STEP_CHECK));
         assertEquals(SetupWizardPanel.STEP_CHECK, wizard.step());
+        assertEquals("the success picture once every check passed", SetupWizardPanel.CHECK_SUCCESS_MASCOT,
+                wizard.mascotOf(SetupWizardPanel.STEP_CHECK).art().resource());
     }
 
     private static SetupWizardPanel wizard(Fake fake) {
@@ -342,6 +384,7 @@ public class SetupWizardPanelTest {
         List<SetupCheck> checks = Collections.singletonList(SetupCheck.ok("AI runtime", "Ollama 0.9.0"));
         SetupDraft finished;
         SetupDraft savedVoices;
+        boolean thorstenInstalled;
         boolean cancelled;
 
         @Override
@@ -392,12 +435,13 @@ public class SetupWizardPanelTest {
 
         @Override
         public void loadVoices(Consumer<List<VoiceOffer>> done) {
-            done.accept(Arrays.asList(new VoiceOffer("de_DE-thorsten-medium", "Thorsten (German)", "de", false),
+            done.accept(Arrays.asList(new VoiceOffer("de_DE-thorsten-medium", "Thorsten (German)", "de", thorstenInstalled),
                     new VoiceOffer("en_US-amy-medium", "Amy (English)", "en", true)));
         }
 
         @Override
         public void installVoice(String voiceId, Consumer<String> progress, BiConsumer<String, String> done) {
+            thorstenInstalled = true;
             done.accept("installed", null);
         }
 
