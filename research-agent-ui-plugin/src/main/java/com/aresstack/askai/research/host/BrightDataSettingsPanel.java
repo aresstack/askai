@@ -42,8 +42,9 @@ public final class BrightDataSettingsPanel extends JPanel {
         key.add(apiKeyHint, BorderLayout.SOUTH);
         p.add(row("API token:", key));
         p.add(row("Zone:", zone));
-        p.add(hint("The SERP API zone from your Bright Data account. The stored token is never shown; leave the "
-                + "field empty to keep it, type a new one to replace it (encrypted on save, sent as Bearer header)."));
+        p.add(hint("Zone (required): the name of the SERP API zone in your own Bright Data account; AskAI has no "
+                + "default. The stored token is never shown; leave the token field empty to keep it, type a new one "
+                + "to replace it (encrypted on save, sent as Bearer header)."));
         p.add(row("", status));
         add(p, BorderLayout.NORTH);
         ProviderForm.enableOnTyping(apiKey, enabled);
@@ -69,10 +70,7 @@ public final class BrightDataSettingsPanel extends JPanel {
     public boolean save() {
         try {
             draft.setEnabled(enabled.isSelected());
-            String typedZone = zone.getText().trim();
-            if (!typedZone.isEmpty()) {
-                draft.setZone(typedZone);
-            }
+            draft.setZone(zone.getText().trim()); // not a secret: what the field shows is what is saved
             char[] typed = apiKey.getPassword();
             if (typed.length > 0) {
                 configurations.saveBrightData(draft, typed); // clears the array

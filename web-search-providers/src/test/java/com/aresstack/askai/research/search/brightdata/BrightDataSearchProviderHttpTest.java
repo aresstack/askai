@@ -77,6 +77,7 @@ public final class BrightDataSearchProviderHttpTest {
         String base = "http://127.0.0.1:" + server.getAddress().getPort();
         BrightDataSearchConfiguration config = new BrightDataSearchConfiguration();
         config.setEnabled(true);
+        config.setZone("test-zone");
         config.setExecutionMode(BrightDataExecutionMode.SYNCHRONOUS);
         config.setSynchronousEndpoint(base + "/request");
         config.setApiKey(secrets.encrypt(API_KEY.toCharArray()));
