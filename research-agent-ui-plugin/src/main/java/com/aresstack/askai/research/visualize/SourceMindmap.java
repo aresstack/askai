@@ -36,9 +36,20 @@ public final class SourceMindmap {
             return null;
         }
         StringBuilder out = new StringBuilder("mindmap\n");
-        out.append("  root((").append(label(rootTitle, "Recherche")).append("))\n");
+        boolean noRootTitle = rootTitle == null || rootTitle.trim().isEmpty();
+        if (noRootTitle && byQuery.size() == 1 && !byQuery.keySet().iterator().next().isEmpty()) {
+            // No research question, ONE search query: that query IS the center — never a
+            // helper node like "Research" above it.
+            Map.Entry<String, List<ResearchSourceRecord>> only = byQuery.entrySet().iterator().next();
+            out.append("  root((").append(label(only.getKey(), "Research")).append("))\n");
+            for (ResearchSourceRecord source : only.getValue()) {
+                out.append("    [").append(label(source.getTitle(), source.getUrl())).append("]\n");
+            }
+            return out.toString();
+        }
+        out.append("  root((").append(label(rootTitle, "Research")).append("))\n");
         for (Map.Entry<String, List<ResearchSourceRecord>> branch : byQuery.entrySet()) {
-            out.append("    (").append(label(branch.getKey(), "Weitere Quellen")).append(")\n");
+            out.append("    (").append(label(branch.getKey(), "Other sources")).append(")\n");
             for (ResearchSourceRecord source : branch.getValue()) {
                 out.append("      [").append(label(source.getTitle(), source.getUrl())).append("]\n");
             }

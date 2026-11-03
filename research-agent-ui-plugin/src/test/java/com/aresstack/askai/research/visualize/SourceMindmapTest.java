@@ -31,6 +31,14 @@ public class SourceMindmapTest {
     }
 
     @Test
+    public void withoutAResearchQuestionTheSingleQueryIsTheCenter() {
+        String mermaid = SourceMindmap.mermaid(null, Arrays.asList(
+                source("Energetisch Sanieren", "energetisches sanieren basics", 0.2, SourceStatus.NEW)));
+        assertEquals("mindmap\n  root((energetisches sanieren basics))\n"
+                + "    [Energetisch Sanieren]\n", mermaid);
+    }
+
+    @Test
     public void onlyTheBestRatedPerBranchSurviveButUserMarkedAlwaysStay() {
         List<ResearchSourceRecord> sources = new ArrayList<ResearchSourceRecord>();
         for (int i = 0; i < 8; i++) {
