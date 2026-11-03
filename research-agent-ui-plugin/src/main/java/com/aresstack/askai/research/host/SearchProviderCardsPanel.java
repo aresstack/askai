@@ -59,8 +59,23 @@ public final class SearchProviderCardsPanel extends JPanel {
     private BraveSettingsPanel bravePanel;
     private BrightDataSettingsPanel brightDataPanel;
 
+    /** {@code false}: no settings below the combo, a "Configure…" button opens them in a dialog instead. */
+    private final boolean inline;
+    private final javax.swing.JButton configure = new com.aresstack.comiccontrols.control.ComicButton("Configure…");
+
+    /** The settings dialog's tab: the selected provider's settings right below the combo. */
     public SearchProviderCardsPanel(WorkspaceStateStore store) {
+        this(store, true);
+    }
+
+    /**
+     * @param inline {@code true}: the selected provider's settings below the combo (settings tab); {@code false}:
+     *               the combo with a "Configure…" button beside it that opens them in a dialog (setup wizard,
+     *               where the large provider panels would burst the page)
+     */
+    public SearchProviderCardsPanel(WorkspaceStateStore store, boolean inline) {
         super(new BorderLayout(6, 6));
+        this.inline = inline;
         this.store = store;
         setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
 
@@ -68,7 +83,8 @@ public final class SearchProviderCardsPanel extends JPanel {
         DataForSeoSettingsDraft draft;
         try {
             services = new ResearchProviderServices();
-            draft = DataForSeoSettingsDraft.load(services.configurationService());
+            // Without inline settings the dialog loads a fresh draft each time it opens.
+            draft = inline ? DataForSeoSettingsDraft.load(services.configurationService()) : null;
         } catch (RuntimeException providerFilesUnavailable) {
             // The provider store could not be opened (e.g. no home dir): keep the browser card usable.
             services = null;
@@ -82,24 +98,170 @@ public final class SearchProviderCardsPanel extends JPanel {
         top.add(source, BorderLayout.CENTER);
         add(top, BorderLayout.NORTH);
 
-        cardHost.add(browserCard(), PROVIDER_LABELS[0]);
-        cardHost.add(braveCard(), PROVIDER_LABELS[1]);
-        cardHost.add(brightDataCard(), PROVIDER_LABELS[2]);
-        cardHost.add(dataForSeoCard(), PROVIDER_LABELS[3]);
-        cardHost.add(serpApiCard(), PROVIDER_LABELS[4]);
-        add(cardHost, BorderLayout.CENTER);
+        if (inline) {
+            cardHost.add(browserCard(), PROVIDER_LABELS[0]);
+            cardHost.add(braveCard(), PROVIDER_LABELS[1]);
+            cardHost.add(brightDataCard(), PROVIDER_LABELS[2]);
+            cardHost.add(dataForSeoCard(), PROVIDER_LABELS[3]);
+            cardHost.add(serpApiCard(), PROVIDER_LABELS[4]);
+            add(cardHost, BorderLayout.CENTER);
+        } else {
+            JPanel actions = new JPanel(new BorderLayout());
+            actions.setOpaque(false);
+            actions.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 0));
+            actions.add(configure, BorderLayout.CENTER);
+            top.add(actions, BorderLayout.EAST);
+            configure.setToolTipText("Key, account and search options of the selected provider");
+            configure.addActionListener(new ActionListener() {
+                public void actionPerformed(ActionEvent e) {
+                    configureSelected();
+                }
+            });
+        }
 
         int selected = indexOfProvider(ResearchRuntimeSettings.loadSearchStrategy(store));
         source.setSelectedIndex(selected);
         cards.show(cardHost, PROVIDER_LABELS[selected]);
+        configure.setEnabled(selected > 0);
         source.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 int i = Math.max(0, source.getSelectedIndex());
                 cards.show(cardHost, PROVIDER_LABELS[i]);
                 cardHost.revalidate();
+                configure.setEnabled(i > 0);
                 persistSelection();
             }
         });
+    }
+
+    /** The "Configure…" button (only shown when the settings are not inline). */
+    javax.swing.JButton configureButton() {
+        return configure;
+    }
+
+    /** The provider combo. */
+    JComboBox<String> providerCombo() {
+        return source;
+    }
+
+    /**
+     * Opens the selected provider's settings in a dialog: a fresh panel each time, saved on "Save" (it stays
+     * open with the reason when saving fails), dropped on "Cancel".
+     */
+    private void configureSelected() {
+        final int index = Math.max(0, source.getSelectedIndex());
+        final ProviderEditor editor = editorFor(index);
+        if (editor == null) {
+            return;
+        }
+        java.awt.Window owner = javax.swing.SwingUtilities.getWindowAncestor(this);
+        final javax.swing.JDialog dialog = new javax.swing.JDialog(owner, PROVIDER_LABELS[index] + " settings",
+                java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
+        JPanel content = new JPanel(new BorderLayout(0, 8));
+        content.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        content.add(editor.component, BorderLayout.CENTER);
+        JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
+        javax.swing.JButton save = new com.aresstack.comiccontrols.control.ComicButton("Save",
+                com.aresstack.comiccontrols.control.ComicButton.Accent.ACTION);
+        javax.swing.JButton cancel = new com.aresstack.comiccontrols.control.ComicButton("Cancel");
+        buttons.add(save);
+        buttons.add(cancel);
+        content.add(buttons, BorderLayout.SOUTH);
+        final boolean[] saved = {false};
+        save.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                String error = editor.save();
+                if (error != null) {
+                    javax.swing.JOptionPane.showMessageDialog(dialog, PROVIDER_LABELS[index]
+                            + " settings were not saved:\n" + error, PROVIDER_LABELS[index],
+                            javax.swing.JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                saved[0] = true;
+                dialog.dispose();
+            }
+        });
+        cancel.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                dialog.dispose();
+            }
+        });
+        dialog.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosed(java.awt.event.WindowEvent e) {
+                if (!saved[0]) {
+                    editor.discard();
+                }
+            }
+        });
+        dialog.setContentPane(content);
+        dialog.getRootPane().setDefaultButton(save);
+        dialog.pack();
+        java.awt.GraphicsConfiguration display = owner != null ? owner.getGraphicsConfiguration() : null;
+        java.awt.Rectangle screen = display != null ? display.getBounds() : new java.awt.Rectangle(0, 0, 1280, 900);
+        dialog.setSize(Math.min(dialog.getWidth(), screen.width - 40), Math.min(dialog.getHeight(), screen.height - 80));
+        dialog.setLocationRelativeTo(owner);
+        dialog.setVisible(true);
+    }
+
+    /** One provider's settings for the dialog: its panel, how to save it (error text or null), how to drop it. */
+    static final class ProviderEditor {
+        final JComponent component;
+        private final java.util.concurrent.Callable<String> saver;
+        private final Runnable discarder;
+
+        ProviderEditor(JComponent component, java.util.concurrent.Callable<String> saver, Runnable discarder) {
+            this.component = component;
+            this.saver = saver;
+            this.discarder = discarder;
+        }
+
+        String save() {
+            try {
+                return saver.call();
+            } catch (Exception failed) {
+                return failed.getMessage() == null ? failed.toString() : failed.getMessage();
+            }
+        }
+
+        void discard() {
+            if (discarder != null) {
+                discarder.run();
+            }
+        }
+    }
+
+    /** A fresh editor for the provider at {@code index}; {@code null} for the browser or without provider files. */
+    ProviderEditor editorFor(int index) {
+        if (providers == null || index <= 0) {
+            return null;
+        }
+        switch (PROVIDER_IDS[index]) {
+            case "BRAVE_SEARCH_API": {
+                final BraveSettingsPanel panel = new BraveSettingsPanel(providers.configurationService());
+                return new ProviderEditor(panel, () -> panel.save() ? null : panel.getLastError(), null);
+            }
+            case "BRIGHT_DATA": {
+                final BrightDataSettingsPanel panel = new BrightDataSettingsPanel(providers.configurationService());
+                return new ProviderEditor(panel, () -> panel.save() ? null : panel.getLastError(), null);
+            }
+            case "DATA_FOR_SEO": {
+                final DataForSeoSettingsDraft draft = DataForSeoSettingsDraft.load(providers.configurationService());
+                final DataForSeoSettingsPanel panel = new DataForSeoSettingsPanel(
+                        draft, providers.dataForSeoPlayground(), providers.secrets());
+                return new ProviderEditor(panel, () -> {
+                    panel.save();
+                    return null;
+                }, draft::dispose);
+            }
+            case "SERP_API": {
+                final SerpApiSettingsPanel panel = new SerpApiSettingsPanel(providers.configurationService());
+                return new ProviderEditor(panel, () -> panel.save() ? null : panel.getLastError(), null);
+            }
+            default:
+                return null;
+        }
     }
 
     /** Persist EVERYTHING on the dialog's Save: the provider selection and the DataForSEO draft. */

@@ -2469,6 +2469,7 @@ public final class SetupWizardPanel extends JPanel {
                 panel.add(column, c);
             }
             c = constraints(1);
+            c.anchor = GridBagConstraints.NORTHWEST; // level with its name, also when the Witch beside is taller
             c.fill = GridBagConstraints.HORIZONTAL;
             c.weightx = 1;
             c.insets = new Insets(10, 0, 3, 0);

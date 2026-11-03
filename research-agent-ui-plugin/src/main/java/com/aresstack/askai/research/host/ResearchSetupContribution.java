@@ -68,7 +68,7 @@ public final class ResearchSetupContribution implements AgentSetupContribution {
             add(providerIntro);
             SearchProviderCardsPanel cards;
             try {
-                cards = new SearchProviderCardsPanel(context.getHostStateStore());
+                cards = new SearchProviderCardsPanel(context.getHostStateStore(), false);
                 cards.setBorder(BorderFactory.createEmptyBorder());
                 transparent(cards);
                 add(cards);
