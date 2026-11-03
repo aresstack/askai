@@ -414,6 +414,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             boolean freshState =
                     com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(current.getPhaseId())
                     && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW.equals(current.getStateId());
+            // A fresh chat (SCOPING/NEW) stays EMPTY: no bootstrap turn, no model call. The user writes first;
+            // the scoping starts with the user's first message (see startScopingOnFirstMessage).
             if (!freshState) {
                 // Restored session: the conversation text comes back from the persisted transcript, but the
                 // interactive buttons do not. Re-derive the decision buttons from the live state
@@ -1067,10 +1069,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * The model-backed greeting was delivered successfully: advance the scope state ONE step (SCOPING/NEW →
-     * SCOPING/RUNNING via START). The greeting depends only on the state, so after this a restart sees a
-     * non-fresh state and never greets again (the persisted chat shows the prior greeting instead). Idempotent
-     * and only meaningful while still at SCOPING/NEW.
+     * SCOPING/NEW → SCOPING/RUNNING when the user sends the first message of a fresh chat — synchronously,
+     * BEFORE the turn reaches the runtime, so the turn's concept writes are allowed and the runtime answers
+     * the topic directly. Also the handler of the runtime's GREETING_DONE signal. Idempotent.
      */
     /**
      * SCOPING/NEW → SCOPING/RUNNING when the user sends the first message of a fresh chat — synchronously,
