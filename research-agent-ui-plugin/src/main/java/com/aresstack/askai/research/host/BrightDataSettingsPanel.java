@@ -5,6 +5,7 @@ import com.aresstack.askai.research.search.config.ProviderConfigurationService;
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicForm;
 
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
@@ -13,7 +14,6 @@ import javax.swing.JTextField;
 import java.awt.BorderLayout;
 
 import static com.aresstack.askai.research.host.ProviderSettingsForm.text;
-import static com.aresstack.askai.research.host.ProviderSettingsForm.trimToNull;
 
 /**
  * Settings for Bright Data ({@code brightdata.json}) in the shared {@link ProviderSettingsForm} frame: the
@@ -28,8 +28,8 @@ public final class BrightDataSettingsPanel extends JPanel {
     private final JPasswordField apiKey = ProviderSettingsForm.secretField();
     private final JLabel apiKeyStatus = ProviderSettingsForm.status();
     private final JTextField zone = ComicControls.textField(16);
-    private final JTextField country = ComicControls.textField(6);
-    private final JTextField language = ComicControls.textField(6);
+    private final JComboBox<RegionChoices.Choice> country = RegionChoices.countries(false);
+    private final JComboBox<RegionChoices.Choice> language = RegionChoices.languages();
     private final JSpinner resultsPerPage = ProviderSettingsForm.number(10, 1, 100, 3);
     private final JLabel status = ProviderSettingsForm.message();
     private BrightDataSearchConfiguration draft;
@@ -47,9 +47,9 @@ public final class BrightDataSettingsPanel extends JPanel {
         credentials.row("", status);
         ComicForm options = form.searchOptions();
         options.row("Country:", country);
-        country.setToolTipText("Two-letter country code, e.g. de");
+        country.setToolTipText("Country the results are localised for");
         options.row("Language:", language);
-        language.setToolTipText("Two-letter language code, e.g. de");
+        language.setToolTipText("Language of the results");
         options.row("Results per page:", resultsPerPage);
         resultsPerPage.setToolTipText("1 to 100");
         add(form.build(), BorderLayout.NORTH);
@@ -66,8 +66,8 @@ public final class BrightDataSettingsPanel extends JPanel {
         }
         draft = c;
         zone.setText(text(c.getZone()));
-        country.setText(text(c.getCountry()));
-        language.setText(text(c.getLanguage()));
+        RegionChoices.select(country, c.getCountry());
+        RegionChoices.select(language, c.getLanguage());
         resultsPerPage.setValue(Math.max(1, Math.min(100, c.getResultsPerPage())));
         boolean stored = c.getApiKey() != null && c.getApiKey().isPresent();
         apiKeyStatus.setText(stored ? "A token is stored." : "No token stored.");
@@ -80,8 +80,8 @@ public final class BrightDataSettingsPanel extends JPanel {
             char[] typed = apiKey.getPassword();
             draft.setEnabled(ProviderSettingsForm.enabled(stored, typed));
             draft.setZone(zone.getText().trim()); // not a secret: what the field shows is what is saved
-            draft.setCountry(trimToNull(country.getText()));
-            draft.setLanguage(trimToNull(language.getText()));
+            draft.setCountry(RegionChoices.selected(country));
+            draft.setLanguage(RegionChoices.selected(language));
             draft.setResultsPerPage((Integer) resultsPerPage.getValue());
             if (typed.length > 0) {
                 configurations.saveBrightData(draft, typed); // clears the array
