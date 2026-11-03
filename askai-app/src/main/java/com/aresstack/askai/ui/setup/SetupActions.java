@@ -36,6 +36,13 @@ public interface SetupActions {
     /** Opens the download page of a runtime (Ollama) in the browser. */
     void openRuntimeDownload();
 
+    /**
+     * Opens AskAI's model browser (Hugging Face, Ollama library, local runtime) as a modal dialog over
+     * {@code parent}; returns when it is closed. Without a browser nothing happens.
+     */
+    default void openModelBrowser(Component parent) {
+    }
+
     // ------------------------------------------------------------------ models
 
     /** The installed models per role, from Ollama and AskAI's local runtime together. */
@@ -62,9 +69,11 @@ public interface SetupActions {
 
     /**
      * Downloads and installs a voice (engine first, if missing) through the draft's network settings, so a running
-     * download also proves the proxy and certificate settings.
+     * download also proves the proxy and certificate settings. With {@code reinstall} an installed voice is
+     * downloaded again.
      */
-    void installVoice(SetupDraft draft, String voiceId, Progress progress, BiConsumer<String, String> done);
+    void installVoice(SetupDraft draft, String voiceId, boolean reinstall, Progress progress,
+                      BiConsumer<String, String> done);
 
     /** Stores the draft's voice choice per language; {@code done} gets {@code null} or the error. */
     void saveVoices(SetupDraft draft, Consumer<String> done);

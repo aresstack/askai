@@ -517,6 +517,13 @@ public final class AskAiFrame extends JFrame {
                             refreshConnectionStatus();
                         }
                     });
+            setupActions.setModelBrowser(() -> new ModelSearchPanel(configurationRepository, askAiService, null,
+                    null, askAiService.localRuntimeManager() == null ? null
+                            : new LocalRuntimeModelsPanel(askAiService, new Runnable() {
+                                public void run() {
+                                    catalogRefreshService.refresh();
+                                }
+                            })));
             setupActions.setPluginSetup(() -> pluginService == null
                     ? java.util.Collections.<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>
                             emptyList()
