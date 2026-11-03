@@ -232,4 +232,31 @@ public class ConceptToolActivityFormatterTest {
         assertFalse(formatter.hasVisibleLines());
         assertEquals("Keine Änderung am Konzept", formatter.summary(true));
     }
+    /** The reported bubble (Rinderzucht): raw rounds, NONE and nudges become one readable line. */
+    @Test
+    public void reportedRinderzuchtTurnShowsOneReadableLine() {
+        String round = "concept round 1: add_cards parent=[\"Rinderzucht zuhause\"] "
+                + "names=[\"Genetik und Rasseauswahl\",\"Haltungsbedingungen\","
+                + "\"Tiergesundheit und Hygiene\",\"Fütterung und Ernährung\","
+                + "\"Reproduktion und Zucht\",\"Wirtschaftliche Aspekte\"]";
+        ConceptToolActivityFormatter formatter = fed(
+                round,
+                "concept_add_cards -> APPLIED revision=1",
+                "concept_add_cards -> ADDED: Genetik und Rasseauswahl",
+                "concept_add_cards -> ADDED: Haltungsbedingungen",
+                "concept_add_cards -> ADDED: Tiergesundheit und Hygiene",
+                "concept_add_cards -> ADDED: Fütterung und Ernährung",
+                "concept_add_cards -> ADDED: Reproduktion und Zucht",
+                "concept_add_cards -> ADDED: Wirtschaftliche Aspekte",
+                round,
+                "concept round 1 -> APPLIED revision=1",
+                "concept action: NONE",
+                "concept round 1 -> APPLIED revision=1",
+                "concept action: NONE",
+                "concept search tags missing — offer nudge turn");
+        assertEquals("• Konzept erweitert – 6 Themenbereiche hinzugefügt: Genetik und Rasseauswahl, "
+                + "Haltungsbedingungen, Tiergesundheit und Hygiene …", formatter.body(true));
+        assertEquals("6 Themenbereiche hinzugefügt", formatter.summary(true));
+        assertEquals("Arbeite an Konzept & Themenraum …", formatter.title(true));
+    }
 }
