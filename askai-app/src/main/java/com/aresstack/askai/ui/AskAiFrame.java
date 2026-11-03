@@ -75,6 +75,9 @@ public final class AskAiFrame extends JFrame {
     /** The application's one read-aloud voice install section (the Voices tab under Models > Setup). */
     private final SpeechOutputModelsPanel speechVoicesPanel = new SpeechOutputModelsPanel(
             new com.aresstack.askai.tts.PiperTtsStore(), new com.aresstack.askai.tts.TtsSettingsStore());
+    /** The application's one Whisper dictation-model installer (the "Dictation" tab under Models > Setup). */
+    private final WhisperModelsPanel whisperModelsPanel =
+            new WhisperModelsPanel(new com.aresstack.askai.stt.whisper.WhisperStore());
     private static final String SETTINGS_NETWORK = "Network";
     private static final String SETTINGS_PLUGINS = "Plugins";
     private static final String ABOUT_VIEW = "about";
@@ -1265,6 +1268,14 @@ public final class AskAiFrame extends JFrame {
                 chat.setInstallAudioModelHandler(installHandler);
                 chat.setAudioProcessingSettingsHandler(audioHandler);
                 chat.setSpeechVoicesPanel(speechVoicesPanel);
+                chat.setWhisperModelsPanel(whisperModelsPanel);
+                // "Install models…" beside the Whisper selector opens Models > Setup > Dictation.
+                chat.setWhisperInstallOpener(() -> {
+                    showScreen(INSTALL_VIEW);
+                    if (installSearchPanel != null) {
+                        installSearchPanel.openDictationModels();
+                    }
+                });
                 // A persisted title/timestamp must reach an OPEN chat list right away.
                 chat.setHistoryChangedListener(new Runnable() {
                     public void run() {
@@ -1390,6 +1401,7 @@ public final class AskAiFrame extends JFrame {
                 });
         final ModelSearchPanel modelSearchPanel =
                 new ModelSearchPanel(configurationRepository, askAiService, nlpModelsPanel, speechVoicesPanel,
+                        whisperModelsPanel,
                         askAiService.localRuntimeManager() == null ? null
                                 : new LocalRuntimeModelsPanel(askAiService, new Runnable() {
                                     public void run() {

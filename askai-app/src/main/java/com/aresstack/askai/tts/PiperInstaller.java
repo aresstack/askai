@@ -115,7 +115,7 @@ public final class PiperInstaller {
     }
 
     /** Extract with a zip-slip guard: every entry must stay under {@code target}. */
-    static void extractZip(Path zip, Path target) throws IOException {
+    public static void extractZip(Path zip, Path target) throws IOException {
         Path root = target.toAbsolutePath().normalize();
         try (ZipInputStream in = new ZipInputStream(Files.newInputStream(zip))) {
             ZipEntry entry;
@@ -245,7 +245,7 @@ public final class PiperInstaller {
         return connection;
     }
 
-    static String sha256(Path file) throws IOException {
+    public static String sha256(Path file) throws IOException {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
