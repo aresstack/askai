@@ -959,6 +959,10 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         if (speechVoicesPanel != null) {
             speechVoicesPanel.removeVoicesChangedListener(speechVoicesListener);
         }
+        if (loggingListener != null) {
+            com.aresstack.askai.plugin.api.service.HostLog.removeChangeListener(loggingListener);
+            loggingListener = null;
+        }
         if (whisperModelsPanel != null) {
             whisperModelsPanel.removeModelsChangedListener(whisperModelsListener);
         }
@@ -1331,6 +1335,9 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
      * General &gt; Logging: one switch per console category (the {@code [browser]}, {@code [local-runtime]}
      * ... prefix of a log line). Takes effect at once, for the host and all plugins, and is stored.
      */
+    /** Refreshes the Logging switches; removed in {@link #disposeSession()} so a closed chat is released. */
+    private Runnable loggingListener;
+
     private ComicForm buildLoggingForm() {
         ComicForm form = ComicForm.titled("Logging");
         final JPanel boxes = new JPanel(new java.awt.GridLayout(0, 3, 8, 0));
@@ -1354,14 +1361,18 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         rebuild.run();
         // New categories appear as soon as something logs under them (listener runs on the logging thread).
         final java.util.concurrent.atomic.AtomicBoolean queued = new java.util.concurrent.atomic.AtomicBoolean();
-        com.aresstack.askai.plugin.api.service.HostLog.addChangeListener(() -> {
+        if (loggingListener != null) {
+            com.aresstack.askai.plugin.api.service.HostLog.removeChangeListener(loggingListener);
+        }
+        loggingListener = () -> {
             if (queued.compareAndSet(false, true)) {
                 javax.swing.SwingUtilities.invokeLater(() -> {
                     queued.set(false);
                     rebuild.run();
                 });
             }
-        });
+        };
+        com.aresstack.askai.plugin.api.service.HostLog.addChangeListener(loggingListener);
         JButton allOn = new ComicButton("All on");
         allOn.addActionListener(event -> {
             com.aresstack.askai.plugin.api.service.HostLog.setDisabled(java.util.Collections.<String>emptyList());

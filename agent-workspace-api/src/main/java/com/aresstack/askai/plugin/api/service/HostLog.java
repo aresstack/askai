@@ -155,7 +155,25 @@ public final class HostLog {
 
     /** Wraps a stream so that lines of switched-off categories are dropped. */
     public static PrintStream filtered(PrintStream target) {
-        return new PrintStream(new CategoryFilterStream(target), true);
+        Charset charset = charsetOf(target);
+        try {
+            return new PrintStream(new CategoryFilterStream(target, charset), true, charset.name());
+        } catch (java.io.UnsupportedEncodingException impossible) {
+            return new PrintStream(new CategoryFilterStream(target, charset), true);
+        }
+    }
+
+    /** The stream's own encoding ({@code PrintStream.charset()}, Java 18+), else the platform default. */
+    static Charset charsetOf(PrintStream stream) {
+        try {
+            Object charset = PrintStream.class.getMethod("charset").invoke(stream);
+            if (charset instanceof Charset) {
+                return (Charset) charset;
+            }
+        } catch (Exception olderJava) {
+            // Java 8-17: no charset(); the console stream uses the default charset there
+        }
+        return Charset.defaultCharset();
     }
 
     private static void register(String category) {
@@ -182,6 +200,9 @@ public final class HostLog {
     static final class CategoryFilterStream extends OutputStream {
         private static final int MAX_BUFFER = 64 * 1024;
         private final PrintStream target;
+        private final Charset charset;
+        /** Decision for the line in progress when it was already judged (an oversized line); null = not yet. */
+        private final ThreadLocal<Boolean> lineDecision = new ThreadLocal<Boolean>();
         private final ThreadLocal<ByteArrayOutputStream> pending = new ThreadLocal<ByteArrayOutputStream>() {
             @Override
             protected ByteArrayOutputStream initialValue() {
@@ -189,16 +210,19 @@ public final class HostLog {
             }
         };
 
-        CategoryFilterStream(PrintStream target) {
+        CategoryFilterStream(PrintStream target, Charset charset) {
             this.target = target;
+            this.charset = charset;
         }
 
         @Override
         public void write(int b) {
             ByteArrayOutputStream line = pending.get();
             line.write(b);
-            if (b == '\n' || line.size() >= MAX_BUFFER) {
-                emit(line);
+            if (b == '\n') {
+                emit(line, true);
+            } else if (line.size() >= MAX_BUFFER) {
+                emit(line, false);
             }
         }
 
@@ -210,14 +234,14 @@ public final class HostLog {
             for (int i = offset; i < end; i++) {
                 if (bytes[i] == '\n') {
                     line.write(bytes, start, i + 1 - start);
-                    emit(line);
+                    emit(line, true);
                     start = i + 1;
                 }
             }
             if (start < end) {
                 line.write(bytes, start, end - start);
                 if (line.size() >= MAX_BUFFER) {
-                    emit(line);
+                    emit(line, false);
                 }
             }
         }
@@ -228,11 +252,19 @@ public final class HostLog {
             target.flush();
         }
 
-        private void emit(ByteArrayOutputStream line) {
+        private void emit(ByteArrayOutputStream line, boolean lineEnded) {
             byte[] bytes = line.toByteArray();
             line.reset();
-            String text = new String(bytes, 0, Math.min(bytes.length, 128), Charset.defaultCharset());
-            if (accepts(text)) {
+            Boolean decision = lineDecision.get();
+            if (decision == null) {
+                decision = accepts(new String(bytes, 0, Math.min(bytes.length, 128), charset));
+            }
+            if (lineEnded) {
+                lineDecision.remove();
+            } else {
+                lineDecision.set(decision);
+            }
+            if (decision) {
                 target.write(bytes, 0, bytes.length);
                 target.flush();
             }
