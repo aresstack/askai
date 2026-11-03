@@ -11,6 +11,9 @@ import java.awt.Dimension;
 /** Small layout helpers shared by the compact provider cards (SerpApi, Google search browser). */
 final class ProviderForm {
 
+    /** The label column's width (see {@link #row}); hints start in the field column. */
+    private static final int HINT_INDENT = 150;
+
     private ProviderForm() {
     }
 
@@ -42,10 +45,50 @@ final class ProviderForm {
         area.setOpaque(false);
         area.setBorder(BorderFactory.createEmptyBorder(2, 0, 6, 0));
         area.setForeground(com.aresstack.comiccontrols.theme.ThemeColor.of("research.settingsHintText"));
-        JPanel p = new JPanel(new BorderLayout(8, 0));
+        final javax.swing.JTextArea wrapped = area;
+        // A wrapping text area knows its height only at a known width: measure at the width the column
+        // gives this row, and re-layout the column once that height changes (otherwise lines are clipped).
+        final JPanel p = new JPanel(new BorderLayout(8, 0)) {
+            private int measuredHeight = -1;
+
+            @Override
+            public Dimension getPreferredSize() {
+                int width = getWidth() - HINT_INDENT - 8;
+                if (width > 0) {
+                    wrapped.setSize(width, Short.MAX_VALUE);
+                }
+                Dimension pref = wrapped.getPreferredSize();
+                java.awt.Insets in = getInsets();
+                // Narrow preferred width: the hint never widens the page, it wraps instead.
+                return new Dimension(HINT_INDENT + 8 + 120 + in.left + in.right, pref.height + in.top + in.bottom);
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); // no BoxLayout stretch
+            }
+
+            @Override
+            public void doLayout() {
+                super.doLayout();
+                int height = getPreferredSize().height;
+                if (height != measuredHeight) {
+                    measuredHeight = height;
+                    invalidate();
+                    if (getParent() != null) {
+                        getParent().invalidate();
+                    }
+                    javax.swing.SwingUtilities.invokeLater(new Runnable() {
+                        public void run() {
+                            revalidate();
+                        }
+                    });
+                }
+            }
+        };
         p.setOpaque(false);
         JLabel spacer = new JLabel();
-        spacer.setPreferredSize(new Dimension(150, 1));
+        spacer.setPreferredSize(new Dimension(HINT_INDENT, 1));
         p.add(spacer, BorderLayout.WEST);
         p.add(area, BorderLayout.CENTER);
         return p;
