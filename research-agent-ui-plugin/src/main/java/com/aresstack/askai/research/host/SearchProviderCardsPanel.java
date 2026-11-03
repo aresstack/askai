@@ -56,6 +56,8 @@ public final class SearchProviderCardsPanel extends JPanel {
     private final DataForSeoSettingsDraft dataForSeoDraft;
     private DataForSeoSettingsPanel dataForSeoPanel;
     private SerpApiSettingsPanel serpApiPanel;
+    private BraveSettingsPanel bravePanel;
+    private BrightDataSettingsPanel brightDataPanel;
 
     public SearchProviderCardsPanel(WorkspaceStateStore store) {
         super(new BorderLayout(6, 6));
@@ -81,8 +83,8 @@ public final class SearchProviderCardsPanel extends JPanel {
         add(top, BorderLayout.NORTH);
 
         cardHost.add(browserCard(), PROVIDER_LABELS[0]);
-        cardHost.add(placeholderCard("Brave Search API"), PROVIDER_LABELS[1]);
-        cardHost.add(placeholderCard("Bright Data"), PROVIDER_LABELS[2]);
+        cardHost.add(braveCard(), PROVIDER_LABELS[1]);
+        cardHost.add(brightDataCard(), PROVIDER_LABELS[2]);
         cardHost.add(dataForSeoCard(), PROVIDER_LABELS[3]);
         cardHost.add(serpApiCard(), PROVIDER_LABELS[4]);
         add(cardHost, BorderLayout.CENTER);
@@ -105,6 +107,16 @@ public final class SearchProviderCardsPanel extends JPanel {
         persistSelection();
         if (dataForSeoPanel != null) {
             dataForSeoPanel.save();
+        }
+        if (bravePanel != null && !bravePanel.save()) {
+            javax.swing.JOptionPane.showMessageDialog(null,
+                    "Brave settings were not saved:\n" + bravePanel.getLastError(),
+                    "Brave Search API", javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+        if (brightDataPanel != null && !brightDataPanel.save()) {
+            javax.swing.JOptionPane.showMessageDialog(null,
+                    "Bright Data settings were not saved:\n" + brightDataPanel.getLastError(),
+                    "Bright Data", javax.swing.JOptionPane.WARNING_MESSAGE);
         }
         if (serpApiPanel != null && !serpApiPanel.save()) {
             // The settings dialog is closing; the card's own status line is no longer visible.
@@ -161,17 +173,20 @@ public final class SearchProviderCardsPanel extends JPanel {
         return serpApiPanel;
     }
 
-    private JComponent placeholderCard(String name) {
-        JPanel p = new JPanel();
-        p.setLayout(new javax.swing.BoxLayout(p, javax.swing.BoxLayout.Y_AXIS));
-        p.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        JLabel l = new JLabel("<html><body style='width:420px'>" + name + " is selectable as the search "
-                + "provider. Its own settings card is added in a follow-up slice; credentials live in "
-                + "~/agents/research/providers/. Selecting it here already routes new sessions to this "
-                + "provider.</body></html>");
-        l.setEnabled(false);
-        p.add(l);
-        return p;
+    private JComponent braveCard() {
+        if (providers == null) {
+            return placeholderUnavailable();
+        }
+        bravePanel = new BraveSettingsPanel(providers.configurationService());
+        return bravePanel;
+    }
+
+    private JComponent brightDataCard() {
+        if (providers == null) {
+            return placeholderUnavailable();
+        }
+        brightDataPanel = new BrightDataSettingsPanel(providers.configurationService());
+        return brightDataPanel;
     }
 
     private JComponent placeholderUnavailable() {

@@ -62,11 +62,12 @@ public class WhisperDictationTest {
         installEngine(store);
         install(store, WhisperModelCatalog.findById("base"));
         install(store, WhisperModelCatalog.findById("small"));
-        assertEquals("small", store.modelFor(DictationSettings.defaults()).getId());
-        assertEquals("base", store.modelFor(DictationSettings.defaults().withWhisperModelId("base")).getId());
-        store.uninstallModel(WhisperModelCatalog.findById("base"));
-        assertEquals("a removed choice falls back to an installed model", "small",
-                store.modelFor(DictationSettings.defaults().withWhisperModelId("base")).getId());
+        assertEquals("the recommended base model first", "base",
+                store.modelFor(DictationSettings.defaults()).getId());
+        assertEquals("small", store.modelFor(DictationSettings.defaults().withWhisperModelId("small")).getId());
+        store.uninstallModel(WhisperModelCatalog.findById("small"));
+        assertEquals("a removed choice falls back to an installed model", "base",
+                store.modelFor(DictationSettings.defaults().withWhisperModelId("small")).getId());
     }
 
     @Test
@@ -106,7 +107,7 @@ public class WhisperDictationTest {
         AudioModelResolver resolver = DictationBackendRouting.resolver(ollamaResolver, () -> active[0]);
         assertEquals("gemma4:e2b", resolver.resolve("Automatic").getModelName());
         active[0] = WhisperModelCatalog.recommended();
-        assertEquals("@whisper:small", resolver.resolve("Automatic").getModelName());
+        assertEquals("@whisper:base", resolver.resolve("Automatic").getModelName());
 
         SpeechTranscriber transcriber = DictationBackendRouting.transcriber(fixed("ollama"), fixed("whisper"));
         assertEquals("whisper", transcriber.transcribe(new SpeechTranscriber.TranscriptionInput(

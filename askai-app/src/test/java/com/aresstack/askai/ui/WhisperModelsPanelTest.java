@@ -50,8 +50,8 @@ public class WhisperModelsPanelTest {
         WhisperModelsPanel panel = new WhisperModelsPanel(store, (model, progress) -> {
             throw new java.io.IOException("proxy said no");
         }, Runnable::run, Runnable::run);
-        panel.installButton("small").doClick();
+        panel.installButton("base").doClick();
         assertTrue(panel.errorText().contains("proxy said no"));
-        assertEquals("Not installed", panel.statusText("small"));
+        assertEquals("Not installed", panel.statusText("base"));
     }
 }

@@ -543,13 +543,20 @@ public final class AskAiFrame extends JFrame {
                             refreshConnectionStatus();
                         }
                     });
-            setupActions.setModelBrowser(() -> new ModelSearchPanel(configurationRepository, askAiService, null,
-                    null, askAiService.localRuntimeManager() == null ? null
-                            : new LocalRuntimeModelsPanel(askAiService, new Runnable() {
-                                public void run() {
-                                    catalogRefreshService.refresh();
-                                }
-                            })));
+            setupActions.setModelBrowser(dictation -> {
+                ModelSearchPanel browser = new ModelSearchPanel(configurationRepository, askAiService, null, null,
+                        new WhisperModelsPanel(new com.aresstack.askai.stt.whisper.WhisperStore()),
+                        askAiService.localRuntimeManager() == null ? null
+                                : new LocalRuntimeModelsPanel(askAiService, new Runnable() {
+                                    public void run() {
+                                        catalogRefreshService.refresh();
+                                    }
+                                }));
+                if (dictation) {
+                    browser.openDictationModels();
+                }
+                return browser;
+            });
             setupActions.setPluginSetup(() -> pluginService == null
                     ? java.util.Collections.<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>
                             emptyList()

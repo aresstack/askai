@@ -14,9 +14,9 @@ public final class WhisperModelCatalog {
     public static final String REPOSITORY = "ggerganov/whisper.cpp";
 
     private static final List<WhisperModel> CURATED = Collections.unmodifiableList(Arrays.asList(
-            new WhisperModel("small", "Small (recommended)", 466),
-            new WhisperModel("large-v3-turbo-q5_0", "Large v3 Turbo (most accurate)", 547),
-            new WhisperModel("base", "Base (fastest, smallest)", 142)));
+            new WhisperModel("base", "Base (recommended)", 142),
+            new WhisperModel("small", "Small (more accurate)", 466),
+            new WhisperModel("large-v3-turbo-q5_0", "Large v3 Turbo (most accurate)", 547)));
 
     private WhisperModelCatalog() {
     }

@@ -93,6 +93,8 @@ public final class SetupWizardPanel extends JPanel {
      * fill the free space of the step instead of standing small in a corner.
      */
     private static final int[] MASCOT_HEIGHTS = {900, 900, 900, 900, 900, 900};
+    /** Height of the research step's Witch in the label column (below "Web search"). */
+    private static final int SECTION_WITCH_HEIGHT = 150;
 
     /** AskAI proxy modes the step offers directly; every other mode is kept and edited in the network settings. */
     static final String PROXY_NONE = "DISABLED";
@@ -174,6 +176,7 @@ public final class SetupWizardPanel extends JPanel {
 
     // Step 2: AI runtime
     private final JTextField ollamaUrl = ComicControls.textField(28);
+    private JComponent ollamaAddressCaption;
     private final ComicButton runtimeTest = new ComicButton("Test connection", ComicButton.Accent.ACTION);
     private final ComicButton runtimeDownload = new ComicButton("Download Ollama…");
     private final ComicButton runtimeManager = new ComicButton("Get Manager…");
@@ -256,6 +259,9 @@ public final class SetupWizardPanel extends JPanel {
     private final JComboBox<String> dictationEngine = ComicControls.comboBox();
     private final JComboBox<String> whisperModel = ComicControls.comboBox();
     private final ModelDownload whisperDownload = new ModelDownload("Download");
+    /** One click for the recommended Whisper model (the first offer), like the chat model's quick install. */
+    private final ComicButton whisperRecommended = new ComicButton("Install Base", ComicButton.Accent.ACTION);
+    private final ComicButton whisperBrowse = new ComicButton("Install…");
     private final Map<String, SetupActions.VoiceOffer> whisperByLabel =
             new LinkedHashMap<String, SetupActions.VoiceOffer>();
     /** The Whisper choices were filled once; until then the draft's Whisper model stays as it is. */
@@ -379,19 +385,42 @@ public final class SetupWizardPanel extends JPanel {
         Rows rows = new Rows(STEP_RUNTIME, "AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
                 + "runtime. One of them must answer; the final check shows which one does.");
-        JPanel runtimeLine = inline(ollamaUrl, runtimeTest, runtimeDownload);
-        // "Get Manager" right under "Download Ollama", in the same column and just as wide.
-        GridBagLayout runtimeLayout = (GridBagLayout) runtimeLine.getLayout();
-        GridBagConstraints download = runtimeLayout.getConstraints(runtimeDownload);
-        download.fill = GridBagConstraints.HORIZONTAL;
-        runtimeLayout.setConstraints(runtimeDownload, download);
-        GridBagConstraints manager = (GridBagConstraints) download.clone();
-        manager.gridy = 1;
-        manager.insets = new Insets(6, 8, 0, 0);
-        runtimeLine.add(runtimeManager, manager);
+        // Two lines in one cell: address, "Test connection", "Download Ollama…"; below them the status in the
+        // field column and "Get Manager…" right under "Download Ollama…", in the same column and just as wide.
+        JPanel runtimeLine = transparent(new GridBagLayout());
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = 0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.weightx = 1;
+        runtimeLine.add(ollamaUrl, c);
+        c = new GridBagConstraints();
+        c.gridx = 1;
+        c.gridy = 0;
+        c.insets = new Insets(0, 8, 0, 0);
+        runtimeLine.add(runtimeTest, c);
+        c = (GridBagConstraints) c.clone();
+        c.gridx = 2;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        runtimeLine.add(runtimeDownload, c);
+        c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = 1;
+        c.gridwidth = 2;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.anchor = GridBagConstraints.WEST;
+        c.insets = new Insets(6, 0, 0, 0);
+        runtimeLine.add(new StatusLine(null, ollamaStatus).panel, c);
+        c = new GridBagConstraints();
+        c.gridx = 2;
+        c.gridy = 1;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.insets = new Insets(6, 8, 0, 0);
+        runtimeLine.add(runtimeManager, c);
         runtimeManager.setToolTipText("The AskAI Ollama Manager: install, start and update Ollama with one click");
-        rows.stretched("Ollama address", runtimeLine);
-        rows.stretched("", new StatusLine(null, ollamaStatus).panel);
+        List<JComponent> runtimeParts = rows.stretched("Ollama address", runtimeLine);
+        rows.topAligned(runtimeParts, ollamaUrl);
+        ollamaAddressCaption = runtimeParts.get(1);
         return rows.panel();
     }
 
@@ -446,7 +475,8 @@ public final class SetupWizardPanel extends JPanel {
             try {
                 com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage page = contribution.createSetupPage(context);
                 if (page != null && page.getComponent() != null) {
-                    researchRows.section(contribution.getDisplayName(), page.getComponent());
+                    SetupWizardMascot witch = pluginPages.isEmpty() ? sectionWitch() : null;
+                    researchRows.section(contribution.getDisplayName(), page.getComponent(), witch);
                     pluginPages.add(page);
                 }
             } catch (RuntimeException | LinkageError broken) {
@@ -455,6 +485,28 @@ public final class SetupWizardPanel extends JPanel {
         }
         researchRows.panel.revalidate();
         researchRows.panel.repaint();
+    }
+
+    /**
+     * The research step's Witch moves from below the form, where the tall search sections leave her no room, into
+     * the label column below the first section's name.
+     */
+    private SetupWizardMascot sectionWitch() {
+        SetupWizardMascot below = mascots[STEP_KNOWLEDGE];
+        SetupWizardMascot.Art art = below == null ? null : below.art();
+        if (art == null) {
+            return null;
+        }
+        final SetupWizardMascot witch = new SetupWizardMascot(art, SECTION_WITCH_HEIGHT,
+                SetupWizardMascot.Placement.LEFT, 0, 0, palette);
+        witch.setPreferredSize(new Dimension(art.widthFor(SECTION_WITCH_HEIGHT), SECTION_WITCH_HEIGHT));
+        witch.setOnFigureClicked(point -> witchMenu().show(witch, point.x, point.y));
+        java.awt.Container page = below.getParent();
+        if (page != null) {
+            page.remove(below);
+        }
+        mascots[STEP_KNOWLEDGE] = witch;
+        return witch;
     }
 
     private JPanel dictationStep() {
@@ -468,7 +520,8 @@ public final class SetupWizardPanel extends JPanel {
         dictationEngine.addItem(ENGINE_WHISPER);
         dictationEngine.addItem(ENGINE_OLLAMA);
         rows.stretched("Transcription", dictationEngine);
-        whisperParts.addAll(rows.stretched("Whisper model", inline(whisperModel, whisperDownload.button)));
+        whisperParts.addAll(rows.stretched("Whisper model", inline(whisperModel, whisperDownload.button, whisperRecommended,
+                whisperBrowse)));
         whisperParts.addAll(rows.stretched("", stack(whisperDownload.line.panel)));
         ollamaAudioParts.addAll(rows.stretched("Audio model", inline(audioModel, audioDownload.button,
                 audioInstall)));
@@ -531,9 +584,9 @@ public final class SetupWizardPanel extends JPanel {
                 + "local runtime");
         embeddingInstall.setToolTipText(chatInstall.getToolTipText());
         audioInstall.setToolTipText(chatInstall.getToolTipText());
-        chatInstall.addActionListener(e -> browseModels(false));
-        embeddingInstall.addActionListener(e -> browseModels(false));
-        audioInstall.addActionListener(e -> browseModels(true));
+        chatInstall.addActionListener(e -> browseModels(false, false));
+        embeddingInstall.addActionListener(e -> browseModels(false, false));
+        audioInstall.addActionListener(e -> browseModels(true, false));
         chatModel.addActionListener(e -> updateButtons());
         embeddingModel.addActionListener(e -> {
             if (!busy) {
@@ -563,6 +616,15 @@ public final class SetupWizardPanel extends JPanel {
         dictationEngine.addActionListener(e -> updateButtons());
         whisperModel.addActionListener(e -> updateButtons());
         whisperDownload.button.addActionListener(e -> installWhisper());
+        whisperRecommended.addActionListener(e -> {
+            SetupActions.VoiceOffer recommended = recommendedWhisper();
+            if (recommended != null) {
+                whisperModel.setSelectedItem(recommended.toString());
+                installWhisper();
+            }
+        });
+        whisperBrowse.setToolTipText("Open the model browser on its Dictation tab");
+        whisperBrowse.addActionListener(e -> browseModels(true, true));
         embeddingDownload.button.addActionListener(e -> pull(embeddingDownload, embeddingModel));
         rerankerDownload.button.addActionListener(e -> installReranker());
         checkRetry.addActionListener(e -> runFinalCheck());
@@ -891,6 +953,17 @@ public final class SetupWizardPanel extends JPanel {
             whisperDownload.button.setText(whisperOffer.isInstalled() ? "Reinstall" : "Download");
         }
         whisperDownload.button.setEnabled(!busy && !whisperDownload.running);
+        SetupActions.VoiceOffer recommendedWhisper = recommendedWhisper();
+        whisperRecommended.setVisible(recommendedWhisper != null && !recommendedWhisper.isInstalled());
+        if (recommendedWhisper != null) {
+            whisperRecommended.setText("Install " + recommendedWhisper.label().replace(" (recommended)", ""));
+            // the selected recommended model has its quick button; no second "Download" beside it
+            if (whisperOffer == recommendedWhisper && !recommendedWhisper.isInstalled()) {
+                whisperDownload.button.setVisible(false);
+            }
+        }
+        whisperRecommended.setEnabled(!busy && !whisperDownload.running);
+        whisperBrowse.setEnabled(!busy && !whisperDownload.running);
         done[STEP_DICTATION] = dictationLoaded && (whisper ? whisperInstalled() : !installedAudio.isEmpty());
         // The reranker is a local model: offer the installation whenever the chosen one is not installed.
         rerankerDownload.button.setVisible(!installedRerankers.contains(text(rerankerModel)));
@@ -1078,15 +1151,30 @@ public final class SetupWizardPanel extends JPanel {
      * Opens AskAI's model browser (Hugging Face, Ollama library, local runtime) over the wizard; afterwards the
      * lists are read again and a model installed meanwhile is selected.
      */
-    private void browseModels(boolean audio) {
+    private void browseModels(boolean audio, boolean whisperTab) {
         final List<String> chatBefore = new ArrayList<String>(installedChat);
         final List<String> embeddingsBefore = new ArrayList<String>(installedEmbeddings);
         final List<String> audioBefore = new ArrayList<String>(installedAudio);
-        setup.openModelBrowser(this, collect()); // modal: returns when the browser is closed
+        final List<String> whisperBefore = installedWhisperIds();
+        final String whisperChoice = whisperId();
+        setup.openModelBrowser(this, collect(), whisperTab); // modal: returns when the browser is closed
         if (closed) {
             return;
         }
         if (audio) {
+            setup.loadWhisperModels(offers -> {
+                if (closed) {
+                    return;
+                }
+                String added = null;
+                for (SetupActions.VoiceOffer offer : offers == null
+                        ? Collections.<SetupActions.VoiceOffer>emptyList() : offers) {
+                    if (added == null && offer.isInstalled() && !whisperBefore.contains(offer.id())) {
+                        added = offer.id();
+                    }
+                }
+                loadWhisperModels(added == null ? whisperChoice : added);
+            });
             final String current = choice(audioModel, AUDIO_AUTOMATIC);
             setup.loadAudioModels(collect(), models -> {
                 if (closed) {
@@ -1682,6 +1770,27 @@ public final class SetupWizardPanel extends JPanel {
         });
     }
 
+    /** The first Whisper offer is the recommended model. */
+    private SetupActions.VoiceOffer recommendedWhisper() {
+        return whisperByLabel.isEmpty() ? null : whisperByLabel.values().iterator().next();
+    }
+
+    private List<String> installedWhisperIds() {
+        List<String> ids = new ArrayList<String>();
+        for (SetupActions.VoiceOffer offer : whisperByLabel.values()) {
+            if (offer.isInstalled()) {
+                ids.add(offer.id());
+            }
+        }
+        return ids;
+    }
+
+    /** The chosen Whisper model id, installed or not; "" if none is listed. */
+    private String whisperId() {
+        SetupActions.VoiceOffer offer = whisperByLabel.get(text(whisperModel));
+        return offer == null ? "" : offer.id();
+    }
+
     private boolean whisperInstalled() {
         for (SetupActions.VoiceOffer offer : whisperByLabel.values()) {
             if (offer.isInstalled()) {
@@ -2048,6 +2157,14 @@ public final class SetupWizardPanel extends JPanel {
         return whisperModel;
     }
 
+    JButton whisperRecommendedButton() {
+        return whisperRecommended;
+    }
+
+    JButton whisperBrowseButton() {
+        return whisperBrowse;
+    }
+
     JButton whisperButton() {
         return whisperDownload.button;
     }
@@ -2086,6 +2203,14 @@ public final class SetupWizardPanel extends JPanel {
 
     JComboBox<String> proxyModeChoice() {
         return proxyMode;
+    }
+
+    JLabel ollamaStatusLabel() {
+        return ollamaStatus;
+    }
+
+    JComponent ollamaAddressLabel() {
+        return ollamaAddressCaption;
     }
 
     JTextField ollamaUrlField() {
@@ -2324,10 +2449,25 @@ public final class SetupWizardPanel extends JPanel {
 
         /** A plugin's section: its name in the label column, its content flush with the fields above. */
         void section(String label, JComponent component) {
+            section(label, component, null);
+        }
+
+        /**
+         * A plugin's section with the step's Witch below its name in the label column: a tall section leaves no
+         * room for her below the form, but the label column beside it is empty.
+         */
+        void section(String label, JComponent component, SetupWizardMascot witch) {
             GridBagConstraints c = constraints(0);
             c.anchor = GridBagConstraints.NORTHWEST;
             c.insets = new Insets(12, 0, 3, 10);
-            panel.add(fieldLabel(label), c);
+            if (witch == null) {
+                panel.add(fieldLabel(label), c);
+            } else {
+                JPanel column = transparent(new BorderLayout(0, 8));
+                column.add(fieldLabel(label), BorderLayout.NORTH);
+                column.add(witch, BorderLayout.CENTER);
+                panel.add(column, c);
+            }
             c = constraints(1);
             c.fill = GridBagConstraints.HORIZONTAL;
             c.weightx = 1;
@@ -2396,6 +2536,23 @@ public final class SetupWizardPanel extends JPanel {
             c.fill = GridBagConstraints.HORIZONTAL;
             layout.setConstraints(component, c);
             return parts;
+        }
+
+        /**
+         * For a field cell with more than one line: its label sits level with the first line ({@code first}),
+         * not in the middle of the cell.
+         */
+        void topAligned(List<JComponent> parts, JComponent first) {
+            if (parts.size() < 2) {
+                return;
+            }
+            JComponent caption = parts.get(1);
+            GridBagLayout layout = (GridBagLayout) panel.getLayout();
+            GridBagConstraints c = layout.getConstraints(caption);
+            c.anchor = GridBagConstraints.NORTHWEST;
+            int offset = Math.max(0, (first.getPreferredSize().height - caption.getPreferredSize().height) / 2);
+            c.insets = new Insets(3 + offset, c.insets.left, c.insets.bottom, c.insets.right);
+            layout.setConstraints(caption, c);
         }
 
         void wide(JComponent component) {
