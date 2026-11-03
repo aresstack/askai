@@ -23,6 +23,8 @@ final class WizardGuide {
             + "sentence by sentence.";
     static final String FAILURE = "That didn't work just now. Your entries are still there, though – we can simply "
             + "try again.";
+    /** His thought while he has neither voice nor runtime yet; only shown, never spoken. */
+    static final String THOUGHT_SILENT = "(When will I finally be heard …)";
     static final String THINKING = "One moment, let me think …";
     static final String NO_ANSWER = "No answer comes to mind right now. Try again in a moment, or ask me what to do "
             + "in this step.";
@@ -70,7 +72,8 @@ final class WizardGuide {
     private static final String[] WHAT_TO_DO = {
             "Choose how AskAI reaches the internet: without a proxy, via the Windows proxy settings or a proxy of "
                     + "your own. In company networks, also trust the Windows certificates. Then click “Test "
-                    + "connection”. Working offline? Then just skip this step.",
+                    + "connection” – or simply download a voice in the next step: if the download runs, the network works. "
+                    + "Working offline? Then just skip this step.",
             "Pick a voice per language and click “Download selected voices”, or keep the Windows voice. You can skip "
                     + "this step and change voices later in the settings.",
             "Enter the address of your Ollama server – on your own machine that is usually http://localhost:11434 – "

@@ -665,8 +665,12 @@ public final class SetupWizardPanel extends JPanel {
         for (SetupWizardMascot mascot : mascots) {
             mascot.say(null);
         }
-        if (merlinAwake) {
+        if (!merlinAwake && narrator.canSpeak()) {
+            wakeMerlin(false); // a downloaded Piper voice is enough: the wizard speaks without any AI runtime
+        } else if (merlinAwake) {
             narrator.say(guide.enteredStep(index));
+        } else {
+            narrator.show(WizardGuide.THOUGHT_SILENT); // only a thought: he has no voice yet
         }
         if (index == STEP_RUNTIME && !done[STEP_RUNTIME] && !runtimeChecking && !busy) {
             checkRuntime(); // the default address usually works: check right away instead of waiting for a click
@@ -1141,6 +1145,9 @@ public final class SetupWizardPanel extends JPanel {
         if (index >= queue.size()) {
             voiceInstalling = false;
             voiceStatus.setText("Voices installed.");
+            // The download went through the configured network: that is as good as a passed network test.
+            done[STEP_NETWORK] = true;
+            clearError(STEP_NETWORK);
             loadVoices();
             return;
         }
@@ -1443,6 +1450,10 @@ public final class SetupWizardPanel extends JPanel {
 
     JComboBox<String> rerankerModelChoice() {
         return rerankerModel;
+    }
+
+    ComicButton voiceInstallButton() {
+        return voiceInstall;
     }
 
     JComboBox<String> voiceGermanChoice() {

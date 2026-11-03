@@ -255,6 +255,46 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void withoutAVoiceTheWizardOnlyThinks() {
+        SetupWizardPanel wizard = wizard(new Fake());
+        wizard.nextButton().doClick();
+        assertFalse(wizard.isMerlinAwake());
+        assertEquals(WizardGuide.THOUGHT_SILENT, wizard.mascotOf(SetupWizardPanel.STEP_VOICE).spokenText());
+    }
+
+    @Test
+    public void aDownloadedVoiceLetsHimSpeakWithoutARuntimeAndProvesTheNetwork() {
+        Fake fake = new Fake();
+        fake.ollamaVersion = null;
+        SetupWizardPanel wizard = wizard(fake);
+        final List<String> spoken = new ArrayList<String>();
+        wizard.setVoice(new WizardVoice() {
+            @Override
+            public boolean isAvailable() {
+                return fake.savedVoices != null;
+            }
+
+            @Override
+            public void speak(String text) {
+                spoken.add(text);
+            }
+
+            @Override
+            public void stop() {
+            }
+        });
+        wizard.nextButton().doClick();
+        wizard.voiceGermanChoice().setSelectedItem("Thorsten (German)");
+        wizard.voiceInstallButton().doClick();
+        assertTrue("the voice download counts as network test", wizard.isDone(SetupWizardPanel.STEP_NETWORK));
+
+        wizard.nextButton().doClick();
+
+        assertTrue("awake without any AI runtime", wizard.isMerlinAwake());
+        assertFalse(spoken.isEmpty());
+    }
+
+    @Test
     public void skipInTheLastStepFinishes() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
@@ -344,6 +384,7 @@ public class SetupWizardPanelTest {
         List<SetupCheck> checks = Collections.singletonList(SetupCheck.ok("AI runtime", "Ollama 0.9.0"));
         SetupDraft finished;
         SetupDraft savedVoices;
+        boolean thorstenInstalled;
         boolean cancelled;
 
         @Override
@@ -394,12 +435,13 @@ public class SetupWizardPanelTest {
 
         @Override
         public void loadVoices(Consumer<List<VoiceOffer>> done) {
-            done.accept(Arrays.asList(new VoiceOffer("de_DE-thorsten-medium", "Thorsten (German)", "de", false),
+            done.accept(Arrays.asList(new VoiceOffer("de_DE-thorsten-medium", "Thorsten (German)", "de", thorstenInstalled),
                     new VoiceOffer("en_US-amy-medium", "Amy (English)", "en", true)));
         }
 
         @Override
         public void installVoice(String voiceId, Consumer<String> progress, BiConsumer<String, String> done) {
+            thorstenInstalled = true;
             done.accept("installed", null);
         }
 
