@@ -63,7 +63,7 @@ import static org.junit.Assume.assumeTrue;
  * the start of {@code ProductiveModeFactorySmokeTest}. Persisted settings → the same
  * {@link ResearchAgentSessionFactory} the plugin registers → {@code activate()} creates the agent in this JVM through
  * {@code InProcessResearchRuntime.shared()} (no agent jar, no process, no ACP/MCP wire) → the agent connects to the
- * research endpoint and the model-backed TeamAgent greets through the host-published main model (mock
+ * research endpoint and the model-backed TeamAgent answers the user's first message through the host-published main model (mock
  * {@code /api/chat}) → close is idempotent. The research run itself (search, research browser, captures, sources,
  * state transitions) is proven through the same factory by {@code InProcessResearchEndToEndTest}.
  *
@@ -117,10 +117,14 @@ public class InProcessProductiveSessionFactoryTest {
         try {
             session = new ResearchAgentSessionFactory().create(
                     new AgentSessionCreationRequest("factory1", "p1", new HashMap<String, String>()), host);
-            session.activate(); // the GUI's start point: creates the agent in this JVM and runs the greeting turn
+            session.activate(); // the GUI's start point: creates the agent in this JVM; a new chat stays empty
             assertTrue("the in-process agent connected to the research endpoint: " + messages,
                     host.ready.await(60, TimeUnit.SECONDS));
-            assertTrue("the model-driven greeting reached the chat: " + messages, host.greeted.await(60, TimeUnit.SECONDS));
+            assertFalse("a new chat stays empty: no greeting, no model call: " + messages,
+                    host.greeted.await(2, TimeUnit.SECONDS));
+            ((ResearchAgentSession) session).submitPrompt("Hasenhaltung");
+            assertTrue("the model answer to the user's first message reached the chat: " + messages,
+                    host.greeted.await(60, TimeUnit.SECONDS));
             assertTrue("the mock /api/chat received model=gemma4:e2b", mockModel.sawModel("gemma4:e2b"));
             for (String message : messages) {
                 assertFalse("the session start reported a problem: " + messages, message.startsWith("PROBLEM:"));
