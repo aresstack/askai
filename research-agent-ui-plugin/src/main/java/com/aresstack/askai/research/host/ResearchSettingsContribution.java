@@ -49,6 +49,7 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
         // editor). The old shared engine/locale fields are gone — each provider owns its full config.
         tabs.addTab("Search", fitted(searchProviders));
         tabs.addTab("Browser SERP", new LegacyBrowserSearchSettingsPanel(store, profile));
+        tabs.addTab("MCP", fitted(runtime.mcpView()));
         tabs.addTab("Check results", runtime.resultsView());
         // The DataForSEO draft + provider selection persist when the gear dialog is disposed; unsaved
         // provider drafts are dropped. The host's settings dialog does not expose an explicit Save hook,
