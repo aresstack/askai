@@ -313,8 +313,10 @@ public final class AskAiFrame extends JFrame {
         // Swing components (surfaces, fields, tables, tabs, …), the comic button/scrollbar
         // delegates, and the menu/popup contours (issue #36).
         this.titleBar = new AskAiTitleBar(getTitle(),
-                () -> setState(java.awt.Frame.ICONIFIED),
-                () -> dispatchEvent(new java.awt.event.WindowEvent(this, java.awt.event.WindowEvent.WINDOW_CLOSING)));
+                // Click on the ✕ hides into the tray; holding it exits AskAI like the tray's "Exit".
+                MainWindowCloseActions.minimize(() -> mainWindowTray.hideToTray(),
+                        () -> setState(java.awt.Frame.ICONIFIED)),
+                MainWindowCloseActions.exit(this::exitApplication));
         // Title bar ABOVE the menu bar, both inside the frameless window's ink contour.
         JPanel header = new JPanel();
         header.setLayout(new javax.swing.BoxLayout(header, javax.swing.BoxLayout.Y_AXIS));
