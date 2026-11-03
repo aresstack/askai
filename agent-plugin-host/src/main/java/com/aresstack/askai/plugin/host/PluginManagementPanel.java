@@ -1,6 +1,8 @@
 package com.aresstack.askai.plugin.host;
 
 import com.aresstack.askai.plugin.api.WorkspacePluginDescriptor;
+import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicTableSupport;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -44,11 +46,25 @@ public final class PluginManagementPanel extends JPanel {
         }
     };
     private final JTable table = new JTable(tableModel);
-    private final JButton enableButton = new JButton("Enable");
-    private final JButton disableButton = new JButton("Disable");
-    private final JButton detailsButton = new JButton("Show details");
+    private final JButton enableButton = new ComicButton("Enable");
+    private final JButton disableButton = new ComicButton("Disable");
+    private final JButton detailsButton = new ComicButton("Show details");
+    private final JButton settingsButton = new ComicButton("Settings\u2026", ComicButton.Accent.ACTION);
+    private SettingsOpener settingsOpener;
     private final javax.swing.JLabel globalStatusLabel = new javax.swing.JLabel(" ");
     private List<PluginCatalogEntry> entries = new ArrayList<PluginCatalogEntry>();
+
+    /**
+     * Opens a plugin's own settings (the categories it contributes to Settings). Set by the host; without
+     * it the "Settings…" button stays hidden.
+     */
+    public interface SettingsOpener {
+        /** Whether the plugin with this stable id contributes settings pages. */
+        boolean hasSettings(String pluginId);
+
+        /** Show the plugin's settings (the host activates whatever the pages need). */
+        void openSettings(String pluginId);
+    }
 
     public PluginManagementPanel(WorkspacePluginService pluginService, PluginEnablementService enablement,
                                  File pluginsDirectory) {
@@ -58,6 +74,7 @@ public final class PluginManagementPanel extends JPanel {
         this.pluginsDirectory = pluginsDirectory;
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
+        ComicTableSupport.style(table);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.getSelectionModel().addListSelectionListener(event -> updateButtons());
         globalStatusLabel.setBorder(BorderFactory.createEmptyBorder(0, 2, 6, 2));
@@ -111,26 +128,46 @@ public final class PluginManagementPanel extends JPanel {
     }
 
     private JComponent buildToolbar() {
-        JButton refresh = new JButton("Refresh catalog");
+        JButton refresh = new ComicButton("Refresh catalog");
         refresh.addActionListener(event -> pluginService.refreshAsync());
-        JButton openFolder = new JButton("Open plugin folder");
+        JButton openFolder = new ComicButton("Open plugin folder");
         openFolder.addActionListener(event -> openPluginFolder());
         enableButton.addActionListener(event -> setSelectedEnabled(true));
         disableButton.addActionListener(event -> setSelectedEnabled(false));
         detailsButton.addActionListener(event -> showDetails());
+        settingsButton.addActionListener(event -> openSelectedSettings());
+        settingsButton.setToolTipText("Open the selected plugin's own settings");
+        // Double-click a row = open its settings (when it has any).
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent event) {
+                if (event.getClickCount() == 2 && settingsButton.isVisible() && settingsButton.isEnabled()) {
+                    openSelectedSettings();
+                }
+            }
+        });
 
-        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        bar.add(enableButton);
-        bar.add(disableButton);
-        bar.add(detailsButton);
-        bar.add(openFolder);
-        bar.add(refresh);
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        left.setOpaque(false);
+        left.add(enableButton);
+        left.add(disableButton);
+        left.add(detailsButton);
+        left.add(openFolder);
+        left.add(refresh);
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        right.setOpaque(false);
+        right.add(settingsButton);
+        JPanel bar = new JPanel(new BorderLayout(6, 0));
+        bar.setOpaque(false);
+        bar.add(left, BorderLayout.CENTER);
+        bar.add(right, BorderLayout.EAST);
         updateButtons();
         return bar;
     }
 
     private void setEntries(List<PluginCatalogEntry> catalog) {
         this.entries = catalog == null ? new ArrayList<PluginCatalogEntry>() : catalog;
+        String selectedId = selectedEntry() == null ? null : stableId(selectedEntry());
         tableModel.setRowCount(0);
         for (PluginCatalogEntry entry : entries) {
             WorkspacePluginDescriptor d = entry.getDescriptor();
@@ -147,6 +184,15 @@ public final class PluginManagementPanel extends JPanel {
                 entry.getLocation()
             });
         }
+        // Keep the selection across catalog refreshes; with a single plugin, preselect it so its
+        // buttons (Settings…) are usable right away.
+        for (int i = 0; i < this.entries.size(); i++) {
+            if (stableId(this.entries.get(i)).equals(selectedId)
+                    || (selectedId == null && this.entries.size() == 1)) {
+                table.getSelectionModel().setSelectionInterval(i, i);
+                break;
+            }
+        }
         updateButtons();
     }
 
@@ -156,6 +202,22 @@ public final class PluginManagementPanel extends JPanel {
         enableButton.setEnabled(has && !entry.isEnabled());
         disableButton.setEnabled(has && entry.isEnabled());
         detailsButton.setEnabled(has);
+        settingsButton.setVisible(settingsOpener != null);
+        settingsButton.setEnabled(has && settingsOpener != null && entry.isEnabled()
+                && settingsOpener.hasSettings(stableId(entry)));
+    }
+
+    /** Wires the "Settings…" button (bottom right) to the host; null hides it. */
+    public void setSettingsOpener(SettingsOpener opener) {
+        this.settingsOpener = opener;
+        updateButtons();
+    }
+
+    private void openSelectedSettings() {
+        PluginCatalogEntry entry = selectedEntry();
+        if (entry != null && settingsOpener != null) {
+            settingsOpener.openSettings(stableId(entry));
+        }
     }
 
     private void setSelectedEnabled(boolean enabled) {
