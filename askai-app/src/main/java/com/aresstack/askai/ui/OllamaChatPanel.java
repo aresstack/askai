@@ -1322,8 +1322,61 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
         JComponent notifications = buildNotificationsCard();
         JComponent devices = buildAudioDevicesForm();
-        ComicForm.alignLabels((ComicForm) notifications, (ComicForm) devices);
-        return ComicForm.stack(setup, notifications, devices);
+        ComicForm logging = buildLoggingForm();
+        ComicForm.alignLabels((ComicForm) notifications, (ComicForm) devices, logging);
+        return ComicForm.stack(setup, notifications, devices, logging);
+    }
+
+    /**
+     * General &gt; Logging: one switch per console category (the {@code [browser]}, {@code [local-runtime]}
+     * ... prefix of a log line). Takes effect at once, for the host and all plugins, and is stored.
+     */
+    private ComicForm buildLoggingForm() {
+        ComicForm form = ComicForm.titled("Logging");
+        final JPanel boxes = new JPanel(new java.awt.GridLayout(0, 3, 8, 0));
+        boxes.setOpaque(false);
+        final Runnable rebuild = new Runnable() {
+            public void run() {
+                boxes.removeAll();
+                for (final String category : com.aresstack.askai.plugin.api.service.HostLog.categories()) {
+                    final javax.swing.JCheckBox box = ComicControls.checkBox(category,
+                            com.aresstack.askai.plugin.api.service.HostLog.isEnabled(category));
+                    box.addActionListener(event -> {
+                        com.aresstack.askai.plugin.api.service.HostLog.setEnabled(category, box.isSelected());
+                        com.aresstack.askai.settings.ConsoleLogSettings.save();
+                    });
+                    boxes.add(box);
+                }
+                boxes.revalidate();
+                boxes.repaint();
+            }
+        };
+        rebuild.run();
+        // New categories appear as soon as something logs under them (listener runs on the logging thread).
+        final java.util.concurrent.atomic.AtomicBoolean queued = new java.util.concurrent.atomic.AtomicBoolean();
+        com.aresstack.askai.plugin.api.service.HostLog.addChangeListener(() -> {
+            if (queued.compareAndSet(false, true)) {
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    queued.set(false);
+                    rebuild.run();
+                });
+            }
+        });
+        JButton allOn = new ComicButton("All on");
+        allOn.addActionListener(event -> {
+            com.aresstack.askai.plugin.api.service.HostLog.setDisabled(java.util.Collections.<String>emptyList());
+            com.aresstack.askai.settings.ConsoleLogSettings.save();
+        });
+        JButton allOff = new ComicButton("All off");
+        allOff.addActionListener(event -> {
+            com.aresstack.askai.plugin.api.service.HostLog.setDisabled(
+                    com.aresstack.askai.plugin.api.service.HostLog.categories());
+            com.aresstack.askai.settings.ConsoleLogSettings.save();
+        });
+        form.row("Console output", boxes, allOn, allOff);
+        form.note("Each switch covers the console lines starting with that [category]. "
+                + "Lines without a category (errors with stack traces) are always shown.");
+        return form;
     }
 
     /** Chat: this chat's system prompt and its technical log (both belong to THIS chat only). */
