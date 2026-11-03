@@ -116,6 +116,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     private static final String MIC_SYSTEM_DEFAULT = "System default";
     private static final String AUDIO_MODEL_AUTOMATIC = "Automatic";
+    /** The languages offered for transcription; "auto" lets the model detect it. Editable for others. */
+    private static final String[] STT_LANGUAGES = {"auto", "de", "en", "fr", "es", "it", "nl", "pt"};
     /** Delete leftover dictation temp files older than this many milliseconds on startup/close. */
     private static final long TEMP_TTL_MILLIS = 24L * 60L * 60L * 1000L;
 
@@ -202,13 +204,26 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     // Dictation controls.
     private final JComboBox<String> audioModelCombo = ComicControls.<String>comboBox();
+    // The dictation settings moved here from Connections. They are application-wide (one AskAiModel shared by
+    // all tabs), so every open of the settings reloads them (another tab may have changed them meanwhile).
+    private javax.swing.JCheckBox sttEnabledBox;
+    private JComboBox<String> sttLanguageCombo;
+    private JTextField sttPromptField;
+    private String sttPromptShown = "";
+    private javax.swing.JSpinner sttMaxFileSize;
+    private com.aresstack.comiccontrols.control.ComicDurationField sttTimeout;
+    private boolean updatingDictationSettings;
     private final JComboBox<AudioProcessingProfile> audioProfileCombo = ComicControls.<AudioProcessingProfile>comboBox();
     private final JComboBox<String> micCombo = ComicControls.<String>comboBox();
     private final JButton micRefreshButton = new ComicButton("Refresh");
     private final JButton testMicButton = new ComicButton("Test microphone");
-    // Speech output (read-aloud), PER LANGUAGE: the Windows voice of that language by default,
-    // or an installed Piper model voice — an English answer is never read with a German voice.
-    private static final String SPEECH_OUTPUT_WINDOWS = "Windows voice (default)";
+    // Speech output (read-aloud), PER LANGUAGE: an engine switch (Piper = default, or the Windows voice)
+    // plus that language's installed Piper voices — an English answer is never read with a German voice.
+    private static final String SPEECH_ENGINE_PIPER = "Piper";
+    private static final String SPEECH_ENGINE_WINDOWS = "Windows voice";
+    private static final String SPEECH_OUTPUT_NO_VOICE = "No voice installed (Windows voice speaks)";
+    private final java.util.Map<String, JComboBox<String>> speechEngineCombos =
+            new java.util.LinkedHashMap<String, JComboBox<String>>();
     private final java.util.Map<String, JComboBox<Object>> speechOutputCombos =
             new java.util.LinkedHashMap<String, JComboBox<Object>>();
     private boolean updatingSpeechOutputCombo;
@@ -1083,7 +1098,27 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         if (settingsPagesPane == null) {
             buildSettingsPanes();
         }
+        refreshDictationSettings();
         syncAgentSettingsPages(); // the agent may have been (de)selected since the panes were built
+    }
+
+    /** Shows the current application-wide dictation values (another tab may have changed them). */
+    private void refreshDictationSettings() {
+        if (sttEnabledBox == null) {
+            return;
+        }
+        SpeechToTextConfiguration stt = model.getSpeechToTextConfiguration();
+        updatingDictationSettings = true;
+        try {
+            sttEnabledBox.setSelected(stt.isEnabled());
+            sttLanguageCombo.setSelectedItem(stt.getLanguage().isEmpty() ? "auto" : stt.getLanguage());
+            sttPromptField.setText(stt.getPrompt());
+            sttPromptShown = sttPromptField.getText();
+            sttMaxFileSize.setValue(stt.getMaxFileSizeMb());
+            sttTimeout.setSeconds(stt.getTimeoutSeconds());
+        } finally {
+            updatingDictationSettings = false;
+        }
     }
 
     private JComponent buildSettingsContent() {
@@ -1286,10 +1321,66 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     /** Speech: dictation (input) and speech output — application-wide, used by every chat. */
     private JComponent buildSpeechCard() {
-        ComicForm input = ComicForm.titled("Dictation");
+        ComicForm input = ComicForm.titled("Dictation (speech-to-text)");
+        final SpeechToTextConfiguration sttNow = model.getSpeechToTextConfiguration();
+        sttEnabledBox = ComicControls.checkBox(
+                "Dictate with the microphone (transcribe recordings and audio files)", sttNow.isEnabled());
+        sttEnabledBox.addActionListener(event -> {
+            model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                    .withEnabled(sttEnabledBox.isSelected()));
+            model.saveSettings();
+            refreshDictationControls();
+        });
+        input.check(sttEnabledBox);
+        // Transcription runs on the Ollama server (its OpenAI-compatible /v1/audio/transcriptions endpoint).
+        // Piper is speech OUTPUT only (see below), so it is no transcription backend.
+        JLabel sttBackendLabel = new JLabel("Ollama (address under Settings > Connections)");
+        sttBackendLabel.setToolTipText("Recordings are transcribed by an audio-capable model on the Ollama"
+                + " server. Piper reads answers aloud — it cannot transcribe.");
+        input.row("Backend", sttBackendLabel);
         audioModelCombo.setEditable(false); // only /api/show-verified models, never free text
+        audioModelCombo.setPrototypeDisplayValue("gemma3n:e4b-it-q8_0 (audio)"); // stable width, also while empty
+        audioModelCombo.setToolTipText("Audio-capable models installed in Ollama. Automatic picks a verified"
+                + " one (the last model that worked first). Install more under Settings > AI models.");
         audioModelCombo.addActionListener(event -> persistAudioModelSelection());
-        input.row("Audio model", audioModelCombo);
+        input.row("Model", audioModelCombo);
+
+        sttLanguageCombo = ComicControls.<String>comboBox(STT_LANGUAGES);
+        sttLanguageCombo.setEditable(true);
+        sttLanguageCombo.setSelectedItem(sttNow.getLanguage().isEmpty() ? "auto" : sttNow.getLanguage());
+        sttLanguageCombo.setToolTipText("The language spoken in recordings; \"auto\" lets the model detect it."
+                + " Type another ISO code if yours is missing.");
+        sttLanguageCombo.addActionListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
+            Object language = sttLanguageCombo.getSelectedItem();
+            model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                    .withLanguage(language == null ? "auto" : String.valueOf(language).trim()));
+            model.saveSettings();
+        });
+        input.row("Language", sttLanguageCombo);
+
+        sttPromptField = ComicControls.textField(sttNow.getPrompt(), 30);
+        sttPromptShown = sttPromptField.getText();
+        sttPromptField.setToolTipText("Optional context given to the transcription model (names, jargon).");
+        Runnable persistPrompt = () -> {
+            // Only a real edit of the shown text is saved — leaving the field unchanged never writes.
+            if (!sttPromptField.getText().equals(sttPromptShown)) {
+                sttPromptShown = sttPromptField.getText();
+                model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                        .withPrompt(sttPromptField.getText()));
+                model.saveSettings();
+            }
+        };
+        sttPromptField.addActionListener(event -> persistPrompt.run());
+        sttPromptField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persistPrompt.run();
+            }
+        });
+        input.row("Context prompt", sttPromptField);
 
         audioProfileCombo.setToolTipText("Choose the audio-processing profile used for microphone transcription.");
         audioProfileCombo.addActionListener(event -> persistAudioProfileSelection());
@@ -1341,15 +1432,48 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         input.inline(autoStopBox, silenceSpinner, new JLabel("seconds, when the signal stays below"),
                 thresholdSpinner, new JLabel("%"));
 
-        ComicForm speech = ComicForm.titled("Speech output");
-        // One selector PER LANGUAGE (like the NLP models): the session's language switch decides
-        // which of these voices reads an answer aloud.
+        sttMaxFileSize = ComicControls.integerSpinner(
+                sttNow.getMaxFileSizeMb(), 1, 100000, 10, 6);
+        sttMaxFileSize.setToolTipText("Larger recordings or audio files are not sent for transcription.");
+        sttMaxFileSize.addChangeListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
+            model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                    .withMaxFileSizeMb(((Number) sttMaxFileSize.getValue()).intValue()));
+            model.saveSettings();
+        });
+        input.row("Max file size", sttMaxFileSize, new JLabel("MB"));
+        sttTimeout = new com.aresstack.comiccontrols.control.ComicDurationField(24 * 3600);
+        sttTimeout.setSeconds(sttNow.getTimeoutSeconds());
+        sttTimeout.setToolTipText("How long one transcription may take before AskAI gives up.");
+        sttTimeout.addChangeListener(event -> {
+            if (updatingDictationSettings) {
+                return;
+            }
+            long seconds = sttTimeout.getSeconds();
+            model.setSpeechToTextConfiguration(model.getSpeechToTextConfiguration()
+                    .withTimeoutSeconds(seconds > 0 ? (int) Math.min(Integer.MAX_VALUE, seconds)
+                            : SpeechToTextConfiguration.DEFAULT_TIMEOUT_SECONDS));
+            model.saveSettings();
+        });
+        input.row("Timeout", sttTimeout);
+
+        ComicForm speech = ComicForm.titled("Speech output (text-to-speech)");
+        // One engine switch + voice selector PER LANGUAGE (like the NLP models): the session's language
+        // switch decides which of these voices reads an answer aloud.
         for (final String language : com.aresstack.askai.tts.TextToSpeechSettings.LANGUAGE_CODES) {
+            JComboBox<String> engine = ComicControls.<String>comboBox(
+                    new String[]{SPEECH_ENGINE_PIPER, SPEECH_ENGINE_WINDOWS});
+            engine.setEditable(false);
+            engine.setToolTipText("Piper (default): natural model voices, entirely on the CPU — the GPU stays"
+                    + " free. Windows voice: the operating system's voice, no download needed.");
+            engine.addActionListener(event -> persistSpeechOutputSelection(language));
+            speechEngineCombos.put(language, engine);
             JComboBox<Object> combo = ComicControls.<Object>comboBox();
-            combo.setEditable(false); // Windows default or an INSTALLED Piper voice
-            combo.setToolTipText("The read-aloud voice for " + speechLanguageLabel(language)
-                    + " answers. Model voices run entirely on the CPU — the GPU stays free."
-                    + " Install voices right below.");
+            combo.setEditable(false); // only INSTALLED Piper voices of this language
+            combo.setToolTipText("The Piper voice for " + speechLanguageLabel(language)
+                    + " answers. Install voices under Settings > AI models > Read-aloud voices.");
             combo.addActionListener(event -> persistSpeechOutputSelection(language));
             speechOutputCombos.put(language, combo);
             JButton speechTestButton = new ComicButton("Test");
@@ -1357,7 +1481,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                     + speechLanguageLabel(language) + " voice — failures show their reason.");
             speechTestButton.addActionListener(event ->
                     runSpeechOutputTest(language, speechTestButton));
-            speech.row("Voice · " + speechLanguageLabel(language), combo, speechTestButton);
+            speech.row("Voice · " + speechLanguageLabel(language), engine, combo, speechTestButton);
         }
         // Read-aloud starts ACTIVE by default: new research answers are spoken without pressing
         // Play (engine-independent — applies to the Windows voice too).
@@ -1684,7 +1808,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         return languageCode;
     }
 
-    /** Reloads every language's combo: the Windows default plus that language's INSTALLED voices. */
+    /** Reloads every language's engine switch and voice combo (that language's INSTALLED Piper voices). */
     private void refreshSpeechOutputVoices() {
         if (speechVoicesPanel != null) {
             speechVoicesPanel.refresh(); // install rows and combos always tell the same story
@@ -1696,21 +1820,29 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                     : speechOutputCombos.entrySet()) {
                 String language = entry.getKey();
                 JComboBox<Object> combo = entry.getValue();
+                JComboBox<String> engine = speechEngineCombos.get(language);
                 com.aresstack.askai.tts.TextToSpeechSettings.Selection selection =
                         tts.selectionFor(language);
+                boolean piper = selection.getEngine()
+                        == com.aresstack.askai.tts.TextToSpeechSettings.Engine.PIPER;
+                if (engine != null) {
+                    engine.setSelectedItem(piper ? SPEECH_ENGINE_PIPER : SPEECH_ENGINE_WINDOWS);
+                }
                 combo.removeAllItems();
-                combo.addItem(SPEECH_OUTPUT_WINDOWS);
-                Object desired = SPEECH_OUTPUT_WINDOWS;
-                for (com.aresstack.askai.tts.PiperVoice voice
-                        : piperTtsStore.installedVoices(language)) {
+                java.util.List<com.aresstack.askai.tts.PiperVoice> voices =
+                        piperTtsStore.installedVoices(language);
+                if (voices.isEmpty()) {
+                    combo.addItem(SPEECH_OUTPUT_NO_VOICE);
+                }
+                Object desired = voices.isEmpty() ? SPEECH_OUTPUT_NO_VOICE : voices.get(0);
+                for (com.aresstack.askai.tts.PiperVoice voice : voices) {
                     combo.addItem(voice);
-                    if (selection.getEngine()
-                            == com.aresstack.askai.tts.TextToSpeechSettings.Engine.PIPER
-                            && voice.getId().equals(selection.getVoiceId())) {
-                        desired = voice; // a selected-but-uninstalled voice falls back to Windows
+                    if (voice.getId().equals(selection.getVoiceId())) {
+                        desired = voice; // no or an uninstalled choice → the first installed voice
                     }
                 }
                 combo.setSelectedItem(desired);
+                combo.setEnabled(piper && !voices.isEmpty());
             }
         } finally {
             updatingSpeechOutputCombo = false;
@@ -1721,20 +1853,28 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         if (updatingSpeechOutputCombo) {
             return;
         }
+        JComboBox<String> engine = speechEngineCombos.get(language);
         JComboBox<Object> combo = speechOutputCombos.get(language);
+        boolean piper = engine == null || !SPEECH_ENGINE_WINDOWS.equals(engine.getSelectedItem());
         Object selected = combo == null ? null : combo.getSelectedItem();
         com.aresstack.askai.tts.TextToSpeechSettings current = ttsSettingsStore.load();
-        com.aresstack.askai.tts.TextToSpeechSettings updated =
-                selected instanceof com.aresstack.askai.tts.PiperVoice
-                        ? current.withSelection(language,
-                                com.aresstack.askai.tts.TextToSpeechSettings.Engine.PIPER,
-                                ((com.aresstack.askai.tts.PiperVoice) selected).getId())
-                        : current.withSelection(language,
-                                com.aresstack.askai.tts.TextToSpeechSettings.Engine.WINDOWS, "");
+        com.aresstack.askai.tts.TextToSpeechSettings updated = !piper
+                ? current.withSelection(language,
+                        com.aresstack.askai.tts.TextToSpeechSettings.Engine.WINDOWS, "")
+                : current.withSelection(language,
+                        com.aresstack.askai.tts.TextToSpeechSettings.Engine.PIPER,
+                        selected instanceof com.aresstack.askai.tts.PiperVoice
+                                ? ((com.aresstack.askai.tts.PiperVoice) selected).getId() : "");
         try {
             ttsSettingsStore.save(updated);
         } catch (java.io.IOException notSaved) {
             appendTech("speech-output selection not saved: " + notSaved.getMessage());
+        }
+        if (combo != null) {
+            combo.setEnabled(piper && selected instanceof com.aresstack.askai.tts.PiperVoice);
+        }
+        if (speechVoicesPanel != null) {
+            speechVoicesPanel.refresh(); // "in use" follows the switch
         }
     }
 
