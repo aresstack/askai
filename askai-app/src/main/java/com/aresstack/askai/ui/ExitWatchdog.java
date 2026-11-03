@@ -13,8 +13,8 @@ import java.util.Map;
  */
 final class ExitWatchdog {
 
-    /** Grace period for the graceful shutdown before the process is terminated explicitly. */
-    static final long DEFAULT_GRACE_MILLIS = 8000L;
+    /** Grace period before forcing the exit; longer than the recorder finalization bound (10 s). */
+    static final long DEFAULT_GRACE_MILLIS = 20000L;
 
     interface Exiter {
         void exit(int status);
