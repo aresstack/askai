@@ -29,7 +29,7 @@ public final class LegacyBrowserSearchDefaults {
     /**
      * The engines a fresh installation searches with: Google first (in the search browser), DuckDuckGo behind it,
      * and only until one of them delivers. Bing stays in the list but off — DuckDuckGo's results come from Bing.
-     * Google fetches its first result page only (the search browser does not page).
+     * Google fetches one result page by default; more pages are a setting ("google:on:3").
      */
     public static com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engineSelection() {
         return new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection(
