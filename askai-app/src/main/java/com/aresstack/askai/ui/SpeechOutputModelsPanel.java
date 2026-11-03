@@ -31,7 +31,7 @@ import java.util.concurrent.Executors;
  * {@code rhasspy/piper-voices}) with one click, exactly where the voice is chosen. The engine and
  * every voice run ENTIRELY on the CPU — the GPU stays free for the AI models (GPU acceleration:
  * coming soon). After a successful install the user is asked whether to use the voice right away.
- * The 🔊 entries in Models → Setup → Hugging Face are only a SHORTCUT that opens this section.
+ * The 🔊 entries in Models → Setup → Hugging Face are only a SHORTCUT to this (Voices) tab.
  * Mirrors {@link NlpModelsPanel}: pure UI orchestration, installs off the EDT, errors shown,
  * never swallowed.
  */
@@ -89,11 +89,10 @@ public final class SpeechOutputModelsPanel extends JPanel {
         for (PiperVoice voice : PiperVoiceCatalog.curated()) {
             rows.component(buildRow(voice));
         }
-        // Full transparency about the downloads — and that the Models route is only a shortcut.
+        // Full transparency about the downloads.
         rows.note("Downloads: voices from HuggingFace “rhasspy/piper-voices”; the engine once (~21 MB)"
                 + " from the pinned Piper 2023.11.14-2 release on GitHub. Stored under"
-                + " %APPDATA%\\.askai\\tts. The 🔊 entries under Models > Setup > Hugging Face are"
-                + " just a shortcut that opens this section.");
+                + " %APPDATA%\\.askai\\tts.");
         rows.component(error);
         add(rows, BorderLayout.CENTER);
     }
