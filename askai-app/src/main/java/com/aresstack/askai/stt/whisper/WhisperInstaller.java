@@ -62,6 +62,17 @@ public final class WhisperInstaller {
         }
     }
 
+    /**
+     * Installs the engine if missing and downloads the model again even when it is installed; the old file is
+     * replaced only after the new download passed its hash check. Blocking — run OFF the EDT.
+     */
+    public void reinstall(WhisperModel model, PiperInstaller.Progress progress) throws IOException {
+        if (!store.isEngineInstalled()) {
+            installEngine(progress);
+        }
+        installModel(model, progress);
+    }
+
     void installEngine(PiperInstaller.Progress progress) throws IOException {
         Path staging = stagingDirectory("engine");
         try {

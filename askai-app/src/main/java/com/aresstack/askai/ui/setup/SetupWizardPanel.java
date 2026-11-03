@@ -109,6 +109,8 @@ public final class SetupWizardPanel extends JPanel {
     static final String MIC_DEFAULT = "System default microphone";
     /** First audio model choice: AskAI picks an installed audio-capable model itself. */
     static final String AUDIO_AUTOMATIC = "Automatic";
+    static final String ENGINE_WHISPER = "Whisper (on this computer)";
+    static final String ENGINE_OLLAMA = "Ollama audio model";
     /** No reranker / no sentence model: AskAI uses its fallbacks. */
     static final String NONE = "";
 
@@ -174,6 +176,7 @@ public final class SetupWizardPanel extends JPanel {
     private final JTextField ollamaUrl = ComicControls.textField(28);
     private final ComicButton runtimeTest = new ComicButton("Test connection", ComicButton.Accent.ACTION);
     private final ComicButton runtimeDownload = new ComicButton("Download Ollama…");
+    private final ComicButton runtimeManager = new ComicButton("Get Manager…");
     private final JLabel ollamaStatus = statusLabel();
     /** The runtime step's two pictures: the install scene until a runtime answers, then the connecting one. */
     private SetupWizardMascot.Art runtimeInstallArt;
@@ -250,6 +253,15 @@ public final class SetupWizardPanel extends JPanel {
     private final JProgressBar micLevel = ComicControls.progressBar(0, 100);
     private final JLabel micStatus = statusLabel();
     private boolean micTesting;
+    private final JComboBox<String> dictationEngine = ComicControls.comboBox();
+    private final JComboBox<String> whisperModel = ComicControls.comboBox();
+    private final ModelDownload whisperDownload = new ModelDownload("Download");
+    private final Map<String, SetupActions.VoiceOffer> whisperByLabel =
+            new LinkedHashMap<String, SetupActions.VoiceOffer>();
+    /** The Whisper choices were filled once; until then the draft's Whisper model stays as it is. */
+    private boolean whisperListed;
+    private final List<JComponent> whisperParts = new ArrayList<JComponent>();
+    private final List<JComponent> ollamaAudioParts = new ArrayList<JComponent>();
     private final JComboBox<String> audioModel = ComicControls.comboBox();
     private final ModelDownload audioDownload = new ModelDownload("Download audio model");
     private final JLabel audioStatus = statusLabel();
@@ -367,7 +379,18 @@ public final class SetupWizardPanel extends JPanel {
         Rows rows = new Rows(STEP_RUNTIME, "AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
                 + "runtime. One of them must answer; the final check shows which one does.");
-        rows.stretched("Ollama address", inline(ollamaUrl, runtimeTest, runtimeDownload));
+        JPanel runtimeLine = inline(ollamaUrl, runtimeTest, runtimeDownload);
+        // "Get Manager" right under "Download Ollama", in the same column and just as wide.
+        GridBagLayout runtimeLayout = (GridBagLayout) runtimeLine.getLayout();
+        GridBagConstraints download = runtimeLayout.getConstraints(runtimeDownload);
+        download.fill = GridBagConstraints.HORIZONTAL;
+        runtimeLayout.setConstraints(runtimeDownload, download);
+        GridBagConstraints manager = (GridBagConstraints) download.clone();
+        manager.gridy = 1;
+        manager.insets = new Insets(6, 8, 0, 0);
+        runtimeLine.add(runtimeManager, manager);
+        runtimeManager.setToolTipText("The AskAI Ollama Manager: install, start and update Ollama with one click");
+        rows.stretched("Ollama address", runtimeLine);
         rows.stretched("", new StatusLine(null, ollamaStatus).panel);
         return rows.panel();
     }
@@ -436,14 +459,21 @@ public final class SetupWizardPanel extends JPanel {
 
     private JPanel dictationStep() {
         Rows rows = new Rows(STEP_DICTATION, "Dictation");
-        rows.note("Optional: speak instead of typing. AskAI records with your microphone and an audio-capable "
-                + "model in your AI runtime writes down what you said. Skip this step if you only type.");
+        rows.note("Optional: speak instead of typing. AskAI records with your microphone and Whisper writes down "
+                + "what you said, right on this computer. Instead, an audio-capable model in Ollama can do it. "
+                + "Skip this step if you only type.");
         rows.stretched("Microphone", inline(microphone, micTest));
         micLevel.setVisible(false);
         rows.stretched("", new StatusLine(micLevel, micStatus).panel);
-        rows.stretched("Audio model", inline(audioModel, audioDownload.button, audioInstall));
-        rows.stretched("", audioDownload.line.panel);
-        rows.stretched("", new StatusLine(null, audioStatus).panel);
+        dictationEngine.addItem(ENGINE_WHISPER);
+        dictationEngine.addItem(ENGINE_OLLAMA);
+        rows.stretched("Transcription", dictationEngine);
+        whisperParts.addAll(rows.stretched("Whisper model", inline(whisperModel, whisperDownload.button)));
+        whisperParts.addAll(rows.stretched("", stack(whisperDownload.line.panel)));
+        ollamaAudioParts.addAll(rows.stretched("Audio model", inline(audioModel, audioDownload.button,
+                audioInstall)));
+        ollamaAudioParts.addAll(rows.stretched("", stack(audioDownload.line.panel,
+                new StatusLine(null, audioStatus).panel)));
         return rows.panel();
     }
 
@@ -495,6 +525,7 @@ public final class SetupWizardPanel extends JPanel {
         }));
         runtimeTest.addActionListener(e -> checkRuntime());
         runtimeDownload.addActionListener(e -> setup.openRuntimeDownload());
+        runtimeManager.addActionListener(e -> setup.openOllamaManagerDownload());
         modelsRefresh.addActionListener(e -> refreshModels());
         chatInstall.setToolTipText("Find and install a model from Hugging Face, the Ollama library or AskAI's "
                 + "local runtime");
@@ -529,6 +560,9 @@ public final class SetupWizardPanel extends JPanel {
         });
         micTest.addActionListener(e -> testMicrophone());
         audioDownload.button.addActionListener(e -> pullAudioModel());
+        dictationEngine.addActionListener(e -> updateButtons());
+        whisperModel.addActionListener(e -> updateButtons());
+        whisperDownload.button.addActionListener(e -> installWhisper());
         embeddingDownload.button.addActionListener(e -> pull(embeddingDownload, embeddingModel));
         rerankerDownload.button.addActionListener(e -> installReranker());
         checkRetry.addActionListener(e -> runFinalCheck());
@@ -844,7 +878,20 @@ public final class SetupWizardPanel extends JPanel {
         micTest.setEnabled(!busy && !micTesting);
         audioDownload.button.setVisible(dictationLoaded && !audioLoading && installedAudio.isEmpty());
         audioDownload.button.setEnabled(!audioDownload.running);
-        done[STEP_DICTATION] = dictationLoaded && !installedAudio.isEmpty();
+        boolean whisper = !ENGINE_OLLAMA.equals(dictationEngine.getSelectedItem());
+        for (JComponent part : whisperParts) {
+            part.setVisible(whisper);
+        }
+        for (JComponent part : ollamaAudioParts) {
+            part.setVisible(!whisper);
+        }
+        SetupActions.VoiceOffer whisperOffer = whisperByLabel.get(text(whisperModel));
+        whisperDownload.button.setVisible(whisperOffer != null);
+        if (whisperOffer != null) {
+            whisperDownload.button.setText(whisperOffer.isInstalled() ? "Reinstall" : "Download");
+        }
+        whisperDownload.button.setEnabled(!busy && !whisperDownload.running);
+        done[STEP_DICTATION] = dictationLoaded && (whisper ? whisperInstalled() : !installedAudio.isEmpty());
         // The reranker is a local model: offer the installation whenever the chosen one is not installed.
         rerankerDownload.button.setVisible(!installedRerankers.contains(text(rerankerModel)));
         sentenceAction(sentenceGermanAction, installedSentenceGerman, "German");
@@ -1598,7 +1645,75 @@ public final class SetupWizardPanel extends JPanel {
         // A saved device that is gone falls back to the system default, as in the chat settings.
         microphone.setSelectedItem(((javax.swing.DefaultComboBoxModel<String>) microphone.getModel())
                 .getIndexOf(chosen) >= 0 ? chosen : MIC_DEFAULT);
+        dictationEngine.setSelectedItem(draft.dictationWithOllama() ? ENGINE_OLLAMA : ENGINE_WHISPER);
+        loadWhisperModels(draft.whisperModel());
         loadAudioModels(draft.audioModel());
+    }
+
+    /** Fills the Whisper choice: {@code select}, else the first installed model, else the recommended one. */
+    private void loadWhisperModels(final String select) {
+        setup.loadWhisperModels(offers -> {
+            if (closed) {
+                return;
+            }
+            whisperListed = true;
+            whisperByLabel.clear();
+            whisperModel.removeAllItems();
+            String chosen = null;
+            String firstInstalled = null;
+            for (SetupActions.VoiceOffer offer : offers == null ? Collections.<SetupActions.VoiceOffer>emptyList()
+                    : offers) {
+                whisperByLabel.put(offer.toString(), offer);
+                whisperModel.addItem(offer.toString());
+                if (offer.id().equals(select)) {
+                    chosen = offer.toString();
+                }
+                if (firstInstalled == null && offer.isInstalled()) {
+                    firstInstalled = offer.toString();
+                }
+            }
+            if (chosen == null) {
+                chosen = firstInstalled;
+            }
+            if (chosen != null) {
+                whisperModel.setSelectedItem(chosen);
+            }
+            updateButtons();
+        });
+    }
+
+    private boolean whisperInstalled() {
+        for (SetupActions.VoiceOffer offer : whisperByLabel.values()) {
+            if (offer.isInstalled()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The chosen Whisper model if installed; otherwise "" (automatic: the first installed one). */
+    private String chosenWhisper() {
+        SetupActions.VoiceOffer offer = whisperByLabel.get(text(whisperModel));
+        return offer != null && offer.isInstalled() ? offer.id() : "";
+    }
+
+    /** Downloads (or downloads again) the chosen Whisper model, the engine first if it is missing. */
+    private void installWhisper() {
+        final SetupActions.VoiceOffer offer = whisperByLabel.get(text(whisperModel));
+        if (offer == null || whisperDownload.running) {
+            return;
+        }
+        whisperDownload.begin();
+        setup.installWhisper(collect(), offer.id(), offer.isInstalled(), whisperDownload.progress(),
+                (message, error) -> {
+                    if (closed) {
+                        return;
+                    }
+                    whisperDownload.end(error == null ? message : "Download failed: " + error);
+                    if (error == null) {
+                        loadWhisperModels(offer.id());
+                    }
+                });
     }
 
     private void loadAudioModels(final String select) {
@@ -1778,6 +1893,8 @@ public final class SetupWizardPanel extends JPanel {
         if (dictationLoaded) {
             b.dictation(choice(microphone, MIC_DEFAULT),
                     audioListed ? choice(audioModel, AUDIO_AUTOMATIC) : (draft == null ? "" : draft.audioModel()));
+            b.dictationEngine(ENGINE_OLLAMA.equals(dictationEngine.getSelectedItem()),
+                    whisperListed ? chosenWhisper() : (draft == null ? "" : draft.whisperModel()));
         }
         return b.build();
     }
@@ -1915,6 +2032,26 @@ public final class SetupWizardPanel extends JPanel {
         return microphone;
     }
 
+    JButton runtimeManagerButton() {
+        return runtimeManager;
+    }
+
+    JButton runtimeDownloadButton() {
+        return runtimeDownload;
+    }
+
+    JComboBox<String> dictationEngineChoice() {
+        return dictationEngine;
+    }
+
+    JComboBox<String> whisperModelChoice() {
+        return whisperModel;
+    }
+
+    JButton whisperButton() {
+        return whisperDownload.button;
+    }
+
     JComboBox<String> audioModelChoice() {
         return audioModel;
     }
@@ -2031,6 +2168,19 @@ public final class SetupWizardPanel extends JPanel {
      * A field with its actions on the same line: the field takes the width, the buttons sit to its right (as
      * “Measure” next to the embedding model).
      */
+    /** Status lines under each other in one cell: the cell can be hidden as a whole, each line hides itself. */
+    private static JPanel stack(JComponent... lines) {
+        JPanel box = transparent(new GridBagLayout());
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.weightx = 1;
+        for (JComponent line : lines) {
+            box.add(line, c);
+        }
+        return box;
+    }
+
     private static JPanel inline(JComponent field, JComponent... actions) {
         JPanel line = transparent(new GridBagLayout());
         GridBagConstraints c = new GridBagConstraints();
@@ -2239,12 +2389,13 @@ public final class SetupWizardPanel extends JPanel {
         }
 
         /** Like {@link #field}, but the component fills the field column, flush with the fields above it. */
-        void stretched(String label, JComponent component) {
-            field(label, component);
+        List<JComponent> stretched(String label, JComponent component) {
+            List<JComponent> parts = field(label, component);
             GridBagLayout layout = (GridBagLayout) panel.getLayout();
             GridBagConstraints c = layout.getConstraints(component);
             c.fill = GridBagConstraints.HORIZONTAL;
             layout.setConstraints(component, c);
+            return parts;
         }
 
         void wide(JComponent component) {
