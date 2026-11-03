@@ -6,6 +6,8 @@ dependencies {
     api project(':agent-workspace-api')
     api project(':agent-plugin-pf4j-api')
     implementation 'org.pf4j:pf4j:3.15.0'
+    // The Plugins settings page uses the host's comic-controls design system (buttons, table styling).
+    implementation project(':comic-controls')
 
     testImplementation 'junit:junit:4.13.2'
     // The classloader integration test loads the research plugin, which references host-provided

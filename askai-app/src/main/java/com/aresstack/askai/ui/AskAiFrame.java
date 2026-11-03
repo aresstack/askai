@@ -430,6 +430,40 @@ public final class AskAiFrame extends JFrame {
         }
     }
 
+    /** The settings pages an agent plugin contributes (empty when it has none or is not selectable). */
+    private java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution>
+            pluginSettingsContributions(String pluginId) {
+        com.aresstack.askai.plugin.pf4j.api.AgentPluginExtension extension =
+                pluginService == null ? null : pluginService.getSelectableAgentExtension(pluginId);
+        java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution> contributions =
+                extension == null ? null : extension.getSettingsContributions();
+        return contributions == null
+                ? java.util.Collections.<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution>emptyList()
+                : contributions;
+    }
+
+    /**
+     * Settings → Plugins → "Settings…": a plugin's settings are session-based (each chat tab configures its
+     * own agent session), so the ACTIVE chat tab switches to this agent (Questing) and the Settings then
+     * show the plugin's own category, e.g. "Research Agent".
+     */
+    private void openPluginSettings(String pluginId) {
+        java.util.List<com.aresstack.askai.plugin.api.agent.AgentSettingsContribution> contributions =
+                pluginSettingsContributions(pluginId);
+        if (contributions.isEmpty() || chatWorkspaceHost == null) {
+            return;
+        }
+        if (!pluginId.equals(chatWorkspaceHost.getActiveAgentId())) {
+            chatWorkspaceHost.selectAgent(pluginId);
+        }
+        if (!com.aresstack.askai.plugin.host.WorkspaceModeEntry.QUESTING_ID
+                .equals(chatWorkspaceHost.getInteractionMode())) {
+            chatWorkspaceHost.setInteractionMode(com.aresstack.askai.plugin.host.WorkspaceModeEntry.QUESTING_ID);
+        }
+        final String category = contributions.get(0).getDisplayName();
+        javax.swing.SwingUtilities.invokeLater(() -> openSettings(category));
+    }
+
     /**
      * An application page as a Settings category, without the old screen footer. The pages scroll
      * themselves (ComicForm pages scroll vertically only; the plugin table scrolls inside its own pane),
@@ -1368,9 +1402,19 @@ public final class AskAiFrame extends JFrame {
         audioScreen().addPage(PAGE_AUDIO_PROCESSING, audioProcessingPanel, null);
         // Settings → Plugins: the real PF4J catalog (enable/disable, details), built after the host so
         // pluginService/enablement exist.
-        chatWorkspace.addApplicationSettingsPage(SETTINGS_PLUGINS, settingsPage(
+        com.aresstack.askai.plugin.host.PluginManagementPanel pluginsPanel =
                 new com.aresstack.askai.plugin.host.PluginManagementPanel(
-                        pluginService, pluginEnablement, pluginsDirectory)));
+                        pluginService, pluginEnablement, pluginsDirectory);
+        pluginsPanel.setSettingsOpener(new com.aresstack.askai.plugin.host.PluginManagementPanel.SettingsOpener() {
+            public boolean hasSettings(String pluginId) {
+                return !pluginSettingsContributions(pluginId).isEmpty();
+            }
+
+            public void openSettings(String pluginId) {
+                openPluginSettings(pluginId);
+            }
+        });
+        chatWorkspace.addApplicationSettingsPage(SETTINGS_PLUGINS, settingsPage(pluginsPanel));
         wireBatchComponent();
         return contentPanel;
     }

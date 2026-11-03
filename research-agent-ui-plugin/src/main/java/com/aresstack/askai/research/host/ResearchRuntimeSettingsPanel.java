@@ -115,7 +115,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField workerWriterSources = ComicControls.textField(3);
     /** AI reranker opt-in (default OFF = lexical BM25 scoring, no model load). */
     private final JCheckBox useAiReranker = ComicControls.checkBox(
-            "Use the AI reranker (semantic model instead of BM25; applies to new sessions)", false);
+            "Use AI reranker (semantic model instead of BM25; applies to new sessions)", false);
     /** Bot-control MCP (default ON): run_command/session_state/chat_history + service-endpoint.json. */
     private final JCheckBox botControlMcp = ComicControls.checkBox(
             "Bot control via MCP (applies to new sessions)", true);
@@ -175,7 +175,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         form.add(row("Agent answer budget (tokens):", agentMaxTokens));
         JPanel searchLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         searchLimits.setOpaque(false);
-        searchLimits.add(labelled("Target sources", searchTargetSources));
+        searchLimits.add(labelled("Source target", searchTargetSources));
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
         searchLimits.add(labelled("Pages", searchMaxPages));
         searchLimits.add(javax.swing.Box.createHorizontalStrut(10));
@@ -244,7 +244,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckRow.setOpaque(false);
         scopeCheckRow.add(labelled("Breadth (concepts)", scopeCheckTargetProbes));
         scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
-        scopeCheckRow.add(labelled("Samples per post", scopeCheckControlsPerAnchor));
+        scopeCheckRow.add(labelled("Examples per post", scopeCheckControlsPerAnchor));
         scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
         scopeCheckRow.add(labelled("Max. topics", scopeCheckMaxTopics));
         scopeCheckRow.add(javax.swing.Box.createHorizontalStrut(10));
@@ -266,7 +266,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckModelRow.add(labelled("Choice tokens", scopeCheckChooserMaxTokens));
         scopeCheckModelRow.add(javax.swing.Box.createHorizontalStrut(10));
         scopeCheckModelRow.add(labelled("Choice timeout (s)", scopeCheckChoiceTimeout));
-        final JPanel scopeCheckModelSettings = row("  advanced (model):", scopeCheckModelRow);
+        final JPanel scopeCheckModelSettings = row("  Advanced (model):", scopeCheckModelRow);
         scopeCheckModelSettings.setVisible(false);
         form.add(scopeCheckModelSettings);
         JPanel scopeCheckCalibrationRow = new JPanel(
@@ -280,11 +280,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
         scopeCheckCalibrationRow.add(labelled("Mission slack", scopeCheckMissionMargin));
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Neighbour Q", scopeCheckNeighborQuantile));
+        scopeCheckCalibrationRow.add(labelled("Neighbor Q", scopeCheckNeighborQuantile));
         scopeCheckCalibrationRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckCalibrationRow.add(labelled("Neighbour slack", scopeCheckNeighborMargin));
+        scopeCheckCalibrationRow.add(labelled("Neighbor slack", scopeCheckNeighborMargin));
         final JPanel scopeCheckCalibrationSettings =
-                row("  advanced (calibration):", scopeCheckCalibrationRow);
+                row("  Advanced (calibration):", scopeCheckCalibrationRow);
         scopeCheckCalibrationSettings.setVisible(false);
         form.add(scopeCheckCalibrationSettings);
         JPanel scopeCheckSweepRow = new JPanel(
@@ -292,7 +292,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckSweepRow.setOpaque(false);
         scopeCheckSweepRow.add(labelled("Min. posts", scopeCheckMinNegotiated));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
-        scopeCheckSweepRow.add(labelled("Min. samples", scopeCheckMinNeighbors));
+        scopeCheckSweepRow.add(labelled("Min. examples", scopeCheckMinNeighbors));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
         scopeCheckSweepRow.add(labelled("Boundary margin", scopeCheckBoundaryMargin));
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
@@ -302,7 +302,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         scopeCheckSweepRow.add(javax.swing.Box.createHorizontalStrut(8));
         scopeCheckSweepRow.add(labelled("Duplicate ≥", scopeCheckDuplicateCeiling));
         final JPanel scopeCheckSweepSettings =
-                row("  advanced (sweep):", scopeCheckSweepRow);
+                row("  Advanced (sweep):", scopeCheckSweepRow);
         scopeCheckSweepSettings.setVisible(false);
         form.add(scopeCheckSweepSettings);
         scopeCheckAdvancedToggle.addActionListener(new ActionListener() {
@@ -328,7 +328,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         botTools.setEnabled(liveEndpoint != null);
         botTools.setToolTipText(liveEndpoint != null
                 ? "Streamable HTTP (MCP JSON-RPC): " + liveEndpoint.connectionUrl()
-                : "This session has no bot endpoint (disabled, or not a productive session)");
+                : "This session has no bot endpoint (disabled or not a productive session)");
         form.add(row("", useAiReranker));
         JPanel botRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         botRow.setOpaque(false);
@@ -342,7 +342,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         connectorDetails.setOpaque(false);
         connectorDetails.add(connectorPort);
         connectorDetails.add(javax.swing.Box.createHorizontalStrut(12));
-        connectorDetails.add(new JLabel("Client-ID:"));
+        connectorDetails.add(new JLabel("Client ID:"));
         connectorDetails.add(javax.swing.Box.createHorizontalStrut(4));
         connectorDetails.add(connectorClientId);
         connectorDetails.add(javax.swing.Box.createHorizontalStrut(12));
@@ -514,7 +514,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindScopeCheckSettings();
         bindLimit(searchTargetSources, ResearchRuntimeSettings.KEY_SEARCH_TARGET_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_TARGET_SOURCES,
-                "The search ends regularly once this many sources are accepted (applies to new sessions).");
+                "The search ends normally after this many accepted sources (applies to new sessions).");
         bindLimit(searchMaxPages, ResearchRuntimeSettings.KEY_SEARCH_MAX_PAGES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_PAGES,
                 "Safety limit: maximum pages visited per search run.");
@@ -523,7 +523,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "Safety limit: maximum tool calls per search run.");
         bindLimit(searchMaxMinutes, ResearchRuntimeSettings.KEY_SEARCH_MAX_MINUTES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_MINUTES,
-                "Safety limit (timeout): maximum run time in minutes; waiting for the "
+                "Safety limit (timeout): maximum run time in minutes; time spent waiting for the "
                         + "user does not count.");
         bindLimit(searchMaxErrors, ResearchRuntimeSettings.KEY_SEARCH_MAX_ERRORS,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_MAX_ERRORS,
@@ -665,44 +665,44 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         com.aresstack.askai.research.scope.ScopeSweepConfiguration d =
                 com.aresstack.askai.research.scope.ScopeSweepConfiguration.defaults();
         bindLimit(scopeCheckTargetProbes, ResearchRuntimeSettings.KEY_SCOPE_CHECK_TARGET_PROBES,
-                d.targetBroadProbes, "How many broad concepts one scope check generates. "
+                d.targetBroadProbes, "How many broad concepts a topic-space check generates. "
                         + "Small main models (2B class) often cannot sustain 50 — set 20 "
                         + "then.");
         bindLimit(scopeCheckControlsPerAnchor,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CONTROLS_PER_ANCHOR, d.controlsPerAnchor,
-                "Local calibration samples per negotiated fence post");
+                "Local calibration examples per negotiated fence post");
         bindLimit(scopeCheckMaxTopics, ResearchRuntimeSettings.KEY_SCOPE_CHECK_MAX_TOPICS,
                 d.selectorParameters.maximumCandidates,
                 "Suggest at most this many unexplored topics per check");
         bindLimit(scopeCheckTimeout, ResearchRuntimeSettings.KEY_SCOPE_CHECK_TIMEOUT_SECONDS,
-                d.generationTimeoutSeconds, "Timeout of the topic generation in seconds");
+                d.generationTimeoutSeconds, "Topic generation timeout in seconds");
         bindDecimal(scopeCheckGenTemperature,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_GEN_TEMPERATURE, d.generatorTemperature,
-                "Temperature of the topic generation (breadth needs variety)");
+                "Topic generation temperature (breadth needs variety)");
         bindLimit(scopeCheckGenMaxTokens, ResearchRuntimeSettings.KEY_SCOPE_CHECK_GEN_MAX_TOKENS,
-                d.generatorMaxOutputTokens, "Token budget of the topic generation");
+                d.generatorMaxOutputTokens, "Topic generation token budget");
         bindDecimal(scopeCheckChooserTemperature,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOOSER_TEMPERATURE, d.chooserTemperature,
-                "Temperature of the question choice (focused, not creative)");
+                "Question choice temperature (focused, not creative)");
         bindLimit(scopeCheckChooserMaxTokens,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOOSER_MAX_TOKENS,
-                d.chooserMaxOutputTokens, "Token budget of the question choice");
+                d.chooserMaxOutputTokens, "Question choice token budget");
         bindLimit(scopeCheckChoiceTimeout,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_CHOICE_TIMEOUT_SECONDS,
-                d.choiceTimeoutSeconds, "Timeout of the question choice in seconds");
-        String spike = " (measurement spike: the formula is deliberately provisional, frozen after "
-                + "productive measurements)";
+                d.choiceTimeoutSeconds, "Question choice timeout in seconds");
+        String spike = " (measurement spike: formula deliberately provisional, frozen after productive "
+                + "measurements)";
         bindDecimal(scopeCheckNearSimilarity,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEAR_SIMILARITY,
-                d.fenceThresholds.nearSimilarity, "Z2 hint: from this cosine on a probe counts as "
-                        + "'near a fence post'" + spike);
+                d.fenceThresholds.nearSimilarity, "Z2 hint: from this cosine on a topic counts as "
+                        + "\u201cnear a post\u201d" + spike);
         bindDecimal(scopeCheckHintBoundaryMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_HINT_BOUNDARY_MARGIN,
                 d.fenceThresholds.boundaryMargin, "Z2 hint boundary margin" + spike);
         bindDecimal(scopeCheckMissionQuantile,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MISSION_QUANTILE,
                 d.calibrationParameters.missionRelevanceQuantile,
-                "Quantile of the anchors' mission relevance (0 = minimum)" + spike);
+                "Quantile of the anchors' mission relevance (0=minimum)" + spike);
         bindDecimal(scopeCheckMissionMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MISSION_MARGIN,
                 d.calibrationParameters.missionRelevanceMargin,
@@ -710,29 +710,29 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindDecimal(scopeCheckNeighborQuantile,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEIGHBOR_QUANTILE,
                 d.calibrationParameters.neighborSimilarityQuantile,
-                "Quantile of the anchor-neighbour cosines (0 = minimum)" + spike);
+                "Quantile of the anchor-neighbor cosines (0=minimum)" + spike);
         bindDecimal(scopeCheckNeighborMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEIGHBOR_MARGIN,
                 d.calibrationParameters.neighborSimilarityMargin,
-                "Slack below the neighbour quantile" + spike);
+                "Slack below the neighbor quantile" + spike);
         bindLimit(scopeCheckMinNegotiated,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MIN_NEGOTIATED,
                 d.calibrationParameters.minimumNegotiatedAnchors,
-                "Minimum number of negotiated IN/OUT fence posts for a reliable calibration");
+                "Minimum negotiated IN/OUT posts for a reliable calibration");
         bindLimit(scopeCheckMinNeighbors,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MIN_NEIGHBORS,
                 d.calibrationParameters.minimumNeighborSamples,
-                "Minimum number of valid neighbour samples");
+                "Minimum valid neighbor examples");
         bindDecimal(scopeCheckBoundaryMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_BOUNDARY_MARGIN, d.boundaryMargin,
-                "|margin| below this value = a genuine IN/OUT boundary question" + spike);
+                "|margin| below this value = genuine IN/OUT boundary question" + spike);
         bindDecimal(scopeCheckNoveltyGap,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NOVELTY_GAP, d.sweepNoveltyGap,
                 "Sweep-relative novelty line: median minus this value" + spike);
         bindDecimal(scopeCheckNoveltyWeight,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NOVELTY_WEIGHT,
                 d.selectorParameters.noveltyWeight,
-                "Weight of novelty in the topic diversity");
+                "Weight of novelty in topic diversity");
         bindDecimal(scopeCheckDuplicateCeiling,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_DUPLICATE_CEILING,
                 d.selectorParameters.duplicateSimilarityCeiling,
@@ -899,7 +899,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                     : "ChatGPT connector: NOT running - " + failure);
             if (!runtime.isRunning()) {
                 javax.swing.JOptionPane.showMessageDialog(this,
-                        "Der ChatGPT-Connector konnte nicht starten:\n" + failure,
+                        "The ChatGPT connector could not start:\n" + failure,
                         "ChatGPT connector", javax.swing.JOptionPane.WARNING_MESSAGE);
             }
         } else {
@@ -999,9 +999,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         }
         StringBuilder html = new StringBuilder("<html><body style='width:520px'>")
                 .append("<b>Transport:</b> Streamable HTTP (MCP JSON-RPC), 127.0.0.1, "
-                        + "Token im URL-Pfad<br>")
-                .append("<b>Verbindungsdatei:</b> &lt;Projekt&gt;/service-endpoint.json "
-                        + "(URL, Token, Usage-Guide)<br><br>")
+                        + "token in the URL path<br>")
+                .append("<b>Connection file:</b> &lt;project&gt;/service-endpoint.json "
+                        + "(URL, token, usage guide)<br><br>")
                 .append("<b>Tools (live):</b><br>");
         for (java.util.Map.Entry<String, String> tool : endpoint.toolCatalog().entrySet()) {
             html.append("<b>").append(tool.getKey()).append("</b> \u2014 ")
