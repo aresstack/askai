@@ -138,6 +138,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
     private String pendingRestoreModel;
 
     private final JComboBox<String> modelCombo;
+    /** Loads the composer's model when the chat starts and swaps (unload old / load new) on model change. */
+    private final ChatModelWarmup modelWarmup;
     private final JTextArea systemPromptArea;
     private final ChatTranscript transcript;
     private final ChatComposerPanel composer;
@@ -354,6 +356,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         this.audioProfileRepository = audioProfileRepository;
         this.applicationState = applicationState;
         this.modelCombo = ComicControls.<String>comboBox();
+        this.modelWarmup = new ChatModelWarmup(ollamaService, model::getDefaultKeepAlive,
+                this::isDictationModel, message -> onUi(() -> setStatus(message)));
         this.modelCombo.setRenderer(new javax.swing.DefaultListCellRenderer() {
             @Override
             public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list,
@@ -2609,6 +2613,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
             modelCombo.setSelectedItem(previous);
         }
         composer.setModelName((String) modelCombo.getSelectedItem());
+        modelWarmup.activate((String) modelCombo.getSelectedItem()); // load now, not on the first message
         // Cached for the party threads (@modelname mention handles) — safe to read off the EDT.
         installedModelNames = new ArrayList<String>(names);
     }
@@ -2658,11 +2663,18 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         }
         modelCombo.setSelectedItem(modelName);
         composer.setModelName(modelName);
+        modelWarmup.activate(modelName);
         refreshReasoningForModel(modelName);
         rememberState(STATE_LAST_MODEL, modelName);
         model.persistMainModel(modelName); // the chat model IS the global main model for all plugins
         transcript.appendInfo("Now chatting with " + modelName + ".");
         setStatus("Model set to " + modelName + ".");
+    }
+
+    /** True when {@code name} is the explicitly selected dictation model, which must stay loaded. */
+    private boolean isDictationModel(String name) {
+        Object selected = audioModelCombo.getSelectedItem();
+        return name != null && name.equals(selected);
     }
 
     /** Opens the ChatGPT-style model picker anchored to the composer's model button. */
@@ -2681,6 +2693,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 item.addActionListener(event -> {
                     modelCombo.setSelectedItem(name);
                     composer.setModelName(name);
+                    modelWarmup.activate(name);
                     refreshReasoningForModel(name);
                     rememberState(STATE_LAST_MODEL, name);
                     model.persistMainModel(name); // the chat model IS the global main model for all plugins
