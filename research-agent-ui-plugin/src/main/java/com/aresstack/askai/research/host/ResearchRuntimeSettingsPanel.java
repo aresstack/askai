@@ -13,7 +13,6 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
-import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -40,15 +39,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     // requirements are met; otherwise new sessions run the demo backend with a visible notice.
     // (A persisted FAKE value remains a developer-only override in the store.)
     private final JLabel backendStatus = new JLabel(" ");
-    /** DEFAULT language for NEW research sessions (English default, German translation) — persisted. */
-    private final JComboBox<String> agentLanguage =
-            ComicControls.<String>comboBox(new String[]{"English", "Deutsch"});
-    /** LLM narration (default off): milestone texts phrased by the main model, validated, with fallback. */
-    private final JCheckBox llmNarration = ComicControls.checkBox(
-            "AI-phrased guidance (uses the main model; applies to new sessions)", false);
-    /** Scoping orientation tags (default off = long-standing behaviour): suggestions on every broad turn. */
-    private final JCheckBox alwaysSuggest = ComicControls.checkBox(
-            "Always offer search suggestions (orientation tags; applies to new sessions)", false);
     /** Answer budget per agent model turn (tokens) — the longest contracted answer is the source review. */
     private final JTextField agentMaxTokens = ComicControls.textField(6);
     // Konzeptpapier tool-round loop: work budget and error tolerance, deliberately separate.
@@ -111,19 +101,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     /** Non-empty = central mode: the AresStack webserver issues the tokens; AskAI only validates. */
     private final JTextField connectorCentralIssuer =
             placeholderField("https://askai.example.com (empty = local OAuth)", 38);
-    /**
-     * Initial-search source (applies to new sessions): the legacy browser SERP (default) or one of the
-     * REST search providers. Provider credentials are NOT configured here — they live in
-     * {@code ${user.home}/agents/research/providers/} (brave.json, brightdata.json, dataforseo.json).
-     */
-    private final JComboBox<String> browserChannel = ComicControls.<String>comboBox(
-            new String[]{ResearchRuntimeSettings.CAMOUFOX_CHANNEL, "chrome", "msedge"});
     // The reranker model is chosen centrally in AskAI (Configuration → AI models), NOT here. Any previously
     // persisted plugin-side selection is carried through unchanged so it is never lost on save.
     private String carriedRerankerModel = "";
-    private final JCheckBox headless = ComicControls.checkBox("Run the browser headless", true);
-    private final JCheckBox allowPrivate = ComicControls.checkBox(
-            "Allow private/loopback targets (development only)", false);
     private final JButton save = new ComicButton("Save");
     private final JButton check = new ComicButton("Check requirements");
     private final JLabel busy = new JLabel(" ");
@@ -143,9 +123,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         JPanel form = new JPanel();
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
         form.add(row("Backend:", backendStatus));
-        form.add(row("Language:", agentLanguage));
-        form.add(row("", llmNarration));
-        form.add(row("", alwaysSuggest));
         form.add(row("Answer budget (tokens):", agentMaxTokens));
         JPanel searchLimits = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
         searchLimits.setOpaque(false);
@@ -304,24 +281,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         connectorDetails.add(connectorClientSecret);
         form.add(row("Connector port:", connectorDetails));
         form.add(row("Central OAuth issuer:", connectorCentralIssuer));
-        // The initial-search PROVIDER selection + its provider-specific settings live on their own
-        // "Search" gear tab (SearchProviderCardsPanel), not as shared fields here.
-        form.add(row("Browser channel:", browserChannel));
-        form.add(row("", headless));
-        // Transparency does not depend on a visible browser window: the chat shows the visited sites.
-        javax.swing.JTextArea headlessHint = ComicControls.textArea(
-                new com.aresstack.askai.research.agent.ResearchPlaybook(
-                com.aresstack.askai.research.agent.ResearchLanguage.fromCode(
-                        ResearchRuntimeSettings.loadLanguage(store))).headlessHint());
-        headlessHint.setLineWrap(true); // wraps inside the field column instead of widening the page
-        headlessHint.setWrapStyleWord(true);
-        headlessHint.setEditable(false);
-        headlessHint.setFocusable(false);
-        headlessHint.setOpaque(false);
-        headlessHint.setBorder(BorderFactory.createEmptyBorder());
-        headlessHint.setForeground(com.aresstack.comiccontrols.theme.ThemeColor.of("research.settingsHintText"));
-        form.add(row("", headlessHint));
-        form.add(row("", allowPrivate));
+        // Browser channel, headless and private targets live on the "Browser" tab (BrowserBasicsRows); the
+        // provider selection and the browser search's own settings on the "Search" tab.
         JPanel buttons = new JPanel();
         buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
         buttons.add(save);
@@ -340,16 +301,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
 
         // Persisted values first, then the automatic browser-channel decision.
         apply(ResearchRuntimeDefaults.complete(ResearchRuntimeSettings.load(store)));
-        // The combo persists the DEFAULT language for NEW research sessions; running sessions keep
-        // their own session-local language (live-switchable at the session, never globally from here).
-        String languageCode = ResearchRuntimeSettings.loadLanguage(store);
-        agentLanguage.setSelectedIndex("de".equals(languageCode) ? 1 : 0);
-        agentLanguage.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent event) {
-                String code = agentLanguage.getSelectedIndex() == 1 ? "de" : "en";
-                ResearchRuntimeSettings.saveLanguage(ResearchRuntimeSettingsPanel.this.store, code);
-            }
-        });
         useAiReranker.setSelected(ResearchRuntimeSettings.loadUseAiReranker(store));
         useAiReranker.setToolTipText("Off: search hits are scored lexically with BM25 — fast, "
                 + "no model. On: the configured cross-encoder model scores them semantically.");
@@ -387,22 +338,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         chatGptConnector.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 persistConnectorSettings();
-            }
-        });
-        llmNarration.setSelected(ResearchRuntimeSettings.loadLlmNarration(store));
-        llmNarration.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent event) {
-                // Like the language: persisted immediately; running sessions keep their narrator.
-                ResearchRuntimeSettings.saveLlmNarration(ResearchRuntimeSettingsPanel.this.store,
-                        llmNarration.isSelected());
-            }
-        });
-        alwaysSuggest.setSelected(ResearchRuntimeSettings.loadAlwaysOfferSearchSuggestions(store));
-        alwaysSuggest.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent event) {
-                // Persisted immediately; the flag reaches the agent at the NEXT session launch.
-                ResearchRuntimeSettings.saveAlwaysOfferSearchSuggestions(
-                        ResearchRuntimeSettingsPanel.this.store, alwaysSuggest.isSelected());
             }
         });
         agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
@@ -456,6 +391,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "How many rejected concept steps may be corrected per turn "
                         + "(error tolerance, separate from the work budget).");
         refreshBackendStatus();
+        // The "Browser" tab changes the channel: the status follows whenever this tab is shown again.
+        addHierarchyListener(new java.awt.event.HierarchyListener() {
+            public void hierarchyChanged(java.awt.event.HierarchyEvent event) {
+                if ((event.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
+                    refreshBackendStatus();
+                }
+            }
+        });
 
         save.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
@@ -470,14 +413,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         });
     }
 
-    /** The panel state as the SAME typed model the factory reads — no second mapping. */
+    /**
+     * The settings NEW sessions get, as the SAME typed model the factory reads — no second mapping. The browser
+     * fields come from the store (the "Browser" tab saves them on every change).
+     */
     ResearchRuntimeSettings currentSettings() {
         // Saving from the panel always persists the automatic mode (this also migrates stores where an
         // old default once wrote FAKE); the demo backend is chosen by the FACTORY only when the
         // requirements are not met.
-        return new ResearchRuntimeSettings(ResearchBackendMode.ACP,
-                String.valueOf(browserChannel.getSelectedItem()), headless.isSelected(),
-                allowPrivate.isSelected(), carriedRerankerModel);
+        ResearchRuntimeSettings stored = ResearchRuntimeDefaults.complete(ResearchRuntimeSettings.load(store));
+        return new ResearchRuntimeSettings(ResearchBackendMode.ACP, stored.getBrowserChannel(),
+                stored.isHeadless(), stored.isAllowPrivateNetworks(), carriedRerankerModel);
     }
 
     /** The live projection of what NEW sessions will do — computed, never chosen. */
@@ -490,11 +436,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     }
 
     private void apply(ResearchRuntimeSettings settings) {
-        browserChannel.setSelectedItem(settings.getBrowserChannel());
         // Carry any previously persisted reranker selection through invisibly (chosen centrally now).
         carriedRerankerModel = settings.getSelectedRerankerModel();
-        headless.setSelected(settings.isHeadless());
-        allowPrivate.setSelected(settings.isAllowPrivateNetworks());
     }
 
     /** A text field with a gray in-field placeholder, shown while the field is empty. */

@@ -61,6 +61,7 @@ public final class SearchProviderCardsPanel extends JPanel {
 
     /** {@code false}: no settings below the combo, a "Configure…" button opens them in a dialog instead. */
     private final boolean inline;
+    private final com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot activeProfile;
     private final javax.swing.JButton configure = new com.aresstack.comiccontrols.control.ComicButton("Configure…");
 
     /** The settings dialog's tab: the selected provider's settings right below the combo. */
@@ -74,9 +75,18 @@ public final class SearchProviderCardsPanel extends JPanel {
      *               where the large provider panels would burst the page)
      */
     public SearchProviderCardsPanel(WorkspaceStateStore store, boolean inline) {
+        this(store, inline, null);
+    }
+
+    /**
+     * @param activeProfile the running session's browser-search snapshot (shown by the browser card), or null
+     */
+    SearchProviderCardsPanel(WorkspaceStateStore store, boolean inline,
+            com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot activeProfile) {
         super(new BorderLayout(6, 6));
         this.inline = inline;
         this.store = store;
+        this.activeProfile = activeProfile;
         setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
 
         ResearchProviderServices services;
@@ -99,11 +109,12 @@ public final class SearchProviderCardsPanel extends JPanel {
         add(top, BorderLayout.NORTH);
 
         if (inline) {
+            // Every card scrolls on its own: the browser card has its own page list, the API cards are forms.
             cardHost.add(browserCard(), PROVIDER_LABELS[0]);
-            cardHost.add(braveCard(), PROVIDER_LABELS[1]);
-            cardHost.add(brightDataCard(), PROVIDER_LABELS[2]);
-            cardHost.add(dataForSeoCard(), PROVIDER_LABELS[3]);
-            cardHost.add(serpApiCard(), PROVIDER_LABELS[4]);
+            cardHost.add(ResearchSettingsContribution.fitted(braveCard()), PROVIDER_LABELS[1]);
+            cardHost.add(ResearchSettingsContribution.fitted(brightDataCard()), PROVIDER_LABELS[2]);
+            cardHost.add(ResearchSettingsContribution.fitted(dataForSeoCard()), PROVIDER_LABELS[3]);
+            cardHost.add(ResearchSettingsContribution.fitted(serpApiCard()), PROVIDER_LABELS[4]);
             add(cardHost, BorderLayout.CENTER);
         } else {
             JPanel actions = new JPanel(new BorderLayout());
@@ -310,16 +321,12 @@ public final class SearchProviderCardsPanel extends JPanel {
                 PROVIDER_IDS[i], "", "", ""));
     }
 
+    /**
+     * The browser search's own settings (engines, result-page analysis, extraction, reranking — see
+     * {@link BrowserSettingsSplit}); what the browser does with every provider is on the "Browser" tab.
+     */
     private JComponent browserCard() {
-        JPanel p = new JPanel();
-        p.setLayout(new javax.swing.BoxLayout(p, javax.swing.BoxLayout.Y_AXIS));
-        p.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        JLabel l = new JLabel("<html><body style='width:420px'>The initial search runs in the local "
-                + "browser (SERP). The browser-specific search settings (search URL, headless, channel) "
-                + "are in the Runtime tab. This is the default.</body></html>");
-        l.setEnabled(false);
-        p.add(l);
-        return p;
+        return LegacyBrowserSearchSettingsPanel.serpSearch(store, activeProfile);
     }
 
     private JComponent dataForSeoCard() {

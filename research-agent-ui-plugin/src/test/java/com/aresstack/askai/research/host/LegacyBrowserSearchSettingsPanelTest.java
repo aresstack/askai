@@ -29,7 +29,7 @@ public class LegacyBrowserSearchSettingsPanelTest {
 
     @Test
     public void promptEditorsCarryTheProductiveDefaultText() {
-        LegacyBrowserSearchSettingsPanel panel = new LegacyBrowserSearchSettingsPanel(store,
+        LegacyBrowserSearchSettingsPanel panel = LegacyBrowserSearchSettingsPanel.serpSearch(store,
                 SearchProcessingProfileSnapshot.create("s1", 4L, 1L,
                         LegacyBrowserSearchDefaults.create()));
         List<JTextArea> areas = new ArrayList<JTextArea>();
@@ -46,12 +46,48 @@ public class LegacyBrowserSearchSettingsPanelTest {
 
     @Test
     public void savingUnchangedDefaultsBumpsTheRevisionWithoutViolations() {
-        LegacyBrowserSearchSettingsPanel panel = new LegacyBrowserSearchSettingsPanel(store, null);
+        LegacyBrowserSearchSettingsPanel panel = LegacyBrowserSearchSettingsPanel.serpSearch(store, null);
         JButton save = findButton(panel, "Save");
         assertNotNull(save);
         save.doClick();
         assertEquals(1L, LegacyBrowserSearchSettingsStore.revision(store));
         assertTrue(LegacyBrowserSearchSettingsStore.loadValues(store).isEmpty());
+        findButton(LegacyBrowserSearchSettingsPanel.browsing(store, null, null), "Save").doClick();
+        assertEquals(2L, LegacyBrowserSearchSettingsStore.revision(store));
+        assertTrue(LegacyBrowserSearchSettingsStore.loadValues(store).isEmpty());
+    }
+
+    @Test
+    public void theTwoHalvesTogetherEditEveryCatalogFieldExactlyOnce() {
+        java.util.Set<String> browsing = LegacyBrowserSearchSettingsPanel.browsing(store, null, null).editedKeys();
+        java.util.Set<String> search = LegacyBrowserSearchSettingsPanel.serpSearch(store, null).editedKeys();
+        java.util.Set<String> all = new java.util.HashSet<String>();
+        for (com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCatalog.Field field
+                : com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCatalog.fields()) {
+            all.add(field.key);
+            assertTrue("exactly one place: " + field.key, browsing.contains(field.key) ^ search.contains(field.key));
+        }
+        assertEquals(all.size(), browsing.size() + search.size());
+        assertTrue("every page load's deadline is a browser setting",
+                browsing.contains("navigation.navigationCommitTimeoutMillis"));
+        assertTrue(browsing.contains("consent.enabled"));
+        assertTrue(browsing.contains("captcha.waitForUser"));
+        assertTrue(browsing.contains("readiness.minimumReadableCharacters"));
+        assertTrue("engines are the browser search's own", search.contains("navigation.engines"));
+        assertTrue(search.contains("navigation.searchResultLimit"));
+        assertTrue(search.contains("reranker.enabled"));
+    }
+
+    @Test
+    public void savingOneHalfKeepsTheOtherHalfsStoredOverrides() {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<String, String>(
+                com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.toValues(
+                        LegacyBrowserSearchDefaults.create()));
+        values.put("navigation.searchResultLimit", "37");
+        LegacyBrowserSearchSettingsStore.saveValues(store, values);
+        // A browsing panel opened afterwards saves its half — the stored search override must survive.
+        findButton(LegacyBrowserSearchSettingsPanel.browsing(store, null, null), "Save").doClick();
+        assertEquals("37", LegacyBrowserSearchSettingsStore.loadValues(store).get("navigation.searchResultLimit"));
     }
 
     private static JButton findButton(Container root, String text) {

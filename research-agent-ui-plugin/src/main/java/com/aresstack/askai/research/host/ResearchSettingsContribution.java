@@ -40,15 +40,18 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
 
     private static JComponent build(WorkspaceStateStore store, ResearchAgentSession research,
             com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot profile) {
-        final SearchProviderCardsPanel searchProviders = new SearchProviderCardsPanel(store);
+        final SearchProviderCardsPanel searchProviders = new SearchProviderCardsPanel(store, true, profile);
         JTabbedPane tabs = ComicControls.tabbedPane();
         tabs.addTab("General", buildGeneralTab(store));
         ResearchRuntimeSettingsPanel runtime = new ResearchRuntimeSettingsPanel(store, research);
         tabs.addTab("Runtime", fitted(runtime));
-        // The provider PICKER + each provider's own settings card (browser default, full DataForSEO
-        // editor). The old shared engine/locale fields are gone — each provider owns its full config.
-        tabs.addTab("Search", fitted(searchProviders));
-        tabs.addTab("Browser SERP", new LegacyBrowserSearchSettingsPanel(store, profile));
+        // The provider PICKER + the selected provider's own settings below it: for "Browser (SERP)" the
+        // browser search's engines, page analysis, extraction, reranking (BrowserSettingsSplit). Each card
+        // scrolls on its own, so the tab is not wrapped in fitted().
+        tabs.addTab("Search", searchProviders);
+        // What the browser itself does with EVERY provider: open and read the hits.
+        tabs.addTab("Browser", LegacyBrowserSearchSettingsPanel.browsing(store, profile,
+                form -> BrowserBasicsRows.addTo(form, store)));
         tabs.addTab("Check results", runtime.resultsView());
         // The DataForSEO draft + provider selection persist when the gear dialog is disposed; unsaved
         // provider drafts are dropped. The host's settings dialog does not expose an explicit Save hook,
@@ -106,6 +109,40 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
 
     /** General research-UI preferences — the first, non-technical tab. */
     private static JComponent buildGeneralTab(final WorkspaceStateStore store) {
+        com.aresstack.comiccontrols.control.ComicForm agent =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Agent");
+        // The DEFAULT language for NEW research sessions; running sessions keep their own session-local
+        // language (live-switchable at the session, never globally from here).
+        final javax.swing.JComboBox<String> language =
+                ComicControls.<String>comboBox(new String[]{"English", "Deutsch"});
+        language.setSelectedIndex("de".equals(ResearchRuntimeSettings.loadLanguage(store)) ? 1 : 0);
+        language.setToolTipText("Language of new research sessions");
+        language.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                ResearchRuntimeSettings.saveLanguage(store, language.getSelectedIndex() == 1 ? "de" : "en");
+            }
+        });
+        // LLM narration (default off): milestone texts phrased by the main model, validated, with fallback.
+        final javax.swing.JCheckBox narration = ComicControls.checkBox(
+                "AI-phrased guidance (uses the main model; applies to new sessions)",
+                ResearchRuntimeSettings.loadLlmNarration(store));
+        narration.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                ResearchRuntimeSettings.saveLlmNarration(store, narration.isSelected());
+            }
+        });
+        // Scoping orientation tags (default off = long-standing behaviour): suggestions on every broad turn.
+        final javax.swing.JCheckBox suggest = ComicControls.checkBox(
+                "Always offer search suggestions (orientation tags; applies to new sessions)",
+                ResearchRuntimeSettings.loadAlwaysOfferSearchSuggestions(store));
+        suggest.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                ResearchRuntimeSettings.saveAlwaysOfferSearchSuggestions(store, suggest.isSelected());
+            }
+        });
+        agent.row("Language", language);
+        agent.check(narration);
+        agent.check(suggest);
         com.aresstack.comiccontrols.control.ComicForm tab =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Search tags");
         final javax.swing.JCheckBox readTagsBox = ComicControls.checkBox(
@@ -153,6 +190,7 @@ public final class ResearchSettingsContribution implements AgentSettingsContribu
             }
         });
         sources.check(autoReviewBox);
-        return com.aresstack.comiccontrols.control.ComicForm.page(tab, sources);
+        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, tab, sources);
+        return com.aresstack.comiccontrols.control.ComicForm.page(agent, tab, sources);
     }
 }
