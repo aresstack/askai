@@ -35,7 +35,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * DataForSEO HTTP contract: HTTP Basic auth from the decrypted username/password, a well-formed live task
+ * DataForSEO HTTP contract: HTTP Basic auth from the decrypted API key, a well-formed live task
  * body (with {@code depth} not capped below the caller's request), organic items mapped to hits, and
  * transport errors surfaced without leaking the password.
  */
@@ -43,6 +43,9 @@ public final class DataForSeoSearchProviderHttpTest {
 
     private static final String USERNAME = "dfs-login";
     private static final String PASSWORD = "dfs-secret-pass";
+    /** DataForSEO API key = Base64(login:password), stored as one secret. */
+    private static final String API_KEY = java.util.Base64.getEncoder()
+            .encodeToString((USERNAME + ":" + PASSWORD).getBytes(StandardCharsets.UTF_8));
 
     private HttpServer server;
     private final AtomicReference<String> lastAuth = new AtomicReference<String>();
@@ -81,8 +84,7 @@ public final class DataForSeoSearchProviderHttpTest {
         DataForSeoSearchConfiguration config = new DataForSeoSearchConfiguration();
         config.setEnabled(true);
         config.setEndpointBase("http://127.0.0.1:" + server.getAddress().getPort());
-        config.setUsername(USERNAME);
-        config.setPassword(secrets.encrypt(PASSWORD.toCharArray()));
+        config.setApiKey(secrets.encrypt(API_KEY.toCharArray()));
         return new SearchProviderFactory(new Gson(), new AsyncHttpClientFactory(), secrets)
                 .createLegacyDataForSeo(config);
     }
@@ -132,6 +134,7 @@ public final class DataForSeoSearchProviderHttpTest {
         WebSearchProvider provider = provider();
         try {
             assertFalse(provider.toString().contains(PASSWORD));
+            assertFalse(provider.toString().contains(API_KEY));
         } finally {
             provider.close();
         }

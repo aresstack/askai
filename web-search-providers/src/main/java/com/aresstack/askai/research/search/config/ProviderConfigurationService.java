@@ -164,14 +164,14 @@ public final class ProviderConfigurationService {
 
     public void saveDataForSeo(
             DataForSeoSearchConfiguration configuration,
-            char[] password) {
+            char[] apiKey) {
 
         try {
-            configuration.setPassword(
-                    secretValueService.encrypt(password));
+            configuration.setApiKey(
+                    secretValueService.encrypt(apiKey));
             saveDataForSeo(configuration);
         } finally {
-            SecretArrays.clear(password);
+            SecretArrays.clear(apiKey);
         }
     }
 

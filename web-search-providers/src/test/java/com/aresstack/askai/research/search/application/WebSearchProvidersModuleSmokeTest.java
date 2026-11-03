@@ -53,7 +53,6 @@ public final class WebSearchProvidersModuleSmokeTest {
 
             DataForSeoSearchConfiguration dataForSeo = service.loadOrCreateDataForSeo();
             dataForSeo.setEnabled(true);
-            dataForSeo.setUsername("smoke-login");
             service.saveDataForSeo(dataForSeo, "dataforseo-secret-PLAINTEXT".toCharArray());
 
             SerpApiSearchConfiguration serpApi = service.loadOrCreateSerpApi();

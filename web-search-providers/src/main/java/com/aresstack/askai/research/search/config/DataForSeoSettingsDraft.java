@@ -10,8 +10,8 @@ import com.aresstack.askai.research.search.security.SecretValueService;
  * {@link DataForSeoSearchConfiguration} directly (so switching provider cards never reloads or discards it),
  * and {@link #save} persists it through the SAME service on Save. Cancel simply drops the draft.
  *
- * <p>Password handling follows the spec: the stored secret is NEVER decrypted into the UI. The draft only
- * knows whether a credential EXISTS; a new password is applied only when the user actually typed one, and
+ * <p>API key handling follows the spec: the stored secret is NEVER decrypted into the UI. The draft only
+ * knows whether a credential EXISTS; a new API key is applied only when the user actually typed one, and
  * is encrypted through the existing {@link SecretValueService} on save — otherwise the stored secret is
  * kept untouched.</p>
  */
@@ -19,14 +19,14 @@ public final class DataForSeoSettingsDraft {
 
     private final ProviderConfigurationService service;
     private final DataForSeoSearchConfiguration configuration;
-    private final boolean hadStoredPassword;
-    private char[] newPassword; // null → keep the stored secret; non-null → encrypt + replace on save
+    private final boolean hadStoredApiKey;
+    private char[] newApiKey; // null → keep the stored secret; non-null → encrypt + replace on save
 
     private DataForSeoSettingsDraft(ProviderConfigurationService service,
                                     DataForSeoSearchConfiguration configuration) {
         this.service = service;
         this.configuration = configuration;
-        this.hadStoredPassword = configuration.getPassword() != null;
+        this.hadStoredApiKey = configuration.getApiKey() != null;
     }
 
     /** Load the draft once from the persisted provider file (creating defaults if none exists). */
@@ -40,50 +40,50 @@ public final class DataForSeoSettingsDraft {
     }
 
     /** True when a credential is already stored — the UI shows "Saved credential", never the secret. */
-    public boolean hasStoredPassword() {
-        return hadStoredPassword || newPassword != null;
+    public boolean hasStoredApiKey() {
+        return hadStoredApiKey || newApiKey != null;
     }
 
-    /** Record a newly typed password (kept only in memory until save); empty/null clears the pending one. */
-    public void setNewPassword(char[] password) {
-        if (newPassword != null) {
-            SecretArrays.clear(newPassword);
+    /** Record a newly typed API key (kept only in memory until save); empty/null clears the pending one. */
+    public void setNewApiKey(char[] apiKey) {
+        if (newApiKey != null) {
+            SecretArrays.clear(newApiKey);
         }
-        newPassword = password == null || password.length == 0 ? null : password.clone();
+        newApiKey = apiKey == null || apiKey.length == 0 ? null : apiKey.clone();
     }
 
-    public boolean hasPendingPassword() {
-        return newPassword != null;
+    public boolean hasPendingApiKey() {
+        return newApiKey != null;
     }
 
     /**
-     * Encrypt a freshly typed (unsaved) password INTO the working config so a playground run uses it —
+     * Encrypt a freshly typed (unsaved) API key INTO the working config so a playground run uses it —
      * without persisting. No-op when nothing new was typed (the run then uses the stored secret). The
-     * later {@link #save} re-encrypts from the pending password, so this stays consistent.
+     * later {@link #save} re-encrypts from the pending API key, so this stays consistent.
      */
-    public void applyPendingPasswordForRun(SecretValueService secrets) {
-        if (newPassword != null && secrets != null) {
-            configuration.setPassword(secrets.encrypt(newPassword.clone()));
+    public void applyPendingApiKeyForRun(SecretValueService secrets) {
+        if (newApiKey != null && secrets != null) {
+            configuration.setApiKey(secrets.encrypt(newApiKey.clone()));
         }
     }
 
     /**
-     * Persist through the provider service: a pending password is encrypted and replaces the stored secret;
+     * Persist through the provider service: a pending API key is encrypted and replaces the stored secret;
      * without one the stored secret is preserved. Validation happens inside the service (depth 1..200, …).
      */
     public void save() {
-        if (newPassword != null) {
-            service.saveDataForSeo(configuration, newPassword.clone()); // service clears its copy
+        if (newApiKey != null) {
+            service.saveDataForSeo(configuration, newApiKey.clone()); // service clears its copy
         } else {
             service.saveDataForSeo(configuration); // keeps the existing encrypted secret untouched
         }
     }
 
-    /** Wipe the in-memory password copy (call on dialog close/cancel). */
+    /** Wipe the in-memory API key copy (call on dialog close/cancel). */
     public void dispose() {
-        if (newPassword != null) {
-            SecretArrays.clear(newPassword);
-            newPassword = null;
+        if (newApiKey != null) {
+            SecretArrays.clear(newApiKey);
+            newApiKey = null;
         }
     }
 }

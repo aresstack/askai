@@ -36,7 +36,6 @@ public final class WebSearchProvidersModuleResilienceTest {
         service.saveBrightData(brightData, "bd-secret".toCharArray());
         DataForSeoSearchConfiguration dataForSeo = service.loadOrCreateDataForSeo();
         dataForSeo.setEnabled(true);
-        dataForSeo.setUsername("login");
         service.saveDataForSeo(dataForSeo, "dfs-secret".toCharArray());
         setup.close();
 

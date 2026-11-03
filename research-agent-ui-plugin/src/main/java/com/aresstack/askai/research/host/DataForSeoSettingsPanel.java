@@ -39,8 +39,8 @@ import java.util.List;
  * The provider-specific DataForSEO editor (its own card — the top provider combo only SELECTS it, it never
  * reduces DataForSEO to shared fields). Bound to ONE {@link DataForSeoSettingsDraft}: edits mutate the
  * draft's working config directly, so switching provider cards never reloads or discards them; the dialog
- * persists the draft on Save. The stored secret is never shown — the password field stays empty over a
- * "Saved credential" hint, and only a freshly typed password is (re)encrypted on save.
+ * persists the draft on Save. The stored secret is never shown — the API key field stays empty over a
+ * "Saved credential" hint, and only a freshly typed API key is (re)encrypted on save.
  *
  * <p>Four tabs: Account, SERP, Advanced, Playground. The Playground runs the SAME productive adapter off
  * the EDT against the CURRENT unsaved draft (a depth or credential can be tried before saving).</p>
@@ -54,9 +54,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
     private final com.aresstack.askai.research.search.security.SecretValueService secrets;
 
     private final JCheckBox enabled = ComicControls.checkBox("Use DataForSEO for the initial search");
-    private final JTextField username = ComicControls.textField(28);
-    private final JPasswordField password = ComicControls.passwordField(28);
-    private final JLabel passwordHint = new JLabel(" ");
+    private final JPasswordField apiKey = ComicControls.passwordField(28);
+    private final JLabel apiKeyHint = new JLabel(" ");
     private final JTextField endpointBase = ComicControls.textField(28);
 
     private final JComboBox<DataForSeoSearchEngine> engine =
@@ -103,14 +102,14 @@ public final class DataForSeoSettingsPanel extends JPanel {
     private JComponent buildAccount() {
         JPanel p = column();
         p.add(row("", enabled));
-        p.add(row("API login:", username));
-        JPanel pw = new JPanel(new BorderLayout(4, 0));
-        pw.add(password, BorderLayout.CENTER);
-        passwordHint.setEnabled(false);
-        pw.add(passwordHint, BorderLayout.SOUTH);
-        p.add(row("API password:", pw));
+        JPanel key = new JPanel(new BorderLayout(4, 0));
+        key.add(apiKey, BorderLayout.CENTER);
+        apiKeyHint.setEnabled(false);
+        key.add(apiKeyHint, BorderLayout.EAST);
+        p.add(row("API key:", key));
         p.add(row("API endpoint:", endpointBase));
-        p.add(hint("The stored password is never shown. Leave it empty to keep the saved credential; "
+        p.add(hint("The DataForSEO API key is Base64(login:password) and is sent as HTTP Basic. "
+                + "It is never shown again. Leave it empty to keep the saved key; "
                 + "type a new one to replace it (encrypted on save)."));
         return p;
     }
@@ -211,9 +210,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
     private void loadFromDraft() {
         DataForSeoSearchConfiguration c = draft.configuration();
         enabled.setSelected(c.isEnabled());
-        username.setText(nullToEmpty(c.getUsername()));
-        password.setText("");
-        passwordHint.setText(draft.hasStoredPassword() ? "Saved credential" : "No credential stored");
+        apiKey.setText("");
+        apiKeyHint.setText(draft.hasStoredApiKey() ? "Saved credential" : "No credential stored");
         endpointBase.setText(nullToEmpty(c.getEndpointBase()));
         engine.setSelectedItem(c.getSearchEngine());
         locationName.setText(nullToEmpty(c.getLocationName()));
@@ -236,9 +234,8 @@ public final class DataForSeoSettingsPanel extends JPanel {
     public void applyToDraft() {
         DataForSeoSearchConfiguration c = draft.configuration();
         c.setEnabled(enabled.isSelected());
-        c.setUsername(emptyToNull(username.getText().trim()));
-        char[] typed = password.getPassword();
-        draft.setNewPassword(typed != null && typed.length > 0 ? typed : null);
+        char[] typed = apiKey.getPassword();
+        draft.setNewApiKey(typed != null && typed.length > 0 ? typed : null);
         c.setEndpointBase(emptyToNull(endpointBase.getText().trim()));
         c.setSearchEngine((DataForSeoSearchEngine) engine.getSelectedItem());
         c.setLocationName(emptyToNull(locationName.getText().trim()));
@@ -296,9 +293,9 @@ public final class DataForSeoSettingsPanel extends JPanel {
 
     private void runPlaygroundSearch() {
         applyToDraft();
-        // The playground uses the freshly typed password too: encrypt it into the config for THIS run
-        // only (not persisted; save re-encrypts from the same pending password).
-        draft.applyPendingPasswordForRun(secrets);
+        // The playground uses the freshly typed API key too: encrypt it into the config for THIS run
+        // only (not persisted; save re-encrypts from the same pending API key).
+        draft.applyPendingApiKeyForRun(secrets);
         final DataForSeoSearchConfiguration config = draft.configuration();
         requestPreview.setText(playground.requestPreview(config, playgroundTerm.getText()));
         runPlayground.setEnabled(false);
