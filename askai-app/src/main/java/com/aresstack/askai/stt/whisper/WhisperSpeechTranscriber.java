@@ -16,13 +16,16 @@ import java.util.function.Supplier;
 /**
  * {@link SpeechTranscriber} backed by the local whisper.cpp CLI: runs {@code whisper-cli.exe} on the normalized
  * 16 kHz mono WAV and reads the plain-text result it writes next to the audio (UTF-8, so umlauts survive the
- * Windows console). The model comes from {@link TranscriptionInput#getModel()} as {@code whisper:<id>}.
+ * Windows console). The model comes from {@link TranscriptionInput#getModel()} as {@code @whisper:<id>}.
  * {@link #cancel()} kills the running process.
  */
 public final class WhisperSpeechTranscriber implements SpeechTranscriber {
 
-    /** Prefix that marks a Whisper model in the dictation pipeline's model name. */
-    public static final String MODEL_PREFIX = "whisper:";
+    /**
+     * Prefix that marks a Whisper model in the dictation pipeline's model name. Starts with '@', which Ollama model
+     * names cannot contain, so an Ollama model called e.g. {@code whisper:latest} never routes to the local engine.
+     */
+    public static final String MODEL_PREFIX = "@whisper:";
 
     private final WhisperStore store;
     private final Supplier<Integer> timeoutSecondsSupplier;

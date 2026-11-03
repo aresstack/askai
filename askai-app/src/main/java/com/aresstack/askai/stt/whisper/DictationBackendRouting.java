@@ -7,7 +7,7 @@ import java.util.function.Supplier;
 
 /**
  * Routes dictation to Whisper or Ollama. While {@code whisperModel} yields a model (Whisper chosen and installed),
- * the model resolver answers {@code whisper:<id>} without asking Ollama, and the transcriber hands such models to
+ * the model resolver answers {@code @whisper:<id>} without asking Ollama, and the transcriber hands such models to
  * Whisper; otherwise everything goes to the Ollama adapters exactly as before.
  */
 public final class DictationBackendRouting {
@@ -25,6 +25,27 @@ public final class DictationBackendRouting {
                             WhisperSpeechTranscriber.MODEL_PREFIX + whisper.getId(), "whisper");
                 }
                 return ollama.resolve(requestedModel);
+            }
+        };
+    }
+
+    /**
+     * Wraps the Ollama probe: while Whisper transcribes, the dictation diagnostics never ask Ollama for its version
+     * (an unreachable server would otherwise delay the finished local transcription).
+     */
+    public static com.aresstack.askai.speech.ServerProbe probe(final com.aresstack.askai.speech.ServerProbe ollama,
+                                                              final Supplier<WhisperModel> whisperModel) {
+        return new com.aresstack.askai.speech.ServerProbe() {
+            public String serverKey() {
+                return ollama.serverKey();
+            }
+
+            public String version() throws Exception {
+                return whisperModel.get() != null ? "" : ollama.version();
+            }
+
+            public boolean endpointAvailable() throws Exception {
+                return whisperModel.get() != null || ollama.endpointAvailable();
             }
         };
     }

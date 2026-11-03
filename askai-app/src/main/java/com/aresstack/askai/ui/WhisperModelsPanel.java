@@ -8,20 +8,18 @@ import com.aresstack.askai.tts.PiperInstaller;
 import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.control.ComicForm;
 
-import javax.swing.Box;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
-import java.awt.FlowLayout;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 /**
- * Settings → AI models → "Dictation models (Whisper)": installs the local whisper.cpp engine and a curated model
+ * Models → Setup → "Dictation": installs the local whisper.cpp engine and a curated model
  * with one click (downloads through AskAI's network settings), uninstalls them again. Whisper is the default
  * dictation backend; until a model is installed, the Ollama audio model transcribes. Installs run off the EDT,
  * errors are shown, never swallowed.
@@ -63,9 +61,13 @@ public final class WhisperModelsPanel extends JPanel {
         ComicForm rows = ComicForm.titled("Dictation models (Whisper)");
         rows.note("Whisper is the default dictation backend: it transcribes locally on the CPU, without Ollama."
                 + " Until a model is installed, the Ollama audio model transcribes.");
+        JPanel grid = new JPanel(new java.awt.GridBagLayout());
+        grid.setOpaque(false);
+        int index = 0;
         for (WhisperModel model : WhisperModelCatalog.curated()) {
-            rows.component(buildRow(model));
+            addRow(grid, index++, model);
         }
+        rows.component(grid);
         rows.note("Downloads: the whisper.cpp engine once (~8 MB, pinned release on GitHub) and the models from"
                 + " HuggingFace “" + WhisperModelCatalog.REPOSITORY + "”, through AskAI's network settings."
                 + " Stored under %APPDATA%\\.askai\\stt.");
@@ -85,10 +87,8 @@ public final class WhisperModelsPanel extends JPanel {
         modelsChangedListeners.remove(listener);
     }
 
-    private JPanel buildRow(final WhisperModel model) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        row.setOpaque(false);
-        row.add(new JLabel(model.getDisplayName() + "  ·  ~" + model.getApproximateSizeMb() + " MB"));
+    /** One grid row: name | size | status | button — the action buttons line up in the right column. */
+    private void addRow(JPanel grid, int index, final WhisperModel model) {
         JLabel status = new JLabel();
         JButton action = new ComicButton("Install");
         action.addActionListener(event -> {
@@ -100,10 +100,23 @@ public final class WhisperModelsPanel extends JPanel {
         });
         statusByModel.put(model.getId(), status);
         buttonByModel.put(model.getId(), action);
-        row.add(Box.createHorizontalStrut(8));
-        row.add(status);
-        row.add(action);
-        return row;
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.gridy = index;
+        c.insets = new java.awt.Insets(3, 4, 3, 12);
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        c.gridx = 0;
+        grid.add(new JLabel(model.getDisplayName()), c);
+        c.gridx = 1;
+        grid.add(new JLabel("~" + model.getApproximateSizeMb() + " MB"), c);
+        c.gridx = 2;
+        c.weightx = 1;
+        c.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        grid.add(status, c);
+        c.gridx = 3;
+        c.weightx = 0;
+        c.fill = java.awt.GridBagConstraints.NONE;
+        c.anchor = java.awt.GridBagConstraints.EAST;
+        grid.add(action, c);
     }
 
     /** Recompute the installed state of every row. */

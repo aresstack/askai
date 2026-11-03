@@ -106,11 +106,13 @@ public class WhisperDictationTest {
         AudioModelResolver resolver = DictationBackendRouting.resolver(ollamaResolver, () -> active[0]);
         assertEquals("gemma4:e2b", resolver.resolve("Automatic").getModelName());
         active[0] = WhisperModelCatalog.recommended();
-        assertEquals("whisper:small", resolver.resolve("Automatic").getModelName());
+        assertEquals("@whisper:small", resolver.resolve("Automatic").getModelName());
 
         SpeechTranscriber transcriber = DictationBackendRouting.transcriber(fixed("ollama"), fixed("whisper"));
         assertEquals("whisper", transcriber.transcribe(new SpeechTranscriber.TranscriptionInput(
-                new File("a.wav"), "whisper:small", "de", "")));
+                new File("a.wav"), "@whisper:small", "de", "")));
+        assertEquals("an Ollama model named whisper:* stays with Ollama", "ollama",
+                transcriber.transcribe(new SpeechTranscriber.TranscriptionInput(new File("a.wav"), "whisper:small", "de", "")));
         assertEquals("ollama", transcriber.transcribe(new SpeechTranscriber.TranscriptionInput(
                 new File("a.wav"), "gemma4:e2b", "de", "")));
     }
@@ -119,10 +121,37 @@ public class WhisperDictationTest {
     public void aMissingWhisperModelFailsWithAReason() {
         WhisperSpeechTranscriber transcriber = new WhisperSpeechTranscriber(store(), () -> 10);
         try {
-            transcriber.transcribe(new SpeechTranscriber.TranscriptionInput(new File("a.wav"), "whisper:small", "", ""));
+            transcriber.transcribe(new SpeechTranscriber.TranscriptionInput(new File("a.wav"), "@whisper:small", "", ""));
             org.junit.Assert.fail("expected a failure");
         } catch (SpeechTranscriber.SpeechTranscriberException expected) {
             assertTrue(expected.getMessage().contains("not installed"));
+        }
+    }
+
+    @Test
+    public void whileWhisperTranscribesTheOllamaVersionIsNeverAsked() throws Exception {
+        final WhisperModel[] active = {WhisperModelCatalog.recommended()};
+        com.aresstack.askai.speech.ServerProbe unreachable = new com.aresstack.askai.speech.ServerProbe() {
+            public String serverKey() {
+                return "http://127.0.0.1:11434";
+            }
+
+            public String version() throws Exception {
+                throw new java.io.IOException("unreachable");
+            }
+
+            public boolean endpointAvailable() throws Exception {
+                throw new java.io.IOException("unreachable");
+            }
+        };
+        com.aresstack.askai.speech.ServerProbe probe = DictationBackendRouting.probe(unreachable, () -> active[0]);
+        assertEquals("", probe.version());
+        active[0] = null;
+        try {
+            probe.version();
+            org.junit.Assert.fail("Ollama is asked again once it transcribes");
+        } catch (java.io.IOException expected) {
+            // fine
         }
     }
 

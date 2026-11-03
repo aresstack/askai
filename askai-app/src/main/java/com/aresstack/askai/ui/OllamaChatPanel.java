@@ -625,7 +625,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         SpeechTranscriber transcriber = com.aresstack.askai.stt.whisper.DictationBackendRouting.transcriber(
                 new OllamaSpeechTranscriber(baseUrl, timeout),
                 new com.aresstack.askai.stt.whisper.WhisperSpeechTranscriber(whisperStore, timeout));
-        ServerProbe probe = new OllamaServerProbe(baseUrl);
+        ServerProbe probe = com.aresstack.askai.stt.whisper.DictationBackendRouting.probe(
+                new OllamaServerProbe(baseUrl), this::activeWhisperModel);
         DictationListener listener = new DictationListener() {
             public void onState(final DictationState state, final String message) {
                 onUi(new Runnable() {
@@ -1365,12 +1366,12 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         input.row("Backend", dictationEngineCombo);
         whisperModelCombo.setEditable(false);
         whisperModelCombo.setPrototypeDisplayValue("No Whisper model installed (Ollama transcribes)");
-        whisperModelCombo.setToolTipText("The installed Whisper model. Install models under Settings > AI models"
-                + " > Dictation models (Whisper).");
+        whisperModelCombo.setToolTipText("The installed Whisper model. Install models under Models > Setup >"
+                + " Dictation.");
         whisperModelCombo.addActionListener(event -> persistWhisperModelSelection());
         JButton installWhisperButton = new ComicButton("Install models…");
-        installWhisperButton.setToolTipText("Opens Settings > AI models > Dictation models (Whisper).");
-        installWhisperButton.addActionListener(event -> openAiModelsSettings());
+        installWhisperButton.setToolTipText("Opens Models > Setup > Dictation, where Whisper models are installed.");
+        installWhisperButton.addActionListener(event -> openWhisperInstall());
         whisperModelRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
         whisperModelRow.setOpaque(false);
         whisperModelRow.add(whisperModelCombo);
@@ -4276,12 +4277,16 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         refreshDictationControls();
     }
 
-    /** Opens Settings > AI models (where the Whisper models are installed). */
-    private void openAiModelsSettings() {
-        if (settingsOpener != null) {
-            settingsOpener.accept(SETTINGS_AI_MODELS);
-        } else {
-            selectSettingsCategory(SETTINGS_AI_MODELS);
+    private Runnable whisperInstallOpener;
+
+    /** Where "Install models…" goes: Models > Setup > Dictation (set by the frame). */
+    public void setWhisperInstallOpener(Runnable opener) {
+        this.whisperInstallOpener = opener;
+    }
+
+    private void openWhisperInstall() {
+        if (whisperInstallOpener != null) {
+            whisperInstallOpener.run();
         }
     }
 
