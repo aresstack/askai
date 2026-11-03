@@ -313,7 +313,11 @@ public final class ResearchAgentSession {
                 if (googleEnabled(browserEngineSelection)) {
                     this.googleSearchStrategy = com.aresstack.askai.research.runtime.search
                             .GoogleSearchBrowserStrategy.create(ensureSearchBrowser(), java.util.Locale.getDefault(),
-                                    environment.get("ASKAI_GOOGLE_SEARCH_URL"));
+                                    environment.get("ASKAI_GOOGLE_SEARCH_URL"),
+                                    browserEngineSelection.resultPagesFor(com.aresstack.askai.browser.search.engine
+                                            .BrowserSearchEngineCatalog.GOOGLE),
+                                    browserEngineSelection.delayMillisFor(com.aresstack.askai.browser.search.engine
+                                            .BrowserSearchEngineCatalog.GOOGLE));
                 }
             }
             // OPTIONAL model-backed SERP layout repair over the central main model (honest fallback else).

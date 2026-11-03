@@ -89,6 +89,7 @@ public final class AsyncModuleSearchProvider implements SearchProvider {
                 .countryCode(request.getCountry())
                 .languageCode(request.getLanguage())
                 .maximumResults(clampResultCount(request.getRequestedResultCount()))
+                .offset(request.getOffset())
                 .build();
 
         CompletableFuture<WebSearchResult> future;

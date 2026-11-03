@@ -175,8 +175,7 @@ final class SearchEngineOrderEditor extends JPanel {
         Color foreground = selected ? selectionForeground() : UIManager.getColor("List.foreground");
 
         final JCheckBox box = ComicControls.checkBox(
-                selected && !BrowserSearchEngineCatalog.runsInSearchBrowser(row.engineId)
-                        ? row.displayName : summaryFor(row));
+                selected ? row.displayName : summaryFor(row));
         box.setSelected(row.enabled);
         box.setOpaque(false);
         box.setForeground(foreground);
@@ -188,7 +187,7 @@ final class SearchEngineOrderEditor extends JPanel {
         });
         panel.add(box);
 
-        if (selected && !BrowserSearchEngineCatalog.runsInSearchBrowser(row.engineId)) {
+        if (selected) {
             // The spinners live IN the selected row — the shared instances are synced to it first.
             syncingSpinners = true;
             pagesSpinner.setValue(row.resultPages);
@@ -222,15 +221,12 @@ final class SearchEngineOrderEditor extends JPanel {
 
     /** {@code "Bing  — 3 pages, delay 1.5 s"} — the unselected row is pure text, delay only when on. */
     private static String summaryFor(Row row) {
-        if (BrowserSearchEngineCatalog.runsInSearchBrowser(row.engineId)) {
-            // The search browser fetches Google's first result page only; pages and delay do not apply.
-            return row.displayName + "  — search browser, first result page";
-        }
         String delay = row.delayMillis > 0
                 ? ", delay " + BrowserSearchEngineSelection
                         .formatDelaySeconds(row.delayMillis) + " s"
                 : "";
-        return row.displayName + "  — " + row.resultPages
+        String where = BrowserSearchEngineCatalog.runsInSearchBrowser(row.engineId) ? "search browser, " : "";
+        return row.displayName + "  — " + where + row.resultPages
                 + (row.resultPages == 1 ? " page" : " pages") + delay;
     }
 

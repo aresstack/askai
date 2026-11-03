@@ -20,6 +20,9 @@ public final class GoogleSearchBrowserStrategy {
     /** Upper bound of one Google search including a possible browser (re)start. */
     public static final long SEARCH_TIMEOUT_MILLIS = 90_000L;
 
+    /** Google lists about ten organic results per page and ignores {@code num}. */
+    public static final int GOOGLE_PAGE_SIZE = 10;
+
     private GoogleSearchBrowserStrategy() {
     }
 
@@ -36,6 +39,15 @@ public final class GoogleSearchBrowserStrategy {
      *                  for local test worlds that serve a Google-shaped result page
      */
     public static SearchStrategy create(SearchBrowser searchBrowser, Locale locale, String searchUrl) {
+        return create(searchBrowser, locale, searchUrl, 1, 0L);
+    }
+
+    /**
+     * @param resultPages Google result pages one search fetches in the search browser (page n = {@code start=n*10})
+     * @param delayMillis pause before every page after the first
+     */
+    public static SearchStrategy create(SearchBrowser searchBrowser, Locale locale, String searchUrl,
+                                        int resultPages, long delayMillis) {
         // askai #41 (lazy resolution): google.*/goto links stay as Google lists them; no request resolves them during
         // the search. The browser follows such a link when the research pipeline actually opens the hit.
         GooglePlaywrightSearchProvider.Builder google = GooglePlaywrightSearchProvider.builder();
@@ -53,6 +65,7 @@ public final class GoogleSearchBrowserStrategy {
                 com.aresstack.askai.research.search.api.SearchEngine.GOOGLE,
                 searchBrowser.asSearchProvider(google.build()));
         return new SingleProviderSearchStrategy(new AsyncModuleSearchProvider(SearchProviderId.GOOGLE_BROWSER,
-                SearchEngine.GOOGLE, web, SEARCH_TIMEOUT_MILLIS), SearchEngine.GOOGLE);
+                SearchEngine.GOOGLE, web, SEARCH_TIMEOUT_MILLIS), SearchEngine.GOOGLE,
+                resultPages, GOOGLE_PAGE_SIZE, delayMillis);
     }
 }
