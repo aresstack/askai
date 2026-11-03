@@ -8,7 +8,7 @@ package com.aresstack.askai.ui.setup;
  * Knows neither Swing nor speech output; that is {@link WizardNarrator}'s job.
  *
  * <p>Ported from the Enterprise AI Client; the lines follow AskAI's steps (network, runtime, chat model, knowledge,
- * check, voice). Index = step index of {@link SetupWizardPanel}.</p>
+ * dictation, check). Index = step index of {@link SetupWizardPanel}.</p>
  */
 final class WizardGuide {
 
@@ -65,6 +65,8 @@ final class WizardGuide {
             "Now I'm choosing a brain for myself. Pick the model we'll chat with.",
             "Here I learn how to search, read and rank knowledge. The better I can do that, the less I have to "
                     + "guess. You can skip this step and do it later in the settings.",
+            "Shall I listen to you as well? Pick your microphone and let me hear you – or skip it, typing works "
+                    + "just as well.",
             "Almost done. Let me check whether I can really do everything I claim."
     };
 
@@ -82,6 +84,9 @@ final class WizardGuide {
                     + "reranker ranks the sources and is required for web research: “Install recommended reranker” "
                     + "puts it into AskAI's own runtime. The sentence models split texts into sentences; “Install "
                     + "sentence models” fetches the missing ones.",
+            "Pick the microphone (or keep the system default) and click “Test microphone”: if the bar moves, I "
+                    + "can hear you. “Automatic” lets AskAI pick a model that understands audio; none installed? "
+                    + "“Download audio model” fetches one. All of this is optional.",
             "Nothing else: I save everything and check it. If something is red, jump to that step above, fix it, "
                     + "and then click “Check again”. “Finish” ends the setup – even if something is still red."
     };
@@ -94,12 +99,14 @@ final class WizardGuide {
             "The chat model phrases my answers. Everything else – research, summaries, tools – builds on it.",
             "The embedding model finds the passages that match your question, even when other words are used. The "
                     + "reranker sorts them by relevance, and the sentence models cut sources into clean sentences.",
+            "With dictation you speak your questions instead of typing them. The recording only goes to your own AI "
+                    + "runtime, which writes it down.",
             "So that you don't only notice in everyday use that something is missing: I check every building "
                     + "block for real once."
     };
 
     private static final String[] TOPIC = {"Connection and voice", "AI runtime", "Chat model",
-            "Knowledge and research", "Final check"};
+            "Knowledge and research", "Dictation", "Final check"};
 
     /** The introduction: in detail on the first start, as a reunion when called later. */
     String greeting(boolean returning) {

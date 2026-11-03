@@ -63,6 +63,8 @@ public final class AskAiSetupActions implements SetupActions {
 
     /** Where the wizard's “Download Ollama…” leads. */
     static final String OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
+    /** How long the microphone test listens. */
+    private static final long MIC_TEST_MILLIS = 4000;
     /** The language Witch speaks in (his lines are English). */
     private static final String WITCH_LANGUAGE = "en";
     private static final String[] SENTENCE_LANGUAGES = {"de", "en"};
@@ -169,7 +171,13 @@ public final class AskAiSetupActions implements SetupActions {
                 .nlpSentence(selections.getNlp().getModelId(NlpCapability.SENTENCE_DETECTION, "de"),
                         selections.getNlp().getModelId(NlpCapability.SENTENCE_DETECTION, "en"))
                 .voices(piperVoiceOf(tts, "de"), piperVoiceOf(tts, "en"))
+                .dictation(stt().getMicrophoneDeviceId(), stt().isAudioModelAutomatic() ? "" : stt().getModelName())
                 .build();
+    }
+
+    private com.aresstack.askai.stt.SpeechToTextConfiguration stt() {
+        com.aresstack.askai.stt.SpeechToTextConfiguration stt = model.getSpeechToTextConfiguration();
+        return stt == null ? com.aresstack.askai.stt.SpeechToTextConfiguration.defaults() : stt;
     }
 
     private static SetupDraft.Builder withNetwork(SetupDraft.Builder builder, AppConfiguration stored) {
@@ -551,7 +559,11 @@ public final class AskAiSetupActions implements SetupActions {
         if (!draft.ollamaBaseUrl().isEmpty()) {
             model.setOllamaBaseUrl(draft.ollamaBaseUrl());
         }
-        model.saveSettings(); // the Ollama address; every other stored value is kept
+        com.aresstack.askai.stt.SpeechToTextConfiguration stt = stt().withMicrophoneDeviceId(draft.microphone());
+        model.setSpeechToTextConfiguration(draft.audioModel().isEmpty()
+                ? stt.withAudioModelAutomatic(true).withModelName("")
+                : stt.withAudioModelAutomatic(false).withModelName(draft.audioModel()));
+        model.saveSettings(); // the Ollama address and the dictation; every other stored value is kept
         originalOllamaUrl = null; // saved: a later cancel no longer restores the old address
         model.persistMainModel(draft.chatModel());
         model.persistRerankerAndEmbeddingsModels(draft.rerankerModel(), draft.embeddingModel());
@@ -604,7 +616,97 @@ public final class AskAiSetupActions implements SetupActions {
 
         checks.add(sentenceCheck("Sentence model (German)", draft.nlpSentenceGerman()));
         checks.add(sentenceCheck("Sentence model (English)", draft.nlpSentenceEnglish()));
+        checks.add(dictationCheck(draft));
         return checks;
+    }
+
+    /** Dictation is optional: only a chosen audio model that is missing counts as a problem. */
+    private SetupCheck dictationCheck(SetupDraft draft) {
+        List<String> audio = audioModelsNow();
+        String microphone = draft.microphone().isEmpty() ? "system microphone" : draft.microphone();
+        if (draft.audioModel().isEmpty()) {
+            return SetupCheck.ok("Dictation", audio.isEmpty()
+                    ? "no audio model yet (optional; download one in the Dictation step)"
+                    : microphone + ", " + audio.get(0) + " (automatic)");
+        }
+        return audio.contains(draft.audioModel())
+                ? SetupCheck.ok("Dictation", microphone + ", " + draft.audioModel())
+                : SetupCheck.failed("Dictation", draft.audioModel() + " is not installed or does not understand audio");
+    }
+
+    /** The installed models whose capabilities include audio (asked from the runtime, one by one). */
+    private List<String> audioModelsNow() {
+        List<String> audio = new ArrayList<String>();
+        for (String name : quietly(ollama::loadChatModelNamesNow)) {
+            try {
+                if (com.aresstack.askai.stt.AudioCapability.isAudioCapable(
+                        ollama.loadModelInfoNow(name).getCapabilities())) {
+                    audio.add(name);
+                }
+            } catch (Exception unreadable) {
+                // a model whose details cannot be read is not offered for dictation
+            }
+        }
+        return audio;
+    }
+
+    // ------------------------------------------------------------------ dictation
+
+    @Override
+    public List<String> microphones() {
+        try {
+            return com.aresstack.audio.infrastructure.AvailableAudioDevices.listCaptureDeviceNames();
+        } catch (RuntimeException | LinkageError e) {
+            return Collections.emptyList();
+        }
+    }
+
+    @Override
+    public void testMicrophone(final String device, final java.util.function.IntConsumer level,
+                               final BiConsumer<Boolean, String> done) {
+        install(() -> {
+            java.io.File workDir = null;
+            com.aresstack.askai.speech.MicrophoneRecorder.Session session = null;
+            try {
+                workDir = java.nio.file.Files.createTempDirectory("askai-mic-test").toFile();
+                session = new com.aresstack.askai.speech.JavaSoundMicrophoneRecorder().start(device, workDir);
+                long endAt = System.currentTimeMillis() + MIC_TEST_MILLIS;
+                boolean signal = false;
+                while (System.currentTimeMillis() < endAt) {
+                    Thread.sleep(100);
+                    com.aresstack.audio.dsp.AudioLevelMeter meter = session.getMeter();
+                    final int percent = com.aresstack.askai.stt.DecibelLevelScale.percentFromPeak(
+                            meter.consumeRecentPeak());
+                    signal |= meter.getOverallRms() > 30 || meter.getPeak() > 500;
+                    deliver(() -> level.accept(percent));
+                }
+                final boolean heard = signal;
+                deliver(() -> done.accept(heard, null));
+            } catch (Exception e) {
+                deliver(() -> done.accept(null, message(e)));
+            } finally {
+                if (session != null) {
+                    session.discard();
+                }
+                if (workDir != null) {
+                    java.io.File[] left = workDir.listFiles();
+                    if (left != null) {
+                        for (java.io.File file : left) {
+                            file.delete();
+                        }
+                    }
+                    workDir.delete();
+                }
+            }
+        });
+    }
+
+    @Override
+    public void loadAudioModels(SetupDraft draft, final Consumer<List<String>> done) {
+        background(() -> {
+            final List<String> audio = audioModelsNow();
+            deliver(() -> done.accept(audio));
+        });
     }
 
     private SetupCheck embeddingCheck(String embeddingModel) {
