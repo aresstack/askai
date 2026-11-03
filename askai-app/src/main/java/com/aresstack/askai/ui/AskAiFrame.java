@@ -111,6 +111,8 @@ public final class AskAiFrame extends JFrame {
     private ChatWorkspacePanel chatWorkspace;
     private com.aresstack.askai.plugin.host.ChatWorkspaceHostPanel chatWorkspaceHost;
     private com.aresstack.askai.plugin.host.WorkspacePluginService pluginService;
+    /** The host-wide plugin state (e.g. the research search strategy) the setup wizard's plugin sections write. */
+    private com.aresstack.askai.plugin.api.service.WorkspaceStateStore pluginHostState;
     private com.aresstack.askai.plugin.host.PluginEnablementService pluginEnablement;
     private java.io.File pluginsDirectory;
     private com.aresstack.askai.plugin.host.AgentSessionCoordinator agentCoordinator;
@@ -471,6 +473,10 @@ public final class AskAiFrame extends JFrame {
                             refreshConnectionStatus();
                         }
                     });
+            setupActions.setPluginSetup(() -> pluginService == null
+                    ? java.util.Collections.<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>
+                            emptyList()
+                    : pluginService.getSetupContributions(), pluginHostState);
         }
         return setupActions;
     }
@@ -693,6 +699,7 @@ public final class AskAiFrame extends JFrame {
         com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostState =
                 new com.aresstack.askai.plugin.host.ApplicationStateWorkspaceStateStore(applicationState, "");
         this.pluginEnablement = new com.aresstack.askai.plugin.host.PluginEnablementService(hostState);
+        this.pluginHostState = hostState;
         this.pluginsDirectory = pluginsRoot.toFile();
         com.aresstack.askai.plugin.host.WorkspacePluginService pluginService =
                 new com.aresstack.askai.plugin.host.WorkspacePluginService(pluginsRoot, HOST_PLUGIN_VERSION, 1,

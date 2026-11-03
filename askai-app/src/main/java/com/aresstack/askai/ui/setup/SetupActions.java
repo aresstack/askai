@@ -159,6 +159,19 @@ public interface SetupActions {
         done.accept(null, "installing a reranker is not available here");
     }
 
+    /**
+     * The sections agent plugins contribute to the research step (e.g. the search browser download and the
+     * search provider). Default: none.
+     */
+    default List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> pluginSetup() {
+        return java.util.Collections.emptyList();
+    }
+
+    /** What plugin setup pages get from the host; {@code null} when there is no host state. */
+    default com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext pluginSetupContext() {
+        return null;
+    }
+
     /** The installed models per role. */
     final class SetupModels {
         private final List<String> chat;

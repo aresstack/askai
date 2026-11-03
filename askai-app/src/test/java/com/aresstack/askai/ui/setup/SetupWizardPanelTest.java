@@ -335,6 +335,43 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void pluginSectionsAppearInTheResearchStepAndAreSavedWithTheSetup() {
+        Fake fake = new Fake();
+        final int[] saved = {0};
+        final javax.swing.JLabel section = new javax.swing.JLabel("search browser");
+        fake.contributions.add(new com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution() {
+            @Override
+            public String getDisplayName() {
+                return "Web search";
+            }
+
+            @Override
+            public com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage createSetupPage(
+                    com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext context) {
+                return new com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage() {
+                    @Override
+                    public javax.swing.JComponent getComponent() {
+                        return section;
+                    }
+
+                    @Override
+                    public void save() {
+                        saved[0]++;
+                    }
+                };
+            }
+        });
+        SetupWizardPanel wizard = wizard(fake);
+        assertNull("built when the research step opens", section.getParent());
+
+        wizard.jumpTo(SetupWizardPanel.STEP_KNOWLEDGE);
+        assertNotNull(section.getParent());
+
+        wizard.jumpTo(SetupWizardPanel.STEP_CHECK);
+        assertTrue("saved with the final check", saved[0] > 0);
+    }
+
+    @Test
     public void skipInTheLastStepFinishes() {
         Fake fake = new Fake();
         SetupWizardPanel wizard = wizard(fake);
@@ -428,6 +465,8 @@ public class SetupWizardPanelTest {
         SetupDraft voiceDraft;
         List<String> pulled = new ArrayList<String>();
         int rerankerInstalls;
+        List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> contributions =
+                new ArrayList<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>();
         boolean cancelled;
 
         @Override
@@ -503,6 +542,16 @@ public class SetupWizardPanelTest {
         public void installReranker(SetupDraft draft, Progress progress, BiConsumer<String, String> done) {
             rerankerInstalls++;
             done.accept("ms-marco-MiniLM-L6-v2", null);
+        }
+
+        @Override
+        public List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> pluginSetup() {
+            return contributions;
+        }
+
+        @Override
+        public com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext pluginSetupContext() {
+            return () -> null;
         }
 
         @Override

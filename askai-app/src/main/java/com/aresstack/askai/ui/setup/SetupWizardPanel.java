@@ -56,7 +56,7 @@ public final class SetupWizardPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
 
-    static final String[] STEP_NAMES = {"Connection & voice", "AI runtime", "Chat model", "Knowledge", "Check"};
+    static final String[] STEP_NAMES = {"Connection & voice", "AI runtime", "Chat model", "Research", "Check"};
     /**
      * The first step sets up the network and downloads the Witch's voice in one go: the download through the
      * configured proxy and certificates is the network test, and from then on the Witch can speak.
@@ -194,6 +194,10 @@ public final class SetupWizardPanel extends JPanel {
     private String measuredFor = "";
     private boolean sentenceInstalling;
     private List<String> installedChat = Collections.emptyList();
+    private Rows researchRows;
+    private boolean pluginSectionsAdded;
+    private final List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage> pluginPages =
+            new ArrayList<com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage>();
     private List<String> installedEmbeddings = Collections.emptyList();
 
     // Step 5: final check
@@ -388,7 +392,38 @@ public final class SetupWizardPanel extends JPanel {
         actions.add(sentenceInstall);
         actions.add(knowledgeStatus);
         rows.field("", actions);
+        researchRows = rows;
         return rows.panel();
+    }
+
+    /**
+     * Adds what the agent plugins need (search browser, search provider) the first time the research step
+     * opens – the plugins load in the background at start and are there by then. They decide, the wizard shows.
+     */
+    private void addPluginSections() {
+        if (pluginSectionsAdded || researchRows == null) {
+            return;
+        }
+        com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext context = setup.pluginSetupContext();
+        List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> contributions = setup.pluginSetup();
+        if (context == null || contributions.isEmpty()) {
+            return; // perhaps the plugins are not loaded yet: try again on the next visit
+        }
+        pluginSectionsAdded = true;
+        for (com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution contribution : contributions) {
+            try {
+                com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage page = contribution.createSetupPage(context);
+                if (page != null && page.getComponent() != null) {
+                    researchRows.heading(contribution.getDisplayName());
+                    researchRows.block(page.getComponent());
+                    pluginPages.add(page);
+                }
+            } catch (RuntimeException | LinkageError broken) {
+                // A plugin's page must never break the setup.
+            }
+        }
+        researchRows.panel.revalidate();
+        researchRows.panel.repaint();
     }
 
     private JPanel checkStep() {
@@ -673,6 +708,9 @@ public final class SetupWizardPanel extends JPanel {
             return;
         }
         draft = collect();
+        if (index == STEP_KNOWLEDGE) {
+            addPluginSections();
+        }
         if (step == STEP_VOICE && index != STEP_VOICE) {
             saveVoicesOnLeaving();
         }
@@ -1018,7 +1056,19 @@ public final class SetupWizardPanel extends JPanel {
 
     // --- step 5: final check
 
+    /** Stores what the plugin sections hold; a failing plugin does not stop the rest. */
+    private void savePluginPages() {
+        for (com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage page : pluginPages) {
+            try {
+                page.save();
+            } catch (RuntimeException ignored) {
+                // the plugin reports its own problems in its section
+            }
+        }
+    }
+
     private void runFinalCheck() {
+        savePluginPages();
         done[STEP_CHECK] = false;
         clearError(STEP_CHECK);
         checkRows.removeAll();
@@ -1235,6 +1285,7 @@ public final class SetupWizardPanel extends JPanel {
      * blocks; the entries are written all the same.
      */
     private void saveDraftThen(Runnable then) {
+        savePluginPages();
         SetupDraft current = collect();
         if (done[STEP_CHECK] && checkedKey(current).equals(checkedDraft)) {
             then.run();
@@ -1296,6 +1347,13 @@ public final class SetupWizardPanel extends JPanel {
     private void close() {
         closed = true; // late results of running requests must not touch the wizard any more
         busy = false;
+        for (com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage page : pluginPages) {
+            try {
+                page.dispose();
+            } catch (RuntimeException ignored) {
+                // closing anyway
+            }
+        }
     }
 
     /** Lets Ollama download the model typed or chosen in {@code field}; the lists reload afterwards. */
@@ -1635,6 +1693,17 @@ public final class SetupWizardPanel extends JPanel {
             c.gridwidth = 2;
             c.insets = new Insets(0, 0, 6, 0);
             panel.add(title, c);
+            row++;
+        }
+
+        /** A full-width block (e.g. a plugin's setup section). */
+        void block(JComponent component) {
+            GridBagConstraints c = constraints(0);
+            c.gridwidth = 2;
+            c.fill = GridBagConstraints.HORIZONTAL;
+            c.weightx = 1;
+            c.insets = new Insets(2, 0, 4, 0);
+            panel.add(component, c);
             row++;
         }
 

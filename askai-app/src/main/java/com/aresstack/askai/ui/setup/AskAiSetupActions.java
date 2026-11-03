@@ -114,6 +114,39 @@ public final class AskAiSetupActions implements SetupActions {
         this.onSaved = onSaved;
     }
 
+    private java.util.function.Supplier<List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>>
+            pluginSetup;
+    private com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostState;
+
+    /** Connects the plugins' setup sections (search browser, search provider) and the host state they write to. */
+    public void setPluginSetup(
+            java.util.function.Supplier<List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>>
+                    contributions,
+            com.aresstack.askai.plugin.api.service.WorkspaceStateStore hostState) {
+        this.pluginSetup = contributions;
+        this.hostState = hostState;
+    }
+
+    @Override
+    public List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> pluginSetup() {
+        if (pluginSetup == null || hostState == null) {
+            return Collections.emptyList();
+        }
+        try {
+            List<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution> all = pluginSetup.get();
+            return all == null ? Collections.<com.aresstack.askai.plugin.api.agent.setup.AgentSetupContribution>
+                    emptyList() : all;
+        } catch (RuntimeException unavailable) {
+            return Collections.emptyList();
+        }
+    }
+
+    @Override
+    public com.aresstack.askai.plugin.api.agent.setup.AgentSetupContext pluginSetupContext() {
+        final com.aresstack.askai.plugin.api.service.WorkspaceStateStore store = hostState;
+        return store == null ? null : () -> store;
+    }
+
     /** The wizard's starting point: AskAI's settings as they are now. */
     public SetupDraft currentDraft() {
         AppConfiguration stored = configuration.load();
