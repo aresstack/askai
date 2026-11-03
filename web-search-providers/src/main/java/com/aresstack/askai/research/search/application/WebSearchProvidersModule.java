@@ -195,8 +195,10 @@ public final class WebSearchProvidersModule
         if (resilient) {
             try {
                 providers.add(supplier.get());
-            } catch (RuntimeException unusable) {
-                // a single unusable provider must not disable the others in resilient mode
+            } catch (RuntimeException | LinkageError unusable) {
+                // A single unusable provider (bad config, or a transport that cannot load, e.g. a classpath
+                // LinkageError) must not abort the whole session start: skip it and say why.
+                System.err.println("[web-search] search provider skipped, it could not be created: " + unusable);
             }
         } else {
             providers.add(supplier.get());
