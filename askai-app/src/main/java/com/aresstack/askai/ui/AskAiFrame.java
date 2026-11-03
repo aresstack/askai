@@ -153,6 +153,12 @@ public final class AskAiFrame extends JFrame {
         ComicTheme.install(AskAiTheme.active());
         this.configurationRepository = configurationRepository;
         this.askAiService = askAiService;
+        // Plugin downloads (e.g. the search browser) go through the saved network settings, read anew each time.
+        com.aresstack.askai.plugin.api.service.HostNetwork.configure(url -> {
+            com.aresstack.askai.config.AppConfiguration stored = configurationRepository.load();
+            return new com.aresstack.askai.net.ConfiguredConnections(stored.getProxyConfiguration(),
+                    stored.getCertificateTrustConfiguration(), stored.getHttpClientConfiguration()).open(url);
+        });
         this.model = new AskAiModel(configurationRepository);
         // R0.3: the VIRTUAL container service is the single source of every model list —
         // remote Ollama and AskAI's local model runtime aggregated with per-source fault isolation.

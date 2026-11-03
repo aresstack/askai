@@ -765,6 +765,7 @@ public final class SetupWizardPanel extends JPanel {
             return;
         }
         draft = collect();
+        setup.useNetwork(draft); // plugin downloads (search browser) use the proxy entered above, even unsaved
         if (index == STEP_KNOWLEDGE) {
             addPluginSections();
         }
@@ -1434,6 +1435,7 @@ public final class SetupWizardPanel extends JPanel {
     private void close() {
         closed = true; // late results of running requests must not touch the wizard any more
         busy = false;
+        setup.useNetwork(null); // from now on the saved network settings apply
         for (com.aresstack.askai.plugin.api.agent.setup.AgentSetupPage page : pluginPages) {
             try {
                 page.dispose();
