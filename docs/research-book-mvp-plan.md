@@ -6,7 +6,7 @@
 | Date | 2026-11-03, revised 2026-11-04 after an external architecture review ("Hardening after review" in section 0) and a check of reusable work in neighbouring projects (section 2.5) |
 | Code base | `develop` at `ab2847e` (after #105) |
 | Goal | The research agent writes, for the first time, a complete book on a topic outlined in Phase 1. Every phase change is made by the user. |
-| Default model | `gemma4:e2b`; for the Document phase `llama3.1:8b` where it is installed, until the writer A/B of PR 31 decides (Q10); `gpt-oss:20b` only as an opt-in writer |
+| Default model | `gemma4:e2b`; for the Document phase `llama3.1:8b` where it is installed, until the writer A/B of PR 31 decides (Q10); `gpt-oss:20b` only if that A/B shows clearly better prose |
 | Target machine | One RTX 5080 with 16 GB, Ollama |
 | Relation to other docs | Replaces the critical path of `mvp-roadmap.md`; section 10 maps its work packages to PRs, and section 2.2 lists its status corrections (AP 2 and AP 3 are built). `docs/research-state-machine.md` is outdated (7 phases); this plan uses the 4-phase graph that is in the code. |
 
@@ -125,7 +125,7 @@ benchmark of PR 04.
 Inside each phase the existing inner states stay as they are: `new`, `waiting`, `running`, `waiting_approval`,
 `paused`, `blocked`, `failed`, `completed`, `cancelled`. `research/waiting` and `draft/waiting` remain short steps
 between the approval and the start of the phase's job, as `research/waiting` already is today. Once Stop no longer
-pauses (PR 06), no productive path enters `paused`, `blocked` or `failed`; today only the fake backend dispatches
+pauses (PR 05), no productive path enters `paused`, `blocked` or `failed`; today only the fake backend dispatches
 `BLOCK` and `FAIL`. They stay in the graph. The legacy ids `evidence`, `review` and `finalization` are remapped on
 restore until PR 37 deletes the remap. Only display names may change (Q1).
 
@@ -303,15 +303,17 @@ surfaces, the per-session bot control and the app-wide ChatGPT connector, which 
 passes `BOT` and its surface.
 
 A small, pure actor policy decides which actor may send which command. Every command that dispatches a state command
-(the forward transitions, `continue`, `request-changes` and every `REOPEN_*`) is accepted only from `USER`. From `BOT`
-it is refused with "Phase changes need the user": a connected bot can read the state, run the commands that dispatch
-no state command (for example `generate-outline` or `run-plan`) while its surface is enabled, and suggest a phase
-change in its answer, which the user then makes (Q13). The transition journal (D3) names actor and surface of every
-transition. Commands that the code dispatches inside a user action carry that action's actor and correlation id:
-`START` on the first message (also via `GREETING_DONE`), `START_RESEARCH` after `submit-scope` and `START_DRAFTING`
-after the outline approval. The last two are effects of their approval in the transition journal, so a crash before
-them is recovered. If such a chained `START_*` is refused, the state stays in `<phase>/waiting`, and `continue`
-(labelled "Start search" or "Start writing") starts it.
+(the forward transitions, `continue`, `retry`, `resume`, `request-changes` and every `REOPEN_*`) is accepted only from
+`USER`. From `BOT` it is refused with "Phase changes need the user": a connected bot can read the state, run the
+commands that dispatch no state command (for example `generate-outline` or `run-plan`) while its surface is enabled,
+and suggest a phase change in its answer, which the user then makes (Q13). A bot's plain chat message counts as a
+command too: in `scoping/new` it would dispatch `START`, so it is refused there. The transition journal (D3) names
+actor and surface of every transition. Commands that the code dispatches inside a user action carry that action's
+actor and correlation id: `START` on the user's first message (also via `GREETING_DONE`), `START_RESEARCH` after
+`submit-scope` and `START_DRAFTING` after the outline approval. The last two are effects of their approval in the
+transition journal, so a crash before them is recovered. If such a chained `START_*` is refused, the state stays in
+`<phase>/waiting`, and only then is `continue` (labelled "Start search" or "Start writing") offered to start it, so
+the normal path needs no Start click (Q4).
 
 The host dispatches no state command of its own. Today it sends only `PAUSE` and `RESUME` for Stop and resume, which
 D1 removes; `FAIL` and `BLOCK` come only from the fake backend. The policy refuses every state command from a `HOST`
@@ -400,7 +402,7 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   |---|---|
   | running | editable |
   | Concept in `scoping/new` | read-only, "Send a first message to start." |
-  | waiting | read-only, "Starting <phase>..." with the continue command |
+  | waiting | read-only, "Starting <phase>..."; the continue command only after the chained start was refused (D2) |
   | at its review gate | read-only, "Waiting for your review. Approve or Request changes." |
   | paused, blocked or failed | read-only, with the resume or retry command |
   | Document in `draft/completed` | read-only, "Final." |
@@ -430,7 +432,7 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   needs Sources reopened (PR 14), and the next `APPROVE_EVIDENCE` appends a sources pin without them. The recorded
   blacklist does keep sources out of outline generation and the evidence packs in two cases, and both are shown: a
   source accepted while a recorded entry that hits it is switched off is marked and stays out until Concept is
-  reopened and the entry removed, because that entry belongs to the approved concept; and at the next `SUBMIT_SCOPE`
+  reopened and the entry removed, because that entry belongs to the Phase-1 record; and at the next `SUBMIT_SCOPE`
   the blacklist of that moment becomes the record, and when it hits accepted sources that the previous record did not,
   `submit-scope` asks for confirmation and names them. Excluding future hits and removing sources already taken are
   therefore separate, visible steps.
@@ -455,12 +457,13 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   Setup installs, not a generative model. The manual-search service command gets a ranking choice, a visit limit and a
   per-query source cap (`ResearchServiceCommandWire` in both modules; the ACP interface stays untouched). Planned
   queries use the ranking that the retrieval benchmark of PR 04 picks for German and mixed-language queries: the
-  cross-encoder, BM25, or the cosine similarity of the multilingual embedding model; its selection keeps the top N. If
-  the chosen ranking is unavailable for a query (reranker stopped, out of memory), that query is ranked by BM25 and
-  its entry says "ranked by keywords, reranker unavailable"; it never falls back to engine order. Typed searches keep
-  the user's setting (Q25). This delivers the "reranked sources" the owner asked for (BM25 alone accepts every hit
-  with a score above 0). The host tags every accepted source with the phase and plan entry of its request, through the
-  `search_request_id` that `ManualSourceAcceptancePort` already sends.
+  installed cross-encoder, BM25, the cosine similarity of the embedding model that the same benchmark picks (Q12), or
+  BM25 and that similarity fused by rank; its selection keeps the top N. If the chosen ranking is unavailable for a
+  query (reranker stopped, out of memory), that query is ranked by BM25 and its entry says "ranked by keywords,
+  reranker unavailable"; it never falls back to engine order. Typed searches keep the user's setting (Q25). This
+  delivers the "reranked sources" the owner asked for (BM25 alone accepts every hit with a score above 0). The host
+  tags every accepted source with the phase and plan entry of its request, through the `search_request_id` that
+  `ManualSourceAcceptancePort` already sends.
 - **Coverage.** A concept node is covered once it has a set number of accepted sources from at least two domains. A
   node whose query budget is spent before that is exhausted: the plan runs no more automatic queries for it, but it
   stays uncovered. Uncovered nodes, exhausted or not, are named on the checklist, in the run outcome and at the review
@@ -636,8 +639,9 @@ Local indexes `[1..k]` are new for Outline; PR 04 measures their parse rate. Nat
 | Every phase | outside Sources, `request_research` creates an offer that the user starts | the same | `research_status`, frozen `concept_read`, bounded `source_list`, `outline_read` | PR 34 |
 
 The concept move path and the concept edit rules are limited to Concept (PR 16). The opt-in bot endpoint keeps its
-three tools (`run_command`, `session_state`, `chat_history`) and gets no phase tool; its `run_command` uses the
-semantic commands and the actor rule of D2.
+tools (`run_command` and the read-only `session_state`, `chat_history`, `technical_log`, `concept_json` and
+`scope_snapshot`; the ChatGPT connector adds `sessions_list` and `session_create`) and gets no phase tool; its
+`run_command` uses the semantic commands and the actor rule of D2.
 
 ## 4. Context and token budget
 
@@ -1045,31 +1049,37 @@ Document model that the sample chapters chose.
 **PR 05 User exits for every phase; walk-through test** (M, MVP)
 - Change: `finish-sources`, `finish-outline` and `finish-document` in `ResearchSemanticCommands` (D1), and on every
   hand-maintained user surface: the action tags in `ResearchAgentSession` and the slash commands in
-  `ResearchChatCommands`. The bot's `run_command` in `ResearchBotSessionTools` neither lists nor accepts them or the
-  `end` offer, which now dispatches `finish-sources`, so a connected bot gains no phase command before PR 06 refuses
-  every one (Q13). English labels in `ResearchPlaybook.actionLabel`: "Approve concept & start search" (the
-  `submit-scope` label moves there from `availableActionTags`, and the `/submit-scope` description follows), "Finish
-  sources", "Approve sources & continue to Outline", "Finish outline", "Approve outline & start writing", "Finish
-  document", "Approve final book", "Request changes...", and `continue` per phase ("Start search", "Start writing").
-  `request-changes` takes an optional comment at all three gates, from the slash arguments or from a one-line dialog
-  on the tag (a bot cannot send it, Q13); PR 06 carries it in `ResearchCommand`. The `end` run offer dispatches
-  `finish-sources` instead of `cancel()`; `cancel` and `pause` leave the tags, the slash commands and `run_command`;
-  `APPROVE_DRAFT` leaves `approve`. Approving the outline also dispatches `START_DRAFTING`, as `submit-scope` already
-  dispatches `START_RESEARCH`. Run offers get ids that are never semantic names, `run-plan` (today `continue` and
-  `resume`) and `retry-query` (today `retry`), also in `RUN_COMMAND_DESCRIPTION`; semantic names resolve first, and
-  only a name that is not semantic may match a live offer. The phase pill and the Revisions plates never dispatch for
-  the current phase. The fake backend stops switching phases by itself. A new `ProductiveBookJourneyTest` drives
-  `ResearchAgentSession.executeCommand` over the productive resources with a fake runtime.
+  `ResearchChatCommands`. The bot gateway (`ResearchBotSessionGateway`, which today serves bot control and the ChatGPT
+  connector) and its `RUN_COMMAND_DESCRIPTION` keep only the commands that dispatch no state command: `run_command`
+  refuses `submit-scope`, `approve`, `request-changes`, `continue`, `retry`, `resume`, every reopen, the three finish
+  commands and the `end` offer, and a plain chat message in `scoping/new`, which would dispatch `START`. So from this
+  PR on a connected bot dispatches no state command, and PR 06 moves the rule into the actor policy (Q13). English
+  labels in `ResearchPlaybook.actionLabel`: "Approve concept & start search" (the `submit-scope` label moves there
+  from `availableActionTags`, and the `/submit-scope` description follows), "Finish sources", "Approve sources &
+  continue to Outline", "Finish outline", "Approve outline & start writing", "Finish document", "Approve final book",
+  "Request changes...", and `continue` per phase ("Start search", "Start writing"). `request-changes` takes an
+  optional comment at all three gates, from the slash arguments or from a one-line dialog on the tag (a bot cannot
+  send it, Q13); PR 06 carries it in `ResearchCommand`. The `review` and `limit` run offers go, because
+  `finish-sources` replaces them (D1), and the `end` run offer dispatches `finish-sources` instead of `cancel()`;
+  `cancel` and `pause` leave the tags, the slash commands and `run_command`; `APPROVE_DRAFT` leaves `approve`. The
+  composer's Stop cancels the agent turn and any search without a state change (D1). Approving the outline also
+  dispatches `START_DRAFTING`, as `submit-scope` already dispatches `START_RESEARCH`. Run offers get ids that are
+  never semantic names, `run-plan` (today `continue` and `resume`) and `retry-query` (today `retry`), also in
+  `RUN_COMMAND_DESCRIPTION`; semantic names resolve first, and only a name that is not semantic may match a live
+  offer. The phase pill and the Revisions plates never dispatch for the current phase. The fake backend stops
+  switching phases by itself. A new `ProductiveBookJourneyTest` drives `ResearchAgentSession.executeCommand` over the
+  productive resources with a fake runtime.
 - Done when: the journey test reaches `draft/completed` with a first chat message, one concept card, then
   `submit-scope`, `finish-sources`, `approve`, `finish-outline`, `approve`, `finish-document`, `approve`; every new
   tag is offered exactly in the state where its command is allowed, and a slash command outside that state is refused
-  with a reason and changes nothing; no tag, slash command, `run_command` name or run offer dispatches `CANCEL` or
-  `PAUSE` (the composer's Stop follows in PR 06), and `end` leads to `research/waiting_approval`; `run_command`
-  accepts `run-plan` and `retry-query`, refuses `finish-sources`, `finish-outline`, `finish-document` and the `end`
-  offer (Q13), and rejects `cancel` and `pause`; with a live `run-plan` offer in `research/running`, `run_command
-  run-plan` runs it and `run_command continue` is rejected with the valid names; choosing the current phase in the
-  pill changes nothing, and in `research/running` the pill offers no `finish-sources`; at the Sources gate, "Request
-  changes" with a comment returns to `research/running`.
+  with a reason and changes nothing; no tag, slash command, `run_command` name, run offer or the composer's Stop
+  dispatches `CANCEL` or `PAUSE`; Stop during a turn or a search leaves the state in `running`, and `end` then still
+  leads to `research/waiting_approval`; no `review` or `accept-limitation` offer remains; `run_command` accepts
+  `run-plan` and `retry-query`, refuses every command that dispatches a state command, the `end` offer and a plain
+  chat message in `scoping/new` (Q13), and rejects `cancel` and `pause`; with a live `run-plan` offer in
+  `research/running`, `run_command run-plan` runs it and `run_command continue` is rejected with the valid names;
+  choosing the current phase in the pill changes nothing, and in `research/running` the pill offers no
+  `finish-sources`; at the Sources gate, "Request changes" with a comment returns to `research/running`.
 
 **PR 06 Transition hook with actor and crash recovery; phase-change hygiene** (L, MVP)
 - Change: `ResearchCommand` carries an actor, the sending surface, a correlation id, the memento revision that the
@@ -1088,15 +1098,14 @@ Document model that the sample chapters chose.
   instead of resetting the project to `scoping/new`, and an unreadable phase journal is moved aside and reported; this
   handling and the atomic phase-journal write moved here from PR 35. The recovery pass of D3 runs on session open
   before any job or command. The chained `START_RESEARCH` and `START_DRAFTING` are the approval's last effects and
-  carry its actor and correlation id; if one is refused, the state stays in `<phase>/waiting`. A `PhaseJobRegistry`
-  holds the running jobs per phase and run token. First hooks: cancel the agent turn, any search and every registered
-  job of the left phase on every phase change including `REOPEN_*`; clear run offers and the in-flight flag; drop late
-  outcomes with an old run token or another phase; a persisted phase divider in the chat through
-  `AgentConversationSink.appendInfoMessage` ("Phase 3: Outline, started by you"), written once per transition id. A
-  `request-changes` comment is posted in the chat as the user's note, without starting a model turn. The composer's
-  Stop cancels the agent turn and any search without a state change (D1). In productive mode `busy` means "agent turn
-  in flight", not "state is running". `maybeStartResearchTurn` is restricted to `research/running` until PR 15 deletes
-  it.
+  carry its actor and correlation id; if one is refused, the state stays in `<phase>/waiting`, and only then is
+  `continue` offered (D2). A `PhaseJobRegistry` holds the running jobs per phase and run token. First hooks: cancel
+  the agent turn, any search and every registered job of the left phase on every phase change including `REOPEN_*`;
+  clear run offers and the in-flight flag; drop late outcomes with an old run token or another phase; a persisted
+  phase divider in the chat through `AgentConversationSink.appendInfoMessage` ("Phase 3: Outline, started by you"),
+  written once per transition id. A `request-changes` comment is posted in the chat as the user's note, without
+  starting a model turn. In productive mode `busy` means "agent turn in flight", not "state is running".
+  `maybeStartResearchTurn` is restricted to `research/running` until PR 15 deletes it.
 - Done when: a refusing test hook leaves state and memento unchanged, writes no `committed` record and shows its
   reason; a fault-injection test stops the dispatch after each write step (`prepared`, a test record that stands in
   for the pins of PR 07, PR 14, PR 21 and PR 26, memento, `committed`, each effect) and reopens the session: state,
@@ -1106,12 +1115,13 @@ Document model that the sample chapters chose.
   the second with the message of D3; a corrupt transition journal or memento keeps its file, shows the repair hint and
   starts nothing; a corrupt phase journal is kept and reported, and the session opens; a torn last journal line is
   ignored; `reopen-concept` during a running turn leaves the composer idle and the late outcome re-arms nothing; the
-  dividers survive a restart; `busy` is false in `outline/running` when nothing runs; Stop during a turn leaves the
-  state in `running`; after `submit-scope` the transition journal shows `SUBMIT_SCOPE` and `START_RESEARCH`, both with
-  actor `USER`; a table test covers every command, actor and surface: a `HOST` state command is refused, and a `BOT`
-  `approve` is refused with "Phase changes need the user", also through the ChatGPT connector with the connector on;
-  `/request-changes too long` at the Outline gate puts "too long" into the journal and the chat and starts no model
-  turn.
+  dividers survive a restart; `busy` is false in `outline/running` when nothing runs; after `submit-scope` the
+  transition journal shows `SUBMIT_SCOPE` and `START_RESEARCH`, both with actor `USER`; a table test covers every
+  command, actor and surface: a `HOST` state command is refused, and a `BOT` `approve` is refused with "Phase changes
+  need the user", also through the ChatGPT connector with the connector on, and a `BOT` chat message in `scoping/new`
+  is refused and the state stays `scoping/new`; while a chained start is queued, `<phase>/waiting` offers no
+  `continue`, and after a refused one it does; `/request-changes too long` at the Outline gate puts "too long" into
+  the journal and the chat and starts no model turn.
 
 **PR 07 Concept freeze; concept and mission are the Phase-1 result** (M, MVP)
 - Change: the `BookManifest` of D4 (`book.json`, append-only pins, atomic UTF-8 writes flushed before the rename,
@@ -1216,10 +1226,11 @@ Document model that the sample chapters chose.
   `docs/research-control-mcp.md` lists the tools that `ResearchToolPolicy` offers; `docs/research-bot-control.md` and
   `docs/research-chatgpt-connector.md` list the semantic names that `run_command` accepts (only commands that dispatch
   no state command), the run offer ids, that bots cannot change phases (D2), and that bot control is off by default;
-  `mvp-roadmap.md` points to this plan and marks AP 2 and AP 3 done.
+  `mvp-roadmap.md` points to this plan and marks AP 2 and AP 3 done. A new ADR records the book pipeline of this plan
+  (freeze, phase models, context rules) with the decisions of section 9 (Q22).
 - Done when: no document names a command or state the graph does not have; the documented tool list equals the policy
   for every phase and state; the documented `run_command` names equal the commands that the actor policy accepts from
-  `BOT`.
+  `BOT`; the new ADR links this plan and names the decisions of section 9.
 
 Checkpoint after M1 (no PR): walk all four phases live with a first message, one concept card and the empty outline
 and document; kill the app once during an approval and once in `research/waiting`, and check that the recovery of PR
@@ -1244,11 +1255,11 @@ and document; kill the app once during an approval and once in `research/waiting
   record hits accepted sources that the previous one did not, `submit-scope` asks for confirmation and names them, and
   Cancel dispatches nothing; switching off a recorded entry says that sources it then lets through stay out of both
   until Concept is reopened, and such a source carries a mark once accepted (D4). Setup (`SetupWizardPanel`,
-  `AskAiSetupActions`) lists the embedding model as required ("needed for Sources filtering and the Outline"), with
-  the preset that PR 04 chose; installing uses the existing installer (the wizard's "Download model" and Models ->
-  Setup), with no new pull code. A `beforeApply` check on `SUBMIT_SCOPE` refuses with "Sources need an embedding
-  model. Open Models -> Setup." while none is ready, and "Check again" re-resolves it without a new chat. Without one,
-  the outline drawer and the exclusion warning name the concrete reason. New strings are English.
+  `AskAiSetupActions`) lists the embedding model as required ("needed for Sources filtering, the Outline and the
+  writing"), with the preset that PR 04 chose; installing uses the existing installer (the wizard's "Download model"
+  and Models -> Setup), with no new pull code. A `beforeApply` check on `SUBMIT_SCOPE` refuses with "Sources need an
+  embedding model. Open Models -> Setup." while none is ready, and "Check again" re-resolves it without a new chat.
+  Without one, the outline drawer and the exclusion warning name the concrete reason. New strings are English.
 - Done when: a candidate matching a typed term is rejected in the SERP, page and link lanes
   (`SearchScopeControlFunnelTest`); a typed host name never reaches the visit stage; an excluded facet without a typed
   term is filtered only by the semantic gate; no search runs unfiltered without saying so; in Sources an added entry
@@ -1481,7 +1492,7 @@ English sources found and the open live checks of roadmap AP 5.
 - Change: an `OutlineBriefWorker` on `phase.outline.labels` and `phase.outline.briefs` (thinking off). A label call
   per candidate cluster and per untitled section returns title and summary; a brief call per chapter addresses its
   sections by local index and returns purpose and three to five key points (150 answer tokens per section plus 100; a
-  chapter with more than six sections is briefed in two calls). Label and brief calls get the blacklist recorded at
+  chapter with more than six sections is briefed in two calls). Brief calls get the blacklist recorded at
   `SUBMIT_SCOPE`, never later entries (D4). Code checks that every index occurs once; one repair with an error list;
   otherwise the default brief stays, and the chapter shows "Brief not generated" with a retry. "Regenerate chapter"
   takes an optional comment and, for a chapter built from sub-clusters, a number of sections (2 to 6): code
@@ -1890,7 +1901,7 @@ other question the plan follows the recommendation until the owner decides other
 | Q19 | Export format for the MVP? | Markdown; DOCX and PDF in M5 |
 | Q20 | Existing test projects with broken umlauts or old states: repair or start new? | Start new projects; no migration code, and PR 37 deletes the existing state migration |
 | Q21 | Which Ollama version and server settings run on the target machine? | Record them in the PR-04 report; recommended settings in section 5.3 |
-| Q22 | Should the reviewed plan become an ADR? | Yes, one ADR for the book pipeline: freeze, phase models, context rules |
+| Q22 | Should the approved plan become an ADR? | Yes, one ADR for the book pipeline: freeze, phase models, context rules; PR 11 writes it |
 | Q23 | After a jump back to Concept and a new submit: search everything again or only what changed? | Only new and changed concept nodes by default, merged by node id; "Search everything again" as an option |
 | Q24 | What is the minimum to finish each phase? | Concept: one first-level card, a mission and a ready embedding model. Sources: none, but the review lists uncovered nodes. Outline: one chapter with a section and no generation in flight. Document: every section written or marked "Skip"; whether the book is complete is the status of the quality report, not a precondition (Q27) |
 | Q25 | Which ranking should planned queries use? | The strategy that wins the retrieval benchmark of PR 04 (the installed cross-encoder, BM25, embedding similarity, or BM25 and embedding similarity fused by rank), with BM25 as the labelled fallback while the winner is unavailable; "Use AI reranker" then applies to typed searches, and its label says so |
