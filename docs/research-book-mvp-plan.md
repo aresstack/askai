@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| Status | Proposal for review. Nothing in this document is implemented yet. |
+| Status | Approved by the owner on 2026-11-04, together with the decisions on Q2, Q4, Q6, Q10, Q12 and Q13 (section 9). Nothing in this document is implemented yet; the implementation PRs follow one at a time, each on the owner's request. |
 | Date | 2026-11-03, revised 2026-11-04 after an external architecture review ("Hardening after review" in section 0) and a check of reusable work in neighbouring projects (section 2.5) |
 | Code base | `develop` at `ab2847e` (after #105) |
 | Goal | The research agent writes, for the first time, a complete book on a topic outlined in Phase 1. Every phase change is made by the user. |
-| Default model | `gemma4:e2b`; alternatives `llama3.1:8b` and `gpt-oss:20b` (mainly for writing) |
+| Default model | `gemma4:e2b`; for the Document phase `llama3.1:8b` where it is installed, until the writer A/B of PR 31 decides (Q10); `gpt-oss:20b` only as an opt-in writer |
 | Target machine | One RTX 5080 with 16 GB, Ollama |
 | Relation to other docs | Replaces the critical path of `mvp-roadmap.md`; section 10 maps its work packages to PRs, and section 2.2 lists its status corrections (AP 2 and AP 3 are built). `docs/research-state-machine.md` is outdated (7 phases); this plan uses the 4-phase graph that is in the code. |
 
@@ -95,22 +95,23 @@ revision, focused gap research), and 6 are quality work.
 | M5 After the first book | Mark a passage and revise it with a comment (like ChatGPT), focused gap research from Outline and Document, robustness, export, cleanup |
 
 **Models.** `gemma4:e2b` for Concept, Sources and Outline and for all helper roles (thinking off, 32k context).
-`llama3.1:8b` is the recommended Document model: it should fit next to `gemma4:e2b` in 16 GB (PR 04 measures it) and
-has no reasoning tokens. `gpt-oss:20b` stays an opt-in writer, chosen only if a blind A/B on identical sections shows
-clearly better German prose, because it cannot share the GPU with another model. Each phase gets its own model in a
-new "Models" tab of the research settings, independent of the chat model (section 5). The embedding model and the
-ranking of planned queries follow the retrieval benchmark of PR 04.
+`llama3.1:8b` is the Document model where it is installed (otherwise `gemma4:e2b`) until the writer A/B of PR 31
+decides (Q10): it should fit next to `gemma4:e2b` in 16 GB (PR 04 measures it) and has no reasoning tokens.
+`gpt-oss:20b` stays an opt-in writer, chosen only if that A/B shows clearly better German prose, because it cannot
+share the GPU with another model. Each phase gets its own model in a new "Models" tab of the research settings,
+independent of the chat model (section 5). The embedding model and the ranking of planned queries follow the retrieval
+benchmark of PR 04.
 
-**Decisions needed first** (section 9 has all questions with recommendations):
+**Decided first** (by the owner on 2026-11-04, as recommended; section 9 has all questions):
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 |---|---|---|
 | Q2 | Blacklist frozen with the concept, or editable in every phase? | Editable in every phase: later entries can be corrected and filter future searches only; accepted sources that match a later entry are listed but never removed by the entry itself; the blacklist recorded with the concept stays frozen |
 | Q4 | Start the search and the writing automatically after the user's approval, or wait for an extra "Start"? | Start automatically; Stop is always available and never changes the phase |
 | Q6 | Outline from concept chapters plus clustered sources, or purely from clusters? | Concept chapters plus clusters; pure clustering ignores the Phase-1 intent |
 | Q10 | Document model before the A/B: `llama3.1:8b` or `gemma4:e2b`? | `llama3.1:8b` where it is installed, until the writer A/B of PR 31 decides |
 | Q12 | Is an embedding model mandatory? | Yes, like the reranker today; the retrieval benchmark of PR 04 picks the model |
-| Q13 | May a connected bot change phases? | No; a bot reads the state and may suggest a step, the user takes it |
+| Q13 | May a connected bot change phases? | No; a bot reads the state and may suggest a step, which the user takes |
 
 ## 1. Target model mapped onto the code
 
@@ -259,7 +260,8 @@ These decisions shape the PR plan. Each one keeps the existing graph and reuses 
 
 The graph already has a review gate at the end of Sources, Outline and Document; Concept closes with `submit-scope`
 alone. The plan adds only the commands that reach the gates, in the one vocabulary of `ResearchSemanticCommands`, so
-buttons, slash commands, action tags, the phase pill, the Workflow tab and the bot all see the same commands:
+buttons, slash commands, action tags, the phase pill and the Workflow tab see the same commands, and a bot may run
+only those that dispatch no state command (D2, Q13):
 
 | New semantic command | Command type | From -> to | Replaces |
 |---|---|---|---|
@@ -499,8 +501,8 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   Sections with fewer than two sources are flagged thin; the flag pre-fills the manual search with the section title,
   and the focused plan follows in PR 34. Generation uses the blacklist recorded at `SUBMIT_SCOPE`. Regenerating merges
   by provenance and never overwrites titles the user edited.
-- If the owner prefers pure clustering (Q6), the same store adopts the cluster projection instead; editor, freeze and
-  writer stay the same.
+- The owner chose concept chapters plus clusters (Q6). Pure clustering would change only the proposal that "Generate
+  outline" builds; store, editor, freeze and writer would stay the same.
 - **The model's part** (`gemma4:e2b`, one short call per chapter, with a deterministic fallback): names candidate
   clusters and untitled sections, and writes the section briefs. **"Regenerate chapter"** takes an optional comment
   and, for a chapter built from sub-clusters, a number of sections (2 to 6): code re-clusters that chapter's passages
@@ -787,6 +789,8 @@ allocate less. With `llama3.1:8b` at its 16,384 preset every Document role fits,
 
 ### 5.2 Recommended defaults
 
+The Document row follows the owner's decision on Q10 and the embedding row the one on Q12.
+
 | Phase / role | Default | Alternative | Thinking | `num_ctx` | Answer | Why |
 |---|---|---|---|---|---|---|
 | Concept | gemma4:e2b | llama3.1:8b with its context raised to 32,768, only if PR 04 shows that it fits beside gemma4:e2b, and only if the live gate drops below 80% or more than 10% of answers fail to parse | off | 32,768 | 4,096 | Interactive and latency-bound; live-tuned on gemma; grammar-constrained JSON |
@@ -1040,30 +1044,32 @@ Document model that the sample chapters chose.
 
 **PR 05 User exits for every phase; walk-through test** (M, MVP)
 - Change: `finish-sources`, `finish-outline` and `finish-document` in `ResearchSemanticCommands` (D1), and on every
-  hand-maintained surface: the action tags in `ResearchAgentSession`, the slash commands in `ResearchChatCommands` and
-  the bot's `RUN_COMMAND_DESCRIPTION` in `ResearchBotSessionTools`. English labels in `ResearchPlaybook.actionLabel`:
-  "Approve concept & start search" (the `submit-scope` label moves there from `availableActionTags`, and the
-  `/submit-scope` description follows), "Finish sources", "Approve sources & continue to Outline", "Finish outline",
-  "Approve outline & start writing", "Finish document", "Approve final book", "Request changes...", and `continue` per
-  phase ("Start search", "Start writing"). `request-changes` takes an optional comment at all three gates, from the
-  slash or bot arguments or from a one-line dialog on the tag; PR 06 carries it in `ResearchCommand`. The `end` run
-  offer dispatches `finish-sources` instead of `cancel()`; `cancel` and `pause` leave the tags, the slash commands and
-  `run_command`; `APPROVE_DRAFT` leaves `approve`. Approving the outline also dispatches `START_DRAFTING`, as
-  `submit-scope` already dispatches `START_RESEARCH`. Run offers get ids that are never semantic names, `run-plan`
-  (today `continue` and `resume`) and `retry-query` (today `retry`), also in `RUN_COMMAND_DESCRIPTION`; semantic names
-  resolve first, and only a name that is not semantic may match a live offer. The phase pill and the Revisions plates
-  never dispatch for the current phase. The fake backend stops switching phases by itself. A new
-  `ProductiveBookJourneyTest` drives `ResearchAgentSession.executeCommand` over the productive resources with a fake
-  runtime.
+  hand-maintained user surface: the action tags in `ResearchAgentSession` and the slash commands in
+  `ResearchChatCommands`. The bot's `run_command` in `ResearchBotSessionTools` neither lists nor accepts them or the
+  `end` offer, which now dispatches `finish-sources`, so a connected bot gains no phase command before PR 06 refuses
+  every one (Q13). English labels in `ResearchPlaybook.actionLabel`: "Approve concept & start search" (the
+  `submit-scope` label moves there from `availableActionTags`, and the `/submit-scope` description follows), "Finish
+  sources", "Approve sources & continue to Outline", "Finish outline", "Approve outline & start writing", "Finish
+  document", "Approve final book", "Request changes...", and `continue` per phase ("Start search", "Start writing").
+  `request-changes` takes an optional comment at all three gates, from the slash arguments or from a one-line dialog
+  on the tag (a bot cannot send it, Q13); PR 06 carries it in `ResearchCommand`. The `end` run offer dispatches
+  `finish-sources` instead of `cancel()`; `cancel` and `pause` leave the tags, the slash commands and `run_command`;
+  `APPROVE_DRAFT` leaves `approve`. Approving the outline also dispatches `START_DRAFTING`, as `submit-scope` already
+  dispatches `START_RESEARCH`. Run offers get ids that are never semantic names, `run-plan` (today `continue` and
+  `resume`) and `retry-query` (today `retry`), also in `RUN_COMMAND_DESCRIPTION`; semantic names resolve first, and
+  only a name that is not semantic may match a live offer. The phase pill and the Revisions plates never dispatch for
+  the current phase. The fake backend stops switching phases by itself. A new `ProductiveBookJourneyTest` drives
+  `ResearchAgentSession.executeCommand` over the productive resources with a fake runtime.
 - Done when: the journey test reaches `draft/completed` with a first chat message, one concept card, then
-  `submit-scope`, `finish-sources`, `approve`, `finish-outline`, `approve`, `finish-document`, `approve`; every new tag
-  is offered exactly in the state where its command is allowed, and a slash command outside that state is refused with
-  a reason and changes nothing; no tag, slash command, `run_command` name or run offer dispatches `CANCEL` or
-  `PAUSE` (the composer's Stop follows in PR 06), and `end` leads to
-  `research/waiting_approval`; `run_command` accepts the new names and rejects `cancel` and `pause`; with a live
-  `run-plan` offer in `research/running`, `run_command run-plan` runs it and `run_command continue` is rejected with
-  the valid names; choosing the current phase in the pill changes nothing, and in `research/running` the pill offers
-  no `finish-sources`; at the Sources gate, "Request changes" with a comment returns to `research/running`.
+  `submit-scope`, `finish-sources`, `approve`, `finish-outline`, `approve`, `finish-document`, `approve`; every new
+  tag is offered exactly in the state where its command is allowed, and a slash command outside that state is refused
+  with a reason and changes nothing; no tag, slash command, `run_command` name or run offer dispatches `CANCEL` or
+  `PAUSE` (the composer's Stop follows in PR 06), and `end` leads to `research/waiting_approval`; `run_command`
+  accepts `run-plan` and `retry-query`, refuses `finish-sources`, `finish-outline`, `finish-document` and the `end`
+  offer (Q13), and rejects `cancel` and `pause`; with a live `run-plan` offer in `research/running`, `run_command
+  run-plan` runs it and `run_command continue` is rejected with the valid names; choosing the current phase in the
+  pill changes nothing, and in `research/running` the pill offers no `finish-sources`; at the Sources gate, "Request
+  changes" with a comment returns to `research/running`.
 
 **PR 06 Transition hook with actor and crash recovery; phase-change hygiene** (L, MVP)
 - Change: `ResearchCommand` carries an actor, the sending surface, a correlation id, the memento revision that the
@@ -1133,12 +1139,13 @@ Document model that the sample chapters chose.
   shows as the mission and can be edited before submit; after submit the manifest's concept pin equals
   `latestApprovedContent` (revision and hash), names its working revision, and its node ids equal that revision's
   identity; the divider names the revision; editing the working concept or the blacklist afterwards does not change
-  what later phases read, and switching the session language does not change the working language of the Phase-1
-  record; in Sources, Outline and Document every concept or mission write (UI, tool, service) is refused, a later
-  blacklist entry can be added, edited, switched off and removed, and switching off a recorded entry changes the next
-  search but not the Phase-1 record; a reopen from the pill asks first; after a reopen and an edit the next submit
-  creates revision N + 1, and without an edit it keeps revision N and the divider says so; the fault-injection test of
-  PR 06 passes with the concept pin; `ProductiveBookJourneyTest` still reaches `draft/completed`.
+  the Phase-1 record that later phases read, and switching the session language does not change the working language
+  of the Phase-1 record; in Sources, Outline and Document every concept or mission write (UI, tool, service) is
+  refused, a later blacklist entry can be added, edited, switched off and removed, and switching off a recorded entry
+  changes the next search but not the Phase-1 record; a reopen from the pill asks first; after a reopen and an edit
+  the next submit creates revision N + 1, and without an edit it keeps revision N and the divider says so; the
+  fault-injection test of PR 06 passes with the concept pin; `ProductiveBookJourneyTest` still reaches
+  `draft/completed`.
 
 **PR 08 One research model per phase, independent of the chat model** (M, MVP)
 - Change: the slots of section 5.1 in `ResearchModelSlots` and `ModelPortSettings`; the phase slots join
@@ -1794,9 +1801,10 @@ that no PR carries yet say so.
 22. **Stop is not a phase command.** Today the composer's Stop pauses the phase when no search or review is in
     flight, and `paused` offers no Finish. Stop now ends what is running and leaves the phase in `running`; the user
     commands `pause` and `cancel` go, and "End research" no longer cancels the phase (PR 05, 06).
-23. **Phase 1 owns everything later phases read.** Mission, deliverable, working language and the blacklist of that
-    moment are frozen with the concept. A greeting can no longer become the mission of every search, and a later
-    language switch cannot change the book language (PR 07).
+23. **Phase 1 owns the record later phases build on.** Mission, deliverable, working language and the blacklist of
+    that moment are frozen with the concept; blacklist entries added later filter only future searches (Q2). A
+    greeting can no longer become the mission of every search, and a later language switch cannot change the book
+    language (PR 07).
 24. **Write-once sources, passage-level citations.** A source's text never changes once stored, and every citation
     names source and checksum and keeps the cited text, so a reviewer can check any sentence against exactly the text
     the writer saw, also after a re-embedding renames or re-cuts the passages (PR 14, 26, 27, 30).
@@ -1853,26 +1861,27 @@ that no PR carries yet say so.
 | Live behaviour differs from CI (no GPU in CI) | Fake ports in CI; live checkpoints: the Phase-1 gate and the measurements of PR 04, the checkpoints after M1, M2 and M3, the writer A/B (PR 31) and PR 32 |
 | Existing test projects carry broken umlauts and old state | No migration code (owner rule); new projects after PR 02 (Q20) |
 
-## 9. Open questions
+## 9. Decisions and open questions
 
-Each question has a recommendation, and the plan follows it until the owner decides otherwise. **Q2, Q4, Q6, Q10, Q12
-and Q13 should be decided first**, because the earliest PRs depend on them.
+Each question has a recommendation. Q2, Q4, Q6, Q10, Q12 and Q13 were decided first, because the earliest PRs depend
+on them: **on 2026-11-04 the owner decided them as recommended**, and their answers start with "Decided:". For every
+other question the plan follows the recommendation until the owner decides otherwise.
 
-| # | Question | Recommendation |
+| # | Question | Decision or recommendation |
 |---|---|---|
 | Q1 | Phase names in the UI: keep Concept, Sources, Outline, Document? | Keep them; they match the tabs and artifacts. The state ids stay unchanged either way |
-| **Q2** | Is the blacklist frozen with the concept, or editable in every phase? | Editable in every phase. Entries added after `SUBMIT_SCOPE` can be added, edited, switched off or removed, and an entry of the recorded blacklist can be switched off for future searches; these changes filter future searches only. The blacklist recorded at `SUBMIT_SCOPE` stays part of the Phase-1 record, which outline generation and evidence packs use; changing it needs Concept reopened. Accepted sources that match a later entry stay accepted and in the evidence packs until the user excludes them, which for an approved source needs Sources reopened (Q3, PR 14); adding or editing a typed entry says how many accepted sources match and lists them (PR 12). Where the recorded blacklist does keep accepted sources out of outline and evidence packs, the user sees which: a new `SUBMIT_SCOPE` asks for confirmation and names them, and a source accepted while a recorded entry that hits it was switched off is marked (D4) |
+| **Q2** | Is the blacklist frozen with the concept, or editable in every phase? | Decided: editable in every phase. Entries added after `SUBMIT_SCOPE` can be added, edited, switched off or removed, and an entry of the recorded blacklist can be switched off for future searches; these changes filter future searches only. The blacklist recorded at `SUBMIT_SCOPE` stays part of the Phase-1 record, which outline generation and evidence packs use; changing it needs Concept reopened. Accepted sources that match a later entry stay accepted and in the evidence packs until the user excludes them, which for an approved source needs Sources reopened (Q3, PR 14); adding or editing a typed entry says how many accepted sources match and lists them (PR 12). Where the recorded blacklist does keep accepted sources out of outline and evidence packs, the user sees which: a new `SUBMIT_SCOPE` asks for confirmation and names them, and a source accepted while a recorded entry that hits it was switched off is marked (D4) |
 | Q3 | May later phases add sources (manual search, gap research)? | Yes, additively and tagged with the phase. `APPROVE_EVIDENCE` records the approved source set; removing or downgrading one of those sources needs Sources reopened, while a source found later can be excluded in the phase that found it |
-| **Q4** | Start the search right after `submit-scope` and the writing right after the outline approval, or wait for an extra "Start"? | Start automatically: the approval is the user's decision. The plan is visible as a checklist; Stop is always available and never changes the phase, so Finish stays available |
+| **Q4** | Start the search right after `submit-scope` and the writing right after the outline approval, or wait for an extra "Start"? | Decided: start automatically, because the approval is the user's decision. The plan is visible as a checklist; Stop is always available and never changes the phase, so Finish stays available |
 | Q5 | Phase-2 engine: the deterministic queue or the opt-in orchestrated mode? | The queue. Hide the orchestrated mode now (PR 15) and delete it after the owner confirms (PR 37); `FileResearchTaskStore` stays for the plan and the writing job |
-| **Q6** | Outline from concept chapters plus clustered sources, or purely from clusters? | Concept chapters plus clusters; pure clustering ignores the intent of Phase 1. The store and editor support both |
+| **Q6** | Outline from concept chapters plus clustered sources, or purely from clusters? | Decided: concept chapters plus clusters; pure clustering ignores the intent of Phase 1. Store and editor do not depend on this choice |
 | Q7 | Size of the first book? | The deliverable's target length if Phase 1 recorded one (a page counts as 300 words, provisional); otherwise 6 to 8 chapters with 3 to 4 sections of 400 to 1,100 words (about 7k to 35k words) from 20 to 40 sources |
 | Q8 | Keep the two-step gates (finish, review, approve) of Sources, Outline and Document, including the Sources review before the outline? | Yes, as in the graph; Concept keeps its single step `submit-scope`. The review state is where the user checks the result, and "Request changes" returns to the phase with a comment |
 | Q9 | In Phase 4 the agent writes into the manuscript by itself. Is that the accepted exception to "the user owns every write"? | Yes; the user controls it through section revisions, rewrites and the final gate |
-| **Q10** | Document model before the A/B: `llama3.1:8b` or `gemma4:e2b`? | `llama3.1:8b` where it is installed: the Models tab writes it as the Document preset when it first opens. Otherwise the Document phase uses the research default `gemma4:e2b`. Provisional until the writer A/B of PR 31, which runs before the first-book run; `gpt-oss:20b` only if the A/B shows clearly better prose |
+| **Q10** | Document model before the A/B: `llama3.1:8b` or `gemma4:e2b`? | Decided: `llama3.1:8b` where it is installed; the Models tab writes it as the Document preset when it first opens. Otherwise the Document phase uses the research default `gemma4:e2b`. Provisional until the writer A/B of PR 31, which runs before the first-book run; `gpt-oss:20b` only if the A/B shows clearly better prose |
 | Q11 | Is `draft/completed` final? The graph has no edge back into `draft` | Final for the MVP; reopening Outline, Sources or Concept still works, and sections whose outline entry did not change keep their text |
-| **Q12** | Is an embedding model mandatory? | Yes, like the reranker today: the blacklist gate, the outline and the evidence packs need vectors. Setup lists it as required, `submit-scope` waits for it, and it is installed under Models -> Setup. The retrieval benchmark of PR 04 (German, German to English, English) decides which model, because the current preset is English-centred |
-| **Q13** | May the bot control or the ChatGPT connector dispatch phase commands? | No. A bot reads the state, runs commands that dispatch no state command while its surface is enabled, and may suggest a phase change in its answer; the user makes it. No setting allows more, and the internal agent never gets a phase tool |
+| **Q12** | Is an embedding model mandatory? | Decided: yes, like the reranker today, because the blacklist gate, the outline and the evidence packs need vectors. Setup lists it as required, `submit-scope` waits for it, and it is installed under Models -> Setup. The retrieval benchmark of PR 04 (German, German to English, English) decides which model, because the current preset is English-centred |
+| **Q13** | May the bot control or the ChatGPT connector dispatch phase commands? | Decided: no. A bot reads the state, runs commands that dispatch no state command while its surface is enabled, and may suggest a phase change in its answer; the user makes it. No setting allows more, and the internal agent never gets a phase tool |
 | Q14 | Rename the Revisions tab to "Workflow"? | Yes; it shows phases, gates, jobs and the transition timeline, and links to the revision lists in the artifact tabs |
 | Q15 | Phase models app-wide or per book? | App-wide for the MVP; a per-book override later |
 | Q16 | Should phase summaries be visible and editable? | Visible on the Workflow steps once PR 10 and PR 18 exist; editable later |
