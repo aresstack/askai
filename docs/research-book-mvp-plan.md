@@ -350,9 +350,10 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   (Q25). This delivers the "reranked sources" the owner asked for (BM25 accepts every hit with a score above 0). The
   host tags every accepted source with the phase and plan entry of its request, through the `search_request_id` that
   `ManualSourceAcceptancePort` already sends.
-- **Coverage.** A concept node is covered after a set number of accepted sources from at least two domains, or after
-  its query budget is spent. Uncovered nodes are named in the run outcome and at the review gate. Caps per query, per
-  node and for the phase keep the run bounded.
+- **Coverage.** A concept node is covered once it has a set number of accepted sources from at least two domains. A
+  node whose query budget is spent before that is exhausted: the plan runs no more automatic queries for it, but it
+  stays uncovered. Uncovered nodes, exhausted or not, are named on the checklist, in the run outcome and at the review
+  gate. Caps per query, per node and for the phase keep the run bounded.
 - **Control.** "Stop search plan" cancels the current query, leaves it pending and stops the queue. At session start
   the store's resume pass (`resumeAfterInterruption`) makes an interrupted entry pending again; the plan runs again
   only on "Run search plan". Any phase change stops the queue. Two acquisitions never overlap: a `/search` or a
@@ -1050,10 +1051,10 @@ follow; until then slots, contexts, thinking modes and budgets are set in the Mo
     visit the top N; the "Use AI reranker" setting applies to typed searches only, and its label says so (Q25). The
     host tags each accepted source with the phase and plan entry of its request, through the `search_request_id` that
     `ManualSourceAcceptancePort` already sends, and `ResearchSourceRecord` stores both.
-  - Coverage and caps: coverage per node and caps per query, node and phase (D5); new rows in the Search settings tab
-    ("Sources per node", "Queries per node", "Sources for the Sources phase") through `ComicForm.fit`. At the end
-    one outcome names uncovered nodes and offers `finish-sources`; the state stays `research/running`. At the review
-    gate the Sources view and the gate message list the uncovered nodes.
+  - Coverage and caps: coverage per node (covered, exhausted or open) and caps per query, node and phase (D5); new
+    rows in the Search settings tab ("Sources per node", "Queries per node", "Sources for the Sources phase") through
+    `ComicForm.fit`. At the end one outcome names uncovered nodes and offers `finish-sources`; the state stays
+    `research/running`. At the review gate the Sources view and the gate message list the uncovered nodes.
   - Gate: "Request changes" at the gate shows its comment on the checklist and adds it as a priority entry that runs
     first. The last `beforeApply` step of `APPROVE_EVIDENCE` records the approved source set (ids and revisions of the
     accepted sources) in the manifest's sources pin; a failed record refuses the transition. A source of the approved
@@ -1064,13 +1065,14 @@ follow; until then slots, contexts, thinking modes and budgets are set in the Mo
   run one after another and two acquisitions never overlap; while the plan runs, the composer stays available and a
   typed line or `research:` starts no second acquisition, and "Stop search plan" stops the queue; the caps hold;
   accepted sources carry query, node and phase; planned queries keep the recorded working language after a language
-  switch; at the gate the uncovered nodes are listed; the wire
-  round-trip passes in both modules; with "Use AI reranker" off, a planned query is reranked by the model and a typed
-  search by BM25; after an app kill during a query, that entry is pending again and "Run search plan" continues with
-  it; `finish-sources` or a reopen during a query cancels it; the approved set equals the sources accepted at that
-  moment and can be read after a restart; after approval, excluding an approved source in `outline/running` is refused,
-  and excluding a source found in Outline works; reopen Concept, rename one leaf node, submit: only that node's entries
-  run, and done entries of unchanged nodes are not searched again; `ResearchSettingsFitTest` stays green.
+  switch; a node whose queries bring no accepted source ends exhausted and is listed as uncovered at the gate; the
+  wire round-trip passes in both modules; with "Use AI reranker" off, a planned query is reranked by the model and a
+  typed search by BM25; after an app kill during a query, that entry is pending again and "Run search plan" continues
+  with it; `finish-sources` or a reopen during a query cancels it; the approved set equals the sources accepted at
+  that moment and can be read after a restart; after approval, excluding an approved source in `outline/running` is
+  refused, and excluding a source found in Outline works; reopen Concept, rename one leaf node, submit: only that
+  node's entries run, and done entries of unchanged nodes are not searched again; `ResearchSettingsFitTest` stays
+  green.
 
 **PR 15 Sources chat is a conversation; dead `SCOPE_PROPOSAL` path removed** (M, MVP)
 - Change: the runtime's `scopeProposal` wire, the `SCOPE_PROPOSAL` event type and its mapping are deleted. In the
