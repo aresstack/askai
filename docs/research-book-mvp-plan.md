@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | Proposal for review. Nothing in this document is implemented yet. |
-| Date | 2026-11-03, revised 2026-11-04 after an external architecture review ("Hardening after review" in section 0) |
+| Date | 2026-11-03, revised 2026-11-04 after an external architecture review ("Hardening after review" in section 0) and a check of reusable work in neighbouring projects (section 2.5) |
 | Code base | `develop` at `ab2847e` (after #105) |
 | Goal | The research agent writes, for the first time, a complete book on a topic outlined in Phase 1. Every phase change is made by the user. |
 | Default model | `gemma4:e2b`; alternatives `llama3.1:8b` and `gpt-oss:20b` (mainly for writing) |
@@ -42,6 +42,7 @@ thinks by default, because research calls other than the SERP layout repair neve
 model slot whose fallback is whatever model the chat window last selected. Source texts with umlauts are corrupted on
 every read (UTF-8 written, ISO-8859-1 read). The retrieval models are English-centred: the embedding preset
 `nomic-embed-text` and `cross-encoder/ms-marco-MiniLM-L6-v2`, the only reranker that AskAI's local runtime can run.
+Every text is embedded without the query and document prompts that `nomic-embed-text` expects.
 
 **The approach.** Structure is deterministic code; the small model gets small, bounded wording tasks with a fallback.
 Code builds the search plan, the outline skeleton, the passage assignment, the evidence packs, the citation numbers
@@ -62,16 +63,25 @@ code against the cited passage; whether a passage really supports a sentence is 
 says so (D8, PR 28). A deterministic quality report states whether the book is complete or an incomplete draft, and
 the user still decides (D8, PR 30). The embedding model and the ranking of planned queries are chosen by a retrieval
 benchmark with German, German-to-English and English queries, because both current presets are English-centred; PR 04
-also estimates the effort of a multilingual path for the local model runtime (section 5.4). PR 04, PR 24 and PR 31
-move into the MVP, the writer A/B adds one complete sample chapter per model, and the first-book run checks workflow,
-data integrity and book quality separately (PR 32).
+also scores a multilingual cross-encoder for the runtime path that `win-directml-java` has already designed (section
+5.4). PR 04, PR 24 and PR 31 move into the MVP, the writer A/B adds one complete sample chapter per model, and the
+first-book run checks workflow, data integrity and book quality separately (PR 32).
+
+**Reuse before new code.** The owner's projects `win-directml-java`, `space-harvester` and `enterprise-ai-client`
+already hold parts of the retrieval and text-mining stack, and some of it came from AskAI in the first place; section
+2.5 lists each component with a decision. No new inference engine is planned: multilingual embedding candidates run on
+Ollama today, the SentencePiece and XLM-R support that `win-directml-java` has designed (about 8 to 9 person-days) is
+the route to a multilingual cross-encoder if the benchmark asks for one, and Space Harvester's former in-process ONNX
+provider stays a fallback (4.1 rule 8). PR 04 ports the query role of the enterprise AI client's embedding port and
+its reciprocal rank fusion; PR 38 ports its rule-based `AcronymExtractor` for an abbreviation list and conflicting
+long forms. Statement extraction and German dependency parsing follow after the first book.
 
 **What the plan can promise.** Workflows that are reproducible and resume after a restart or a crash, sources that
 stay traceable from every citation, small models working on bounded tasks, part of the hallucinations caught in code,
 and a book that states its own quality limits. Whether the book is good in substance only the live runs can show (PR
 31, PR 32).
 
-**The plan.** 37 pull requests in six milestones, each mergeable on its own (section 6). 26 are needed for the first
+**The plan.** 38 pull requests in six milestones, each mergeable on its own (section 6). 27 are needed for the first
 book, 5 implement agreed rules that do not block it (the Models tab, phase summaries, the Workflow tab, passage
 revision, focused gap research), and 6 are quality work.
 
@@ -81,7 +91,7 @@ revision, focused gap research), and 6 are quality work.
 | M1 Walking skeleton | Every gate from Concept to the finished book is reachable by user commands; transitions recover after a crash; concept and mission freeze; one model per phase, set in a new Models tab; the Revisions tab becomes the Workflow tab |
 | M2 Concept to sources | A blacklist that filters; the frozen concept drives an autonomous, resumable search plan through the one acquisition funnel; the approved source set with write-once source texts; phase-scoped chat context |
 | M3 Outline | "Generate outline" builds an outline from concept and clustered sources; the user edits it, regenerates single chapters and freezes it |
-| M4 First book | Section-by-section writing with checked citations and claim checks, a one-click gap search, an assembled book with references and a quality report, the writer A/B with a sample chapter, and a live acceptance run on three levels |
+| M4 First book | Section-by-section writing with checked citations and claim checks, a one-click gap search, an assembled book with references, an abbreviation list and a quality report, the writer A/B with a sample chapter, and a live acceptance run on three levels |
 | M5 After the first book | Mark a passage and revise it with a comment (like ChatGPT), focused gap research from Outline and Document, robustness, export, cleanup |
 
 **Models.** `gemma4:e2b` for Concept, Sources and Outline and for all helper roles (thinking off, 32k context).
@@ -158,7 +168,7 @@ covered only by state-machine unit tests and by the fake backend, which switches
 | Context size | `OllamaModelPort` sends `num_ctx` from the request, else from the slot (`askai-app/.../modelport/OllamaModelPort.java:678-681`). Research roles pass 0 except in orchestrated tasks, and no slot has a context by default | The answer budget is one spawn-time value for all phases (`ASKAI_AGENT_MAX_OUTPUT_TOKENS`, default 4,096); `PortMainModelChat` returns only the content, so `prompt_eval_count`, `done_reason` and a cut-off answer are invisible. Host callers such as the Models page Load button and dictation send no `num_ctx` |
 | Thinking | `PortMainModelChat` sets no thinking mode (`runtime/team/PortMainModelChat.java:22`); only the SERP layout repair sends Off (`runtime/inference/PortStructuredInferenceClient.java:76`) | Every other research role runs with the model default; for `gemma4:e2b` that is most likely "on", which costs latency and can empty the 24-token page judge. A reasoning-only answer already fails visibly (`OllamaModelPort.java:762-768`) |
 | Models | Eight role slots (`runtime/inference/ResearchModelSlots.java:15-29`), editable in Settings -> AI models -> Model resources | All four phases run on the one `conversation` slot (`runtime/team/PhaseAssistantProfile.java:74-85`); Outline has no profile and uses a neutral fallback. Unset slots fall back to `ai.mainModel`, which any chat tab rewrites (also silently when a chat tab is restored). Without a chat model the session starts, but every model role is unavailable (`askai-app/.../localmodels/LocalInferenceConfigurationSnapshotProvider.java:70-74`). The narrator and the brief visualizer always use the chat model (`OllamaAgentInferencePort`) |
-| Retrieval models | Setup recommends the embedding model `nomic-embed-text` (`askai-app/.../ui/setup/SetupActions.java:170`) and installs the reranker `cross-encoder/ms-marco-MiniLM-L6-v2` into AskAI's local runtime (`:172`), which the research runtime calls over HTTP behind the `CandidateReranker` seam | Both models are English-centred. The local runtime runs only BERT cross-encoders with a WordPiece tokenizer and an explicit mapping (`askai-app/.../localmodels/LocalModelCompatibilityAnalyzer.java:10-16`), so a multilingual reranker is runtime work. With the AI reranker selected, an unavailable reranker ends the search with `RERANKER_UNAVAILABLE` instead of a fallback (`runtime/acquire/WebSearchApplicationService.java:809-812`). Passage ids contain the embedding fingerprint (`research-knowledge-pipeline/.../PassageSegmentation.java:140`), so a model change renames every passage |
+| Retrieval models | Setup recommends the Ollama embedding model `nomic-embed-text` (`askai-app/.../ui/setup/SetupActions.java:170`) and installs the reranker `cross-encoder/ms-marco-MiniLM-L6-v2` into AskAI's local runtime (`:172`), which the research runtime calls over HTTP behind the `CandidateReranker` seam. Embeddings come from Ollama or from the local runtime, both through `/api/embed` (`askai-app/.../plugin/host/AgentRuntimeServices.java:145`) | Both models are English-centred. For embeddings and reranking, the local runtime (`win-directml-java`) runs only BERT models with a WordPiece tokenizer: the English embedding models `all-MiniLM-L6-v2` and `e5-small/base/large-v2` and the ms-marco cross-encoder (`askai-app/.../localmodels/LocalModelInstallResolution.java:76`, `LocalModelCompatibilityAnalyzer.java:10-16`); multilingual XLM-R models are designed there but not built. `EmbeddingPort` has no query role, and `HttpEmbeddingPortAdapter` sends every text with `input_type=raw` (`research-knowledge-processing/.../embedding/HttpEmbeddingPortAdapter.java:81`), so models that expect query and document prompts, such as `nomic-embed-text`, run without them. With the AI reranker selected, an unavailable reranker ends the search with `RERANKER_UNAVAILABLE` instead of a fallback (`runtime/acquire/WebSearchApplicationService.java:809-812`). Passage ids contain the embedding fingerprint (`research-knowledge-pipeline/.../PassageSegmentation.java:140`), so a model change renames every passage |
 | Data integrity | Concept store: atomic V3 commit with history | Sources, passages, live-outline titles, visualisation: UTF-8 written, ISO-8859-1 read (`plugin/store/FileResearchSourceRepository.java:138-141`; RA-P007), so umlauts break on the first table-of-contents build and the damage grows with every source update. Unlocked compare-and-write (RA-P006). A corrupt `research-session.json` silently resets the project to `scoping/new`. Source texts are write-once only by convention: a changed page at the same URL becomes a new source with its own checksum (`plugin/capture/SourceAcceptanceService.java:166`), but `put` overwrites a record verbatim, and metadata changes keep no history |
 | Docs | | `docs/research-state-machine.md` still shows 7 phases with Outline before Research; several javadocs say `SUBMIT_SCOPE -> OUTLINE`, "bot control on by default", `outline_save` "legacy only"; `mvp-roadmap.md` lists AP 2 and AP 3 as open although they are built |
 
@@ -208,6 +218,8 @@ flow, and protection against losing unsaved edits (RA-P008). The Document tab ed
 | Small-model tool channel | `ScopingPhaseOutputContract` + `ConceptToolRounds` (grammar-constrained JSON actions, cards addressed by exact names) |
 | Acquisition funnel | `runtime/acquire/WebSearchApplicationService.java`, `ManualSourceAcceptancePort` (sends query and request id with every accepted source) |
 | Ranking strategies | `runtime/rerank/CandidateReranker` with `SearchResultReranker` (the cross-encoder over HTTP), `Bm25CandidateReranker` and, for tests, `EngineOrderReranker` |
+| Embedding arms | Ollama and the local runtime behind one `EmbeddingConfigurationSnapshotProvider`, both through `/api/embed`; the local runtime also serves `/api/rerank` and applies the E5 prefixes through `input_type` (`local-model-runtime/.../LocalModelRuntimeServer.java:249`) |
+| Sentence segmentation | `SentenceSegmentationPort` with `RegexSentenceSegmenter` and `OpenNlpSentenceSegmenter` (module `research-text-opennlp`); OpenNLP models are installed under Models -> Setup |
 | Source checksums | `SourceAcceptanceService` stores the capture's content hash as the source checksum; a changed page at the same URL becomes a new source |
 | Query generation | `runtime/orchestrator/SearchPlannerWorker.java` (JSON, rejects short/long/duplicate queries) |
 | Resumable jobs | `FileResearchTaskStore` and `ResearchTask`. Its resume pass (`resumeAfterInterruption`) has no caller; today only the orchestrator resumes tasks, and only those of its own run |
@@ -217,6 +229,27 @@ flow, and protection against losing unsaved edits (RA-P008). The Document tab ed
 | Phase attribution | `plugin/agent/ResearchPhaseJournal.java`, `ResearchChatHistoryProjection.java` |
 | Context assembly seam | `runtime/team/PhaseContextAssembler.java`, `PhaseContextPolicy.java` |
 | Model slots and residency | `ModelPortSettings`, `ModelResourceScheduler`, `ModelResourcesPanel`, `ChatModelWarmup` (#104) |
+
+### 2.5 Reusable work in neighbouring projects
+
+Checked on 2026-11-04 in `aresstack/win-directml-java` (`ae27896`, release 0.2.0), `aresstack/space-harvester`
+(`37b9c66`) and `aresstack/enterprise-ai-client` (`a64d004`). Code is ported into AskAI's modules together with its
+tests, never added as a dependency. Several concepts came from AskAI in the first place: the enterprise AI client's
+`EmbeddingPort` names `research-knowledge-pipeline` as its origin, and its `KnowledgePassageId` (copied by Space
+Harvester as `PassageId`) and the semantic passage segmentation follow AskAI's earlier `arch` design. They are not
+ported back.
+
+| Component | Where | What it does | Decision |
+|---|---|---|---|
+| SentencePiece and XLM-R support | `win-directml-java`, `docs/concept-sentencepiece-xlmr.md` (issue 33) | Designed, not built: tokenizer, XLM-R embedding rules and weight loader for multilingual E5, `bge-m3` and `bge-reranker-v2-m3`, with parity tests against the reference implementation; estimated at about 8 to 9 person-days | The route to a multilingual cross-encoder and to the entailment model of D8 stage 2, built in `win-directml-java` and adopted through AskAI's local model catalog; started only if the retrieval benchmark shows the need (PR 04, 5.4 item 8) |
+| In-process ONNX embedding provider | Space Harvester, `OnnxEmbeddingProvider` at commit `2b78493` (ADR 0004); removed later in favour of an external embedding service (ADR 0011) | `intfloat/multilingual-e5-small` through ONNX Runtime and the Hugging Face tokenizer: query and passage prefixes, mean pooling with L2 norm, SHA-256-checked model files, a concurrency limit, and a reference test against the PyTorch implementation for German, English and overlong texts (cosine above 0.9999) | Not adopted now (4.1 rule 8). A fallback adapter behind `EmbeddingPort` if neither Ollama nor the local runtime can run a model the benchmark needs; its reference-test pattern is reused for any new embedding path |
+| Query role of the embedding port | enterprise AI client, `EmbeddingPort.embedQueries` | Queries and documents are embedded by separate calls, so models with query and passage prompts get them | Ported in PR 04: AskAI's port gets the same role, and its adapter adds each model's documented prompts |
+| Reciprocal rank fusion | enterprise AI client, `ReciprocalRankFusion` in `RetrieveKnowledgeUseCase` | Fuses the BM25 and the cosine ranking by rank, not by score; if one path fails, the other's result stands with a warning | Ported in PR 04 as a fourth ranking strategy of the benchmark |
+| Remote rerank and embedding adapters | Space Harvester `KipitzRerankAdapter`; enterprise AI client `OpenAiCompatibleEmbeddingAdapter` | Cross-encoder and embeddings through external HTTP services | Not needed: AskAI ranks through the local runtime's `/api/rerank` and embeds through Ollama or the local runtime |
+| Acronyms and long forms | enterprise AI client, `AcronymExtractor` with `LongFormMatcher`, `AcronymForms`, `TermScanner` and `DocumentAcronymsUseCase`; Space Harvester keeps a copy and derives versioned facts from its findings, including conflicting long forms (`EnrichmentFacts`) | Rules only, no model: acronyms such as `IAR`, `GmbH` or `U.S.A.`, technical identifiers such as `MAX_SIZE` kept apart, long forms aligned letter by letter inside one sentence, code, addresses and lines in capitals left out; the findings carry extractor id and version | Ported in PR 38 for the abbreviation list, the long forms in the writer's glossary block and the conflicts in the quality report; the versioned findings follow the Space Harvester idea |
+| Statement extraction | enterprise AI client, `DocumentStatementsUseCase`, `ChatStatementExtractor`, `StatementValidator`; the same in Space Harvester's `enrichment/statements` | A chat model proposes mentions, events and relations per paragraph; Java keeps only candidates anchored in their sentence and leaves pronouns unresolved. The anchor is checked, not the truth | After the first book, as the base for passage-level statements in D8 stage 2 and for contradiction candidates; it costs one model call per paragraph of every source |
+| Rule-based German language processors | Space Harvester `enrichment/language` (`TermProcessor`, `EntityProcessor`, `PropertyProcessor`, `ActivityProcessor`, `RelationProcessor`) | Terms, entities, properties, activities and relations such as `is_a` and `part_of` from German sentences, without a model | Later, as input to the book ledger (section 7, proposal 27) |
+| German dependency parsing | Space Harvester `nlp-parser` (OpenNLP and MaltParser 1.9.2 with a pinned German model under CC BY-SA 4.0) | Universal Dependencies parses; a stand-alone module, not part of Space Harvester's productive processing | Optional, only after a measured gain; not part of the MVP |
 
 ## 3. Design decisions
 
@@ -533,10 +566,11 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   of uncited sentences and paragraphs; unsupported numbers and quotes; open gaps; concept nodes left uncovered at the
   Sources approval; sources accepted after it; near-copies (twelve or more consecutive words of a cited passage
   without quotation marks); repeated passages across sections (word-shingle overlap); glossary terms the book never
-  uses; words written against the target. The book is "complete" when no section is missing, skipped or stale, every
-  paragraph cites a passage, and no unsupported number or quote, near-copy or open gap remains; otherwise it is an
-  "incomplete draft" with the counts. The `finish-document` confirmation and the Document gate show the report, the
-  user may approve either way (Q27), and the front matter prints the status.
+  uses; acronyms without a long form in the sources or with conflicting long forms (PR 38); words written against the
+  target. The book is "complete" when no section is missing, skipped or stale, every paragraph cites a passage, and no
+  unsupported number or quote, near-copy or open gap remains; otherwise it is an "incomplete draft" with the counts.
+  The `finish-document` confirmation and the Document gate show the report, the user may approve either way (Q27), and
+  the front matter prints the status.
 - MVP revision: "Rewrite section" and "Rewrite chapter" with an optional comment, one key-point part per call. Final
   review uses the existing gate: `finish-document` makes the manuscript read-only, "Request changes" returns to
   `running` with the comment, which can open "Rewrite section" for the sections the user picks, and `approve` completes
@@ -630,6 +664,10 @@ semantic commands and the actor rule of D2.
    model answer can only take the actions of its phase's action union (D11): none of them changes a phase, and each is
    visible and reversible (plan entries, blacklist entries, section revisions). Writer output passes the checks of D8
    before it is stored.
+8. **Runtime-neutral retrieval; no new engine without a measured need.** The research pipeline talks to
+   `EmbeddingPort` and `CandidateReranker` only, never to a runtime. Models run on Ollama or on AskAI's local runtime;
+   a further native engine, for example ONNX Runtime, is added only when the retrieval benchmark shows that a needed
+   model runs on neither, and then behind the same ports. Model quality decides, not technology (section 2.5).
 
 ### 4.2 Budget per phase and role (tokens)
 
@@ -743,8 +781,8 @@ allocate less. With `llama3.1:8b` at its 16,384 preset every Document role fits,
 | Outline (chat, labels, briefs) | gemma4:e2b | llama3.1:8b if the briefs are poor | off | 32,768 | chat 1,536, labels 160, briefs 150 per section plus 100 | Structure is code; the model words one chapter at a time |
 | Document (writer, rewrite, chat) | llama3.1:8b if installed, otherwise gemma4:e2b (preset written when the Models tab first opens) | gpt-oss:20b with thinking low, after the A/B | none on llama3.1:8b, off on gemma4:e2b, low on gpt-oss | 16,384; gemma4:e2b keeps 32,768 | writer 3,072 (1,200 on gemma4:e2b), chat 1,536 (writer 4,096 and chat 3,072 on gpt-oss) | Should fit beside gemma4:e2b (about 12 to 14 GB together, to be measured), no reasoning tokens, German officially supported |
 | Phase summaries | the model of the phase being left | gemma4:e2b | off (low on gpt-oss) | its value | 600 | Already loaded at the transition |
-| Embeddings | the winner of the retrieval benchmark (PR 04); until then nomic-embed-text, the Setup preset | multilingual candidates from the Ollama library, for example nomic-embed-text-v2-moe, bge-m3, embeddinggemma, snowflake-arctic-embed2 or granite-embedding:278m | n/a | the model's own; passages must fit it | n/a | Required for scope gate, outline assignment and evidence packs; a change re-embeds the project (PR 20) and recalibrates the thresholds of the scope gate and the outline assignment |
-| Ranking of planned queries | the strategy that wins the retrieval benchmark (Q25) | the installed cross-encoder (English), BM25, or embedding similarity; a multilingual cross-encoder only after the runtime path of section 5.4 | n/a | n/a | n/a | Decides which pages are visited; BM25 is the labelled fallback while the chosen strategy is unavailable |
+| Embeddings | the winner of the retrieval benchmark (PR 04); until then nomic-embed-text, the Setup preset | multilingual candidates from the Ollama library, for example nomic-embed-text-v2-moe, bge-m3, embeddinggemma, snowflake-arctic-embed2 or granite-embedding:278m, each with the query and document prompts of its model card; the local runtime's embedding models are English | n/a | the model's own; passages must fit it | n/a | Required for scope gate, outline assignment and evidence packs; a change re-embeds the project (PR 20) and recalibrates the thresholds of the scope gate and the outline assignment |
+| Ranking of planned queries | the strategy that wins the retrieval benchmark (Q25) | the installed cross-encoder (English), BM25, embedding similarity, or BM25 and embedding similarity fused by rank; a multilingual cross-encoder only after the runtime path of section 5.4 | n/a | n/a | n/a | Decides which pages are visited; BM25 is the labelled fallback while the chosen strategy is unavailable |
 
 Single-request generation speed on the target machine (`docs/ollama-parallel-inference-benchmark-2026-10-30.md`):
 `gemma4:e2b` 192 to 223 tokens/s, `gpt-oss:20b` 160 to 163, `llama3.1:8b` 126 to 147. A full section call therefore
@@ -792,22 +830,26 @@ PR 04 runs a protocol on the target machine and checks the results in, without m
    queries for German passages, German queries for English passages, and English queries for English passages. Each
    query has one known target passage in a fixed corpus of about 300 passages captured from German and English pages;
    the corpus stays in the benchmark's local data directory, because it is third-party text, while queries, target ids
-   and results are checked in. For the current preset and each multilingual candidate of 5.2: Recall@5, Recall@10 and
-   mean reciprocal rank per group; how many of 50 passages labelled by the owner land under the right concept node
-   when each goes to the nearest node by cosine against its full label path (the assignment rule of PR 22); embedding
-   time per 100 passages; GPU memory; the longest passage in tokens against the model's context. For the ranking of
-   planned queries, the same queries against lists of 20 search results (title and snippet) each: BM25, the installed
-   cross-encoder and embedding similarity, scored by whether the target lands in the visited top N, and how often a
+   and results are checked in. Every candidate runs through the productive `EmbeddingPort` with the query and document
+   prompts of its model card; the current preset also runs once without them, as today. For the current preset and
+   each multilingual candidate of 5.2: Recall@5, Recall@10 and mean reciprocal rank per group; how many of 50 passages
+   labelled by the owner land under the right concept node when each goes to the nearest node by cosine against its
+   full label path (the assignment rule of PR 22); embedding time per 100 passages; GPU memory; the longest passage in
+   tokens against the model's context. For the ranking of planned queries, the same queries against lists of 20 search
+   results (title and snippet) each: BM25, the installed cross-encoder, embedding similarity, and BM25 fused with
+   embedding similarity by reciprocal rank, scored by whether the target lands in the visited top N, and how often a
    strategy selects nothing (`NO_SEMANTIC_MATCHES`). Rules: among the candidates that fit beside the phase models and
    whose German-to-English Recall@10 is not below the current preset's, the one with the best mean Recall@10 over the
    three groups becomes the embedding preset; planned queries get the ranking strategy with the best mean hit rate
    over the three groups.
-8. **A multilingual path for the local runtime.** What AskAI's local model runtime needs to run a cross-encoder with
-   an XLM-R architecture and a SentencePiece tokenizer (tokenizer, model mapping, a reference test), recorded as an
-   effort estimate, together with the hit rate of one multilingual cross-encoder on the queries of item 7, scored once
-   with a reference implementation outside AskAI. If it clearly beats the chosen strategy, a follow-up PR adds the
-   path; the same path would carry the entailment model of D8 stage 2. The `CandidateReranker` seam and the HTTP
-   reranker client stay model-neutral either way, so today's runtime limit does not shape the retrieval design.
+8. **A multilingual path for the local runtime.** `win-directml-java` has already designed SentencePiece and XLM-R
+   support (`docs/concept-sentencepiece-xlmr.md`, about 8 to 9 person-days, covering multilingual E5, `bge-m3` and
+   `bge-reranker-v2-m3`), so PR 04 does not estimate it again. It scores one multilingual cross-encoder,
+   `bge-reranker-v2-m3`, on the queries of item 7, once, with a reference implementation outside AskAI. If it clearly
+   beats the chosen strategy, the path is built in `win-directml-java` and adopted through AskAI's local model catalog
+   in a follow-up PR; the same path would carry the entailment model of D8 stage 2. Space Harvester's former ONNX
+   provider stays the fallback of 4.1 rule 8. The `CandidateReranker` seam and the HTTP reranker client stay
+   model-neutral either way, so today's runtime limit does not shape the retrieval design.
 9. **Truncation.** Whether the installed Ollama honours `truncate=false` on chat and embedding calls: an overlong
    probe must fail instead of answering.
 
@@ -862,6 +904,7 @@ about 1,000, L more. "Done when" lists the acceptance criteria the reviewer chec
 | 30 | Book assembler, citations, quality report and Markdown export | M4 | 26, 28 | L | MVP |
 | 31 | Writer A/B with a sample chapter and the Document default | M4 | 04, 08, 28, 29 | M | MVP |
 | 32 | First-book acceptance run and report | M4 | every MVP PR | M | MVP |
+| 38 | Abbreviations and long forms from the sources | M4 | 14, 27, 30 | M | MVP |
 | 33 | Revise a marked passage with a comment | M5 | 29, 30 | L | Rule |
 | 34 | Gap research from Outline and Document | M5 | 14, 15, 29 | M | Rule |
 | 35 | Store robustness | M5 | 02 | M | Plus |
@@ -869,17 +912,19 @@ about 1,000, L more. "Done when" lists the acceptance criteria the reviewer chec
 | 37 | Legacy cleanup | M5 | 15, 29 | M | Plus |
 
 **Order.** The longest chain has eleven PRs: 05 -> 06 -> 07 -> 12 -> 14 -> 22 -> 27 -> 28 -> 29 -> 31 -> 32; PR 04,
-08, 13, 16, 20, 21 and 26 join on the way. M0, the context PRs 16 and 17 and the outline editor run beside it. PR 05
-goes first: `ResearchAgentSession` (5,260 lines) is a merge hotspot, and the other PRs rebase on it. PR 04 runs early:
-its retrieval benchmark picks the embedding preset and the ranking of planned queries before PR 12, 14 and 20 build on
-them, and its Phase-1 live gate is the baseline that PR 07, 12, 16 and 17 must not undercut. M1, M2 and M3 each end
-with a live checkpoint on real data before the next milestone starts, so recovery, search and retrieval quality are
-measured before the outline and the writing depend on them. After PR 07 the walking skeleton exists: a user can walk
-all four phases to `draft/completed` with a first message, one concept card, an empty outline and an empty document;
-PR 07, 12, 21 and 29 add the matching fixtures to `ProductiveBookJourneyTest`. PR 08 is MVP: the planner, the writer
-and the Document model of the first book run on its phase slots. PR 09 can follow; until then slots, contexts,
-thinking modes and budgets are set in the Model resources panel (PR 03, PR 08). PR 31 runs before PR 32, so the
-acceptance run writes with the Document model that the sample chapters chose.
+08, 13, 16, 20, 21 and 26 join on the way, and 28 -> 30 -> 38 -> 32 is a second branch of the same length. PR 38 was
+added after the check of reusable work in section 2.5 and keeps its number, so the other numbers stay stable. M0, the
+context PRs 16 and 17 and the outline editor run beside the chain. PR 05 goes first: `ResearchAgentSession` (5,260
+lines) is a merge hotspot, and the other PRs rebase on it. PR 04 runs early: its retrieval benchmark picks the
+embedding preset and the ranking of planned queries before PR 12, 14 and 20 build on them, and its Phase-1 live gate
+is the baseline that PR 07, 12, 16 and 17 must not undercut. M1, M2 and M3 each end with a live checkpoint on real
+data before the next milestone starts, so recovery, search and retrieval quality are measured before the outline and
+the writing depend on them. After PR 07 the walking skeleton exists: a user can walk all four phases to
+`draft/completed` with a first message, one concept card, an empty outline and an empty document; PR 07, 12, 21 and 29
+add the matching fixtures to `ProductiveBookJourneyTest`. PR 08 is MVP: the planner, the writer and the Document model
+of the first book run on its phase slots. PR 09 can follow; until then slots, contexts, thinking modes and budgets are
+set in the Model resources panel (PR 03, PR 08). PR 31 runs before PR 32, so the acceptance run writes with the
+Document model that the sample chapters chose.
 
 ### 6.2 M0 Honest foundations
 
@@ -948,15 +993,23 @@ acceptance run writes with the Document model that the sample chapters chose.
   GPU memory with `nvidia-smi` per context and parallel setting, with the reranker and two browsers open, including
   `llama3.1:8b` at 32,768; `load_duration` for every model switch; how a prompt with several system messages is
   rendered; the Phase-1 live gate N = 10, which also records the four open checks of roadmap AP 1; the retrieval
-  benchmark with its three query groups, the effort estimate for a multilingual runtime path and the truncation check
-  (section 5.4, items 7 to 9). The results go to `docs/ollama-model-budget-measurements.md` with the Ollama version
+  benchmark with its three query groups, the multilingual cross-encoder probe and the truncation check (section 5.4,
+  items 7 to 9). Before the benchmark, `EmbeddingPort` gets a query role (`embedQueries`, as in the enterprise AI
+  client, whose port came from this one), and `HttpEmbeddingPortAdapter` adds the query and document prompts that the
+  model card of each supported model names: as text for Ollama models, through `input_type` for the local runtime's E5
+  models. The prompt scheme becomes part of the embedding fingerprint, so projects embedded before it are re-embedded
+  (PR 20). `ReciprocalRankFusion` is ported with its test as a ranking strategy (section 2.5). The benchmark runs
+  through these productive paths. The results go to `docs/ollama-model-budget-measurements.md` with the Ollama version
   and server settings and without machine paths. A one-line follow-up sets the embedding preset in `SetupActions` and
   the ranking of planned queries by the rules of section 5.4. The PR is MVP because PR 12, PR 14 and PR 20 build on
   these two choices: retrieval quality is measured before the book generation is built.
 - Done when: the normal test run stays model-free; the report answers every question of section 5.4 and has a row for
   every default of sections 4.1, 4.2 and 5.2; the retrieval part gives Recall@5, Recall@10 and the mean reciprocal
-  rank per group and candidate, and the hit rate per ranking strategy; a default that lands before the report stays
-  marked provisional until a one-line follow-up adopts the measured value.
+  rank per group and candidate, and the hit rate per ranking strategy; a request golden shows `search_query: ` before
+  a `nomic-embed-text` query and `search_document: ` before a passage; a model without a known prompt scheme is
+  embedded raw and the report says so; a changed prompt scheme changes the fingerprint; the ported fusion test passes;
+  a default that lands before the report stays marked provisional until a one-line follow-up adopts the measured
+  value.
 
 ### 6.3 M1 Walking skeleton
 
@@ -1528,13 +1581,32 @@ regenerate one chapter.
     written, and both recover without repeating finished work.
   - Data integrity: after the restarts every pin matches its content hash; every citation resolves to source, checksum
     and passage, and every `[n]` to a reference; umlauts and typographic quotes are intact; no write is lost.
-  - Book quality: `document.md` has contents, every chapter and section, numbered citations and open points; no
-    unknown marker and no truncation on writer calls; the quality report lists every uncited paragraph, unsupported
-    number and quote, near-copy and repetition; the owner checks 20 randomly drawn citations against their passages
-    (provisional target: at least 17 support their sentence); German sources are found for the German topic, and
-    English sources land in the right chapters; a read-through by the owner finds no contradiction between chapters,
-    or the report lists it.
+  - Book quality: `document.md` has contents, every chapter and section, numbered citations, an abbreviation list and
+    open points; no unknown marker and no truncation on writer calls; the quality report lists every uncited
+    paragraph, unsupported number and quote, near-copy and repetition; the owner checks 20 randomly drawn citations
+    against their passages (provisional target: at least 17 support their sentence); German sources are found for the
+    German topic, and English sources land in the right chapters; a read-through by the owner finds no contradiction
+    between chapters, or the report lists it.
 - Done when: each level is met, or every miss is filed as a defect with its cause; the report is checked in.
+
+**PR 38 Abbreviations and long forms from the sources** (M, MVP)
+- Change: the rule-based `AcronymExtractor` of the enterprise AI client (section 2.5) is ported with
+  `LongFormMatcher`, `AcronymForms`, `TermScanner` and their tests into `research-knowledge-processing`, on AskAI's
+  `SentenceSegmentationPort` (OpenNLP when the language model is installed, else the regex segmenter), through a small
+  adapter that maps its sentences back to text spans; the port gains a fingerprint (the OpenNLP model checksum or
+  `regex`). It runs once per accepted source on its write-once text after the passages are stored, and its findings
+  (short form, long forms with the passages that state them, technical identifiers) are stored under source checksum,
+  extractor version and segmenter fingerprint, so a new version or model re-runs only stale sources. The evidence
+  pack's glossary block (PR 27) adds up to ten acronyms of its passages with the long forms the sources give, within
+  its 200 tokens. The assembler (PR 30) adds an "Abbreviations" appendix for every acronym the manuscript uses, with
+  its long form and sources, and lists every long form where the sources disagree. The quality report adds acronyms
+  used without a long form in the sources, conflicting long forms, and chapters whose first use of an acronym lacks
+  the long form.
+- Done when: the ported tests pass apart from package names; "Retrieval-Augmented Generation (RAG)" in a German source
+  yields RAG with that long form and its passage; `MAX_SIZE` is a technical identifier, not an acronym; two sources
+  with different long forms for one acronym show a conflict in the quality report and both forms in the appendix; a
+  new extractor version re-runs only sources with older findings; the appendix lists exactly the acronyms the
+  manuscript uses; an evidence pack with acronyms stays within the writer budget.
 
 ### 6.7 M5 After the first book
 
@@ -1638,9 +1710,11 @@ that no PR carries yet say so.
 15. **The search plan as a visible checklist.** Status and accepted sources per query give control (drop, edit, re-run)
     without an extra gate, and make unattended time predictable (PR 14).
 16. **Rank by measurement.** Setup already requires a reranker, but the installed cross-encoder is English, and so is
-    the embedding preset. A retrieval benchmark with German, German-to-English and English queries picks the embedding
-    model and the ranking of planned queries, BM25 stays the labelled fallback, and the effort of a multilingual
-    runtime path is estimated, so today's runtime limit does not decide the retrieval design (PR 04, PR 14, Q25).
+    the embedding preset, which today even runs without its query and document prompts. A retrieval benchmark with
+    German, German-to-English and English queries picks the embedding model and the ranking of planned queries, BM25
+    stays the labelled fallback, and a multilingual cross-encoder is scored for the runtime path that
+    `win-directml-java` has already designed, so today's runtime limit does not decide the retrieval design (PR 04, PR
+    14, Q25).
 17. **An honest front matter.** "Written by <model> from N sources; concept revision 4, outline revision 2; status:
     incomplete draft, 3 open points; support checked for numbers and quotes only" sets expectations without the cost
     of a verification pass (PR 30).
@@ -1670,10 +1744,15 @@ that no PR carries yet say so.
     counts, shown before the final approval; the user decides (PR 30, Q27).
 27. **A deterministic book ledger (not planned yet).** A Java component, not a model, that records terms with the
     section that defines them and the key points each section covered, feeds a short "covered so far" block to the
-    writer and adds a terminology report. It follows after the first book if the repetition count of PR 30 shows the
-    need.
+    writer and adds a terminology report. Its inputs are the acronyms of PR 38 and, if they prove useful, Space
+    Harvester's rule-based term and relation processors (section 2.5). It follows after the first book if the
+    repetition count of PR 30 shows the need.
 28. **Source text is data.** Page and source text enters prompts only as a quoted block, and model answers can only
     take visible, reversible actions of their phase (4.1 rule 7).
+29. **Reuse before building.** The owner's neighbouring projects are checked before AskAI builds a component a third
+    time: two ports into PR 04 (query role, rank fusion), one into PR 38 (acronyms), a designed runtime path in
+    `win-directml-java`, and an ONNX fallback with reference tests. Concepts that came from AskAI are not ported back
+    (section 2.5, 4.1 rule 8).
 
 ## 8. Risks
 
@@ -1685,11 +1764,14 @@ that no PR carries yet say so.
 | `gemma4:e2b` at 32k and `llama3.1:8b` at 16k may not fit together with the embedding model, the reranker and two browsers | PR 04 measures total GPU memory with `nvidia-smi`. Fallbacks: q8_0 KV and flash attention, `OLLAMA_NUM_PARALLEL=1`, then `llama3.1:8b` at 12,288, where every Document role of 4.2 fits. If even that does not fit: 8,192 with the small writer preset (450 words, 6 x 250, writer answer budget 1,200) and a Document chat answer budget of 1,280; then the writer, its continuation, the rewrite per part and the Document chat (about 8,050) fit |
 | With `gpt-oss:20b` as writer every research or helper call swaps 12 to 14 GB | Opt-in only after the A/B; gap searches batched between chapters; "Loading <model>..." in the chat |
 | Hallucinated or misattributed content | Evidence-only prompts; markers validated in code; numbers, years, percentages and quotes checked against the cited passage (PR 28); uncited sentences and paragraphs flagged; citations with source checksum and passage; references built from the store; the quality report and the front matter (PR 30); 20 citations checked by the owner (PR 32); the user's final gate. A sentence that reverses what its passage says is not caught before stage 2 of D8 |
-| German and cross-language research ranked by English-centred models, so the right sources are never visited | The retrieval benchmark of PR 04 (German, German to English, English) picks the embedding model and the ranking before PR 12, PR 14 and PR 20 build on them; the M2 checkpoint checks the live share of German and English sources; PR 04 estimates a multilingual runtime path |
+| German and cross-language research ranked by English-centred models, so the right sources are never visited | The retrieval benchmark of PR 04 (German, German to English, English) picks the embedding model and the ranking before PR 12, PR 14 and PR 20 build on them; the M2 checkpoint checks the live share of German and English sources; PR 04 scores a multilingual cross-encoder for the XLM-R path designed in `win-directml-java` |
 | A crash between an approval and its effects leaves a half-done transition | Transition journal as an outbox, recovery on session open, idempotent effects, fault-injection tests (D3, PR 06) |
 | Prompt injection through page or source text | Source text only as quoted data; action unions without phase changes; every model action visible and reversible; writer output checked in code (4.1 rule 7) |
 | The writer copies source text | Near-copies of twelve words or more without quotation marks are flagged in the quality report (PR 30); usage rights stay the user's responsibility before publication |
 | A sound architecture is taken for a good book | The plan promises traceability, recovery and visible limits, not quality; the writer A/B with a sample chapter (PR 31) and the three-level acceptance run (PR 32) measure it |
+| Retrieval quality is judged on embeddings without their query and document prompts | The query role of `EmbeddingPort` and the model-card prompts come before the benchmark (PR 04); the current preset is also measured without them, so the effect is visible |
+| A second native inference engine adds packaging and native-library risk | 4.1 rule 8: Ollama and the local runtime first; ONNX only behind the existing ports after a measured need, with the reference tests of section 2.5 |
+| A component is built a third time | Section 2.5 lists the reusable components with a decision each; ports keep their tests (PR 04, PR 38) |
 | Unattended search hits CAPTCHAs and slow sites; book-scale search time is unmeasured | The existing CAPTCHA wait; failed entries are marked and can be re-run; caps; a persisted, resumable plan; "Finish sources" at any time, because Stop never leaves `running`; measured at the M2 checkpoint |
 | BM25 accepts every hit with a score above 0 | Planned queries use the ranking that wins the retrieval benchmark and its top N (Q25), with BM25 only as the labelled fallback; the scope gate with a working blacklist, the readiness judge and the user's Sources gate |
 | The first message, even a greeting, becomes the mission and enters every base query | The Concept tab shows the mission as an editable row, `submit-scope` refuses an empty mission, and the Phase-1 record freezes it (PR 07) |
@@ -1739,9 +1821,10 @@ and Q13 should be decided first**, because the earliest PRs depend on them.
 | Q22 | Should the reviewed plan become an ADR? | Yes, one ADR for the book pipeline: freeze, phase models, context rules |
 | Q23 | After a jump back to Concept and a new submit: search everything again or only what changed? | Only new and changed concept nodes by default, merged by node id; "Search everything again" as an option |
 | Q24 | What is the minimum to finish each phase? | Concept: one first-level card, a mission and a ready embedding model. Sources: none, but the review lists uncovered nodes. Outline: one chapter with a section and no generation in flight. Document: every section written or marked "Skip"; whether the book is complete is the status of the quality report, not a precondition (Q27) |
-| Q25 | Which ranking should planned queries use? | The strategy that wins the retrieval benchmark of PR 04 (the installed cross-encoder, BM25 or embedding similarity), with BM25 as the labelled fallback while the winner is unavailable; "Use AI reranker" then applies to typed searches, and its label says so |
+| Q25 | Which ranking should planned queries use? | The strategy that wins the retrieval benchmark of PR 04 (the installed cross-encoder, BM25, embedding similarity, or BM25 and embedding similarity fused by rank), with BM25 as the labelled fallback while the winner is unavailable; "Use AI reranker" then applies to typed searches, and its label says so |
 | Q26 | A phase badge on every chat bubble (a host API change)? | After M4; until then the persisted phase dividers carry the annotation |
 | Q27 | May the user approve the final book while the quality report says "incomplete draft"? | Yes; the confirmation names the warnings, and the front matter prints the status |
+| Q28 | Is the abbreviation list (PR 38) part of the first book? | Yes: it is rule-based, needs no model call, reuses tested code, and a non-fiction book on a technical topic usually has one |
 
 ## 10. Relation to existing documents
 
@@ -1762,7 +1845,7 @@ and Q13 should be decided first**, because the earliest PRs depend on them.
 | AP 4 Transition from scoping to research planning | PR 13 to PR 15 |
 | AP 5 Live acceptance of the productive research | Its open live checks join the M2 checkpoint and PR 32. |
 | AP 6 From the fence to search control | PR 12 and PR 19. PR 12 deliberately adds the word filter that AP 6 ruled out, because the owner asked that blacklisted hits be ignored directly. It applies only to terms and domains the user typed into the blacklist, never to facets from the conversation; the semantic gate stays the main boundary. |
-| AP 7 Knowledge consolidation | Passages, embeddings, `ActiveKnowledgeCorpusReader` and the topic projection are built and feed PR 20 and PR 22. Numbers and quotes are checked against the cited passages (PR 28) and reported (PR 30); semantic claims and contradictions are not part of the MVP. Writer gaps (PR 28), the one-click gap search (PR 29) and gap research (PR 34) stand in for corpus gaps. |
+| AP 7 Knowledge consolidation | Passages, embeddings, `ActiveKnowledgeCorpusReader` and the topic projection are built and feed PR 20 and PR 22. Numbers and quotes are checked against the cited passages (PR 28) and reported (PR 30); acronyms and long forms come from the ported extractor (PR 38); semantic claims, statements and contradictions are not part of the MVP (section 2.5). Writer gaps (PR 28), the one-click gap search (PR 29) and gap research (PR 34) stand in for corpus gaps. |
 | AP 8 Outline | PR 20 to PR 24 |
 | AP 9 Writing and report | PR 26 to PR 30 |
 | AP 10 Concept as the only Phase-1 result | PR 07 |
