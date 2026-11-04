@@ -45,6 +45,17 @@ public final class FakeModelPort implements ModelPort, AutoCloseable {
     private final AtomicInteger reservations = new AtomicInteger();
     /** When non-null, each call awaits this latch before answering (a blocking/slow model). */
     private volatile CountDownLatch gate;
+    /**
+     * Test seam: runs inside {@link ModelCall#cancel()} right after the worker has been woken and before the
+     * cancel reports its terminal callback. It receives a latch that opens once the worker thread has exited,
+     * so a regression test can deterministically let the worker run first.
+     */
+    volatile CancelSignalHook cancelSignalHook;
+
+    /** See {@link #cancelSignalHook}. */
+    interface CancelSignalHook {
+        void afterWorkerWoken(CountDownLatch workerExited);
+    }
 
     /** Queue one raw model answer — the {@code content} the TeamAgentTurnParser will parse (a JSON turn). */
     public void enqueueRaw(String rawContent) {
@@ -159,8 +170,17 @@ public final class FakeModelPort implements ModelPort, AutoCloseable {
         requests.add(request);
         final AtomicBoolean terminal = new AtomicBoolean();
         final CountDownLatch cancelled = new CountDownLatch(1);
+        final CountDownLatch workerExited = new CountDownLatch(1);
         final Thread worker = new Thread(new Runnable() {
             public void run() {
+                try {
+                    answer();
+                } finally {
+                    workerExited.countDown();
+                }
+            }
+
+            private void answer() {
                 CountDownLatch latch = gate;
                 if (latch != null) {
                     try {
@@ -188,8 +208,15 @@ public final class FakeModelPort implements ModelPort, AutoCloseable {
         worker.start();
         return new ModelCall() {
             public void cancel() {
+                // Claim the terminal state BEFORE waking the worker: otherwise the woken worker can claim it
+                // first and report onCompleted for a call the caller has already cancelled.
+                boolean claimed = terminal.compareAndSet(false, true);
                 cancelled.countDown();
-                if (terminal.compareAndSet(false, true)) {
+                CancelSignalHook hook = cancelSignalHook;
+                if (hook != null) {
+                    hook.afterWorkerWoken(workerExited);
+                }
+                if (claimed) {
                     listener.onFailed(new ModelFailure(ModelFailure.Kind.CANCELLED, "cancelled by the caller"));
                 }
             }
