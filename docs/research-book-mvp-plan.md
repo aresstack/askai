@@ -260,8 +260,8 @@ These decisions shape the PR plan. Each one keeps the existing graph and reuses 
 
 The graph already has a review gate at the end of Sources, Outline and Document; Concept closes with `submit-scope`
 alone. The plan adds only the commands that reach the gates, in the one vocabulary of `ResearchSemanticCommands`, so
-buttons, slash commands, action tags, the phase pill and the Workflow tab see the same commands, and a bot may run
-only those that dispatch no state command (D2, Q13):
+buttons, slash commands, action tags, the phase pill and the Workflow tab see the same commands; a bot runs none of
+them, because each dispatches a state command (D2, Q13):
 
 | New semantic command | Command type | From -> to | Replaces |
 |---|---|---|---|
@@ -641,7 +641,7 @@ Local indexes `[1..k]` are new for Outline; PR 04 measures their parse rate. Nat
 The concept move path and the concept edit rules are limited to Concept (PR 16). The opt-in bot endpoint keeps its
 tools (`run_command` and the read-only `session_state`, `chat_history`, `technical_log`, `concept_json` and
 `scope_snapshot`; the ChatGPT connector adds `sessions_list` and `session_create`) and gets no phase tool; its
-`run_command` resolves names like the user surfaces and follows the actor rule of D2, which refuses every semantic
+`run_command` resolves names as the user surfaces do and follows the actor rule of D2, which refuses every semantic
 command because each dispatches a state command.
 
 ## 4. Context and token budget
