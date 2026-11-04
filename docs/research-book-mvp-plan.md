@@ -641,7 +641,8 @@ Local indexes `[1..k]` are new for Outline; PR 04 measures their parse rate. Nat
 The concept move path and the concept edit rules are limited to Concept (PR 16). The opt-in bot endpoint keeps its
 tools (`run_command` and the read-only `session_state`, `chat_history`, `technical_log`, `concept_json` and
 `scope_snapshot`; the ChatGPT connector adds `sessions_list` and `session_create`) and gets no phase tool; its
-`run_command` uses the semantic commands and the actor rule of D2.
+`run_command` resolves names like the user surfaces and follows the actor rule of D2, which refuses every semantic
+command because each dispatches a state command.
 
 ## 4. Context and token budget
 
@@ -1050,25 +1051,26 @@ Document model that the sample chapters chose.
 - Change: `finish-sources`, `finish-outline` and `finish-document` in `ResearchSemanticCommands` (D1), and on every
   hand-maintained user surface: the action tags in `ResearchAgentSession` and the slash commands in
   `ResearchChatCommands`. The bot gateway (`ResearchBotSessionGateway`, which today serves bot control and the ChatGPT
-  connector) and its `RUN_COMMAND_DESCRIPTION` keep only the commands that dispatch no state command: `run_command`
-  refuses `submit-scope`, `approve`, `request-changes`, `continue`, `retry`, `resume`, every reopen, the three finish
-  commands and the `end` offer, and a plain chat message in `scoping/new`, which would dispatch `START`. So from this
-  PR on a connected bot dispatches no state command, and PR 06 moves the rule into the actor policy (Q13). English
-  labels in `ResearchPlaybook.actionLabel`: "Approve concept & start search" (the `submit-scope` label moves there
-  from `availableActionTags`, and the `/submit-scope` description follows), "Finish sources", "Approve sources &
-  continue to Outline", "Finish outline", "Approve outline & start writing", "Finish document", "Approve final book",
-  "Request changes...", and `continue` per phase ("Start search", "Start writing"). `request-changes` takes an
-  optional comment at all three gates, from the slash arguments or from a one-line dialog on the tag (a bot cannot
-  send it, Q13); PR 06 carries it in `ResearchCommand`. The `review` and `limit` run offers go, because
-  `finish-sources` replaces them (D1), and the `end` run offer dispatches `finish-sources` instead of `cancel()`;
-  `cancel` and `pause` leave the tags, the slash commands and `run_command`; `APPROVE_DRAFT` leaves `approve`. The
-  composer's Stop cancels the agent turn and any search without a state change (D1). Approving the outline also
-  dispatches `START_DRAFTING`, as `submit-scope` already dispatches `START_RESEARCH`. Run offers get ids that are
-  never semantic names, `run-plan` (today `continue` and `resume`) and `retry-query` (today `retry`), also in
-  `RUN_COMMAND_DESCRIPTION`; semantic names resolve first, and only a name that is not semantic may match a live
-  offer. The phase pill and the Revisions plates never dispatch for the current phase. The fake backend stops
-  switching phases by itself. A new `ProductiveBookJourneyTest` drives `ResearchAgentSession.executeCommand` over the
-  productive resources with a fake runtime.
+  connector) and the `RUN_COMMAND_DESCRIPTION` of `ResearchBotSessionTools`, which `ResearchBotDirectoryTools` reuses,
+  keep only the commands that dispatch no state command: `run_command` refuses `submit-scope`, `approve`,
+  `request-changes`, `continue`, `retry`, `resume`, every reopen, the three finish commands and the `end` offer, and a
+  plain chat message in `scoping/new`, which would dispatch `START`. So from this PR on a connected bot dispatches no
+  state command, and PR 06 moves the rule into the actor policy (Q13). English labels in
+  `ResearchPlaybook.actionLabel`: "Approve concept & start search" (the `submit-scope` label moves there from
+  `availableActionTags`, and the `/submit-scope` description follows), "Finish sources", "Approve sources & continue
+  to Outline", "Finish outline", "Approve outline & start writing", "Finish document", "Approve final book", "Request
+  changes...", and `continue` per phase ("Start search", "Start writing"). `request-changes` takes an optional comment
+  at all three gates, from the slash arguments or from a one-line dialog on the tag (a bot cannot send it, Q13); PR 06
+  carries it in `ResearchCommand`. The `review` and `limit` run offers go, because `finish-sources` replaces them
+  (D1), and the `end` run offer dispatches `finish-sources` instead of `cancel()`; `cancel` and `pause` leave the
+  tags, the slash commands and `run_command`; `APPROVE_DRAFT` leaves `approve`. The composer's Stop cancels the agent
+  turn and any search without a state change (D1). Approving the outline also dispatches `START_DRAFTING`, as
+  `submit-scope` already dispatches `START_RESEARCH`. Run offers get ids that are never semantic names, `run-plan`
+  (today `continue` and `resume`) and `retry-query` (today `retry`), also in `RUN_COMMAND_DESCRIPTION`; semantic names
+  resolve first, and only a name that is not semantic may match a live offer. The phase pill and the Revisions plates
+  never dispatch for the current phase. The fake backend stops switching phases by itself. A new
+  `ProductiveBookJourneyTest` drives `ResearchAgentSession.executeCommand` over the productive resources with a fake
+  runtime.
 - Done when: the journey test reaches `draft/completed` with a first chat message, one concept card, then
   `submit-scope`, `finish-sources`, `approve`, `finish-outline`, `approve`, `finish-document`, `approve`; every new
   tag is offered exactly in the state where its command is allowed, and a slash command outside that state is refused
@@ -1077,9 +1079,10 @@ Document model that the sample chapters chose.
   leads to `research/waiting_approval`; no `review` or `accept-limitation` offer remains; `run_command` accepts
   `run-plan` and `retry-query`, refuses every command that dispatches a state command, the `end` offer and a plain
   chat message in `scoping/new` (Q13), and rejects `cancel` and `pause`; with a live `run-plan` offer in
-  `research/running`, `run_command run-plan` runs it and `run_command continue` is rejected with the valid names;
-  choosing the current phase in the pill changes nothing, and in `research/running` the pill offers no
-  `finish-sources`; at the Sources gate, "Request changes" with a comment returns to `research/running`.
+  `research/running`, `run_command run-plan` runs it, and the slash command `/continue` does not run the offer but is
+  rejected as not allowed in `research/running`, with the valid names; choosing the current phase in the pill changes
+  nothing, and in `research/running` the pill offers no `finish-sources`; at the Sources gate, "Request changes" with
+  a comment returns to `research/running`.
 
 **PR 06 Transition hook with actor and crash recovery; phase-change hygiene** (L, MVP)
 - Change: `ResearchCommand` carries an actor, the sending surface, a correlation id, the memento revision that the
@@ -1212,22 +1215,23 @@ Document model that the sample chapters chose.
   `ResearchPhaseToolbarContribution`, the scoping approval texts, the web search line and card and the thinking and
   problem texts of `ResearchAgentSession`, and the tag tooltip of `ScopingSupportView`. Agent texts that follow the
   session language are not UI text.
-- Done when: every legal user command of the current state (the `ResearchSemanticCommands` names that resolve now) is
-  reachable from the tab, and `PAUSE`, `BLOCK`, `FAIL` and `CANCEL` never appear; reopen needs a confirmation and Cancel
-  dispatches nothing; the timeline shows actor, surface and revision; the revision label equals the memento revision
-  after agent events; every label is English in a German session; a grep in the PR description finds no German
-  literal in the research plugin except parser keywords for German user input and agent texts that follow the session
-  language; the layout tests pass.
+- Done when: every legal user command of the current state (the `ResearchSemanticCommands` names that resolve now;
+  `continue` only after a refused chained start, D2) is reachable from the tab, and `PAUSE`, `BLOCK`, `FAIL` and
+  `CANCEL` never appear; reopen needs a confirmation and Cancel dispatches nothing; the timeline shows actor, surface
+  and revision; the revision label equals the memento revision after agent events; every label is English in a German
+  session; a grep in the PR description finds no German literal in the research plugin except parser keywords for
+  German user input and agent texts that follow the session language; the layout tests pass.
 
 **PR 11 Documentation in line with the code** (S, Plus)
 - Change: `docs/research-state-machine.md` describes the 4-phase graph and the new commands; ADR 0001 gets its role
   table and, in section 3.2, the amendment that `SlotBinding` and `ChatResult` carry model labels as text only; stale
   javadoc (`SUBMIT_SCOPE` leading to Outline, bot control "on by default", `outline_save` "legacy only");
   `docs/research-control-mcp.md` lists the tools that `ResearchToolPolicy` offers; `docs/research-bot-control.md` and
-  `docs/research-chatgpt-connector.md` list the semantic names that `run_command` accepts (only commands that dispatch
-  no state command), the run offer ids, that bots cannot change phases (D2), and that bot control is off by default;
-  `mvp-roadmap.md` points to this plan and marks AP 2 and AP 3 done. A new ADR records the book pipeline of this plan
-  (freeze, phase models, context rules) with the decisions of section 9 (Q22).
+  `docs/research-chatgpt-connector.md` list the commands that `run_command` accepts (only commands that dispatch no
+  state command, such as `search` and `generate-outline`, so no semantic name), the run offer ids, that bots cannot
+  change phases (D2), and that bot control is off by default; `mvp-roadmap.md` points to this plan and marks AP 2 and
+  AP 3 done. A new ADR records the book pipeline of this plan (freeze, phase models, context rules) with the decisions
+  of section 9 (Q22).
 - Done when: no document names a command or state the graph does not have; the documented tool list equals the policy
   for every phase and state; the documented `run_command` names equal the commands that the actor policy accepts from
   `BOT`; the new ADR links this plan and names the decisions of section 9.
@@ -1811,7 +1815,7 @@ that no PR carries yet say so.
     change cheaper, without a big-bang refactoring (PR 06 onwards).
 22. **Stop is not a phase command.** Today the composer's Stop pauses the phase when no search or review is in
     flight, and `paused` offers no Finish. Stop now ends what is running and leaves the phase in `running`; the user
-    commands `pause` and `cancel` go, and "End research" no longer cancels the phase (PR 05, 06).
+    commands `pause` and `cancel` go, and "End research" no longer cancels the phase (PR 05).
 23. **Phase 1 owns the record later phases build on.** Mission, deliverable, working language and the blacklist of
     that moment are frozen with the concept; blacklist entries added later filter only future searches (Q2). A
     greeting can no longer become the mission of every search, and a later language switch cannot change the book
@@ -1855,7 +1859,7 @@ that no PR carries yet say so.
 | A second native inference engine adds packaging and native-library risk | 4.1 rule 8: Ollama and the local runtime first; ONNX only behind the existing ports after a measured need, with the reference tests of section 2.5 |
 | A component is built a third time | Section 2.5 lists the reusable components with a decision each; ports keep their tests (PR 04, PR 38) |
 | Unattended search hits CAPTCHAs and slow sites; book-scale search time is unmeasured | The existing CAPTCHA wait; failed entries are marked and can be re-run; caps; a persisted, resumable plan; "Finish sources" at any time, because Stop never leaves `running`; measured at the M2 checkpoint |
-| BM25 accepts every hit with a score above 0 | Planned queries use the ranking that wins the retrieval benchmark and its top N (Q25), with BM25 only as the labelled fallback; the scope gate with a working blacklist, the readiness judge and the user's Sources gate |
+| BM25 accepts every hit with a score above 0 | Planned queries use the ranking that wins the retrieval benchmark and its top N (Q25), with BM25 as the labelled fallback while the chosen strategy is unavailable; the scope gate with a working blacklist, the readiness judge and the user's Sources gate |
 | The first message, even a greeting, becomes the mission and enters every base query | The Concept tab shows the mission as an editable row, `submit-scope` refuses an empty mission, and the Phase-1 record freezes it (PR 07) |
 | A connected bot or the ChatGPT connector approves a gate without the user | Every state command from `BOT` is refused (Q13); the transition journal names actor and surface (PR 06) |
 | Clustering is slow or memory-hungry on large corpora | PR 20: nearest-neighbour chain (O(n²) time and memory), progress, cancel and a corpus limit that keeps the best passages per source |
