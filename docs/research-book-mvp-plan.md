@@ -105,7 +105,7 @@ ranking of planned queries follow the retrieval benchmark of PR 04.
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q2 | Blacklist frozen with the concept, or editable in every phase? | Editable in every phase: later entries can be corrected and filter future searches only; the blacklist recorded with the concept stays frozen |
+| Q2 | Blacklist frozen with the concept, or editable in every phase? | Editable in every phase: later entries can be corrected and filter future searches only; accepted sources that match a later entry are listed but never removed by the entry itself; the blacklist recorded with the concept stays frozen |
 | Q4 | Start the search and the writing automatically after the user's approval, or wait for an extra "Start"? | Start automatically; Stop is always available and never changes the phase |
 | Q6 | Outline from concept chapters plus clustered sources, or purely from clusters? | Concept chapters plus clusters; pure clustering ignores the Phase-1 intent |
 | Q10 | Document model before the A/B: `llama3.1:8b` or `gemma4:e2b`? | `llama3.1:8b` where it is installed, until the writer A/B of PR 31 decides |
@@ -419,7 +419,19 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   Phase-1 record; outline generation and evidence packs keep using the blacklist recorded at `SUBMIT_SCOPE`, and
   changing that record needs Concept reopened. An entry that equals a frozen concept card is refused with the hint to
   reopen Concept; any other conflict with a concept node is reported and never resolved by changing the concept. The
-  agent's `blacklist_add` only adds.
+  agent's `blacklist_add` only adds. A source counts as hit by a blacklist when the term and domain filter of PR 12
+  matches one of its typed entries on the source's title, URL or stored search excerpt; an entry the agent adds with
+  `exclude_topic` or `blacklist_add` is a facet: only the semantic gate applies it, to future searches, and it is
+  never matched against accepted sources. A later entry never removes an accepted source by itself: matching sources
+  stay accepted and in the evidence packs, and the sources pin is never changed. Adding or editing a typed entry says
+  how many accepted sources it matches and lists them (PR 12); the user can exclude them, which for an approved source
+  needs Sources reopened (PR 14), and the next `APPROVE_EVIDENCE` appends a sources pin without them. The recorded
+  blacklist does keep sources out of outline generation and the evidence packs in two cases, and both are shown: a
+  source accepted while a recorded entry that hits it is switched off is marked and stays out until Concept is
+  reopened and the entry removed, because that entry belongs to the approved concept; and at the next `SUBMIT_SCOPE`
+  the blacklist of that moment becomes the record, and when it hits accepted sources that the previous record did not,
+  `submit-scope` asks for confirmation and names them. Excluding future hits and removing sources already taken are
+  therefore separate, visible steps.
 - The research brief stops being a Phase-1 result: concept and mission are (roadmap AP 10).
 
 ### D5. Phase 2 is a deterministic plan from the frozen concept, run through the one funnel
@@ -683,7 +695,7 @@ semantic commands and the actor rule of D2.
 | Page readiness judge | gemma4:e2b | 32,768 | system 150; page excerpt 2,000 | 24 (in code) | none | about 3,200 |
 | SERP layout repair | gemma4:e2b | 32,768 | system 300; SERP digest 4,000 | 2,000 (existing browser setting `aiLayoutResolver.maximumOutputTokens`) | none | about 7,400 |
 | Cluster and section label | gemma4:e2b | 32,768 | system 250; concept path 150; 3 passages x 250; language. Cap about 1,200 | 160 | none | about 2,400 |
-| Chapter briefs, regenerate one chapter | gemma4:e2b | 32,768 | system 450; book synopsis 300; chapter 100; sections by local index 200; 6 passages x 250; blacklist 100; comment 300. Cap about 3,000 | 150 per section plus 100 (700 for four sections); a chapter with more than six sections is briefed in two calls | none; other chapters stay in the store | about 5,100 |
+| Chapter briefs, regenerate one chapter | gemma4:e2b | 32,768 | system 450; book synopsis 300; chapter 100; sections by local index 200; 6 passages x 250; blacklist 100 (the recorded one, D4); comment 300. Cap about 3,000 | 150 per section plus 100 (700 for four sections); a chapter with more than six sections is briefed in two calls | none; other chapters stay in the store | about 5,100 |
 | Outline chat turn | gemma4:e2b | 32,768 | profile 800; date and language 230; concept summary 1,200; outline (ids and titles) 2,000; coverage per chapter 400; change request 300; summaries of other phases up to 1,800; window 3,000; user 1,000. Cap about 10,700 | 1,536 | Own phase; other phases as summaries | about 9,900 |
 | Section writer | llama3.1:8b | 16,384 | rules 550; synopsis 300; chapter and section brief 400; neighbour titles 60; previous-section digest 300; glossary 200; evidence 8 x 300. Cap about 4,300 | 3,072 (up to 1,100 words) | none | about 11,500 with its continuation |
 | Section writer, small preset | gemma4:e2b | 32,768 | the same blocks with evidence 6 x 250. Cap about 3,400 | 1,200 (up to 450 words) | none | about 6,900 with its continuation |
@@ -1218,19 +1230,27 @@ and document; kill the app once during an approval and once in `research/waiting
   without the semantic gate; facets from the conversation stay with the semantic gate (roadmap AP 6, section 10). The
   sky is shown in every phase and follows the blacklist rule of D4 (Q2): after `SUBMIT_SCOPE`, later entries can be
   added, edited, switched off and removed, and a recorded entry can be switched off for future searches; the Phase-1
-  record never changes. Setup (`SetupWizardPanel`, `AskAiSetupActions`) lists the embedding model as required ("needed
-  for Sources filtering and the Outline"), with the preset that PR 04 chose; installing uses the existing installer
-  (the wizard's "Download model" and Models -> Setup), with no new pull code. A `beforeApply` check on `SUBMIT_SCOPE`
-  refuses with "Sources need an embedding model. Open Models -> Setup." while none is ready, and "Check again"
-  re-resolves it without a new chat. Without one, the outline drawer and the exclusion warning name the concrete
-  reason. New strings are English.
+  record never changes. Adding or editing a typed entry runs the same term and domain filter over the accepted sources
+  (title, URL and, where present, the stored search excerpt; a source accepted without a park has none), reports how
+  many it matches and lists them in the Sources view; it excludes none of them by itself (D4). In Concept the list
+  adds that these sources leave outline generation and the evidence packs once the entry is recorded; when the new
+  record hits accepted sources that the previous one did not, `submit-scope` asks for confirmation and names them, and
+  Cancel dispatches nothing; switching off a recorded entry says that sources it then lets through stay out of both
+  until Concept is reopened, and such a source carries a mark once accepted (D4). Setup (`SetupWizardPanel`,
+  `AskAiSetupActions`) lists the embedding model as required ("needed for Sources filtering and the Outline"), with
+  the preset that PR 04 chose; installing uses the existing installer (the wizard's "Download model" and Models ->
+  Setup), with no new pull code. A `beforeApply` check on `SUBMIT_SCOPE` refuses with "Sources need an embedding
+  model. Open Models -> Setup." while none is ready, and "Check again" re-resolves it without a new chat. Without one,
+  the outline drawer and the exclusion warning name the concrete reason. New strings are English.
 - Done when: a candidate matching a typed term is rejected in the SERP, page and link lanes
   (`SearchScopeControlFunnelTest`); a typed host name never reaches the visit stage; an excluded facet without a typed
   term is filtered only by the semantic gate; no search runs unfiltered without saying so; in Sources an added entry
   rejects matching hits in the next query, switching it off lets them through again, and the Phase-1 record stays
-  unchanged; without an embedding model `submit-scope` is refused with the setup hint, and after installing it
-  succeeds in the same chat; `ProductiveBookJourneyTest` provides a ready fake embedding model and still reaches
-  `draft/completed`.
+  unchanged; an entry that matches two accepted sources reports and lists both and excludes neither; a re-submit whose
+  record newly hits an accepted source asks for confirmation, names that source and dispatches nothing on Cancel; a
+  source accepted while a recorded entry that hits it is switched off carries the mark; without an embedding model
+  `submit-scope` is refused with the setup hint, and after installing it succeeds in the same chat;
+  `ProductiveBookJourneyTest` provides a ready fake embedding model and still reaches `draft/completed`.
 
 **PR 13 Concept query planner** (M, MVP)
 - Change: prompt, schema and reader of `SearchPlannerWorker` move into a `QueryPlanner`, which the worker delegates to.
@@ -1282,8 +1302,9 @@ and document; kill the app once during an approval and once in `research/waiting
     `FileResearchSourceRepository` refuses to change the full text or the checksum of a source once they are set (D4);
     only a parked candidate receives its text once. A source of the approved set can be excluded or downgraded only in
     `research/running`; elsewhere the Sources view and the tools refuse with "Reopen Sources to remove an approved
-    source." Sources found later carry their phase tag and can be excluded in the phase that found them. New strings
-    are English.
+    source." After the approval, an approved source that a later typed entry matches (PR 12) carries that same hint in
+    the Sources view, and once Sources is reopened (`research/running`) it offers Exclude instead. Sources found later
+    carry their phase tag and can be excluded in the phase that found them. New strings are English.
 - Done when: after `submit-scope` the plan lists only nodes of the approved revision and no blacklisted node; queries
   run one after another and two acquisitions never overlap; while the plan runs, the composer stays available and a
   typed line or `research:` starts no second acquisition, and "Stop search plan" stops the queue; the caps hold;
@@ -1295,9 +1316,11 @@ and document; kill the app once during an approval and once in `research/waiting
   reopen during a query cancels it; the approved set equals the sources accepted at that moment, with their checksums,
   and can be read after a restart; overwriting the text of an accepted source is refused, and a changed page becomes a
   new source; after approval, excluding an approved source in `outline/running` is refused, and excluding a source
-  found in Outline works; reopen Concept, rename one leaf node, submit: only that node's entries run, and done entries
-  of unchanged nodes are not searched again; when embedding similarity takes part in the ranking, the recording
-  embedding port of PR 04 shows the planned query embedded as a query and title and snippet as documents;
+  found in Outline works; a blacklist entry added after the approval that matches an approved source changes neither
+  the approved set nor the sources pin, and the Sources view marks that source with "Reopen Sources to remove an
+  approved source."; reopen Concept, rename one leaf node, submit: only that node's entries run, and done entries of
+  unchanged nodes are not searched again; when embedding similarity takes part in the ranking, the recording embedding
+  port of PR 04 shows the planned query embedded as a query and title and snippet as documents;
   `ResearchSettingsFitTest` stays green.
 
 **PR 15 Sources chat is a conversation; dead `SCOPE_PROPOSAL` path removed** (M, MVP)
@@ -1309,9 +1332,9 @@ and document; kill the app once during an approval and once in `research/waiting
   offers drive the plan queue. The runtime's prompt routing drops `|| hostIsInResearchRunning()`, so a typed line in
   `research/running` reaches the Sources assistant. Its block (plan, coverage, the latest change request) joins the
   seam of PR 16, and its action union holds `request_research` (adds plan entries) and `blacklist_add` on the add-only
-  path of PR 07. `research:` outside `research/running` is refused before any browser call, with a pointer to
-  `/search`. `ContributionToolInvoker` maps "Unknown tool" after a phase change to a state-changed result. The
-  orchestrated-mode checkbox is hidden (Q5).
+  path of PR 07; its entries are facets for the semantic gate, like those of `exclude_topic` (D4). `research:` outside
+  `research/running` is refused before any browser call, with a pointer to `/search`. `ContributionToolInvoker` maps
+  "Unknown tool" after a phase change to a state-changed result. The orchestrated-mode checkbox is hidden (Q5).
 - Done when: grep finds no `SCOPE_PROPOSAL` or `scopeProposal` in main code, and the plugin's `ResearchAgentSession`
   has no `researchQuestion`; a typed line in `research/running` gets an answer and starts no acquisition; "search for
   X" adds a plan entry; `research: x` in `outline/running` is refused without a browser call.
@@ -1358,8 +1381,10 @@ and document; kill the app once during an approval and once in `research/waiting
 
 **PR 19 "Block this site" and blacklist flags in later phases** (S, Plus)
 - Change: "Block this site" on search hits and in the Sources view adds a host-name entry (PR 12). Blacklist hits are
-  counted in the coverage report. The Outline and Document views flag chapters and sources that an entry added after
-  `SUBMIT_SCOPE` would hit; the user removes them by reopening.
+  counted in the coverage report. The Outline and Document views (the Sources view has the list of PR 12 and the hint
+  of PR 14) flag chapters and sources that an entry added after `SUBMIT_SCOPE` would hit and change none of them: an
+  approved source is removed by reopening Sources (PR 14), a source found later by excluding it in the phase that
+  found it, and a chapter in the Outline editor (from Document after reopening Outline).
 - Done when: a blocked domain never reaches the visit stage; the approved concept revision is unchanged; a later entry
   that matches a chapter flags it without changing the outline; blacklist hits appear in the coverage report.
 
@@ -1411,12 +1436,12 @@ English sources found and the open live checks of roadmap AP 5.
   first-level concept nodes of the Phase-1 record in concept order; sections from second-level nodes or sub-clusters
   (titled "<chapter title>, part n" and flagged untitled); nodes below the second level become key points of their
   section's default brief, and passages assigned to them count for that section; passages from the approved source set
-  plus sources accepted later, minus excluded sources, with the blacklist recorded at `SUBMIT_SCOPE`. Every passage
-  goes to the nearest node of the approved concept revision, by cosine against outline anchors whose text is the
-  node's full label path (book title, parent labels, label), embedded as queries against the stored passage vectors
-  (PR 04); the scope fence anchors stay as they are. A passage is assigned only above a threshold and with a margin
-  over the second-best node; both are calibrated on the corpus of the M2 checkpoint and recorded in the PR, and
-  `topicAssignmentThreshold` is not reused. Leftover clusters that meet `minimumPassagesPerTopic` and
+  plus sources accepted later, minus excluded sources and sources hit by the blacklist recorded at `SUBMIT_SCOPE`
+  (D4). Every passage goes to the nearest node of the approved concept revision, by cosine against outline anchors
+  whose text is the node's full label path (book title, parent labels, label), embedded as queries against the stored
+  passage vectors (PR 04); the scope fence anchors stay as they are. A passage is assigned only above a threshold and
+  with a margin over the second-best node; both are calibrated on the corpus of the M2 checkpoint and recorded in the
+  PR, and `topicAssignmentThreshold` is not reused. Leftover clusters that meet `minimumPassagesPerTopic` and
   `minimumDistinctSourcesPerTopic` are listed as candidates. Each section gets a default brief: purpose from the
   node's label path and the mission, key points from the best passages, and a word target from the deliverable's
   target length (a page counts as 300 words, provisional), spread over the sections and weighted by their number of
@@ -1430,8 +1455,9 @@ English sources found and the open live checks of roadmap AP 5.
 - Done when: the same input gives a byte-identical outline in concept order; no model is called; a renamed section
   keeps its title after regeneration; thin sections are flagged; a third-level node appears as a key point of its
   section's default brief; candidates are listed, not inserted; the anchors come from the approved revision; an
-  excluded source contributes no passage; `finish-outline` during a generation is refused; the recording embedding
-  port of PR 04 shows the label paths embedded as queries and no passage embedded again.
+  excluded source contributes no passage, while a source that matches only an entry added after `SUBMIT_SCOPE` still
+  does; `finish-outline` during a generation is refused; the recording embedding port of PR 04 shows the label paths
+  embedded as queries and no passage embedded again.
 
 **PR 23 Outline tab and editor** (M, MVP)
 - Change: an Outline tab between Sources and Document. A tree editor with rename, add, delete, move, indent and
@@ -1445,14 +1471,15 @@ English sources found and the open live checks of roadmap AP 5.
   the tab is read-only after `finish-outline`.
 
 **PR 24 Chapter labels, briefs and single-chapter regeneration** (M, MVP)
-- Change: an `OutlineBriefWorker` on `phase.outline.labels` and `phase.outline.briefs` (thinking off). A label call per
-  candidate cluster and per untitled section returns title and summary; a brief call per chapter addresses its
+- Change: an `OutlineBriefWorker` on `phase.outline.labels` and `phase.outline.briefs` (thinking off). A label call
+  per candidate cluster and per untitled section returns title and summary; a brief call per chapter addresses its
   sections by local index and returns purpose and three to five key points (150 answer tokens per section plus 100; a
-  chapter with more than six sections is briefed in two calls). Code checks that every index occurs once; one repair
-  with an error list; otherwise the default brief stays, and the chapter shows "Brief not generated" with a retry.
-  "Regenerate chapter" takes an optional comment and, for a chapter built from sub-clusters, a number of sections (2 to
-  6): code re-clusters that chapter's passages into that many sections, the comment steers labels and briefs, and the
-  chapter keeps its id. Splits and merges of sections that come from concept nodes are made in the editor (PR 23).
+  chapter with more than six sections is briefed in two calls). Label and brief calls get the blacklist recorded at
+  `SUBMIT_SCOPE`, never later entries (D4). Code checks that every index occurs once; one repair with an error list;
+  otherwise the default brief stays, and the chapter shows "Brief not generated" with a retry. "Regenerate chapter"
+  takes an optional comment and, for a chapter built from sub-clusters, a number of sections (2 to 6): code
+  re-clusters that chapter's passages into that many sections, the comment steers labels and briefs, and the chapter
+  keeps its id. Splits and merges of sections that come from concept nodes are made in the editor (PR 23).
   `ResearchToolPolicy` offers the same operation as `outline_regenerate_chapter` in `outline/running`. "Add suggested
   chapter" in the Outline tab adopts a labelled candidate cluster. `finish-outline` is refused while a regeneration
   runs.
@@ -1506,9 +1533,11 @@ regenerate one chapter.
   the writer settings (presets 8 x 300 or 6 x 250), numbered locally `[1]..[k]`, one number per passage, inside a
   quoted data block (4.1 rule 7); plus book synopsis, previous-section digest, glossary (the labels of the approved
   concept) and the book language from the Phase-1 record.
-- Done when: the same store state gives an identical pack; the pack fits the budget of each writer preset; every local
-  number maps to one passage of an accepted source and carries that source's checksum and the passage text as cut for
-  the pack; the recording embedding port of PR 04 shows the brief embedded as a query and no passage embedded again.
+- Done when: the same store state gives an identical pack; the pack fits the budget of each writer preset; a source
+  hit by the recorded blacklist contributes nothing, while one that matches only an entry added after `SUBMIT_SCOPE`
+  still does; every local number maps to one passage of an accepted source and carries that source's checksum and the
+  passage text as cut for the pack; the recording embedding port of PR 04 shows the brief embedded as a query and no
+  passage embedded again.
 
 **PR 28 Section writer with checked citations** (M, MVP)
 - Change: a `SectionWriter` on `phase.draft.writer` with the rules of D8: use only the numbered passages, cite `[n]`
@@ -1832,7 +1861,7 @@ and Q13 should be decided first**, because the earliest PRs depend on them.
 | # | Question | Recommendation |
 |---|---|---|
 | Q1 | Phase names in the UI: keep Concept, Sources, Outline, Document? | Keep them; they match the tabs and artifacts. The state ids stay unchanged either way |
-| **Q2** | Is the blacklist frozen with the concept, or editable in every phase? | Editable in every phase. Entries added after `SUBMIT_SCOPE` can be added, edited, switched off or removed, and an entry of the recorded blacklist can be switched off for future searches; these changes filter future searches only. The blacklist recorded at `SUBMIT_SCOPE` stays part of the Phase-1 record, which outline generation and evidence packs use; changing it needs Concept reopened |
+| **Q2** | Is the blacklist frozen with the concept, or editable in every phase? | Editable in every phase. Entries added after `SUBMIT_SCOPE` can be added, edited, switched off or removed, and an entry of the recorded blacklist can be switched off for future searches; these changes filter future searches only. The blacklist recorded at `SUBMIT_SCOPE` stays part of the Phase-1 record, which outline generation and evidence packs use; changing it needs Concept reopened. Accepted sources that match a later entry stay accepted and in the evidence packs until the user excludes them, which for an approved source needs Sources reopened (Q3, PR 14); adding or editing a typed entry says how many accepted sources match and lists them (PR 12). Where the recorded blacklist does keep accepted sources out of outline and evidence packs, the user sees which: a new `SUBMIT_SCOPE` asks for confirmation and names them, and a source accepted while a recorded entry that hits it was switched off is marked (D4) |
 | Q3 | May later phases add sources (manual search, gap research)? | Yes, additively and tagged with the phase. `APPROVE_EVIDENCE` records the approved source set; removing or downgrading one of those sources needs Sources reopened, while a source found later can be excluded in the phase that found it |
 | **Q4** | Start the search right after `submit-scope` and the writing right after the outline approval, or wait for an extra "Start"? | Start automatically: the approval is the user's decision. The plan is visible as a checklist; Stop is always available and never changes the phase, so Finish stays available |
 | Q5 | Phase-2 engine: the deterministic queue or the opt-in orchestrated mode? | The queue. Hide the orchestrated mode now (PR 15) and delete it after the owner confirms (PR 37); `FileResearchTaskStore` stays for the plan and the writing job |
