@@ -243,10 +243,10 @@ ported back.
 |---|---|---|---|
 | SentencePiece and XLM-R support | `win-directml-java`, `docs/concept-sentencepiece-xlmr.md` (issue 33) | Designed, not built: tokenizer, XLM-R embedding rules and weight loader for multilingual E5, `bge-m3` and `bge-reranker-v2-m3`, with parity tests against the reference implementation; estimated at about 8 to 9 person-days | The route to a multilingual cross-encoder and to the entailment model of D8 stage 2, built in `win-directml-java` and adopted through AskAI's local model catalog; started only if the retrieval benchmark shows the need (PR 04, 5.4 item 8) |
 | In-process ONNX embedding provider | Space Harvester, `OnnxEmbeddingProvider` at commit `2b78493` (ADR 0004); removed later in favour of an external embedding service (ADR 0011) | `intfloat/multilingual-e5-small` through ONNX Runtime and the Hugging Face tokenizer: query and passage prefixes, mean pooling with L2 norm, SHA-256-checked model files, a concurrency limit, and a reference test against the PyTorch implementation for German, English and overlong texts (cosine above 0.9999) | Not adopted now (4.1 rule 8). A fallback adapter behind `EmbeddingPort` if neither Ollama nor the local runtime can run a model the benchmark needs; its reference-test pattern is reused for any new embedding path |
-| Query role of the embedding port | enterprise AI client, `EmbeddingPort.embedQueries` | Queries and documents are embedded by separate calls, so models with query and passage prompts get them | Ported in PR 04: AskAI's port gets the same role, and its adapter adds each model's documented prompts |
+| Query role of the embedding port | enterprise AI client, `EmbeddingPort.embedQueries` | Queries and documents are embedded by separate calls, so models with query and passage prompts get them | Ported in PR 04: AskAI's port gets the same role, every call site states its role, and its adapter adds each model's documented prompts |
 | Reciprocal rank fusion | enterprise AI client, `ReciprocalRankFusion` in `RetrieveKnowledgeUseCase` | Fuses the BM25 and the cosine ranking by rank, not by score; if one path fails, the other's result stands with a warning | Ported in PR 04 as a fourth ranking strategy of the benchmark |
 | Remote rerank and embedding adapters | Space Harvester `KipitzRerankAdapter`; enterprise AI client `OpenAiCompatibleEmbeddingAdapter` | Cross-encoder and embeddings through external HTTP services | Not needed: AskAI ranks through the local runtime's `/api/rerank` and embeds through Ollama or the local runtime |
-| Acronyms and long forms | enterprise AI client, `AcronymExtractor` with `LongFormMatcher`, `AcronymForms`, `TermScanner` and `DocumentAcronymsUseCase`; Space Harvester keeps a copy and derives versioned facts from its findings, including conflicting long forms (`EnrichmentFacts`) | Rules only, no model: acronyms such as `IAR`, `GmbH` or `U.S.A.`, technical identifiers such as `MAX_SIZE` kept apart, long forms aligned letter by letter inside one sentence, code, addresses and lines in capitals left out; the findings carry extractor id and version | Ported in PR 38 for the abbreviation list, the long forms in the writer's glossary block and the conflicts in the quality report; the versioned findings follow the Space Harvester idea |
+| Acronyms and long forms | enterprise AI client, `AcronymExtractor` with `LongFormMatcher`, `AcronymForms`, `TermScanner` and `DocumentAcronymsUseCase`; Space Harvester keeps a copy and derives versioned facts from its findings, including conflicting long forms (`EnrichmentFacts`) | Rules only, no model: acronyms such as `IAR`, `GmbH` or `U.S.A.`, technical identifiers such as `MAX_SIZE` kept apart, long forms aligned letter by letter inside one sentence, code, addresses and lines in capitals left out; the findings carry extractor id and version | Ported in PR 38 for the abbreviation list, the long forms in the writer's glossary block and the conflicts in the quality report; the versioned findings follow the Space Harvester idea and point into the source text by character span (`TextSpan`, as in `AcronymDefinition`), never at a passage id |
 | Statement extraction | enterprise AI client, `DocumentStatementsUseCase`, `ChatStatementExtractor`, `StatementValidator`; the same in Space Harvester's `enrichment/statements` | A chat model proposes mentions, events and relations per paragraph; Java keeps only candidates anchored in their sentence and leaves pronouns unresolved. The anchor is checked, not the truth | After the first book, as the base for passage-level statements in D8 stage 2 and for contradiction candidates; it costs one model call per paragraph of every source |
 | Rule-based German language processors | Space Harvester `enrichment/language` (`TermProcessor`, `EntityProcessor`, `PropertyProcessor`, `ActivityProcessor`, `RelationProcessor`) | Terms, entities, properties, activities and relations such as `is_a` and `part_of` from German sentences, without a model | Later, as input to the book ledger (section 7, proposal 27) |
 | German dependency parsing | Space Harvester `nlp-parser` (OpenNLP and MaltParser 1.9.2 with a pinned German model under CC BY-SA 4.0) | Universal Dependencies parses; a stand-alone module, not part of Space Harvester's productive processing | Optional, only after a measured gain; not part of the MVP |
@@ -550,8 +550,10 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   contradicts the sentence; stage 1 passes a sentence that turns a decrease into an increase as long as the numbers
   match. A relevance cross-encoder cannot do this, and a multilingual entailment model needs the runtime path that PR
   04 estimates. Until then the book says that support was checked for numbers and quotes only.
-- Every citation is stored as source id, source checksum, passage id and a hash of the passage text, so it stays
-  checkable against the write-once source text, also after a re-embedding renames the passages (PR 20).
+- Every citation is stored as source id, source checksum, the cited text exactly as the writer saw it with its hash,
+  and the passage id only as a derived link. A re-embedding renames every passage and, in the default semantic
+  boundary mode of `PassageSegmentation`, can move passage boundaries (PR 20); the stored text stays checkable against
+  the write-once source text either way.
 - Word target per call and evidence pack size are writer settings of the Document row (section 5.1). The host presets
   them by model: about 1,100 words and 8 passages of 300 tokens for `llama3.1:8b` and `gpt-oss:20b`, about 450 words
   and 6 x 250 for `gemma4:e2b` and every other model. The writer's answer budget follows the word target (about 2.3
@@ -566,11 +568,11 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   of uncited sentences and paragraphs; unsupported numbers and quotes; open gaps; concept nodes left uncovered at the
   Sources approval; sources accepted after it; near-copies (twelve or more consecutive words of a cited passage
   without quotation marks); repeated passages across sections (word-shingle overlap); glossary terms the book never
-  uses; acronyms without a long form in the sources or with conflicting long forms (PR 38); words written against the
-  target. The book is "complete" when no section is missing, skipped or stale, every paragraph cites a passage, and no
-  unsupported number or quote, near-copy or open gap remains; otherwise it is an "incomplete draft" with the counts.
-  The `finish-document` confirmation and the Document gate show the report, the user may approve either way (Q27), and
-  the front matter prints the status.
+  uses; acronyms without a long form in the sources or with conflicting long forms, and chapters whose first use of an
+  acronym lacks its long form (PR 30, PR 38); words written against the target. The book is "complete" when no section
+  is missing, skipped or stale, every paragraph cites a passage, and no unsupported number or quote, near-copy or open
+  gap remains; otherwise it is an "incomplete draft" with the counts. The `finish-document` confirmation and the
+  Document gate show the report, the user may approve either way (Q27), and the front matter prints the status.
 - MVP revision: "Rewrite section" and "Rewrite chapter" with an optional comment, one key-point part per call. Final
   review uses the existing gate: `finish-document` makes the manuscript read-only, "Request changes" returns to
   `running` with the comment, which can open "Rewrite section" for the sections the user picks, and `approve` completes
@@ -901,10 +903,10 @@ about 1,000, L more. "Done when" lists the acceptance criteria the reviewer chec
 | 27 | Evidence packs per section | M4 | 01, 02, 22, 26 | M | MVP |
 | 28 | Section writer with checked citations | M4 | 03, 08, 27 | M | MVP |
 | 29 | Writing job; rewrite a section or a chapter with a comment; one-click gap search | M4 | 06, 14, 16, 26, 28 | L | MVP |
-| 30 | Book assembler, citations, quality report and Markdown export | M4 | 26, 28 | L | MVP |
-| 31 | Writer A/B with a sample chapter and the Document default | M4 | 04, 08, 28, 29 | M | MVP |
+| 30 | Book assembler, citations, quality report and Markdown export | M4 | 26, 28, 38 | L | MVP |
+| 31 | Writer A/B with a sample chapter and the Document default | M4 | 04, 08, 28, 29, 38 | M | MVP |
 | 32 | First-book acceptance run and report | M4 | every MVP PR | M | MVP |
-| 38 | Abbreviations and long forms from the sources | M4 | 14, 27, 30 | M | MVP |
+| 38 | Abbreviations and long forms from the sources | M4 | 14, 27 | M | MVP |
 | 33 | Revise a marked passage with a comment | M5 | 29, 30 | L | Rule |
 | 34 | Gap research from Outline and Document | M5 | 14, 15, 29 | M | Rule |
 | 35 | Store robustness | M5 | 02 | M | Plus |
@@ -912,8 +914,9 @@ about 1,000, L more. "Done when" lists the acceptance criteria the reviewer chec
 | 37 | Legacy cleanup | M5 | 15, 29 | M | Plus |
 
 **Order.** The longest chain has eleven PRs: 05 -> 06 -> 07 -> 12 -> 14 -> 22 -> 27 -> 28 -> 29 -> 31 -> 32; PR 04,
-08, 13, 16, 20, 21 and 26 join on the way, and 28 -> 30 -> 38 -> 32 is a second branch of the same length. PR 38 was
-added after the check of reusable work in section 2.5 and keeps its number, so the other numbers stay stable. M0, the
+08, 13, 16, 20, 21 and 26 join on the way. PR 38 branches off after PR 27 and comes before PR 30 and PR 31, so the
+assembler renders its abbreviation list and the writer A/B writes with the glossary block of the book; it was added
+after the check of reusable work in section 2.5 and keeps its number, so the other numbers stay stable. M0, the
 context PRs 16 and 17 and the outline editor run beside the chain. PR 05 goes first: `ResearchAgentSession` (5,260
 lines) is a merge hotspot, and the other PRs rebase on it. PR 04 runs early: its retrieval benchmark picks the
 embedding preset and the ranking of planned queries before PR 12, 14 and 20 build on them, and its Phase-1 live gate
@@ -995,21 +998,31 @@ Document model that the sample chapters chose.
   rendered; the Phase-1 live gate N = 10, which also records the four open checks of roadmap AP 1; the retrieval
   benchmark with its three query groups, the multilingual cross-encoder probe and the truncation check (section 5.4,
   items 7 to 9). Before the benchmark, `EmbeddingPort` gets a query role (`embedQueries`, as in the enterprise AI
-  client, whose port came from this one), and `HttpEmbeddingPortAdapter` adds the query and document prompts that the
-  model card of each supported model names: as text for Ollama models, through `input_type` for the local runtime's E5
-  models. The prompt scheme becomes part of the embedding fingerprint, so projects embedded before it are re-embedded
-  (PR 20). `ReciprocalRankFusion` is ported with its test as a ranking strategy (section 2.5). The benchmark runs
-  through these productive paths. The results go to `docs/ollama-model-budget-measurements.md` with the Ollama version
-  and server settings and without machine paths. A one-line follow-up sets the embedding preset in `SetupActions` and
-  the ranking of planned queries by the rules of section 5.4. The PR is MVP because PR 12, PR 14 and PR 20 build on
-  these two choices: retrieval quality is measured before the book generation is built.
+  client, whose port came from this one; `embed` becomes `embedDocuments`, so no call site keeps an implicit role),
+  and `HttpEmbeddingPortAdapter` adds the query and document prompts that the model card of each supported model
+  names: as text for Ollama models, through `input_type` for the local runtime's E5 models. The prompt scheme becomes
+  part of the embedding fingerprint, so projects embedded before it are re-embedded (PR 20). Every call site gets its
+  role in this PR, and later PRs keep it: passages and the sentence windows that place passage boundaries are
+  documents; a search query that embedding similarity ranks against results (PR 14), a concept node's label path for
+  the outline assignment (PR 22) and a section brief for the evidence search (PR 27) are queries; clustering compares
+  stored passage vectors, so both sides are documents and nothing is embedded twice. The scope fence stays raw: its
+  anchors, `scope_probe` terms, sweep probes and the candidate texts of `SearchScopeGate` are compared only with each
+  other, its thresholds were calibrated on raw vectors, and its fingerprint names the raw scheme; roles for it would
+  need a new calibration and a new Phase-1 baseline. A recording embedding port in the test fixtures logs role and
+  text per call; this PR checks the productive source processing path with it, and PR 14, 22 and 27 check theirs.
+  `ReciprocalRankFusion` is ported with its test as a ranking strategy (section 2.5). The benchmark runs through these
+  productive paths. The results go to `docs/ollama-model-budget-measurements.md` with the Ollama version and server
+  settings and without machine paths. A one-line follow-up sets the embedding preset in `SetupActions` and the ranking
+  of planned queries by the rules of section 5.4. The PR is MVP because PR 12, PR 14 and PR 20 build on these two
+  choices: retrieval quality is measured before the book generation is built.
 - Done when: the normal test run stays model-free; the report answers every question of section 5.4 and has a row for
   every default of sections 4.1, 4.2 and 5.2; the retrieval part gives Recall@5, Recall@10 and the mean reciprocal
   rank per group and candidate, and the hit rate per ranking strategy; a request golden shows `search_query: ` before
-  a `nomic-embed-text` query and `search_document: ` before a passage; a model without a known prompt scheme is
-  embedded raw and the report says so; a changed prompt scheme changes the fingerprint; the ported fusion test passes;
-  a default that lands before the report stays marked provisional until a one-line follow-up adopts the measured
-  value.
+  a `nomic-embed-text` query and `search_document: ` before a passage; the recording embedding port shows passages and
+  the sentence windows of the passage boundaries embedded as documents and the scope fence's texts embedded raw; a
+  model without a known prompt scheme is embedded raw and the report says so; a changed prompt scheme changes the
+  fingerprint; the ported fusion test passes; a default that lands before the report stays marked provisional until a
+  one-line follow-up adopts the measured value.
 
 ### 6.3 M1 Walking skeleton
 
@@ -1253,11 +1266,12 @@ and document; kill the app once during an approval and once in `research/waiting
   - Wire: the manual search request and its service command (`ResearchServiceCommandWire` in both modules) get the
     ranking choice, the visit limit and the per-query source cap. Planned queries use the ranking fixed after PR 04
     and visit the top N; when it is unavailable, that query is ranked by BM25 and its entry says so (D5). If PR 04
-    picked embedding similarity, a `CandidateReranker` over the embedding port joins `SearchResultReranker` and
-    `Bm25CandidateReranker`. The "Use AI reranker" setting applies to typed searches only, and its label says so
-    (Q25). There is no separate provider integration: the queue uses the manual search path and the provider of the
-    Search tab. The host tags each accepted source with the phase and plan entry of its request, through the
-    `search_request_id` that `ManualSourceAcceptancePort` already sends, and `ResearchSourceRecord` stores both.
+    picked embedding similarity or its fusion with BM25, a `CandidateReranker` over the embedding port joins
+    `SearchResultReranker` and `Bm25CandidateReranker`; it embeds the planned query as a query and title and snippet
+    as documents. The "Use AI reranker" setting applies to typed searches only, and its label says so (Q25). There is
+    no separate provider integration: the queue uses the manual search path and the provider of the Search tab. The
+    host tags each accepted source with the phase and plan entry of its request, through the `search_request_id` that
+    `ManualSourceAcceptancePort` already sends, and `ResearchSourceRecord` stores both.
   - Coverage and caps: coverage per node (covered, exhausted or open) and caps per query, node and phase (D5); new
     rows in the Search settings tab ("Sources per node", "Queries per node", "Sources for the Sources phase") through
     `ComicForm.fit`. At the end one outcome names uncovered nodes and offers `finish-sources`; the state stays
@@ -1282,7 +1296,9 @@ and document; kill the app once during an approval and once in `research/waiting
   and can be read after a restart; overwriting the text of an accepted source is refused, and a changed page becomes a
   new source; after approval, excluding an approved source in `outline/running` is refused, and excluding a source
   found in Outline works; reopen Concept, rename one leaf node, submit: only that node's entries run, and done entries
-  of unchanged nodes are not searched again; `ResearchSettingsFitTest` stays green.
+  of unchanged nodes are not searched again; when embedding similarity takes part in the ranking, the recording
+  embedding port of PR 04 shows the planned query embedded as a query and title and snippet as documents;
+  `ResearchSettingsFitTest` stays green.
 
 **PR 15 Sources chat is a conversation; dead `SCOPE_PROPOSAL` path removed** (M, MVP)
 - Change: the runtime's `scopeProposal` wire, the `SCOPE_PROPOSAL` event type and its mapping are deleted. In the
@@ -1360,8 +1376,9 @@ English sources found and the open live checks of roadmap AP 5.
   limit (a setting, default 6,000 passages, about 144 MB as a full float matrix) the best-ranked passages per source
   are kept and the rest is reported. Progress and cancel run through `SharedTopicDiscovery.refreshPinned`. One
   embedding model, the one PR 04 chose, is pinned per project by fingerprint; a change re-embeds instead of mixing
-  vectors and renames every passage id (`PassageSegmentation`), which citations survive through their passage text
-  hash (D8). Passages longer than the embedding model's context are split before embedding, and embedding calls send
+  vectors; it renames every passage id and, in the default semantic boundary mode, can move passage boundaries
+  (`PassageSegmentation`), so citations keep their cited text (D8) and acronym findings their spans in the source text
+  (PR 38). Passages longer than the embedding model's context are split before embedding, and embedding calls send
   `truncate=false`. Failures reach the outline drawer instead of only the error stream. Clustering runs only on
   request in `outline/running`. The background topic runner (#42) and its setting are removed; topic answers outside
   Outline read the last stored snapshot.
@@ -1396,14 +1413,15 @@ English sources found and the open live checks of roadmap AP 5.
   section's default brief, and passages assigned to them count for that section; passages from the approved source set
   plus sources accepted later, minus excluded sources, with the blacklist recorded at `SUBMIT_SCOPE`. Every passage
   goes to the nearest node of the approved concept revision, by cosine against outline anchors whose text is the
-  node's full label path (book title, parent labels, label); the scope fence anchors stay as they are. A passage is
-  assigned only above a threshold and with a margin over the second-best node; both are calibrated on the corpus of
-  the M2 checkpoint and recorded in the PR, and `topicAssignmentThreshold` is not reused. Leftover clusters that meet
-  `minimumPassagesPerTopic` and `minimumDistinctSourcesPerTopic` are listed as candidates. Each section gets a default
-  brief: purpose from the node's label path and the mission, key points from the best passages, and a word target from
-  the deliverable's target length (a page counts as 300 words, provisional), spread over the sections and weighted by
-  their number of sources, or 400 to 1,100 words without a target length (Q7). Sections with fewer than two sources
-  are flagged thin; the flag pre-fills the manual search with the section title, and the focused plan follows in PR
+  node's full label path (book title, parent labels, label), embedded as queries against the stored passage vectors
+  (PR 04); the scope fence anchors stay as they are. A passage is assigned only above a threshold and with a margin
+  over the second-best node; both are calibrated on the corpus of the M2 checkpoint and recorded in the PR, and
+  `topicAssignmentThreshold` is not reused. Leftover clusters that meet `minimumPassagesPerTopic` and
+  `minimumDistinctSourcesPerTopic` are listed as candidates. Each section gets a default brief: purpose from the
+  node's label path and the mission, key points from the best passages, and a word target from the deliverable's
+  target length (a page counts as 300 words, provisional), spread over the sections and weighted by their number of
+  sources, or 400 to 1,100 words without a target length (Q7). Sections with fewer than two sources are flagged thin;
+  the flag pre-fills the manual search with the section title, and the focused plan follows in PR
   34. "Generate outline" in `outline/running` runs off the UI thread with progress and cancel and merges by provenance
   without overwriting edited titles. The existing `generate-outline` command (the outline button, `executeCommand`,
   the bot's `run_command`) runs this generation and is refused outside `outline/running`; `finish-outline` is refused
@@ -1412,7 +1430,8 @@ English sources found and the open live checks of roadmap AP 5.
 - Done when: the same input gives a byte-identical outline in concept order; no model is called; a renamed section
   keeps its title after regeneration; thin sections are flagged; a third-level node appears as a key point of its
   section's default brief; candidates are listed, not inserted; the anchors come from the approved revision; an
-  excluded source contributes no passage; `finish-outline` during a generation is refused.
+  excluded source contributes no passage; `finish-outline` during a generation is refused; the recording embedding
+  port of PR 04 shows the label paths embedded as queries and no passage embedded again.
 
 **PR 23 Outline tab and editor** (M, MVP)
 - Change: an Outline tab between Sources and Document. A tree editor with rename, add, delete, move, indent and
@@ -1459,36 +1478,37 @@ regenerate one chapter.
 
 **PR 26 Manuscript store with section revisions** (M, MVP)
 - Change: `FileManuscriptStore`: per section id (from the outline) a list of revisions with text, a citation map from
-  each local marker to source id, source checksum, passage id and passage text hash (D8), the flags of the claim check
-  (filled by PR 28), gaps, model label, thinking level, prompt hash, evidence ids, the fingerprint of the outline
-  entry and of its chapter entry it was written from (title, brief, provenance), and time; status pending, written,
-  failed, skipped, stale or orphan ("Skip section" in the Document tab marks a section skipped, "Unskip" makes it
-  pending again); expected-revision writes; UTF-8. Content writes only in `draft/running` (the stale and orphan marks
-  of the transition hooks are exempt); read-only after `finish-document` until "Request changes"; the last
-  `beforeApply` step of `APPROVE_FINAL` pins the set of section revisions and their model labels in the manifest.
-  Stale marking (D4): `APPROVE_OUTLINE` compares the approved outline with the fingerprints; a section whose own or
-  chapter entry changed becomes stale, a new id is pending, and a deleted id is kept as an orphan that is not
-  assembled. `APPROVE_EVIDENCE` marks sections stale that cite a source outside the new approved set. `REOPEN_OUTLINE`
-  marks nothing. The Document tab edits one section at a time: Save writes a section revision through
+  each local marker to source id, source checksum, the cited text with its hash and the passage id as a derived link
+  (D8), the flags of the claim check (filled by PR 28), gaps, model label, thinking level, prompt hash, evidence ids,
+  the fingerprint of the outline entry and of its chapter entry it was written from (title, brief, provenance), and
+  time; status pending, written, failed, skipped, stale or orphan ("Skip section" in the Document tab marks a section
+  skipped, "Unskip" makes it pending again); expected-revision writes; UTF-8. Content writes only in `draft/running`
+  (the stale and orphan marks of the transition hooks are exempt); read-only after `finish-document` until "Request
+  changes"; the last `beforeApply` step of `APPROVE_FINAL` pins the set of section revisions and their model labels in
+  the manifest. Stale marking (D4): `APPROVE_OUTLINE` compares the approved outline with the fingerprints; a section
+  whose own or chapter entry changed becomes stale, a new id is pending, and a deleted id is kept as an orphan that is
+  not assembled. `APPROVE_EVIDENCE` marks sections stale that cite a source outside the new approved set.
+  `REOPEN_OUTLINE` marks nothing. The Document tab edits one section at a time: Save writes a section revision through
   `FileManuscriptStore`; the editor shows that section's local markers and keeps local text on a save conflict and on
   the Edit/Page toggle (RA-P008); the tab lists a section's revisions with view and restore while the phase is open.
   `document.md` is generated and read-only in the tab, and the tab takes its mode from the D4 table.
 - Done when: concurrent job and user saves lose neither text and the conflict shows both; a revision whose citation
-  map lacks a checksum or a passage is refused; writes are refused outside `draft/running`; sections of unchanged
+  map lacks a checksum or the cited text is refused; writes are refused outside `draft/running`; sections of unchanged
   outline entries keep their text after an outline reopen; after a jump back to Concept from Document, one renamed
   chapter and a new outline approval, exactly that chapter's sections are stale and nothing rewrites them by itself;
   the fault-injection test of PR 06 passes with the manuscript pin and its stale marks.
 
 **PR 27 Evidence packs per section** (M, MVP)
 - Change: a deterministic `SectionContextBuilder`: passages from the section's provenance plus
-  `SemanticKnowledgeIndex.semanticSearch` on its brief, drawn from the approved source set plus sources accepted
-  later, minus excluded sources and sources hit by the blacklist recorded at `SUBMIT_SCOPE`; deduplicated, at most two
-  per source, cut at sentence boundaries, with passage size and count from the writer settings (presets 8 x 300 or 6 x
-  250), numbered locally `[1]..[k]`, one number per passage, inside a quoted data block (4.1 rule 7); plus book
-  synopsis, previous-section digest, glossary (the labels of the approved concept) and the book language from the
-  Phase-1 record.
+  `SemanticKnowledgeIndex.semanticSearch` on its brief, which is embedded as a query (PR 04), drawn from the approved
+  source set plus sources accepted later, minus excluded sources and sources hit by the blacklist recorded at
+  `SUBMIT_SCOPE`; deduplicated, at most two per source, cut at sentence boundaries, with passage size and count from
+  the writer settings (presets 8 x 300 or 6 x 250), numbered locally `[1]..[k]`, one number per passage, inside a
+  quoted data block (4.1 rule 7); plus book synopsis, previous-section digest, glossary (the labels of the approved
+  concept) and the book language from the Phase-1 record.
 - Done when: the same store state gives an identical pack; the pack fits the budget of each writer preset; every local
-  number maps to one passage of an accepted source and carries that source's checksum.
+  number maps to one passage of an accepted source and carries that source's checksum and the passage text as cut for
+  the pack; the recording embedding port of PR 04 shows the brief embedded as a query and no passage embedded again.
 
 **PR 28 Section writer with checked citations** (M, MVP)
 - Change: a `SectionWriter` on `phase.draft.writer` with the rules of D8: use only the numbered passages, cite `[n]`
@@ -1544,26 +1564,33 @@ regenerate one chapter.
   outline revisions, the book status, "support checked for numbers and quotes only"), contents, chapters and sections
   in approved-outline order without orphans, local markers renumbered globally by first use, open points from the gaps
   and the skipped sections, and a references list (title, site, URL, access date) from `FileResearchSourceRepository`
-  that marks sources accepted after the Sources approval. Every citation resolves through source id and checksum; a
-  mismatch is reported, never silently re-pointed. A `BookQualityReport` is computed on every assembly as in D8 and
-  gives the status "complete" or "incomplete draft"; the Document tab shows it, the `finish-document` confirmation and
-  the gate message name its warnings, and the last `beforeApply` step of `APPROVE_FINAL` adds the report and every
-  cited source with its checksum to the manuscript pin of PR 26. The assembler is the only writer of `document.md`: it
-  runs on one serial executor after every manuscript change, so it needs no lock, and `document_save` leaves
-  `ResearchToolPolicy` (the agent uses `section_rewrite`). `DocumentPageView` resolves `[n]` to the source and reveals
-  it in the Sources tab. "Export book..." saves the Markdown to a file the user chooses.
+  that marks sources accepted after the Sources approval. An "Abbreviations" appendix lists every acronym the
+  manuscript uses with its long form and sources, from the findings of PR 38, and every long form where the sources
+  disagree. Every citation resolves through source id, checksum and its stored text, also after a re-embedding has
+  renamed or re-cut the passages; a mismatch is reported, never silently re-pointed. A `BookQualityReport` is computed
+  on every assembly as in D8 and gives the status "complete" or "incomplete draft"; the Document tab shows it, the
+  `finish-document` confirmation and the gate message name its warnings, and the last `beforeApply` step of
+  `APPROVE_FINAL` adds the report and every cited source with its checksum to the manuscript pin of PR 26. The
+  assembler is the only writer of `document.md`: it runs on one serial executor after every manuscript change, so it
+  needs no lock, and `document_save` leaves `ResearchToolPolicy` (the agent uses `section_rewrite`).
+  `DocumentPageView` resolves `[n]` to the source and reveals it in the Sources tab. "Export book..." saves the
+  Markdown to a file the user chooses.
 - Done when: a golden test renders a fixture of two chapters with two sections each exactly; rewriting a section that
   cites the same sources in the same order keeps every number, and any other rewrite renumbers the book
   deterministically with every `[n]` still resolving; every `[n]` has exactly one reference and no reference is
   unused; a fixture with one skipped section, one unsupported number, one near-copy and one repeated paragraph reports
   each and the status "incomplete draft", and the user can still approve it with the warnings shown; a fixture without
   findings reports "complete"; a source accepted in Document is marked in the references; the final pin lists every
-  cited source with its checksum; the exported file equals `document.md`; `document_save` is offered in no state.
+  cited source with its checksum; two sources with different long forms for one acronym show a conflict in the quality
+  report and both forms in the appendix, which lists exactly the acronyms the manuscript uses; after a re-embedding
+  that renames and re-cuts the passages every citation still resolves; the exported file equals `document.md`;
+  `document_save` is offered in no state.
 
 **PR 31 Writer A/B with a sample chapter and the Document default** (M, MVP)
 - Change: the A/B of section 5.4 as an opt-in benchmark probe: three identical sections and one complete sample
-  chapter per model, the chapter written by the writing job from the same outline and evidence. It runs before the
-  acceptance run of PR 32, and a one-line follow-up sets the `phase.draft` preset by the decision rule.
+  chapter per model, the chapter written by the writing job from the same outline and evidence. It runs after PR 38,
+  so every model writes with the glossary block of the book, and before the acceptance run of PR 32; a one-line
+  follow-up sets the `phase.draft` preset by the decision rule.
 - Done when: the report holds the metrics, the quality-report counts and the owner's blind ranking of the sections and
   the sample chapter for all three models, without names; the preset follows the rule.
 
@@ -1579,8 +1606,9 @@ regenerate one chapter.
   - Workflow: every phase is entered and left by user commands only; an app restart in every phase resumes it; Stop
     and one reopen with a new approval work; the app is killed once during an approval and once while a section is
     written, and both recover without repeating finished work.
-  - Data integrity: after the restarts every pin matches its content hash; every citation resolves to source, checksum
-    and passage, and every `[n]` to a reference; umlauts and typographic quotes are intact; no write is lost.
+  - Data integrity: after the restarts every pin matches its content hash; every citation resolves to source and
+    checksum, its stored text is found in that source, and every `[n]` resolves to a reference; umlauts and
+    typographic quotes are intact; no write is lost.
   - Book quality: `document.md` has contents, every chapter and section, numbered citations, an abbreviation list and
     open points; no unknown marker and no truncation on writer calls; the quality report lists every uncited
     paragraph, unsupported number and quote, near-copy and repetition; the owner checks 20 randomly drawn citations
@@ -1594,19 +1622,25 @@ regenerate one chapter.
   `LongFormMatcher`, `AcronymForms`, `TermScanner` and their tests into `research-knowledge-processing`, on AskAI's
   `SentenceSegmentationPort` (OpenNLP when the language model is installed, else the regex segmenter), through a small
   adapter that maps its sentences back to text spans; the port gains a fingerprint (the OpenNLP model checksum or
-  `regex`). It runs once per accepted source on its write-once text after the passages are stored, and its findings
-  (short form, long forms with the passages that state them, technical identifiers) are stored under source checksum,
-  extractor version and segmenter fingerprint, so a new version or model re-runs only stale sources. The evidence
-  pack's glossary block (PR 27) adds up to ten acronyms of its passages with the long forms the sources give, within
-  its 200 tokens. The assembler (PR 30) adds an "Abbreviations" appendix for every acronym the manuscript uses, with
-  its long form and sources, and lists every long form where the sources disagree. The quality report adds acronyms
-  used without a long form in the sources, conflicting long forms, and chapters whose first use of an acronym lacks
-  the long form.
+  `regex`). It runs once per accepted source on its write-once text, and its findings (short forms, long forms,
+  technical identifiers) are stored under source id, source checksum, extractor version and segmenter fingerprint, so
+  a new version or model re-runs only stale sources. A finding points into the source text, never at a passage: each
+  long form keeps the character spans of its short form, its long form and its sentence in the write-once text
+  (`TextSpan`, as the enterprise AI client's `AcronymDefinition` does). Passage ids change with the embedding model,
+  and in the default semantic boundary mode so do passage boundaries (`PassageSegmentation`, PR 20). The passage that
+  states a long form is therefore looked up from its span when it is needed, among the passages of the current
+  embedding fingerprint, and a cached link holds only for that fingerprint and segmentation version; a re-embedding
+  re-runs no extraction. Only sources that an evidence pack may use at that moment count (PR 27: the approved set plus
+  later accepted sources, minus excluded sources and sources hit by the recorded blacklist), for the glossary, the
+  abbreviation list and the conflicts alike. The evidence pack's glossary block (PR 27) adds up to ten acronyms of its
+  passages with the long forms those sources give, within its 200 tokens. For the assembler (PR 30) it answers, per
+  acronym, the long forms with their sources and spans and whether they conflict.
 - Done when: the ported tests pass apart from package names; "Retrieval-Augmented Generation (RAG)" in a German source
-  yields RAG with that long form and its passage; `MAX_SIZE` is a technical identifier, not an acronym; two sources
-  with different long forms for one acronym show a conflict in the quality report and both forms in the appendix; a
-  new extractor version re-runs only sources with older findings; the appendix lists exactly the acronyms the
-  manuscript uses; an evidence pack with acronyms stays within the writer budget.
+  yields RAG with that long form, its spans and the passage that states it; `MAX_SIZE` is a technical identifier, not
+  an acronym; a new extractor version re-runs only sources with older findings; after a re-embedding that renames and
+  re-cuts the passages, no source is extracted again and RAG still resolves to the passage that states it; a long form
+  found only in an excluded source or in a source hit by the recorded blacklist reaches neither a glossary block nor
+  the answers for the assembler; an evidence pack with acronyms stays within the writer budget.
 
 ### 6.7 M5 After the first book
 
@@ -1735,8 +1769,8 @@ that no PR carries yet say so.
     moment are frozen with the concept. A greeting can no longer become the mission of every search, and a later
     language switch cannot change the book language (PR 07).
 24. **Write-once sources, passage-level citations.** A source's text never changes once stored, and every citation
-    names source, checksum and passage, so a reviewer can check any sentence against exactly the text the writer saw,
-    also after a re-embedding (PR 14, 26, 27, 30).
+    names source and checksum and keeps the cited text, so a reviewer can check any sentence against exactly the text
+    the writer saw, also after a re-embedding renames or re-cuts the passages (PR 14, 26, 27, 30).
 25. **Check what code can check, and say what it cannot.** Numbers, years, percentages and quotes are compared with
     the cited passage in code; semantic support needs an entailment model and comes later, and until then the book
     says so (PR 28, PR 30).
@@ -1777,7 +1811,7 @@ that no PR carries yet say so.
 | The first message, even a greeting, becomes the mission and enters every base query | The Concept tab shows the mission as an editable row, `submit-scope` refuses an empty mission, and the Phase-1 record freezes it (PR 07) |
 | A connected bot or the ChatGPT connector approves a gate without the user | Every state command from `BOT` is refused (Q13); the transition journal names actor and surface (PR 06) |
 | Clustering is slow or memory-hungry on large corpora | PR 20: nearest-neighbour chain (O(n²) time and memory), progress, cancel and a corpus limit that keeps the best passages per source |
-| Changing the embedding model silently empties the outline corpus or breaks citations | Pinned fingerprint per project and re-embedding (PR 20); citations keep a passage text hash and the source checksum, so renamed passages do not break them (D8) |
+| Changing the embedding model silently empties the outline corpus or breaks citations | Pinned fingerprint per project and re-embedding (PR 20); citations keep the source checksum and the cited text, and acronym findings keep spans in the source text, so renamed or re-cut passages break neither (D8, PR 38) |
 | Phase-scoped context changes live-tuned Phase-1 behaviour | The live gate before and after (PR 04, PR 17); if it drops, keep the newest `FINAL` entry as canonical JSON |
 | `truncate=false` turns silent overflows into visible errors | Switched on together with the budgeted window (PR 17); the guard trims optional blocks first, names the cause and does not rely on the flag, which PR 04 checks against the installed Ollama. No `shift` is sent, because it is a runner setting that would reload the model; PR 01 warns when a call could reach the limit while answering |
 | A 2B model drops or invents decisions in phase summaries | Facts come from the artifacts; deterministic fallback; raw messages stay stored; summaries visible on the Workflow steps |
