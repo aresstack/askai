@@ -123,6 +123,9 @@ final class KnowledgeProcessingSessionFactory {
         // Embedding: strict batch /api/embed adapter over the SESSION descriptor (its own timeout).
         final HttpEmbeddingPortAdapter embeddings = new HttpEmbeddingPortAdapter(descriptor,
                 new UrlConnectionEmbeddingHttpTransport((int) descriptor.timeoutMillis));
+        // The knowledge pipeline's vector world: documents under the model's prompt scheme (PR 04).
+        final String documentFingerprint = embeddings.fingerprint(
+                com.aresstack.askai.research.knowledge.EmbeddingPort.Role.DOCUMENT);
 
         // Sentences: resolved PER JOB LANGUAGE (cached) — a job's immutable language snapshot picks its own
         // sentence model, so the job enqueued after a language switch segments with the NEW language while a
@@ -176,7 +179,8 @@ final class KnowledgeProcessingSessionFactory {
                 + " language=" + sessionLanguageCode
                 + " segmenter=" + segmenterDescription
                 + " embeddingModel=" + descriptor.modelId
-                + " fingerprint=" + descriptor.embeddingFingerprint()
+                + " fingerprint=" + documentFingerprint
+                + " promptScheme=" + embeddings.scheme().id()
                 + " dimension=" + descriptor.embeddingDimension
                 + " endpoint=" + descriptor.endpointUrl());
 
@@ -185,7 +189,7 @@ final class KnowledgeProcessingSessionFactory {
         // missing persisted projection only costs a rebuild and never blocks the session start.
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader =
                 new com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader(
-                        repository, vectorStore, projectId, descriptor.embeddingFingerprint());
+                        repository, vectorStore, projectId, documentFingerprint);
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader.SourceFilter
                 sourceFilter = new com.aresstack.askai.research.knowledge.processing.live
                         .ActiveKnowledgeCorpusReader.SourceFilter() {
@@ -225,8 +229,8 @@ final class KnowledgeProcessingSessionFactory {
                         projectionBuilder,
                         new com.aresstack.askai.research.knowledge.processing.live
                                 .FileTopicSnapshotStore(projectDir),
-                        descriptor.embeddingFingerprint());
-        final String fingerprint = descriptor.embeddingFingerprint();
+                        documentFingerprint);
+        final String fingerprint = documentFingerprint;
         final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner projection =
                 new com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner(
                         new com.aresstack.askai.research.knowledge.processing.live
@@ -285,7 +289,7 @@ final class KnowledgeProcessingSessionFactory {
                         .LiveKnowledgeProjectionRunner[1];
         final SourceProcessingWorker worker = new SourceProcessingWorker(queue, reader, segmentationFactory,
                 passageStore, index, generations, projectId, settings.maxProcessingAttempts,
-                descriptor.embeddingFingerprint(),
+                documentFingerprint,
                 notifying(diagnosticListener(projectId, descriptionByLanguage), new Runnable() {
                     public void run() {
                         if (knowledgeChangedNotifier != null) {

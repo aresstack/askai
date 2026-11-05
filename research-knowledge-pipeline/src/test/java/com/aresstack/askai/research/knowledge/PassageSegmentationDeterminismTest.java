@@ -18,7 +18,7 @@ public class PassageSegmentationDeterminismTest {
 
     /** A fixed embedder: constant fingerprint so passage ids are stable and version-aware. */
     private static final class FixedEmbedder implements EmbeddingPort {
-        public List<EmbeddingVector> embed(List<String> texts) {
+        public List<EmbeddingVector> embed(Role role, List<String> texts) {
             List<EmbeddingVector> out = new ArrayList<EmbeddingVector>();
             for (int i = 0; i < texts.size(); i++) {
                 out.add(new EmbeddingVector("m", "fp-1", new float[]{1f, 0f}));

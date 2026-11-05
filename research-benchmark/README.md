@@ -67,3 +67,20 @@ Example: `gradlew :research-benchmark:benchmark -Daskai.benchmark.models=gemma4:
   (`OllamaTokenMeter`); it relays requests and streams unchanged and sums Ollama's `prompt_eval_count` and
   `eval_count`. The subject's code is not touched. A run's usage is taken only after its last model call has
   finished, so a call that outlives its run is not charged to the next one.
+
+## Measurement protocol and retrieval benchmark (plan PR 04)
+
+Two more live tests run in the same opt-in `benchmark` task and never in `test`:
+
+- `ModelProtocolLiveTest`: characters per token (English, German) and tokens per German word, `load_duration` for
+  every switch between `askai.benchmark.protocolModels`, total GPU memory from `nvidia-smi` after each load, and
+  whether `truncate=false` makes an overlong chat and embedding call fail.
+- `RetrievalBenchmarkLiveTest`: known-item retrieval in three groups (DE→DE, DE→EN, EN→EN) for every
+  `askai.benchmark.embeddingCandidates` model through the productive `HttpEmbeddingPortAdapter` with the prompts of
+  its model card (the first candidate also once raw), the concept assignment of the labelled passages, and the
+  ranking of planned queries by BM25, the installed cross-encoder, embedding similarity and reciprocal rank fusion.
+  Queries, target ids and labels are checked in (`benchmark/retrieval/retrieval-queries.json`); the corpus and the
+  search results are third-party text and stay in `askai.benchmark.retrievalData` (`corpus.jsonl`,
+  `serp/<queryId>.json`). Without queries or data it skips.
+
+Results go to `docs/ollama-model-budget-measurements.md`.

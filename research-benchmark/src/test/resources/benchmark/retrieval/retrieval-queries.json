@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "_comment": "Plan 5.4 item 7: 24 known-item queries (8 DE_DE, 8 DE_EN, 8 EN_EN) on one topic of the owner's choice, each with one target passage id of the local corpus; concept nodes with their full label paths and 50 passages labelled by the owner. The owner fills this file; the corpus (corpus.jsonl) and the search results (serp/<queryId>.json) stay in the local data directory because they are third-party text. Empty until then: the live benchmark skips with that reason.",
+  "topic": "",
+  "queries": [],
+  "conceptNodes": [],
+  "labelledPassages": []
+}

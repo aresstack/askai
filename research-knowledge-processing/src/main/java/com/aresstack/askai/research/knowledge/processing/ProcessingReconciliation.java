@@ -86,4 +86,36 @@ public final class ProcessingReconciliation {
         }
         return enqueued;
     }
+
+    /**
+     * PR 04: re-derive captures that were processed only in another vector world (for example before the prompt
+     * scheme became part of the fingerprint). Every capture of an eligible source with text that has no passage in
+     * the active world and no job for it is enqueued under its OWN capture id, so the worker derives the active
+     * world from the same capture.
+     *
+     * @param captureSourceIds         capture id → source id of every capture in the knowledge project
+     * @param currentWorldCaptureIds   capture ids that already own a passage of the active world
+     * @param currentWorldJobCaptureIds capture ids with a non-superseded job of the active world
+     * @param eligibleSourceIds        sources that are corpus-eligible and have segmentable text
+     * @return how many captures were handed to the scheduler
+     */
+    public static int reembedStale(java.util.Map<String, String> captureSourceIds,
+                                   Set<String> currentWorldCaptureIds,
+                                   Set<String> currentWorldJobCaptureIds,
+                                   Set<String> eligibleSourceIds,
+                                   MissingJobScheduler scheduler) {
+        int enqueued = 0;
+        for (java.util.Map.Entry<String, String> capture : captureSourceIds.entrySet()) {
+            String captureId = capture.getKey();
+            String sourceId = capture.getValue();
+            if (sourceId == null || !eligibleSourceIds.contains(sourceId)
+                    || currentWorldCaptureIds.contains(captureId)
+                    || currentWorldJobCaptureIds.contains(captureId)) {
+                continue;
+            }
+            scheduler.enqueue(captureId, sourceId);
+            enqueued++;
+        }
+        return enqueued;
+    }
 }

@@ -15,6 +15,11 @@ dependencies {
     testImplementation project(':research-agent-runtime')
     // The task record the orchestrated subject reads back (ADR 0001, 4.4).
     testImplementation project(':research-domain')
+    // PR 04: the retrieval benchmark embeds through the productive EmbeddingPort adapter and ranks with the
+    // productive rerankers and the ported reciprocal rank fusion.
+    testImplementation project(':research-knowledge-pipeline')
+    testImplementation project(':research-knowledge-processing')
+    testImplementation project(':browser-api')
     // The plugin compiles these against the host (compileOnly); a test outside the host provides them.
     testImplementation project(':mcp-runtime-api')
     testImplementation project(':mcp-solon-runtime')

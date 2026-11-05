@@ -132,7 +132,7 @@ public final class PassageSegmentation {
                     text.append(sentence.getText());
                     sentenceIds.add(sentence.getSentenceId());
                 }
-                EmbeddingPort.EmbeddingVector vector = embeddings.embed(
+                EmbeddingPort.EmbeddingVector vector = embeddings.embedDocuments(
                         java.util.Collections.singletonList(text.toString())).get(0);
                 // Deterministic, version-aware passage id from its fachliche identity (capture + position +
                 // segmentation version + embedding model), so the same captureId + pipelineVersion +
@@ -177,7 +177,7 @@ public final class PassageSegmentation {
         for (Sentence sentence : sentences) {
             texts.add(sentence.getText());
         }
-        List<EmbeddingPort.EmbeddingVector> vectors = embeddings.embed(texts);
+        List<EmbeddingPort.EmbeddingVector> vectors = embeddings.embedDocuments(texts);
 
         List<Sentence> current = new ArrayList<Sentence>();
         for (int i = 0; i < sentences.size(); i++) {

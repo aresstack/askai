@@ -55,7 +55,7 @@ public class HttpEmbeddingPortAdapterTest {
         EmbeddingEndpointDescriptor d = descriptor(3);
         HttpEmbeddingPortAdapter a = new HttpEmbeddingPortAdapter(d,
                 returns("{\"model\":\"m\",\"embeddings\":[[0.1,0.2,0.3],[0.4,0.5,0.6]]}"));
-        List<EmbeddingPort.EmbeddingVector> vectors = a.embed(Arrays.asList("one", "two"));
+        List<EmbeddingPort.EmbeddingVector> vectors = a.embedDocuments(Arrays.asList("one", "two"));
         assertEquals(2, vectors.size());
         assertEquals(3, vectors.get(0).getDimension());
         assertEquals(d.embeddingFingerprint(), vectors.get(0).getModelFingerprint());
@@ -97,7 +97,7 @@ public class HttpEmbeddingPortAdapterTest {
                     }
                 });
         try {
-            a.embed(Arrays.asList("a"));
+            a.embedDocuments(Arrays.asList("a"));
             fail("transport failure must surface");
         } catch (EmbeddingException e) {
             assertTrue(e.getMessage().contains("connection refused"));
@@ -106,7 +106,7 @@ public class HttpEmbeddingPortAdapterTest {
 
     private static void assertFails(HttpEmbeddingPortAdapter adapter, List<String> inputs, String hint) {
         try {
-            adapter.embed(inputs);
+            adapter.embedDocuments(inputs);
             fail("expected EmbeddingException (" + hint + ")");
         } catch (EmbeddingException expected) {
             // ok

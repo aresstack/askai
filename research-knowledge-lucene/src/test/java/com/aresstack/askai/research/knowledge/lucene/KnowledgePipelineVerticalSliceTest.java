@@ -44,7 +44,7 @@ public class KnowledgePipelineVerticalSliceTest {
 
     /** Keyword-driven deterministic embedder in one fixed world (fpINT/dim 4). */
     private static final class KeywordEmbedder implements EmbeddingPort {
-        public List<EmbeddingVector> embed(List<String> texts) {
+        public List<EmbeddingVector> embed(Role role, List<String> texts) {
             List<EmbeddingVector> out = new ArrayList<EmbeddingVector>();
             for (String t : texts) {
                 String lower = t == null ? "" : t.toLowerCase();
@@ -140,7 +140,7 @@ public class KnowledgePipelineVerticalSliceTest {
         assertTrue(keyword.get(0).getText().toLowerCase().contains("glasses"));
 
         // Semantic search (brute-force cosine) with a glasses-world query vector ranks the glasses passage first.
-        float[] queryVector = new KeywordEmbedder().embed(Arrays.asList("smart glasses")).get(0).getValues();
+        float[] queryVector = new KeywordEmbedder().embedQueries(Arrays.asList("smart glasses")).get(0).getValues();
         List<PassageSearchHit> semantic = index.semanticSearch(PROJECT_ID,
                 new PassageSemanticQuery(FINGERPRINT, queryVector, 10));
         assertEquals(2, semantic.size());
