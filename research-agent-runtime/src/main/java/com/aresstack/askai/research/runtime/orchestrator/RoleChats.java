@@ -2,6 +2,7 @@ package com.aresstack.askai.research.runtime.orchestrator;
 
 import com.aresstack.askai.agent.model.port.ModelPort;
 import com.aresstack.askai.research.runtime.role.ResearchRole;
+import com.aresstack.askai.research.runtime.team.LoggedMainModelChat;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.runtime.team.PortMainModelChat;
 import com.aresstack.askai.research.runtime.team.UnavailableMainModelChat;
@@ -28,7 +29,8 @@ public interface RoleChats {
                 if (port == null) {
                     return new UnavailableMainModelChat("the host publishes no model port");
                 }
-                return PortMainModelChat.forRole(new MeteredModelPort(port, tokens), role, timeout);
+                return new LoggedMainModelChat(
+                        PortMainModelChat.forRole(new MeteredModelPort(port, tokens), role, timeout), "run");
             }
         };
     }

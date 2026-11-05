@@ -774,7 +774,9 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                         new TokenUsage((int) Math.min(Integer.MAX_VALUE, completion.getPromptEvalCount()),
                                 completion.getEvalCount() > 0 ? (int) Math.min(Integer.MAX_VALUE,
                                         completion.getEvalCount()) : -1),
-                        reservation.endpointId, duration));
+                        reservation.endpointId, duration, reservation.model,
+                        Duration.ofNanos(completion.getLoadDurationNanos()),
+                        Duration.ofNanos(completion.getPromptEvalDurationNanos())));
             }
         }
 

@@ -57,6 +57,16 @@ public final class FakeModelPort implements ModelPort, AutoCloseable {
         void afterWorkerWoken(CountDownLatch workerExited);
     }
 
+    /** Test seam: the usage, finish reason, model label and thinking every later answer reports. */
+    volatile ChatResult telemetry;
+
+    /** Every later answer reports this usage, finish reason, model label and reasoning text. */
+    public void reportTelemetry(int promptTokens, int outputTokens, ChatResult.FinishReason finishReason,
+                                String modelLabel, String thinking) {
+        telemetry = new ChatResult("x", thinking, null, finishReason, new TokenUsage(promptTokens, outputTokens),
+                "fake", Duration.ofMillis(1500), modelLabel, Duration.ofMillis(200), Duration.ofMillis(700));
+    }
+
     /** Queue one raw model answer — the {@code content} the TeamAgentTurnParser will parse (a JSON turn). */
     public void enqueueRaw(String rawContent) {
         scripted.add(rawContent == null ? "" : rawContent);
@@ -200,8 +210,13 @@ public final class FakeModelPort implements ModelPort, AutoCloseable {
                 String content = scripted.isEmpty() ? "{\"assistantMessage\":\"(no scripted turn)\"}"
                         : scripted.poll();
                 listener.onContentDelta(content);
-                listener.onCompleted(new ChatResult(content, "", null, ChatResult.FinishReason.STOP,
-                        TokenUsage.unknown(), "fake", Duration.ZERO));
+                ChatResult shape = telemetry;
+                listener.onCompleted(shape == null
+                        ? new ChatResult(content, "", null, ChatResult.FinishReason.STOP,
+                                TokenUsage.unknown(), "fake", Duration.ZERO)
+                        : new ChatResult(content, shape.getThinking(), null, shape.getFinishReason(),
+                                shape.getUsage(), "fake", shape.getDuration(), shape.getModelLabel(),
+                                shape.getLoadDuration(), shape.getPromptEvalDuration()));
             }
         }, "fake-model-port");
         worker.setDaemon(true);
