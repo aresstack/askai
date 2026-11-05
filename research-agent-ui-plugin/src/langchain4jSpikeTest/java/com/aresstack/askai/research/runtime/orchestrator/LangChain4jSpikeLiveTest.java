@@ -72,6 +72,10 @@ public class LangChain4jSpikeLiveTest {
             return delegate.chat(request, listener);
         }
 
+        public java.util.concurrent.CompletableFuture<Void> warm(com.aresstack.askai.agent.model.port.ModelSlot slot) {
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        }
+
         public ResourceSnapshot resources() {
             return delegate.resources();
         }

@@ -1,11 +1,16 @@
 package com.aresstack.askai.modelport;
 
+import com.aresstack.askai.agent.model.port.ThinkingMode;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -27,7 +32,10 @@ public final class ModelPortSettingsRepository {
     private static final String ENDPOINT_BUDGET_SUFFIX = ".memoryBudgetMb";
     private static final String SLOT = "slot.";
     private static final String SLOT_MODEL_SUFFIX = ".model";
-    private static final String SLOT_CONTEXT_SUFFIX = ".contextTokens";
+    private static final String SLOT_THINKING_SUFFIX = ".thinking";
+    private static final String SLOT_ANSWER_SUFFIX = ".answerTokens";
+    private static final String MODEL = "model.";
+    private static final String MODEL_CONTEXT_SUFFIX = ".contextTokens";
     private static final String KEEP_ALIVE = "keepAlive";
     private static final String IMPLICIT_WAIT = "implicitWaitSeconds";
     private static final String RESIDENCY_REFRESH = "residencyRefreshSeconds";
@@ -55,7 +63,11 @@ public final class ModelPortSettingsRepository {
             File directory = appData != null && appData.trim().length() > 0
                     ? new File(appData, ".askai")
                     : new File(System.getProperty("user.home"), ".askai");
-            shared = new ModelPortSettingsRepository(new File(directory, FILE_NAME));
+            final ModelPortSettingsRepository repository = new ModelPortSettingsRepository(new File(directory,
+                    FILE_NAME));
+            shared = repository;
+            // Every host caller of the Ollama client sends the context of THIS file (plan 4.1, rule 1).
+            com.aresstack.askai.client.ModelContextSizes.install(model -> repository.load().contextOf(model));
         }
         return shared;
     }
@@ -89,8 +101,14 @@ public final class ModelPortSettingsRepository {
         for (Map.Entry<String, String> entry : settings.getSlotModels().entrySet()) {
             properties.setProperty(SLOT + entry.getKey() + SLOT_MODEL_SUFFIX, entry.getValue());
         }
-        for (Map.Entry<String, Integer> entry : settings.getSlotContextTokens().entrySet()) {
-            properties.setProperty(SLOT + entry.getKey() + SLOT_CONTEXT_SUFFIX, String.valueOf(entry.getValue()));
+        for (Map.Entry<String, ThinkingMode> entry : settings.getSlotThinking().entrySet()) {
+            properties.setProperty(SLOT + entry.getKey() + SLOT_THINKING_SUFFIX, entry.getValue().name());
+        }
+        for (Map.Entry<String, Integer> entry : settings.getSlotAnswerTokens().entrySet()) {
+            properties.setProperty(SLOT + entry.getKey() + SLOT_ANSWER_SUFFIX, String.valueOf(entry.getValue()));
+        }
+        for (Map.Entry<String, Integer> entry : settings.getModelContextTokens().entrySet()) {
+            properties.setProperty(MODEL + entry.getKey() + MODEL_CONTEXT_SUFFIX, String.valueOf(entry.getValue()));
         }
         properties.setProperty(KEEP_ALIVE, settings.getKeepAlive());
         properties.setProperty(IMPLICIT_WAIT, String.valueOf(settings.getImplicitWaitSeconds()));
@@ -99,9 +117,9 @@ public final class ModelPortSettingsRepository {
         if (directory != null && !directory.isDirectory() && !directory.mkdirs()) {
             throw new IOException("could not create " + directory);
         }
-        OutputStream out = new FileOutputStream(file);
+        Writer out = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8);
         try {
-            properties.store(out, "AskAI model port: capacities, memory budgets, slots (ADR 0001, 4.5)");
+            properties.store(out, "AskAI model port: capacities, memory budgets, contexts per model, slots (ADR 0001, 4.5)");
         } finally {
             out.close();
         }
@@ -111,7 +129,7 @@ public final class ModelPortSettingsRepository {
     private ModelPortSettings read() {
         Properties properties = new Properties();
         try {
-            InputStream in = new FileInputStream(file);
+            Reader in = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8);
             try {
                 properties.load(in);
             } finally {
@@ -124,7 +142,9 @@ public final class ModelPortSettingsRepository {
         Map<String, Integer> capacities = new LinkedHashMap<String, Integer>();
         Map<String, Long> budgets = new LinkedHashMap<String, Long>();
         Map<String, String> slotModels = new LinkedHashMap<String, String>();
-        Map<String, Integer> slotContexts = new LinkedHashMap<String, Integer>();
+        Map<String, ThinkingMode> slotThinking = new LinkedHashMap<String, ThinkingMode>();
+        Map<String, Integer> slotAnswers = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> modelContexts = new LinkedHashMap<String, Integer>();
         for (String key : new TreeMap<Object, Object>(properties).keySet().toArray(new String[0])) {
             String value = properties.getProperty(key, "").trim();
             if (key.startsWith(MODEL_CAPACITY)) {
@@ -134,18 +154,35 @@ public final class ModelPortSettingsRepository {
                         longOr(value, -1L));
             } else if (key.startsWith(SLOT) && key.endsWith(SLOT_MODEL_SUFFIX)) {
                 slotModels.put(key.substring(SLOT.length(), key.length() - SLOT_MODEL_SUFFIX.length()), value);
-            } else if (key.startsWith(SLOT) && key.endsWith(SLOT_CONTEXT_SUFFIX)) {
-                slotContexts.put(key.substring(SLOT.length(), key.length() - SLOT_CONTEXT_SUFFIX.length()),
+            } else if (key.startsWith(SLOT) && key.endsWith(SLOT_THINKING_SUFFIX)) {
+                ThinkingMode mode = thinkingOr(value);
+                if (mode != null) {
+                    slotThinking.put(key.substring(SLOT.length(), key.length() - SLOT_THINKING_SUFFIX.length()),
+                            mode);
+                }
+            } else if (key.startsWith(SLOT) && key.endsWith(SLOT_ANSWER_SUFFIX)) {
+                slotAnswers.put(key.substring(SLOT.length(), key.length() - SLOT_ANSWER_SUFFIX.length()),
+                        intOr(value, 0));
+            } else if (key.startsWith(MODEL) && key.endsWith(MODEL_CONTEXT_SUFFIX)) {
+                modelContexts.put(key.substring(MODEL.length(), key.length() - MODEL_CONTEXT_SUFFIX.length()),
                         intOr(value, 0));
             }
         }
         return new ModelPortSettings(
                 intOr(properties.getProperty(DEFAULT_CAPACITY), ModelPortSettings.DEFAULT_CAPACITY),
-                capacities, budgets, slotModels, slotContexts,
+                capacities, budgets, slotModels, modelContexts, slotThinking, slotAnswers,
                 properties.getProperty(KEEP_ALIVE, ModelPortSettings.DEFAULT_KEEP_ALIVE),
                 intOr(properties.getProperty(IMPLICIT_WAIT), ModelPortSettings.DEFAULT_IMPLICIT_WAIT_SECONDS),
                 intOr(properties.getProperty(RESIDENCY_REFRESH),
                         ModelPortSettings.DEFAULT_RESIDENCY_REFRESH_SECONDS));
+    }
+
+    private static ThinkingMode thinkingOr(String value) {
+        try {
+            return ThinkingMode.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            return null;
+        }
     }
 
     private static int intOr(String value, int fallback) {

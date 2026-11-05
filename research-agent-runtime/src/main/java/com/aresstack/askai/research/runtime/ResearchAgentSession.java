@@ -93,6 +93,13 @@ public final class ResearchAgentSession {
     /** Whether the HOST offers the Konzeptpapier tools (detected from the MCP tool list at startup). */
     private boolean conceptToolsAvailable;
     /** Tool-round / repair budgets for the concept loop — the user's settings via env hand-off. */
+    /**
+     * The answer budget of one orchestrator decision and of a worker answer (planner, verifier, web researcher;
+     * the writer has its own setting): the 4,096 these roles always had, now their own value instead of the
+     * removed global "Answer budget" setting (plan PR 03).
+     */
+    static final int WORKER_ANSWER_TOKENS = 4096;
+
     private int conceptMaxToolRounds =
             com.aresstack.askai.research.runtime.team.ConceptToolRounds.DEFAULT_MAX_TOOL_ROUNDS;
     private int conceptMaxRepairAttempts =
@@ -276,23 +283,11 @@ public final class ResearchAgentSession {
                                 return scopeFence.rendered();
                             }
                         }));
-        // The user's "Agent-Antwortbudget (Tokens)" setting (host env hand-off): the per-turn output
-        // budget is configuration, never a hidden constant. Unset/invalid → the documented default.
-        String outputBudget = environment.get("ASKAI_AGENT_MAX_OUTPUT_TOKENS");
-        if (outputBudget != null && !outputBudget.trim().isEmpty()) {
-            try {
-                teamAgent.setMaxOutputTokens(Integer.parseInt(outputBudget.trim()));
-            } catch (NumberFormatException invalid) {
-                System.err.println("[research-agent] ignoring invalid ASKAI_AGENT_MAX_OUTPUT_TOKENS="
-                        + outputBudget.trim());
-            }
-        }
         // Konzeptpapier loop budgets (host env hand-off): tool rounds ≠ repair attempts — one is the
         // WORK budget, the other the ERROR tolerance; both are settings, never hidden constants.
         conceptMaxToolRounds = envInt("ASKAI_CONCEPT_TOOL_ROUNDS", conceptMaxToolRounds);
         conceptMaxRepairAttempts = envInt("ASKAI_CONCEPT_REPAIR_ATTEMPTS", conceptMaxRepairAttempts);
         System.err.println("[research-agent] TeamAgent ready on " + mainModelChat.modelName()
-                + " outputBudget=" + teamAgent.getMaxOutputTokens()
                 + " conceptTools=" + conceptToolsAvailable
                 + (conceptToolsAvailable
                         ? " rounds=" + conceptMaxToolRounds + " repairs=" + conceptMaxRepairAttempts
@@ -1044,9 +1039,9 @@ public final class ResearchAgentSession {
                             acquisition, research, orchestratorSettings(),
                             com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.from(
                                     environment.values()),
-                            teamAgent == null ? 0 : teamAgent.getMaxOutputTokens()),
+                            WORKER_ANSWER_TOKENS),
                     budget.getMinimumAcceptedSources(), budget.getMinimumDistinctHosts(),
-                    teamAgent == null ? 0 : teamAgent.getMaxOutputTokens(),
+                    WORKER_ANSWER_TOKENS,
                     new java.util.function.Supplier<com.aresstack.askai.research.runtime.orchestrator.ResearchOutline>() {
                         public com.aresstack.askai.research.runtime.orchestrator.ResearchOutline get() {
                             return readOutline();
@@ -1537,7 +1532,7 @@ public final class ResearchAgentSession {
                     public com.aresstack.askai.research.runtime.team.TeamAgentResult internalTurn(
                             String instruction,
                             com.aresstack.askai.research.runtime.team.TeamAgentStateView v) {
-                        return teamAgent.internalTurn(instruction, v);
+                        return teamAgent.reviewTurn(instruction, v);
                     }
                 },
                 new com.aresstack.askai.research.runtime.team.PostSearchReview.Emitter() {

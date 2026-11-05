@@ -52,6 +52,7 @@ public final class ResearchOrchestrator {
             .purpose("plans, evaluates and re-plans the work packages of an orchestrated research run")
             .systemPrompt(SYSTEM)
             .output(RoleOutput.schemaPerRequest("OrchestratorDecisionCodec"))
+            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
     /** Low but non-zero: the decisions should be stable, the queries still varied. */

@@ -61,6 +61,11 @@ public final class MainModelChatResult {
         return text;
     }
 
+    /** True when the answer stopped at its token budget ({@code done_reason} length): a flagged prose result. */
+    public boolean isCutOff() {
+        return "length".equals(metrics.getDoneReason());
+    }
+
     /** A human-readable, secret-free reason for a non-OK status. */
     public String getDetail() {
         return detail;

@@ -34,6 +34,7 @@ public final class WebResearchWorker implements TaskWorker {
             .promptFromCaller()
             .tools(RoleToolCatalog.of("research_status", "source_list", "source_accept", "source_park"))
             .output(RoleOutput.text("WebAcquisition result (stop reason + accepted source references)"))
+            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
     private final WebAcquisition acquisition;

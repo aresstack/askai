@@ -447,35 +447,6 @@ public final class ResearchRuntimeSettings {
                         d.choiceTimeoutSeconds));
     }
 
-    static final String KEY_AGENT_MAX_OUTPUT_TOKENS = "research.runtime.agentMaxOutputTokens";
-    /** The default answer budget per agent model turn — generous enough for the longest contract (review). */
-    public static final int DEFAULT_AGENT_MAX_OUTPUT_TOKENS = 4096;
-
-    /**
-     * The output-token budget the agent grants the model PER TURN (the longest contracted answer is the
-     * post-search source review). A budget, not a target: short turns stay short. Configurable so a too
-     * small value never has to be fixed in code again; an unparsable or non-positive persisted value falls
-     * back to the default. Applies to NEW sessions.
-     */
-    public static int loadAgentMaxOutputTokens(WorkspaceStateStore store) {
-        if (store == null) {
-            return DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
-        }
-        try {
-            int value = Integer.parseInt(store.get(KEY_AGENT_MAX_OUTPUT_TOKENS,
-                    String.valueOf(DEFAULT_AGENT_MAX_OUTPUT_TOKENS)).trim());
-            return value > 0 ? value : DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
-        } catch (NumberFormatException invalid) {
-            return DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
-        }
-    }
-
-    public static void saveAgentMaxOutputTokens(WorkspaceStateStore store, int tokens) {
-        if (store != null && tokens > 0) {
-            store.put(KEY_AGENT_MAX_OUTPUT_TOKENS, String.valueOf(tokens));
-        }
-    }
-
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";
     /** How many model↔tool cycles ONE concept turn may make — the WORK budget of the loop. */
     public static final int DEFAULT_CONCEPT_TOOL_ROUNDS = 4;

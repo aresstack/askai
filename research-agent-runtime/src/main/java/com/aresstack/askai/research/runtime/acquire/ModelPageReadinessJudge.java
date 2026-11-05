@@ -38,6 +38,7 @@ public final class ModelPageReadinessJudge implements PageReadinessJudge {
             .purpose("classifies an ambiguous opened page (readable, consent, challenge, blocked, unreadable)")
             .systemPrompt(SYSTEM)
             .output(RoleOutput.text("ModelPageReadinessJudge one-word verdict"))
+            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
     private final PageReadinessModel model;

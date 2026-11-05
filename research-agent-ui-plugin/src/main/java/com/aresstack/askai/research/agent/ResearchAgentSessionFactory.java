@@ -153,8 +153,6 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 ResearchRuntimeSettings.loadBotControlMcp(hostContext.getStateStore()));
         factory.setAlwaysOfferSearchSuggestions(
                 ResearchRuntimeSettings.loadAlwaysOfferSearchSuggestions(hostContext.getStateStore()));
-        factory.setAgentMaxOutputTokens(
-                ResearchRuntimeSettings.loadAgentMaxOutputTokens(hostContext.getStateStore()));
         factory.setConceptToolRounds(
                 ResearchRuntimeSettings.loadConceptToolRounds(hostContext.getStateStore()));
         factory.setConceptRepairAttempts(

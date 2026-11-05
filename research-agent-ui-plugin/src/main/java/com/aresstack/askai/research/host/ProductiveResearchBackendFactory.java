@@ -75,15 +75,6 @@ public final class ProductiveResearchBackendFactory {
         this.alwaysOfferSearchSuggestions = enabled;
     }
 
-    /** Answer budget per agent model turn (tokens); the settings value, never a code constant. */
-    private volatile int agentMaxOutputTokens = ResearchRuntimeSettings.DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
-
-    public void setAgentMaxOutputTokens(int tokens) {
-        if (tokens > 0) {
-            this.agentMaxOutputTokens = tokens;
-        }
-    }
-
     /** Konzeptpapier loop budgets: tool rounds = work budget, repair attempts = error tolerance. */
     private volatile int conceptToolRounds = ResearchRuntimeSettings.DEFAULT_CONCEPT_TOOL_ROUNDS;
     private volatile int conceptRepairAttempts = ResearchRuntimeSettings.DEFAULT_CONCEPT_REPAIR_ATTEMPTS;
@@ -923,8 +914,6 @@ public final class ProductiveResearchBackendFactory {
             baseEnv.put("ASKAI_RERANKER_CONFIG_DE", rerankerDePath);
             // Settings checkbox "Immer Suchvorschläge anbieten" → the scoping prompt variant (default off).
             baseEnv.put("ASKAI_SCOPING_ALWAYS_SUGGEST", String.valueOf(alwaysOfferSearchSuggestions));
-            // Settings "Agent-Antwortbudget (Tokens)" → the model-turn output budget (review = longest).
-            baseEnv.put("ASKAI_AGENT_MAX_OUTPUT_TOKENS", String.valueOf(agentMaxOutputTokens));
             // Settings "Konzept-Werkzeugrunden / -Reparaturen" → the concept tool-round loop budgets.
             baseEnv.put("ASKAI_CONCEPT_TOOL_ROUNDS", String.valueOf(conceptToolRounds));
             baseEnv.put("ASKAI_CONCEPT_REPAIR_ATTEMPTS", String.valueOf(conceptRepairAttempts));

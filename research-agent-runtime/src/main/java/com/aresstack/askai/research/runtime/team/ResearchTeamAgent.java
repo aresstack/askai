@@ -34,28 +34,29 @@ public final class ResearchTeamAgent {
     /** A calm, deterministic temperature for a consultative planner (varied queries come from the prompt). */
     private static final double TEMPERATURE = 0.4;
     /**
-     * The DEFAULT output budget per model turn. It must fit the LONGEST contracted answer, and that is the
-     * post-search review: ONE JSON with the visible summary of up to 12 sources PLUS the optional brief
-     * markdown, suggestions, scope patch and unresolved issues. At the former 1024 the review's JSON was
-     * routinely TRUNCATED mid-string — unparseable, the one repair truncated identically, and every
-     * "Neue Quellen auswerten" ended as UNUSABLE_ANSWER. The budget only bounds the model's permission to
-     * write; short turns stay short. The EFFECTIVE value is the user's setting
-     * ("Agent-Antwortbudget (Tokens)", handed to the process at launch), never a hidden constant.
+     * The answer budgets per call, taken from the ROLE of the call (plan 4.1 rule 6, table 4.2): a Concept chat
+     * turn including its tool rounds gets 4,096; a chat turn of every later phase 1,536; the post-search review
+     * 4,096 in Concept (summary and suggestions) and 3,072 in Sources (summary only), both provisional until the
+     * measurement PR. Roles on one slot never share one budget. A JSON answer cut off at its budget fails loud.
      */
-    public static final int DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+    public static final int CONCEPT_TURN_BUDGET = 4096;
+    public static final int PHASE_TURN_BUDGET = 1536;
+    public static final int CONCEPT_REVIEW_BUDGET = 4096;
+    public static final int SOURCES_REVIEW_BUDGET = 3072;
 
-    private int maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS;
-
-    /** Apply the user's configured answer budget; a non-positive value keeps the current one. */
-    public void setMaxOutputTokens(int tokens) {
-        if (tokens > 0) {
-            this.maxOutputTokens = tokens;
-        }
+    /** The answer budget of a chat turn (and its tool rounds) in a phase. */
+    public static int turnBudget(String phaseId) {
+        return isConcept(phaseId) ? CONCEPT_TURN_BUDGET : PHASE_TURN_BUDGET;
     }
 
-    /** The effective per-turn answer budget (the configured setting, or the documented default). */
-    public int getMaxOutputTokens() {
-        return maxOutputTokens;
+    /** The answer budget of the post-search review in a phase. */
+    public static int reviewBudget(String phaseId) {
+        return isConcept(phaseId) ? CONCEPT_REVIEW_BUDGET : SOURCES_REVIEW_BUDGET;
+    }
+
+    private static boolean isConcept(String phaseId) {
+        return phaseId == null || phaseId.isEmpty()
+                || PhaseAssistantProfileRegistry.SCOPING_PHASE_ID.equalsIgnoreCase(phaseId);
     }
 
     private final MainModelChat model;
@@ -158,7 +159,8 @@ public final class ResearchTeamAgent {
                 confirmedAspects, proposedQuestion, proposedAspects, history, meter);
         append(messages, meter, PromptBlockMeter.GREETING_INSTRUCTION, ChatMessage.user(
                 TeamAgentPlaybook.greetingInstruction(contextAssembler.workingLanguageDisplayName())));
-        TeamAgentResult result = runTurn(messages, meter, state, greeting.getOutputContract(), null);
+        TeamAgentResult result = runTurn(messages, meter, state, greeting.getOutputContract(), null,
+                turnBudget(state.getPhaseId()));
         if (result.isOk()) {
             greeted = true;
             greetingResult = result;
@@ -196,12 +198,23 @@ public final class ResearchTeamAgent {
      * action): the generation-time schema admits only that variant. {@code null} = an ordinary internal turn.
      */
     public TeamAgentResult internalTurn(String instruction, TeamAgentStateView state, String requiredActionType) {
+        return internalTurn(instruction, state, requiredActionType, turnBudget(state.getPhaseId()));
+    }
+
+    /** The post-search review: an internal turn with the review's own answer budget (plan 4.2). */
+    public TeamAgentResult reviewTurn(String instruction, TeamAgentStateView state) {
+        return internalTurn(instruction, state, null, reviewBudget(state.getPhaseId()));
+    }
+
+    private TeamAgentResult internalTurn(String instruction, TeamAgentStateView state, String requiredActionType,
+                                         int budget) {
         PhaseAssistantProfile profile = profiles.forPhase(state.getPhaseId());
         PromptBlockMeter meter = new PromptBlockMeter();
         List<ChatMessage> messages = baseMessages(state, meter);
         append(messages, meter, PromptBlockMeter.TOOL_FEEDBACK,
                 ChatMessage.user(instruction == null ? "" : instruction.trim()));
-        TeamAgentResult result = runTurn(messages, meter, state, profile.getOutputContract(), requiredActionType);
+        TeamAgentResult result = runTurn(messages, meter, state, profile.getOutputContract(), requiredActionType,
+                budget);
         if (result.isOk()) {
             // The ANSWER is real conversation — the user sees it, and the next turn must know it exists.
             // Only the instruction stays out.
@@ -229,7 +242,8 @@ public final class ResearchTeamAgent {
         PromptBlockMeter meter = new PromptBlockMeter();
         List<ChatMessage> messages = baseMessages(state, meter);
         append(messages, meter, PromptBlockMeter.USER_MESSAGE, pendingUserTurn);
-        TeamAgentResult result = runTurn(messages, meter, state, profile.getOutputContract(), null);
+        TeamAgentResult result = runTurn(messages, meter, state, profile.getOutputContract(), null,
+                turnBudget(state.getPhaseId()));
         if (result.isOk()) {
             history.add(pendingUserTurn);
             pendingUserTurn = null;
@@ -263,8 +277,9 @@ public final class ResearchTeamAgent {
      * surface a misleading turn.
      */
     private TeamAgentResult runTurn(List<ChatMessage> messages, PromptBlockMeter meter, TeamAgentStateView state,
-                                    PhaseOutputContract contract, String requiredActionType) {
-        Parsed parsed = callParseWithRepair(messages, meter, state.getPhaseId(), contract, requiredActionType);
+                                    PhaseOutputContract contract, String requiredActionType, int budget) {
+        Parsed parsed = callParseWithRepair(messages, meter, state.getPhaseId(), contract, requiredActionType,
+                budget);
         if (parsed.failure != null) {
             return parsed.failure;
         }
@@ -288,20 +303,20 @@ public final class ResearchTeamAgent {
      * without a schema the long-standing plain completion stays byte-identical.
      */
     private MainModelChatResult callModel(List<ChatMessage> messages, PromptBlockMeter meter, String phase,
-                                          PhaseOutputContract contract, String requiredActionType) {
+                                          PhaseOutputContract contract, String requiredActionType, int budget) {
         String schema = requiredActionType == null ? contract.outputSchemaJson()
                 : contract.outputSchemaJson(requiredActionType);
         MainModelChatResult result = schema == null
-                ? model.complete(messages, TEMPERATURE, maxOutputTokens)
-                : model.completeJson(messages, TEMPERATURE, maxOutputTokens, schema);
+                ? model.complete(messages, TEMPERATURE, budget)
+                : model.completeJson(messages, TEMPERATURE, budget, schema);
         ModelCallLog.log(phase, meter, result);
         return result;
     }
 
     /** One model call + phase-contract parse, with EXACTLY ONE bounded parse-repair on failure. */
     private Parsed callParseWithRepair(List<ChatMessage> messages, PromptBlockMeter meter, String phase,
-                                       PhaseOutputContract contract, String requiredActionType) {
-        MainModelChatResult call = callModel(messages, meter, phase, contract, requiredActionType);
+                                       PhaseOutputContract contract, String requiredActionType, int budget) {
+        MainModelChatResult call = callModel(messages, meter, phase, contract, requiredActionType, budget);
         if (!call.isOk()) {
             return Parsed.fail(TeamAgentResult.modelUnavailable(call.getDetail()));
         }
@@ -314,7 +329,7 @@ public final class ResearchTeamAgent {
         PromptBlockMeter repairMeter = meter.copy();
         append(repair, repairMeter, PromptBlockMeter.REPAIR_NOTE, ChatMessage.assistant(call.getText()));
         append(repair, repairMeter, PromptBlockMeter.REPAIR_NOTE, ChatMessage.user(TeamAgentPlaybook.repairNudge()));
-        return callParseOnce(repair, repairMeter, phase, contract, requiredActionType);
+        return callParseOnce(repair, repairMeter, phase, contract, requiredActionType, budget);
     }
 
     /**
@@ -355,8 +370,8 @@ public final class ResearchTeamAgent {
      * turn stays intact for a clean retry.
      */
     private Parsed callParseOnce(List<ChatMessage> messages, PromptBlockMeter meter, String phase,
-                                 PhaseOutputContract contract, String requiredActionType) {
-        MainModelChatResult call = callModel(messages, meter, phase, contract, requiredActionType);
+                                 PhaseOutputContract contract, String requiredActionType, int budget) {
+        MainModelChatResult call = callModel(messages, meter, phase, contract, requiredActionType, budget);
         if (!call.isOk()) {
             return Parsed.fail(TeamAgentResult.modelUnavailable(call.getDetail()));
         }

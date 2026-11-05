@@ -17,10 +17,9 @@ import java.util.List;
  *   <li>{@code outputFormat}: free text, generic JSON or a JSON schema; default text.</li>
  *   <li>{@code thinking}: the thinking mode; default {@link ThinkingMode#DEFAULT}.</li>
  *   <li>{@code temperature}: null = the model's default.</li>
- *   <li>{@code maxOutputTokens}: 0 = no limit set by the caller.</li>
- *   <li>{@code contextTokens}: the context size for this call; 0 = the reservation's size, or the slot
- *       default without an explicit reservation. A size above the reservation's is rejected, because the
- *       reservation is what the scheduler planned memory for.</li>
+ *   <li>{@code maxOutputTokens}: 0 = the slot's answer budget (none unless configured).</li>
+ *   <li>{@code contextTokens}: the MINIMUM context this call needs; 0 = none. The call always runs with the
+ *       model's context; a minimum above it fails with {@code CONTEXT_TOO_LARGE} before the HTTP call.</li>
  *   <li>{@code timeout}: the caller's time limit for the whole call (a setting of the calling role, never a
  *       constant); null = the platform's configured default.</li>
  * </ul>
@@ -86,7 +85,7 @@ public final class ChatRequest {
         return maxOutputTokens;
     }
 
-    /** Context size in tokens; 0 = reservation size or slot default. */
+    /** The minimum context in tokens; 0 = none. */
     public int getContextTokens() {
         return contextTokens;
     }

@@ -1,5 +1,8 @@
 package com.aresstack.askai.modelport;
 
+import com.aresstack.askai.agent.model.port.ThinkingMode;
+import com.aresstack.askai.client.ModelContextSizes;
+
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -17,7 +20,13 @@ import java.util.Map;
  *       not configured, which disables the memory planning for that endpoint (models then never share
  *       it; a model switch is a deliberate step);</li>
  *   <li>{@code slotModels}: the model filling a slot; absent or empty = the central main model;</li>
- *   <li>{@code slotContextTokens}: the default context size per slot (0 = the model's own default);</li>
+ *   <li>{@code modelContextTokens}: the context ({@code num_ctx}) per MODEL (plan 4.1, rule 1); a model without
+ *       a value gets its preset ({@link ModelContextSizes}). Every caller sends this value for the model, so
+ *       Ollama never reloads the runner for a different context;</li>
+ *   <li>{@code slotThinking}: the thinking mode per slot, filled into a request that leaves it at
+ *       {@link ThinkingMode#DEFAULT}; absent = Auto (resolved per model, plan 4.1 rule 3);</li>
+ *   <li>{@code slotAnswerTokens}: the answer budget per slot, filled into a request without one; absent or 0
+ *       = none (the role's own budget, or the model's default);</li>
  *   <li>{@code keepAlive}: Ollama's {@code keep_alive} sent with every call, keeping the active model
  *       warm (default {@code 5m}, the value AskAI has always used);</li>
  *   <li>{@code implicitWaitSeconds}: how long a call without an explicit reservation may wait for a free
@@ -46,14 +55,17 @@ public final class ModelPortSettings {
     private final Map<String, Integer> modelCapacities;
     private final Map<String, Long> endpointMemoryBudgetsMb;
     private final Map<String, String> slotModels;
-    private final Map<String, Integer> slotContextTokens;
+    private final Map<String, Integer> modelContextTokens;
+    private final Map<String, ThinkingMode> slotThinking;
+    private final Map<String, Integer> slotAnswerTokens;
     private final String keepAlive;
     private final int implicitWaitSeconds;
     private final int residencyRefreshSeconds;
 
     public ModelPortSettings(int defaultCapacity, Map<String, Integer> modelCapacities,
                              Map<String, Long> endpointMemoryBudgetsMb, Map<String, String> slotModels,
-                             Map<String, Integer> slotContextTokens, String keepAlive, int implicitWaitSeconds,
+                             Map<String, Integer> modelContextTokens, Map<String, ThinkingMode> slotThinking,
+                             Map<String, Integer> slotAnswerTokens, String keepAlive, int implicitWaitSeconds,
                              int residencyRefreshSeconds) {
         this.defaultCapacity = defaultCapacity < 1 ? DEFAULT_CAPACITY : defaultCapacity;
         this.modelCapacities = positive(modelCapacities);
@@ -70,15 +82,18 @@ public final class ModelPortSettings {
             }
         }
         this.slotModels = Collections.unmodifiableMap(models);
-        Map<String, Integer> contexts = new LinkedHashMap<String, Integer>();
-        if (slotContextTokens != null) {
-            for (Map.Entry<String, Integer> entry : slotContextTokens.entrySet()) {
-                if (entry.getValue() != null && entry.getValue() > 0) {
-                    contexts.put(entry.getKey(), entry.getValue());
+        this.modelContextTokens = positive(modelContextTokens);
+        Map<String, ThinkingMode> thinking = new LinkedHashMap<String, ThinkingMode>();
+        if (slotThinking != null) {
+            for (Map.Entry<String, ThinkingMode> entry : slotThinking.entrySet()) {
+                if (entry.getKey() != null && entry.getValue() != null
+                        && entry.getValue() != ThinkingMode.DEFAULT) {
+                    thinking.put(entry.getKey(), entry.getValue());
                 }
             }
         }
-        this.slotContextTokens = Collections.unmodifiableMap(contexts);
+        this.slotThinking = Collections.unmodifiableMap(thinking);
+        this.slotAnswerTokens = positive(slotAnswerTokens);
         this.keepAlive = keepAlive == null || keepAlive.trim().isEmpty() ? DEFAULT_KEEP_ALIVE : keepAlive.trim();
         this.implicitWaitSeconds = implicitWaitSeconds < 0 ? DEFAULT_IMPLICIT_WAIT_SECONDS : implicitWaitSeconds;
         this.residencyRefreshSeconds = residencyRefreshSeconds < 1
@@ -86,7 +101,7 @@ public final class ModelPortSettings {
     }
 
     public static ModelPortSettings defaults() {
-        return new ModelPortSettings(DEFAULT_CAPACITY, null, null, null, null, DEFAULT_KEEP_ALIVE,
+        return new ModelPortSettings(DEFAULT_CAPACITY, null, null, null, null, null, null, DEFAULT_KEEP_ALIVE,
                 DEFAULT_IMPLICIT_WAIT_SECONDS, DEFAULT_RESIDENCY_REFRESH_SECONDS);
     }
 
@@ -124,17 +139,38 @@ public final class ModelPortSettings {
         return slotModels;
     }
 
-    /** The default context size of a slot in tokens, 0 = the model's default. */
-    public int slotContextTokens(String slot) {
-        Integer value = slot == null ? null : slotContextTokens.get(slot);
+    /** The context ({@code num_ctx}) of a model: its setting, else its preset. Always positive. */
+    public int contextOf(String model) {
+        Integer value = model == null ? null : modelContextTokens.get(model.trim());
+        return value == null ? ModelContextSizes.preset(model) : value;
+    }
+
+    /** The configured contexts per model (presets are not listed unless saved). */
+    public Map<String, Integer> getModelContextTokens() {
+        return modelContextTokens;
+    }
+
+    /** The thinking mode of a slot; {@link ThinkingMode#DEFAULT} means Auto. */
+    public ThinkingMode slotThinking(String slot) {
+        ThinkingMode value = slot == null ? null : slotThinking.get(slot);
+        return value == null ? ThinkingMode.DEFAULT : value;
+    }
+
+    public Map<String, ThinkingMode> getSlotThinking() {
+        return slotThinking;
+    }
+
+    /** The answer budget of a slot in tokens, 0 = none. */
+    public int slotAnswerTokens(String slot) {
+        Integer value = slot == null ? null : slotAnswerTokens.get(slot);
         return value == null ? 0 : value;
     }
 
-    public Map<String, Integer> getSlotContextTokens() {
-        return slotContextTokens;
+    public Map<String, Integer> getSlotAnswerTokens() {
+        return slotAnswerTokens;
     }
 
-    /** The default slots plus every slot with a configured model or context, in a stable order. */
+    /** The default slots plus every slot with a configured model, thinking mode or budget, in a stable order. */
     public java.util.List<String> knownSlotNames() {
         java.util.List<String> names = new java.util.ArrayList<String>(DEFAULT_SLOTS);
         for (String name : slotModels.keySet()) {
@@ -142,7 +178,12 @@ public final class ModelPortSettings {
                 names.add(name);
             }
         }
-        for (String name : slotContextTokens.keySet()) {
+        for (String name : slotThinking.keySet()) {
+            if (!names.contains(name)) {
+                names.add(name);
+            }
+        }
+        for (String name : slotAnswerTokens.keySet()) {
             if (!names.contains(name)) {
                 names.add(name);
             }

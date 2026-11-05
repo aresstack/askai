@@ -45,6 +45,7 @@ public final class ResearchRoles {
             .purpose("repairs the result layout of a search page the extractor could not read")
             .promptFromCaller()
             .output(RoleOutput.json("SearchLayoutRepairJson"))
+            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
     private ResearchRoles() {

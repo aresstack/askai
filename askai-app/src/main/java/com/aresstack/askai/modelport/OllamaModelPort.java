@@ -9,6 +9,7 @@ import com.aresstack.askai.agent.model.port.ModelMessage;
 import com.aresstack.askai.agent.model.port.ModelPort;
 import com.aresstack.askai.agent.model.port.ModelSlot;
 import com.aresstack.askai.agent.model.port.OutputFormat;
+import com.aresstack.askai.agent.model.port.ThinkingMode;
 import com.aresstack.askai.agent.model.port.TokenUsage;
 import com.aresstack.askai.agent.model.port.ToolCall;
 import com.aresstack.askai.agent.model.port.ToolDefinition;
@@ -77,6 +78,9 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class OllamaModelPort implements ModelPort, AutoCloseable {
 
+    /** Reasoning room a contract role gets on a level-only model (plan 4.1 rule 3; provisional until PR 04). */
+    static final int LEVEL_ONLY_REASONING_TOKENS = 1000;
+
     /** The endpoint pool. Ids are stable settings keys; base URLs may change (a restarted local runtime). */
     public interface EndpointDirectory {
         List<String> endpointIds();
@@ -123,6 +127,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     private final ScheduledExecutorService timers;
     private final Map<String, Boolean> reachability = new ConcurrentHashMap<String, Boolean>();
     private final AtomicInteger reservationIds = new AtomicInteger();
+    private final Map<String, Capabilities> capabilityCache = new ConcurrentHashMap<String, Capabilities>();
     private volatile boolean closed;
 
     public OllamaModelPort(EndpointDirectory endpoints, SlotDirectory slots,
@@ -210,8 +215,14 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         ModelPortSettings settings = settings();
         // Memory planning needs fresh loaded sizes; the probe runs in the background, never here.
         residency.refreshIfOlderThan(Duration.ofSeconds(settings.getResidencyRefreshSeconds()));
-        int defaultContext = settings.slotContextTokens(slot.getName());
-        final int context = request.getContextTokens() > 0 ? request.getContextTokens() : defaultContext;
+        // The context is the model's (plan 4.1, rule 1); a request's value is only the minimum it needs.
+        final int context = settings.contextOf(model);
+        if (request.getContextTokens() > context) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.CONTEXT_TOO_LARGE, contextTooLarge(model,
+                            request.getContextTokens(), context)));
+            return result;
+        }
         final CompletableFuture<ModelResourceScheduler.Grant> grant =
                 scheduler.acquire(slot, endpointId, model, request.getMaxWait());
         grant.whenComplete((granted, failure) -> {
@@ -303,7 +314,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             }
             String endpointId = slots.endpointFor(model);
             bindings.add(new SlotBinding(slot, endpointId, handle(endpointId, model),
-                    settings.slotContextTokens(slot.getName())));
+                    settings.contextOf(model), model));
             add(models, endpointId, model);
         }
         for (Map.Entry<String, List<String>> tracked : scheduler.trackedModels().entrySet()) {
@@ -326,6 +337,56 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                     loaded.sizeBytes, loaded.vramBytes, loaded.expiresAt, loaded.contextLength));
         }
         return new ResourceSnapshot(Instant.now(), pool, bindings, capacities, residents, view.known);
+    }
+
+    @Override
+    public CompletableFuture<Void> warm(final ModelSlot slot) {
+        final CompletableFuture<Void> result = new CompletableFuture<Void>();
+        if (slot == null) {
+            throw new IllegalArgumentException("slot must not be null");
+        }
+        if (closed) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.PORT_CLOSED, "the model port is closed"));
+            return result;
+        }
+        final String model = slots.modelFor(slot);
+        if (model == null || model.trim().isEmpty()) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.NO_BINDING,
+                    "no model is configured for this slot and no main model is selected"));
+            return result;
+        }
+        final String endpointId = slots.endpointFor(model);
+        try {
+            calls.submit(new Runnable() {
+                public void run() {
+                    try {
+                        ModelPortSettings settings = settings();
+                        client(endpoints.baseUrl(endpointId)).loadModel(model, settings.getKeepAlive(),
+                                settings.contextOf(model));
+                        reachability.put(endpointId, Boolean.TRUE);
+                        result.complete(null);
+                    } catch (IOException unavailable) {
+                        reachability.put(endpointId, Boolean.FALSE);
+                        result.completeExceptionally(new SlotUnavailableException(slot,
+                                SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, "endpoint " + endpointId
+                                        + " is not available: " + unavailable.getMessage()));
+                    } catch (OllamaRequestException failed) {
+                        boolean down = isConnectFailure(failed);
+                        reachability.put(endpointId, down ? Boolean.FALSE : Boolean.TRUE);
+                        result.completeExceptionally(new SlotUnavailableException(slot,
+                                SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, failed.getMessage()));
+                    } catch (RuntimeException unexpected) {
+                        result.completeExceptionally(unexpected);
+                    }
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException shutDown) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.PORT_CLOSED, "the model port is closed"));
+        }
+        return result;
     }
 
     /** Stops accepting calls, fails waiting reservations, cancels running calls. Idempotent. */
@@ -355,6 +416,69 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             return ModelHandle.of(token.toString());
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
+        }
+    }
+
+    static String contextTooLarge(String model, int needed, int available) {
+        return "Context too large for " + model + ": the call needs " + needed + " tokens, the model's context is "
+                + available + " (raise it in the model resources)";
+    }
+
+    /**
+     * The wire value of {@code think} for one call (plan 4.1, rule 3): the request's mode, else the slot's;
+     * Auto resolves per model. A model without the thinking capability never gets the field; a level-only
+     * model ({@code gpt-oss}) gets {@code low} for Off and Auto.
+     */
+    Object resolveThinking(ThinkingMode requested, String slot, String baseUrl, String model) {
+        ThinkingMode mode = requested == null || requested == ThinkingMode.DEFAULT
+                ? settings().slotThinking(slot) : requested;
+        Capabilities capabilities = capabilities(baseUrl, model);
+        if (!capabilities.thinking) {
+            return null;
+        }
+        if (mode == ThinkingMode.DEFAULT || mode == ThinkingMode.OFF) {
+            return capabilities.levelOnly ? "low" : Boolean.FALSE;
+        }
+        return thinkValue(mode);
+    }
+
+    /** What {@code /api/show} says about a model's thinking, cached per endpoint and model. */
+    private Capabilities capabilities(String baseUrl, String model) {
+        String key = baseUrl + "\n" + model;
+        Capabilities known = capabilityCache.get(key);
+        if (known != null) {
+            return known;
+        }
+        Capabilities resolved;
+        try {
+            com.aresstack.askai.client.OllamaModelInfoView info = client(baseUrl).getModelInfo(model);
+            boolean thinking = info.getCapabilities().contains("thinking");
+            resolved = new Capabilities(thinking, isLevelOnly(model, info.getDetails().getFamily()));
+            capabilityCache.put(key, resolved);
+        } catch (OllamaRequestException | RuntimeException unknown) {
+            // Not cached: the next call asks again. Without knowledge no think field is sent, because a
+            // non-thinking model rejects one.
+            System.err.println("[model-port] capabilities of " + model + " unknown, sending no think field: "
+                    + unknown.getMessage());
+            resolved = new Capabilities(false, false);
+        }
+        return resolved;
+    }
+
+    /** The families that accept only thinking levels, never {@code false} (plan 4.1, rule 3). */
+    static boolean isLevelOnly(String model, String family) {
+        String name = model == null ? "" : model.toLowerCase(java.util.Locale.ROOT);
+        String fam = family == null ? "" : family.toLowerCase(java.util.Locale.ROOT).replace("-", "");
+        return name.startsWith("gpt-oss") || fam.equals("gptoss");
+    }
+
+    private static final class Capabilities {
+        final boolean thinking;
+        final boolean levelOnly;
+
+        Capabilities(boolean thinking, boolean levelOnly) {
+            this.thinking = thinking;
+            this.levelOnly = levelOnly;
         }
     }
 
@@ -435,7 +559,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     }
 
     /** The wire value of {@code think}: null = omit. */
-    static Object thinkValue(com.aresstack.askai.agent.model.port.ThinkingMode mode) {
+    static Object thinkValue(ThinkingMode mode) {
         switch (mode) {
             case OFF:
                 return Boolean.FALSE;
@@ -675,15 +799,21 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 return;
             }
             Map<String, Object> options = new LinkedHashMap<String, Object>();
-            int context = request.getContextTokens() > 0 ? request.getContextTokens() : reservation.contextTokens;
-            if (context > 0) {
-                options.put("num_ctx", context);
-            }
+            options.put("num_ctx", reservation.contextTokens); // the model's context, on every call
             if (request.getTemperature() != null) {
                 options.put("temperature", request.getTemperature());
             }
-            if (request.getMaxOutputTokens() > 0) {
-                options.put("num_predict", request.getMaxOutputTokens());
+            Object think = resolveThinking(request.getThinking(), reservation.slot.getName(), baseUrl,
+                    reservation.model);
+            int budget = request.getMaxOutputTokens() > 0 ? request.getMaxOutputTokens()
+                    : settings().slotAnswerTokens(reservation.slot.getName());
+            if (budget > 0 && request.getThinking() == ThinkingMode.OFF && "low".equals(think)) {
+                // A contract role asked for no reasoning on a model that cannot switch it off: its answer
+                // budget gets room for the reasoning (1,000 tokens until the measurement PR, plan 4.1 rule 3).
+                budget += LEVEL_ONLY_REASONING_TOKENS;
+            }
+            if (budget > 0) {
+                options.put("num_predict", budget);
             }
             List<OllamaChatOptions.Tool> tools = new ArrayList<OllamaChatOptions.Tool>();
             for (ToolDefinition tool : request.getTools()) {
@@ -706,7 +836,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             }
             try {
                 OllamaChatCompletion completion = client(baseUrl).streamChat(reservation.model,
-                        turns(request.getMessages()), settings().getKeepAlive(), thinkValue(request.getThinking()),
+                        turns(request.getMessages()), settings().getKeepAlive(), think,
                         extras, new OllamaChatStreamListener() {
                             public void onThinkingDelta(String delta) {
                                 if (!terminal.get()) {
