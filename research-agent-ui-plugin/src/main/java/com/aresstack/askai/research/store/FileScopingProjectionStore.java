@@ -64,8 +64,8 @@ public final class FileScopingProjectionStore {
             return null;
         }
         Properties p = new Properties();
-        try (InputStream in = new FileInputStream(file)) {
-            p.load(in);
+        try {
+            p.putAll(StoreIo.loadUtf8Properties(file));
         } catch (IOException ex) {
             return null;
         }

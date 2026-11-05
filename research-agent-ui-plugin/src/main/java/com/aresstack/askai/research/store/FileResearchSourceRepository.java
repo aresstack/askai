@@ -27,6 +27,10 @@ import java.util.Properties;
  */
 public final class FileResearchSourceRepository implements ResearchSourceRepository {
 
+    /** One lock per source file, shared by every repository instance on the same directory. */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Object> SOURCE_LOCKS =
+            new java.util.concurrent.ConcurrentHashMap<String, Object>();
+
     private final File dir;
 
     public FileResearchSourceRepository(File sourcesDir) {
@@ -72,6 +76,22 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
 
     @Override
     public SourceUpdateResult update(String sourceId, long expectedRevision, SourceUpdate update) {
+        if (sourceId == null) {
+            return SourceUpdateResult.notFound(null);
+        }
+        synchronized (lockFor(sourceId)) {
+            return updateLocked(sourceId, expectedRevision, update);
+        }
+    }
+
+    private Object lockFor(String sourceId) {
+        String key = file(sourceId).getAbsolutePath();
+        Object fresh = new Object();
+        Object existing = SOURCE_LOCKS.putIfAbsent(key, fresh);
+        return existing == null ? fresh : existing;
+    }
+
+    private SourceUpdateResult updateLocked(String sourceId, long expectedRevision, SourceUpdate update) {
         ResearchSourceRecord current = get(sourceId);
         if (current == null) {
             return SourceUpdateResult.notFound(sourceId);
@@ -97,13 +117,15 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
             write(next);
             return SourceUpdateResult.updated(next);
         } catch (IOException ex) {
-            return SourceUpdateResult.conflict(current); // write failed: report as non-applied
+            return SourceUpdateResult.failed(current, String.valueOf(ex.getMessage()));
         }
     }
 
     /** Add or overwrite a record verbatim (used to seed a fresh project). */
     public void put(ResearchSourceRecord record) throws IOException {
-        write(record);
+        synchronized (lockFor(record.getSourceId())) {
+            write(record);
+        }
     }
 
     private void write(ResearchSourceRecord r) throws IOException {
@@ -136,12 +158,7 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
     private ResearchSourceRecord readFile(File f) {
         try {
             Properties p = new Properties();
-            InputStream in = new FileInputStream(f);
-            try {
-                p.load(in);
-            } finally {
-                in.close();
-            }
+            p.putAll(StoreIo.loadUtf8Properties(f));
             String id = p.getProperty("sourceId");
             if (id == null || id.trim().isEmpty()) {
                 return null; // corrupt: no id

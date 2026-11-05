@@ -33,6 +33,11 @@ final class StoreIo {
         }
     }
 
+    /** Reads a store's {@code .properties} file as UTF-8 (never the ISO-8859-1 of {@code Properties.load(InputStream)}). */
+    static java.util.Properties loadUtf8Properties(File file) throws IOException {
+        return com.aresstack.askai.research.knowledge.processing.Utf8Properties.load(file);
+    }
+
     static String readUtf8(File file) throws IOException {
         return new String(Files.readAllBytes(file.toPath()), UTF8);
     }
