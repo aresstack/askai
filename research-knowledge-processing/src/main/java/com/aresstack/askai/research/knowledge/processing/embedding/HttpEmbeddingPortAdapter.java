@@ -10,27 +10,53 @@ import java.util.List;
 /**
  * The productive {@link EmbeddingPort}: it POSTs a BATCH {@code /api/embed} request built from the injected
  * {@link EmbeddingEndpointDescriptor} and validates the response STRICTLY. It knows ONLY the descriptor — no
- * host runtime manager, no model catalog, no AskAI settings, no Swing. Batch in / batch out; {@code
- * input_type=raw} is fixed. There is NO zero-vector fallback, NO retry on another model, and NO legacy
+ * host runtime manager, no model catalog, no AskAI settings, no Swing. Batch in / batch out. Each call's
+ * {@link EmbeddingPort.Role} selects the model card's prompt ({@link EmbeddingPromptScheme}): as text for Ollama
+ * models, through {@code input_type} for the local runtime's E5 models, nothing for raw calls. There is NO zero-vector fallback, NO retry on another model, and NO legacy
  * {@code /api/embeddings} path — a malformed or inconsistent response fails hard (a retryable EMBEDDING error).
  *
  * <p>Every returned vector is tagged with the descriptor's {@link EmbeddingEndpointDescriptor#embeddingFingerprint()}
- * (the semantic vector-world identity), so downstream passages and the reprocessing key are version-aware.</p>
+ * combined with the applied prompt scheme ({@link #fingerprint(EmbeddingPort.Role)}), so downstream passages and the
+ * reprocessing key are version-aware and raw vectors are never compared with prompted ones.</p>
  */
 public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
 
     private final EmbeddingEndpointDescriptor descriptor;
     private final EmbeddingHttpTransport transport;
+    private final EmbeddingPromptScheme scheme;
 
     public HttpEmbeddingPortAdapter(EmbeddingEndpointDescriptor descriptor, EmbeddingHttpTransport transport) {
         this.descriptor = descriptor;
         this.transport = transport;
+        this.scheme = EmbeddingPromptScheme.forModel(descriptor.modelId);
+    }
+
+    /** The prompt scheme of the descriptor's model. */
+    public EmbeddingPromptScheme scheme() {
+        return scheme;
+    }
+
+    /** The fingerprint that vectors of this role carry (documents and queries share it; raw keeps the base). */
+    public String fingerprint(EmbeddingPort.Role role) {
+        return scheme.effective(role).fingerprint(descriptor.embeddingFingerprint());
+    }
+
+    /** The fingerprint of document (and query) vectors of a descriptor: the knowledge pipeline's vector world. */
+    public static String documentFingerprint(EmbeddingEndpointDescriptor descriptor) {
+        return EmbeddingPromptScheme.forModel(descriptor.modelId).fingerprint(descriptor.embeddingFingerprint());
     }
 
     @Override
-    public List<EmbeddingVector> embed(List<String> texts) {
+    public List<EmbeddingVector> embed(EmbeddingPort.Role role, List<String> texts) {
+        if (role == null) {
+            throw new IllegalArgumentException("every embedding call states its role");
+        }
         List<String> inputs = texts == null ? new ArrayList<String>() : texts;
-        String body = buildRequest(descriptor.modelId, inputs);
+        List<String> prompted = new ArrayList<String>(inputs.size());
+        for (String text : inputs) {
+            prompted.add(scheme.apply(role, text));
+        }
+        String body = buildRequest(descriptor.modelId, prompted, scheme.inputType(role));
         String response;
         try {
             response = transport.post(descriptor.endpointUrl(), body);
@@ -43,7 +69,7 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
             throw new EmbeddingException("embedding count " + matrix.size()
                     + " does not match input count " + inputs.size());
         }
-        String fingerprint = descriptor.embeddingFingerprint();
+        String fingerprint = fingerprint(role);
         List<EmbeddingVector> vectors = new ArrayList<EmbeddingVector>();
         for (float[] values : matrix) {
             validateVector(values);
@@ -70,6 +96,10 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
     // ------------------------------------------------------------------ request/response wire (testable)
 
     static String buildRequest(String modelId, List<String> inputs) {
+        return buildRequest(modelId, inputs, "raw");
+    }
+
+    static String buildRequest(String modelId, List<String> inputs, String inputType) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"model\":").append(jsonString(modelId)).append(",\"input\":[");
         for (int i = 0; i < inputs.size(); i++) {
@@ -78,7 +108,7 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
             }
             sb.append(jsonString(inputs.get(i)));
         }
-        sb.append("],\"input_type\":\"raw\"}");
+        sb.append("],\"input_type\":").append(jsonString(inputType)).append('}');
         return sb.toString();
     }
 

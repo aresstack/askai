@@ -68,7 +68,7 @@ public class SourceProcessingWorkerTest {
 
     /** A fixed-space embedder: same fingerprint/dimension for all texts (segmentation stays deterministic). */
     private static final class FixedEmbedder implements EmbeddingPort {
-        public List<EmbeddingVector> embed(List<String> texts) {
+        public List<EmbeddingVector> embed(Role role, List<String> texts) {
             List<EmbeddingVector> out = new ArrayList<EmbeddingVector>();
             for (int i = 0; i < texts.size(); i++) {
                 out.add(new EmbeddingVector("fake", "fake-fp", new float[]{1f, 0f, 0f}));

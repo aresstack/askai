@@ -611,7 +611,8 @@ public final class ProductiveResearchBackendFactory {
             final com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler base =
                     new com.aresstack.askai.research.knowledge.processing
                             .QueueBackedKnowledgeProcessingScheduler(processingQueue, knowledgeSettings,
-                            embeddingDescriptor.embeddingFingerprint());
+                            com.aresstack.askai.research.knowledge.processing.embedding.HttpEmbeddingPortAdapter
+                                    .documentFingerprint(embeddingDescriptor));
             acceptance.setKnowledgeProcessingScheduler(
                     new com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler() {
                         public void enqueue(String captureId, String sourceId) {
