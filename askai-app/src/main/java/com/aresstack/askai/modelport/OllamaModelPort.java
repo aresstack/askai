@@ -358,35 +358,53 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             return result;
         }
         final String endpointId = slots.endpointFor(model);
-        try {
-            calls.submit(new Runnable() {
-                public void run() {
+        // The load goes through admission control like a call: it waits its turn, so it never loads another
+        // model in the middle of an active batch (the scheduler's model-switch ordering and capacity).
+        final CompletableFuture<ModelResourceScheduler.Grant> grant = scheduler.acquire(slot, endpointId, model,
+                Duration.ofSeconds(settings().getImplicitWaitSeconds()));
+        grant.whenComplete((granted, failure) -> {
+            if (failure != null) {
+                result.completeExceptionally(failure instanceof java.util.concurrent.CompletionException
+                        && failure.getCause() != null ? failure.getCause() : failure);
+                return;
+            }
+            try {
+                calls.submit(() -> {
                     try {
-                        ModelPortSettings settings = settings();
-                        client(endpoints.baseUrl(endpointId)).loadModel(model, settings.getKeepAlive(),
-                                settings.contextOf(model));
-                        reachability.put(endpointId, Boolean.TRUE);
-                        result.complete(null);
-                    } catch (IOException unavailable) {
-                        reachability.put(endpointId, Boolean.FALSE);
-                        result.completeExceptionally(new SlotUnavailableException(slot,
-                                SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, "endpoint " + endpointId
-                                        + " is not available: " + unavailable.getMessage()));
-                    } catch (OllamaRequestException failed) {
-                        boolean down = isConnectFailure(failed);
-                        reachability.put(endpointId, down ? Boolean.FALSE : Boolean.TRUE);
-                        result.completeExceptionally(new SlotUnavailableException(slot,
-                                SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, failed.getMessage()));
-                    } catch (RuntimeException unexpected) {
-                        result.completeExceptionally(unexpected);
+                        load(slot, endpointId, model, result);
+                    } finally {
+                        granted.release();
                     }
-                }
-            });
-        } catch (java.util.concurrent.RejectedExecutionException shutDown) {
-            result.completeExceptionally(new SlotUnavailableException(slot,
-                    SlotUnavailableException.Reason.PORT_CLOSED, "the model port is closed"));
-        }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException shutDown) {
+                granted.release();
+                result.completeExceptionally(new SlotUnavailableException(slot,
+                        SlotUnavailableException.Reason.PORT_CLOSED, "the model port is closed"));
+            }
+        });
         return result;
+    }
+
+    private void load(ModelSlot slot, String endpointId, String model, CompletableFuture<Void> result) {
+        try {
+            ModelPortSettings settings = settings();
+            client(endpoints.baseUrl(endpointId)).loadModel(model, settings.getKeepAlive(),
+                    settings.contextOf(model));
+            reachability.put(endpointId, Boolean.TRUE);
+            result.complete(null);
+        } catch (IOException unavailable) {
+            reachability.put(endpointId, Boolean.FALSE);
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, "endpoint " + endpointId
+                            + " is not available: " + unavailable.getMessage()));
+        } catch (OllamaRequestException failed) {
+            boolean down = isConnectFailure(failed);
+            reachability.put(endpointId, down ? Boolean.FALSE : Boolean.TRUE);
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, failed.getMessage()));
+        } catch (RuntimeException unexpected) {
+            result.completeExceptionally(unexpected);
+        }
     }
 
     /** Stops accepting calls, fails waiting reservations, cancels running calls. Idempotent. */
