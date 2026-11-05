@@ -354,7 +354,7 @@ public class OllamaModelPortTest {
         assertEquals("pf4j", messages.get(2).get("tool_calls").get(0).get("function").get("arguments")
                 .get("q").asText());
         assertEquals("search", messages.get(3).get("tool_name").asText());
-        assertNull("no thinking setting = no think field", body.get("think"));
+        assertFalse("no thinking setting = Auto, which is off on gemma4:e2b", body.get("think").asBoolean());
     }
 
     @Test

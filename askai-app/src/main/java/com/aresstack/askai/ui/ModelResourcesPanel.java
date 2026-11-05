@@ -10,7 +10,6 @@ import com.aresstack.comiccontrols.control.ComicControls;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultCellEditor;
-import javax.swing.JComboBox;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -92,7 +91,7 @@ public final class ModelResourcesPanel extends JPanel {
         JTable capacityTable = new JTable(capacities);
         JTable slotTable = new JTable(slots);
         slotTable.getColumnModel().getColumn(2).setCellEditor(
-                new DefaultCellEditor(new JComboBox<String>(THINKING_CHOICES)));
+                new DefaultCellEditor(ComicControls.comboBox(THINKING_CHOICES)));
         JTable contextTable = new JTable(contexts);
         JPanel contextButtons = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton addContext = new ComicButton("Add model");
