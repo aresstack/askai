@@ -359,12 +359,7 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
     private static Properties read(File f) {
         Properties p = new Properties();
         try {
-            InputStream in = new FileInputStream(f);
-            try {
-                p.load(in);
-            } finally {
-                in.close();
-            }
+            p.putAll(Utf8Properties.load(f));
         } catch (IOException ex) {
             throw new IllegalStateException("Cannot read " + f.getAbsolutePath(), ex);
         }

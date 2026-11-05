@@ -124,12 +124,7 @@ public final class FileConceptStore {
         }
         Properties props = new Properties();
         try {
-            InputStream in = new FileInputStream(file);
-            try {
-                props.load(in);
-            } finally {
-                in.close();
-            }
+            props.putAll(StoreIo.loadUtf8Properties(file));
         } catch (IOException unreadable) {
             return null;
         }
@@ -452,12 +447,7 @@ public final class FileConceptStore {
             return props;
         }
         try {
-            InputStream in = new FileInputStream(file);
-            try {
-                props.load(in);
-            } finally {
-                in.close();
-            }
+            props.putAll(StoreIo.loadUtf8Properties(file));
         } catch (IOException corrupt) {
             // best-effort: defaults fill the rest
         }

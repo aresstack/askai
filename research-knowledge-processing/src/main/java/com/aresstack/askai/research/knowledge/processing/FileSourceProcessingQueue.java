@@ -210,12 +210,7 @@ public final class FileSourceProcessingQueue implements SourceProcessingQueue {
     private Stored read(File f) {
         try {
             Properties p = new Properties();
-            InputStream in = new FileInputStream(f);
-            try {
-                p.load(in);
-            } finally {
-                in.close();
-            }
+            p.putAll(Utf8Properties.load(f));
             String jobId = p.getProperty("jobId");
             String captureId = p.getProperty("captureId");
             if (jobId == null || jobId.trim().isEmpty() || captureId == null || captureId.trim().isEmpty()) {

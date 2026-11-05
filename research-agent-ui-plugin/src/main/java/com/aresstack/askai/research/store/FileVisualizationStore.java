@@ -20,7 +20,7 @@ import java.util.Properties;
  */
 public final class FileVisualizationStore {
 
-    private static final int SCHEMA_VERSION = 1;
+    private static final int SCHEMA_VERSION = 2;
 
     private final File dir;
 
@@ -64,12 +64,7 @@ public final class FileVisualizationStore {
         }
         try {
             Properties p = new Properties();
-            InputStream in = new FileInputStream(props);
-            try {
-                p.load(in);
-            } finally {
-                in.close();
-            }
+            p.putAll(StoreIo.loadUtf8Properties(props));
             if (!Integer.toString(SCHEMA_VERSION).equals(p.getProperty("schemaVersion"))) {
                 return null; // incompatible → "not generated yet", never guessed
             }
