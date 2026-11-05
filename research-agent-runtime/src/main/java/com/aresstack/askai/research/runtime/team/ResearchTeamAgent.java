@@ -153,11 +153,12 @@ public final class ResearchTeamAgent {
         // It therefore uses the neutral fallback profile (generic prompt + generic contract), never the
         // scoping business contract that would demand a research brief.
         PhaseAssistantProfile greeting = profiles.fallback();
+        PromptBlockMeter meter = new PromptBlockMeter();
         List<ChatMessage> messages = contextAssembler.assemble(greeting, state, confirmedQuestion,
-                confirmedAspects, proposedQuestion, proposedAspects, history);
-        messages.add(ChatMessage.user(TeamAgentPlaybook.greetingInstruction(
-                contextAssembler.workingLanguageDisplayName())));
-        TeamAgentResult result = runTurn(messages, state, greeting.getOutputContract());
+                confirmedAspects, proposedQuestion, proposedAspects, history, meter);
+        append(messages, meter, PromptBlockMeter.GREETING_INSTRUCTION, ChatMessage.user(
+                TeamAgentPlaybook.greetingInstruction(contextAssembler.workingLanguageDisplayName())));
+        TeamAgentResult result = runTurn(messages, meter, state, greeting.getOutputContract(), null);
         if (result.isOk()) {
             greeted = true;
             greetingResult = result;
@@ -196,9 +197,11 @@ public final class ResearchTeamAgent {
      */
     public TeamAgentResult internalTurn(String instruction, TeamAgentStateView state, String requiredActionType) {
         PhaseAssistantProfile profile = profiles.forPhase(state.getPhaseId());
-        List<ChatMessage> messages = baseMessages(state);
-        messages.add(ChatMessage.user(instruction == null ? "" : instruction.trim()));
-        TeamAgentResult result = runTurn(messages, state, profile.getOutputContract(), requiredActionType);
+        PromptBlockMeter meter = new PromptBlockMeter();
+        List<ChatMessage> messages = baseMessages(state, meter);
+        append(messages, meter, PromptBlockMeter.TOOL_FEEDBACK,
+                ChatMessage.user(instruction == null ? "" : instruction.trim()));
+        TeamAgentResult result = runTurn(messages, meter, state, profile.getOutputContract(), requiredActionType);
         if (result.isOk()) {
             // The ANSWER is real conversation — the user sees it, and the next turn must know it exists.
             // Only the instruction stays out.
@@ -223,9 +226,10 @@ public final class ResearchTeamAgent {
 
     private TeamAgentResult runUserTurn(TeamAgentStateView state) {
         PhaseAssistantProfile profile = profiles.forPhase(state.getPhaseId());
-        List<ChatMessage> messages = baseMessages(state);
-        messages.add(pendingUserTurn);
-        TeamAgentResult result = runTurn(messages, state, profile.getOutputContract());
+        PromptBlockMeter meter = new PromptBlockMeter();
+        List<ChatMessage> messages = baseMessages(state, meter);
+        append(messages, meter, PromptBlockMeter.USER_MESSAGE, pendingUserTurn);
+        TeamAgentResult result = runTurn(messages, meter, state, profile.getOutputContract(), null);
         if (result.isOk()) {
             history.add(pendingUserTurn);
             pendingUserTurn = null;
@@ -240,10 +244,16 @@ public final class ResearchTeamAgent {
      * system prompt (and, later, its readable/writable artifacts and tools). The active phase is the host's,
      * read from {@code state.getPhaseId()} — the model never chooses it.
      */
-    private List<ChatMessage> baseMessages(TeamAgentStateView state) {
+    private List<ChatMessage> baseMessages(TeamAgentStateView state, PromptBlockMeter meter) {
         PhaseAssistantProfile profile = profiles.forPhase(state.getPhaseId());
         return contextAssembler.assemble(profile, state, confirmedQuestion, confirmedAspects,
-                proposedQuestion, proposedAspects, history);
+                proposedQuestion, proposedAspects, history, meter);
+    }
+
+    private static void append(List<ChatMessage> messages, PromptBlockMeter meter, String block,
+                               ChatMessage message) {
+        messages.add(message);
+        meter.add(block, message);
     }
 
     /**
@@ -252,14 +262,9 @@ public final class ResearchTeamAgent {
      * repaired answer that leaks meta-talk — after one repair is UNUSABLE_ANSWER. None of these fabricate or
      * surface a misleading turn.
      */
-    private TeamAgentResult runTurn(List<ChatMessage> messages, TeamAgentStateView state,
-                                    PhaseOutputContract contract) {
-        return runTurn(messages, state, contract, null);
-    }
-
-    private TeamAgentResult runTurn(List<ChatMessage> messages, TeamAgentStateView state,
+    private TeamAgentResult runTurn(List<ChatMessage> messages, PromptBlockMeter meter, TeamAgentStateView state,
                                     PhaseOutputContract contract, String requiredActionType) {
-        Parsed parsed = callParseWithRepair(messages, contract, requiredActionType);
+        Parsed parsed = callParseWithRepair(messages, meter, state.getPhaseId(), contract, requiredActionType);
         if (parsed.failure != null) {
             return parsed.failure;
         }
@@ -282,19 +287,21 @@ public final class ResearchTeamAgent {
      * (Ollama structured outputs) — grammar stops a small model from losing count of its braces;
      * without a schema the long-standing plain completion stays byte-identical.
      */
-    private MainModelChatResult callModel(List<ChatMessage> messages, PhaseOutputContract contract,
-                                          String requiredActionType) {
+    private MainModelChatResult callModel(List<ChatMessage> messages, PromptBlockMeter meter, String phase,
+                                          PhaseOutputContract contract, String requiredActionType) {
         String schema = requiredActionType == null ? contract.outputSchemaJson()
                 : contract.outputSchemaJson(requiredActionType);
-        return schema == null
+        MainModelChatResult result = schema == null
                 ? model.complete(messages, TEMPERATURE, maxOutputTokens)
                 : model.completeJson(messages, TEMPERATURE, maxOutputTokens, schema);
+        ModelCallLog.log(phase, meter, result);
+        return result;
     }
 
     /** One model call + phase-contract parse, with EXACTLY ONE bounded parse-repair on failure. */
-    private Parsed callParseWithRepair(List<ChatMessage> messages, PhaseOutputContract contract,
-                                       String requiredActionType) {
-        MainModelChatResult call = callModel(messages, contract, requiredActionType);
+    private Parsed callParseWithRepair(List<ChatMessage> messages, PromptBlockMeter meter, String phase,
+                                       PhaseOutputContract contract, String requiredActionType) {
+        MainModelChatResult call = callModel(messages, meter, phase, contract, requiredActionType);
         if (!call.isOk()) {
             return Parsed.fail(TeamAgentResult.modelUnavailable(call.getDetail()));
         }
@@ -304,9 +311,10 @@ public final class ResearchTeamAgent {
         }
         traceParseFailure("first", parsed.getError(), call.getText());
         List<ChatMessage> repair = new ArrayList<ChatMessage>(messages);
-        repair.add(ChatMessage.assistant(call.getText()));
-        repair.add(ChatMessage.user(TeamAgentPlaybook.repairNudge()));
-        return callParseOnce(repair, contract, requiredActionType);
+        PromptBlockMeter repairMeter = meter.copy();
+        append(repair, repairMeter, PromptBlockMeter.REPAIR_NOTE, ChatMessage.assistant(call.getText()));
+        append(repair, repairMeter, PromptBlockMeter.REPAIR_NOTE, ChatMessage.user(TeamAgentPlaybook.repairNudge()));
+        return callParseOnce(repair, repairMeter, phase, contract, requiredActionType);
     }
 
     /**
@@ -346,9 +354,9 @@ public final class ResearchTeamAgent {
      * failed as UNUSABLE_ANSWER — the user then sees the fixed, meta-free typed line, and the pending user
      * turn stays intact for a clean retry.
      */
-    private Parsed callParseOnce(List<ChatMessage> messages, PhaseOutputContract contract,
-                                 String requiredActionType) {
-        MainModelChatResult call = callModel(messages, contract, requiredActionType);
+    private Parsed callParseOnce(List<ChatMessage> messages, PromptBlockMeter meter, String phase,
+                                 PhaseOutputContract contract, String requiredActionType) {
+        MainModelChatResult call = callModel(messages, meter, phase, contract, requiredActionType);
         if (!call.isOk()) {
             return Parsed.fail(TeamAgentResult.modelUnavailable(call.getDetail()));
         }

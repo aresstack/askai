@@ -36,6 +36,9 @@ public final class ChatResult {
     private final TokenUsage usage;
     private final String endpointId;
     private final Duration duration;
+    private final String modelLabel;
+    private final Duration loadDuration;
+    private final Duration promptEvalDuration;
 
     /**
      * @param content      the answer text (for JSON output formats: the raw JSON text); null becomes ""
@@ -48,6 +51,20 @@ public final class ChatResult {
      */
     public ChatResult(String content, String thinking, List<ToolCall> toolCalls, FinishReason finishReason,
                       TokenUsage usage, String endpointId, Duration duration) {
+        this(content, thinking, toolCalls, finishReason, usage, endpointId, duration, "", null, null);
+    }
+
+    /**
+     * @param modelLabel         display label of the model that answered (technical log only); null becomes ""
+     * @param loadDuration       time the provider spent loading the model; null becomes zero
+     * @param promptEvalDuration time the provider spent evaluating the prompt; null becomes zero
+     */
+    public ChatResult(String content, String thinking, List<ToolCall> toolCalls, FinishReason finishReason,
+                      TokenUsage usage, String endpointId, Duration duration, String modelLabel,
+                      Duration loadDuration, Duration promptEvalDuration) {
+        this.modelLabel = modelLabel == null ? "" : modelLabel;
+        this.loadDuration = loadDuration == null ? Duration.ZERO : loadDuration;
+        this.promptEvalDuration = promptEvalDuration == null ? Duration.ZERO : promptEvalDuration;
         this.content = content == null ? "" : content;
         this.thinking = thinking == null ? "" : thinking;
         this.toolCalls = toolCalls == null || toolCalls.isEmpty()
@@ -89,6 +106,21 @@ public final class ChatResult {
 
     public Duration getDuration() {
         return duration;
+    }
+
+    /** Display label of the model that answered, "" when unknown. For technical logs, never for routing. */
+    public String getModelLabel() {
+        return modelLabel;
+    }
+
+    /** Model load time reported by the provider; zero when the model was warm or nothing was reported. */
+    public Duration getLoadDuration() {
+        return loadDuration;
+    }
+
+    /** Prompt evaluation time reported by the provider; zero when not reported. */
+    public Duration getPromptEvalDuration() {
+        return promptEvalDuration;
     }
 
     /**

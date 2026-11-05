@@ -17,19 +17,35 @@ public final class MainModelChatResult {
     private final Status status;
     private final String text;
     private final String detail;
+    private final ModelCallMetrics metrics;
 
-    private MainModelChatResult(Status status, String text, String detail) {
+    private MainModelChatResult(Status status, String text, String detail, ModelCallMetrics metrics) {
         this.status = status;
+        this.metrics = metrics == null ? ModelCallMetrics.unknown() : metrics;
         this.text = text == null ? "" : text;
         this.detail = detail == null ? "" : detail;
     }
 
     public static MainModelChatResult ok(String text) {
-        return new MainModelChatResult(Status.OK, text, "");
+        return new MainModelChatResult(Status.OK, text, "", null);
+    }
+
+    /** A success with what the call cost (token usage, finish reason, durations, model label). */
+    public static MainModelChatResult ok(String text, ModelCallMetrics metrics) {
+        return new MainModelChatResult(Status.OK, text, "", metrics);
     }
 
     public static MainModelChatResult failure(Status status, String detail) {
-        return new MainModelChatResult(status, "", detail);
+        return new MainModelChatResult(status, "", detail, null);
+    }
+
+    public static MainModelChatResult failure(Status status, String detail, ModelCallMetrics metrics) {
+        return new MainModelChatResult(status, "", detail, metrics);
+    }
+
+    /** What the call cost; {@link ModelCallMetrics#unknown()} when the transport reported nothing. */
+    public ModelCallMetrics getMetrics() {
+        return metrics;
     }
 
     public Status getStatus() {

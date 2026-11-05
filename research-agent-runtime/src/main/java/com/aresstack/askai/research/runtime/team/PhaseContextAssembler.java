@@ -119,29 +119,45 @@ public final class PhaseContextAssembler {
                                       String confirmedQuestion, List<String> confirmedAspects,
                                       String proposedQuestion, List<String> proposedAspects,
                                       List<ChatMessage> history) {
+        return assemble(profile, state, confirmedQuestion, confirmedAspects, proposedQuestion, proposedAspects,
+                history, new PromptBlockMeter());
+    }
+
+    /** As above, and counts every block it adds into {@code meter} (plan PR 01); the messages are the same. */
+    public List<ChatMessage> assemble(PhaseAssistantProfile profile, TeamAgentStateView state,
+                                      String confirmedQuestion, List<String> confirmedAspects,
+                                      String proposedQuestion, List<String> proposedAspects,
+                                      List<ChatMessage> history, PromptBlockMeter meter) {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
-        messages.add(ChatMessage.system(profile.getSystemPrompt()));
-        messages.add(ChatMessage.system("Current date: " + currentDate.today()));
-        messages.add(ChatMessage.system(
+        add(messages, meter, PromptBlockMeter.PROFILE, ChatMessage.system(profile.getSystemPrompt()));
+        add(messages, meter, PromptBlockMeter.DATE, ChatMessage.system("Current date: " + currentDate.today()));
+        add(messages, meter, PromptBlockMeter.LANGUAGE, ChatMessage.system(
                 TeamAgentPlaybook.workingLanguageContext(currentLanguage.displayName())));
-        messages.add(ChatMessage.system(TeamAgentPlaybook.stateContext(
+        add(messages, meter, PromptBlockMeter.STATE, ChatMessage.system(TeamAgentPlaybook.stateContext(
                 state, confirmedQuestion, confirmedAspects, proposedQuestion, proposedAspects)));
         // The scope the HOST holds — authoritative for this turn. Without it the model would rebuild the
         // scope from the conversation, which is how earlier decisions quietly disappear.
         String scope = currentScope.rendered();
         if (!scope.isEmpty()) {
-            messages.add(ChatMessage.system(TeamAgentPlaybook.scopeFenceContext(scope)));
+            add(messages, meter, PromptBlockMeter.FENCE,
+                    ChatMessage.system(TeamAgentPlaybook.scopeFenceContext(scope)));
         }
         // The persisted CONCEPT — authoritative for this turn, exactly like the scope fence:
         // without it a type=none inference can only reconstruct the concept from the chat,
         // which is how unpersisted "focus" claims are born.
         String concept = currentConcept.rendered();
         if (!concept.isEmpty()) {
-            messages.add(ChatMessage.system(concept));
+            add(messages, meter, PromptBlockMeter.CONCEPT, ChatMessage.system(concept));
         }
         if (history != null) {
             messages.addAll(history);
+            meter.add(PromptBlockMeter.HISTORY, history);
         }
         return messages;
+    }
+
+    private static void add(List<ChatMessage> messages, PromptBlockMeter meter, String block, ChatMessage message) {
+        messages.add(message);
+        meter.add(block, message);
     }
 }

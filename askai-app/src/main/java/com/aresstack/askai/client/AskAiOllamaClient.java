@@ -341,7 +341,9 @@ public final class AskAiOllamaClient {
                     ? -1L : last.getPromptEvalCount();
             OllamaChatCompletion completion = new OllamaChatCompletion(
                     thinking.toString(), content.toString(), toolCalls, evalCount, evalDuration, promptEvalCount,
-                    last == null ? "" : last.getDoneReason());
+                    last == null ? "" : last.getDoneReason(),
+                    last == null || last.getLoadDuration() == null ? 0L : last.getLoadDuration(),
+                    last == null || last.getPromptEvalDuration() == null ? 0L : last.getPromptEvalDuration());
             if (listener != null) {
                 listener.onComplete(completion);
             }
