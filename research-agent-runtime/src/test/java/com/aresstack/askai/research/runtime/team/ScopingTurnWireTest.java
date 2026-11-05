@@ -102,14 +102,14 @@ public class ScopingTurnWireTest {
         assertEquals("the port streams; the former client did not", Boolean.TRUE, sent.remove("stream"));
         assertEquals(Boolean.FALSE, legacy.remove("stream"));
         assertEquals("keep_alive is the platform's warm-keeping (default 5m)", "5m", sent.remove("keep_alive"));
-        assertFalse("no thinking setting — the former client sent none either", sent.containsKey("think"));
+        assertFalse("no think field while the model's capabilities are unknown", sent.containsKey("think"));
         assertFalse("no tools on a scoping turn", sent.containsKey("tools"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> sentOptions = (Map<String, Object>) sent.get("options");
+        assertEquals("the model's context on every call (plan 4.1, rule 1)", 32768,
+                ((Number) sentOptions.remove("num_ctx")).intValue());
         assertEquals("everything else is the former request, field by field", legacy, withoutNulls(sent));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> options = (Map<String, Object>) sent.get("options");
-        assertFalse("no num_ctx: the slot default is the model's own context, as before",
-                options.containsKey("num_ctx"));
         @SuppressWarnings("unchecked")
         Map<String, Object> sentProperties = (Map<String, Object>) ((Map<String, Object>) sent.get("format"))
                 .get("properties");

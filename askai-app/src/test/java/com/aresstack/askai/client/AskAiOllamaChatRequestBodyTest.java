@@ -165,7 +165,8 @@ public class AskAiOllamaChatRequestBodyTest {
         JsonNode body = new ObjectMapper().readTree(requestBody.get());
         assertEquals("json", body.get("format").asText());
         assertNull("no tools offered, none sent", body.get("tools"));
-        assertNull("no options set, none sent", body.get("options"));
+        assertEquals("no options set: only the model's context (plan 4.1, rule 1)", 1, body.get("options").size());
+        assertEquals(8192, body.get("options").get("num_ctx").asInt());
     }
 
     @Test

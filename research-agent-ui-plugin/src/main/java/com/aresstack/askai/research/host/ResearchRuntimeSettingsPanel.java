@@ -39,8 +39,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     // requirements are met; otherwise new sessions run the demo backend with a visible notice.
     // (A persisted FAKE value remains a developer-only override in the store.)
     private final javax.swing.JTextArea backendStatus = com.aresstack.comiccontrols.control.ComicForm.text(" ");
-    /** Answer budget per agent model turn (tokens) — the longest contracted answer is the source review. */
-    private final JTextField agentMaxTokens = ComicControls.textField(6);
     // Konzeptpapier tool-round loop: work budget and error tolerance, deliberately separate.
     private final JTextField conceptToolRounds = ComicControls.textField(4);
     private final JTextField conceptRepairAttempts = ComicControls.textField(4);
@@ -149,7 +147,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         com.aresstack.comiccontrols.control.ComicForm agent =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Agent");
         agent.row("Backend", backendStatus);
-        agent.row("Answer budget (tokens)", group(agentMaxTokens));
         agent.row("", useAiReranker);
 
         com.aresstack.comiccontrols.control.ComicForm limits =
@@ -341,21 +338,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             }
         });
         updateMcpFieldsEnabled();
-        agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
-        agentMaxTokens.setToolTipText("The agent's answer budget in tokens per model turn (the longest "
-                + "answer is the source review). Too small a value truncates answers. "
-                + "Applies to new sessions.");
-        agentMaxTokens.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent event) {
-                persistAgentMaxTokens();
-            }
-        });
-        agentMaxTokens.addFocusListener(new java.awt.event.FocusAdapter() {
-            @Override
-            public void focusLost(java.awt.event.FocusEvent event) {
-                persistAgentMaxTokens();
-            }
-        });
         bindScopeCheckSettings();
         bindLimit(searchTargetSources, ResearchRuntimeSettings.KEY_SEARCH_TARGET_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_TARGET_SOURCES,
@@ -745,20 +727,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 persist.run();
             }
         });
-    }
-
-    /** Persist the agent answer budget; a non-numeric/non-positive entry resets to the persisted value. */
-    private void persistAgentMaxTokens() {
-        try {
-            int tokens = Integer.parseInt(agentMaxTokens.getText().trim());
-            if (tokens > 0) {
-                ResearchRuntimeSettings.saveAgentMaxOutputTokens(store, tokens);
-                return;
-            }
-        } catch (NumberFormatException invalid) {
-            // fall through to the reset below
-        }
-        agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
     }
 
     /** All five connector controls as ONE persisted unit (from the toggle and from Save). */

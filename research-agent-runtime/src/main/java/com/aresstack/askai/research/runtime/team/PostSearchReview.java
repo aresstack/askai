@@ -11,7 +11,7 @@ package com.aresstack.askai.research.runtime.team;
 public final class PostSearchReview {
 
     /**
-     * The model turn — productive: {@code ResearchTeamAgent.internalTurn}. NOT {@code respond}: a button
+     * The model turn — productive: {@code ResearchTeamAgent.reviewTurn}. NOT {@code respond}: a button
      * press is not a sentence the user wrote, and it must not enter the conversation as one.
      */
     public interface Model {

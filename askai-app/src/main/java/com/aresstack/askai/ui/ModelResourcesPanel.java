@@ -1,5 +1,7 @@
 package com.aresstack.askai.ui;
 
+import com.aresstack.askai.agent.model.port.ThinkingMode;
+import com.aresstack.askai.client.ModelContextSizes;
 import com.aresstack.askai.modelport.CentralModelDirectories;
 import com.aresstack.askai.modelport.ModelPortSettings;
 import com.aresstack.askai.modelport.ModelPortSettingsRepository;
@@ -7,6 +9,7 @@ import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.control.ComicControls;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultCellEditor;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -30,14 +33,18 @@ import java.util.Map;
 
 /**
  * The settings of the model port's resource scheduling (ADR 0001, 4.5): capacity per model and endpoint,
- * the GPU memory budget per endpoint, keep-alive, and per model slot (role) the model and the context size.
+ * the GPU memory budget per endpoint, keep-alive, the context per MODEL (plan 4.1, rule 1: every caller sends
+ * it), and per model slot (role) the model, the thinking mode and the answer budget.
  * Every value is a setting with a default; nothing here is a constant in code. Saved to the model-port
  * settings file; the port reads it on every call, so a save applies to the next call.
  */
 public final class ModelResourcesPanel extends JPanel {
 
     private static final String[] CAPACITY_COLUMNS = {"Model", "Concurrent calls"};
-    private static final String[] SLOT_COLUMNS = {"Slot (role)", "Model (empty = main model)", "Context tokens (0 = model default)"};
+    private static final String[] SLOT_COLUMNS = {"Slot (role)", "Model (empty = main model)", "Thinking",
+            "Answer budget (0 = role default)"};
+    private static final String[] CONTEXT_COLUMNS = {"Model", "Context tokens"};
+    private static final String[] THINKING_CHOICES = {"Auto", "Off", "Low", "Medium", "High"};
 
     private final ModelPortSettingsRepository repository;
     private final JSpinner defaultCapacity = ComicControls.spinner(new SpinnerNumberModel(1, 1, 64, 1));
@@ -46,6 +53,7 @@ public final class ModelResourcesPanel extends JPanel {
     private final JSpinner ollamaBudget = ComicControls.spinner(new SpinnerNumberModel(-1, -1, 1048576, 1024));
     private final JSpinner localBudget = ComicControls.spinner(new SpinnerNumberModel(-1, -1, 1048576, 1024));
     private final DefaultTableModel capacities = new DefaultTableModel(CAPACITY_COLUMNS, 0);
+    private final DefaultTableModel contexts = new DefaultTableModel(CONTEXT_COLUMNS, 0);
     private final DefaultTableModel slots = new DefaultTableModel(SLOT_COLUMNS, 0) {
         private static final long serialVersionUID = 1L;
 
@@ -82,6 +90,26 @@ public final class ModelResourcesPanel extends JPanel {
 
         JTable capacityTable = new JTable(capacities);
         JTable slotTable = new JTable(slots);
+        slotTable.getColumnModel().getColumn(2).setCellEditor(
+                new DefaultCellEditor(ComicControls.comboBox(THINKING_CHOICES)));
+        JTable contextTable = new JTable(contexts);
+        JPanel contextButtons = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton addContext = new ComicButton("Add model");
+        addContext.addActionListener(event -> contexts.addRow(new Object[]{"",
+                String.valueOf(ModelContextSizes.OTHER_MODELS)}));
+        JButton removeContext = new ComicButton("Remove model");
+        removeContext.addActionListener(event -> {
+            int selected = contextTable.getSelectedRow();
+            if (selected >= 0) {
+                contexts.removeRow(selected);
+            }
+        });
+        contextButtons.add(addContext);
+        contextButtons.add(removeContext);
+        JPanel contextPanel = new JPanel(new BorderLayout(4, 4));
+        contextPanel.setBorder(ComicControls.titledBorder("Context per model (num_ctx, sent by every caller)"));
+        contextPanel.add(scroll(contextTable), BorderLayout.CENTER);
+        contextPanel.add(contextButtons, BorderLayout.SOUTH);
         JPanel capacityButtons = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton addCapacity = new ComicButton("Add model");
         addCapacity.addActionListener(event -> capacities.addRow(new Object[]{"", "1"}));
@@ -102,8 +130,9 @@ public final class ModelResourcesPanel extends JPanel {
         slotPanel.setBorder(ComicControls.titledBorder("Model slots (one per role)"));
         slotPanel.add(scroll(slotTable), BorderLayout.CENTER);
 
-        JPanel tables = new JPanel(new GridLayout(1, 2, 8, 8));
+        JPanel tables = new JPanel(new GridLayout(1, 3, 8, 8));
         tables.add(capacityPanel);
+        tables.add(contextPanel);
         tables.add(slotPanel);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -114,6 +143,9 @@ public final class ModelResourcesPanel extends JPanel {
             }
             if (capacityTable.isEditing()) {
                 capacityTable.getCellEditor().stopCellEditing();
+            }
+            if (contextTable.isEditing()) {
+                contextTable.getCellEditor().stopCellEditing();
             }
             save();
         });
@@ -151,11 +183,55 @@ public final class ModelResourcesPanel extends JPanel {
         for (Map.Entry<String, Integer> entry : settings.getModelCapacities().entrySet()) {
             capacities.addRow(new Object[]{entry.getKey(), String.valueOf(entry.getValue())});
         }
+        contexts.setRowCount(0);
+        for (String model : contextModels(settings)) {
+            contexts.addRow(new Object[]{model, String.valueOf(settings.contextOf(model))});
+        }
         slots.setRowCount(0);
         for (String slot : settings.knownSlotNames()) {
-            slots.addRow(new Object[]{slot, settings.slotModel(slot),
-                    String.valueOf(settings.slotContextTokens(slot))});
+            slots.addRow(new Object[]{slot, settings.slotModel(slot), thinkingLabel(settings.slotThinking(slot)),
+                    String.valueOf(settings.slotAnswerTokens(slot))});
         }
+    }
+
+    /** The presets, every configured context, and every model named for a slot or a capacity. */
+    static java.util.List<String> contextModels(ModelPortSettings settings) {
+        java.util.List<String> models = new java.util.ArrayList<String>(ModelContextSizes.PRESETS.keySet());
+        java.util.List<String> named = new java.util.ArrayList<String>(settings.getModelContextTokens().keySet());
+        named.addAll(settings.getSlotModels().values());
+        named.addAll(settings.getModelCapacities().keySet());
+        for (String model : named) {
+            if (!model.trim().isEmpty() && !models.contains(model.trim())) {
+                models.add(model.trim());
+            }
+        }
+        return models;
+    }
+
+    static String thinkingLabel(ThinkingMode mode) {
+        switch (mode) {
+            case OFF:
+                return "Off";
+            case LOW:
+                return "Low";
+            case MEDIUM:
+                return "Medium";
+            case HIGH:
+                return "High";
+            default:
+                return "Auto";
+        }
+    }
+
+    static ThinkingMode thinkingOf(String label) {
+        String value = label == null ? "" : label.trim();
+        for (ThinkingMode mode : new ThinkingMode[]{ThinkingMode.OFF, ThinkingMode.LOW, ThinkingMode.MEDIUM,
+                ThinkingMode.HIGH}) {
+            if (thinkingLabel(mode).equalsIgnoreCase(value)) {
+                return mode;
+            }
+        }
+        return ThinkingMode.DEFAULT;
     }
 
     private static int budgetMb(ModelPortSettings settings, String endpointId) {
@@ -173,18 +249,28 @@ public final class ModelResourcesPanel extends JPanel {
                 modelCapacities.put(model, value);
             }
         }
+        Map<String, Integer> modelContexts = new LinkedHashMap<String, Integer>();
+        for (int row = 0; row < contexts.getRowCount(); row++) {
+            String model = text(contexts.getValueAt(row, 0));
+            int value = number(contexts.getValueAt(row, 1));
+            if (!model.isEmpty() && value >= 1 && value != ModelContextSizes.preset(model)) {
+                modelContexts.put(model, value); // a preset stays a preset, so it follows the code's value
+            }
+        }
         Map<String, String> slotModels = new LinkedHashMap<String, String>();
-        Map<String, Integer> slotContexts = new LinkedHashMap<String, Integer>();
+        Map<String, ThinkingMode> slotThinking = new LinkedHashMap<String, ThinkingMode>();
+        Map<String, Integer> slotAnswers = new LinkedHashMap<String, Integer>();
         for (int row = 0; row < slots.getRowCount(); row++) {
             String slot = text(slots.getValueAt(row, 0));
             slotModels.put(slot, text(slots.getValueAt(row, 1)));
-            slotContexts.put(slot, Math.max(0, number(slots.getValueAt(row, 2))));
+            slotThinking.put(slot, thinkingOf(text(slots.getValueAt(row, 2))));
+            slotAnswers.put(slot, Math.max(0, number(slots.getValueAt(row, 3))));
         }
         Map<String, Long> budgets = new LinkedHashMap<String, Long>(current.getEndpointMemoryBudgetsMb());
         budgets.put(CentralModelDirectories.OLLAMA, ((Number) ollamaBudget.getValue()).longValue());
         budgets.put(CentralModelDirectories.LOCAL_RUNTIME, ((Number) localBudget.getValue()).longValue());
         ModelPortSettings updated = new ModelPortSettings(((Number) defaultCapacity.getValue()).intValue(),
-                modelCapacities, budgets, slotModels, slotContexts, keepAlive.getText(),
+                modelCapacities, budgets, slotModels, modelContexts, slotThinking, slotAnswers, keepAlive.getText(),
                 ((Number) implicitWait.getValue()).intValue(), current.getResidencyRefreshSeconds());
         try {
             repository.save(updated);

@@ -96,4 +96,46 @@ public class PortMainModelPassthroughTest {
         assertEquals("{\"type\":\"object\"}", schema.getOutputFormat().getSchemaJson());
         assertEquals("slot scope", chat.modelName());
     }
+
+    @Test
+    public void aJsonAnswerCutOffAtItsBudgetFailsAndProseIsFlagged() {
+        FakeModelPort port = new FakeModelPort();
+        port.reportTelemetry(900, 64, com.aresstack.askai.agent.model.port.ChatResult.FinishReason.LENGTH,
+                "gemma4:e2b", "");
+        port.enqueueRaw("{\"a\":");
+        port.enqueueRaw("Ein langer Text");
+        PortMainModelChat chat = new PortMainModelChat(port, ResearchModelSlots.SCOPE, null);
+        java.util.List<ChatMessage> messages = Arrays.asList(ChatMessage.system("s"), ChatMessage.user("u"));
+
+        MainModelChatResult json = chat.completeJson(messages, 0.2, 64, null);
+        assertEquals("a cut-off JSON answer never reaches the parser", MainModelChatResult.Status.INVALID_RESPONSE,
+                json.getStatus());
+        assertTrue(json.getDetail().contains("cut off"));
+        MainModelChatResult prose = chat.complete(messages, 0.2, 64);
+        assertTrue("prose stays a result", prose.isOk());
+        assertTrue("but is flagged", prose.isCutOff());
+    }
+
+    @Test
+    public void contractRolesSendThinkingOffAndChatRolesLeaveItToTheSlot() {
+        FakeModelPort port = new FakeModelPort();
+        port.enqueueRaw("readable");
+        port.enqueueRaw("Hallo");
+        java.util.List<ChatMessage> messages = Arrays.asList(ChatMessage.system("s"), ChatMessage.user("u"));
+        PortMainModelChat.forRole(port, com.aresstack.askai.research.runtime.role.ResearchRoles.PAGE_READINESS_JUDGE,
+                null).complete(messages, 0.0, 24);
+        PortMainModelChat.forRole(port, com.aresstack.askai.research.runtime.role.ResearchRoles.CONVERSATION, null)
+                .complete(messages, 0.4, 4096);
+        assertEquals(com.aresstack.askai.agent.model.port.ThinkingMode.OFF, port.requests().get(0).getThinking());
+        assertEquals("the page judge keeps its budget of 24", 24, port.requests().get(0).getMaxOutputTokens());
+        assertEquals(com.aresstack.askai.agent.model.port.ThinkingMode.DEFAULT,
+                port.requests().get(1).getThinking());
+        for (com.aresstack.askai.research.runtime.role.ResearchRole role
+                : com.aresstack.askai.research.runtime.role.ResearchRoles.orchestration()) {
+            if (!role.getId().equals("writer")) {
+                assertEquals("contract role " + role.getId(), com.aresstack.askai.agent.model.port.ThinkingMode.OFF,
+                        role.getThinking());
+            }
+        }
+    }
 }

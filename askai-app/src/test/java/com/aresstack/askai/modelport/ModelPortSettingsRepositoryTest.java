@@ -1,5 +1,6 @@
 package com.aresstack.askai.modelport;
 
+import com.aresstack.askai.agent.model.port.ThinkingMode;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -24,7 +25,12 @@ public class ModelPortSettingsRepositoryTest {
         assertEquals(1, settings.capacityOf("gemma4:e2b"));
         assertEquals(-1L, settings.memoryBudgetBytes("ollama"));
         assertEquals("", settings.slotModel("judge"));
-        assertEquals(0, settings.slotContextTokens("judge"));
+        assertEquals("presets of plan 4.1", 32768, settings.contextOf("gemma4:e2b"));
+        assertEquals(16384, settings.contextOf("llama3.1:8b"));
+        assertEquals(16384, settings.contextOf("gpt-oss:20b"));
+        assertEquals(8192, settings.contextOf("some-other:7b"));
+        assertEquals(ThinkingMode.DEFAULT, settings.slotThinking("judge"));
+        assertEquals(0, settings.slotAnswerTokens("judge"));
         assertEquals("5m", settings.getKeepAlive());
         assertEquals(ModelPortSettings.DEFAULT_SLOTS, settings.knownSlotNames());
     }
@@ -37,9 +43,15 @@ public class ModelPortSettingsRepositoryTest {
         slotModels.put("judge", "gemma4:e2b");
         slotModels.put("narration", "gpt-oss:20b");
         Map<String, Integer> contexts = new LinkedHashMap<String, Integer>();
-        contexts.put("judge", 4096);
+        contexts.put("llama3.1:8b", 24576);
+        Map<String, ThinkingMode> thinking = new LinkedHashMap<String, ThinkingMode>();
+        thinking.put("judge", ThinkingMode.OFF);
+        thinking.put("synthesis", ThinkingMode.HIGH);
+        Map<String, Integer> answers = new LinkedHashMap<String, Integer>();
+        answers.put("conversation", 1536);
         repository.save(new ModelPortSettings(2, Collections.singletonMap("gemma4:e2b", 4),
-                Collections.singletonMap("ollama", 16384L), slotModels, contexts, "30m", 120, 7));
+                Collections.singletonMap("ollama", 16384L), slotModels, contexts, thinking, answers, "30m", 120,
+                7));
 
         ModelPortSettings loaded = new ModelPortSettingsRepository(repository.getFile()).load();
         assertEquals(2, loaded.getDefaultCapacity());
@@ -47,14 +59,18 @@ public class ModelPortSettingsRepositoryTest {
         assertEquals(2, loaded.capacityOf("gpt-oss:20b"));
         assertEquals(16384L * 1024L * 1024L, loaded.memoryBudgetBytes("ollama"));
         assertEquals("gpt-oss:20b", loaded.slotModel("narration"));
-        assertEquals(4096, loaded.slotContextTokens("judge"));
+        assertEquals("a model name with a colon survives as a key", 24576, loaded.contextOf("llama3.1:8b"));
+        assertEquals(32768, loaded.contextOf("gemma4:e2b"));
+        assertEquals(ThinkingMode.OFF, loaded.slotThinking("judge"));
+        assertEquals(ThinkingMode.HIGH, loaded.slotThinking("synthesis"));
+        assertEquals(1536, loaded.slotAnswerTokens("conversation"));
         assertEquals("30m", loaded.getKeepAlive());
         assertEquals(120, loaded.getImplicitWaitSeconds());
         assertEquals(7, loaded.getResidencyRefreshSeconds());
         assertEquals("the extra slot is listed after the defaults", "narration",
                 loaded.knownSlotNames().get(ModelPortSettings.DEFAULT_SLOTS.size()));
 
-        repository.save(new ModelPortSettings(3, null, null, null, null, null, 600, 5));
+        repository.save(new ModelPortSettings(3, null, null, null, null, null, null, null, 600, 5));
         assertEquals("a save is visible to the next read at once", 3, repository.load().getDefaultCapacity());
     }
 }

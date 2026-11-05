@@ -63,7 +63,7 @@ public class ModelCallTelemetryTest {
     @Test
     public void aCutAnswerLogsOneLineWithAllFieldsAndAWarningNamingTheRole() {
         FakeModelPort port = new FakeModelPort();
-        port.reportTelemetry(5000, 300, ChatResult.FinishReason.LENGTH, "gemma4:e2b", "thinking...");
+        port.reportTelemetry(7000, 300, ChatResult.FinishReason.LENGTH, "gemma4:e2b", "thinking...");
         port.enqueueMessage("Hello.");
         ResearchTeamAgent agent = agentOver(port);
 
@@ -76,9 +76,9 @@ public class ModelCallTelemetryTest {
         String line = calls.get(0);
         for (String field : Arrays.asList("phase=outline", "role=team-conversation", "slot=conversation",
                 "model=gemma4:e2b", "status=OK", "blocks=[profile=", " date=", " language=", " state=",
-                " user-message=", "prompt_eval_count=5000", "eval_count=300", "done_reason=length",
+                " user-message=", "prompt_eval_count=7000", "eval_count=300", "done_reason=length",
                 "thinking_chars=11", "duration_ms=1500", "load_ms=200", "prompt_eval_ms=700", "num_ctx=8192",
-                "answer_budget=" + agent.getMaxOutputTokens())) {
+                "answer_budget=" + ResearchTeamAgent.turnBudget("outline"))) {
             assertTrue("missing " + field + " in " + line, line.contains(field));
         }
         boolean lengthWarning = false;
@@ -86,11 +86,11 @@ public class ModelCallTelemetryTest {
         for (String warning : lines) {
             if (warning.contains("WARNING") && warning.contains("role team-conversation")) {
                 lengthWarning |= warning.contains("done_reason=length");
-                contextWarning |= warning.contains("prompt_eval_count 5000");
+                contextWarning |= warning.contains("prompt_eval_count 7000");
             }
         }
         assertTrue("length warning names the role: " + lines, lengthWarning);
-        assertTrue("5000 + budget exceeds num_ctx 8192: " + lines, contextWarning);
+        assertTrue("7000 + the 1536 budget exceeds num_ctx 8192: " + lines, contextWarning);
     }
 
     @Test

@@ -37,6 +37,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The sole adapter between AskAI and the official {@code io.github.ollama4j:ollama4j} library (1.1.7, the
@@ -166,6 +167,19 @@ public final class AskAiOllamaClient {
      * A purely numeric keep_alive (e.g. {@code -1} = forever) is sent as a number, anything else as a duration.
      */
     public void loadModel(String modelName, String keepAlive) throws OllamaRequestException {
+        loadModel(modelName, keepAlive, ModelContextSizes.of(modelName));
+    }
+
+    /**
+     * Loads a model with an explicit context: the model port's warm-up of a slot, which reads the context from
+     * its own settings. Every other caller uses {@link #loadModel(String, String)}, which looks it up per model.
+     */
+    public void loadModel(String modelName, String keepAlive, int contextTokens) throws OllamaRequestException {
+        sendLoad(loadBody(modelName, keepAlive, contextTokens), modelName);
+    }
+
+    /** The exact JSON body of a load: an empty generate with keep-alive and the model's {@code num_ctx}. */
+    static String loadBody(String modelName, String keepAlive, int contextTokens) {
         com.fasterxml.jackson.databind.node.ObjectNode body = Utils.getObjectMapper().createObjectNode();
         body.put("model", modelName);
         body.put("prompt", "");
@@ -176,13 +190,21 @@ public final class AskAiOllamaClient {
         } else if (!value.isEmpty()) {
             body.put("keep_alive", value);
         }
+        // The same num_ctx as every chat on this model: a load with another value would load a runner the
+        // next call throws away again.
+        body.putObject("options").put("num_ctx", contextTokens > 0 ? contextTokens
+                : ModelContextSizes.of(modelName));
+        return body.toString();
+    }
+
+    private void sendLoad(String body, String modelName) throws OllamaRequestException {
         java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder()
                 .connectTimeout(java.time.Duration.ofSeconds(5)).build();
         java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder(
                 java.net.URI.create(baseUrl + "/api/generate"))
                 .timeout(java.time.Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
                 .header("Content-Type", "application/json")
-                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body.toString())).build();
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body)).build();
         try {
             java.net.http.HttpResponse<String> response = http.send(request,
                     java.net.http.HttpResponse.BodyHandlers.ofString());
@@ -227,6 +249,7 @@ public final class AskAiOllamaClient {
                     .withModel(modelName)
                     .withPrompt(prompt)
                     .build();
+            request.setOptions(contextOptions(modelName, null));
             OllamaResult result = ollama.generate(request, null);
             return result == null || result.getResponse() == null ? "" : result.getResponse();
         } catch (OllamaException ex) {
@@ -295,9 +318,7 @@ public final class AskAiOllamaClient {
             } else if (extras.isJsonMode()) {
                 request.setFormat("json");
             }
-            if (!extras.getModelOptions().isEmpty()) {
-                request.setOptions(new LinkedHashMap<String, Object>(extras.getModelOptions()));
-            }
+            request.setOptions(contextOptions(modelName, extras.getModelOptions()));
 
             final StringBuilder thinking = new StringBuilder();
             final StringBuilder content = new StringBuilder();
@@ -453,6 +474,23 @@ public final class AskAiOllamaClient {
             return new OllamaChatMessage(OllamaChatMessageRole.USER, turn.getContent(), null, null, images);
         }
         return new OllamaChatMessage(OllamaChatMessageRole.USER, turn.getContent());
+    }
+
+    /**
+     * The model options of a call with the model's {@code num_ctx} (plan 4.1, rule 1): a caller that names a
+     * context (the model port, which reads the same setting) keeps it; every other caller gets the looked-up
+     * value, so main chat, party bot, warm-up, the Models and Actions pages and the setup question all send
+     * the same context for the same model.
+     */
+    static Map<String, Object> contextOptions(String modelName, Map<String, Object> options) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        if (options != null) {
+            result.putAll(options);
+        }
+        if (!result.containsKey("num_ctx")) {
+            result.put("num_ctx", ModelContextSizes.of(modelName));
+        }
+        return result;
     }
 
     private static OllamaModelInfo toModelInfo(Model model) {

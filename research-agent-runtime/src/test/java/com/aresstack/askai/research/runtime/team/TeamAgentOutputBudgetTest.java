@@ -3,8 +3,10 @@ package com.aresstack.askai.research.runtime.team;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -31,31 +33,42 @@ public class TeamAgentOutputBudgetTest {
         }
     }
 
-    @Test
-    public void theDefaultOutputBudgetFitsTheReviewContract() {
-        BudgetCapturingModel model = new BudgetCapturingModel();
-        ResearchTeamAgent agent = new ResearchTeamAgent(model);
-        TeamAgentResult result = agent.internalTurn(TeamAgentPlaybook.sourceReviewInstruction(),
-                ResearchStatusView.empty());
-        assertTrue(result.isOk());
-        assertTrue("one model call", model.grantedBudgets.size() == 1);
-        assertTrue("the review's single JSON (12-source summary + brief + patch) does not fit 1024 "
-                + "tokens; granted: " + model.grantedBudgets.get(0),
-                model.grantedBudgets.get(0) >= 4096);
-        assertTrue("the default is the documented constant, not a scattered literal",
-                model.grantedBudgets.get(0) == ResearchTeamAgent.DEFAULT_MAX_OUTPUT_TOKENS);
+    private static TeamAgentStateView in(String phase) {
+        return new TeamAgentStateView(phase, "running", Arrays.asList("CANCEL"));
+    }
+
+    /** The budgets one step granted (a parse repair repeats the call with the same budget). */
+    private static List<Integer> budgetsOf(BudgetCapturingModel model, Runnable step) {
+        int before = model.grantedBudgets.size();
+        step.run();
+        return new ArrayList<Integer>(model.grantedBudgets.subList(before, model.grantedBudgets.size()));
+    }
+
+    private static void assertAll(String what, int expected, List<Integer> budgets) {
+        assertTrue(what + ": at least one call", !budgets.isEmpty());
+        for (Integer budget : budgets) {
+            assertEquals(what, Integer.valueOf(expected), budget);
+        }
     }
 
     @Test
-    public void theConfiguredBudgetIsGrantedVerbatimAndNonsenseIsIgnored() {
-        BudgetCapturingModel model = new BudgetCapturingModel();
-        ResearchTeamAgent agent = new ResearchTeamAgent(model);
-        agent.setMaxOutputTokens(8192); // the user's setting, handed to the process at launch
-        agent.setMaxOutputTokens(0);    // a non-positive value must never shrink the budget to nothing
-        agent.internalTurn(TeamAgentPlaybook.sourceReviewInstruction(), ResearchStatusView.empty());
-        assertTrue("the configured budget reaches the model verbatim: " + model.grantedBudgets.get(0),
-                model.grantedBudgets.get(0) == 8192);
-        assertTrue(agent.getMaxOutputTokens() == 8192);
+    public void theReviewGetsItsOwnBudgetPerPhase() {
+        final BudgetCapturingModel model = new BudgetCapturingModel();
+        final ResearchTeamAgent agent = new ResearchTeamAgent(model);
+        assertAll("Concept review: summary and suggestions", 4096, budgetsOf(model,
+                () -> agent.reviewTurn(TeamAgentPlaybook.sourceReviewInstruction(), in("scoping"))));
+        assertAll("Sources review: summary only", 3072, budgetsOf(model,
+                () -> agent.reviewTurn(TeamAgentPlaybook.sourceReviewInstruction(), in("research"))));
+    }
+
+    @Test
+    public void chatTurnsAndToolRoundsTakeTheBudgetOfTheirPhase() {
+        final BudgetCapturingModel model = new BudgetCapturingModel();
+        final ResearchTeamAgent agent = new ResearchTeamAgent(model);
+        assertAll("Concept chat turn", 4096, budgetsOf(model, () -> agent.respond("Hallo", in("scoping"))));
+        assertAll("a tool round belongs to the Concept turn", 4096,
+                budgetsOf(model, () -> agent.internalTurn("tool feedback", in("scoping"))));
+        assertAll("Sources chat turn", 1536, budgetsOf(model, () -> agent.respond("Weiter", in("research"))));
     }
 
     @Test

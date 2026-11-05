@@ -45,6 +45,7 @@ public final class SearchPlannerWorker implements TaskWorker {
                     + "searches exactly those queries (use it for broad or vague aspects)")
             .systemPrompt(SYSTEM)
             .output(RoleOutput.schemaPerRequest("SearchPlannerWorker.schema"))
+            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
     static final int MAX_QUERY_LENGTH = 160;

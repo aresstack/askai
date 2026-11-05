@@ -59,6 +59,7 @@ public final class SourceVerifierWorker implements TaskWorker {
             .systemPrompt(SYSTEM)
             .tools(RoleToolCatalog.of(SourceMaterial.TOOL))
             .output(RoleOutput.schemaPerRequest("SourceVerifierWorker.schema"))
+            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
     private static final double TEMPERATURE = 0.1;
