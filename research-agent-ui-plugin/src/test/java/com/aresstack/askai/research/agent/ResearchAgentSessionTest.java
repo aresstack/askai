@@ -130,7 +130,8 @@ public class ResearchAgentSessionTest {
         assertEquals(SubmissionAvailability.UNAVAILABLE, f.session.getChatTarget().getAvailability());
         f.session.activate(); // passive: SCOPING/NEW until the first question
         f.session.getChatTarget().submitText("investigate pf4j"); // → SCOPING/RUNNING
-        assertEquals(SubmissionAvailability.BUSY, f.session.getChatTarget().getAvailability());
+        assertEquals("PR 05: a running phase keeps the composer free for follow-ups",
+                SubmissionAvailability.AVAILABLE, f.session.getChatTarget().getAvailability());
         f.toSourcesGate(); // → WAITING for approval
         assertEquals(SubmissionAvailability.AVAILABLE, f.session.getChatTarget().getAvailability());
     }

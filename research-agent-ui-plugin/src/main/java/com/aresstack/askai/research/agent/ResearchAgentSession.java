@@ -5324,8 +5324,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 return agentTurnInFlight ? SubmissionAvailability.BUSY
                         : SubmissionAvailability.AVAILABLE;
             }
-            return com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(stateId)
-                    ? SubmissionAvailability.BUSY : SubmissionAvailability.AVAILABLE;
+            // PR 05: the fake stays in RUNNING until the user finishes the phase, and its simulated
+            // work is synchronous, so the composer stays free for follow-up messages.
+            return SubmissionAvailability.AVAILABLE;
         }
 
         public void submitText(String text) {
