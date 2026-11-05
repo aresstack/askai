@@ -542,8 +542,51 @@ public final class ResearchPlaybook {
 
     /** Localized labels for the typed result-card actions (ids are stable, labels are language-bound). */
     public String actionLabel(String actionId) {
-        if ("continue".equals(actionId)) {
-            return de() ? "Weiterrecherchieren" : "Continue research";
+        // The decision labels of the user exits (PR 05, D1) are English, like the rest of the UI.
+        if ("submit-scope".equals(actionId)) {
+            return "Approve concept & start search";
+        }
+        if ("finish-sources".equals(actionId)) {
+            return "Finish sources";
+        }
+        if ("finish-outline".equals(actionId)) {
+            return "Finish outline";
+        }
+        if ("finish-document".equals(actionId)) {
+            return "Finish document";
+        }
+        if ("approve-research".equals(actionId)) {
+            return "Approve sources & continue to Outline";
+        }
+        if ("approve-outline".equals(actionId)) {
+            return "Approve outline & start writing";
+        }
+        if ("approve-draft".equals(actionId) || "approve-final".equals(actionId)) {
+            return "Approve final book";
+        }
+        if ("approve".equals(actionId)) {
+            return "Approve";
+        }
+        if ("changes".equals(actionId) || "request-changes".equals(actionId)) {
+            return "Request changes...";
+        }
+        if ("continue-research".equals(actionId)) {
+            return "Start search";
+        }
+        if ("continue-draft".equals(actionId)) {
+            return "Start writing";
+        }
+        if ("continue".equals(actionId) || "run-plan".equals(actionId)) {
+            return "Continue research";
+        }
+        if ("retry".equals(actionId) || "retry-query".equals(actionId)) {
+            return "Try again";
+        }
+        if ("resume".equals(actionId)) {
+            return "Resume";
+        }
+        if ("end".equals(actionId)) {
+            return "Finish sources";
         }
         if ("sources".equals(actionId)) {
             return de() ? "Quellen ansehen" : "View sources";
@@ -551,29 +594,8 @@ public final class ResearchPlaybook {
         if ("refine".equals(actionId)) {
             return de() ? "Suchauftrag ergänzen" : "Refine scope";
         }
-        if ("limit".equals(actionId)) {
-            return de() ? "Mit Einschränkung fortfahren" : "Continue with limitation";
-        }
-        if ("end".equals(actionId)) {
-            return de() ? "Recherche beenden" : "End research";
-        }
-        if ("review".equals(actionId)) {
-            return de() ? "Belege prüfen" : "Review evidence";
-        }
-        if ("retry".equals(actionId)) {
-            return de() ? "Erneut versuchen" : "Try again";
-        }
         if ("config".equals(actionId)) {
             return de() ? "Konfiguration öffnen" : "Open configuration";
-        }
-        if ("resume".equals(actionId)) {
-            return de() ? "Fortsetzen" : "Resume";
-        }
-        if ("approve".equals(actionId)) {
-            return de() ? "Freigeben" : "Approve";
-        }
-        if ("changes".equals(actionId)) {
-            return de() ? "Änderungen anfordern" : "Request changes";
         }
         return actionId;
     }

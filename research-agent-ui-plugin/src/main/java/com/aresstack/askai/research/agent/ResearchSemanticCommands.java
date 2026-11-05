@@ -24,17 +24,20 @@ final class ResearchSemanticCommands {
         Map<String, List<ResearchCommandType>> map =
                 new LinkedHashMap<String, List<ResearchCommandType>>();
         map.put("submit-scope", Arrays.asList(ResearchCommandType.SUBMIT_SCOPE));
+        // D1: every phase closes with a USER command that reaches its review gate.
+        map.put("finish-sources", Arrays.asList(ResearchCommandType.REQUEST_EVIDENCE_REVIEW));
+        map.put("finish-outline", Arrays.asList(ResearchCommandType.PROPOSE_OUTLINE));
+        map.put("finish-document", Arrays.asList(ResearchCommandType.REQUEST_DRAFT_REVIEW));
+        // APPROVE_DRAFT has no edge in the graph and is no user command.
         map.put("approve", Arrays.asList(ResearchCommandType.APPROVE_OUTLINE,
-                ResearchCommandType.APPROVE_EVIDENCE, ResearchCommandType.APPROVE_DRAFT,
-                ResearchCommandType.APPROVE_FINAL));
+                ResearchCommandType.APPROVE_EVIDENCE, ResearchCommandType.APPROVE_FINAL));
         map.put("request-changes", Arrays.asList(ResearchCommandType.REQUEST_OUTLINE_CHANGES,
                 ResearchCommandType.REQUEST_REVISION));
         map.put("continue", Arrays.asList(ResearchCommandType.START_RESEARCH,
                 ResearchCommandType.START_DRAFTING));
         map.put("retry", Arrays.asList(ResearchCommandType.RETRY));
         map.put("resume", Arrays.asList(ResearchCommandType.RESUME, ResearchCommandType.UNBLOCK));
-        map.put("pause", Arrays.asList(ResearchCommandType.PAUSE));
-        map.put("cancel", Arrays.asList(ResearchCommandType.CANCEL));
+        // D1: no user surface dispatches PAUSE or CANCEL; the graph keeps both edges.
         // The way back (always possible): reopen an earlier phase; nothing is deleted.
         map.put("reopen-concept", Arrays.asList(ResearchCommandType.REOPEN_CONCEPT));
         map.put("reopen-sources", Arrays.asList(ResearchCommandType.REOPEN_SOURCES));
@@ -48,6 +51,11 @@ final class ResearchSemanticCommands {
     /** All semantic command names, in stable declaration order. */
     static List<String> names() {
         return new ArrayList<String>(CANDIDATES.keySet());
+    }
+
+    /** Whether a name is a semantic command (each one dispatches a state command). */
+    static boolean isSemantic(String name) {
+        return name != null && CANDIDATES.containsKey(name);
     }
 
     /** The concrete candidates for a semantic name, or an empty list for an unknown name. */

@@ -227,9 +227,12 @@ public class ScopingBriefApprovalTest {
 
         assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
         assertEquals(ResearchStateIds.RUNNING, fx.resources.currentState().getStateId());
-        // The free-search field lives in the workspace top bar now, so the tag surface is back to
-        // demand-driven visibility: no tags after scoping → no surface.
-        assertFalse("the scoping-only accessory disappears once the phase leaves scoping", view.isVisible());
+        // PR 05: the tag surface stays demand-driven; in research/running it carries the user's exit.
+        boolean finish = false;
+        for (com.aresstack.askai.research.agent.ResearchActionTag tag : fx.session.availableActionTags()) {
+            finish |= "finish-sources".equals(tag.getCommand());
+        }
+        assertTrue("research/running offers Finish sources", finish);
     }
 
     @Test

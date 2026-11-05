@@ -152,7 +152,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             // resources) and the app-wide public connector (through the session directory, see activate()).
             this.botGateway = new com.aresstack.askai.research.mcp.ResearchBotSessionGateway() {
                         public String execute(String command, String arguments) {
-                            return executeCommand(command, arguments);
+                            return executeBotCommand(command, arguments);
                         }
 
                         public String describeState() {
@@ -544,24 +544,23 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         if (resolveSemanticCommand("submit-scope") != null) {
             String reason = scopingApprovalUnavailableReason();
-            tags.add(new ResearchActionTag("submit-scope",
-                    playbook.isGerman() ? "Fragestellung freigeben & weiter" : "Approve brief & continue",
-                    reason.isEmpty()
-                            ? (playbook.isGerman()
-                                    ? "Fragestellung freigeben und mit der Recherche beginnen"
-                                    : "Approve the brief and start the research")
-                            : reason,
+            tags.add(new ResearchActionTag("submit-scope", playbook.actionLabel("submit-scope"),
+                    reason.isEmpty() ? "Approve the concept and start the search" : reason,
                     reason.isEmpty()));
         }
-        // The DECISION commands become buttons (interrupt machinery — pause/cancel — stays composer-only).
-        addTagIfAvailable(tags, "approve", playbook.actionLabel("approve"));
-        addTagIfAvailable(tags, "request-changes", playbook.actionLabel("changes"));
-        addTagIfAvailable(tags, "continue", playbook.actionLabel("continue"));
+        // D1: the user exits of every phase and the gate decisions become buttons; no tag ever
+        // dispatches PAUSE or CANCEL. Each tag exists exactly where its command is allowed.
+        addTagIfAvailable(tags, "finish-sources", playbook.actionLabel("finish-sources"));
+        addTagIfAvailable(tags, "finish-outline", playbook.actionLabel("finish-outline"));
+        addTagIfAvailable(tags, "finish-document", playbook.actionLabel("finish-document"));
+        String phaseId = currentAllowedPhaseId();
+        addTagIfAvailable(tags, "approve", playbook.actionLabel("approve-" + phaseId));
+        addTagIfAvailable(tags, "request-changes", playbook.actionLabel("request-changes"));
+        addTagIfAvailable(tags, "continue", playbook.actionLabel("continue-" + phaseId));
         addTagIfAvailable(tags, "retry", playbook.actionLabel("retry"));
         addTagIfAvailable(tags, "resume", playbook.actionLabel("resume"));
         for (String id : outcomeOffers) {
-            tags.add(new ResearchActionTag("limit".equals(id) ? "accept-limitation" : id,
-                    playbook.actionLabel(id), "", true));
+            tags.add(new ResearchActionTag(id, playbook.actionLabel(id), "", true));
         }
         com.aresstack.askai.research.review.PostSearchReviewStatus reviewStatus = postSearchReviewStatus();
         if (reviewStatus.isOffered()) {
@@ -661,6 +660,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator =
                 scopeCoordinator();
         return coordinator != null && coordinator.isUsable();
+    }
+
+    /** The phase id of the live state (productive: the authoritative resources state). */
+    private String currentAllowedPhaseId() {
+        com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
+                productiveResources != null && !productiveResources.isClosed()
+                        ? productiveResources.currentState() : state;
+        return memento == null ? "" : memento.getPhaseId();
     }
 
     private void addTagIfAvailable(java.util.List<ResearchActionTag> tags, String command, String label) {
@@ -1301,6 +1308,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             // The machine knows WHICH approval fits the phase; the UI never re-encodes phase rules.
             ResearchCommandType approve = firstAllowedWithPrefix("APPROVE_");
             if (approve != null && dispatch(approve, null).isAccepted()) {
+                if (approve == ResearchCommandType.APPROVE_OUTLINE) {
+                    // D1/Q4: approving the outline also starts the writing, after the approval's
+                    // own dispatch returned; a refused start leaves draft/waiting with "Start writing".
+                    chainStart(ResearchCommandType.START_DRAFTING);
+                }
                 // Continue AUTOMATICALLY with the stored research question — the user never has to
                 // type it a second time. Auto-advance reaches RESEARCH/running, then the question
                 // goes to the agent, which starts the autonomous web research.
@@ -1314,7 +1326,28 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         String pendingApprovalId = state.getPendingApprovalId();
         if (handle != null && pendingApprovalId != null) {
+            boolean outlineGate = backend.canExecute(handle, ResearchCommandType.APPROVE_OUTLINE);
             backend.approve(handle, pendingApprovalId);
+            if (outlineGate) {
+                chainStart(ResearchCommandType.START_DRAFTING);
+            }
+        }
+    }
+
+    /**
+     * Dispatch the chained {@code START_*} of a user approval (D1, Q4) when the machine allows it.
+     * Only ever called right after the user's own approval; the fake backend no longer moves itself.
+     */
+    private void chainStart(ResearchCommandType start) {
+        if (handle == null) {
+            return;
+        }
+        if (productiveResources != null) {
+            if (currentAllowedCommands().contains(start)) {
+                dispatch(start, null);
+            }
+        } else if (backend.canExecute(handle, start)) {
+            backend.executeCommand(handle, start);
         }
     }
 
@@ -1887,28 +1920,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         System.err.println("[scope-approve] " + message);
     }
 
-    public void pause() {
-        if (productiveResources != null) {
-            setAgentTurnInFlight(false);
-            if (dispatch(ResearchCommandType.PAUSE, null).isAccepted()) {
-                // A visible confirmation — and the sink event makes the composer re-read availability.
-                narrateAsAgent("paused", narrator.pausedNotice());
-            }
-            return;
-        } else if (handle != null) {
-            backend.pause(handle);
-        }
-    }
-
-    public void resume() {
-        if (productiveResources != null) {
-            dispatch(ResearchCommandType.RESUME, null);
-        } else if (handle != null) {
-            backend.resume(handle);
-        }
-    }
-
-    public void cancel() {
+    /**
+     * D1: Stop never changes the state. It cancels the agent turn in flight (and the bot's post-search
+     * review); the phase stays where it is, so Finish and every editor stay available. No user surface
+     * dispatches {@code PAUSE} or {@code CANCEL} any more; the graph keeps both edges.
+     */
+    public void stopAgentTurn() {
         if (postSearchSummaryInFlight) {
             // The bot's post-search review is the turn in flight. It runs inside the manual-search operation,
             // so cancelling THAT aborts the review's model call (via the runtime @Cancel → cancelInFlight).
@@ -1918,12 +1935,22 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             setAgentTurnInFlight(false);
             return;
         }
-        if (productiveResources != null) {
-            setAgentTurnInFlight(false);
-            dispatch(ResearchCommandType.CANCEL, null);
-        } else if (handle != null) {
-            backend.cancel(handle);
+        setAgentTurnInFlight(false);
+        if (productiveResources == null || handle == null) {
+            return; // the fake backend's cancel would dispatch CANCEL: Stop leaves it alone
         }
+        // Off the EDT: writing to a busy agent's transport must never freeze the UI.
+        final ResearchSessionHandle cancelHandle = handle;
+        Thread canceller = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    backend.cancel(cancelHandle);
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }, "research-turn-cancel");
+        canceller.setDaemon(true);
+        canceller.start();
     }
 
     public boolean canDispatch(ResearchCommandType type) {
@@ -4350,20 +4377,19 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if ("resolve-conflict-remove".equals(cmd) || "resolve-conflict-keep".equals(cmd)) {
             return resolvePendingConflictFromHost("resolve-conflict-remove".equals(cmd));
         }
-        // Transient OUTCOME offers (the follow-up choices of a finished run) — same names as the tags.
-        String offerId = "accept-limitation".equals(cmd) ? "limit" : cmd;
-        if (outcomeOffers.contains(offerId)) {
-            return runOutcomeOffer(offerId);
-        }
-        // SEMANTIC state commands — internal ResearchCommandType names are NEVER user/bot API. The
-        // processor resolves the semantic name against the CURRENT state (the same projection the buttons
-        // use), so "approve" hits whichever approval gate is pending.
-        if (!SEMANTIC_COMMANDS.contains(cmd)) {
+        // SEMANTIC state commands resolve FIRST (D1): a stale run offer can never shadow a command,
+        // and only a name that is not semantic may match a live offer. Internal ResearchCommandType
+        // names are NEVER user/bot API; "approve" hits whichever approval gate is pending.
+        if (!ResearchSemanticCommands.isSemantic(cmd)) {
+            if (outcomeOffers.contains(cmd)) {
+                return runOutcomeOffer(cmd);
+            }
             return "rejected: unknown command '" + cmd + "'. Valid now: " + validCommandNames();
         }
         ResearchCommandType type = resolveSemanticCommand(cmd);
         if (type == null) {
-            com.aresstack.askai.research.state.oo.ResearchStateMemento memento = state;
+            com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
+                    productiveResources != null ? productiveResources.currentState() : state;
             return "rejected: '" + cmd + "' is not allowed in " + memento.getPhaseId() + "/"
                     + memento.getStateId() + ". Valid now: " + validCommandNames();
         }
@@ -4375,19 +4401,107 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     ? "handled: scope approved, research started"
                     : "rejected: " + scopingApprovalUnavailableReasonFor(outcome);
         }
-        if ("approve".equals(cmd) && hasPendingApproval()) {
+        if ("approve".equals(cmd) && hasPendingApprovalNow()) {
             approveCurrent();
             return "handled: approved (" + type.name().toLowerCase(java.util.Locale.ROOT) + " gate)";
         }
         if ("request-changes".equals(cmd)) {
-            requestChanges("");
-            narrateAsAgent("refine", narrator.refinePrompt());
+            requestChanges(args);
+            if (args.isEmpty()) {
+                narrateAsAgent("refine", narrator.refinePrompt());
+            } else {
+                sayAsAgent("Changes requested: " + args);
+            }
             return "handled: changes requested";
         }
         com.aresstack.askai.research.backend.ResearchCommandDispatchResult dispatched =
                 dispatch(type, null);
+        if (dispatched.isAccepted() && type == ResearchCommandType.SUBMIT_SCOPE) {
+            chainStart(ResearchCommandType.START_RESEARCH); // fake mode: submit-scope starts the search
+        }
+        if (dispatched.isAccepted() && (type == ResearchCommandType.REQUEST_EVIDENCE_REVIEW
+                || type == ResearchCommandType.PROPOSE_OUTLINE
+                || type == ResearchCommandType.REQUEST_DRAFT_REVIEW)) {
+            outcomeOffers = java.util.Collections.emptyList(); // a phase exit clears the run offers
+            showRestoredActionsIfAny();
+        }
         return dispatched.isAccepted() ? "handled: dispatched " + cmd
                 : "rejected: " + dispatched.getStatus() + " " + dispatched.getDetail();
+    }
+
+    /** Whether an approval is pending in the live (productive: authoritative) state. */
+    private boolean hasPendingApprovalNow() {
+        com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
+                productiveResources != null ? productiveResources.currentState() : state;
+        return memento.getPendingApprovalId() != null || hasPendingApproval();
+    }
+
+    /** The run offers a bot may run: they dispatch no state command (Q13). */
+    private static final java.util.Set<String> BOT_RUNNABLE_OFFERS = new java.util.HashSet<String>(
+            java.util.Arrays.asList("run-plan", "retry-query", "sources", "config", "refine"));
+
+    /**
+     * The BOT entry (bot control and the ChatGPT connector): from PR 05 on a connected bot dispatches
+     * no state command (Q13). Every semantic command, the {@code end} offer and a plain chat message
+     * in {@code scoping/new} (which would dispatch {@code START}) are refused; {@code pause} and
+     * {@code cancel} are no commands at all. Service commands and the run offers {@code run-plan}
+     * and {@code retry-query} run as for the user. PR 06 moves this rule into the actor policy.
+     */
+    public String executeBotCommand(String command, String arguments) {
+        String cmd = command == null ? "" : command.trim().toLowerCase(java.util.Locale.ROOT);
+        String args = arguments == null ? "" : arguments.trim();
+        if ("pause".equals(cmd) || "cancel".equals(cmd)) {
+            return "rejected: '" + cmd + "' is no command. Valid now: " + validBotCommandNames();
+        }
+        if (ResearchSemanticCommands.isSemantic(cmd)
+                || ("accept-limitation".equals(cmd) || "limit".equals(cmd) || "review".equals(cmd))) {
+            return "rejected: Phase changes need the user ('" + cmd + "'). Valid now: "
+                    + validBotCommandNames();
+        }
+        if (!cmd.isEmpty() && outcomeOffers.contains(cmd) && !BOT_RUNNABLE_OFFERS.contains(cmd)) {
+            return "rejected: Phase changes need the user ('" + cmd + "'). Valid now: "
+                    + validBotCommandNames();
+        }
+        if (cmd.isEmpty() && !args.isEmpty()) {
+            com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
+                    productiveResources != null ? productiveResources.currentState() : state;
+            if (memento != null
+                    && com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING
+                            .equals(memento.getPhaseId())
+                    && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW
+                            .equals(memento.getStateId())) {
+                return "rejected: Phase changes need the user (the first chat message starts the "
+                        + "concept phase).";
+            }
+        }
+        return executeCommand(cmd, args);
+    }
+
+    /** The semantic commands valid right now; only the user can run them (Q13). */
+    private String userOnlyCommandNames() {
+        StringBuilder sb = new StringBuilder();
+        for (String name : SEMANTIC_COMMANDS) {
+            if (resolveSemanticCommand(name) != null) {
+                sb.append(sb.length() == 0 ? "" : ", ").append(name);
+            }
+        }
+        return sb.length() == 0 ? "-" : sb.toString();
+    }
+
+    /** The commands a bot may run right now: the service commands and the bot-runnable offers. */
+    private String validBotCommandNames() {
+        StringBuilder sb = new StringBuilder(
+                "search <query>, generate-visualization, generate-outline, review-sources, "
+                        + "check-scope");
+        if (topicDiscoveryOffered()) {
+            sb.append(", discover-topics");
+        }
+        for (String id : outcomeOffers) {
+            if (BOT_RUNNABLE_OFFERS.contains(id)) {
+                sb.append(", ").append(id);
+            }
+        }
+        return sb.toString();
     }
 
     private static String renderOutcome(ResearchDerivedActions.ActionOutcome outcome) {
@@ -4426,9 +4540,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
         }
         for (String id : outcomeOffers) {
-            String name = "limit".equals(id) ? "accept-limitation" : id;
-            if (sb.indexOf(", " + name) < 0) {
-                sb.append(", ").append(name);
+            if (sb.indexOf(", " + id) < 0) {
+                sb.append(", ").append(id);
             }
         }
         return sb.toString();
@@ -4449,7 +4562,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
           .append(" pendingApproval=").append(memento.getPendingApprovalId() == null ? "-"
                   : memento.getPendingApprovalId())
           .append(" busy=").append(agentTurnInFlight).append('\n');
-        sb.append("commands: ").append(validCommandNames()).append('\n');
+        // Q13: the commands line lists what a bot may run; phase changes stay with the user.
+        sb.append("commands: ").append(validBotCommandNames()).append('\n');
+        sb.append("userOnly: ").append(userOnlyCommandNames())
+          .append(" (phase changes need the user)").append('\n');
         sb.append("buttons:");
         java.util.List<ResearchActionTag> buttons = availableActionTags();
         if (buttons.isEmpty()) {
@@ -4956,34 +5072,35 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             com.aresstack.askai.research.backend.ResearchRunOutcomeInfo o) {
         java.util.List<String> ids = new ArrayList<String>();
         String stop = o.getStopReason();
+        // D1: run offers get ids that are never semantic names ("run-plan", "retry-query"); the
+        // "review" and "limit" offers are gone ("Finish sources" replaces them), and "end" finishes
+        // the sources instead of cancelling the phase.
         if ("USER_CANCELLED".equals(stop)) {
-            ids.add("resume");
+            ids.add("run-plan");
             ids.add("sources");
             ids.add("end");
         } else if ("MCP_UNAVAILABLE".equals(stop)) {
-            ids.add("retry");
+            ids.add("retry-query");
             ids.add("config");
         } else if ("ERROR_BUDGET_EXHAUSTED".equals(stop)) {
-            ids.add("retry");
+            ids.add("retry-query");
             ids.add("sources");
             ids.add("end");
         } else if ("SUFFICIENT_EVIDENCE".equals(stop)
                 || ("SOURCE_BUDGET_EXHAUSTED".equals(stop) && o.isEvidenceSufficient())) {
-            ids.add("review");
             ids.add("sources");
             ids.add("end");
         } else if ("RERANKER_UNAVAILABLE".equals(stop) || "RERANKER_TIMEOUT".equals(stop)
                 || "RERANKER_INVALID_RESPONSE".equals(stop) || "SEARCH_TECHNICAL_PROBLEM".equals(stop)
                 || "SCOPE_CONTROL_UNAVAILABLE".equals(stop)) {
-            // Technical search/reranker failures: retry or fix the configuration — NEVER "accept the
-            // limitation" (there is no research result to accept, only a failed component).
-            ids.add("retry");
+            // Technical search/reranker failures: retry or fix the configuration.
+            ids.add("retry-query");
             ids.add("config");
             ids.add("end");
         } else if ("RERANKER_CONFIGURATION_ERROR".equals(stop)) {
             // The snapshot/selection is invalid: fixing the configuration comes FIRST.
             ids.add("config");
-            ids.add("retry");
+            ids.add("retry-query");
             ids.add("end");
         } else if ("NO_SEMANTIC_MATCHES".equals(stop)) {
             // Semantic outcome, not a failure: no candidate passed the selection policy.
@@ -4995,11 +5112,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             ids.add("sources");
             ids.add("end");
         } else {
-            // Budget exhausted with open evidence requirements — the screenshotted case.
-            ids.add("continue");
+            // Budget exhausted with open evidence requirements.
+            ids.add("run-plan");
             ids.add("sources");
             ids.add("refine");
-            ids.add("limit");
             ids.add("end");
         }
         return ids;
@@ -5011,7 +5127,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     private String runOutcomeOffer(String id) {
         boolean navigation = "sources".equals(id) || "config".equals(id);
-        if ("continue".equals(id) || "retry".equals(id) || "resume".equals(id)) {
+        String result = "handled: " + id;
+        if ("run-plan".equals(id) || "retry-query".equals(id)) {
             continueResearchTurn();
         } else if ("sources".equals(id)) {
             openArtifactView("sources");
@@ -5023,16 +5140,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             + "(category „Research Agent“).");
         } else if ("refine".equals(id)) {
             narrateAsAgent("refine", narrator.refinePrompt()); // the composer is free; the user just types
-        } else if ("limit".equals(id)) {
-            com.aresstack.askai.research.backend.ResearchRunOutcomeInfo outcome = lastOutcome;
-            if (outcome == null) {
-                return "rejected: no run outcome to accept a limitation for";
-            }
-            recordLimitation(outcome);
         } else if ("end".equals(id)) {
-            cancel(); // the controlled end of the research phase (state machine stays the authority)
-        } else if ("review".equals(id)) {
-            requestEvidenceReview();
+            // The controlled end of the search: the user's finish-sources, never CANCEL (D1).
+            result = executeCommandOnUiThread("finish-sources", "");
+            if (!result.startsWith("handled")) {
+                return result;
+            }
         } else {
             return "rejected: unknown outcome action " + id;
         }
@@ -5044,7 +5157,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 }
             });
         }
-        return "handled: " + id;
+        return result;
     }
 
     /** Continue with the STORED question, a fresh budget and no re-visits (the agent keeps its history). */
@@ -5052,10 +5165,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (productiveResources == null || handle == null) {
             return;
         }
-        if (com.aresstack.askai.research.state.oo.ResearchStateIds.PAUSED
-                .equals(productiveResources.currentState().getStateId())) {
-            dispatch(ResearchCommandType.RESUME, null);
-        }
+        // A run offer dispatches no state command (Q13): a paused run is resumed by the user's "resume".
         if (!researchQuestion.isEmpty()
                 && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING
                         .equals(productiveResources.currentState().getStateId())) {
@@ -5148,24 +5258,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
     }
 
-    /** Record the unmet evidence requirement VISIBLY and move on towards review — never silently. */
-    private void recordLimitation(com.aresstack.askai.research.backend.ResearchRunOutcomeInfo outcome) {
-        // Issue #32: no research-notes artifact anymore — the visible chat note (persisted transcript) plus
-        // the structured run-outcome card ARE the record; diagnostics are never copied into a notes document.
-        sayAsAgent(playbook.limitationRecorded(outcome));
-        requestEvidenceReview();
-    }
-
-    /** Move on to the evidence review when the state machine allows it (the machine stays authority). */
-    private void requestEvidenceReview() {
-        if (currentAllowedCommands().contains(ResearchCommandType.REQUEST_EVIDENCE_REVIEW)
-                && dispatch(ResearchCommandType.REQUEST_EVIDENCE_REVIEW, null).isAccepted()) {
-            // The evidence gate (EVIDENCE/waiting_approval) now presents its approve/request-changes buttons —
-            // without this the review click advanced the state but showed nothing ("geht nicht weiter").
-            showRestoredActionsIfAny();
-        }
-    }
-
     private void applyActivity(ResearchBackendEvent event) {
         String id = event.getActivityId();
         switch (event.getActivityKind()) {
@@ -5217,7 +5309,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return names;
     }
 
-    /** The composer route: plain prompts go to the backend; stop pauses the run. */
+    /** The composer route: plain prompts go to the backend; stop cancels the turn, never the phase. */
     private final class ResearchChatTarget implements ChatSubmissionTarget {
         public SubmissionAvailability getAvailability() {
             String stateId = state.getStateId();
@@ -5232,8 +5324,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 return agentTurnInFlight ? SubmissionAvailability.BUSY
                         : SubmissionAvailability.AVAILABLE;
             }
-            return com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(stateId)
-                    ? SubmissionAvailability.BUSY : SubmissionAvailability.AVAILABLE;
+            // PR 05: the fake stays in RUNNING until the user finishes the phase, and its simulated
+            // work is synchronous, so the composer stays free for follow-up messages.
+            return SubmissionAvailability.AVAILABLE;
         }
 
         public void submitText(String text) {
@@ -5244,7 +5337,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
         public void stop() {
             if (postSearchSummaryInFlight) {
-                cancel(); // the review-abort path: cancels the model call, clears bubble + busy
+                stopAgentTurn(); // the review-abort path: cancels the model call, clears bubble + busy
                 return;
             }
             if (activeManualSearchRequestId != null) {
@@ -5254,7 +5347,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 setAgentTurnInFlight(false);
                 return;
             }
-            pause();
+            stopAgentTurn(); // D1: Stop cancels the turn, never the phase
         }
     }
 }

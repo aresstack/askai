@@ -38,14 +38,21 @@ public final class ResearchChatCommands {
         commands.add(new OpenCommand());
         commands.add(new SearchCommand());
         commands.add(new MapCommand());
+        // D1: every phase's exit and gate decision, with the labels of the red tags.
         commands.add(new ProcessorCommand("submit-scope",
-                "Approve the research brief and continue into the research phase"));
+                "Approve concept & start search"));
+        commands.add(new ProcessorCommand("finish-sources",
+                "Finish sources: make the sources read-only for review"));
+        commands.add(new ProcessorCommand("finish-outline",
+                "Finish outline: make the outline read-only for review"));
+        commands.add(new ProcessorCommand("finish-document",
+                "Finish document: make the document read-only for review"));
         commands.add(new ProcessorCommand("approve",
-                "Approve the pending review gate (outline/evidence/draft/final)"));
+                "Approve the pending review gate (sources/outline/final book)"));
         commands.add(new ProcessorCommand("request-changes",
-                "Request changes at the pending review gate"));
+                "Request changes at the pending review gate, with an optional comment"));
         commands.add(new ProcessorCommand("continue",
-                "Continue with the next step (start research/drafting)"));
+                "Start search or start writing when the chained start was refused"));
         commands.add(new ProcessorCommand("review-sources",
                 "Review the newly captured sources (Neue Quellen auswerten)"));
         commands.add(new ProcessorCommand("check-scope",
@@ -58,7 +65,8 @@ public final class ResearchChatCommands {
     /** The red-tag twins exposed as slash commands (the test guards the sync). */
     static List<String> processorCommandNames() {
         return java.util.Arrays.asList(
-                "submit-scope", "approve", "request-changes", "continue", "review-sources",
+                "submit-scope", "finish-sources", "finish-outline", "finish-document", "approve",
+                "request-changes", "continue", "review-sources",
                 "check-scope", "discover-topics");
     }
 
@@ -119,6 +127,11 @@ public final class ResearchChatCommands {
         }
 
         public ChatCommandDescriptor getDescriptor() {
+            if ("request-changes".equals(name)) {
+                return ChatCommandDescriptor.of(name, description, "/request-changes [comment]",
+                        new CommandArgumentDescriptor("comment", "What should change (optional)",
+                                false));
+            }
             return ChatCommandDescriptor.of(name, description);
         }
 

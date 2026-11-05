@@ -53,7 +53,9 @@ public final class ResearchStateSnapshot {
         ResearchStateFactory factory = ResearchStateFactory.getInstance();
         for (ResearchCommandType command : this.allowedCommands) {
             String target = factory.forwardTargetPhaseId(phase, command);
-            if (target != null && !advance.containsKey(target)) {
+            // D1: the pill and the plates never dispatch for the CURRENT phase (a within-phase exit
+            // such as finish-sources is a tag/slash command, never a phase click).
+            if (target != null && !target.equals(this.currentPhaseId) && !advance.containsKey(target)) {
                 advance.put(target, command);
             }
         }
