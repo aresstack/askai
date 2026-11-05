@@ -44,7 +44,18 @@ final class ScopingComposerAccessory implements ComposerAccessory {
             public void accept(ResearchActionTag action) {
                 // ONE path for every red tag: the structured command processor. Rejections surface through
                 // the session (problems/diagnostics); the tags re-derive on the resulting state change.
-                research.executeCommand(action.getCommand(), "");
+                String arguments = "";
+                if ("request-changes".equals(action.getCommand())) {
+                    // D1: an optional one-line comment for the change request (Cancel = no request).
+                    Object answer = javax.swing.JOptionPane.showInputDialog(view,
+                            "What should change? (optional)", "Request changes",
+                            javax.swing.JOptionPane.PLAIN_MESSAGE, null, null, "");
+                    if (answer == null) {
+                        return;
+                    }
+                    arguments = answer.toString().trim();
+                }
+                research.executeCommand(action.getCommand(), arguments);
             }
         });
         this.refresh = new Runnable() {

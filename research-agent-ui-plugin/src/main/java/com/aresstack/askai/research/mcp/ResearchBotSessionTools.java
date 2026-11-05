@@ -31,11 +31,13 @@ public final class ResearchBotSessionTools {
     /** The shared command description — the directory face documents the same commands. */
     static final String RUN_COMMAND_DESCRIPTION =
             "Execute one research command. Always-on commands: search <query> (web search), "
-            + "generate-visualization, generate-outline, review-sources. State commands "
-            + "(only when the phase allows them): submit-scope, approve, request-changes, "
-            + "continue, retry, resume, pause, cancel. Omit 'command' to send the arguments "
-            + "as a plain CHAT MESSAGE to the research agent. Unknown/not-allowed commands "
-            + "are rejected with the currently valid list. Call session_state first.";
+            + "generate-visualization, generate-outline, review-sources, check-scope. Run offers "
+            + "(only while session_state lists them): run-plan, retry-query, sources, config, refine. "
+            + "Phase changes need the user: a bot cannot run submit-scope, approve, request-changes, "
+            + "continue, retry, resume, the reopen and finish commands or the 'end' offer; suggest "
+            + "them in your answer instead. Omit 'command' to send the arguments as a plain CHAT "
+            + "MESSAGE to the research agent (refused before the first user message). Unknown or "
+            + "refused commands are rejected with the currently valid list. Call session_state first.";
 
     static final String SESSION_STATE_DESCRIPTION =
             "Current research phase and run state, plus the currently valid commands (the same set the "
