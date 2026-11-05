@@ -139,6 +139,15 @@ public final class ProtocolProbes {
 
     /** Item 9 for chat: a prompt longer than {@code num_ctx} with {@code truncate=false}. */
     public Answer overlongChat(String model, int numCtx) throws IOException {
+        return chat(model, numCtx, repeat(numCtx * 2) + " Answer with one word.");
+    }
+
+    /** The short control call of item 9: the same request shape, well inside the context. */
+    public Answer shortChat(String model, int numCtx) throws IOException {
+        return chat(model, numCtx, "Answer with one word: ok?");
+    }
+
+    private Answer chat(String model, int numCtx, String content) throws IOException {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", false);
@@ -150,7 +159,7 @@ public final class ProtocolProbes {
         JsonArray messages = new JsonArray();
         JsonObject user = new JsonObject();
         user.addProperty("role", "user");
-        user.addProperty("content", repeat(numCtx * 2) + " Answer with one word.");
+        user.addProperty("content", content);
         messages.add(user);
         body.add("messages", messages);
         return post("/api/chat", body);

@@ -60,7 +60,7 @@ public class ModelProtocolLiveTest {
         String previous = "(start)";
         for (int round = 0; round < 2; round++) {
             for (String model : models) {
-                int numCtx = "gemma4:e2b".equals(model) ? 32768 : 16384;
+                int numCtx = numCtx(model);
                 long load = probes.loadDurationMillis(model, numCtx);
                 long gpu = ProtocolProbes.gpuMemoryUsedMiB();
                 md.append(String.format(Locale.ROOT, "| %s | %s | %d | %s | %s |%n", previous, model, numCtx,
@@ -73,11 +73,11 @@ public class ModelProtocolLiveTest {
         if (!models.isEmpty()) {
             ProtocolProbes.Answer chat = probes.overlongChat(models.get(0), 2048);
             md.append(String.format(Locale.ROOT, "| chat | %s | %d | %s |%n", models.get(0), chat.status,
-                    chat.status >= 400 ? "yes" : "no: it answered"));
+                    truncationVerdict(probes.shortChat(models.get(0), 2048), chat)));
         }
         ProtocolProbes.Answer embed = probes.overlongEmbed(embeddingModel, 20000);
         md.append(String.format(Locale.ROOT, "| embed | %s | %d | %s |%n", embeddingModel, embed.status,
-                embed.status >= 400 ? "yes" : "no: it answered"));
+                truncationVerdict(probes.overlongEmbed(embeddingModel, 5), embed)));
 
         File dir = new File(System.getProperty(P + "reportDir", "build/reports/research-benchmark"));
         dir.mkdirs();
@@ -86,6 +86,42 @@ public class ModelProtocolLiveTest {
         Files.write(out.toPath(), md.toString().getBytes(StandardCharsets.UTF_8));
         System.out.println(md);
         System.out.println("[model-protocol] report " + out.getName());
+    }
+
+    /**
+     * The context of one model: {@code -Daskai.benchmark.numCtx.<model>=32768} overrides the presets of PR 03
+     * (gemma4:e2b 32768, llama3.1:8b and gpt-oss:20b 16384, others 8192), e.g. for llama3.1:8b at 32k (item 3).
+     */
+    static int numCtx(String model) {
+        Integer override = Integer.getInteger(P + "numCtx." + model);
+        if (override != null && override > 0) {
+            return override;
+        }
+        if ("gemma4:e2b".equals(model)) {
+            return 32768;
+        }
+        return "llama3.1:8b".equals(model) || "gpt-oss:20b".equals(model) ? 16384 : 8192;
+    }
+
+    /**
+     * Item 9 verdict: only a context-length rejection counts. A failing short control call (model missing or not
+     * loadable) makes the check unavailable, and any other error stays unclear.
+     */
+    static String truncationVerdict(ProtocolProbes.Answer control, ProtocolProbes.Answer overlong) {
+        if (control == null || control.status != 200) {
+            return "unavailable: control call failed (HTTP " + (control == null ? "?" : control.status) + ")";
+        }
+        if (overlong.status == 200) {
+            return "no: it answered";
+        }
+        String body = overlong.body == null ? "" : overlong.body.toLowerCase(Locale.ROOT);
+        if (body.contains("context") || body.contains("length") || body.contains("too long")
+                || body.contains("exceed")) {
+            return "yes";
+        }
+        return "unclear: HTTP " + overlong.status + " "
+                + (overlong.body == null ? "" : overlong.body.replace('|', '/').replaceAll("\\s+", " ")
+                .substring(0, Math.min(120, overlong.body.length())));
     }
 
     private static String ratio(int chars, long tokens) {

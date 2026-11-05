@@ -687,6 +687,42 @@ public final class ProductiveResearchBackendFactory {
                                 base.enqueue(captureId, sourceId, researchLanguageCode);
                             }
                         });
+                // PR 04: the prompt scheme is part of the vector world, so captures processed only in an older
+                // world (raw vectors before PR 04) are re-derived once in the active one; the worker keeps the
+                // capture and writes new passages under the new fingerprint.
+                String activeWorld = com.aresstack.askai.research.knowledge.processing.embedding
+                        .HttpEmbeddingPortAdapter.documentFingerprint(embeddingDescriptor);
+                java.util.Map<String, String> captureSourceIds = new java.util.LinkedHashMap<String, String>();
+                for (com.aresstack.askai.research.domain.SourceCapture processedCapture
+                        : knowledgeProject.captures().values()) {
+                    captureSourceIds.put(processedCapture.getCaptureId(), processedCapture.getSourceId());
+                }
+                java.util.Set<String> currentWorldCaptureIds = new java.util.HashSet<String>();
+                for (com.aresstack.askai.research.domain.Passage passage : knowledgeProject.passages().values()) {
+                    if (activeWorld.equals(passage.getEmbeddingFingerprint())) {
+                        currentWorldCaptureIds.add(passage.getCaptureId());
+                    }
+                }
+                java.util.Set<String> eligibleSourceIds = new java.util.HashSet<String>();
+                for (com.aresstack.askai.research.knowledge.processing.ProcessingReconciliation.CandidateSource
+                        candidate : candidates) {
+                    if (candidate.corpusEligible() && candidate.hasSegmentableText()) {
+                        eligibleSourceIds.add(candidate.sourceId());
+                    }
+                }
+                int stale = com.aresstack.askai.research.knowledge.processing.ProcessingReconciliation
+                        .reembedStale(captureSourceIds, currentWorldCaptureIds,
+                                processingQueue.captureIdsWithKnownProcessing(activeWorld), eligibleSourceIds,
+                                new com.aresstack.askai.research.knowledge.processing
+                                        .ProcessingReconciliation.MissingJobScheduler() {
+                                    public void enqueue(String captureId, String sourceId) {
+                                        base.enqueue(captureId, sourceId, researchLanguageCode);
+                                    }
+                                });
+                if (stale > 0) {
+                    System.err.println("[research-knowledge] re-embedding " + stale
+                            + " capture(s) of an older embedding world");
+                }
                 if (missing > 0) {
                     System.err.println("[research-knowledge] reconciliation enqueued " + missing
                             + " missing processing job(s) for sources accepted without an"

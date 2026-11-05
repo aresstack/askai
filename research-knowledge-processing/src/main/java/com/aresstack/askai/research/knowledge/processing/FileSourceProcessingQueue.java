@@ -143,6 +143,22 @@ public final class FileSourceProcessingQueue implements SourceProcessingQueue {
         return sourceIds;
     }
 
+    /**
+     * Capture ids with a non-superseded job in ONE vector world (PR 04: a changed prompt scheme moves the world, so
+     * captures processed in the old one are re-derived unless the new world already knows them).
+     */
+    public synchronized java.util.Set<String> captureIdsWithKnownProcessing(String embeddingFingerprint) {
+        java.util.Set<String> captureIds = new java.util.HashSet<String>();
+        for (SourceProcessingJob job : loadAll()) {
+            if (job.getState() != SourceProcessingJob.State.SUPERSEDED
+                    && embeddingFingerprint != null
+                    && embeddingFingerprint.equals(job.getRequest().getEmbeddingModelFingerprint())) {
+                captureIds.add(job.getRequest().getCaptureId());
+            }
+        }
+        return captureIds;
+    }
+
     // ------------------------------------------------------------------ persistence
 
     private File file(String jobId) {

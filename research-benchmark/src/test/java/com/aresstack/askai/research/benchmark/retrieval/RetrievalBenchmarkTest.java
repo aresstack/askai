@@ -117,4 +117,29 @@ public class RetrievalBenchmarkTest {
                 RankingStrategies.byReranker(new Bm25CandidateReranker(), "copper price", results()), r);
         assertEquals("r2", fused.ids.get(0));
     }
+
+    @Test
+    public void truncationCountsOnlyAContextRejection() {
+        ProtocolProbes.Answer ok = new ProtocolProbes.Answer(200, "{}");
+        assertEquals("yes", ModelProtocolLiveTest.truncationVerdict(ok,
+                new ProtocolProbes.Answer(400, "{\"error\":\"input length exceeds the context length\"}")));
+        assertEquals("no: it answered", ModelProtocolLiveTest.truncationVerdict(ok, ok));
+        assertTrue(ModelProtocolLiveTest.truncationVerdict(new ProtocolProbes.Answer(404, "model not found"),
+                new ProtocolProbes.Answer(404, "model not found")).startsWith("unavailable"));
+        assertTrue(ModelProtocolLiveTest.truncationVerdict(ok,
+                new ProtocolProbes.Answer(500, "runner crashed")).startsWith("unclear"));
+    }
+
+    @Test
+    public void protocolContextFollowsThePresetsUnlessOverridden() {
+        assertEquals(32768, ModelProtocolLiveTest.numCtx("gemma4:e2b"));
+        assertEquals(16384, ModelProtocolLiveTest.numCtx("llama3.1:8b"));
+        assertEquals(8192, ModelProtocolLiveTest.numCtx("other"));
+        System.setProperty("askai.benchmark.numCtx.llama3.1:8b", "32768");
+        try {
+            assertEquals(32768, ModelProtocolLiveTest.numCtx("llama3.1:8b"));
+        } finally {
+            System.clearProperty("askai.benchmark.numCtx.llama3.1:8b");
+        }
+    }
 }

@@ -104,10 +104,12 @@ public class RetrievalBenchmarkLiveTest {
         Map<String, Map<RetrievalBenchmarkData.Group, List<Integer>>> strategyRanks =
                 new LinkedHashMap<String, Map<RetrievalBenchmarkData.Group, List<Integer>>>();
         Map<String, Integer> nothing = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> failures = new LinkedHashMap<String, Integer>();
         String rankingNote = rankPlannedQueries(probes, ollama, candidates.get(0), set, data, visitTopN,
-                strategyRanks, nothing);
+                strategyRanks, nothing, failures);
 
-        String report = report(probes.version(), set, runs, strategyRanks, nothing, visitTopN, rankingNote);
+        String report = report(probes.version(), set, runs, strategyRanks, nothing, failures, visitTopN,
+                rankingNote);
         File dir = new File(System.getProperty(P + "reportDir", "build/reports/research-benchmark"));
         dir.mkdirs();
         File out = new File(dir, "retrieval-benchmark-"
@@ -129,13 +131,8 @@ public class RetrievalBenchmarkLiveTest {
                     "/api/embed", dimension, "none", "", 600_000L), new UrlConnectionEmbeddingHttpTransport(600_000));
             List<String> ids = new ArrayList<String>(corpus.keySet());
             List<String> texts = new ArrayList<String>();
-            String longest = "";
             for (String id : ids) {
-                String text = corpus.get(id).text;
-                texts.add(text);
-                if (text.length() > longest.length()) {
-                    longest = text;
-                }
+                texts.add(corpus.get(id).text);
             }
             long started = System.nanoTime();
             List<EmbeddingPort.EmbeddingVector> docs = new ArrayList<EmbeddingPort.EmbeddingVector>();
@@ -145,7 +142,10 @@ public class RetrievalBenchmarkLiveTest {
             }
             run.millisPer100 = (System.nanoTime() - started) / 1e6 * 100.0 / Math.max(1, texts.size());
             run.gpuMiB = ProtocolProbes.gpuMemoryUsedMiB();
-            run.longestPassageTokens = probes.embeddingTokens(model, longest);
+            // Token order differs from character order (and per model), so every passage is counted.
+            for (String text : texts) {
+                run.longestPassageTokens = Math.max(run.longestPassageTokens, probes.embeddingTokens(model, text));
+            }
             run.contextLength = probes.contextLength(model);
             Map<String, EmbeddingPort.EmbeddingVector> byId = new LinkedHashMap<String, EmbeddingPort.EmbeddingVector>();
             for (int i = 0; i < ids.size(); i++) {
@@ -209,7 +209,7 @@ public class RetrievalBenchmarkLiveTest {
     private static String rankPlannedQueries(ProtocolProbes probes, String ollama, String presetModel,
                                              RetrievalBenchmarkData.QuerySet set, File data, int visitTopN,
                                              Map<String, Map<RetrievalBenchmarkData.Group, List<Integer>>> ranks,
-                                             Map<String, Integer> nothing) {
+                                             Map<String, Integer> nothing, Map<String, Integer> failures) {
         StringBuilder note = new StringBuilder();
         LocalRerankerRuntime runtime = null;
         CandidateReranker crossEncoder = null;
@@ -245,12 +245,12 @@ public class RetrievalBenchmarkLiveTest {
                 RankingStrategies.Ranking lexical = RankingStrategies.byReranker(bm25, query.text, results.results);
                 RankingStrategies.Ranking embedding = RankingStrategies.byEmbedding(port, query.text,
                         results.results);
-                record(ranks, nothing, "BM25", query, lexical, results.targetResultId);
-                record(ranks, nothing, "Embedding similarity", query, embedding, results.targetResultId);
-                record(ranks, nothing, "BM25 + embedding (RRF)", query,
+                record(ranks, nothing, failures, "BM25", query, lexical, results.targetResultId);
+                record(ranks, nothing, failures, "Embedding similarity", query, embedding, results.targetResultId);
+                record(ranks, nothing, failures, "BM25 + embedding (RRF)", query,
                         RankingStrategies.byFusion(lexical, embedding), results.targetResultId);
                 if (crossEncoder != null) {
-                    record(ranks, nothing, "Cross-encoder", query,
+                    record(ranks, nothing, failures, "Cross-encoder", query,
                             RankingStrategies.byReranker(crossEncoder, query.text, results.results),
                             results.targetResultId);
                 }
@@ -269,8 +269,15 @@ public class RetrievalBenchmarkLiveTest {
     }
 
     private static void record(Map<String, Map<RetrievalBenchmarkData.Group, List<Integer>>> ranks,
-                               Map<String, Integer> nothing, String strategy, RetrievalBenchmarkData.Query query,
-                               RankingStrategies.Ranking ranking, String target) {
+                               Map<String, Integer> nothing, Map<String, Integer> failures, String strategy,
+                               RetrievalBenchmarkData.Query query, RankingStrategies.Ranking ranking, String target) {
+        // An operational failure (timeout, unloadable model) is not a retrieval miss: it is counted apart and
+        // stays out of the hit-rate denominator. A fusion warning about one failed path is not a failure.
+        if (!ranking.problem.isEmpty() && ranking.ids.isEmpty()) {
+            failures.merge(strategy, 1, Integer::sum);
+            ranks.computeIfAbsent(strategy, s -> new LinkedHashMap<RetrievalBenchmarkData.Group, List<Integer>>());
+            return;
+        }
         ranks.computeIfAbsent(strategy, s -> new LinkedHashMap<RetrievalBenchmarkData.Group, List<Integer>>())
                 .computeIfAbsent(query.group, g -> new ArrayList<Integer>())
                 .add(RetrievalMetrics.rankOf(ranking.ids, target));
@@ -279,7 +286,8 @@ public class RetrievalBenchmarkLiveTest {
 
     static String report(String ollamaVersion, RetrievalBenchmarkData.QuerySet set, List<Run> runs,
                          Map<String, Map<RetrievalBenchmarkData.Group, List<Integer>>> strategyRanks,
-                         Map<String, Integer> nothing, int visitTopN, String rankingNote) {
+                         Map<String, Integer> nothing, Map<String, Integer> failures, int visitTopN,
+                         String rankingNote) {
         StringBuilder md = new StringBuilder();
         md.append("# Retrieval benchmark\n\n");
         md.append("Ollama ").append(ollamaVersion).append(", topic: ").append(set.topic).append(", ")
@@ -310,8 +318,8 @@ public class RetrievalBenchmarkLiveTest {
                     run.contextLength < 0 ? "?" : String.valueOf(run.contextLength)));
         }
         md.append("\n## Ranking of planned queries (target in the visited top ").append(visitTopN).append(")\n\n");
-        md.append(rankingNote).append("\n\n| Strategy | DE_DE | DE_EN | EN_EN | Mean | Selected nothing |\n"
-                + "|---|---|---|---|---|---|\n");
+        md.append(rankingNote).append("\n\n| Strategy | DE_DE | DE_EN | EN_EN | Mean | Selected nothing | Failed calls |\n"
+                + "|---|---|---|---|---|---|---|\n");
         for (Map.Entry<String, Map<RetrievalBenchmarkData.Group, List<Integer>>> s : strategyRanks.entrySet()) {
             md.append("| ").append(s.getKey());
             double sum = 0;
@@ -320,7 +328,8 @@ public class RetrievalBenchmarkLiveTest {
                 sum += rate;
                 md.append(String.format(Locale.ROOT, " | %.3f", rate));
             }
-            md.append(String.format(Locale.ROOT, " | %.3f | %d |%n", sum / 3, nothing.getOrDefault(s.getKey(), 0)));
+            md.append(String.format(Locale.ROOT, " | %.3f | %d | %d |%n", sum / 3, nothing.getOrDefault(s.getKey(), 0),
+                    failures.getOrDefault(s.getKey(), 0)));
         }
         md.append("\n## Rule of 5.4 item 7\n\n").append(winner(runs)).append('\n');
         return md.toString();
@@ -331,14 +340,10 @@ public class RetrievalBenchmarkLiveTest {
      * Whether a candidate fits beside the phase models is a GPU measurement and stays for the owner to confirm.
      */
     static String winner(List<Run> runs) {
-        Run preset = null;
-        for (Run run : runs) {
-            if (!run.raw && run.problem.isEmpty()) {
-                preset = run;
-                break;
-            }
-        }
-        if (preset == null || preset.groups.get(RetrievalBenchmarkData.Group.DE_EN) == null) {
+        // The first run is the configured preset (prompted); it is never replaced by another candidate.
+        Run preset = runs.isEmpty() ? null : runs.get(0);
+        if (preset == null || preset.raw || !preset.problem.isEmpty()
+                || preset.groups.get(RetrievalBenchmarkData.Group.DE_EN) == null) {
             return "No result for the current preset; no choice.";
         }
         double floor = preset.groups.get(RetrievalBenchmarkData.Group.DE_EN).recallAt10;
