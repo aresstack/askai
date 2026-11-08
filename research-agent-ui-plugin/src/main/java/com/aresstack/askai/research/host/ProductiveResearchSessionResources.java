@@ -460,6 +460,11 @@ public final class ProductiveResearchSessionResources {
         return transitions;
     }
 
+    /** Plan PR 14: the one acceptance boundary (the session binds its phase/plan-entry tagger). */
+    public SourceAcceptanceService acceptance() {
+        return acceptance;
+    }
+
     public com.aresstack.askai.research.transition.PhaseJobRegistry phaseJobs() {
         return phaseJobs;
     }

@@ -12,6 +12,10 @@ public final class ManualWebSearchRequest {
 
     private final String query;
     private final ResearchLanguage language;
+    /** Plan PR 14: {@code bm25}, {@code reranker} or "" (typed search: the user's setting). */
+    private final String ranking;
+    private final int visitLimit;
+    private final int sourceCap;
 
     /** English snapshot convenience (legacy callers/tests without a session language). */
     public ManualWebSearchRequest(String query) {
@@ -19,8 +23,32 @@ public final class ManualWebSearchRequest {
     }
 
     public ManualWebSearchRequest(String query, ResearchLanguage language) {
+        this(query, language, "", 0, 0);
+    }
+
+    /**
+     * Plan PR 14: a planned query with its ranking choice ({@code bm25} or {@code reranker}), its visit limit (top N
+     * ranked hits) and its per-query source cap.
+     */
+    public ManualWebSearchRequest(String query, ResearchLanguage language, String ranking, int visitLimit,
+                                  int sourceCap) {
         this.query = query == null ? "" : query.trim();
         this.language = language == null ? ResearchLanguage.ENGLISH : language;
+        this.ranking = ranking == null ? "" : ranking.trim();
+        this.visitLimit = Math.max(0, visitLimit);
+        this.sourceCap = Math.max(0, sourceCap);
+    }
+
+    public String getRanking() {
+        return ranking;
+    }
+
+    public int getVisitLimit() {
+        return visitLimit;
+    }
+
+    public int getSourceCap() {
+        return sourceCap;
     }
 
     public String getQuery() {

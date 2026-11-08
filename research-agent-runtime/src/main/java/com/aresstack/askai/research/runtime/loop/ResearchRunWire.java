@@ -251,6 +251,15 @@ public final class ResearchRunWire {
     }
 
     /** A manual search finished: the result count and the strategy status (RESULTS|NO_RESULTS|…). */
+    /**
+     * Plan PR 14: as {@link #manualSearchCompleted(String, int, String)}; {@code keywordFallback} marks a planned
+     * query that was ranked by BM25 because its chosen ranking was unavailable ({@code ranked_by=keywords}).
+     */
+    public static String manualSearchCompleted(String requestId, int results, String status,
+                                               boolean keywordFallback) {
+        return manualSearchCompleted(requestId, results, status) + (keywordFallback ? " ranked_by=keywords" : "");
+    }
+
     public static String manualSearchCompleted(String requestId, int results, String status) {
         return MARKER + "manual_search_completed"
                 + " request_id=" + (requestId == null ? "" : requestId)
