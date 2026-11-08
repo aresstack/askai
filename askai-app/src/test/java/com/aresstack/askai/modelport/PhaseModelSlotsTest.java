@@ -169,7 +169,8 @@ public class PhaseModelSlotsTest {
         slots("default", "gpt-oss:20b");
         ModelFailure failure = fail("judge");
         assertTrue(failure.getDetail(),
-                failure.getDetail().endsWith("The page judge needs a model that can turn thinking off."));
+                failure.getDetail().endsWith("The page judge needs a model that can turn thinking off; gpt-oss:20b "
+                        + "cannot. Set a model for it under Research settings -> Models."));
         assertTrue("nothing was sent", chatBodies.isEmpty());
         assertEquals("a phase slot may use a reasoning model", "gpt-oss:20b", call("phase.research"));
     }
