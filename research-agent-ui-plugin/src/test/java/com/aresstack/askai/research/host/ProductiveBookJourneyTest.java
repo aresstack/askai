@@ -103,8 +103,16 @@ public class ProductiveBookJourneyTest {
         final RecordingBackend backend = new RecordingBackend();
         final ProductiveResearchSessionResources resources;
         final ResearchAgentSession session;
+        final java.io.File dir;
+        final PlainHost host;
 
         Fx() {
+            this(newTempDir());
+        }
+
+        Fx(java.io.File dir) {
+            this.dir = dir;
+            this.host = new PlainHost();
             final ProductiveResearchSessionResources[] holder = new ProductiveResearchSessionResources[1];
             ResearchControlEndpoint control = new ResearchControlEndpoint(registry, "s1", 7L,
                     new ResearchControlContext() {
@@ -136,9 +144,11 @@ public class ProductiveBookJourneyTest {
                     });
             control.open();
             resources = new ProductiveResearchSessionResources("s1", new OoResearchStateMachine("s1"),
-                    null, null, null, tempProjectContext(), control, null, null, null);
+                    null, null, null,
+                    com.aresstack.askai.research.store.ResearchProjectContext.open("s1", dir), control,
+                    null, null, null);
             holder[0] = resources;
-            session = new ResearchAgentSession(backend, null, new PlainHost(), "s1", "p1", resources);
+            session = new ResearchAgentSession(backend, null, host, "s1", "p1", resources);
             session.activate();
         }
     }
@@ -154,11 +164,21 @@ public class ProductiveBookJourneyTest {
 
     private static long sequence;
 
+    private static void settle(Fx fx) {
+        try {
+            assertTrue(fx.session.awaitTransitionEffects(5000));
+        } catch (InterruptedException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
     private static String phase(Fx fx) {
+        settle(fx);
         return fx.resources.currentState().getPhaseId() + "/" + fx.resources.currentState().getStateId();
     }
 
     private static List<String> tagCommands(Fx fx) {
+        settle(fx);
         List<String> commands = new ArrayList<String>();
         for (com.aresstack.askai.research.agent.ResearchActionTag tag : fx.session.availableActionTags()) {
             commands.add(tag.getCommand());
@@ -324,9 +344,177 @@ public class ProductiveBookJourneyTest {
                 snapshot.advanceCommandFor(ResearchStateIds.SCOPING));
     }
 
+    // ------------------------------------------------------------------ PR 06
+
+    private static List<String> journalCommands(Fx fx, String actor) throws Exception {
+        List<String> commands = new ArrayList<String>();
+        for (com.google.gson.JsonObject record : fx.resources.transitions().journalRecords()) {
+            if ("prepared".equals(record.get("kind").getAsString())) {
+                com.google.gson.JsonObject transition = record.getAsJsonObject("transition");
+                assertEquals(actor, transition.get("actor").getAsString());
+                commands.add(transition.get("command").getAsString());
+            }
+        }
+        return commands;
+    }
+
+    @Test
+    public void submitScopeJournalsBothTransitionsWithTheUserAsActor() throws Exception {
+        Fx fx = new Fx();
+        firstMessage(fx, "A book about plugin isolation in Java");
+        assertHandled(fx.session.executeCommand("submit-scope", ""));
+        assertEquals("research/running", phase(fx));
+        assertEquals(java.util.Arrays.asList("START", "SUBMIT_SCOPE", "START_RESEARCH"),
+                journalCommands(fx, "USER"));
+    }
+
+    @Test
+    public void botAndHostStateCommandsAreRefusedOnEverySurface() {
+        Fx fx = new Fx();
+        for (com.aresstack.askai.research.state.CommandSurface surface : new com.aresstack.askai.research
+                .state.CommandSurface[] {com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL,
+                com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR}) {
+            String chat = fx.session.executeBotCommand(surface, "", "hello");
+            assertTrue(chat, chat.startsWith("rejected") && chat.contains("Phase changes need the user"));
+            assertEquals("scoping/new", phase(fx));
+        }
+        firstMessage(fx, "A book");
+        assertHandled(fx.session.executeCommand("submit-scope", ""));
+        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        assertEquals("research/waiting_approval", phase(fx));
+        for (com.aresstack.askai.research.state.CommandSurface surface
+                : com.aresstack.askai.research.state.CommandSurface.values()) {
+            String bot = fx.session.executeCommandAs(com.aresstack.askai.research.state.CommandActor.BOT,
+                    surface, "approve", "");
+            assertTrue(surface + ": " + bot, bot.contains("Phase changes need the user"));
+            String host = fx.session.executeCommandAs(com.aresstack.askai.research.state.CommandActor.HOST,
+                    surface, "approve", "");
+            assertTrue(surface + ": " + host, host.startsWith("rejected")
+                    && host.contains("The host dispatches no state command"));
+        }
+        String connector = fx.session.executeBotCommand(
+                com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR, "approve", "");
+        assertTrue(connector, connector.contains("Phase changes need the user"));
+        assertEquals("research/waiting_approval", phase(fx));
+    }
+
+    @Test
+    public void twoApproveClicksOnTheSameRevisionApproveOnce() {
+        Fx fx = new Fx();
+        firstMessage(fx, "A book");
+        assertHandled(fx.session.executeCommand("submit-scope", ""));
+        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        long seen = fx.resources.currentState().getRevision();
+        assertHandled(fx.session.executeUserCommand("approve", "", seen));
+        String second = fx.session.executeUserCommand("approve", "", seen);
+        assertTrue(second, second.contains("The workflow changed. Check the current state and try again."));
+        assertEquals("outline/running", phase(fx));
+    }
+
+    @Test
+    public void requestChangesWithACommentIsJournalledAndPostedWithoutAModelTurn() throws Exception {
+        Fx fx = new Fx();
+        firstMessage(fx, "A book");
+        assertHandled(fx.session.executeCommand("submit-scope", ""));
+        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        assertHandled(fx.session.executeCommand("approve", ""));
+        assertHandled(fx.session.executeCommand("finish-outline", ""));
+        assertEquals("outline/waiting_approval", phase(fx));
+        int prompts = fx.backend.prompts.size();
+        assertHandled(fx.session.executeCommand("request-changes", "too long"));
+        assertEquals("outline/running", phase(fx));
+        assertEquals("no model turn", prompts, fx.backend.prompts.size());
+        assertTrue(fx.host.userMessages.toString(), fx.host.userMessages.contains("Changes requested: too long"));
+        boolean journalled = false;
+        for (com.google.gson.JsonObject record : fx.resources.transitions().journalRecords()) {
+            journalled |= "prepared".equals(record.get("kind").getAsString()) && "too long".equals(
+                    record.getAsJsonObject("transition").get("comment").getAsString());
+        }
+        assertTrue(journalled);
+    }
+
+    @Test
+    public void busyIsFalseWhenNothingRunsAndDividersSurviveARestart() {
+        java.io.File dir = newTempDir();
+        Fx fx = new Fx(dir);
+        firstMessage(fx, "A book");
+        assertHandled(fx.session.executeCommand("submit-scope", ""));
+        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        assertHandled(fx.session.executeCommand("approve", ""));
+        assertEquals("outline/running", phase(fx));
+        assertFalse("busy means an agent turn in flight", fx.session.getState().isBusy());
+        assertTrue(fx.host.infos.toString(), fx.host.infos.contains("Phase 2: Sources, started by you"));
+        assertTrue(fx.host.infos.toString(), fx.host.infos.contains("Phase 3: Outline, started by you"));
+        int dividers = fx.host.infos.size();
+        fx.session.close();
+        fx.resources.close();
+
+        Fx reopened = new Fx(dir);
+        assertEquals("outline/running", phase(reopened));
+        assertFalse("no divider is written twice", reopened.host.infos.contains("Phase 3: Outline, started by you"));
+        assertTrue(new java.io.File(new java.io.File(dir, "state"), "transitions.jsonl").isFile());
+        assertTrue(dividers >= 2);
+    }
+
+    @Test
+    public void reopenConceptDuringARunningTurnLeavesTheComposerIdleAndTheLateOutcomeReArmsNothing() {
+        Fx fx = new Fx();
+        firstMessage(fx, "A book");
+        assertHandled(fx.session.executeCommand("submit-scope", ""));
+        assertEquals("research/running", phase(fx));
+        fx.session.submitPrompt("search more");
+        assertEquals(com.aresstack.askai.plugin.api.agent.SubmissionAvailability.BUSY,
+                fx.session.getChatTarget().getAvailability());
+        assertHandled(fx.session.executeCommand("reopen-concept", ""));
+        assertEquals("scoping/running", phase(fx));
+        assertEquals(com.aresstack.askai.plugin.api.agent.SubmissionAvailability.AVAILABLE,
+                fx.session.getChatTarget().getAvailability());
+        startOutcome(fx, "TOOL_BUDGET_EXHAUSTED");
+        assertFalse("the late outcome re-arms no offer", tagCommands(fx).contains("run-plan"));
+        assertEquals(com.aresstack.askai.plugin.api.agent.SubmissionAvailability.AVAILABLE,
+                fx.session.getChatTarget().getAvailability());
+    }
+
+    @Test
+    public void aCorruptPhaseJournalIsKeptAndReportedAndTheSessionOpens() throws Exception {
+        java.io.File dir = newTempDir();
+        java.io.File journal = new java.io.File(dir, "phase-journal.json");
+        java.nio.file.Files.write(journal.toPath(), "{broken".getBytes("UTF-8"));
+        Fx fx = new Fx(dir);
+        assertFalse(journal.isFile());
+        boolean kept = false;
+        for (java.io.File file : dir.listFiles()) {
+            kept |= file.getName().startsWith("phase-journal.json.corrupt-");
+        }
+        assertTrue("moved aside, not deleted", kept);
+        assertTrue(fx.host.problems.toString(), fx.host.problems.toString().contains("phase journal"));
+        firstMessage(fx, "A book");
+        assertEquals("the session opens", "scoping/running", phase(fx));
+    }
+
+    @Test
+    public void aCorruptMementoBlocksTheSessionWithARepairHint() throws Exception {
+        java.io.File dir = newTempDir();
+        java.io.File state = new java.io.File(dir, "state");
+        state.mkdirs();
+        java.nio.file.Files.write(new java.io.File(state, "research-session.json").toPath(),
+                "garbage".getBytes("UTF-8"));
+        Fx fx = new Fx(dir);
+        assertTrue(fx.host.problems.toString(), fx.host.problems.toString().contains("Repair or restore"));
+        fx.session.submitPrompt("hello");
+        assertTrue("nothing started", fx.backend.prompts.isEmpty());
+        assertEquals("scoping/new", phase(fx));
+        assertEquals("garbage", new String(java.nio.file.Files.readAllBytes(
+                new java.io.File(state, "research-session.json").toPath()), "UTF-8"));
+    }
+
     // ------------------------------------------------------------------ minimal host
 
     private static final class PlainHost implements AgentHostContext {
+        final List<String> infos = java.util.Collections.synchronizedList(new ArrayList<String>());
+        final List<String> userMessages = java.util.Collections.synchronizedList(new ArrayList<String>());
+        final List<String> problems = java.util.Collections.synchronizedList(new ArrayList<String>());
+
         public UiExecutor getUiExecutor() {
             return new UiExecutor() {
                 public void execute(Runnable runnable) {
@@ -363,12 +551,19 @@ public class ProductiveBookJourneyTest {
         }
 
         public AgentConversationSink getConversationSink() {
-            // A silent sink: the journey asserts states and command results, not transcript lines.
+            // A recording sink: info lines (phase dividers), user notes and problems.
             return (AgentConversationSink) java.lang.reflect.Proxy.newProxyInstance(
                     AgentConversationSink.class.getClassLoader(),
                     new Class<?>[] {AgentConversationSink.class},
                     new java.lang.reflect.InvocationHandler() {
                         public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) {
+                            if ("appendInfoMessage".equals(method.getName())) {
+                                infos.add(String.valueOf(args[1]));
+                            } else if ("appendUserMessage".equals(method.getName())) {
+                                userMessages.add(String.valueOf(args[1]));
+                            } else if ("showProblem".equals(method.getName())) {
+                                problems.add(String.valueOf(args[1]));
+                            }
                             Class<?> type = method.getReturnType();
                             if (type == boolean.class) {
                                 return Boolean.FALSE;
@@ -385,12 +580,10 @@ public class ProductiveBookJourneyTest {
         }
     }
 
-    /** A file-backed project context in a fresh temp directory (the productive contract). */
-    private static com.aresstack.askai.research.store.ResearchProjectContext tempProjectContext() {
+    /** A fresh temp directory for a file-backed project context (the productive contract). */
+    private static java.io.File newTempDir() {
         try {
-            java.io.File dir = java.nio.file.Files.createTempDirectory("askai-research-test")
-                    .toFile();
-            return com.aresstack.askai.research.store.ResearchProjectContext.open("s1", dir);
+            return java.nio.file.Files.createTempDirectory("askai-research-test").toFile();
         } catch (java.io.IOException ex) {
             throw new IllegalStateException(ex);
         }

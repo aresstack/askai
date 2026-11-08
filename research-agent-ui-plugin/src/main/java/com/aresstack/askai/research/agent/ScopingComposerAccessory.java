@@ -55,7 +55,7 @@ final class ScopingComposerAccessory implements ComposerAccessory {
                     }
                     arguments = answer.toString().trim();
                 }
-                research.executeCommand(action.getCommand(), arguments);
+                research.executeUserCommand(action.getCommand(), arguments, action.getRevision());
             }
         });
         this.refresh = new Runnable() {

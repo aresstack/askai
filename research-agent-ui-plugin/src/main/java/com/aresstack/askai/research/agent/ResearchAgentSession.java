@@ -76,6 +76,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private volatile com.aresstack.askai.research.mcp.ResearchBotSessionRegistration botRegistration;
     /** The structured command/state/history gateway onto THIS session (productive only), or null. */
     private com.aresstack.askai.research.mcp.ResearchBotSessionGateway botGateway;
+    /** The ChatGPT connector's own gateway (PR 06): same port, surface CHATGPT_CONNECTOR. */
+    private com.aresstack.askai.research.mcp.ResearchBotSessionGateway connectorGateway;
     /** Productive mode only: the session's OWN generation-scoped resources (state authority + processes). */
     private final com.aresstack.askai.research.host.ProductiveResearchSessionResources productiveResources;
 
@@ -148,55 +150,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     });
                 }
             });
-            // ONE gateway object serves both faces: the session's own bot-control endpoint (through the
-            // resources) and the app-wide public connector (through the session directory, see activate()).
-            this.botGateway = new com.aresstack.askai.research.mcp.ResearchBotSessionGateway() {
-                        public String execute(String command, String arguments) {
-                            return executeBotCommand(command, arguments);
-                        }
-
-                        public String describeState() {
-                            return describeSessionState();
-                        }
-
-                        public String describeHistory(boolean raw) {
-                            return describeChatHistory(raw);
-                        }
-
-                        @Override
-                        public String describeTechnicalLog(int tailLines) {
-                            return ResearchAgentSession.this.describeTechnicalLog(tailLines);
-                        }
-
-                        @Override
-                        public String describeConceptSnapshot() {
-                            com.aresstack.askai.research.concept.ConceptBranchService service =
-                                    conceptBranchService();
-                            if (service == null) {
-                                return null;
-                            }
-                            com.aresstack.askai.research.concept.ConceptBranchService
-                                    .DocumentSnapshot snapshot = service.snapshot();
-                            return "revision=" + snapshot.getWorkingRevision() + "\n"
-                                    + snapshot.getDocumentJson();
-                        }
-
-                        @Override
-                        public String describeScopeSnapshot() {
-                            com.aresstack.askai.research.scope.ResearchScopeCoordinator
-                                    coordinator = scopeCoordinator();
-                            if (coordinator == null || !coordinator.isUsable()) {
-                                return null;
-                            }
-                            com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft =
-                                    coordinator.current();
-                            // The SAME fence rendering the model sees — a driver and the agent
-                            // must never argue over two different projections of one scope.
-                            return "revision=" + draft.getRevision() + "\n"
-                                    + com.aresstack.askai.research.domain.scope
-                                            .ResearchScopeFenceView.render(draft);
-                        }
-                    };
+            // PR 06 (D2): each external surface gets its OWN gateway, which passes BOT and its surface —
+            // the session's bot-control endpoint (through the resources) and the app-wide ChatGPT
+            // connector (through the session directory, see activate()).
+            this.botGateway = newBotGateway(com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL);
+            this.connectorGateway =
+                    newBotGateway(com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR);
+            wireTransitionEngine(resources);
             resources.setSessionGateway(botGateway);
             // The one-command exclusion facade: exclude_topic/resolve_concept_conflict reach the
             // session (which owns coordinator, concept service and conflict registry) via this
@@ -385,12 +345,29 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         // BEFORE any turn: the runtime must know the session language, otherwise its English default
         // decides the greeting and the suggestion labels of a German session.
         publishSessionLanguage();
+        // PR 06 (D3): the recovery pass runs BEFORE any job or command — it commits a transition the
+        // memento names, re-runs open effects and dispatches a chained START_* a crash interrupted.
+        // An unreadable memento or transition journal blocks the session with a repair hint.
+        if (productiveResources != null) {
+            String blocked = productiveResources.transitions().blockedReason();
+            if (blocked != null) {
+                problemMessage = blocked;
+                if (sink != null) {
+                    sink.showProblem("research-project-blocked", blocked);
+                }
+                return; // starts nothing: no registration, no restore, no turn
+            }
+            technicalLog("[transition] " + productiveResources.transitions().recover());
+            if (phaseJournalProblem != null && sink != null) {
+                sink.showProblem("research-phase-journal-corrupt", phaseJournalProblem);
+            }
+        }
         // The session is now driveable: publish it under its CHAT id so external clients (the public
         // ChatGPT connector) can address exactly this session. Registration is independent of whether the
         // connector listener is running — switching it on later still finds everything that is live.
         if (botGateway != null && !chatSessionId.isEmpty()) {
             botRegistration = com.aresstack.askai.research.mcp.ResearchBotSessionDirectory.get()
-                    .register(chatSessionId, sessionId, botGateway);
+                    .register(chatSessionId, sessionId, connectorGateway);
         }
         // Wire the user web search onto the productive backend transport (a #RSC1# service command through the backend transport).
         // Transport-agnostic: a fake/clickdummy backend's submitServiceCommand is a no-op. Tests may override
@@ -600,7 +577,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     + "suggestions — you decide what enters the concept",
                     true));
         }
-        return tags;
+        if (productiveResources == null) {
+            return tags;
+        }
+        // PR 06 (D3): a tag carries the revision it was derived for; clicking a stale one is refused
+        long seen = productiveResources.currentState().getRevision();
+        java.util.List<ResearchActionTag> stamped = new java.util.ArrayList<ResearchActionTag>(tags.size());
+        for (ResearchActionTag tag : tags) {
+            stamped.add(tag.withRevision(seen));
+        }
+        return stamped;
     }
 
     /** #42: enabled setting + an existing prepared snapshot with topics — never a computation. */
@@ -764,7 +750,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         ResearchPhase phase = com.aresstack.askai.research.state.oo.ResearchStateIds.phase(state.getPhaseId());
         ResearchRunState run =
                 com.aresstack.askai.research.state.oo.ResearchStateIds.runState(state.getStateId());
-        boolean busy = com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(state.getStateId())
+        // PR 06: in productive mode busy means "agent turn in flight", not "state is running".
+        boolean busy = (productiveResources != null ? agentTurnInFlight
+                : com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(state.getStateId()))
                 || postSearchSummaryInFlight; // the post-search summary keeps the bot "am Zug" (red send)
         return AgentStateSnapshot.builder()
                 .phaseLabel(phase.name())
@@ -854,6 +842,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * touched when it already exists — we never create one here just to preempt it.
      */
     private void beginAgentTurn() {
+        dropLateOutcome = false; // a new turn's outcome counts again
         setAgentTurnInFlight(true);
         com.aresstack.askai.research.visualize.LazyArtifactVisualizer visualizer = artifactVisualizer;
         if (visualizer != null) {
@@ -944,6 +933,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             echoUserMessage(text);
             reportSubmitProblem("The research agent is not running for this chat. "
                     + "Switch the mode again or open a new chat to restart it.");
+            return;
+        }
+        if (productiveResources != null && productiveResources.transitions().blockedReason() != null) {
+            // PR 06: an unreadable memento or transition journal starts nothing, not even a turn
+            reportSubmitProblem(productiveResources.transitions().blockedReason());
             return;
         }
         if (productiveResources != null && !productiveResources.isClosed()) {
@@ -1071,8 +1065,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         // C5: no outline approval gate anymore — a committed scope auto-advances STRAIGHT into
         // RESEARCH/running, so the stored question must start the research turn HERE (previously the
         // outline-gate approval triggered it).
-        autoAdvanceTowardsResearch();
-        maybeStartResearchTurn();
+        autoAdvanceTowardsResearch(); // START_RESEARCH's transition listener starts the research turn
     }
 
     /**
@@ -1240,7 +1233,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             .Status.SESSION_NOT_ACTIVE, "The research session is not active yet.");
         }
         if (productiveResources != null) {
-            return dispatchProductive(command);
+            return dispatchProductive(command, argument);
         }
         // FAKE mode: the deterministic backend owns its state machine; availability from the live memento.
         if (!canDispatch(command)) {
@@ -1254,47 +1247,35 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     private com.aresstack.askai.research.backend.ResearchCommandDispatchResult dispatchProductive(
-            ResearchCommandType command) {
-        boolean allowed = stateFactory
-                .restore(productiveResources.currentState())
-                .getCurrentState().getAllowedCommands().contains(command);
+            ResearchCommandType command, String argument) {
+        CommandOrigin origin = activeOrigin;
         try {
-            com.aresstack.askai.research.state.oo.ResearchStateTransitionResult result =
-                    productiveResources.dispatch(command);
-            if (!result.isAccepted()) {
-                return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.of(
-                        allowed ? com.aresstack.askai.research.backend.ResearchCommandDispatchResult
-                                        .Status.DISPATCH_FAILED
-                                : com.aresstack.askai.research.backend.ResearchCommandDispatchResult
-                                        .Status.INVALID_PHASE,
-                        result.getRejectionReason());
-            }
-            // PAUSE/CANCEL additionally stop the agent's running turn (transport concern, not state
-            // logic) — off the EDT: writing to a busy agent's transport must never freeze the UI.
-            if (command == ResearchCommandType.PAUSE || command == ResearchCommandType.CANCEL) {
-                final ResearchSessionHandle cancelHandle = handle;
-                Thread canceller = new Thread(new Runnable() {
-                    public void run() {
-                        try {
-                            backend.cancel(cancelHandle);
-                        } catch (RuntimeException ignored) {
-                        }
-                    }
-                }, "research-turn-cancel");
-                canceller.setDaemon(true);
-                canceller.start();
-            }
-            final com.aresstack.askai.research.state.oo.ResearchStateMemento next =
-                    productiveResources.currentState();
-            uiExecutor.execute(new Runnable() {
-                public void run() {
-                    state = next; // mirror the single truth into the view model, then notify observers
-                    revision = next.getRevision();
-                    invalidateNarration(); // in-flight warm texts belong to the previous situation
-                    fireStateChanged();
+            com.aresstack.askai.research.transition.TransitionOutcome outcome = productiveResources.dispatch(
+                    new com.aresstack.askai.research.state.ResearchCommand(command,
+                            "cmd-" + System.nanoTime(), origin.actor, origin.surface, origin.correlationId,
+                            origin.seenRevision, argument == null ? "" : argument));
+            if (outcome.isCommitted()) {
+                if (command == ResearchCommandType.PAUSE || command == ResearchCommandType.CANCEL) {
+                    stopAgentTurn(); // the graph keeps both edges; they also stop the running turn
                 }
-            });
-            return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.accepted();
+                return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.accepted();
+            }
+            com.aresstack.askai.research.backend.ResearchCommandDispatchResult.Status status;
+            switch (outcome.getKind()) {
+                case INVALID_STATE:
+                    status = com.aresstack.askai.research.backend.ResearchCommandDispatchResult
+                            .Status.INVALID_PHASE;
+                    break;
+                case NOT_PERSISTED:
+                    status = com.aresstack.askai.research.backend.ResearchCommandDispatchResult
+                            .Status.DISPATCH_FAILED;
+                    break;
+                default:
+                    status = com.aresstack.askai.research.backend.ResearchCommandDispatchResult
+                            .Status.REFUSED;
+            }
+            return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.of(status,
+                    outcome.getReason());
         } catch (RuntimeException ex) {
             return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.of(
                     com.aresstack.askai.research.backend.ResearchCommandDispatchResult
@@ -1303,26 +1284,329 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
     }
 
+    // ------------------------------------------------------------------ PR 06: transitions (D2, D3)
+
+    /** Who sends the command being executed right now (D2); set around a bot or user command on the EDT. */
+    private static final class CommandOrigin {
+        final com.aresstack.askai.research.state.CommandActor actor;
+        final com.aresstack.askai.research.state.CommandSurface surface;
+        final String correlationId;
+        final long seenRevision;
+
+        CommandOrigin(com.aresstack.askai.research.state.CommandActor actor,
+                      com.aresstack.askai.research.state.CommandSurface surface, long seenRevision) {
+            this.actor = actor;
+            this.surface = surface;
+            this.correlationId = "c-" + java.util.UUID.randomUUID();
+            this.seenRevision = seenRevision;
+        }
+    }
+
+    private static final CommandOrigin USER_ORIGIN = new CommandOrigin(
+            com.aresstack.askai.research.state.CommandActor.USER,
+            com.aresstack.askai.research.state.CommandSurface.USER_INTERFACE,
+            com.aresstack.askai.research.state.ResearchCommand.NO_REVISION);
+
+    /** The origin of the command in progress; the user's app surfaces unless a bot command set it. */
+    private volatile CommandOrigin activeOrigin = USER_ORIGIN;
+    /** Set when a phase change cancelled a turn in flight: its late outcome is dropped (D3). */
+    private volatile boolean dropLateOutcome;
+    /** Set when the phase journal was unreadable on open; reported once the session activates. */
+    private String phaseJournalProblem;
+
+    static final String EFFECT_HYGIENE = "phase-hygiene";
+    static final String EFFECT_DIVIDER = "phase-divider";
+    static final String EFFECT_CHANGE_NOTE = "change-note";
+
+    private com.aresstack.askai.research.mcp.ResearchBotSessionGateway newBotGateway(
+            final com.aresstack.askai.research.state.CommandSurface surface) {
+        return new com.aresstack.askai.research.mcp.ResearchBotSessionGateway() {
+            public String execute(String command, String arguments) {
+                return executeBotCommand(surface, command, arguments);
+            }
+
+            public String describeState() {
+                return describeSessionState();
+            }
+
+            public String describeHistory(boolean raw) {
+                return describeChatHistory(raw);
+            }
+
+            @Override
+            public String describeTechnicalLog(int tailLines) {
+                return ResearchAgentSession.this.describeTechnicalLog(tailLines);
+            }
+
+            @Override
+            public String describeConceptSnapshot() {
+                com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+                if (service == null) {
+                    return null;
+                }
+                com.aresstack.askai.research.concept.ConceptBranchService.DocumentSnapshot snapshot =
+                        service.snapshot();
+                return "revision=" + snapshot.getWorkingRevision() + "\n" + snapshot.getDocumentJson();
+            }
+
+            @Override
+            public String describeScopeSnapshot() {
+                com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();
+                if (coordinator == null || !coordinator.isUsable()) {
+                    return null;
+                }
+                com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = coordinator.current();
+                // The SAME fence rendering the model sees — a driver and the agent must never argue
+                // over two different projections of one scope.
+                return "revision=" + draft.getRevision() + "\n"
+                        + com.aresstack.askai.research.domain.scope.ResearchScopeFenceView.render(draft);
+            }
+        };
+    }
+
+    /**
+     * Wire the first hooks of D3 into the session's transition engine. Each effect is idempotent per
+     * transition id, because the recovery pass re-runs an effect whose {@code done} record is missing.
+     */
+    private void wireTransitionEngine(
+            final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources) {
+        com.aresstack.askai.research.transition.TransitionEngine engine = resources.transitions();
+        engine.addHook(new com.aresstack.askai.research.transition.PhaseTransitionHook() {
+            public java.util.List<String> effects(
+                    com.aresstack.askai.research.transition.PhaseTransition transition) {
+                java.util.List<String> names = new java.util.ArrayList<String>();
+                if (transition.changesPhase()) {
+                    names.add(EFFECT_HYGIENE);
+                    names.add(EFFECT_DIVIDER);
+                }
+                if (!transition.getComment().isEmpty()
+                        && transition.getCommand().name().startsWith("REQUEST_")) {
+                    names.add(EFFECT_CHANGE_NOTE);
+                }
+                return names;
+            }
+        });
+        engine.registerEffect(EFFECT_HYGIENE, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(final com.aresstack.askai.research.transition.PhaseTransition transition) {
+                // the jobs first (off the EDT), then the session's own turn, search, offers and flag
+                resources.phaseJobs().leavePhase(transition.getFrom().getPhaseId());
+                onUiAndWait(new Runnable() {
+                    public void run() {
+                        if (agentTurnInFlight || postSearchSummaryInFlight) {
+                            dropLateOutcome = true;
+                            stopAgentTurn();
+                        }
+                        if (activeManualSearchRequestId != null) {
+                            cancelManualWebSearch();
+                        }
+                        outcomeOffers = java.util.Collections.emptyList();
+                        setAgentTurnInFlight(false);
+                        fireStateChanged();
+                    }
+                });
+            }
+        });
+        engine.registerEffect(EFFECT_DIVIDER, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(final com.aresstack.askai.research.transition.PhaseTransition transition) {
+                onUiAndWait(new Runnable() {
+                    public void run() {
+                        String key = EFFECT_DIVIDER + ":" + transition.getId();
+                        if (sink == null || journal.hasShown(key)) {
+                            return; // written once per transition id, also across a recovery re-run
+                        }
+                        String id = "phase-divider-" + transition.getId();
+                        sink.appendInfoMessage(id, phaseDividerText(transition));
+                        journal.attribute(id, transition.getTo().getPhaseId());
+                        journal.markShown(key);
+                        persistJournalNow();
+                    }
+                });
+            }
+        });
+        engine.registerEffect(EFFECT_CHANGE_NOTE, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(final com.aresstack.askai.research.transition.PhaseTransition transition) {
+                onUiAndWait(new Runnable() {
+                    public void run() {
+                        String key = EFFECT_CHANGE_NOTE + ":" + transition.getId();
+                        if (sink == null || journal.hasShown(key)) {
+                            return;
+                        }
+                        // the user's note, posted as the user's message — it starts NO model turn
+                        String id = "change-note-" + transition.getId();
+                        sink.appendUserMessage(id, "Changes requested: " + transition.getComment());
+                        journal.attribute(id, transition.getTo().getPhaseId());
+                        journal.markShown(key);
+                        persistJournalNow();
+                    }
+                });
+            }
+        });
+        engine.addListener(new com.aresstack.askai.research.transition.TransitionListener() {
+            public void committed(final com.aresstack.askai.research.transition.PhaseTransition transition) {
+                // mirror the single truth into the view model for EVERY committed transition — also a
+                // chained start on the effect worker and one the recovery pass dispatched
+                uiExecutor.execute(new Runnable() {
+                    public void run() {
+                        com.aresstack.askai.research.state.oo.ResearchStateMemento next =
+                                resources.currentState();
+                        state = next;
+                        revision = next.getRevision();
+                        invalidateNarration(); // in-flight warm texts belong to the previous situation
+                        if (transition.getCommand() == ResearchCommandType.START_RESEARCH) {
+                            maybeStartResearchTurn(); // the chained start releases the research turn
+                        }
+                        showRestoredActionsIfAny();
+                        fireStateChanged();
+                    }
+                });
+            }
+        });
+    }
+
+    /** The persisted phase divider, e.g. "Phase 3: Outline, started by you". */
+    static String phaseDividerText(com.aresstack.askai.research.transition.PhaseTransition transition) {
+        String phase = transition.getTo().getPhaseId();
+        String name;
+        int number;
+        if (com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(phase)) {
+            number = 1;
+            name = "Concept";
+        } else if (com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH.equals(phase)) {
+            number = 2;
+            name = "Sources";
+        } else if (com.aresstack.askai.research.state.oo.ResearchStateIds.OUTLINE.equals(phase)) {
+            number = 3;
+            name = "Outline";
+        } else {
+            number = 4;
+            name = "Document";
+        }
+        String by;
+        switch (transition.getActor()) {
+            case USER:
+                by = "you";
+                break;
+            case BOT:
+                by = "a bot";
+                break;
+            default:
+                by = "the host";
+        }
+        String verb = transition.getCommand().name().startsWith("REOPEN_") ? "reopened" : "started";
+        return "Phase " + number + ": " + name + ", " + verb + " by " + by;
+    }
+
+    /** Run on the EDT and wait (an effect's done record must follow its result); direct when already there. */
+    private void onUiAndWait(final Runnable runnable) {
+        if (uiExecutor == null || uiExecutor.isUiThread()) {
+            runnable.run();
+            return;
+        }
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        final RuntimeException[] failure = {null};
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                try {
+                    runnable.run();
+                } catch (RuntimeException failed) {
+                    failure[0] = failed;
+                } finally {
+                    done.countDown();
+                }
+            }
+        });
+        try {
+            if (!done.await(15, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new IllegalStateException("timed out waiting for the UI thread");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted");
+        }
+        if (failure[0] != null) {
+            throw failure[0];
+        }
+    }
+
+    /**
+     * Off the Swing EDT (bots, the ChatGPT connector, tests) a command returns once its transition effects,
+     * including a chained start, ran, so the next command sees the settled state. Never blocks the EDT.
+     */
+    private void settleTransitionEffects() {
+        if (productiveResources == null || javax.swing.SwingUtilities.isEventDispatchThread()) {
+            return;
+        }
+        try {
+            productiveResources.transitions().awaitEffects(10000L);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Test seam: wait until the transition effects queued so far ran. */
+    public boolean awaitTransitionEffects(long timeoutMillis) throws InterruptedException {
+        return productiveResources == null
+                || productiveResources.transitions().awaitEffects(timeoutMillis);
+    }
+
+    /** Execute a block with the given origin (on the EDT); always restores the user's origin. */
+    private String withOrigin(CommandOrigin origin, java.util.concurrent.Callable<String> block) {
+        CommandOrigin previous = activeOrigin;
+        activeOrigin = origin;
+        try {
+            return block.call();
+        } catch (RuntimeException failed) {
+            throw failed;
+        } catch (Exception failed) {
+            throw new IllegalStateException(failed);
+        } finally {
+            activeOrigin = previous;
+        }
+    }
+
     public void approveCurrent() {
+        approveCurrentResult();
+    }
+
+    /** Approve with the revision the user saw (tags, plates): a second click on an old revision is refused. */
+    public com.aresstack.askai.research.backend.ResearchCommandDispatchResult approveCurrent(
+            final long seenRevision) {
+        CommandOrigin previous = activeOrigin;
+        activeOrigin = new CommandOrigin(previous.actor, previous.surface, seenRevision);
+        try {
+            return approveCurrentResult();
+        } finally {
+            activeOrigin = previous;
+        }
+    }
+
+    private com.aresstack.askai.research.backend.ResearchCommandDispatchResult approveCurrentResult() {
         if (productiveResources != null) {
+            long seen = activeOrigin.seenRevision;
+            if (seen != com.aresstack.askai.research.state.ResearchCommand.NO_REVISION
+                    && seen != productiveResources.currentState().getRevision()) {
+                return refuseOutdated();
+            }
             // The machine knows WHICH approval fits the phase; the UI never re-encodes phase rules.
             ResearchCommandType approve = firstAllowedWithPrefix("APPROVE_");
-            if (approve != null && dispatch(approve, null).isAccepted()) {
-                if (approve == ResearchCommandType.APPROVE_OUTLINE) {
-                    // D1/Q4: approving the outline also starts the writing, after the approval's
-                    // own dispatch returned; a refused start leaves draft/waiting with "Start writing".
-                    chainStart(ResearchCommandType.START_DRAFTING);
-                }
-                // Continue AUTOMATICALLY with the stored research question — the user never has to
-                // type it a second time. Auto-advance reaches RESEARCH/running, then the question
-                // goes to the agent, which starts the autonomous web research.
-                autoAdvanceTowardsResearch();
-                maybeStartResearchTurn();
+            if (approve == null) {
+                return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.of(
+                        com.aresstack.askai.research.backend.ResearchCommandDispatchResult.Status.INVALID_PHASE,
+                        "Nothing to approve in " + productiveResources.currentState().getPhaseId() + "/"
+                                + productiveResources.currentState().getStateId() + ".");
+            }
+            com.aresstack.askai.research.backend.ResearchCommandDispatchResult result = dispatch(approve, null);
+            if (result.isAccepted()) {
+                // D1/Q4: approving the outline also starts the writing — the transition engine dispatches
+                // START_DRAFTING as the approval's last effect, after this dispatch returned.
                 // Present the NEXT decision gate's buttons (e.g. evidence -> draft): a gate reached by an
                 // approval must never be a dead end. Working/terminal states show nothing.
                 showRestoredActionsIfAny();
+            } else if (result.getStatus()
+                    == com.aresstack.askai.research.backend.ResearchCommandDispatchResult.Status.REFUSED) {
+                reportRefusal(result.getDetail());
             }
-            return;
+            return result;
         }
         String pendingApprovalId = state.getPendingApprovalId();
         if (handle != null && pendingApprovalId != null) {
@@ -1331,6 +1615,24 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             if (outlineGate) {
                 chainStart(ResearchCommandType.START_DRAFTING);
             }
+            return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.accepted();
+        }
+        return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.of(
+                com.aresstack.askai.research.backend.ResearchCommandDispatchResult.Status.INVALID_PHASE,
+                "Nothing to approve.");
+    }
+
+    private com.aresstack.askai.research.backend.ResearchCommandDispatchResult refuseOutdated() {
+        reportRefusal(com.aresstack.askai.research.transition.TransitionEngine.OUTDATED_REVISION);
+        return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.of(
+                com.aresstack.askai.research.backend.ResearchCommandDispatchResult.Status.REFUSED,
+                com.aresstack.askai.research.transition.TransitionEngine.OUTDATED_REVISION);
+    }
+
+    /** Show a refusal of the transition engine (a hook's reason, an outdated revision) to the user. */
+    private void reportRefusal(String reason) {
+        if (sink != null && reason != null && !reason.isEmpty()) {
+            sink.showProblem("research-transition-refused-" + System.nanoTime(), reason);
         }
     }
 
@@ -1343,10 +1645,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return;
         }
         if (productiveResources != null) {
-            if (currentAllowedCommands().contains(start)) {
-                dispatch(start, null);
-            }
-        } else if (backend.canExecute(handle, start)) {
+            return; // PR 06: the transition engine dispatches the chained start as the approval's effect
+        }
+        if (backend.canExecute(handle, start)) {
             backend.executeCommand(handle, start);
         }
     }
@@ -1356,7 +1657,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (productiveResources == null) {
             return;
         }
+        // PR 06: only in research/running (until PR 15 deletes this method)
         if (!researchQuestion.isEmpty() && handle != null
+                && com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH
+                        .equals(productiveResources.currentState().getPhaseId())
                 && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING
                         .equals(productiveResources.currentState().getStateId())) {
             beginAgentTurn(); // busy + preempt visualizer; cleared by the turn's terminal event
@@ -1365,18 +1669,30 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     public void requestChanges(String reason) {
+        requestChangesResult(reason);
+    }
+
+    /** {@code request-changes}: the comment travels in the command (D2) and lands in journal and chat. */
+    private com.aresstack.askai.research.backend.ResearchCommandDispatchResult requestChangesResult(String reason) {
         if (productiveResources != null) {
             ResearchCommandType request = firstAllowedWithPrefix("REQUEST_");
-            if (request != null && dispatch(request, reason).isAccepted()) {
+            if (request == null) {
+                return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.of(
+                        com.aresstack.askai.research.backend.ResearchCommandDispatchResult.Status.INVALID_PHASE,
+                        "No changes can be requested now.");
+            }
+            com.aresstack.askai.research.backend.ResearchCommandDispatchResult result = dispatch(request, reason);
+            if (result.isAccepted()) {
                 // The resulting state may itself be a decision gate — present its buttons.
                 showRestoredActionsIfAny();
             }
-            return;
+            return result;
         }
         String pendingApprovalId = state.getPendingApprovalId();
         if (handle != null && pendingApprovalId != null) {
             backend.reject(handle, pendingApprovalId, reason);
         }
+        return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.accepted();
     }
 
     /**
@@ -1435,11 +1751,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         // C5: SUBMIT_SCOPE now lands directly in RESEARCH (no outline gate). The user's ONE decision here IS
         // "finish scoping → research begins"; the technical WAITING→RUNNING step belongs to that same
         // decision, so the click also releases the research turn (with the stored question, when present).
-        if (com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH.equals(after.getPhaseId())
-                && com.aresstack.askai.research.state.oo.ResearchStateIds.WAITING.equals(after.getStateId())
-                && dispatch(ResearchCommandType.START_RESEARCH, null).isAccepted()) {
-            maybeStartResearchTurn();
-        }
+        // PR 06: the transition engine dispatches START_RESEARCH as SUBMIT_SCOPE's last effect, with the
+        // same actor and correlation id; the listener then releases the research turn.
+        settleTransitionEffects();
         return ScopingApprovalOutcome.SUCCESS;
     }
 
@@ -4218,17 +4532,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         try {
             journalWriteExecutor.execute(new Runnable() {
                 public void run() {
-                    try {
-                        java.io.OutputStream out = new java.io.FileOutputStream(target);
-                        try {
-                            out.write(json.getBytes("UTF-8"));
-                        } finally {
-                            out.close();
-                        }
-                    } catch (java.io.IOException writeFailed) {
-                        System.err.println("[research-journal] could not persist the phase attribution ("
-                                + target + "): " + writeFailed.getMessage());
-                    }
+                    writeJournal(target, json);
                 }
             });
         } catch (java.util.concurrent.RejectedExecutionException closing) {
@@ -4236,18 +4540,43 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
     }
 
-    /** Load the persisted phase attribution of this project (absent/corrupt → start empty). */
+    /** Write the journal now, on the caller's thread (a transition effect's result precedes its done record). */
+    private void persistJournalNow() {
+        java.io.File target = journalFile();
+        if (target != null) {
+            writeJournal(target, journal.toJson());
+        }
+    }
+
+    /** PR 06: written atomically and flushed before the rename. */
+    private static synchronized void writeJournal(java.io.File target, String json) {
+        try {
+            com.aresstack.askai.research.transition.AtomicFiles.write(target, json);
+        } catch (java.io.IOException writeFailed) {
+            System.err.println("[research-journal] could not persist the phase attribution ("
+                    + target + "): " + writeFailed.getMessage());
+        }
+    }
+
+    /**
+     * Load the persisted phase attribution of this project. An unreadable file is moved aside and reported
+     * (PR 06); the session opens without the phase marks of older messages.
+     */
     private void restorePhaseJournal() {
         java.io.File source = journalFile();
         if (source == null || !source.isFile()) {
             return;
         }
         try {
-            journal = ResearchPhaseJournal.fromJson(
+            journal = ResearchPhaseJournal.parse(
                     new String(java.nio.file.Files.readAllBytes(source.toPath()), "UTF-8"));
-        } catch (java.io.IOException unreadable) {
-            System.err.println("[research-journal] could not read " + source + ": "
-                    + unreadable.getMessage() + " — phases of older messages stay unknown");
+        } catch (java.io.IOException | IllegalArgumentException unreadable) {
+            java.io.File moved = com.aresstack.askai.research.transition.AtomicFiles.moveAside(source);
+            phaseJournalProblem = "The phase journal (" + source.getName() + ") was unreadable"
+                    + (moved == null ? "" : " and was moved aside to " + moved.getName())
+                    + ". The chat opens without the phase marks of older messages.";
+            System.err.println("[research-journal] " + phaseJournalProblem);
+            journal = new ResearchPhaseJournal();
         }
     }
 
@@ -4311,6 +4640,28 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * valid command list. Executed on the EDT like real user input.
      */
     public String executeCommand(final String command, final String arguments) {
+        return executeCommand(USER_ORIGIN, command, arguments);
+    }
+
+    /**
+     * A USER command from an app surface that shows a revision (tags, plates): with the revision the user saw,
+     * so a double click or two surfaces never approve twice (D3).
+     */
+    public String executeUserCommand(String command, String arguments, long seenRevision) {
+        return executeCommand(new CommandOrigin(com.aresstack.askai.research.state.CommandActor.USER,
+                com.aresstack.askai.research.state.CommandSurface.USER_INTERFACE, seenRevision),
+                command, arguments);
+    }
+
+    /** Test/host seam: a command from any actor and surface; the actor policy decides (D2). */
+    public String executeCommandAs(com.aresstack.askai.research.state.CommandActor actor,
+                                   com.aresstack.askai.research.state.CommandSurface surface,
+                                   String command, String arguments) {
+        return executeCommand(new CommandOrigin(actor, surface,
+                com.aresstack.askai.research.state.ResearchCommand.NO_REVISION), command, arguments);
+    }
+
+    private String executeCommand(final CommandOrigin origin, final String command, final String arguments) {
         final String cmd = command == null ? "" : command.trim().toLowerCase(java.util.Locale.ROOT);
         final String args = arguments == null ? "" : arguments.trim();
         if (cmd.isEmpty() && args.isEmpty()) {
@@ -4325,7 +4676,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         uiExecutor.execute(new Runnable() {
             public void run() {
                 try {
-                    result[0] = executeCommandOnUiThread(cmd, args);
+                    result[0] = withOrigin(origin, new java.util.concurrent.Callable<String>() {
+                        public String call() {
+                            return executeCommandOnUiThread(cmd, args);
+                        }
+                    });
                 } catch (RuntimeException failed) {
                     result[0] = "rejected: " + failed.getMessage();
                 } finally {
@@ -4341,6 +4696,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             Thread.currentThread().interrupt();
             return "rejected: interrupted";
         }
+        settleTransitionEffects();
         return result[0] == null ? "rejected: no result" : result[0];
     }
 
@@ -4386,6 +4742,18 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
             return "rejected: unknown command '" + cmd + "'. Valid now: " + validCommandNames();
         }
+        if (activeOrigin.actor != com.aresstack.askai.research.state.CommandActor.USER) {
+            // D2: every semantic command dispatches a state command — the actor policy decides
+            ResearchCommandType any = ResearchSemanticCommands.candidates(cmd).isEmpty() ? null
+                    : ResearchSemanticCommands.candidates(cmd).get(0);
+            return "rejected: " + com.aresstack.askai.research.transition.ActorPolicy.refusal(any,
+                    activeOrigin.actor) + " ('" + cmd + "'). Valid now: " + validBotCommandNames();
+        }
+        if (productiveResources != null
+                && activeOrigin.seenRevision != com.aresstack.askai.research.state.ResearchCommand.NO_REVISION
+                && activeOrigin.seenRevision != productiveResources.currentState().getRevision()) {
+            return "rejected: " + refuseOutdated().getDetail(); // D3: a stale tag or a second click
+        }
         ResearchCommandType type = resolveSemanticCommand(cmd);
         if (type == null) {
             com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
@@ -4402,16 +4770,22 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     : "rejected: " + scopingApprovalUnavailableReasonFor(outcome);
         }
         if ("approve".equals(cmd) && hasPendingApprovalNow()) {
-            approveCurrent();
-            return "handled: approved (" + type.name().toLowerCase(java.util.Locale.ROOT) + " gate)";
+            com.aresstack.askai.research.backend.ResearchCommandDispatchResult approved = approveCurrentResult();
+            return approved.isAccepted()
+                    ? "handled: approved (" + type.name().toLowerCase(java.util.Locale.ROOT) + " gate)"
+                    : "rejected: " + approved.getDetail();
         }
         if ("request-changes".equals(cmd)) {
-            requestChanges(args);
+            com.aresstack.askai.research.backend.ResearchCommandDispatchResult requested =
+                    requestChangesResult(args);
+            if (!requested.isAccepted()) {
+                return "rejected: " + requested.getDetail();
+            }
             if (args.isEmpty()) {
                 narrateAsAgent("refine", narrator.refinePrompt());
-            } else {
+            } else if (productiveResources == null) {
                 sayAsAgent("Changes requested: " + args);
-            }
+            } // productive: the transition's change-note effect posts the comment as the user's note
             return "handled: changes requested";
         }
         com.aresstack.askai.research.backend.ResearchCommandDispatchResult dispatched =
@@ -4448,6 +4822,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * and {@code retry-query} run as for the user. PR 06 moves this rule into the actor policy.
      */
     public String executeBotCommand(String command, String arguments) {
+        return executeBotCommand(com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL, command,
+                arguments);
+    }
+
+    /** The BOT entry of one external surface (PR 06: each surface has its own gateway). */
+    public String executeBotCommand(com.aresstack.askai.research.state.CommandSurface surface, String command,
+                                    String arguments) {
         String cmd = command == null ? "" : command.trim().toLowerCase(java.util.Locale.ROOT);
         String args = arguments == null ? "" : arguments.trim();
         if ("pause".equals(cmd) || "cancel".equals(cmd)) {
@@ -4455,8 +4836,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         if (ResearchSemanticCommands.isSemantic(cmd)
                 || ("accept-limitation".equals(cmd) || "limit".equals(cmd) || "review".equals(cmd))) {
-            return "rejected: Phase changes need the user ('" + cmd + "'). Valid now: "
-                    + validBotCommandNames();
+            return "rejected: " + com.aresstack.askai.research.transition.ActorPolicy.BOT_REFUSAL + " ('" + cmd
+                    + "'). Valid now: " + validBotCommandNames();
         }
         if (!cmd.isEmpty() && outcomeOffers.contains(cmd) && !BOT_RUNNABLE_OFFERS.contains(cmd)) {
             return "rejected: Phase changes need the user ('" + cmd + "'). Valid now: "
@@ -4470,11 +4851,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             .equals(memento.getPhaseId())
                     && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW
                             .equals(memento.getStateId())) {
-                return "rejected: Phase changes need the user (the first chat message starts the "
-                        + "concept phase).";
+                return "rejected: " + com.aresstack.askai.research.transition.ActorPolicy.BOT_REFUSAL
+                        + " (the first chat message starts the concept phase).";
             }
         }
-        return executeCommand(cmd, args);
+        return executeCommand(new CommandOrigin(com.aresstack.askai.research.state.CommandActor.BOT, surface,
+                com.aresstack.askai.research.state.ResearchCommand.NO_REVISION), cmd, args);
     }
 
     /** The semantic commands valid right now; only the user can run them (Q13). */
@@ -4518,6 +4900,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     private ResearchCommandType resolveSemanticCommand(String cmd) {
         java.util.Set<ResearchCommandType> allowed = currentAllowedCommands();
+        if ("continue".equals(cmd) && productiveResources != null
+                && productiveResources.transitions().hasQueuedChainStart()) {
+            return null; // D2: while the approval's chained start is queued, no "continue" is offered
+        }
         for (ResearchCommandType candidate : ResearchSemanticCommands.candidates(cmd)) {
             if (allowed.contains(candidate)) {
                 return candidate;
@@ -4972,6 +5358,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     private void applyRunOutcome(ResearchBackendEvent event) {
+        if (dropLateOutcome) {
+            // PR 06: the late outcome of a turn the phase change cancelled re-arms nothing
+            dropLateOutcome = false;
+            technicalLog("[transition] late run outcome of a left phase dropped");
+            return;
+        }
         setAgentTurnInFlight(false); // the run is over; the user decides the next step
         final com.aresstack.askai.research.backend.ResearchRunOutcomeInfo outcome = event.getRunOutcome();
         // The structured outcome narrative IS the phase summary for chat_history's default rendering.

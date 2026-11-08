@@ -34,7 +34,11 @@ public final class ProductiveResearchSessionResources {
 
     private final String sessionKey;
     private final OoResearchStateMachine stateMachine;
-    private volatile ResearchStateMemento state;
+    /** The one transition chokepoint (D2/D3): actor policy, hooks, transition journal and recovery. */
+    private final com.aresstack.askai.research.transition.TransitionEngine transitions;
+    /** The running jobs per phase and run token (D3). */
+    private final com.aresstack.askai.research.transition.PhaseJobRegistry phaseJobs =
+            new com.aresstack.askai.research.transition.PhaseJobRegistry();
     private final CaptureStore captures;
     private final ResearchSourceRepository repository;
     private final SourceAcceptanceService acceptance;
@@ -94,23 +98,18 @@ public final class ProductiveResearchSessionResources {
         this.sessionKey = sessionKey;
         this.stateMachine = stateMachine;
         this.projectContext = projectContext;
-        // RESTORE-or-init: a stored memento wins; without one the initial state is persisted
-        // immediately so the project directory always carries the truth from revision 0 on.
-        ResearchStateMemento restored = projectContext.getSessionStateStore().load();
-        if (restored != null) {
-            this.state = restored;
-        } else {
-            this.state = stateMachine.initialMemento();
-            try {
-                projectContext.getSessionStateStore().save(this.state);
-            } catch (java.io.IOException persistFailed) {
-                // FAIL-CLOSED: a productive context whose state store cannot write never
-                // activates - the factory's rollback tears everything down.
-                throw new IllegalStateException("The research project state store is not "
-                        + "writable (" + persistFailed.getMessage() + ") - the productive "
-                        + "session must not start", persistFailed);
+        // RESTORE-or-init through the transition engine (D3): a stored memento wins; without one the
+        // initial state is persisted at once. An unreadable memento or transition journal blocks the
+        // session with a repair hint instead of resetting the project to scoping/new.
+        java.io.File stateDir = new java.io.File(projectContext.getProjectDirectory(), "state");
+        this.transitions = new com.aresstack.askai.research.transition.TransitionEngine(stateMachine,
+                projectContext.getSessionStateStore(),
+                new java.io.File(stateDir, com.aresstack.askai.research.transition.TransitionJournal.FILE_NAME));
+        this.transitions.addListener(new com.aresstack.askai.research.transition.TransitionListener() {
+            public void committed(com.aresstack.askai.research.transition.PhaseTransition transition) {
+                refreshToolsAsync();
             }
-        }
+        });
         this.captures = captures;
         this.repository = repository;
         this.acceptance = acceptance;
@@ -338,7 +337,7 @@ public final class ProductiveResearchSessionResources {
     }
 
     public ResearchStateMemento currentState() {
-        return state;
+        return transitions.currentState();
     }
 
     public CaptureStore getCaptures() {
@@ -409,21 +408,35 @@ public final class ProductiveResearchSessionResources {
                 }
             });
 
-    public synchronized ResearchStateTransitionResult dispatch(ResearchCommandType command) {
-        ResearchStateTransitionResult result = stateMachine.dispatch(state,
+    /** A user command without revision or comment (the Workflow tab and older callers). */
+    public ResearchStateTransitionResult dispatch(ResearchCommandType command) {
+        com.aresstack.askai.research.transition.TransitionOutcome outcome = dispatch(
                 ResearchCommand.of(command, "cmd-" + System.nanoTime()));
-        if (result.isAccepted()) {
-            // PERSIST-BEFORE-APPLY: the new memento must be on disk before anyone can observe it.
-            // If persistence fails there is NO success result, NO tool refresh and the active
-            // state stays the previous memento — a state never advances only in RAM.
-            try {
-                projectContext.getSessionStateStore().save(result.getNextMemento());
-            } catch (java.io.IOException persistFailed) {
-                return ResearchStateTransitionResult.rejected(state,
-                        "state transition not persisted (" + persistFailed.getMessage()
-                                + ") — the previous state stays active");
-            }
-            state = result.getNextMemento();
+        return outcome.isCommitted()
+                ? ResearchStateTransitionResult.accepted(outcome.getState(),
+                        java.util.Collections.<com.aresstack.askai.research.state.ResearchEvent>emptyList())
+                : ResearchStateTransitionResult.rejected(outcome.getState(), outcome.getReason());
+    }
+
+    /**
+     * Apply a command through the transition engine (D2/D3): actor policy, revision check, hooks, journal,
+     * memento, then the effects on the engine's worker. A refusal leaves state, memento and tools untouched.
+     */
+    public com.aresstack.askai.research.transition.TransitionOutcome dispatch(ResearchCommand command) {
+        return transitions.dispatch(command);
+    }
+
+    /** The transition engine of this session (hooks, effects and the recovery pass are wired by the session). */
+    public com.aresstack.askai.research.transition.TransitionEngine transitions() {
+        return transitions;
+    }
+
+    public com.aresstack.askai.research.transition.PhaseJobRegistry phaseJobs() {
+        return phaseJobs;
+    }
+
+    private void refreshToolsAsync() {
+        try {
             toolRefreshExecutor.execute(new Runnable() {
                 public void run() {
                     try {
@@ -433,8 +446,9 @@ public final class ProductiveResearchSessionResources {
                     }
                 }
             });
+        } catch (java.util.concurrent.RejectedExecutionException closing) {
+            // the session is closing
         }
-        return result;
     }
 
     /**
@@ -468,22 +482,22 @@ public final class ProductiveResearchSessionResources {
     ResearchControlContext controlContext() {
         return new ResearchControlContext() {
             public String currentPhaseId() {
-                return state.getPhaseId();
+                return currentState().getPhaseId();
             }
 
             public String currentStateId() {
-                return state.getStateId();
+                return currentState().getStateId();
             }
 
             public String statusLine() {
                 // Publish the live allowed workflow commands too, so the model-backed TeamAgent (in the
                 // runtime process) can propose only a legal next step. The host stays the authority: it
                 // re-validates any proposal against this same state machine before executing it.
-                StringBuilder line = new StringBuilder(state.getPhaseId()).append('/')
-                        .append(state.getStateId()).append(" rev=").append(state.getRevision());
+                StringBuilder line = new StringBuilder(currentState().getPhaseId()).append('/')
+                        .append(currentState().getStateId()).append(" rev=").append(currentState().getRevision());
                 java.util.Set<com.aresstack.askai.research.state.ResearchCommandType> allowed =
                         com.aresstack.askai.research.state.oo.ResearchStateFactory.getInstance()
-                                .restore(state).getCurrentState().getAllowedCommands();
+                                .restore(currentState()).getCurrentState().getAllowedCommands();
                 if (!allowed.isEmpty()) {
                     line.append(" cmds=");
                     boolean first = true;
@@ -631,6 +645,7 @@ public final class ProductiveResearchSessionResources {
         }
         closed = true;
         toolRefreshExecutor.shutdownNow();
+        transitions.close();
         // Stop the knowledge worker FIRST (graceful: lets the current job finish). The persistent FIFO and the
         // canonical corpus outlive the session, so a mid-flight job is simply recovered on the next open.
         if (topicsRunner != null) {

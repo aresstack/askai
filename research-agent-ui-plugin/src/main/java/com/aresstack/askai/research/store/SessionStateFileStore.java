@@ -28,6 +28,64 @@ public final class SessionStateFileStore {
     }
 
     public void save(ResearchStateMemento memento) throws IOException {
+        save(memento, null);
+    }
+
+    /** The memento together with the id of the last committed transition (D3: the commit point). */
+    public static final class StoredState {
+        private final ResearchStateMemento memento;
+        private final String lastTransitionId;
+
+        StoredState(ResearchStateMemento memento, String lastTransitionId) {
+            this.memento = memento;
+            this.lastTransitionId = lastTransitionId;
+        }
+
+        public ResearchStateMemento getMemento() {
+            return memento;
+        }
+
+        /** The id of the transition this memento commits, or {@code null}. */
+        public String getLastTransitionId() {
+            return lastTransitionId;
+        }
+    }
+
+    public java.io.File getFile() {
+        return file;
+    }
+
+    /**
+     * The strict read of PR 06: {@code null} only when the file is missing; a file that exists but cannot
+     * be read throws, so the caller blocks with a repair hint instead of starting over at scoping/new.
+     */
+    public StoredState loadStored()
+            throws com.aresstack.askai.research.transition.CorruptProjectFileException {
+        if (!file.isFile()) {
+            return null; // missing (a directory in its place fails the mandatory initial write)
+        }
+        try {
+            String json = StoreIo.readUtf8(file);
+            String phaseId = field(json, "phaseId");
+            String stateId = field(json, "stateId");
+            if (phaseId == null || stateId == null || json.indexOf("\"revision\":") < 0) {
+                throw new IllegalStateException("required ids missing");
+            }
+            ResearchStateMemento memento = new ResearchStateMemento(phaseId, stateId,
+                    field(json, "continuationStateId"),
+                    longField(json, "revision"), field(json, "pendingApprovalId"));
+            if (!MODEL_PHASES_V4.equals(field(json, "model"))) {
+                memento = LegacyResearchStateMigration.migratePreV4(memento);
+            }
+            return new StoredState(memento, field(json, "lastTransitionId"));
+        } catch (Exception corrupt) {
+            throw new com.aresstack.askai.research.transition.CorruptProjectFileException(file,
+                    file.getName() + " is unreadable (" + corrupt.getMessage() + ")");
+        }
+    }
+
+    /** Write the memento and the id of its transition atomically, flushed before the rename. */
+    public void save(ResearchStateMemento memento, String lastTransitionId) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
         sb.append("  \"model\": ").append(quote(MODEL_PHASES_V4)).append(",\n");
@@ -35,7 +93,8 @@ public final class SessionStateFileStore {
         sb.append("  \"stateId\": ").append(quote(memento.getStateId())).append(",\n");
         sb.append("  \"continuationStateId\": ").append(quote(memento.getContinuationStateId())).append(",\n");
         sb.append("  \"revision\": ").append(memento.getRevision()).append(",\n");
-        sb.append("  \"pendingApprovalId\": ").append(quote(memento.getPendingApprovalId())).append("\n");
+        sb.append("  \"pendingApprovalId\": ").append(quote(memento.getPendingApprovalId())).append(",\n");
+        sb.append("  \"lastTransitionId\": ").append(quote(lastTransitionId)).append("\n");
         sb.append("}\n");
         StoreIo.atomicWrite(file, sb.toString());
     }
