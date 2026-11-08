@@ -45,6 +45,13 @@ public final class ResearchServiceCommand {
     public static final String TYPE_CHOOSE_ADVICE = "choose_advice";
 
     /**
+     * Plan PR 13: plan the search queries of the frozen concept — per node its base query plus model variants on
+     * {@code phase.research.planner}; the typed plan goes back as one {@code #RSX1# query_plan} line. Material only:
+     * no chat turn, no state change.
+     */
+    public static final String TYPE_PLAN_QUERIES = "plan_queries";
+
+    /**
      * ADR 0001, lane F: the user starts an orchestrated research run for {@code query} (the orchestrator
      * plans; nothing runs until the user approves the plan).
      */

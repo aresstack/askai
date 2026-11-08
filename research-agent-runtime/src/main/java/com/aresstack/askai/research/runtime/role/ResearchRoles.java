@@ -35,6 +35,10 @@ public final class ResearchRoles {
     /** The acquisition runner's page readiness judge. */
     public static final ResearchRole PAGE_READINESS_JUDGE = ModelPageReadinessJudge.ROLE;
 
+    /** The book pipeline's concept query planner (plan PR 13) on {@code phase.research.planner}. */
+    public static final ResearchRole QUERY_PLANNER =
+            com.aresstack.askai.research.runtime.orchestrator.QueryPlanner.CONCEPT_ROLE;
+
     /**
      * The model-backed SERP layout repair. Its prompts are built per repair ticket by
      * {@code browser-search-analysis} (another module's contract), hence {@code CALLER}; the answer is a JSON
@@ -58,6 +62,7 @@ public final class ResearchRoles {
         roles.add(SCOPE_ADVICE_CHOOSER);
         roles.add(PAGE_READINESS_JUDGE);
         roles.add(SERP_LAYOUT_REPAIR);
+        roles.add(QUERY_PLANNER);
         return Collections.unmodifiableList(roles);
     }
 
