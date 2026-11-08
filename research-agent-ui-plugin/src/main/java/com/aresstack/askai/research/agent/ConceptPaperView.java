@@ -61,6 +61,17 @@ public final class ConceptPaperView extends JPanel {
         String restore(long revision);
     }
 
+    /** Saves the user's mission edit (PR 07); {@code null} on success, else the reason. */
+    public interface MissionSaver {
+        String save(String mission);
+    }
+
+    private final javax.swing.JTextField missionField = ComicControls.textField();
+    private final ComicButton missionSaveButton = new ComicButton("Save mission");
+    private final JLabel modeLabel = new JLabel(" ");
+    private MissionSaver missionSaver;
+    private String shownMission = "";
+
     private static final String EMPTY =
             "_No concept yet. Describe in the chat what you want to research._";
 
@@ -145,7 +156,11 @@ public final class ConceptPaperView extends JPanel {
         treeButton.setToolTipText("Show the concept as an editable card tree");
         jsonButton.setToolTipText("Show and edit the raw JSON document");
         searchRow.add(modeToggle, BorderLayout.EAST);
-        add(searchRow, BorderLayout.NORTH);
+        JPanel north = new JPanel(new BorderLayout());
+        north.setOpaque(false);
+        north.add(buildMissionRow(), BorderLayout.NORTH);
+        north.add(searchRow, BorderLayout.CENTER);
+        add(north, BorderLayout.NORTH);
 
         // Editor + the comic error overlay share the center: a rejected save POPS over the text
         // in a comic plate (bigger type, red stripe) and fades out by itself.
@@ -164,6 +179,90 @@ public final class ConceptPaperView extends JPanel {
         add(buildFooter(), BorderLayout.SOUTH);
         wireActions();
         updateControls();
+    }
+
+    /** The mission as one editable row above the tree (PR 07): label left, field, button in the same row. */
+    private JPanel buildMissionRow() {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setOpaque(false);
+        row.setBorder(BorderFactory.createEmptyBorder(ResearchUiMetrics.FOOTER_PADDING_V,
+                ResearchUiMetrics.FOOTER_PADDING_H, 0, ResearchUiMetrics.FOOTER_PADDING_H));
+        row.add(new JLabel("Mission"), BorderLayout.WEST);
+        row.add(missionField, BorderLayout.CENTER);
+        missionField.setToolTipText("What the book is for; your first message becomes the mission");
+        missionSaveButton.setFocusable(false);
+        missionSaveButton.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
+        row.add(missionSaveButton, BorderLayout.EAST);
+        modeLabel.setVisible(false);
+        JPanel block = new JPanel(new BorderLayout());
+        block.setOpaque(false);
+        block.add(row, BorderLayout.CENTER);
+        JPanel modeRow = new JPanel(new BorderLayout());
+        modeRow.setOpaque(false);
+        modeRow.setBorder(BorderFactory.createEmptyBorder(2, ResearchUiMetrics.FOOTER_PADDING_H, 0,
+                ResearchUiMetrics.FOOTER_PADDING_H));
+        modeRow.add(modeLabel, BorderLayout.CENTER);
+        block.add(modeRow, BorderLayout.SOUTH);
+        ActionListener saveMission = new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                saveMission();
+            }
+        };
+        missionSaveButton.addActionListener(saveMission);
+        missionField.addActionListener(saveMission);
+        return block;
+    }
+
+    public void setMissionSaver(MissionSaver saver) {
+        this.missionSaver = saver;
+    }
+
+    /**
+     * Show the mission and the view's mode (D4): an empty {@code modeMessage} means editable; otherwise the
+     * mission and the concept are read-only and the message says why. A mission the user is typing is kept.
+     */
+    public void renderMission(String mission, String modeMessage) {
+        String value = mission == null ? "" : mission;
+        boolean editable = modeMessage == null || modeMessage.isEmpty();
+        if (!missionField.getText().equals(shownMission) && editable) {
+            // the user is typing: keep the edit, only remember the stored value
+            shownMission = value;
+        } else {
+            shownMission = value;
+            missionField.setText(value);
+        }
+        missionField.setEditable(editable);
+        missionSaveButton.setEnabled(editable && missionSaver != null);
+        modeLabel.setText(editable ? " " : modeMessage);
+        modeLabel.setVisible(!editable);
+    }
+
+    String missionText() {
+        return missionField.getText();
+    }
+
+    String modeText() {
+        return modeLabel.isVisible() ? modeLabel.getText() : "";
+    }
+
+    void typeMission(String text) {
+        missionField.setText(text);
+    }
+
+    void clickSaveMission() {
+        missionSaveButton.doClick();
+    }
+
+    private void saveMission() {
+        if (missionSaver == null) {
+            return;
+        }
+        String problem = missionSaver.save(missionField.getText());
+        if (problem != null) {
+            showError(problem);
+        } else {
+            shownMission = missionField.getText().trim();
+        }
     }
 
     private void buildErrorOverlay() {

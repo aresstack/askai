@@ -35,7 +35,7 @@ public final class ResearchToolPolicy {
     }
 
     /** @return whether write tools of {@code phaseId} are usable in {@code stateId} (running only). */
-    static boolean writable(String phaseId, String stateId, String requiredPhaseId) {
+    public static boolean writable(String phaseId, String stateId, String requiredPhaseId) {
         return requiredPhaseId.equals(phaseId) && ResearchStateIds.RUNNING.equals(stateId);
     }
 

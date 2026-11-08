@@ -31,6 +31,11 @@ import com.aresstack.askai.research.state.ResearchCommandType;
 import com.aresstack.askai.research.state.oo.OoResearchStateMachine;
 import com.aresstack.askai.research.state.oo.ResearchStateIds;
 import com.aresstack.askai.research.store.FileResearchBriefStore;
+import com.aresstack.askai.research.store.FileConceptStore;
+import com.aresstack.askai.research.book.ConceptFreezeHook;
+import com.aresstack.askai.research.book.ConceptPin;
+import com.aresstack.askai.research.book.FrozenConcept;
+import com.aresstack.askai.research.concept.ConceptBranchService;
 
 import org.junit.Test;
 
@@ -67,8 +72,9 @@ public class ScopingBriefApprovalTest {
         assertTrue(fx.session.canApproveScopingBriefAndContinue());
         assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
 
-        // The brief was approved into exactly one immutable revision.
-        assertEquals(1, fx.session.researchBriefStore().load().getApprovedRevisions().size());
+        // PR 07: the concept (not the brief) is approved into exactly one immutable revision.
+        assertEquals(1, fx.session.conceptBranchService().store().latestApprovedNumber());
+        assertEquals(0, fx.session.researchBriefStore().load().getApprovedRevisions().size());
         // C5: the ONE user decision "finish scoping" lands directly in RESEARCH/running (the technical
         // WAITING step belongs to the same decision; there is no outline approval gate anymore).
         assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
@@ -77,64 +83,175 @@ public class ScopingBriefApprovalTest {
     }
 
     @Test
-    public void aBriefApprovalFailureLeavesThePhaseUntouched() {
+    public void aConceptApprovalFailureLeavesThePhaseUntouched() {
         Fx fx = new Fx();
         toScopingRunningWithBrief(fx, "# Brief\nsomething worth researching");
 
         // Sabotage the store so approval throws: put a FILE where the revisions directory must be created.
-        File briefDir = new File(fx.resources.getProjectContext().getProjectDirectory(), "brief");
-        File revisions = new File(briefDir, "revisions");
+        File conceptDir = new File(fx.resources.getProjectContext().getProjectDirectory(), "concept");
+        File revisions = new File(conceptDir, "revisions");
         try {
             assertTrue("test setup: block the revisions directory", revisions.createNewFile());
         } catch (IOException ex) {
             throw new IllegalStateException(ex);
         }
 
-        assertEquals(ScopingApprovalOutcome.APPROVAL_FAILED, fx.session.approveScopingBriefAndContinue());
-        // Approve-before-transition: the failed artifact approval dispatched no SUBMIT_SCOPE.
+        assertEquals(ScopingApprovalOutcome.TRANSITION_REJECTED, fx.session.approveScopingBriefAndContinue());
+        // a failed approval refuses the transition (PR 07: the approval is the transition's record)
         assertEquals(ResearchStateIds.SCOPING, fx.resources.currentState().getPhaseId());
         assertEquals(ResearchStateIds.RUNNING, fx.resources.currentState().getStateId());
-        // The failure was surfaced, not swallowed.
         assertTrue(hasApprovalProblem(fx));
     }
 
+    /**
+     * PR 07 reverses the old no-content gate for exactly two structural cases: a concept without
+     * first-level cards and an empty mission. The submit-scope tag shows the reason while disabled.
+     */
     @Test
-    public void anAlreadyApprovedIdenticalBriefCreatesNoDuplicateRevisionButStillAdvances() {
+    public void submitOnAnEmptyConceptOrAnEmptyMissionIsRefusedWithAReason() {
         Fx fx = new Fx();
         fx.session.dispatch(ResearchCommandType.START, null);
         completeTurn(fx, 1L);
-        FileResearchBriefStore store = fx.session.researchBriefStore();
-        store.updateWorkingCopy("# Brief\nstable question", 1000L);
-        store.approveCurrent(1000L); // pre-approve: revision 0001, working copy consumed
-        assertEquals(1, store.load().getApprovedRevisions().size());
 
-        // The effective brief is now the approved revision (no working copy). The explicit action approves
-        // again (ALREADY_CURRENT → no new revision) and STILL performs the single transition.
-        assertTrue(fx.session.canApproveScopingBriefAndContinue());
+        assertFalse(fx.session.canApproveScopingBriefAndContinue());
+        assertEquals(ScopingApprovalOutcome.CONCEPT_INCOMPLETE, fx.session.approveScopingBriefAndContinue());
+        assertTrue(fx.session.scopingApprovalUnavailableReason().contains(ConceptFreezeHook.NO_CARDS));
+        assertTrue(submitTag(fx).getTooltip().endsWith(ConceptFreezeHook.NO_CARDS));
+        assertFalse(submitTag(fx).isEnabled());
+        assertEquals(ResearchStateIds.SCOPING, fx.resources.currentState().getPhaseId());
+
+        addCard(fx, "Tasks");
+        assertEquals(ScopingApprovalOutcome.CONCEPT_INCOMPLETE, fx.session.approveScopingBriefAndContinue());
+        assertTrue(fx.session.scopingApprovalUnavailableReason().contains(ConceptFreezeHook.NO_MISSION));
+
+        assertEquals(null, fx.session.editMission("Real-time operating systems"));
+        assertTrue(submitTag(fx).isEnabled());
         assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
-
-        assertEquals("no duplicate revision", 1, store.load().getApprovedRevisions().size());
         assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
     }
 
-    /**
-     * The user owns the state machine. An empty or vague scope is NOT a reason to block submit-scope: when
-     * the machine allows the transition, the command must be available and must work — on the very first
-     * turn and with nothing written yet. This test previously pinned the opposite ("Es liegt noch keine
-     * Fragestellung vor"), which both gated a user command on an assistant's judgement and still treated
-     * the scope as one research question.
-     */
     @Test
-    public void anEmptyOrBlankScopeNeverBlocksTheUsersSubmitScope() {
+    public void theHookAlsoRefusesARawSubmitScopeOnAnEmptyConcept() {
         Fx fx = new Fx();
         fx.session.dispatch(ResearchCommandType.START, null);
         completeTurn(fx, 1L);
+        fx.session.editMission("A mission");
 
-        assertTrue("submit-scope must not be gated by the content of the scope",
-                fx.session.canApproveScopingBriefAndContinue());
+        com.aresstack.askai.research.backend.ResearchCommandDispatchResult refused =
+                fx.session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null);
+        assertFalse(refused.isAccepted());
+        assertEquals(ConceptFreezeHook.NO_CARDS, refused.getDetail());
+        assertEquals(ResearchStateIds.SCOPING, fx.resources.currentState().getPhaseId());
+    }
+
+    @Test
+    public void aGreetingAsTheFirstMessageShowsAsTheMissionAndCanBeEditedBeforeSubmit() {
+        Fx fx = new Fx();
+        fx.session.dispatch(ResearchCommandType.START, null);
+        fx.session.submitPrompt("Hello there");
+        completeTurn(fx, 1L);
+        assertEquals("Hello there", fx.session.currentMission());
+
+        assertEquals(null, fx.session.editMission("Plugin isolation in Java"));
+        assertEquals("Plugin isolation in Java", fx.session.currentMission());
+    }
+
+    @Test
+    public void submitPinsTheApprovedConceptAndTheDividerNamesTheRevision() throws Exception {
+        Fx fx = new Fx();
+        toSubmittableConcept(fx);
+        FileConceptStore store = fx.session.conceptBranchService().store();
+        long working = store.workingRevision();
+
         assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
-        assertEquals("the user's command moved the phase", ResearchStateIds.RESEARCH,
-                fx.resources.currentState().getPhaseId());
+
+        FrozenConcept frozen = fx.session.frozenConcept();
+        ConceptPin pin = frozen.getPin();
+        assertEquals(store.latestApprovedNumber(), pin.getApprovedRevision());
+        assertEquals(FileConceptStore.sha256(store.latestApprovedContent()), pin.getContentHash());
+        assertEquals(working, pin.getWorkingRevision());
+        assertTrue("the node ids come from the frozen revision's identity",
+                store.identityHistoryContent(pin.getWorkingRevision()) != null);
+        assertEquals("Plugin isolation", frozen.getMission());
+        assertEquals("en", frozen.getLanguage());
+        assertTrue(fx.session.bookManifest().conceptPins().size() == 1);
+        assertTrue("divider: " + fx.sink.infos, fx.sink.infos.toString()
+                .contains("Phase 2: Sources, started by you (concept revision 1)"));
+    }
+
+    @Test
+    public void laterEditsNeverChangeThePhaseOneRecord() throws Exception {
+        Fx fx = new Fx();
+        toSubmittableConcept(fx);
+        fx.session.addScopeExclusion("Applets");
+        assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
+        assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
+        ConceptBranchService concept = fx.session.conceptBranchService();
+        long revision = concept.store().workingRevision();
+
+        // every concept or mission write is refused outside Concept: UI, tool, service, history restore
+        assertTrue(fx.session.editMission("Another mission") != null);
+        assertFalse(concept.addCards(java.util.Collections.<String>emptyList(),
+                java.util.Collections.singletonList("Late card")).isApplied());
+        assertFalse(concept.replaceDocument("{\"title\":\"\",\"concept\":[]}", revision).isApplied());
+        assertFalse(concept.restoreRevision(1L).isApplied());
+        assertFalse(concept.renameNode(java.util.Collections.singletonList("Tasks"), "Jobs").isApplied());
+        assertTrue(concept.writeRefusal().startsWith("Frozen at revision 1."));
+        assertEquals(revision, concept.store().workingRevision());
+        assertEquals("Frozen at revision 1. Reopen Concept to change it.", fx.session.conceptModeMessage());
+
+        // the blacklist rule of Q2: a later entry can be added and removed, a recorded one stays
+        assertEquals(null, fx.session.addScopeExclusion("Swing"));
+        assertTrue(fx.session.currentScopeDraft().getExclusions().contains("Swing"));
+        assertEquals(null, fx.session.removeScopeExclusion("Swing"));
+        assertFalse(fx.session.currentScopeDraft().getExclusions().contains("Swing"));
+        assertTrue(fx.session.removeScopeExclusion("Applets").contains("Reopen Concept"));
+        assertTrue("an entry equal to a frozen card is refused",
+                fx.session.addScopeExclusion("Tasks").contains("Reopen Concept"));
+
+        // the session language changes, the record's working language does not
+        fx.session.changeLanguage(com.aresstack.askai.research.agent.ResearchLanguage.GERMAN);
+        FrozenConcept frozen = fx.session.frozenConcept();
+        assertEquals("en", frozen.getLanguage());
+        assertEquals("Plugin isolation", frozen.getMission());
+        assertEquals(java.util.Arrays.asList("Applets"), frozen.getPin().getBlacklist());
+        assertFalse(frozen.getEffectiveDocument().contains("Applets"));
+        assertTrue(frozen.getApprovedDocument().contains("Applets"));
+    }
+
+    @Test
+    public void reopenThenEditCreatesTheNextRevisionAndWithoutAnEditKeepsIt() throws Exception {
+        Fx fx = new Fx();
+        toSubmittableConcept(fx);
+        assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
+
+        assertTrue(fx.session.dispatch(ResearchCommandType.REOPEN_CONCEPT, null).isAccepted());
+        toScopingRunning(fx);
+        assertEquals(java.util.Arrays.asList(ConceptFreezeHook.REOPENED_NOTE), fx.session.bookManifest().notes());
+        assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
+        assertEquals(1, fx.session.frozenConcept().getRevision());
+        assertTrue(fx.sink.infos.toString().contains("(concept revision 1, unchanged)"));
+
+        assertTrue(fx.session.dispatch(ResearchCommandType.REOPEN_CONCEPT, null).isAccepted());
+        toScopingRunning(fx);
+        addCard(fx, "Scheduling");
+        assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
+        assertEquals(2, fx.session.frozenConcept().getRevision());
+        assertTrue(fx.sink.infos.toString().contains("(concept revision 2)"));
+        assertEquals(3, fx.session.bookManifest().conceptPins().size());
+    }
+
+    @Test
+    public void aDamagedManifestFailsClosedAndRefusesTheSubmit() throws Exception {
+        Fx fx = new Fx();
+        toSubmittableConcept(fx);
+        File manifest = fx.session.bookManifest().file();
+        java.nio.file.Files.write(manifest.toPath(), "{ not json".getBytes("UTF-8"));
+
+        assertEquals(ScopingApprovalOutcome.TRANSITION_REJECTED, fx.session.approveScopingBriefAndContinue());
+        assertEquals(ResearchStateIds.SCOPING, fx.resources.currentState().getPhaseId());
+        assertEquals("{ not json", new String(java.nio.file.Files.readAllBytes(manifest.toPath()), "UTF-8"));
+        assertTrue(hasApprovalProblem(fx));
     }
 
     @Test
@@ -143,6 +260,7 @@ public class ScopingBriefApprovalTest {
         fx.session.dispatch(ResearchCommandType.START, null);
         completeTurn(fx, 1L);
         fx.session.researchBriefStore().updateWorkingCopy("   \n  \t", 1000L);
+        makeSubmittable(fx);
 
         assertTrue(fx.session.canApproveScopingBriefAndContinue());
         assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
@@ -155,6 +273,7 @@ public class ScopingBriefApprovalTest {
         fx.session.dispatch(ResearchCommandType.START, null);        // SCOPING/RUNNING
         completeTurn(fx, 1L);
         fx.session.researchBriefStore().updateWorkingCopy("# Brief\nx", 1000L);
+        makeSubmittable(fx);
         fx.session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null); // → RESEARCH (C5)
         assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
 
@@ -177,6 +296,7 @@ public class ScopingBriefApprovalTest {
 
         // Once the turn completes, the same brief makes the action legal.
         completeTurn(fx, 1L);
+        makeSubmittable(fx);
         assertTrue(fx.session.canApproveScopingBriefAndContinue());
     }
 
@@ -186,6 +306,7 @@ public class ScopingBriefApprovalTest {
         fx.session.dispatch(ResearchCommandType.START, null); // SCOPING/RUNNING
         completeTurn(fx, 1L);
         fx.session.researchBriefStore().updateWorkingCopy("# Brief\nx", 1000L);
+        makeSubmittable(fx);
 
         // Model output / advice — even a literal "weiter" — reaches the chat but must NOT move the phase.
         fx.session.onEvent(ResearchBackendEvent.builder(ResearchBackendEventType.ASSISTANT_MESSAGE)
@@ -269,11 +390,48 @@ public class ScopingBriefApprovalTest {
 
     private static boolean hasApprovalProblem(Fx fx) {
         for (String problem : fx.sink.problems) {
-            if (problem.startsWith("Fragestellung konnte nicht freigegeben werden")) {
+            if (problem.startsWith("Concept not submitted")) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static com.aresstack.askai.research.agent.ResearchActionTag submitTag(Fx fx) {
+        for (com.aresstack.askai.research.agent.ResearchActionTag tag : fx.session.availableActionTags()) {
+            if ("submit-scope".equals(tag.getCommand())) {
+                return tag;
+            }
+        }
+        throw new AssertionError("no submit-scope tag");
+    }
+
+    private static void addCard(Fx fx, String name) {
+        assertTrue(fx.session.conceptBranchService().addCards(java.util.Collections.<String>emptyList(),
+                java.util.Collections.singletonList(name)).isApplied());
+    }
+
+    /** PR 07: one first-level card and a mission, the structural minimum of submit-scope. */
+    static void makeSubmittable(Fx fx) {
+        addCard(fx, "Tasks");
+        addCard(fx, "Applets");
+        assertEquals(null, fx.session.editMission("Plugin isolation"));
+    }
+
+    private static void toSubmittableConcept(Fx fx) {
+        fx.session.dispatch(ResearchCommandType.START, null);
+        completeTurn(fx, 1L);
+        makeSubmittable(fx);
+    }
+
+    /** After a reopen, bring Concept back to running (the state machine decides the edge). */
+    private static void toScopingRunning(Fx fx) {
+        if (!ResearchStateIds.RUNNING.equals(fx.resources.currentState().getStateId())) {
+            assertTrue(fx.resources.currentState().getStateId(),
+                    fx.session.dispatch(ResearchCommandType.START, null).isAccepted());
+        }
+        assertEquals(ResearchStateIds.SCOPING, fx.resources.currentState().getPhaseId());
+        assertEquals(ResearchStateIds.RUNNING, fx.resources.currentState().getStateId());
     }
 
     /** SCOPING/NEW → SCOPING/RUNNING, deliver a terminal event, then store a real brief. */
@@ -281,6 +439,7 @@ public class ScopingBriefApprovalTest {
         fx.session.dispatch(ResearchCommandType.START, null);
         completeTurn(fx, 1L);
         fx.session.researchBriefStore().updateWorkingCopy(brief, 1000L);
+        makeSubmittable(fx);
     }
 
     /** Deliver a terminal COMPLETED event so a pending {@code agentTurnInFlight} is cleared. */
@@ -483,6 +642,12 @@ public class ScopingBriefApprovalTest {
     /** Records the visible problems, so a rejected click can be asserted to be non-silent. */
     private static final class RecordingSink implements AgentConversationSink {
         final List<String> problems = new ArrayList<String>();
+        final List<String> infos = new ArrayList<String>();
+
+        @Override
+        public void appendInfoMessage(String messageId, String markdown) {
+            infos.add(markdown);
+        }
 
         public void appendUserMessage(String messageId, String markdown) {
         }

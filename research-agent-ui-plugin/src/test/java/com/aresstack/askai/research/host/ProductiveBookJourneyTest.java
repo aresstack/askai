@@ -229,6 +229,8 @@ public class ProductiveBookJourneyTest {
                 .addNode(Collections.<String>emptyList(), "Class loaders").isApplied());
         assertOnlyFinishTagFor(fx, null);
 
+        ConceptTestSupport.makeSubmittable(fx.session);
+
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertEquals("submit-scope also starts the search", "research/running", phase(fx));
         assertOnlyFinishTagFor(fx, "finish-sources");
@@ -266,6 +268,7 @@ public class ProductiveBookJourneyTest {
     public void noUserSurfaceDispatchesPauseOrCancelAndStopKeepsThePhase() {
         Fx fx = new Fx();
         firstMessage(fx, "A book about plugin isolation in Java");
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertEquals("research/running", phase(fx));
         for (String name : new String[] {"pause", "cancel"}) {
@@ -314,6 +317,7 @@ public class ProductiveBookJourneyTest {
             assertTrue(name + ": " + outcome, outcome.contains("Phase changes need the user"));
         }
         assertEquals("scoping/running", phase(fx));
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
 
         // A live run-plan offer in research/running: the bot runs it; /continue is no offer alias.
@@ -336,6 +340,7 @@ public class ProductiveBookJourneyTest {
     public void choosingTheCurrentPhaseInThePillChangesNothing() {
         Fx fx = new Fx();
         firstMessage(fx, "A book");
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         com.aresstack.askai.research.agent.ResearchStateSnapshot snapshot =
                 fx.session.currentResearchSnapshot();
@@ -362,6 +367,7 @@ public class ProductiveBookJourneyTest {
     public void submitScopeJournalsBothTransitionsWithTheUserAsActor() throws Exception {
         Fx fx = new Fx();
         firstMessage(fx, "A book about plugin isolation in Java");
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertEquals("research/running", phase(fx));
         assertEquals(java.util.Arrays.asList("START", "SUBMIT_SCOPE", "START_RESEARCH"),
@@ -379,6 +385,7 @@ public class ProductiveBookJourneyTest {
             assertEquals("scoping/new", phase(fx));
         }
         firstMessage(fx, "A book");
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertHandled(fx.session.executeCommand("finish-sources", ""));
         assertEquals("research/waiting_approval", phase(fx));
@@ -402,6 +409,7 @@ public class ProductiveBookJourneyTest {
     public void twoApproveClicksOnTheSameRevisionApproveOnce() {
         Fx fx = new Fx();
         firstMessage(fx, "A book");
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertHandled(fx.session.executeCommand("finish-sources", ""));
         long seen = fx.resources.currentState().getRevision();
@@ -415,6 +423,7 @@ public class ProductiveBookJourneyTest {
     public void requestChangesWithACommentIsJournalledAndPostedWithoutAModelTurn() throws Exception {
         Fx fx = new Fx();
         firstMessage(fx, "A book");
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertHandled(fx.session.executeCommand("finish-sources", ""));
         assertHandled(fx.session.executeCommand("approve", ""));
@@ -438,12 +447,13 @@ public class ProductiveBookJourneyTest {
         java.io.File dir = newTempDir();
         Fx fx = new Fx(dir);
         firstMessage(fx, "A book");
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertHandled(fx.session.executeCommand("finish-sources", ""));
         assertHandled(fx.session.executeCommand("approve", ""));
         assertEquals("outline/running", phase(fx));
         assertFalse("busy means an agent turn in flight", fx.session.getState().isBusy());
-        assertTrue(fx.host.infos.toString(), fx.host.infos.contains("Phase 2: Sources, started by you"));
+        assertTrue(fx.host.infos.toString(), fx.host.infos.contains("Phase 2: Sources, started by you (concept revision 1)"));
         assertTrue(fx.host.infos.toString(), fx.host.infos.contains("Phase 3: Outline, started by you"));
         int dividers = fx.host.infos.size();
         fx.session.close();
@@ -460,6 +470,7 @@ public class ProductiveBookJourneyTest {
     public void reopenConceptDuringARunningTurnLeavesTheComposerIdleAndTheLateOutcomeReArmsNothing() {
         Fx fx = new Fx();
         firstMessage(fx, "A book");
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertEquals("research/running", phase(fx));
         fx.session.submitPrompt("search more");

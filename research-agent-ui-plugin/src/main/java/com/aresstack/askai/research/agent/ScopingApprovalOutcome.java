@@ -14,6 +14,9 @@ public enum ScopingApprovalOutcome {
     /** No non-blank research brief exists yet, so there is nothing to approve. */
     MISSING_BRIEF,
 
+    /** The concept has no first-level card or the mission is empty (PR 07); the reason names which. */
+    CONCEPT_INCOMPLETE,
+
     /** A foreground agent turn is in flight; the transition must wait until it terminates. */
     BUSY,
 

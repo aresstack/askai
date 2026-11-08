@@ -174,6 +174,9 @@ public final class ResearchPhaseToolbarContribution implements AgentToolbarContr
         if (semantic == null) {
             return; // the domain withdrew the transition since the popup opened
         }
+        if (!ReopenConfirmation.confirm(pill, semantic)) {
+            return; // D10: Cancel dispatches nothing
+        }
         String outcome = session.executeCommand(semantic, "");
         if (outcome != null && !outcome.startsWith("handled")) {
             JOptionPane.showMessageDialog(pill,

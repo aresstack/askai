@@ -216,6 +216,7 @@ public class ResearchRunCardsTest {
         /** Drive to a running research the model-driven way: a validated scope proposal from the agent is
          *  executed host-side. C5: no outline gate — the commit lands directly in RESEARCH/running. */
         void reachRunningResearch() {
+            ConceptTestSupport.makeSubmittable(session);
             event(ResearchBackendEvent.builder(ResearchBackendEventType.SCOPE_PROPOSAL)
                     .title("SUBMIT_SCOPE").text("investigate pf4j").messages("", "focus on isolation"));
             assertEquals(ResearchStateIds.RESEARCH, resources.currentState().getPhaseId());

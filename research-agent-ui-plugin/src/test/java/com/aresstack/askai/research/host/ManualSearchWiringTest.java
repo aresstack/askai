@@ -98,6 +98,7 @@ public class ManualSearchWiringTest {
 
         // RESEARCH (C5: SUBMIT_SCOPE lands there directly): still accepted — the service never gates
         // on the phase — and the phase is unchanged by the search.
+        ConceptTestSupport.makeSubmittable(fx.session);
         fx.session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null);
         assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
         fx.session.requestManualWebSearch("query in research");

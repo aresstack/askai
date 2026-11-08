@@ -387,6 +387,23 @@ public final class FileConceptStore {
         }
     }
 
+    /** The approved document of {@code number}, or {@code null} when there is none. */
+    public synchronized String approvedContent(int number) {
+        if (number <= 0 || !revisionJson(number).isFile()) {
+            return null;
+        }
+        try {
+            return StoreIo.readUtf8(revisionJson(number));
+        } catch (IOException unreadable) {
+            return null;
+        }
+    }
+
+    /** The content hash recorded with approved revision {@code number} ("" when unknown). */
+    public synchronized String approvedHash(int number) {
+        return revisionProps(number).getProperty("contentHash", "");
+    }
+
     public synchronized int latestApprovedNumber() {
         File revDir = new File(dir, "revisions");
         File[] files = revDir.listFiles();
