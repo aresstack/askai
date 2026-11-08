@@ -29,6 +29,9 @@ public class TypedBlacklistTest {
         assertTrue(list.matches("", "", "http://docs.example.org/a"));
         assertFalse(list.matches("example.org is mentioned", "example.org", "https://other.org/"));
         assertFalse(list.matches("", "", "https://notexample.org/"));
+        assertTrue("query right after the authority", list.matches("", "", "https://example.org?lang=en"));
+        assertTrue("fragment right after the authority", list.matches("", "", "https://example.org#top"));
+        assertTrue("user info is not the host", list.matches("", "", "https://u@example.org:8080/x"));
     }
 
     @Test

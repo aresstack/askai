@@ -119,9 +119,15 @@ public final class TypedBlacklist {
         if (scheme >= 0) {
             value = value.substring(scheme + 3);
         }
-        int slash = value.indexOf('/');
-        if (slash >= 0) {
-            value = value.substring(0, slash);
+        for (char end : new char[] {'/', '?', '#'}) {
+            int cut = value.indexOf(end);
+            if (cut >= 0) {
+                value = value.substring(0, cut);
+            }
+        }
+        int at = value.lastIndexOf('@');
+        if (at >= 0) {
+            value = value.substring(at + 1);
         }
         int colon = value.indexOf(':');
         if (colon >= 0) {

@@ -920,8 +920,8 @@ public final class ProductiveResearchBackendFactory {
                 public com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor resolve() {
                     com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor descriptor =
                             prepareEmbeddingDescriptor(sessionKey, embeddingProjectDir);
-                    if (descriptor == null) {
-                        return null;
+                    if (descriptor == null || wired.isClosed()) {
+                        return null; // runs under the resources' lock, so close() cannot slip in after this
                     }
                     KnowledgeProcessingSessionFactory.KnowledgeSession late = wireKnowledge(descriptor,
                             projectContext, sessionKey, embeddingCaptures, repository, processingQueue,

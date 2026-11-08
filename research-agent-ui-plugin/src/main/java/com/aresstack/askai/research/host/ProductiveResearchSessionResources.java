@@ -668,7 +668,7 @@ public final class ProductiveResearchSessionResources {
     }
 
     /** Documented shutdown order; idempotent; safe on partial construction (nulls skipped). */
-    public void close() {
+    public synchronized void close() { // PR 12: never interleaves with a late embedding attach
         if (closed) {
             return;
         }

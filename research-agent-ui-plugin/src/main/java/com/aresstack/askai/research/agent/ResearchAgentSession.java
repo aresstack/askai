@@ -2574,9 +2574,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (fresh.isEmpty()) {
             return true;
         }
-        StringBuilder message = new StringBuilder("The blacklist of this concept keeps ").append(fresh.size())
+        StringBuilder message = new StringBuilder("The blacklist of this concept newly matches ").append(fresh.size())
                 .append(fresh.size() == 1 ? " accepted source" : " accepted sources")
-                .append(" out of outline generation and the evidence packs:");
+                .append(". It becomes part of the Phase-1 record that outline generation and the evidence packs use:");
         for (com.aresstack.askai.research.sources.ResearchSourceRecord record : fresh) {
             message.append("\n- ").append(com.aresstack.askai.research.book.BlacklistSourceMatches.describe(record));
         }
@@ -3908,8 +3908,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             text.append("\n- ").append(com.aresstack.askai.research.book.BlacklistSourceMatches.describe(hit));
         }
         if (concept) {
-            text.append("\nOnce the entry is recorded with the concept, these sources leave outline generation "
-                    + "and the evidence packs.");
+            text.append("\nWhen you submit the concept, the entry becomes part of the Phase-1 record that outline "
+                    + "generation and the evidence packs use.");
         }
         return text.toString();
     }
