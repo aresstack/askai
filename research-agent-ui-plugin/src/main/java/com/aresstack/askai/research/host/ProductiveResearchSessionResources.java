@@ -125,6 +125,35 @@ public final class ProductiveResearchSessionResources {
         this.embeddingDescriptor = descriptor;
     }
 
+    /** PR 12: re-resolves the embedding model on demand ("Check again"); never downloads anything. */
+    public interface EmbeddingResolver {
+        /** The newly resolved descriptor (and the knowledge pipeline wired for it), or {@code null}. */
+        com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor resolve();
+    }
+
+    private EmbeddingResolver embeddingResolver;
+
+    void setEmbeddingResolver(EmbeddingResolver resolver) {
+        this.embeddingResolver = resolver;
+    }
+
+    /**
+     * PR 12: the embedding descriptor, re-resolved once more when none was ready yet — so a model
+     * installed after the chat was opened is picked up without a new chat. {@code null} = still none.
+     */
+    public synchronized com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor
+            ensureEmbeddingDescriptor() {
+        if (embeddingDescriptor != null || embeddingResolver == null || isClosed()) {
+            return embeddingDescriptor;
+        }
+        try {
+            return embeddingResolver.resolve();
+        } catch (RuntimeException failed) {
+            System.err.println("[research] embedding re-check failed: " + failed.getMessage());
+            return null;
+        }
+    }
+
     /** The frozen embedding snapshot of this session; null = capability honestly unavailable. */
     public com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor
             getEmbeddingDescriptor() {
@@ -654,7 +683,7 @@ public final class ProductiveResearchSessionResources {
     }
 
     /** Documented shutdown order; idempotent; safe on partial construction (nulls skipped). */
-    public void close() {
+    public synchronized void close() { // PR 12: never interleaves with a late embedding attach
         if (closed) {
             return;
         }

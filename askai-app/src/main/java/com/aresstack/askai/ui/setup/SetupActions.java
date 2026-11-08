@@ -166,8 +166,15 @@ public interface SetupActions {
     String RECOMMENDED_CHAT_MODEL = "gemma4:e2b";
     /** The stronger alternative offered beside the recommended chat model (needs more memory). */
     String ALTERNATIVE_CHAT_MODEL = "llama3.1:8b";
-    /** Suggested when no embedding model is installed yet. */
+    /**
+     * Suggested when no embedding model is installed yet. The embedding model is required (Q12, PR 12).
+     * PROVISIONAL, pending benchmark: the retrieval benchmark of PR 04 has not chosen the productive
+     * multilingual model yet (nomic-embed-text scored poorly German to English). Switching the preset is a
+     * change of this constant only; installing still goes through the existing installer, never automatically.
+     */
     String RECOMMENDED_EMBEDDING_MODEL = "nomic-embed-text";
+    /** Why the embedding model is required, shown in the wizard and its final check. */
+    String EMBEDDING_REQUIRED_REASON = "needed for Sources filtering, the Outline and the writing";
     /** The reranker the research agent asks for; it runs in AskAI's own local runtime (Ollama has none). */
     String RECOMMENDED_RERANKER = "cross-encoder/ms-marco-MiniLM-L6-v2";
 

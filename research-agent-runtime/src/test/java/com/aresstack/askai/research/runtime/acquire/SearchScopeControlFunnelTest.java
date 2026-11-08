@@ -46,6 +46,8 @@ public class SearchScopeControlFunnelTest {
         boolean ended;
         boolean inAffinityOnly; // SC2a: outFilter=false, every KEEP reports nearIn
         boolean failEvaluate;
+        com.aresstack.askai.research.domain.scope.TypedBlacklist typed =
+                com.aresstack.askai.research.domain.scope.TypedBlacklist.empty();
 
         void out(String lane, String id) {
             java.util.Set<String> ids = outIdsByLane.get(lane);
@@ -57,6 +59,10 @@ public class SearchScopeControlFunnelTest {
         }
 
         public Session begin() throws ToolInvoker.ToolFailure {
+            return beginUntyped().withBlacklist(typed);
+        }
+
+        private Session beginUntyped() throws ToolInvoker.ToolFailure {
             if (failBegin) {
                 throw new ToolInvoker.ToolFailure("UNAVAILABLE no embedding model");
             }
@@ -94,12 +100,18 @@ public class SearchScopeControlFunnelTest {
         final List<String> tools = new ArrayList<String>();
         final List<String> openedUrls = new ArrayList<String>();
         String pageReply = "";
+        String linksReply = "";
 
         public String call(String tool, Map<String, Object> args) {
             tools.add(tool);
             if ("web_open".equals(tool)) {
                 openedUrls.add(String.valueOf(args.get("url")));
                 return pageReply;
+            }
+            if ("web_links".equals(tool)) {
+                String reply = linksReply;
+                linksReply = ""; // only the first page offers links
+                return reply;
             }
             return "";
         }
@@ -363,5 +375,141 @@ public class SearchScopeControlFunnelTest {
         assertTrue("zero evaluate calls on the fast path", scope.lanes.isEmpty());
         assertEquals("baseline behaviour: ALL hits parked", 3, acceptance.parked.size());
         assertEquals("baseline behaviour: ALL hits opened", 3, browser.openedUrls.size());
+    }
+
+    // ---- PR 12: the typed blacklist, a deterministic filter beside the semantic gate ----
+
+    private static com.aresstack.askai.research.domain.scope.TypedBlacklist typed(String... entries) {
+        return com.aresstack.askai.research.domain.scope.TypedBlacklist.of(Arrays.asList(entries));
+    }
+
+    @Test
+    public void aTypedTermRejectsTheSerpHitBeforeRerankWithoutTheSemanticGate() {
+        int[] calls = {0};
+        RecordingBrowser browser = new RecordingBrowser();
+        browser.pageReply = "capture_id=c1 final_url=https://kept.example/scheduling "
+                + "title=\"irrelevant page\"\nnothing about the query here";
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        List<String> status = new ArrayList<String>();
+        WebSearchApplicationService service =
+                service(browser, twoHitStrategy(calls), acceptance, status);
+        ScriptedScope scope = new ScriptedScope();
+        scope.inactive = true; // no semantic gate at all
+        scope.typed = typed("swing");
+        service.setScopeControl(scope);
+
+        service.execute("freertos scheduling");
+
+        assertTrue("the semantic gate was never asked", scope.lanes.isEmpty());
+        assertEquals(Arrays.asList("https://kept.example/scheduling", "https://second.example/tasks"),
+                acceptance.parked);
+        assertFalse("the blocked hit is never opened",
+                browser.openedUrls.contains("https://out.example/gui"));
+        assertTrue(status.toString().contains("search-blacklist serp skip candidate=\"Java Swing GUI Tutorial\""));
+    }
+
+    @Test
+    public void aTypedHostNameNeverReachesTheVisitStage() {
+        int[] calls = {0};
+        RecordingBrowser browser = new RecordingBrowser();
+        browser.pageReply = "capture_id=c1 final_url=https://kept.example/scheduling "
+                + "title=\"irrelevant page\"\nnothing about the query here";
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        WebSearchApplicationService service =
+                service(browser, twoHitStrategy(calls), acceptance, new ArrayList<String>());
+        ScriptedScope scope = new ScriptedScope();
+        scope.inactive = true;
+        scope.typed = typed("www.Second.example");
+        service.setScopeControl(scope);
+
+        service.execute("freertos scheduling");
+
+        assertFalse(browser.openedUrls.contains("https://second.example/tasks"));
+        assertFalse(acceptance.parked.contains("https://second.example/tasks"));
+        assertEquals(2, browser.openedUrls.size());
+    }
+
+    @Test
+    public void aTypedTermRejectsTheLoadedPageAfterFetch() {
+        int[] calls = {0};
+        RecordingBrowser browser = new RecordingBrowser();
+        // the SERP said nothing about "lab"; only the loaded page title does
+        browser.pageReply = "capture_id=c1 final_url=https://kept.example/scheduling "
+                + "title=\"FreeRTOS Scheduling Lab\"\nfreertos scheduling deep dive";
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        List<String> status = new ArrayList<String>();
+        WebSearchApplicationService service =
+                service(browser, twoHitStrategy(calls), acceptance, status);
+        ScriptedScope scope = new ScriptedScope();
+        scope.inactive = true;
+        scope.typed = typed("Lab");
+        service.setScopeControl(scope);
+
+        service.execute("freertos scheduling");
+
+        assertEquals("all three SERP hits pass the SERP lane", 3, acceptance.parked.size());
+        assertTrue("never accepted", acceptance.accepted.isEmpty());
+        assertFalse("links never harvested", browser.tools.contains("web_links"));
+        assertTrue(status.toString().contains("search-blacklist page skip url=https://kept.example/scheduling"));
+    }
+
+    @Test
+    public void aTypedTermRejectsALinkBeforeTheFrontier() {
+        int[] calls = {0};
+        RecordingBrowser browser = new RecordingBrowser();
+        browser.pageReply = "capture_id=c1 final_url=https://kept.example/scheduling "
+                + "title=\"FreeRTOS Scheduling\"\nfreertos scheduling deep dive";
+        browser.linksReply = "l1: FreeRTOS scheduling with Swing — https://links.example/swing-scheduling\n"
+                + "l2: FreeRTOS scheduling internals — https://links.example/internals\n";
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        List<String> status = new ArrayList<String>();
+        WebSearchApplicationService service =
+                service(browser, twoHitStrategy(calls), acceptance, status);
+        ScriptedScope scope = new ScriptedScope();
+        scope.inactive = true;
+        scope.typed = typed("swing");
+        service.setScopeControl(scope);
+
+        service.execute("freertos scheduling");
+
+        assertTrue("links were read", browser.tools.contains("web_links"));
+        assertFalse("the blocked link is never opened",
+                browser.openedUrls.contains("https://links.example/swing-scheduling"));
+        assertTrue(status.toString().contains("search-blacklist links items="));
+    }
+
+    @Test
+    public void withoutScopeControlTheRunSaysItIsUnfiltered() {
+        int[] calls = {0};
+        RecordingBrowser browser = new RecordingBrowser();
+        browser.pageReply = "capture_id=c1 final_url=https://kept.example/scheduling "
+                + "title=\"irrelevant page\"\nnothing about the query here";
+        List<String> status = new ArrayList<String>();
+        WebSearchApplicationService service =
+                service(browser, twoHitStrategy(calls), new RecordingAcceptance(), status);
+
+        service.execute("freertos scheduling");
+
+        assertTrue(status.toString().contains("search-blacklist NONE (no scope control) — this search runs unfiltered"));
+    }
+
+    @Test
+    public void anExcludedFacetWithoutATypedTermIsLeftToTheSemanticGate() {
+        int[] calls = {0};
+        RecordingBrowser browser = new RecordingBrowser();
+        browser.pageReply = "capture_id=c1 final_url=https://kept.example/scheduling "
+                + "title=\"irrelevant page\"\nnothing about the query here";
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        List<String> status = new ArrayList<String>();
+        WebSearchApplicationService service =
+                service(browser, twoHitStrategy(calls), acceptance, status);
+        ScriptedScope scope = new ScriptedScope();
+        scope.out("serp", "https://out.example/gui"); // the facet "GUI" lives only in the gate
+        service.setScopeControl(scope);
+
+        service.execute("freertos scheduling");
+
+        assertFalse(status.toString().contains("search-blacklist serp skip"));
+        assertTrue(status.toString().contains("search-scope skip candidate=\"Java Swing GUI Tutorial\""));
     }
 }

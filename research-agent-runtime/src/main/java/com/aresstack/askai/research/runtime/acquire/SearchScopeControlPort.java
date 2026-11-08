@@ -30,13 +30,33 @@ public interface SearchScopeControlPort {
         public final String summary;
         public final boolean outFilter;
         public final boolean inAffinity;
+        /**
+         * PR 12: the user's TYPED blacklist entries of the same snapshot — the deterministic term
+         * and domain filter the run applies itself, with or without the semantic gate.
+         */
+        public final com.aresstack.askai.research.domain.scope.TypedBlacklist blacklist;
 
         public Session(boolean active, String handle, String summary) {
             this(active, handle, summary, active, false);
         }
 
+        /** The same snapshot with the typed blacklist attached. */
+        public Session withBlacklist(
+                com.aresstack.askai.research.domain.scope.TypedBlacklist typed) {
+            return new Session(active, handle, summary, outFilter, inAffinity, typed);
+        }
+
         public Session(boolean active, String handle, String summary, boolean outFilter,
                        boolean inAffinity) {
+            this(active, handle, summary, outFilter, inAffinity,
+                    com.aresstack.askai.research.domain.scope.TypedBlacklist.empty());
+        }
+
+        public Session(boolean active, String handle, String summary, boolean outFilter,
+                       boolean inAffinity,
+                       com.aresstack.askai.research.domain.scope.TypedBlacklist blacklist) {
+            this.blacklist = blacklist == null
+                    ? com.aresstack.askai.research.domain.scope.TypedBlacklist.empty() : blacklist;
             this.active = active;
             this.handle = handle;
             this.summary = summary == null ? "" : summary;

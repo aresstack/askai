@@ -703,8 +703,8 @@ public final class AskAiSetupActions implements SetupActions {
         }
 
         if (draft.embeddingModel().isEmpty()) {
-            checks.add(SetupCheck.ok("Embedding model", "none chosen (optional; the research agent falls back "
-                    + "to simpler matching)"));
+            checks.add(SetupCheck.failed("Embedding model", "none chosen (required: "
+                    + SetupActions.EMBEDDING_REQUIRED_REASON + ")"));
         } else {
             checks.add(embeddingCheck(draft.embeddingModel()));
         }
