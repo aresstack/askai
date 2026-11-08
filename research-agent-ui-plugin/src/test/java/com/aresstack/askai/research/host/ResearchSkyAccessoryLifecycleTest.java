@@ -126,6 +126,7 @@ public class ResearchSkyAccessoryLifecycleTest {
         assertTrue(sky.isVisible());
         assertTrue(insetOf(sky) > 0);
 
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertTrue("the phase change goes through the machine",
                 fx.session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted());
         assertEquals(ResearchStateIds.RESEARCH,

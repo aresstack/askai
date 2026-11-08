@@ -109,6 +109,37 @@ public final class ConceptBranchService {
         }
     }
 
+    /**
+     * The one Phase-1 write guard (PR 07, D4): returns {@code null} while the concept may change,
+     * otherwise the reason shown to the user. Every content write of this service asks it first.
+     */
+    public interface WriteGuard {
+        String refusal();
+    }
+
+    private volatile WriteGuard writeGuard;
+
+    public void setWriteGuard(WriteGuard guard) {
+        this.writeGuard = guard;
+    }
+
+    /** The store behind this service (the concept freeze approves through it). */
+    public FileConceptStore store() {
+        return store;
+    }
+
+    /** {@code null} when a content write may run now, otherwise the guard's reason. */
+    public String writeRefusal() {
+        WriteGuard guard = writeGuard;
+        return guard == null ? null : guard.refusal();
+    }
+
+    private EditResult frozenError() {
+        String reason = writeRefusal();
+        return editError(JsonTreeDiagnostic.of(JsonTreeErrorCode.CANDIDATE_DOCUMENT_INVALID,
+                reason == null ? "The concept is frozen." : reason).build());
+    }
+
     public synchronized void setLifecycleListener(LifecycleListener listener) {
         this.lifecycleListener = listener;
     }
@@ -388,8 +419,8 @@ public final class ConceptBranchService {
     /** Resolve an (epoch, nodeId) reference to the CURRENT path, or set a refusal. */
     private List<String> resolveById(String epoch, String nodeId) {
         idResolveError = null;
-        if (failClosed) {
-            idResolveError = failClosedError().getDiagnostic();
+        if (failClosed || writeRefusal() != null) {
+            idResolveError = (failClosed ? failClosedError() : frozenError()).getDiagnostic();
             return null;
         }
         if (identity == null || epoch == null || !epoch.equals(identity.epoch())) {
@@ -806,8 +837,8 @@ public final class ConceptBranchService {
      * input never reaches the store.
      */
     public synchronized EditResult replaceDocument(String documentJson, long expectedRevision) {
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         long currentRevision = store.workingRevision();
         if (expectedRevision != currentRevision) {
@@ -861,8 +892,8 @@ public final class ConceptBranchService {
      * raw-save semantics (fresh epoch), never to silent reconstruction.
      */
     public synchronized EditResult restoreRevision(long revision) {
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         String document = store.workingHistoryContent(revision);
         if (document == null) {
@@ -955,8 +986,8 @@ public final class ConceptBranchService {
         if (!result.isCommitted()) {
             return editError(result.getDiagnostic());
         }
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         String documentHash = FileConceptStore.sha256(result.getDocumentJson());
         if (documentHash.equals(confirmedDocumentHash)) {
@@ -987,8 +1018,8 @@ public final class ConceptBranchService {
 
     /** Add one new EMPTY card under the parent path (empty parent = the concept root). */
     public synchronized EditResult addNode(List<String> parentNames, String name) {
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         String cardName = name == null ? "" : name.trim();
         if (cardName.isEmpty()) {
@@ -1112,8 +1143,8 @@ public final class ConceptBranchService {
      */
     public synchronized AddCardsResult addCards(List<String> parentNames, List<String> names,
                                                 String insertBeforeNodeId) {
-        if (failClosed) {
-            EditResult refused = failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            EditResult refused = failClosed ? failClosedError() : frozenError();
             return new AddCardsResult(false, -1L, java.util.Collections.<String>emptyList(),
                     java.util.Collections.<String>emptyList(), null, refused.getDiagnostic());
         }
@@ -1382,8 +1413,8 @@ public final class ConceptBranchService {
      */
     public synchronized MoveLeafResult moveLeaf(List<String> sourceNames,
                                                 List<String> targetParentNames) {
-        if (failClosed) {
-            return moveError(failClosedError().getDiagnostic());
+        if (failClosed || writeRefusal() != null) {
+            return moveError((failClosed ? failClosedError() : frozenError()).getDiagnostic());
         }
         String document = store.effectiveContent();
         StrictJsonParseResult parsed = StrictJsonParser.parse(document);
@@ -1564,8 +1595,8 @@ public final class ConceptBranchService {
 
     /** Remove the card at the name path with its whole subtree. Deliberately destructive. */
     public synchronized EditResult removeNodeAt(List<String> names) {
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         if (names == null || names.isEmpty()) {
             return editError(JsonTreeDiagnostic.of(JsonTreeErrorCode.BRANCH_GRAFT_FAILED,
@@ -1599,8 +1630,8 @@ public final class ConceptBranchService {
      * make name-chain addressing ambiguous).
      */
     public synchronized EditResult renameNode(List<String> names, String newName) {
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         String cardName = newName == null ? "" : newName.trim();
         if (cardName.isEmpty()) {
@@ -1648,8 +1679,8 @@ public final class ConceptBranchService {
      * replacement against the blacklist before it gets here.
      */
     public synchronized EditResult rewriteTerminalBranch(List<String> names, List<String> leaves) {
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         Located located = locateForEdit(names);
         if (located.error != null) {
@@ -1691,8 +1722,8 @@ public final class ConceptBranchService {
      * remain host-authorized paths ({@code removeNodeAt} via the concept-conflict resolution).
      */
     public synchronized EditResult deleteTerminalBranch(List<String> names) {
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         Located located = locateForEdit(names);
         if (located.error != null) {
@@ -1824,8 +1855,8 @@ public final class ConceptBranchService {
      */
     private EditResult commitCandidate(JsonElement candidate, ConceptIdentity identityAfter,
                                        String boundaryReason) {
-        if (failClosed) {
-            return failClosedError();
+        if (failClosed || writeRefusal() != null) {
+            return failClosed ? failClosedError() : frozenError();
         }
         String candidateJson = GSON.toJson(candidate);
         JsonTreeParseResult validated = JsonTreeParser.parse(candidateJson);
@@ -1880,6 +1911,9 @@ public final class ConceptBranchService {
 
     /** DELIBERATELY destructive: removes the addressed node with its whole subtree. */
     public synchronized EditResult removeBranch(String handleId) {
+        if (writeRefusal() != null) {
+            return frozenError();
+        }
         Handle handle = handles.get(handleId);
         if (handle == null) {
             return editError(unknownHandle(handleId));

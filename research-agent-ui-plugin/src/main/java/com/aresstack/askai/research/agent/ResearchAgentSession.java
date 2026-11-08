@@ -1378,6 +1378,18 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private void wireTransitionEngine(
             final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources) {
         com.aresstack.askai.research.transition.TransitionEngine engine = resources.transitions();
+        // PR 07: the concept freeze — gate, Phase-1 record and the one Phase-1 write guard (D4)
+        bookManifest = new com.aresstack.askai.research.book.BookManifest(
+                resources.getProjectContext().getProjectDirectory());
+        engine.addHook(new com.aresstack.askai.research.book.ConceptFreezeHook(phase1Source(), bookManifest));
+        com.aresstack.askai.research.concept.ConceptBranchService concept = resources.conceptBranchService();
+        if (concept != null) {
+            concept.setWriteGuard(new com.aresstack.askai.research.concept.ConceptBranchService.WriteGuard() {
+                public String refusal() {
+                    return conceptWriteRefusal();
+                }
+            });
+        }
         engine.addHook(new com.aresstack.askai.research.transition.PhaseTransitionHook() {
             public java.util.List<String> effects(
                     com.aresstack.askai.research.transition.PhaseTransition transition) {
@@ -1427,7 +1439,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             return; // written once per transition id, also across a recovery re-run
                         }
                         String id = "phase-divider-" + transition.getId();
-                        sink.appendInfoMessage(id, phaseDividerText(transition));
+                        sink.appendInfoMessage(id, phaseDividerText(transition)
+                                + conceptRevisionSuffix(transition));
                         journal.attribute(id, transition.getTo().getPhaseId());
                         journal.markShown(key);
                         persistJournalNow();
@@ -1473,6 +1486,227 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 });
             }
         });
+    }
+
+    // ------------------------------------------------------------------ PR 07: concept freeze
+
+    /** The book manifest of this productive session ({@code null} in fake mode). */
+    private volatile com.aresstack.askai.research.book.BookManifest bookManifest;
+
+    private com.aresstack.askai.research.book.Phase1Source phase1Source() {
+        return new com.aresstack.askai.research.book.Phase1Source() {
+            public com.aresstack.askai.research.store.FileConceptStore conceptStore() {
+                com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+                return service == null ? null : service.store();
+            }
+
+            public String mission() {
+                return currentScopeDraft().getMission();
+            }
+
+            public String deliverable() {
+                return describeDeliverable(currentScopeDraft().getDeliverable());
+            }
+
+            public String language() {
+                return sessionLanguage.currentLanguage().getCode();
+            }
+
+            public java.util.List<String> blacklist() {
+                return currentBlacklistTerms();
+            }
+        };
+    }
+
+    static String describeDeliverable(com.aresstack.askai.research.domain.scope.ResearchDeliverable deliverable) {
+        if (deliverable == null || !deliverable.hasTargetLength()) {
+            return "";
+        }
+        String unit = deliverable.getLengthUnit().name().toLowerCase(java.util.Locale.ROOT);
+        int min = deliverable.getTargetLengthMin();
+        int max = deliverable.getTargetLengthMax();
+        if (min > 0 && max > 0 && min != max) {
+            return min + "-" + max + " " + unit;
+        }
+        return Math.max(min, max) + " " + unit;
+    }
+
+    /** The book manifest, or {@code null} in fake mode. */
+    public com.aresstack.askai.research.book.BookManifest bookManifest() {
+        return bookManifest;
+    }
+
+    /**
+     * The effective frozen concept (D4) — the only way later phases see Phase 1: the approved revision minus
+     * the recorded blacklist, with mission, deliverable and language from the Phase-1 record.
+     * @return {@code null} before the first committed {@code SUBMIT_SCOPE} or in fake mode
+     */
+    public com.aresstack.askai.research.book.FrozenConcept frozenConcept()
+            throws com.aresstack.askai.research.transition.CorruptProjectFileException {
+        com.aresstack.askai.research.book.BookManifest manifest = bookManifest;
+        com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+        if (manifest == null || service == null || productiveResources == null) {
+            return null;
+        }
+        final com.aresstack.askai.research.transition.TransitionEngine engine = productiveResources.transitions();
+        return com.aresstack.askai.research.book.FrozenConcept.read(manifest, service.store(),
+                new com.aresstack.askai.research.book.BookManifest.CommitCheck() {
+                    public boolean isCommitted(String transitionId) {
+                        return engine.isCommitted(transitionId);
+                    }
+                });
+    }
+
+    /** The approved revision of the valid Phase-1 record, or 0. */
+    private int frozenConceptRevision() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            return frozen == null ? 0 : frozen.getRevision();
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return 0;
+        }
+    }
+
+    /**
+     * The one Phase-1 write guard (D4): {@code null} while the concept and the mission may change
+     * ({@code scoping/running}, the rule of {@code ResearchToolPolicy.writable}), otherwise the Concept
+     * tab's message of the D4 table. Fake mode has no guard.
+     */
+    public String conceptWriteRefusal() {
+        if (productiveResources == null) {
+            return null;
+        }
+        com.aresstack.askai.research.state.oo.ResearchStateMemento memento = productiveResources.currentState();
+        if (com.aresstack.askai.research.mcp.ResearchToolPolicy.writable(memento.getPhaseId(),
+                memento.getStateId(), com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING)) {
+            return null;
+        }
+        return conceptModeMessage(memento);
+    }
+
+    /** The Concept tab's read-only message of the D4 table; "" while it is editable. */
+    public String conceptModeMessage() {
+        String refusal = conceptWriteRefusal();
+        return refusal == null ? "" : refusal;
+    }
+
+    private String conceptModeMessage(com.aresstack.askai.research.state.oo.ResearchStateMemento memento) {
+        String stateId = memento.getStateId();
+        if (com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(memento.getPhaseId())) {
+            if (com.aresstack.askai.research.state.oo.ResearchStateIds.NEW.equals(stateId)) {
+                return "Send a first message to start.";
+            }
+            if (com.aresstack.askai.research.state.oo.ResearchStateIds.WAITING.equals(stateId)) {
+                return "Starting Concept...";
+            }
+            return "Concept is " + stateId + ". Resume it to change the concept.";
+        }
+        int revision = frozenConceptRevision();
+        return revision > 0
+                ? "Frozen at revision " + revision + ". Reopen Concept to change it."
+                : "The concept is frozen. Reopen Concept to change it.";
+    }
+
+    /**
+     * The scope side of the write guard (D4, Q2): outside {@code scoping/running} only plain blacklist
+     * entries pass. A new entry that equals a frozen concept card is refused with the hint to reopen
+     * Concept; an entry recorded with the concept cannot be removed (it stays the Phase-1 record).
+     */
+    private String scopeWriteRefusal(com.aresstack.askai.research.domain.scope.ScopePatch patch,
+                                     java.util.List<com.aresstack.askai.research.domain.scope
+                                             .UnresolvedScopeIssue> issues) {
+        String frozen = conceptWriteRefusal();
+        if (frozen == null) {
+            return null;
+        }
+        if (issues != null && !issues.isEmpty()) {
+            return frozen;
+        }
+        if (patch == null || patch.isEmpty()) {
+            return null;
+        }
+        com.aresstack.askai.research.book.FrozenConcept concept = null;
+        try {
+            concept = frozenConcept();
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return corrupt.getMessage();
+        }
+        for (com.aresstack.askai.research.domain.scope.ScopePatchOperation operation : patch.getOperations()) {
+            String kind = operation.kind();
+            String value = operation.describe().substring(Math.min(operation.describe().length(),
+                    kind.length())).trim();
+            if ("addExclusion".equals(kind)) {
+                if (concept != null && containsIgnoreCase(concept.cardNames(), value)) {
+                    return "\"" + value + "\" is a card of the frozen concept. Reopen Concept to exclude it.";
+                }
+            } else if ("removeExclusion".equals(kind)) {
+                if (concept != null && containsIgnoreCase(concept.getPin().getBlacklist(), value)) {
+                    return "\"" + value + "\" was recorded with the approved concept. Reopen Concept to "
+                            + "remove it.";
+                }
+            } else {
+                return frozen;
+            }
+        }
+        return null;
+    }
+
+    private static boolean containsIgnoreCase(java.util.Collection<String> values, String value) {
+        for (String candidate : values) {
+            if (candidate.trim().equalsIgnoreCase(value.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The divider's note of the concept revision a {@code SUBMIT_SCOPE} froze. */
+    private String conceptRevisionSuffix(com.aresstack.askai.research.transition.PhaseTransition transition) {
+        if (transition.getCommand() != ResearchCommandType.SUBMIT_SCOPE || bookManifest == null) {
+            return "";
+        }
+        try {
+            com.aresstack.askai.research.book.ConceptPin pin = bookManifest.conceptPinOf(transition.getId());
+            if (pin == null) {
+                return "";
+            }
+            return " (concept revision " + pin.getApprovedRevision()
+                    + (pin.isNewRevision() ? "" : ", unchanged") + ")";
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return "";
+        }
+    }
+
+    /** The mission shown above the concept tree ("" when none is recorded yet). */
+    public String currentMission() {
+        return currentScopeDraft().getMission();
+    }
+
+    /**
+     * The user's mission edit from the Concept tab's mission row; refused outside {@code scoping/running}.
+     * @return {@code null} when saved (or unchanged), otherwise the reason
+     */
+    public String editMission(String text) {
+        String mission = text == null ? "" : text.trim();
+        com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();
+        if (coordinator == null) {
+            return "No project is open; the mission is not stored.";
+        }
+        if (mission.equals(coordinator.current().getMission())) {
+            return null;
+        }
+        com.aresstack.askai.research.scope.ScopeUpdateResult result = coordinator.apply(
+                new com.aresstack.askai.research.domain.scope.ScopePatch(java.util.Collections.singletonList(
+                        com.aresstack.askai.research.domain.scope.ScopePatchOperations.setMission(mission))),
+                java.util.Collections.<com.aresstack.askai.research.domain.scope.UnresolvedScopeIssue>emptyList());
+        if (result.getStatus() == com.aresstack.askai.research.scope.ScopeUpdateResult.Status.REJECTED) {
+            return result.getReason();
+        }
+        if (result.isApplied()) {
+            publishScopeFence();
+            fireStateChanged();
+        }
+        return null;
     }
 
     /** The persisted phase divider, e.g. "Phase 3: Outline, started by you". */
@@ -1734,26 +1968,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             surfaceScopingApprovalProblem(blocker);
             return blocker;
         }
-        // 1) Persist/approve the brief artifact when there IS one. It is a by-product of the conversation,
-        // not a precondition: an empty brief must never stop the user from leaving scoping.
-        if (hasNonBlankBrief()) {
-            com.aresstack.askai.research.store.FileResearchBriefStore store = researchBriefStore();
-            try {
-                scopeApproveDiag("approveResult="
-                        + store.approveCurrent(System.currentTimeMillis()).getStatus());
-            } catch (RuntimeException approvalFailed) {
-                scopeApproveDiag("approveResult=FAILED " + approvalFailed.getClass().getSimpleName());
-                surfaceScopingApprovalProblem(ScopingApprovalOutcome.APPROVAL_FAILED);
-                return ScopingApprovalOutcome.APPROVAL_FAILED;
-            }
-        } else {
-            scopeApproveDiag("approveResult=SKIPPED (no brief yet — not a precondition)");
-        }
         scopeApproveDiag("before=" + snapshot.getPhaseId() + "/" + snapshot.getStateId());
-        // 2) Only now the single, explicit transition — never autoAdvanceTowardsResearch(): exactly one step.
-        boolean accepted = dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted();
-        scopeApproveDiag("dispatch accepted=" + accepted);
-        if (!accepted) {
+        // PR 07: the single, explicit transition. The concept approval and the Phase-1 record are the
+        // transition's own record (ConceptFreezeHook); a failed approval refuses the transition.
+        com.aresstack.askai.research.backend.ResearchCommandDispatchResult dispatched =
+                dispatch(ResearchCommandType.SUBMIT_SCOPE, null);
+        scopeApproveDiag("dispatch accepted=" + dispatched.isAccepted());
+        if (!dispatched.isAccepted()) {
+            lastScopingRefusal = dispatched.getDetail();
             surfaceScopingApprovalProblem(ScopingApprovalOutcome.TRANSITION_REJECTED);
             return ScopingApprovalOutcome.TRANSITION_REJECTED;
         }
@@ -2187,11 +2409,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 || !currentAllowedCommands().contains(ResearchCommandType.SUBMIT_SCOPE)) {
             return ScopingApprovalOutcome.WRONG_PHASE;
         }
-        // NO content gate. The user owns the state machine: when the state machine allows SUBMIT_SCOPE, the
-        // user may submit — on the very first turn and with a vague or half-finished scope. The old check
-        // required a non-blank research BRIEF ("Es liegt noch keine Fragestellung vor"), which is doubly
-        // wrong now: the scope is a ResearchScopeDraft, not a single question, and an assistant's opinion
-        // about completeness may advise but never block. Readiness, if it ever exists, stays advisory.
+        // PR 07 (Q24): exactly two STRUCTURAL content cases block — a concept without first-level cards
+        // and an empty mission. An assistant's opinion about completeness still never blocks.
+        String structural = com.aresstack.askai.research.book.ConceptFreezeHook.submitBlocker(phase1Source());
+        if (structural != null) {
+            lastScopingRefusal = structural;
+            return ScopingApprovalOutcome.CONCEPT_INCOMPLETE;
+        }
         return null; // ready
     }
 
@@ -2213,32 +2437,37 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
     }
 
-    private static String scopingApprovalProblemText(ScopingApprovalOutcome outcome) {
+    /** The last structural or hook refusal of submit-scope, shown with CONCEPT_INCOMPLETE/TRANSITION_REJECTED. */
+    private volatile String lastScopingRefusal = "";
+
+    private String scopingApprovalProblemText(ScopingApprovalOutcome outcome) {
         String reason;
         switch (outcome) {
             case BUSY:
-                reason = "Es läuft gerade eine Agent-Antwort. Bitte einen Moment warten.";
+                reason = "The assistant is still answering. Wait a moment.";
                 break;
             case MISSING_BRIEF:
-                reason = "Es liegt noch keine Fragestellung vor.";
+                reason = "There is no research question yet.";
                 break;
             case WRONG_PHASE:
-                reason = "In dieser Phase ist der Wechsel nicht möglich.";
+                reason = "Concept cannot be submitted in this phase.";
                 break;
             case APPROVAL_FAILED:
-                reason = "Der Brief konnte nicht gespeichert werden.";
+                reason = "The concept could not be approved.";
                 break;
+            case CONCEPT_INCOMPLETE:
             case TRANSITION_REJECTED:
-                reason = "Phasenwechsel wurde abgelehnt.";
+                reason = lastScopingRefusal == null || lastScopingRefusal.isEmpty()
+                        ? "The phase change was refused." : lastScopingRefusal;
                 break;
             case SESSION_INACTIVE:
-                reason = "Die Sitzung ist nicht aktiv.";
+                reason = "The session is not active.";
                 break;
             default:
-                reason = "Unbekannter Grund.";
+                reason = "Unknown reason.";
                 break;
         }
-        return "Fragestellung konnte nicht freigegeben werden: " + reason;
+        return "Concept not submitted: " + reason;
     }
 
     /** Compact, non-sensitive trace of the scoping-approval click path (runWithDevPlugins console). */
@@ -3346,6 +3575,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (scopeCoordinator == null && productiveResources != null) {
             scopeCoordinator = new com.aresstack.askai.research.scope.ResearchScopeCoordinator(
                     productiveResources.getProjectContext().getScopeDraftStore());
+            scopeCoordinator.setWriteGuard(new com.aresstack.askai.research.scope.ResearchScopeCoordinator
+                    .WriteGuard() {
+                public String refusal(com.aresstack.askai.research.domain.scope.ScopePatch patch,
+                                      java.util.List<com.aresstack.askai.research.domain.scope
+                                              .UnresolvedScopeIssue> issues) {
+                    return scopeWriteRefusal(patch, issues);
+                }
+            });
         }
         return scopeCoordinator;
     }

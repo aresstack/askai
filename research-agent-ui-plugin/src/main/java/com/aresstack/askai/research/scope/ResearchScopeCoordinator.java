@@ -41,6 +41,20 @@ public final class ResearchScopeCoordinator {
         }
     }
 
+    /**
+     * The Phase-1 write guard (PR 07, D4): {@code null} lets a patch pass, otherwise the reason it is refused.
+     * Outside {@code scoping/running} only the blacklist edits of Q2 may pass.
+     */
+    public interface WriteGuard {
+        String refusal(ScopePatch patch, List<UnresolvedScopeIssue> issues);
+    }
+
+    private volatile WriteGuard writeGuard;
+
+    public void setWriteGuard(WriteGuard guard) {
+        this.writeGuard = guard;
+    }
+
     /** False when the persisted draft could not be read; scoping must then be repaired, not overwritten. */
     public boolean isUsable() {
         return draft != null;
@@ -78,6 +92,11 @@ public final class ResearchScopeCoordinator {
         if (draft == null) {
             return ScopeUpdateResult.rejected(ResearchScopeDraft.empty(),
                     "the persisted scope draft is unusable (" + unusableReason + ")");
+        }
+        WriteGuard guard = writeGuard;
+        String refusal = guard == null ? null : guard.refusal(patch, issues);
+        if (refusal != null) {
+            return ScopeUpdateResult.rejected(draft, refusal);
         }
         boolean changed = patch != null && !patch.isEmpty();
         // The revision is NOT decided here: the store owns the counter, so the builder is left untouched

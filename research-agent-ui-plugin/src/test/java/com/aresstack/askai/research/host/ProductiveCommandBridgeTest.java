@@ -155,6 +155,7 @@ public class ProductiveCommandBridgeTest {
         assertEquals("a plain turn commits no scope", ResearchStateIds.SCOPING,
                 fx.resources.currentState().getPhaseId());
 
+        ConceptTestSupport.makeSubmittable(fx.session);
         // Only the HOST executing a VALIDATED agent proposal commits the scope. C5: no outline gate —
         // the commit auto-advances straight into RESEARCH/running and submits the stored question.
         fx.session.onEvent(ResearchBackendEvent.builder(
@@ -185,6 +186,7 @@ public class ProductiveCommandBridgeTest {
                 .text("How does pf4j isolate plugins?")
                 .messages("", "class isolation\nversioning")
                 .build();
+        ConceptTestSupport.makeSubmittable(fx.session);
         fx.session.onEvent(proposal);
 
         // C5: the committed scope auto-advances into RESEARCH/running and submits the stored question —
@@ -231,6 +233,7 @@ public class ProductiveCommandBridgeTest {
     public void aScopeProposalOutsideScopingIsDroppedNotExecuted() {
         Fx fx = new Fx();
         assertTrue(fx.session.dispatch(ResearchCommandType.START, null).isAccepted());
+        ConceptTestSupport.makeSubmittable(fx.session);
         assertTrue(fx.session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted());
         // Now past SCOPING (in OUTLINE): a late scope proposal must be dropped, never re-committed.
         assertFalse(ResearchStateIds.SCOPING.equals(fx.resources.currentState().getPhaseId()));

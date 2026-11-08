@@ -353,6 +353,22 @@ public final class FileConceptStore {
         }
     }
 
+    /** An approval together with the working revision it froze, read under one lock. */
+    public static final class FrozenApproval {
+        public final Approval approval;
+        public final long workingRevision;
+
+        FrozenApproval(Approval approval, long workingRevision) {
+            this.approval = approval;
+            this.workingRevision = workingRevision;
+        }
+    }
+
+    /** Approve and read the working revision atomically, so no commit can slip in between (PR 07). */
+    public synchronized FrozenApproval approveCurrentFrozen(long nowMillis) {
+        return new FrozenApproval(approveCurrent(nowMillis), workingRevision());
+    }
+
     /** Freeze the current effective document as the next immutable approved revision. */
     public synchronized Approval approveCurrent(long nowMillis) {
         String content = effectiveContent();
@@ -385,6 +401,23 @@ public final class FileConceptStore {
         } catch (IOException unreadable) {
             return null;
         }
+    }
+
+    /** The approved document of {@code number}, or {@code null} when there is none. */
+    public synchronized String approvedContent(int number) {
+        if (number <= 0 || !revisionJson(number).isFile()) {
+            return null;
+        }
+        try {
+            return StoreIo.readUtf8(revisionJson(number));
+        } catch (IOException unreadable) {
+            return null;
+        }
+    }
+
+    /** The content hash recorded with approved revision {@code number} ("" when unknown). */
+    public synchronized String approvedHash(int number) {
+        return revisionProps(number).getProperty("contentHash", "");
     }
 
     public synchronized int latestApprovedNumber() {
