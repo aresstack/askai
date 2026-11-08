@@ -86,4 +86,22 @@ public class BookManifestTest {
         assertTrue(!effective.contains("Applets"));
         assertEquals(Arrays.asList("Tasks", "Applets"), FrozenConcept.firstLevelCards(document));
     }
+
+    /** Plan PR 16: later phases see this read-only summary of the effective frozen concept. */
+    @Test
+    public void theSummaryShowsMissionDeliverableEffectiveCardsAndTheRecordedBlacklist() {
+        String document = "{\"title\":\"\",\"concept\":[{\"Tasks\":[{\"Applets\":[]},\"Timers\"],"
+                + "\"Scheduling\":[]}]}";
+        ConceptPin pin = new ConceptPin("t-1", 3, true, "hash", 7L, 0L, "Write a guide to tasks",
+                "A short book", "en", Arrays.asList("Applets"));
+        String summary = FrozenConcept.of(pin, document).summary();
+        assertEquals("Approved concept revision 3\n"
+                + "Mission: Write a guide to tasks\n"
+                + "Deliverable: A short book\n"
+                + "Cards:\n"
+                + "- Tasks\n"
+                + "  - Timers\n"
+                + "- Scheduling\n"
+                + "Recorded blacklist: Applets\n", summary);
+    }
 }

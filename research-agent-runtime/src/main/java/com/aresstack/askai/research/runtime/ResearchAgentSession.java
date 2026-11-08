@@ -289,6 +289,21 @@ public final class ResearchAgentSession {
                             public String rendered() {
                                 return scopeFence.rendered();
                             }
+                        }).withCurrentConceptSummary(
+                        new com.aresstack.askai.research.runtime.team.PhaseContextAssembler
+                                .CurrentConceptSummary() {
+                            public String rendered() {
+                                // Plan PR 16: later phases see the frozen concept read-only, never
+                                // the live concept with its edit rules. Best effort, like the concept.
+                                return hostBlock("concept_summary", "No approved concept.");
+                            }
+                        }).withCurrentChangeRequest(
+                        new com.aresstack.askai.research.runtime.team.PhaseContextAssembler
+                                .CurrentChangeRequest() {
+                            public String forPhase(String phaseId) {
+                                // The host answers for its live phase, which is the turn's phase.
+                                return hostBlock("phase_change_request", "No change request.");
+                            }
                         }));
         // Konzeptpapier loop budgets (host env hand-off): tool rounds ≠ repair attempts — one is the
         // WORK budget, the other the ERROR tolerance; both are settings, never hidden constants.
@@ -1656,17 +1671,18 @@ public final class ResearchAgentSession {
             ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.log("status: " + raw));
             com.aresstack.askai.research.runtime.team.TeamAgentStateView view =
                     com.aresstack.askai.research.runtime.team.ResearchStatusView.parse(raw);
-            // Best-effort: give the agent the ACCEPTED sources (from source_list) so it can actually reference
-            // them instead of asking the user to re-describe what a web search just found. Never fatal.
+            // Best-effort: give the agent the bounded source overview (plan PR 16: counts per status and the
+            // ten newest titles, never every source) so it can reference what a web search just found
+            // instead of asking the user to re-describe it. Never fatal.
             try {
-                String sources = researchCall("source_list", Collections.<String, Object>emptyMap());
+                String sources = researchCall("source_overview", Collections.<String, Object>emptyMap());
                 if (sources != null && !sources.trim().isEmpty()
                         && !"No sources.".equals(sources.trim())) {
                     view = view.withSources(sources);
                 }
             } catch (RuntimeException sourcesUnavailable) {
                 ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                        .log("source_list unavailable: " + sourcesUnavailable.getMessage()));
+                        .log("source_overview unavailable: " + sourcesUnavailable.getMessage()));
             }
             return view;
         } catch (RuntimeException ex) {
@@ -1705,6 +1721,11 @@ public final class ResearchAgentSession {
             final AgentOutput ctx,
             final com.aresstack.askai.research.runtime.team.TeamAgentStateView view,
             String text) {
+        if (!com.aresstack.askai.research.runtime.team.PhaseActionUnion.conceptEditing(view.getPhaseId())) {
+            // Plan PR 16: the concept move path and the concept edit rules are Concept-only. "Move this
+            // paragraph to chapter 2" in Document is a plain turn of the Document assistant.
+            return teamAgent.respond(text, view);
+        }
         if (conceptToolsAvailable
                 && com.aresstack.askai.research.runtime.team.ConceptTurnPolicy.modeFor(text)
                         == com.aresstack.askai.research.runtime.team.ConceptTurnPolicy.Mode
@@ -1767,6 +1788,19 @@ public final class ResearchAgentSession {
         }
         return runConceptToolRounds(ctx, teamAgent.respond(text, view), view, text,
                 false, null);
+    }
+
+    /** One read-only host block for the turn context; "" when the host has none or is unreachable. */
+    private String hostBlock(String tool, String noneAnswer) {
+        try {
+            String text = researchCall(tool, Collections.<String, Object>emptyMap());
+            if (text == null || text.trim().isEmpty() || noneAnswer.equals(text.trim())) {
+                return "";
+            }
+            return text.trim();
+        } catch (RuntimeException unavailable) {
+            return "";
+        }
     }
 
     private static void conceptLog(AgentOutput ctx, String message) {
@@ -1865,12 +1899,13 @@ public final class ResearchAgentSession {
                 }
                 break;
             case ADD:
-                // Legacy transcripts only — the loop refuses model ADDs before this funnel.
-                toolName = "concept_add";
+                // Legacy transcripts only — the loop refuses model ADDs before this funnel. The host's
+                // single-card concept_add is gone (plan PR 16): one card travels as a one-name list.
+                toolName = "concept_add_cards";
                 if (!action.getParent().isEmpty()) {
                     args.put("parent_path_json", segmentsJson(action.getParent()));
                 }
-                args.put("name", action.getName());
+                args.put("names_json", segmentsJson(java.util.Collections.singletonList(action.getName())));
                 break;
             case ADD_CARDS:
                 // The atomic list capture: ALL user-named areas in one call, one revision.

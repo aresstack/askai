@@ -45,7 +45,7 @@ tables here together with the Ollama version and the server settings of 5.3.
 | 4 | `load_duration` for every switch between gemma4:e2b, llama3.1:8b and gpt-oss:20b | `ModelProtocolLiveTest` (two rounds through all models) | open |
 | 5 | How the chat template renders several, and non-leading, system messages | manual: `ollama show --template` per model and one request with two system messages; not automated in this PR | open |
 | 6 | Phase-1 live gate on gemma4:e2b (N = 10) and the four open checks of roadmap AP 1 | the existing live gate run (`research-benchmark` baseline subject); its result is recorded here | open |
-| 7 | Retrieval benchmark: Recall@5, Recall@10, MRR per group (DE→DE, DE→EN, EN→EN) and candidate; concept assignment of 50 labelled passages; embedding time per 100 passages; GPU memory; longest passage against the model's context; hit rate and "selects nothing" per ranking strategy | `RetrievalBenchmarkLiveTest`; needs the owner's 24 queries in `research-benchmark/src/test/resources/benchmark/retrieval/retrieval-queries.json` and the local corpus of about 300 passages (`corpus.jsonl`) plus 20 search results per query (`serp/<queryId>.json`) | open: topic chosen (Java-Modulsystem, Classloader und Plugin-Isolation, 2026-11-08); 24 queries, 8 concept nodes and 50 labels checked in for review; corpus captured on the owner's machine; the 20 search results per query are still missing, so the ranking part reports them as missing |
+| 7 | Retrieval benchmark: Recall@5, Recall@10, MRR per group (DE→DE, DE→EN, EN→EN) and candidate; concept assignment of 50 labelled passages; embedding time per 100 passages; GPU memory; longest passage against the model's context; hit rate and "selects nothing" per ranking strategy | `RetrievalBenchmarkLiveTest`; needs the owner's 24 queries in `research-benchmark/src/test/resources/benchmark/retrieval/retrieval-queries.json` and the local corpus of about 300 passages (`corpus.jsonl`) plus 20 search results per query (`serp/<queryId>.json`) | open: topic chosen (Java-Modulsystem, Classloader und Plugin-Isolation, 2026-11-08); 24 queries, 8 concept nodes and 50 labels checked in for review; corpus captured on the owner's machine (731 passages); nomic-embed-text measured, other candidates open; the 20 search results per query are still missing, so the ranking part reports them as missing |
 | 8 | One multilingual cross-encoder (`bge-reranker-v2-m3`) on the queries of item 7, with a reference implementation outside AskAI | outside AskAI by design (the plan forbids a new engine without measured need); score with the same query file and compare with the table of item 7 | open |
 | 9 | Does the installed Ollama honour `truncate=false` on chat and embedding calls? | `ModelProtocolLiveTest` (an overlong prompt must fail with an HTTP error) | open |
 
@@ -60,13 +60,19 @@ runtime's E5 models get `input_type=query`/`passage`.
 
 | Candidate | DE→DE R@5 / R@10 / MRR | DE→EN R@5 / R@10 / MRR | EN→EN R@5 / R@10 / MRR | Concept assignment (of 50) | ms / 100 passages | GPU MiB | Longest passage / context |
 |---|---|---|---|---|---|---|---|
-| nomic-embed-text (raw, before PR 04) | open | open | open | open | open | open | open |
-| nomic-embed-text (nomic-v1) | open | open | open | open | open | open | open |
+| nomic-embed-text (raw, before PR 04) | – / – / 0.460 | – / – / 0.017 | – / – / 0.650 | 19 | 1073 | 2306 | open |
+| nomic-embed-text (nomic-v1) | – / – / 0.626 | – / 1 of 8 / 0.029 | – / – / 0.766 | 18 | 1087 | 2306 | open |
 | nomic-embed-text-v2-moe (nomic-v1) | open | open | open | open | open | open | open |
 | bge-m3 (raw: no known scheme) | open | open | open | open | open | open | open |
 | embeddinggemma (embeddinggemma-v1) | open | open | open | open | open | open | open |
 | snowflake-arctic-embed2 (arctic-v1) | open | open | open | open | open | open | open |
 | granite-embedding:278m (raw: no known scheme) | open | open | open | open | open | open | open |
+
+First GPU run (2026-11-08, owner's RTX 5080, Ollama 0.40.13, develop with #119): 19/19 sources, 731 passages,
+50/50 labels. Only `nomic-embed-text` was installed, so the other rows are still open. "–" means the value is in
+the owner's local report but was not passed on. Finding: the prompt scheme clearly helps (MRR DE→DE +0.17,
+EN→EN +0.12), but DE→EN (1 of 8 targets in the top 10) and concept assignment (36 %) are too weak to fix
+`nomic-embed-text` as the multilingual preset. PR 12 waits for the comparison with the other candidates.
 
 Ranking of planned queries (target in the visited top N):
 
