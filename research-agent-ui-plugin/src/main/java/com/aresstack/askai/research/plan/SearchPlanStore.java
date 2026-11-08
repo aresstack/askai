@@ -28,6 +28,26 @@ public final class SearchPlanStore {
         this.recordFile = new File(new File(projectDirectory, "search-plan"), "plan.json");
     }
 
+    /** Plan PR 14: written before the plan build starts, removed once the plan is stored (crash recovery). */
+    public File buildPendingFile() {
+        return new File(recordFile.getParentFile(), "build-pending");
+    }
+
+    public synchronized void markBuildPending() throws IOException {
+        AtomicFiles.write(buildPendingFile(), "pending\n");
+    }
+
+    public synchronized void clearBuildPending() {
+        File marker = buildPendingFile();
+        if (marker.isFile() && !marker.delete()) {
+            System.err.println("[search-plan] could not remove " + marker);
+        }
+    }
+
+    public synchronized boolean isBuildPending() {
+        return buildPendingFile().isFile();
+    }
+
     public File recordFile() {
         return recordFile;
     }

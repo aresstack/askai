@@ -210,7 +210,7 @@ public final class SearchPlanQueue {
     /** Another acquisition ended: the queue may start its next entry. */
     public void kick() {
         synchronized (this) {
-            if (!running || current != null) {
+            if (current != null || (!running && deferred.isEmpty())) {
                 return;
             }
         }
@@ -223,7 +223,7 @@ public final class SearchPlanQueue {
      */
     public boolean deferUntilEntryEnds(Runnable work) {
         synchronized (this) {
-            if (current != null) {
+            if (current != null || !deferred.isEmpty()) {
                 deferred.add(work);
                 return true;
             }
@@ -237,7 +237,6 @@ public final class SearchPlanQueue {
         if (!"completed".equals(subKind) && !"failed".equals(subKind)) {
             return;
         }
-        List<Runnable> released;
         synchronized (this) {
             if (current == null || !requestId.equals(current.getRequestId())) {
                 return; // a late event of an entry that already ended
@@ -245,10 +244,11 @@ public final class SearchPlanQueue {
             long now = clock.now();
             SearchPlanEntry entry = current;
             try {
+                // sources accepted before a stop or a failure still count for coverage and caps
+                for (String sourceId : sources.acceptedBy(requestId)) {
+                    entry = entry.withSource(sourceId, now);
+                }
                 if ("completed".equals(subKind)) {
-                    for (String sourceId : sources.acceptedBy(requestId)) {
-                        entry = entry.withSource(sourceId, now);
-                    }
                     if (keywordFallback) {
                         entry = entry.withNote(KEYWORD_FALLBACK, now);
                     }
@@ -265,18 +265,29 @@ public final class SearchPlanQueue {
             }
             current = null;
             stopRequested = false;
-            released = new ArrayList<Runnable>(deferred);
-            deferred.clear();
         }
         listener.changed();
-        for (Runnable work : released) {
-            try {
-                work.run();
-            } catch (RuntimeException failed) {
-                System.err.println("[search-plan] deferred work failed: " + failed.getMessage());
-            }
-        }
         scheduleNext();
+    }
+
+    /**
+     * Release the oldest deferred acquisition, one at a time: the next one waits until this one made acquisition
+     * busy and ended again. @return {@code true} when one was released
+     */
+    private boolean releaseOneDeferred() {
+        Runnable work;
+        synchronized (this) {
+            if (current != null || deferred.isEmpty() || busy.busy()) {
+                return false;
+            }
+            work = deferred.remove(0);
+        }
+        try {
+            work.run();
+        } catch (RuntimeException failed) {
+            System.err.println("[search-plan] deferred work failed: " + failed.getMessage());
+        }
+        return true;
     }
 
     private void backToPending(SearchPlanEntry entry, long now) throws IOException, CorruptProjectFileException {
@@ -304,6 +315,9 @@ public final class SearchPlanQueue {
     }
 
     void dispatchNext() {
+        if (releaseOneDeferred()) {
+            return; // the released acquisition runs first; its end kicks the queue again
+        }
         Outcome outcome = null;
         synchronized (this) {
             if (!running || current != null || busy.busy()) {
@@ -488,8 +502,9 @@ public final class SearchPlanQueue {
                 || entry.getStatus() == SearchPlanEntry.Status.RUNNING) {
             return null;
         }
+        // an explicit re-run is the user's request: coverage and the node budget do not skip it
         SearchPlanEntry again = SearchPlanEntry.submit(newId(), entry.getPhase(), entry.getNodeId(),
-                entry.getNodeLabel(), entry.getQuery(), entry.getOrigin(), clock.now());
+                entry.getNodeLabel(), entry.getQuery(), SearchPlanEntry.Origin.USER, clock.now());
         store.save(again);
         List<String> order = new ArrayList<String>(record.getOrder());
         int at = order.indexOf(entryId);

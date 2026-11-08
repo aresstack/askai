@@ -126,7 +126,8 @@ public final class SearchPlanMerger {
 
     /**
      * "Search everything again": every active node gets one new pending entry per distinct query it ran before
-     * (base, variants and the user's own), in plan order. Done entries stay on record.
+     * (base, variants and the user's own), in plan order, as the user's entries (coverage does not skip them).
+     * Done entries stay on record.
      */
     public static Result searchAgain(SearchPlanRecord stored, Map<String, SearchPlanEntry> entries, IdSource ids,
                                      long nowMillis) {
@@ -147,7 +148,7 @@ public final class SearchPlanMerger {
                 continue;
             }
             SearchPlanEntry again = SearchPlanEntry.submit(ids.next(), entry.getPhase(), entry.getNodeId(),
-                    entry.getNodeLabel(), entry.getQuery(), entry.getOrigin(), nowMillis);
+                    entry.getNodeLabel(), entry.getQuery(), SearchPlanEntry.Origin.USER, nowMillis);
             changed.add(again);
             order.add(again.getId());
             added++;

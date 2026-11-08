@@ -211,6 +211,59 @@ public class SearchPlanQueueTest {
     }
 
     @Test
+    public void deferredAcquisitionsAreReleasedOneAtATime() throws Exception {
+        build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")),
+                Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.run();
+        final List<String> ran = new ArrayList<String>();
+        for (final String name : Arrays.asList("first", "second")) {
+            queue.deferUntilEntryEnds(new Runnable() {
+                public void run() {
+                    ran.add(name);
+                    busy = true;
+                }
+            });
+        }
+        port.complete(false);
+        assertEquals(Collections.singletonList("first"), ran);
+        busy = false;
+        queue.kick();
+        assertEquals(Arrays.asList("first", "second"), ran);
+        assertEquals(1, port.searched.size());
+        busy = false;
+        queue.kick();
+        assertEquals(2, port.searched.size());
+    }
+
+    @Test
+    public void sourcesAcceptedBeforeAStopStillCount() throws Exception {
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.run();
+        queue.stop();
+        sources.byRequest.put("req-1", Arrays.asList("s9"));
+        port.fail("CANCELLED");
+        SearchPlanEntry entry = queue.entriesInOrder().get(0);
+        assertEquals(SearchPlanEntry.Status.PENDING, entry.getStatus());
+        assertEquals(Collections.singletonList("s9"), entry.getAcceptedSourceIds());
+    }
+
+    @Test
+    public void anExplicitRerunOfACoveredNodeRuns() throws Exception {
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        sources.domains.put("s1", "one.example");
+        sources.domains.put("s2", "two.example");
+        sources.next = Arrays.asList("s1", "s2");
+        SearchPlanQueue queue = queue(caps(2, 4, 60));
+        queue.run();
+        port.complete(false);
+        assertNotNull(queue.rerun(queue.entriesInOrder().get(0).getId()));
+        queue.run();
+        assertEquals(2, port.searched.size());
+    }
+
+    @Test
     public void stopCancelsTheCurrentQueryAndLeavesItPending() throws Exception {
         build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
         SearchPlanQueue queue = queue(caps(3, 4, 60));

@@ -1819,16 +1819,29 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
         engine.registerEffect(EFFECT_SEARCH_PLAN, new com.aresstack.askai.research.transition.TransitionEffect() {
             public void run(com.aresstack.askai.research.transition.PhaseTransition transition) {
-                // the planner call may take minutes; it must not hold the effect worker (later transitions)
-                Thread build = new Thread(new Runnable() {
-                    public void run() {
-                        buildSearchPlan(store);
-                    }
-                }, "search-plan-build");
-                build.setDaemon(true);
-                build.start();
+                // the planner call may take minutes; it must not hold the effect worker (later transitions).
+                // The marker keeps the build recoverable: a session opened after a crash builds again.
+                try {
+                    store.markBuildPending();
+                } catch (java.io.IOException failed) {
+                    System.err.println("[search-plan] build marker not written: " + failed.getMessage());
+                }
+                startSearchPlanBuild(store);
             }
         });
+        if (store.isBuildPending()) {
+            startSearchPlanBuild(store); // the last build did not finish before the app ended
+        }
+    }
+
+    private void startSearchPlanBuild(final com.aresstack.askai.research.plan.SearchPlanStore store) {
+        Thread build = new Thread(new Runnable() {
+            public void run() {
+                buildSearchPlan(store);
+            }
+        }, "search-plan-build");
+        build.setDaemon(true);
+        build.start();
     }
 
     /**
@@ -1845,6 +1858,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return;
         }
         if (frozen == null) {
+            store.clearBuildPending(); // nothing to build from (no Phase-1 record)
             return;
         }
         java.util.List<String> blacklist = new java.util.ArrayList<String>(frozen.getPin().getBlacklist());
@@ -1868,6 +1882,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
                                     frozen.getRevision(), frozen.getLanguage(), bookTitle(frozen), nodes, blacklist),
                             queryPlanner, caps.getQueriesPerNode(), System.currentTimeMillis());
+            store.clearBuildPending();
             System.err.println("[search-plan] plan built: nodes=" + nodes.size() + " added=" + result.getAdded());
         } catch (java.io.IOException | com.aresstack.askai.research.transition.CorruptProjectFileException failed) {
             System.err.println("[search-plan] the plan could not be stored: " + failed.getMessage());
@@ -2523,6 +2538,18 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     private void applyManualSearch(ResearchBackendEvent event) {
+        try {
+            applyManualSearchEvent(event);
+        } finally {
+            // plan PR 14: resume the queue only after every busy field of this event is settled
+            com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
+            if (planQueue != null) {
+                planQueue.kick();
+            }
+        }
+    }
+
+    private void applyManualSearchEvent(ResearchBackendEvent event) {
         com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
         if (planQueue != null && planQueue.owns(event.getTechnicalDetail())) {
             // Plan PR 14: a planned query posts no chat line; the plan checklist shows its status.
