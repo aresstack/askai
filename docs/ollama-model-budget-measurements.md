@@ -121,6 +121,7 @@ best mean hit rate. The report prints the qualifying candidate; the fit is decid
 
 ## What PR 04 changed in the product
 
+- The retrieval benchmark is isolated: its corpus is cut by its own heading-bounded 40-160-word segmentation, not by the productive `PassageSegmentation`; a cross-check with the productive segmentation is a follow-up.
 - `EmbeddingPort` has roles: `embedDocuments`, `embedQueries` and `embedRaw` (the old `embed(texts)` is gone, so no
   call site keeps an implicit role). Passages and the sentence windows of the passage boundaries are documents; the
   scope fence (anchors, `scope_probe` terms, sweep probes, `SearchScopeGate` candidates) stays raw.

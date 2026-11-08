@@ -223,4 +223,21 @@ public class RetrievalBenchmarkTest {
         }
         assertTrue(passages.size() >= 4);
     }
+
+    @Test
+    public void twoLabelsOnOnePassageAreRejected() {
+        RetrievalBenchmarkData.QuerySet set = RetrievalBenchmarkData.parseQueries(JsonParser.parseString(
+                "{\"conceptNodes\":[{\"id\":\"n\",\"labelPath\":\"A\"}],\"labelledPassages\":["
+                        + "{\"source\":\"s\",\"terms\":[\"modul\"],\"nodeId\":\"n\"},"
+                        + "{\"source\":\"s\",\"terms\":[\"pfad\"],\"nodeId\":\"n\"}]}").getAsJsonObject());
+        java.util.Map<String, RetrievalBenchmarkData.Passage> corpus =
+                new java.util.LinkedHashMap<String, RetrievalBenchmarkData.Passage>();
+        corpus.put("s-p0", new RetrievalBenchmarkData.Passage("s-p0", "s", "de", "Modul und Pfad"));
+        try {
+            set.resolve(corpus);
+            fail("two labels on one passage must fail");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("labelled twice"));
+        }
+    }
 }

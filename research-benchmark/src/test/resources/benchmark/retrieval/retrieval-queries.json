@@ -59,7 +59,8 @@
       "text": "Wodurch wird eine geladene Klasse in der JVM eindeutig identifiziert?",
       "targetSource": "de-hauer-classloader",
       "targetTerms": [
-        "voll qualifizierten Namen"
+        "voll qualifizierten Namen",
+        "ClassLoader"
       ]
     },
     {
@@ -122,7 +123,7 @@
     {
       "id": "de-en-05",
       "group": "DE_EN",
-      "text": "Wie viel Speicher verbrauchen einzelne Classloader für 20 Plugins?",
+      "text": "Wie viel Speicher schätzt OmegaT für einzelne Classloader bei 20 Plugins?",
       "targetSource": "en-omegat-adr",
       "targetTerms": [
         "1MB",
@@ -209,7 +210,7 @@
     {
       "id": "en-en-06",
       "group": "EN_EN",
-      "text": "Which method does a custom class loader override?",
+      "text": "Which method does a custom class loader typically override?",
       "targetSource": "en-baeldung-classloaders",
       "targetTerms": [
         "findClass"

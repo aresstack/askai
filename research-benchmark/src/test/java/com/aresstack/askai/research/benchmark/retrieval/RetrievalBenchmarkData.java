@@ -182,12 +182,16 @@ public final class RetrievalBenchmarkData {
                 try {
                     String id = label.getKey().resolve(corpus, "label " + label.getKey().terms);
                     String previous = labels.put(id, label.getValue());
-                    if (previous != null && !previous.equals(label.getValue())) {
-                        problems.add("passage " + id + " is labelled " + previous + " and " + label.getValue());
+                    if (previous != null) {
+                        problems.add("passage " + id + " is labelled twice (" + previous + ", " + label.getValue()
+                                + ", terms " + label.getKey().terms + ")");
                     }
                 } catch (IllegalArgumentException missing) {
                     problems.add(missing.getMessage());
                 }
+            }
+            if (problems.isEmpty() && labels.size() != labelLocators.size()) {
+                problems.add(labelLocators.size() + " labels resolve to only " + labels.size() + " distinct passages");
             }
             if (!problems.isEmpty()) {
                 throw new IllegalArgumentException(problems.size() + " unresolved: " + String.join("; ", problems));

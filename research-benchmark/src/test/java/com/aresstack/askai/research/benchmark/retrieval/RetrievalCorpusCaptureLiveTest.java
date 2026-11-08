@@ -73,10 +73,15 @@ public class RetrievalCorpusCaptureLiveTest {
         if (!failed.isEmpty()) {
             throw new AssertionError("corpus incomplete, nothing written; not captured: " + failed);
         }
-        Files.write(new File(dir, "corpus.jsonl").toPath(), lines, StandardCharsets.UTF_8);
+        // Validate first (every target and 50 distinct labels), then replace corpus.jsonl atomically.
+        RetrievalBenchmarkData.loadQueries().resolve(corpus);
+        java.nio.file.Path target = new File(dir, "corpus.jsonl").toPath();
+        java.nio.file.Path temp = new File(dir, "corpus.jsonl.tmp").toPath();
+        Files.write(temp, lines, StandardCharsets.UTF_8);
+        Files.move(temp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
         System.out.println("[retrieval-corpus] " + corpus.size() + " passages written to corpus.jsonl");
-        RetrievalBenchmarkData.loadQueries().resolve(corpus); // throws with every target/label that does not match
-        System.out.println("[retrieval-corpus] all 24 targets and every label resolve");
+        System.out.println("[retrieval-corpus] all 24 targets and 50 distinct labels resolve");
     }
 
     private static String fetch(String url) throws Exception {

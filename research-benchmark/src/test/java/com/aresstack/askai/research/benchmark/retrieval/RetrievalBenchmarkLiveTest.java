@@ -101,12 +101,19 @@ public class RetrievalBenchmarkLiveTest {
             }
         }
 
-        // Ranking of planned queries: BM25, cross-encoder, embedding (current preset, prompted), RRF.
+        // Ranking of planned queries: BM25, cross-encoder, and embedding similarity and RRF with the current preset
+        // and with the candidate the rule of item 7 picks (when it is another model).
+        List<String> rankingModels = new ArrayList<String>();
+        rankingModels.add(candidates.get(0));
+        Run best = bestRun(runs);
+        if (best != null && !rankingModels.contains(best.model)) {
+            rankingModels.add(best.model);
+        }
         Map<String, Map<RetrievalBenchmarkData.Group, List<Integer>>> strategyRanks =
                 new LinkedHashMap<String, Map<RetrievalBenchmarkData.Group, List<Integer>>>();
         Map<String, Integer> nothing = new LinkedHashMap<String, Integer>();
         Map<String, Integer> failures = new LinkedHashMap<String, Integer>();
-        String rankingNote = rankPlannedQueries(probes, ollama, candidates.get(0), set, data, visitTopN,
+        String rankingNote = rankPlannedQueries(probes, ollama, rankingModels, set, data, visitTopN,
                 strategyRanks, nothing, failures);
 
         String report = report(probes.version(), set, runs, strategyRanks, nothing, failures, visitTopN,
@@ -207,7 +214,7 @@ public class RetrievalBenchmarkLiveTest {
         return ids;
     }
 
-    private static String rankPlannedQueries(ProtocolProbes probes, String ollama, String presetModel,
+    private static String rankPlannedQueries(ProtocolProbes probes, String ollama, List<String> embeddingModels,
                                              RetrievalBenchmarkData.QuerySet set, File data, int visitTopN,
                                              Map<String, Map<RetrievalBenchmarkData.Group, List<Integer>>> ranks,
                                              Map<String, Integer> nothing, Map<String, Integer> failures) {
@@ -230,10 +237,15 @@ public class RetrievalBenchmarkLiveTest {
                         model, RerankerScoreSemantics.RAW_LOGIT);
                 note.append("Cross-encoder: ").append(model).append(". ");
             }
-            int dimension = probes.embeddingDimension(presetModel);
-            EmbeddingPort port = new HttpEmbeddingPortAdapter(new EmbeddingEndpointDescriptor(presetModel, ollama,
-                    "/api/embed", dimension, "none", "", 600_000L), new UrlConnectionEmbeddingHttpTransport(600_000));
-            note.append("Embedding similarity and fusion use ").append(presetModel).append(". ");
+            Map<String, EmbeddingPort> ports = new LinkedHashMap<String, EmbeddingPort>();
+            for (String embeddingModel : embeddingModels) {
+                int dimension = probes.embeddingDimension(embeddingModel);
+                ports.put(embeddingModel, new HttpEmbeddingPortAdapter(new EmbeddingEndpointDescriptor(
+                        embeddingModel, ollama, "/api/embed", dimension, "none", "", 600_000L),
+                        new UrlConnectionEmbeddingHttpTransport(600_000)));
+            }
+            note.append("Embedding similarity and fusion run with ").append(String.join(" and ", ports.keySet()))
+                    .append(" (the current preset and the candidate the rule picks). ");
             CandidateReranker bm25 = new Bm25CandidateReranker();
             int missing = 0;
             for (RetrievalBenchmarkData.Query query : set.queries) {
@@ -244,12 +256,15 @@ public class RetrievalBenchmarkLiveTest {
                     continue;
                 }
                 RankingStrategies.Ranking lexical = RankingStrategies.byReranker(bm25, query.text, results.results);
-                RankingStrategies.Ranking embedding = RankingStrategies.byEmbedding(port, query.text,
-                        results.results);
                 record(ranks, nothing, failures, "BM25", query, lexical, results.targetResultId);
-                record(ranks, nothing, failures, "Embedding similarity", query, embedding, results.targetResultId);
-                record(ranks, nothing, failures, "BM25 + embedding (RRF)", query,
-                        RankingStrategies.byFusion(lexical, embedding), results.targetResultId);
+                for (Map.Entry<String, EmbeddingPort> port : ports.entrySet()) {
+                    RankingStrategies.Ranking embedding = RankingStrategies.byEmbedding(port.getValue(), query.text,
+                            results.results);
+                    record(ranks, nothing, failures, "Embedding similarity (" + port.getKey() + ")", query,
+                            embedding, results.targetResultId);
+                    record(ranks, nothing, failures, "BM25 + embedding RRF (" + port.getKey() + ")", query,
+                            RankingStrategies.byFusion(lexical, embedding), results.targetResultId);
+                }
                 if (crossEncoder != null) {
                     record(ranks, nothing, failures, "Cross-encoder", query,
                             RankingStrategies.byReranker(crossEncoder, query.text, results.results),
@@ -293,6 +308,9 @@ public class RetrievalBenchmarkLiveTest {
         md.append("# Retrieval benchmark\n\n");
         md.append("Ollama ").append(ollamaVersion).append(", topic: ").append(set.topic).append(", ")
                 .append(set.queries.size()).append(" queries.\n\n");
+        md.append("Isolated benchmark: the corpus is cut by the benchmark's own heading-bounded segmentation "
+                + "(40 to 160 words), not by AskAI's semantic PassageSegmentation; a cross-check with the productive "
+                + "segmentation is a follow-up.\n\n");
         md.append("## Embedding candidates\n\n");
         md.append("| Candidate | Group | Recall@5 | Recall@10 | MRR |\n|---|---|---|---|---|\n");
         for (Run run : runs) {
@@ -341,11 +359,22 @@ public class RetrievalBenchmarkLiveTest {
      * Whether a candidate fits beside the phase models is a GPU measurement and stays for the owner to confirm.
      */
     static String winner(List<Run> runs) {
+        Run best = bestRun(runs);
+        if (best == null) {
+            return "No result for the current preset or no candidate qualifies; no choice.";
+        }
+        return String.format(Locale.ROOT,
+                "Best qualifying candidate: %s (mean Recall@10 %.3f). It becomes the preset only if it fits beside "
+                        + "the phase models (GPU column).", best.label, best.meanRecall10());
+    }
+
+    /** The candidate the rule picks, or null when the preset has no result or nobody qualifies. */
+    static Run bestRun(List<Run> runs) {
         // The first run is the configured preset (prompted); it is never replaced by another candidate.
         Run preset = runs.isEmpty() ? null : runs.get(0);
         if (preset == null || preset.raw || !preset.problem.isEmpty()
                 || preset.groups.get(RetrievalBenchmarkData.Group.DE_EN) == null) {
-            return "No result for the current preset; no choice.";
+            return null;
         }
         double floor = preset.groups.get(RetrievalBenchmarkData.Group.DE_EN).recallAt10;
         Run best = null;
@@ -358,8 +387,6 @@ public class RetrievalBenchmarkLiveTest {
                 best = run;
             }
         }
-        return best == null ? "No candidate qualifies." : String.format(Locale.ROOT,
-                "Best qualifying candidate: %s (mean Recall@10 %.3f). It becomes the preset only if it fits beside "
-                        + "the phase models (GPU column).", best.label, best.meanRecall10());
+        return best;
     }
 }
