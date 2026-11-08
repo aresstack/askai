@@ -115,7 +115,7 @@ public class ResearchSkyAccessoryLifecycleTest {
     }
 
     @Test
-    public void leavingScopingHidesTheSkyAndResetsTheInset() throws Exception {
+    public void leavingScopingKeepsTheBlacklistSky() throws Exception {
         Fx fx = new Fx(tempDir());
         fx.session.dispatch(ResearchCommandType.START, null);
         completeTurn(fx, 1L);
@@ -131,8 +131,8 @@ public class ResearchSkyAccessoryLifecycleTest {
                 fx.session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted());
         assertEquals(ResearchStateIds.RESEARCH,
                 fx.session.currentResearchSnapshot().getCurrentPhaseId());
-        assertFalse("outside Phase 1 the sky is gone", sky.isVisible());
-        assertEquals("…and the chat gets its full height back", 0, insetOf(sky));
+        // PR 12: the blacklist filters in every phase, so its sky stays in every phase
+        assertTrue("outside Phase 1 the sky stays", sky.isVisible());
     }
 
     // ------------------------------------------------------------------ helpers

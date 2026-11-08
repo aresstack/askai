@@ -1449,6 +1449,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         bookManifest = new com.aresstack.askai.research.book.BookManifest(
                 resources.getProjectContext().getProjectDirectory());
         engine.addHook(new com.aresstack.askai.research.book.ConceptFreezeHook(phase1Source(), bookManifest));
+        // PR 12 (Q12): no Concept submit without an embedding model; each check re-resolves it
+        engine.addHook(new com.aresstack.askai.research.book.EmbeddingRequiredHook(
+                new com.aresstack.askai.research.book.EmbeddingRequiredHook.Readiness() {
+                    public boolean ready() {
+                        return resources.ensureEmbeddingDescriptor() != null;
+                    }
+                }));
         com.aresstack.askai.research.concept.ConceptBranchService concept = resources.conceptBranchService();
         if (concept != null) {
             concept.setWriteGuard(new com.aresstack.askai.research.concept.ConceptBranchService.WriteGuard() {
@@ -2041,6 +2048,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             surfaceScopingApprovalProblem(blocker);
             return blocker;
         }
+        if (!confirmNewlyHitSources()) {
+            scopeApproveDiag("cancelled: the user kept the previous record");
+            return ScopingApprovalOutcome.USER_CANCELLED; // nothing dispatched
+        }
         scopeApproveDiag("before=" + snapshot.getPhaseId() + "/" + snapshot.getStateId());
         // PR 07: the single, explicit transition. The concept approval and the Phase-1 record are the
         // transition's own record (ConceptFreezeHook); a failed approval refuses the transition.
@@ -2510,6 +2521,69 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
     }
 
+    /** PR 12: asks the user before a re-submit keeps accepted sources out; {@code true} = go on. */
+    public interface ResubmitConfirmation {
+        boolean confirm(String message);
+    }
+
+    private volatile ResubmitConfirmation resubmitConfirmation = new ResubmitConfirmation() {
+        public boolean confirm(final String message) {
+            final boolean[] yes = {false};
+            onUiAndWait(new Runnable() {
+                public void run() {
+                    yes[0] = javax.swing.JOptionPane.showConfirmDialog(null, message, "Submit concept",
+                            javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.WARNING_MESSAGE)
+                            == javax.swing.JOptionPane.OK_OPTION;
+                }
+            });
+            return yes[0];
+        }
+    };
+
+    /** Test and host seam for the re-submit confirmation. */
+    public void setResubmitConfirmation(ResubmitConfirmation confirmation) {
+        if (confirmation != null) {
+            this.resubmitConfirmation = confirmation;
+        }
+    }
+
+    /**
+     * PR 12 (D4): when the new record's typed entries hit accepted sources the previous record did not,
+     * submit-scope names them and asks; Cancel dispatches nothing. The first submit has no previous
+     * record, so the sources it hits are compared against an empty one.
+     */
+    private boolean confirmNewlyHitSources() {
+        com.aresstack.askai.research.domain.scope.TypedBlacklist previous =
+                com.aresstack.askai.research.domain.scope.TypedBlacklist.empty();
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen != null) {
+                previous = com.aresstack.askai.research.domain.scope.TypedBlacklist.of(frozen.getPin().getBlacklist());
+            }
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            // the transition engine refuses a corrupt record on its own; nothing to compare here
+        }
+        if (productiveResources == null || productiveResources.getRepository() == null) {
+            return true;
+        }
+        java.util.List<com.aresstack.askai.research.sources.ResearchSourceRecord> fresh =
+                com.aresstack.askai.research.book.BlacklistSourceMatches.newlyHit(previous,
+                        com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft()),
+                        productiveResources.getRepository().find(
+                                com.aresstack.askai.research.sources.SourceQuery.all()));
+        if (fresh.isEmpty()) {
+            return true;
+        }
+        StringBuilder message = new StringBuilder("The blacklist of this concept keeps ").append(fresh.size())
+                .append(fresh.size() == 1 ? " accepted source" : " accepted sources")
+                .append(" out of outline generation and the evidence packs:");
+        for (com.aresstack.askai.research.sources.ResearchSourceRecord record : fresh) {
+            message.append("\n- ").append(com.aresstack.askai.research.book.BlacklistSourceMatches.describe(record));
+        }
+        message.append("\n\nSubmit the concept anyway?");
+        return resubmitConfirmation.confirm(message.toString());
+    }
+
     /** The last structural or hook refusal of submit-scope, shown with CONCEPT_INCOMPLETE/TRANSITION_REJECTED. */
     private volatile String lastScopingRefusal = "";
 
@@ -2535,6 +2609,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 break;
             case SESSION_INACTIVE:
                 reason = "The session is not active.";
+                break;
+            case USER_CANCELLED:
+                reason = "You cancelled it.";
                 break;
             default:
                 reason = "Unknown reason.";
@@ -3720,7 +3797,132 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * @return {@code null} when recorded (or already present), else the honest rejection reason
      */
     public String addScopeExclusion(String text) {
-        return applyExclusionPatch(text, true);
+        String value = text == null ? "" : text.trim();
+        String frozen = recordedPhaseRefusal(value, true);
+        if (frozen != null) {
+            return frozen;
+        }
+        String refusal = applyExclusionPatch(value, true);
+        if (refusal != null) {
+            return refusal;
+        }
+        // PR 12: a typed TERM is also the same excluded facet and OUT anchor the exclude_topic tool
+        // records, with its concept-conflict check; a host name only blocks the domain.
+        if (!com.aresstack.askai.research.domain.scope.TypedBlacklist.isHostEntry(value)) {
+            surfaceExcludeTopicNote(excludeTopicCommand(value));
+        }
+        reportAcceptedBlacklistHits(value);
+        return null;
+    }
+
+    /**
+     * PR 12 (Q2): after {@code SUBMIT_SCOPE} the recorded blacklist is part of the Phase-1 record. An
+     * entry that names a card of the approved concept is refused, and a recorded entry cannot be taken
+     * out of the live list here (switching recorded entries off comes with PR 19).
+     */
+    private String recordedPhaseRefusal(String value, boolean add) {
+        if (value.isEmpty() || conceptWriteRefusal() == null) {
+            return null; // Concept is open: the list changes the next record
+        }
+        com.aresstack.askai.research.book.FrozenConcept frozen;
+        try {
+            frozen = frozenConcept();
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return corrupt.getMessage();
+        }
+        if (frozen == null) {
+            return null;
+        }
+        if (add) {
+            for (String card : frozen.cardNames()) {
+                if (card.trim().equalsIgnoreCase(value)) {
+                    return "\"" + value + "\" is a card of the approved concept. Reopen Concept to exclude it.";
+                }
+            }
+            return null;
+        }
+        for (String recorded : frozen.getPin().getBlacklist()) {
+            if (recorded.trim().equalsIgnoreCase(value)) {
+                return "\"" + value + "\" is part of the approved concept. Reopen Concept to change it.";
+            }
+        }
+        return null;
+    }
+
+    /** A conflict or branch note of the facet path must reach the user (no model turn runs here). */
+    private void surfaceExcludeTopicNote(String reply) {
+        if (reply == null || sink == null) {
+            return;
+        }
+        final String note;
+        try {
+            com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(reply).getAsJsonObject();
+            String result = json.has("result") ? json.get("result").getAsString() : "";
+            if ("REJECTED".equals(result)) {
+                note = "The term is kept as a blacklist entry, but not as an excluded topic: "
+                        + (json.has("reason") ? json.get("reason").getAsString() : "refused");
+            } else if (json.has("conceptConflict") || json.has("conceptBranchNote")) {
+                note = json.has("userMessage") ? json.get("userMessage").getAsString() : "";
+            } else {
+                return;
+            }
+        } catch (RuntimeException unreadable) {
+            return;
+        }
+        if (note.isEmpty()) {
+            return;
+        }
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                sink.appendInfoMessage(publish("blacklist-note-" + System.nanoTime()), note);
+            }
+        });
+    }
+
+    /**
+     * PR 12 (D4): adding or editing a typed entry says how many ACCEPTED sources it hits and lists
+     * them; it excludes none of them by itself.
+     */
+    private void reportAcceptedBlacklistHits(String entry) {
+        java.util.List<com.aresstack.askai.research.sources.ResearchSourceRecord> hits =
+                acceptedBlacklistHits(com.aresstack.askai.research.domain.scope.TypedBlacklist.of(
+                        java.util.Collections.singletonList(entry)));
+        if (hits.isEmpty() || sink == null) {
+            return;
+        }
+        final String text = acceptedHitsText(entry, hits, conceptWriteRefusal() == null);
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                sink.appendInfoMessage(publish("blacklist-hits-" + System.nanoTime()), text);
+            }
+        });
+    }
+
+    static String acceptedHitsText(String entry,
+            java.util.List<com.aresstack.askai.research.sources.ResearchSourceRecord> hits, boolean concept) {
+        StringBuilder text = new StringBuilder();
+        text.append('"').append(entry).append("\" matches ").append(hits.size())
+                .append(hits.size() == 1 ? " accepted source" : " accepted sources")
+                .append(". They stay accepted until you exclude them:");
+        for (com.aresstack.askai.research.sources.ResearchSourceRecord hit : hits) {
+            text.append("\n- ").append(com.aresstack.askai.research.book.BlacklistSourceMatches.describe(hit));
+        }
+        if (concept) {
+            text.append("\nOnce the entry is recorded with the concept, these sources leave outline generation "
+                    + "and the evidence packs.");
+        }
+        return text.toString();
+    }
+
+    /** The accepted sources a typed list hits (empty in fake mode). */
+    java.util.List<com.aresstack.askai.research.sources.ResearchSourceRecord> acceptedBlacklistHits(
+            com.aresstack.askai.research.domain.scope.TypedBlacklist list) {
+        if (productiveResources == null || productiveResources.getRepository() == null) {
+            return java.util.Collections.emptyList();
+        }
+        return com.aresstack.askai.research.book.BlacklistSourceMatches.accepted(list,
+                productiveResources.getRepository().find(
+                        com.aresstack.askai.research.sources.SourceQuery.all()));
     }
 
     /**
@@ -3730,7 +3932,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * @return {@code null} when removed (or already absent), else the honest rejection reason
      */
     public String removeScopeExclusion(String text) {
-        return applyExclusionPatch(text, false);
+        String frozen = recordedPhaseRefusal(text == null ? "" : text.trim(), false);
+        return frozen != null ? frozen : applyExclusionPatch(text, false);
     }
 
     private String applyExclusionPatch(String text, boolean add) {
@@ -3768,7 +3971,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         publishScopeFence();
                         fireStateChanged();
                     }
-                    return null;
+                    // PR 12: "+ Add" records a term as facet AND typed entry — take both back
+                    break;
                 }
             }
         }
@@ -4501,6 +4705,25 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * disappears.
      */
     String searchScopeBegin() {
+        String line = searchScopeBeginLine();
+        if (line.startsWith("UNAVAILABLE")) {
+            return line; // the run ends fail-closed anyway
+        }
+        // PR 12: the typed entries ride the SAME pinned snapshot as a second line — the runtime's
+        // deterministic term and domain filter, which needs no embedding model.
+        com.aresstack.askai.research.domain.scope.TypedBlacklist typed =
+                com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft());
+        com.google.gson.JsonArray entries = new com.google.gson.JsonArray();
+        for (String entry : typed.entries()) {
+            entries.add(entry);
+        }
+        technicalLog("search-blacklist snapshot entries=" + typed.entries().size());
+        return line + "\n"
+                + com.aresstack.askai.research.runtime.acquire.ServiceSearchScopeControlPort.BLACKLIST_PREFIX
+                + entries;
+    }
+
+    private String searchScopeBeginLine() {
         com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator =
                 scopeCoordinator();
         if (coordinator == null || !coordinator.isUsable() || productiveResources == null

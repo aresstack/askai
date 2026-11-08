@@ -30,7 +30,10 @@ public enum ScopingApprovalOutcome {
     TRANSITION_REJECTED,
 
     /** The session is disposed, closed or not started — no live command authority to reach. */
-    SESSION_INACTIVE;
+    SESSION_INACTIVE,
+
+    /** PR 12: the user cancelled the confirmation that the new record keeps accepted sources out; nothing was dispatched. */
+    USER_CANCELLED;
 
     public boolean isSuccess() {
         return this == SUCCESS;
