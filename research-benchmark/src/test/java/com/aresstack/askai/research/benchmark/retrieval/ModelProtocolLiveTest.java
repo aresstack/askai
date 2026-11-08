@@ -69,13 +69,24 @@ public class ModelProtocolLiveTest {
                 + "|---|---|---|---|---|---|---|\n");
         String previous = "(start)";
         List<String> failures = new ArrayList<String>();
+        switches:
         for (int round = 0; round < 2; round++) {
             for (String model : models) {
                 int numCtx = numCtx(model);
                 log("unloading before switch " + previous + " -> " + model);
-                List<String> left = probes.unloadAll(60_000);
+                List<String> left;
+                try {
+                    left = probes.unloadAll(60_000);
+                } catch (java.io.IOException stuck) {
+                    left = java.util.Collections.singletonList("unload call failed: " + stuck.getMessage());
+                }
                 if (!left.isEmpty()) {
-                    log("still loaded after 60 s: " + left);
+                    // No cold load possible: measuring now would report a warm or contended load as a reload.
+                    log("still loaded after 60 s: " + left + ", stopping the switch measurements");
+                    md.append(String.format(Locale.ROOT, "| %s | %s | %d | not measured | - | %s | no: unload "
+                            + "did not finish |%n", previous, model, numCtx, left.toString().replace('|', '/')));
+                    failures.add(previous + " -> " + model + ": still loaded after unload " + left);
+                    break switches;
                 }
                 log("loading " + model + " num_ctx=" + numCtx);
                 long started = System.currentTimeMillis();
@@ -100,18 +111,25 @@ public class ModelProtocolLiveTest {
                 md.append(String.format(Locale.ROOT, "| %s | %s | %d | %s | %s | %s | %s |%n", previous, model,
                         numCtx, load, gpu < 0 ? "not measured" : String.valueOf(gpu), ps, reloaded));
                 previous = model;
+                if (!failures.isEmpty()) {
+                    break switches;
+                }
             }
         }
         md.append("\n## truncate=false (item 9)\n\n| Call | Model | HTTP status | Failed as required |\n"
                 + "|---|---|---|---|\n");
-        if (!models.isEmpty()) {
+        if (!failures.isEmpty()) {
+            md.append("Not run: a model switch failed above, so Ollama is not in a usable state.\n");
+        } else if (!models.isEmpty()) {
             ProtocolProbes.Answer chat = probes.overlongChat(models.get(0), 2048);
             md.append(String.format(Locale.ROOT, "| chat | %s | %d | %s |%n", models.get(0), chat.status,
                     truncationVerdict(probes.shortChat(models.get(0), 2048), chat)));
         }
-        ProtocolProbes.Answer embed = probes.overlongEmbed(embeddingModel, 20000);
-        md.append(String.format(Locale.ROOT, "| embed | %s | %d | %s |%n", embeddingModel, embed.status,
-                truncationVerdict(probes.overlongEmbed(embeddingModel, 5), embed)));
+        if (failures.isEmpty()) {
+            ProtocolProbes.Answer embed = probes.overlongEmbed(embeddingModel, 20000);
+            md.append(String.format(Locale.ROOT, "| embed | %s | %d | %s |%n", embeddingModel, embed.status,
+                    truncationVerdict(probes.overlongEmbed(embeddingModel, 5), embed)));
+        }
 
         File dir = new File(System.getProperty(P + "reportDir", "build/reports/research-benchmark"));
         dir.mkdirs();
@@ -121,7 +139,7 @@ public class ModelProtocolLiveTest {
         System.out.println(md);
         System.out.println("[model-protocol] report " + out.getName());
         if (!failures.isEmpty()) {
-            throw new AssertionError("model switch timed out (report " + out.getName() + "): " + failures);
+            throw new AssertionError("model switch failed (report " + out.getName() + "): " + failures);
         }
     }
 
