@@ -169,8 +169,11 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                     if (slashPopup != null) {
                         slashPopup.hide();
                     }
-                    // A research tab runs on its phase slots: it holds no composer model (plan 5.1).
-                    warmComposerModel((String) modelCombo.getSelectedItem());
+                    // A research tab runs on its phase slots: it holds no composer model (plan 5.1). The
+                    // coordinator is shared by all tabs, so only the visible tab follows its mode.
+                    if (isShowing()) {
+                        warmComposerModel((String) modelCombo.getSelectedItem());
+                    }
                     refreshAgentComposerState();
                 }
             });
