@@ -529,7 +529,7 @@
     {
       "source": "en-tomcat-classloader-howto",
       "terms": [
-        "visible to both Tomcat internal classes"
+        "parent-child tree"
       ],
       "nodeId": "n7"
     },
