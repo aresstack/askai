@@ -65,6 +65,16 @@ public class ResearchAgentSessionTest {
         final RecordingSink sink = new RecordingSink();
         final ResearchAgentSession session =
                 new ResearchAgentSession(backend, null, new FakeHost(sink), "s1", "p1");
+
+        /** PR 05: the user's own exits lead to the Sources gate; the fake never moves itself. */
+        void toSourcesGate() {
+            scheduler.runUntilIdle();
+            org.junit.Assert.assertTrue(session.executeCommand("submit-scope", "").startsWith("handled"));
+            scheduler.runUntilIdle();
+            String finish = session.executeCommand("finish-sources", "");
+            org.junit.Assert.assertTrue(finish, finish.startsWith("handled"));
+            scheduler.runUntilIdle();
+        }
     }
 
     @Test
@@ -107,7 +117,7 @@ public class ResearchAgentSessionTest {
         f.session.activate();
         // Creation is passive: the user's first question starts the run.
         f.session.getChatTarget().submitText("investigate pf4j");
-        f.scheduler.runUntilIdle(); // → Sources approval gate (#43: evidence review inside Sources)
+        f.toSourcesGate(); // → Sources approval gate (#43: evidence review inside Sources)
         assertEquals("RESEARCH", f.session.getState().getPhaseLabel());
         assertTrue(f.session.getState().hasPendingApproval());
         assertTrue(f.sink.approvals > 0);
@@ -120,8 +130,9 @@ public class ResearchAgentSessionTest {
         assertEquals(SubmissionAvailability.UNAVAILABLE, f.session.getChatTarget().getAvailability());
         f.session.activate(); // passive: SCOPING/NEW until the first question
         f.session.getChatTarget().submitText("investigate pf4j"); // → SCOPING/RUNNING
-        assertEquals(SubmissionAvailability.BUSY, f.session.getChatTarget().getAvailability());
-        f.scheduler.runUntilIdle(); // → WAITING for approval
+        assertEquals("PR 05: a running phase keeps the composer free for follow-ups",
+                SubmissionAvailability.AVAILABLE, f.session.getChatTarget().getAvailability());
+        f.toSourcesGate(); // → WAITING for approval
         assertEquals(SubmissionAvailability.AVAILABLE, f.session.getChatTarget().getAvailability());
     }
 
@@ -136,7 +147,7 @@ public class ResearchAgentSessionTest {
         String early = f.session.executeCommand("approve", "");
         assertTrue(early, early.startsWith("rejected:"));
 
-        f.scheduler.runUntilIdle();
+        f.toSourcesGate();
         String ok = f.session.executeCommand("approve", "");
         assertTrue(ok, ok.startsWith("handled:"));
         f.scheduler.runUntilIdle();
@@ -204,7 +215,7 @@ public class ResearchAgentSessionTest {
         });
         f.session.activate();
         f.session.getChatTarget().submitText("investigate pf4j"); // the question starts the run
-        f.scheduler.runUntilIdle(); // → Sources waiting_approval (#43)
+        f.toSourcesGate(); // → Sources waiting_approval (#43)
         com.aresstack.askai.research.agent.ResearchStateSnapshot snapshot =
                 f.session.currentResearchSnapshot();
         assertEquals(com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
