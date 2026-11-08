@@ -1221,7 +1221,8 @@ public final class ResearchAgentSession {
         try {
             result = com.aresstack.askai.research.runtime.orchestrator.QueryPlanner.planConcept(
                     roleChat(com.aresstack.askai.research.runtime.orchestrator.QueryPlanner.CONCEPT_ROLE),
-                    com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(requestJson));
+                    com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(requestJson),
+                    cancelled::get);
         } catch (IllegalArgumentException malformedRequest) {
             System.err.println("[query-plan] malformed request requestId=" + requestId + ": "
                     + malformedRequest.getMessage());

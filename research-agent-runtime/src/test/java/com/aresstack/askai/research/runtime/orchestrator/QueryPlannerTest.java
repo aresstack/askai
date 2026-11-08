@@ -118,6 +118,30 @@ public class QueryPlannerTest {
     }
 
     @Test
+    public void aVariantNeverDuplicatesALaterNodesBaseQuery() {
+        ScriptedChat chat = new ScriptedChat()
+                .answer("{\"queries\":[\"Java Modulsystem\",\"Classloader Hierarchie Plugins\"]}")
+                .answer("{\"queries\":[\"JPMS Module Layer Plugins\"]}");
+        ConceptQueryPlan.Result result = QueryPlanner.planConcept(chat, request("de", 2,
+                node("n1", "Classloader", "Java Classloader Plugins"),
+                node("n2", "Modulsystem", "Java Modulsystem")));
+        assertEquals(Arrays.asList("Java Classloader Plugins", "Classloader Hierarchie Plugins"),
+                result.getNodes().get(0).queries());
+    }
+
+    @Test
+    public void afterCancellationNoFurtherModelCallStarts() {
+        final ScriptedChat chat = new ScriptedChat().answer("{\"queries\":[\"Classloader Hierarchie Plugins\"]}");
+        ConceptQueryPlan.Result result = QueryPlanner.planConcept(chat, request("de", 2,
+                        node("n1", "Classloader", "Java Classloader Plugins"),
+                        node("n2", "Modulsystem", "Java Modulsystem")),
+                () -> !chat.calls.isEmpty());
+        assertEquals(1, chat.calls.size());
+        assertEquals(Collections.singletonList("Java Modulsystem"), result.getNodes().get(1).queries());
+        assertTrue(result.getNodes().get(1).getNote().contains("stopped"));
+    }
+
+    @Test
     public void theNodeLabelStandsInForAnUnusableBaseQuery() {
         ConceptQueryPlan.Result result = QueryPlanner.planConcept(null, request("de", 2,
                 node("n1", "Classloader", "")));

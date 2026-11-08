@@ -178,21 +178,36 @@ public final class QueryPlanner {
      * query alone and says why in the node's note. Never throws.
      */
     public static ConceptQueryPlan.Result planConcept(MainModelChat chat, ConceptQueryPlan.Request request) {
+        return planConcept(chat, request, null);
+    }
+
+    /**
+     * As {@link #planConcept(MainModelChat, ConceptQueryPlan.Request)}; once {@code cancelled} is set no further
+     * model call starts and the remaining nodes keep their base query.
+     */
+    public static ConceptQueryPlan.Result planConcept(MainModelChat chat, ConceptQueryPlan.Request request,
+                                                      java.util.function.BooleanSupplier cancelled) {
         List<ConceptQueryPlan.NodePlan> plans = new ArrayList<ConceptQueryPlan.NodePlan>();
         if (request == null) {
             return new ConceptQueryPlan.Result(plans);
         }
+        // Every node's base query is reserved up front, so no variant duplicates a later node's base query.
         Set<String> known = new java.util.LinkedHashSet<String>(request.getQueriesRun());
         for (ConceptQueryPlan.Node node : request.getNodes()) {
             String base = baseQuery(node);
             if (!base.isEmpty()) {
                 known.add(base);
             }
+        }
+        for (ConceptQueryPlan.Node node : request.getNodes()) {
+            String base = baseQuery(node);
             List<String> variants = Collections.emptyList();
             String note = "";
-            if (request.getMaxVariantsPerNode() > 0 && chat != null) {
+            if (isCancelled(cancelled)) {
+                note = "planning stopped, base query only";
+            } else if (request.getMaxVariantsPerNode() > 0 && chat != null) {
                 try {
-                    variants = planNode(chat, request, node, base, known);
+                    variants = planNode(chat, request, node, base, known, cancelled);
                 } catch (WorkerAnswerException invalid) {
                     note = "invalid planner answer, base query only: " + invalid.getMessage();
                 } catch (RuntimeException failure) {
@@ -206,7 +221,8 @@ public final class QueryPlanner {
     }
 
     private static List<String> planNode(MainModelChat chat, ConceptQueryPlan.Request request,
-                                         ConceptQueryPlan.Node node, String base, Set<String> known)
+                                         ConceptQueryPlan.Node node, String base, Set<String> known,
+                                         java.util.function.BooleanSupplier cancelled)
             throws WorkerAnswerException {
         int max = request.getMaxVariantsPerNode();
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
@@ -222,7 +238,7 @@ public final class QueryPlanner {
             try {
                 return read(result.getText(), max, known, request.getBlacklist());
             } catch (WorkerAnswerException invalid) {
-                if (attempt >= CONCEPT_REPAIR_ATTEMPTS) {
+                if (attempt >= CONCEPT_REPAIR_ATTEMPTS || isCancelled(cancelled)) {
                     throw invalid;
                 }
                 messages.add(ChatMessage.assistant(result.getText() == null ? "" : result.getText()));
@@ -230,6 +246,10 @@ public final class QueryPlanner {
                         + "\nAnswer again with the corrected JSON object only."));
             }
         }
+    }
+
+    private static boolean isCancelled(java.util.function.BooleanSupplier cancelled) {
+        return cancelled != null && cancelled.getAsBoolean();
     }
 
     /** The node's base query, or its label when the base query is unusable; empty when neither fits. */
