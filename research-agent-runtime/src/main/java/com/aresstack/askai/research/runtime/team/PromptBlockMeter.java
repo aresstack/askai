@@ -26,6 +26,8 @@ public final class PromptBlockMeter {
     public static final String REPAIR_NOTE = "repair-note";
     public static final String GREETING_INSTRUCTION = "greeting-instruction";
     public static final String USER_MESSAGE = "user-message";
+    /** The open turn's user message and latest answer, pinned in its tool rounds (PR 17). */
+    public static final String OPEN_TURN = "open-turn";
 
     /** Rough characters per token for the pre-call estimate; deliberately pessimistic for German text. */
     static final int CHARS_PER_TOKEN = 3;

@@ -1807,7 +1807,10 @@ public final class ResearchAgentSession {
                             throws com.aresstack.askai.research.runtime.loop.ToolInvoker.ToolFailure,
                             com.aresstack.askai.research.runtime.loop.ToolInvoker.EndpointUnavailable {
                         String receipt = conceptToolCall(action);
-                        applied.add(action.describe());
+                        if (com.aresstack.askai.research.runtime.team.ConceptToolRounds
+                                .isAppliedOutcome(action, receipt)) {
+                            applied.add(action.describe());
+                        }
                         return receipt;
                     }
                 },

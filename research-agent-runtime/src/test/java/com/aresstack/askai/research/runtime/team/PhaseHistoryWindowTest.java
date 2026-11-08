@@ -212,6 +212,22 @@ public class PhaseHistoryWindowTest {
     }
 
     @Test
+    public void aToolRoundAlwaysSeesTheOpenTurnsUserMessageEvenBeyondTheWindow() {
+        FakeModel model = new FakeModel(0);
+        ResearchTeamAgent agent = new ResearchTeamAgent(model, PhaseAssistantProfileRegistry.defaults(), assembler());
+        model.enqueueOk(answer("first"));
+        model.enqueueOk(answer("second"));
+        String longMessage = "CONSTRAINT " + repeat('w', 12_000); // above the 3,000-token window
+        agent.respond(longMessage, view("outline"));
+        agent.internalTurn("tool feedback", view("outline"));
+
+        List<ChatMessage> round = model.calls.get(1);
+        assertEquals("tool feedback", round.get(round.size() - 1).getContent());
+        assertEquals(longMessage, round.get(round.size() - 3).getContent());
+        assertTrue(round.get(round.size() - 2).getContent().contains("first"));
+    }
+
+    @Test
     public void theParseRepairNoLongerEchoesTheFailedAnswer() {
         FakeModel model = new FakeModel(0);
         ResearchTeamAgent agent = new ResearchTeamAgent(model, PhaseAssistantProfileRegistry.defaults(), assembler());

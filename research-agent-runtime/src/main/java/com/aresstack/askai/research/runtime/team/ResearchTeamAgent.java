@@ -92,6 +92,9 @@ public final class ResearchTeamAgent {
     /** Index in {@link #history} of the open turn's FINAL entry, which a tool round supersedes; -1 = none. */
     private int turnFinalIndex = -1;
 
+    /** Index of the open chat turn's USER entry: pinned outside the shrinkable window in its tool rounds. */
+    private int turnUserIndex = -1;
+
     public ResearchTeamAgent(MainModelChat model) {
         this(model, PhaseAssistantProfileRegistry.defaults(), new PhaseContextAssembler());
     }
@@ -189,6 +192,7 @@ public final class ResearchTeamAgent {
         }
         int index = turnFinalIndex;
         turnFinalIndex = -1;
+        turnUserIndex = -1;
         if (visible == null || !visible.isOk() || index >= history.size()) {
             return;
         }
@@ -228,7 +232,8 @@ public final class ResearchTeamAgent {
         int budget = turnBudget(state.getPhaseId());
         Prompt prompt = fit(greeting, state, HistoryWindow.chatBudget(state.getPhaseId()), budget,
                 PromptBlockMeter.GREETING_INSTRUCTION, ChatMessage.user(
-                        TeamAgentPlaybook.greetingInstruction(contextAssembler.workingLanguageDisplayName())));
+                        TeamAgentPlaybook.greetingInstruction(contextAssembler.workingLanguageDisplayName())),
+                false);
         if (prompt.failure != null) {
             return prompt.failure;
         }
@@ -293,6 +298,7 @@ public final class ResearchTeamAgent {
         if (result.isOk()) {
             // The review is its own turn: its answer is real conversation, never a tool round of a chat turn.
             turnFinalIndex = -1;
+            turnUserIndex = -1;
             recordFinal(state, result.getOutput());
             foldProposal(result.getOutput());
         }
@@ -303,7 +309,7 @@ public final class ResearchTeamAgent {
                                          int budget, int windowTokens) {
         PhaseAssistantProfile profile = profiles.forPhase(state.getPhaseId());
         Prompt prompt = fit(profile, state, windowTokens, budget, PromptBlockMeter.TOOL_FEEDBACK,
-                ChatMessage.user(instruction == null ? "" : instruction.trim()));
+                ChatMessage.user(instruction == null ? "" : instruction.trim()), turnUserIndex >= 0);
         if (prompt.failure != null) {
             return prompt.failure;
         }
@@ -328,9 +334,10 @@ public final class ResearchTeamAgent {
         PhaseAssistantProfile profile = profiles.forPhase(state.getPhaseId());
         int budget = turnBudget(state.getPhaseId());
         turnFinalIndex = -1;
+        turnUserIndex = -1;
         // The last user message is never dropped: it is the tail, outside the window the guard may shrink.
         Prompt prompt = fit(profile, state, HistoryWindow.chatBudget(state.getPhaseId()), budget,
-                PromptBlockMeter.USER_MESSAGE, pendingUserTurn);
+                PromptBlockMeter.USER_MESSAGE, pendingUserTurn, false);
         if (prompt.failure != null) {
             return prompt.failure;
         }
@@ -338,6 +345,7 @@ public final class ResearchTeamAgent {
                 budget);
         if (result.isOk()) {
             history.add(pendingUserTurn.tagged(PhaseKeys.normalize(state.getPhaseId()), ChatMessage.Kind.USER));
+            turnUserIndex = history.size() - 1;
             pendingUserTurn = null;
             turnFinalIndex = recordFinal(state, result.getOutput());
             foldProposal(result.getOutput());
@@ -352,14 +360,28 @@ public final class ResearchTeamAgent {
      * window first; when even an empty window does not fit, the call fails visibly and nothing is sent.
      */
     private Prompt fit(PhaseAssistantProfile profile, TeamAgentStateView state, int windowTokens, int budget,
-                       String tailBlock, ChatMessage tail) {
+                       String tailBlock, ChatMessage tail, boolean pinOpenTurn) {
         MainModelChat model = chatFor(state.getPhaseId());
+        // In a tool round the open turn's user message (and its latest answer) are pinned like the tail: the
+        // window and the guard only ever shrink the conversation BEFORE the turn.
+        List<ChatMessage> windowSource = history;
+        List<ChatMessage> pinned = new ArrayList<ChatMessage>();
+        if (pinOpenTurn && turnUserIndex >= 0 && turnUserIndex < history.size()) {
+            windowSource = history.subList(0, turnUserIndex);
+            pinned.add(history.get(turnUserIndex));
+            if (turnFinalIndex > turnUserIndex && turnFinalIndex < history.size()) {
+                pinned.add(history.get(turnFinalIndex));
+            }
+        }
         int context = model.contextTokens();
         int window = windowTokens;
         while (true) {
             PromptBlockMeter meter = new PromptBlockMeter();
             List<ChatMessage> messages = contextAssembler.assemble(profile, state, confirmedQuestion,
-                    confirmedAspects, proposedQuestion, proposedAspects, history, window, meter);
+                    confirmedAspects, proposedQuestion, proposedAspects, windowSource, window, meter);
+            for (ChatMessage entry : pinned) {
+                append(messages, meter, PromptBlockMeter.OPEN_TURN, entry);
+            }
             append(messages, meter, tailBlock, tail);
             if (context <= 0) {
                 return Prompt.ok(messages, meter);
