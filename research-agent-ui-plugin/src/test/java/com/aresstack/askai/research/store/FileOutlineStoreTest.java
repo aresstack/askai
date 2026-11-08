@@ -140,4 +140,25 @@ public class FileOutlineStoreTest {
                     new String(Files.readAllBytes(history.toPath()), "UTF-8"));
         }
     }
+
+    @Test
+    public void aLostManifestOrDamagedApprovalIsNeverTakenAsValid() throws Exception {
+        FileOutlineStore store = new FileOutlineStore(folder.getRoot());
+        store.commit(outline("One"), 0L, 1L);
+        store.approveCurrent(2L);
+        Files.write(new File(folder.getRoot(), "revisions/0001.json").toPath(), "{}".getBytes("UTF-8"));
+        try {
+            store.approveCurrent(3L);
+            fail("a damaged approval is not reused");
+        } catch (FileOutlineStore.CorruptOutlineException expected) {
+            assertTrue(expected.getMessage().contains("approved revision 1"));
+        }
+        assertTrue(new File(folder.getRoot(), "working.properties").delete());
+        try {
+            store.commit(outline("Two"), 0L, 4L);
+            fail("a missing manifest beside working revisions is damage, not a new store");
+        } catch (FileOutlineStore.CorruptOutlineException expected) {
+            assertTrue(new File(folder.getRoot(), "working-history/1.json").isFile());
+        }
+    }
 }

@@ -1464,6 +1464,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (outline != null) {
             outline.setWriteGuard(this::outlineWriteRefusal);
             outline.setChangeListener((changed, revision) -> renderOutlineArtifact(changed));
+            try {
+                renderOutlineArtifact(outline.current()); // reconcile a render lost to a crash after the commit
+            } catch (com.aresstack.askai.research.store.FileOutlineStore.CorruptOutlineException corrupt) {
+                System.err.println("[research] " + corrupt.getMessage());
+            }
             engine.addHook(new com.aresstack.askai.research.book.OutlineFreezeHook(outline, bookManifest));
             engine.registerEffect(com.aresstack.askai.research.book.ConceptStaleMarker.EFFECT,
                     new com.aresstack.askai.research.book.ConceptStaleMarker(phase1Source(), bookManifest, outline,

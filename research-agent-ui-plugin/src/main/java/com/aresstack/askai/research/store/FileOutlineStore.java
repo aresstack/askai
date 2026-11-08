@@ -185,6 +185,10 @@ public final class FileOutlineStore {
         String hash = StoreIo.sha256(content);
         int latest = latestApprovedNumber();
         if (latest > 0 && hash.equals(approvedHash(latest))) {
+            String approved = approvedContent(latest);
+            if (approved == null || !hash.equals(StoreIo.sha256(approved))) {
+                throw corrupt("its approved revision " + latest + " does not match its recorded hash");
+            }
             return new Approval(latest, false, working, hash);
         }
         int next = latest + 1;
@@ -249,6 +253,10 @@ public final class FileOutlineStore {
     private Manifest manifest() {
         File file = workingPropsFile();
         if (!file.isFile()) {
+            File[] history = new File(dir, "working-history").listFiles();
+            if (file.exists() || (history != null && history.length > 0)) {
+                throw corrupt("its manifest is missing although working revisions exist");
+            }
             return new Manifest(0L, null);
         }
         Properties props;
