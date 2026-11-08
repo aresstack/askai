@@ -198,6 +198,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
             Map<String, String> env = new LinkedHashMap<String, String>();
             env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
             env.put("PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS", "1");
+            DriverClasspathJar.install();
             playwright = Playwright.create(new Playwright.CreateOptions().setEnv(env));
             stage = "BROWSER_LAUNCH";
             if (camoufox) {

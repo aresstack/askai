@@ -116,6 +116,7 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
             env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
             env.put("PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS", "1");
             Path camoufoxExecutable = camoufox ? CamoufoxProvisioning.ensureInstalled() : null;
+            DriverClasspathJar.install();
             playwright = Playwright.create(new Playwright.CreateOptions().setEnv(env));
             Browser browser;
             if (camoufox) {
