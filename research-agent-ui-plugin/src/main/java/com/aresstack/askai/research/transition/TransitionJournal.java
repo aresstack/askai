@@ -58,6 +58,15 @@ public final class TransitionJournal {
                 if (!record.has("kind") || !record.has("id")) {
                     throw new IllegalStateException("record without kind or id");
                 }
+                String kind = record.get("kind").getAsString();
+                record.get("id").getAsString();
+                if ("prepared".equals(kind)) {
+                    PhaseTransition.fromJson(record.getAsJsonObject("transition")); // payload must decode
+                } else if ("done".equals(kind)) {
+                    record.get("effect").getAsString();
+                } else if (!"committed".equals(kind)) {
+                    throw new IllegalStateException("unknown record kind " + kind);
+                }
                 records.add(record);
             } catch (RuntimeException broken) {
                 throw new CorruptProjectFileException(file, file.getName() + " line " + lineNumber

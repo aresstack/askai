@@ -357,6 +357,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 }
                 return; // starts nothing: no registration, no restore, no turn
             }
+            // the listeners of a recovered chained start need the stored research question
+            if (problemMessage.isEmpty()) {
+                restoreProjectMetadata();
+            }
             technicalLog("[transition] " + productiveResources.transitions().recover());
             if (phaseJournalProblem != null && sink != null) {
                 sink.showProblem("research-phase-journal-corrupt", phaseJournalProblem);
@@ -379,7 +383,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (productiveResources != null && problemMessage.isEmpty()) {
             // Still restore the persisted assignment (question + focus areas) so a resumed project keeps its
             // scope for continuation; the scoping ceremony is no longer host-driven.
-            restoreProjectMetadata();
+            // (the persisted assignment was restored before the recovery pass, see above)
             // Show the last PERSISTED visualization (possibly stale) — never regenerate on open (issue #29).
             restorePersistedVisualization();
             // A fresh chat (SCOPING/NEW) stays EMPTY: no bootstrap turn, no model call. The former greeting
@@ -843,6 +847,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     private void beginAgentTurn() {
         dropLateOutcome = false; // a new turn's outcome counts again
+        turnStartedMillis = System.currentTimeMillis();
         setAgentTurnInFlight(true);
         com.aresstack.askai.research.visualize.LazyArtifactVisualizer visualizer = artifactVisualizer;
         if (visualizer != null) {
@@ -1311,6 +1316,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private volatile CommandOrigin activeOrigin = USER_ORIGIN;
     /** Set when a phase change cancelled a turn in flight: its late outcome is dropped (D3). */
     private volatile boolean dropLateOutcome;
+    /** When the current agent turn began; phase hygiene only cancels a turn of the left phase. */
+    private volatile long turnStartedMillis;
     /** Set when the phase journal was unreadable on open; reported once the session activates. */
     private String phaseJournalProblem;
 
@@ -1392,15 +1399,20 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 resources.phaseJobs().leavePhase(transition.getFrom().getPhaseId());
                 onUiAndWait(new Runnable() {
                     public void run() {
-                        if (agentTurnInFlight || postSearchSummaryInFlight) {
+                        // only a turn that began before the transition belongs to the left phase;
+                        // a prompt sent in the new phase meanwhile is left alone
+                        boolean departing = turnStartedMillis <= transition.getTimeMillis();
+                        if (departing && (agentTurnInFlight || postSearchSummaryInFlight)) {
                             dropLateOutcome = true;
                             stopAgentTurn();
                         }
-                        if (activeManualSearchRequestId != null) {
+                        if (departing && activeManualSearchRequestId != null) {
                             cancelManualWebSearch();
                         }
                         outcomeOffers = java.util.Collections.emptyList();
-                        setAgentTurnInFlight(false);
+                        if (departing) {
+                            setAgentTurnInFlight(false);
+                        }
                         fireStateChanged();
                     }
                 });
@@ -4542,9 +4554,25 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     /** Write the journal now, on the caller's thread (a transition effect's result precedes its done record). */
     private void persistJournalNow() {
-        java.io.File target = journalFile();
-        if (target != null) {
-            writeJournal(target, journal.toJson());
+        final java.io.File target = journalFile();
+        if (target == null || journalWriteExecutor.isShutdown()) {
+            return;
+        }
+        final String json = journal.toJson();
+        try {
+            // the same ordered executor as persistJournal(), so an older queued snapshot can never
+            // overwrite this one; waiting keeps the effect's result ahead of its done record
+            journalWriteExecutor.submit(new Runnable() {
+                public void run() {
+                    writeJournal(target, json);
+                }
+            }).get(15, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.RejectedExecutionException closing) {
+            // shutting down
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException failed) {
+            System.err.println("[research-journal] ordered write failed: " + failed.getMessage());
         }
     }
 

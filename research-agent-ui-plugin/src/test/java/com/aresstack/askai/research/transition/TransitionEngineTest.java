@@ -369,13 +369,17 @@ public class TransitionEngineTest {
 
     @Test
     public void aCorruptJournalOrMementoKeepsItsFileBlocksAndStartsNothing() throws Exception {
-        for (String broken : new String[] {TransitionJournal.FILE_NAME, "research-session.json"}) {
+        for (String broken : new String[] {TransitionJournal.FILE_NAME, "research-session.json",
+                "payload:" + TransitionJournal.FILE_NAME}) {
+            boolean payload = broken.startsWith("payload:");
+            broken = broken.replace("payload:", "");
             File dir = tempDir();
             Fixture fx = new Fixture(dir);
             assertTrue(fx.send(ResearchCommandType.START).isCommitted());
             fx.engine.close();
             File file = new File(new File(dir, "state"), broken);
-            byte[] garbage = "this is not json\n".getBytes("UTF-8");
+            byte[] garbage = (payload ? "{\"kind\":\"prepared\",\"id\":\"t1\"}\n" : "this is not json\n")
+                    .getBytes("UTF-8");
             Files.write(file.toPath(), garbage);
             Fixture reopened = new Fixture(dir);
             String reason = reopened.engine.blockedReason();
