@@ -125,6 +125,7 @@ public class ScopingBriefApprovalTest {
         assertTrue(fx.session.scopingApprovalUnavailableReason().contains(ConceptFreezeHook.NO_MISSION));
 
         assertEquals(null, fx.session.editMission("Real-time operating systems"));
+        ConceptTestSupport.readyEmbedding(fx.session); // PR 12: submit-scope requires an embedding model
         assertTrue(submitTag(fx).isEnabled());
         assertEquals(ScopingApprovalOutcome.SUCCESS, fx.session.approveScopingBriefAndContinue());
         assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
@@ -214,7 +215,8 @@ public class ScopingBriefApprovalTest {
         FrozenConcept frozen = fx.session.frozenConcept();
         assertEquals("en", frozen.getLanguage());
         assertEquals("Plugin isolation", frozen.getMission());
-        assertEquals(java.util.Arrays.asList("Applets"), frozen.getPin().getBlacklist());
+        // PR 12: "+ Add" records the typed entry and its excluded facet (label and id)
+        assertEquals(java.util.Arrays.asList("Applets", "applets"), frozen.getPin().getBlacklist());
         assertFalse(frozen.getEffectiveDocument().contains("Applets"));
         assertTrue(frozen.getApprovedDocument().contains("Applets"));
     }

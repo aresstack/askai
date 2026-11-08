@@ -181,7 +181,7 @@ public class BlacklistAndEmbeddingGateTest {
         final ResearchAgentSession session;
         final List<String> infos = new ArrayList<String>();
         final com.aresstack.askai.research.sources.InMemoryResearchSourceRepository repository =
-                new com.aresstack.askai.research.sources.InMemoryResearchSourceRepository();
+                com.aresstack.askai.research.sources.InMemoryResearchSourceRepository.empty();
 
         Fx(File projectDir) {
             final ProductiveResearchSessionResources[] holder =
