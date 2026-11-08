@@ -49,6 +49,11 @@ public final class FrozenConcept {
             throw new CorruptProjectFileException(manifest.file(), "The approved concept revision "
                     + pin.getApprovedRevision() + " does not match the book manifest.");
         }
+        return of(pin, approved);
+    }
+
+    /** The frozen concept of a verified pin and its approved document. */
+    static FrozenConcept of(ConceptPin pin, String approved) {
         return new FrozenConcept(pin, approved, withoutTerms(approved, pin.getBlacklist()));
     }
 
@@ -177,4 +182,58 @@ public final class FrozenConcept {
         }
     }
 
+
+    /**
+     * The read-only concept summary every phase after Concept gets (plan PR 16): mission, deliverable, the
+     * approved cards of the effective concept and the blacklist recorded with it. Rendered from the Phase-1
+     * record only, never from the live scope draft.
+     */
+    public String summary() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Approved concept revision ").append(getRevision()).append('\n');
+        if (!getMission().trim().isEmpty()) {
+            sb.append("Mission: ").append(getMission().trim()).append('\n');
+        }
+        if (!getDeliverable().trim().isEmpty()) {
+            sb.append("Deliverable: ").append(getDeliverable().trim()).append('\n');
+        }
+        sb.append("Cards:\n");
+        int before = sb.length();
+        appendCards(parseConcept(effectiveDocument), "- ", sb);
+        if (sb.length() == before) {
+            sb.append("(none)\n");
+        }
+        List<String> blacklist = pin.getBlacklist();
+        sb.append("Recorded blacklist: ");
+        if (blacklist.isEmpty()) {
+            sb.append("(none)");
+        } else {
+            for (int i = 0; i < blacklist.size(); i++) {
+                sb.append(i > 0 ? ", " : "").append(blacklist.get(i).trim());
+            }
+        }
+        return sb.append('\n').toString();
+    }
+
+    private static void appendCards(JsonArray level, String indent, StringBuilder sb) {
+        for (JsonElement element : level) {
+            if (element.isJsonPrimitive()) {
+                String name = element.getAsString().trim();
+                if (!name.isEmpty()) {
+                    sb.append(indent).append(name).append('\n');
+                }
+            } else if (element.isJsonObject()) {
+                for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+                    String name = entry.getKey().trim();
+                    if (name.isEmpty()) {
+                        continue;
+                    }
+                    sb.append(indent).append(name).append('\n');
+                    if (entry.getValue().isJsonArray()) {
+                        appendCards(entry.getValue().getAsJsonArray(), "  " + indent, sb);
+                    }
+                }
+            }
+        }
+    }
 }

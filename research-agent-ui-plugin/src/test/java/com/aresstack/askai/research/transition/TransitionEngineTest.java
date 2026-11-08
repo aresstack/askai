@@ -398,4 +398,22 @@ public class TransitionEngineTest {
             reopened.engine.close();
         }
     }
+
+    /** Plan PR 16: a phase's latest change request lives until its next Finish. */
+    @Test
+    public void theLatestChangeRequestOfAPhaseLastsUntilItsNextFinish() throws Exception {
+        Fixture f = new Fixture(tempDir());
+        f.toSourcesGate();
+        assertEquals("", f.engine.latestChangeRequest("research"));
+        assertTrue(f.engine.dispatch(new ResearchCommand(ResearchCommandType.REQUEST_REVISION, "cr-1",
+                CommandActor.USER, CommandSurface.USER_INTERFACE, "cr-1", ResearchCommand.NO_REVISION,
+                "Add sources on JPMS layers")).isCommitted());
+        f.settle();
+        assertEquals("research/running", f.phase());
+        assertEquals("Add sources on JPMS layers", f.engine.latestChangeRequest("research"));
+        assertEquals("another phase has none", "", f.engine.latestChangeRequest("outline"));
+        assertTrue(f.send(ResearchCommandType.REQUEST_EVIDENCE_REVIEW).isCommitted());
+        assertEquals("the next Finish clears it", "", f.engine.latestChangeRequest("research"));
+        f.engine.close();
+    }
 }

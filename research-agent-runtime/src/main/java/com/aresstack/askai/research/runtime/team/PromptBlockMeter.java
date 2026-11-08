@@ -8,7 +8,8 @@ import java.util.Map;
 
 /**
  * Counts the named blocks of ONE final model request (plan PR 01): the blocks of {@link PhaseContextAssembler}
- * (profile, date, language, state, fence, concept, history) and those {@link ResearchTeamAgent} appends (tool
+ * (profile, date, language, state, fence and concept in Concept, concept summary and phase artifact
+ * later, history) and those {@link ResearchTeamAgent} appends (tool
  * feedback, repair note, greeting instruction, user message). It only measures; the request stays unchanged.
  * The block sizes are the characters of the message contents, so their sum equals the characters of the
  * assembled messages.
@@ -21,6 +22,10 @@ public final class PromptBlockMeter {
     public static final String STATE = "state";
     public static final String FENCE = "fence";
     public static final String CONCEPT = "concept";
+    /** Later phases only (plan PR 16): the read-only summary of the frozen concept. */
+    public static final String CONCEPT_SUMMARY = "concept-summary";
+    /** Later phases only (plan PR 16): the artifact block of the live phase with its latest change request. */
+    public static final String PHASE_ARTIFACT = "phase-artifact";
     public static final String HISTORY = "history";
     public static final String TOOL_FEEDBACK = "tool-feedback";
     public static final String REPAIR_NOTE = "repair-note";
