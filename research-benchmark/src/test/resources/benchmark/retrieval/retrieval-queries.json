@@ -1,8 +1,642 @@
 {
-  "version": 1,
-  "_comment": "Plan 5.4 item 7: 24 known-item queries (8 DE_DE, 8 DE_EN, 8 EN_EN) on one topic of the owner's choice, each with one target passage id of the local corpus; concept nodes with their full label paths and 50 passages labelled by the owner. The owner fills this file; the corpus (corpus.jsonl) and the search results (serp/<queryId>.json) stay in the local data directory because they are third-party text. Empty until then: the live benchmark skips with that reason.",
-  "topic": "",
-  "queries": [],
-  "conceptNodes": [],
-  "labelledPassages": []
+  "version": 2,
+  "_comment": "Plan 5.4 item 7. Topic chosen by the owner on 2026-11-08. Queries, targets and labels were drafted by Claude from the public pages of retrieval-sources.json and are for the owner to review. A target or label names its source and terms that must all occur (case-insensitive) in exactly one passage of that source; the loader resolves it to the passage id of the locally captured corpus and fails when a target is missing or ambiguous. The 24 query targets are labelled too, so 50 passages carry a concept node.",
+  "topic": "Java-Modulsystem, Classloader und Plugin-Isolation",
+  "queries": [
+    {
+      "id": "de-de-01",
+      "group": "DE_DE",
+      "text": "In welcher Reihenfolge sucht die JVM Klassen auf Modulpfad und Klassenpfad?",
+      "targetSource": "de-ia-jigsaw-tutorial",
+      "targetTerms": [
+        "zuerst",
+        "Module-Path",
+        "Classpath"
+      ]
+    },
+    {
+      "id": "de-de-02",
+      "group": "DE_DE",
+      "text": "Dürfen zwei Java-Module ein Paket mit demselben Namen enthalten?",
+      "targetSource": "de-ia-jigsaw-tutorial",
+      "targetTerms": [
+        "disjunkte",
+        "Packages"
+      ]
+    },
+    {
+      "id": "de-de-03",
+      "group": "DE_DE",
+      "text": "Können Jigsaw-Module versioniert werden?",
+      "targetSource": "de-ia-modularity-patterns",
+      "targetTerms": [
+        "nicht versioniert"
+      ]
+    },
+    {
+      "id": "de-de-04",
+      "group": "DE_DE",
+      "text": "Haben Java-Module einen Lebenszyklus wie OSGi-Bundles?",
+      "targetSource": "de-ia-modularity-patterns",
+      "targetTerms": [
+        "Lebenszyklus",
+        "OSGi"
+      ]
+    },
+    {
+      "id": "de-de-05",
+      "group": "DE_DE",
+      "text": "Welche Pakete exportiert ein automatisches Modul?",
+      "targetSource": "de-tutego-module",
+      "targetTerms": [
+        "Automatische Module",
+        "alle ihre Pakete"
+      ]
+    },
+    {
+      "id": "de-de-06",
+      "group": "DE_DE",
+      "text": "Wodurch wird eine geladene Klasse in der JVM eindeutig identifiziert?",
+      "targetSource": "de-hauer-classloader",
+      "targetTerms": [
+        "voll qualifizierten Namen"
+      ]
+    },
+    {
+      "id": "de-de-07",
+      "group": "DE_DE",
+      "text": "In welcher Sprache ist der Bootstrap-Classloader implementiert?",
+      "targetSource": "de-jek-classloader",
+      "targetTerms": [
+        "nativem Code"
+      ]
+    },
+    {
+      "id": "de-de-08",
+      "group": "DE_DE",
+      "text": "Lädt der ServiceLoader seine Provider sofort oder erst bei Bedarf?",
+      "targetSource": "de-ia-modulare-anwendungen",
+      "targetTerms": [
+        "ServiceLoader",
+        "lazily"
+      ]
+    },
+    {
+      "id": "de-en-01",
+      "group": "DE_EN",
+      "text": "Welche Module kann das unbenannte Modul lesen?",
+      "targetSource": "en-sotms",
+      "targetTerms": [
+        "unnamed module reads every other module"
+      ]
+    },
+    {
+      "id": "de-en-02",
+      "group": "DE_EN",
+      "text": "Kann ein benanntes Modul eine Abhängigkeit auf das unbenannte Modul deklarieren?",
+      "targetSource": "en-sotms",
+      "targetTerms": [
+        "dependence upon the unnamed module"
+      ]
+    },
+    {
+      "id": "de-en-03",
+      "group": "DE_EN",
+      "text": "Warum bekommt jedes Plugin einen eigenen Classloader?",
+      "targetSource": "en-adevinta-plugins",
+      "targetTerms": [
+        "own class loader",
+        "own set of dependencies"
+      ]
+    },
+    {
+      "id": "de-en-04",
+      "group": "DE_EN",
+      "text": "Wann kann der Garbage Collector einen Classloader entfernen?",
+      "targetSource": "en-adevinta-plugins",
+      "targetTerms": [
+        "garbage collector",
+        "all instances"
+      ]
+    },
+    {
+      "id": "de-en-05",
+      "group": "DE_EN",
+      "text": "Wie viel Speicher verbrauchen einzelne Classloader für 20 Plugins?",
+      "targetSource": "en-omegat-adr",
+      "targetTerms": [
+        "1MB",
+        "20 plugins"
+      ]
+    },
+    {
+      "id": "de-en-06",
+      "group": "DE_EN",
+      "text": "Wer stellt den Kontext-Classloader eines Threads bereit?",
+      "targetSource": "en-baeldung-classloaders",
+      "targetTerms": [
+        "ContextClassLoader",
+        "creator of the thread"
+      ]
+    },
+    {
+      "id": "de-en-07",
+      "group": "DE_EN",
+      "text": "Können JDK-Klassen auf Klassen des Anwendungs-Classloaders verweisen?",
+      "targetSource": "en-foojay-hierarchies",
+      "targetTerms": [
+        "application class loader",
+        "not vice versa"
+      ]
+    },
+    {
+      "id": "de-en-08",
+      "group": "DE_EN",
+      "text": "Welche Klassen sind an einen delegierten Classloader gebunden?",
+      "targetSource": "en-devshorts-plugins",
+      "targetTerms": [
+        "delegated loader",
+        "bound"
+      ]
+    },
+    {
+      "id": "en-en-01",
+      "group": "EN_EN",
+      "text": "What is an automatic module?",
+      "targetSource": "en-sotms",
+      "targetTerms": [
+        "automatic module is a named module",
+        "defined implicitly"
+      ]
+    },
+    {
+      "id": "en-en-02",
+      "group": "EN_EN",
+      "text": "Which services is an automatic module considered to use?",
+      "targetSource": "en-sotms",
+      "targetTerms": [
+        "use every available service"
+      ]
+    },
+    {
+      "id": "en-en-03",
+      "group": "EN_EN",
+      "text": "Which module layer do most applications use?",
+      "targetSource": "en-sotms",
+      "targetTerms": [
+        "boot layer"
+      ]
+    },
+    {
+      "id": "en-en-04",
+      "group": "EN_EN",
+      "text": "How does a class loader that checks its own resources first differ from parent-first lookup?",
+      "targetSource": "en-redhat-mc-classloading",
+      "targetTerms": [
+        "parent-first",
+        "own resources"
+      ]
+    },
+    {
+      "id": "en-en-05",
+      "group": "EN_EN",
+      "text": "Which class loader is the parent of the system class loader?",
+      "targetSource": "en-baeldung-classloaders",
+      "targetTerms": [
+        "platform class loader is the parent of the system class loader"
+      ]
+    },
+    {
+      "id": "en-en-06",
+      "group": "EN_EN",
+      "text": "Which method does a custom class loader override?",
+      "targetSource": "en-baeldung-classloaders",
+      "targetTerms": [
+        "findClass"
+      ]
+    },
+    {
+      "id": "en-en-07",
+      "group": "EN_EN",
+      "text": "Why can two plugins of the same type still interfere with each other?",
+      "targetSource": "en-omegat-adr",
+      "targetTerms": [
+        "same type",
+        "access each other"
+      ]
+    },
+    {
+      "id": "en-en-08",
+      "group": "EN_EN",
+      "text": "Why must the types of the plugin interface be shared with the plugin engine?",
+      "targetSource": "en-adevinta-plugins",
+      "targetTerms": [
+        "shared by the plugin and the plugin-engine"
+      ]
+    }
+  ],
+  "conceptNodes": [
+    {
+      "id": "n1",
+      "labelPath": "Java-Modulsystem > Moduldeklaration und Abhängigkeiten"
+    },
+    {
+      "id": "n2",
+      "labelPath": "Java-Modulsystem > Kapselung und Sichtbarkeit von Paketen"
+    },
+    {
+      "id": "n3",
+      "labelPath": "Java-Modulsystem > Migration: Modulpfad, Klassenpfad, unbenannte und automatische Module"
+    },
+    {
+      "id": "n4",
+      "labelPath": "Java-Modulsystem > Services und Layer"
+    },
+    {
+      "id": "n5",
+      "labelPath": "Classloader > Hierarchie und Delegation"
+    },
+    {
+      "id": "n6",
+      "labelPath": "Classloader > Eigene Classloader und Identität von Klassen"
+    },
+    {
+      "id": "n7",
+      "labelPath": "Plugin-Isolation > Ein Classloader pro Plugin"
+    },
+    {
+      "id": "n8",
+      "labelPath": "Plugin-Isolation > Gemeinsame Schnittstellen, Speicher und Entladen"
+    }
+  ],
+  "labelledPassages": [
+    {
+      "source": "de-ia-jigsaw-tutorial",
+      "terms": [
+        "zuerst",
+        "Module-Path",
+        "Classpath"
+      ],
+      "nodeId": "n3"
+    },
+    {
+      "source": "de-ia-jigsaw-tutorial",
+      "terms": [
+        "disjunkte",
+        "Packages"
+      ],
+      "nodeId": "n2"
+    },
+    {
+      "source": "de-ia-modularity-patterns",
+      "terms": [
+        "nicht versioniert"
+      ],
+      "nodeId": "n1"
+    },
+    {
+      "source": "de-ia-modularity-patterns",
+      "terms": [
+        "Lebenszyklus",
+        "OSGi"
+      ],
+      "nodeId": "n1"
+    },
+    {
+      "source": "de-tutego-module",
+      "terms": [
+        "Automatische Module",
+        "alle ihre Pakete"
+      ],
+      "nodeId": "n3"
+    },
+    {
+      "source": "de-hauer-classloader",
+      "terms": [
+        "voll qualifizierten Namen"
+      ],
+      "nodeId": "n6"
+    },
+    {
+      "source": "de-jek-classloader",
+      "terms": [
+        "nativem Code"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "de-ia-modulare-anwendungen",
+      "terms": [
+        "ServiceLoader",
+        "lazily"
+      ],
+      "nodeId": "n4"
+    },
+    {
+      "source": "en-sotms",
+      "terms": [
+        "unnamed module reads every other module"
+      ],
+      "nodeId": "n3"
+    },
+    {
+      "source": "en-sotms",
+      "terms": [
+        "dependence upon the unnamed module"
+      ],
+      "nodeId": "n3"
+    },
+    {
+      "source": "en-adevinta-plugins",
+      "terms": [
+        "own class loader",
+        "own set of dependencies"
+      ],
+      "nodeId": "n7"
+    },
+    {
+      "source": "en-adevinta-plugins",
+      "terms": [
+        "garbage collector",
+        "all instances"
+      ],
+      "nodeId": "n8"
+    },
+    {
+      "source": "en-omegat-adr",
+      "terms": [
+        "1MB",
+        "20 plugins"
+      ],
+      "nodeId": "n8"
+    },
+    {
+      "source": "en-baeldung-classloaders",
+      "terms": [
+        "ContextClassLoader",
+        "creator of the thread"
+      ],
+      "nodeId": "n6"
+    },
+    {
+      "source": "en-foojay-hierarchies",
+      "terms": [
+        "application class loader",
+        "not vice versa"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "en-devshorts-plugins",
+      "terms": [
+        "delegated loader",
+        "bound"
+      ],
+      "nodeId": "n7"
+    },
+    {
+      "source": "en-sotms",
+      "terms": [
+        "automatic module is a named module",
+        "defined implicitly"
+      ],
+      "nodeId": "n3"
+    },
+    {
+      "source": "en-sotms",
+      "terms": [
+        "use every available service"
+      ],
+      "nodeId": "n4"
+    },
+    {
+      "source": "en-sotms",
+      "terms": [
+        "boot layer"
+      ],
+      "nodeId": "n4"
+    },
+    {
+      "source": "en-redhat-mc-classloading",
+      "terms": [
+        "parent-first",
+        "own resources"
+      ],
+      "nodeId": "n7"
+    },
+    {
+      "source": "en-baeldung-classloaders",
+      "terms": [
+        "platform class loader is the parent of the system class loader"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "en-baeldung-classloaders",
+      "terms": [
+        "findClass"
+      ],
+      "nodeId": "n6"
+    },
+    {
+      "source": "en-omegat-adr",
+      "terms": [
+        "same type",
+        "access each other"
+      ],
+      "nodeId": "n8"
+    },
+    {
+      "source": "en-adevinta-plugins",
+      "terms": [
+        "shared by the plugin and the plugin-engine"
+      ],
+      "nodeId": "n8"
+    },
+    {
+      "source": "en-sotms",
+      "terms": [
+        "module path",
+        "whole modules"
+      ],
+      "nodeId": "n3"
+    },
+    {
+      "source": "en-sotms",
+      "terms": [
+        "reads the second",
+        "readable by the first"
+      ],
+      "nodeId": "n1"
+    },
+    {
+      "source": "en-sotms",
+      "terms": [
+        "does not export it"
+      ],
+      "nodeId": "n2"
+    },
+    {
+      "source": "en-baeldung-classloaders",
+      "terms": [
+        "bootstrap or primordial class loader"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "en-baeldung-classloaders",
+      "terms": [
+        "delegation model is hierarchical"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "en-baeldung-classloaders",
+      "terms": [
+        "child class loaders can see the classes loaded by their parents"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "en-baeldung-classloaders",
+      "terms": [
+        "ensure unique classes"
+      ],
+      "nodeId": "n6"
+    },
+    {
+      "source": "en-adevinta-plugins",
+      "terms": [
+        "always first delegate to their parent"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "en-adevinta-plugins",
+      "terms": [
+        "only load classes from the jars given"
+      ],
+      "nodeId": "n7"
+    },
+    {
+      "source": "en-adevinta-plugins",
+      "terms": [
+        "even if the same code is already loaded"
+      ],
+      "nodeId": "n8"
+    },
+    {
+      "source": "en-redhat-mc-classloading",
+      "terms": [
+        "DefaultDomain is shared"
+      ],
+      "nodeId": "n7"
+    },
+    {
+      "source": "en-omegat-adr",
+      "terms": [
+        "share the same namespace"
+      ],
+      "nodeId": "n7"
+    },
+    {
+      "source": "en-omegat-adr",
+      "terms": [
+        "Type-Based ClassLoader Isolation"
+      ],
+      "nodeId": "n7"
+    },
+    {
+      "source": "en-omegat-adr",
+      "terms": [
+        "memory leak in one plugin"
+      ],
+      "nodeId": "n8"
+    },
+    {
+      "source": "en-devshorts-plugins",
+      "terms": [
+        "invert that process"
+      ],
+      "nodeId": "n7"
+    },
+    {
+      "source": "en-foojay-hierarchies",
+      "terms": [
+        "root node is the bootstrap class loader"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "de-ia-jigsaw-tutorial",
+      "terms": [
+        "Granularität eines Exports",
+        "Java-Package"
+      ],
+      "nodeId": "n2"
+    },
+    {
+      "source": "de-ia-jigsaw-tutorial",
+      "terms": [
+        "Unnamed Module"
+      ],
+      "nodeId": "n3"
+    },
+    {
+      "source": "de-ia-jigsaw-tutorial",
+      "terms": [
+        "nicht-öffentliche Klassen"
+      ],
+      "nodeId": "n2"
+    },
+    {
+      "source": "de-ia-modularity-patterns",
+      "terms": [
+        "Zyklen zur Laufzeit"
+      ],
+      "nodeId": "n1"
+    },
+    {
+      "source": "de-tutego-module",
+      "terms": [
+        "starke Kapselung"
+      ],
+      "nodeId": "n2"
+    },
+    {
+      "source": "de-tutego-module",
+      "terms": [
+        "list-modules"
+      ],
+      "nodeId": "n1"
+    },
+    {
+      "source": "de-jek-modulsystem",
+      "terms": [
+        "Exportierte Pakete sind für andere Module sichtbar"
+      ],
+      "nodeId": "n2"
+    },
+    {
+      "source": "de-ia-modulare-anwendungen",
+      "terms": [
+        "Service-Provider und Service-Consumer"
+      ],
+      "nodeId": "n4"
+    },
+    {
+      "source": "de-hauer-classloader",
+      "terms": [
+        "delegiert er zunächst die Aufgabe an seinen Parent"
+      ],
+      "nodeId": "n5"
+    },
+    {
+      "source": "de-jek-classloader",
+      "terms": [
+        "Extension-Classloader ist für das Laden von Erweiterungsklassen"
+      ],
+      "nodeId": "n5"
+    }
+  ]
 }

@@ -84,6 +84,7 @@ public class RetrievalBenchmarkLiveTest {
         Assume.assumeFalse("set -Daskai.benchmark.retrievalData to the local corpus directory", dataDir.isEmpty());
         File data = new File(dataDir);
         Map<String, RetrievalBenchmarkData.Passage> corpus = RetrievalBenchmarkData.loadCorpus(data, set);
+        set = set.resolve(corpus);
         String ollama = System.getProperty(P + "ollamaUrl", "http://127.0.0.1:11434").replaceAll("/+$", "");
         ProtocolProbes probes = new ProtocolProbes(ollama, 600_000);
         Assume.assumeFalse("Ollama not reachable at the configured URL", "unknown".equals(probes.version()));
