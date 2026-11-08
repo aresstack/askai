@@ -61,7 +61,8 @@ public class PhaseGatedContextBlocksTest {
         TeamAgentStateView state = new TeamAgentStateView(phaseId, "running", Collections.<String>emptyList());
         PhaseAssistantProfile profile = PhaseAssistantProfileRegistry.defaults(false, true).forPhase(phaseId);
         return assembler().assemble(profile, state, "", Collections.<String>emptyList(), "",
-                Collections.<String>emptyList(), Collections.singletonList(ChatMessage.user("hello")), meter);
+                Collections.<String>emptyList(), Collections.singletonList(
+                        ChatMessage.user("hello").tagged(phaseId, ChatMessage.Kind.USER)), meter);
     }
 
     private static String text(List<ChatMessage> messages) {

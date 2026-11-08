@@ -988,7 +988,8 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             OutputFormat format = request.getOutputFormat();
             OllamaChatOptions extras = new OllamaChatOptions(tools,
                     format.getKind() == OutputFormat.Kind.JSON_SCHEMA ? format.getSchemaJson() : null,
-                    options, format.getKind() == OutputFormat.Kind.JSON, () -> aborted.get());
+                    options, format.getKind() == OutputFormat.Kind.JSON, () -> aborted.get(),
+                    request.getTruncate());
             if (!reservation.enterWire(this)) {
                 fail(ModelFailure.Kind.RESERVATION_INVALID, "the reservation was closed before the call started");
                 finish();

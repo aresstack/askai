@@ -927,7 +927,15 @@ public final class ResearchAgentSession {
         if (freshState) {
             ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
         }
-        emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text), view.getPhaseId());
+        // The chat turn and its tool rounds hold the history lock as one unit: a review turn waits (PR 17).
+        final String turnText = text;
+        com.aresstack.askai.research.runtime.team.TeamAgentResult turn = teamAgent.exclusively(
+                new java.util.function.Supplier<com.aresstack.askai.research.runtime.team.TeamAgentResult>() {
+                    public com.aresstack.askai.research.runtime.team.TeamAgentResult get() {
+                        return conceptAwareRespond(ctx, view, turnText);
+                    }
+                });
+        emitTeamAgentResult(ctx, turn, view.getPhaseId());
         return cancelled.get()
                 ? AgentTurnOutcome.CANCELLED
                 : AgentTurnOutcome.END_TURN;
@@ -1581,8 +1589,19 @@ public final class ResearchAgentSession {
         if (teamAgent == null) {
             return com.aresstack.askai.research.domain.search.PostSearchReviewOutcome.FAILED;
         }
-        com.aresstack.askai.research.runtime.team.TeamAgentStateView view =
+        final com.aresstack.askai.research.runtime.team.TeamAgentStateView view =
                 readStateView(ctx).withSources(readReviewContext(ctx, capturedThrough));
+        // Serialised with chat turns (PR 17): the review never interleaves with a turn's tool rounds.
+        return teamAgent.exclusively(new java.util.function.Supplier<
+                com.aresstack.askai.research.domain.search.PostSearchReviewOutcome>() {
+            public com.aresstack.askai.research.domain.search.PostSearchReviewOutcome get() {
+                return runPostSearchReview(ctx, view);
+            }
+        });
+    }
+
+    private com.aresstack.askai.research.domain.search.PostSearchReviewOutcome runPostSearchReview(
+            final AgentOutput ctx, com.aresstack.askai.research.runtime.team.TeamAgentStateView view) {
         return com.aresstack.askai.research.runtime.team.PostSearchReview.run(view,
                 new com.aresstack.askai.research.runtime.team.PostSearchReview.Model() {
                     public com.aresstack.askai.research.runtime.team.TeamAgentResult internalTurn(
@@ -1795,9 +1814,13 @@ public final class ResearchAgentSession {
             final com.aresstack.askai.research.runtime.team.TeamAgentStateView view,
             String userText, boolean seededMovedReceipt, String seededMoveOutcome) {
         if (!conceptToolsAvailable) {
+            teamAgent.completeTurn(initial, "");
             return initial;
         }
-        return com.aresstack.askai.research.runtime.team.ConceptToolRounds.run(initial,
+        // The applied actions of this turn, for the one-line receipt of its FINAL history entry (D7).
+        final java.util.List<String> applied = new java.util.ArrayList<String>();
+        com.aresstack.askai.research.runtime.team.TeamAgentResult closed =
+                com.aresstack.askai.research.runtime.team.ConceptToolRounds.run(initial,
                 new com.aresstack.askai.research.runtime.team.ConceptToolRounds.FollowUpTurn() {
                     public com.aresstack.askai.research.runtime.team.TeamAgentResult run(
                             String feedbackInstruction) {
@@ -1817,7 +1840,12 @@ public final class ResearchAgentSession {
                     public String call(com.aresstack.askai.research.runtime.team.ConceptAction action)
                             throws com.aresstack.askai.research.runtime.loop.ToolInvoker.ToolFailure,
                             com.aresstack.askai.research.runtime.loop.ToolInvoker.EndpointUnavailable {
-                        return conceptToolCall(action);
+                        String receipt = conceptToolCall(action);
+                        if (com.aresstack.askai.research.runtime.team.ConceptToolRounds
+                                .isAppliedOutcome(action, receipt)) {
+                            applied.add(action.describe());
+                        }
+                        return receipt;
                     }
                 },
                 conceptMaxToolRounds, conceptMaxRepairAttempts,
@@ -1843,6 +1871,8 @@ public final class ResearchAgentSession {
                 // A name the user wrote literally is never taken for a prompt placeholder, and a
                 // bare greeting never triggers the first-turn card nudge.
                 userText);
+        teamAgent.completeTurn(closed, String.join("; ", applied));
+        return closed;
     }
 
     /** Whether THIS session ever offered exploration tags — ends the one-shot offer nudge. */

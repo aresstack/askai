@@ -32,6 +32,14 @@ public interface MainModelChat {
         return complete(messages, temperature, maxOutputTokens);
     }
 
+    /**
+     * The context in tokens the call runs with (the bound model's {@code num_ctx}, plan 4.1 rule 1), for the
+     * overflow guard of the caller; 0 = unknown, then no guard runs.
+     */
+    default int contextTokens() {
+        return 0;
+    }
+
     /** What this client calls, for the readiness line and diagnostics (a slot name, never a secret). */
     String modelName();
 

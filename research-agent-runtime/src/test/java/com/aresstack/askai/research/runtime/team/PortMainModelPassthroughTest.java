@@ -87,6 +87,8 @@ public class PortMainModelPassthroughTest {
 
         ChatRequest generic = port.requests().get(0);
         assertEquals(OutputFormat.Kind.JSON, generic.getOutputFormat().getKind());
+        assertEquals("research calls never let Ollama cut the prompt (PR 17)", Boolean.FALSE,
+                generic.getTruncate());
         assertEquals(ResearchModelSlots.SCOPE, generic.getSlot());
         assertEquals(Double.valueOf(0.2), generic.getTemperature());
         assertEquals(64, generic.getMaxOutputTokens());

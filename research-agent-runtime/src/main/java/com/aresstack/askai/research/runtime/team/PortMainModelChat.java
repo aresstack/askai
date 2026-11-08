@@ -104,6 +104,18 @@ public final class PortMainModelChat implements MainModelChat {
                         ? OutputFormat.json() : OutputFormat.jsonSchema(schemaJson));
     }
 
+    /** The bound model's context for the overflow guard; 0 when no binding is known (no guard then). */
+    @Override
+    public int contextTokens() {
+        try {
+            ResourceSnapshot snapshot = port.resources();
+            SlotBinding binding = snapshot == null ? null : snapshot.bindingOf(slot).orElse(null);
+            return binding == null ? 0 : binding.getContextTokens();
+        } catch (RuntimeException unavailable) {
+            return 0;
+        }
+    }
+
     /** The slot name: plugins never see which model fills it. */
     @Override
     public String modelName() {
@@ -128,6 +140,8 @@ public final class PortMainModelChat implements MainModelChat {
                 .temperature(temperature < 0 || Double.isNaN(temperature) ? null : temperature)
                 .maxOutputTokens(Math.max(0, maxOutputTokens))
                 .contextTokens(contextTokens)
+                // Ollama refuses an oversized prompt instead of silently cutting it (plan 4.1 rule 2, PR 17).
+                .truncate(Boolean.FALSE)
                 .timeout(timeout);
         for (ChatMessage message : messages) {
             request.message(toModelMessage(message));
