@@ -4,8 +4,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 
 /** Small filesystem helpers for the project store: UTF-8 atomic writes and SHA-256 checksums. */
@@ -16,21 +14,10 @@ final class StoreIo {
     private StoreIo() {
     }
 
-    /** Write {@code content} to {@code target} atomically: temp file in the same dir, then move. */
+    /** Write {@code content} to {@code target} atomically: temp file in the same dir, flushed, then move. */
     static void atomicWrite(File target, String content) throws IOException {
-        File dir = target.getParentFile();
-        if (dir != null) {
-            Files.createDirectories(dir.toPath());
-        }
-        File tmp = new File(dir, target.getName() + ".tmp");
-        Files.write(tmp.toPath(), content.getBytes(UTF8));
-        Path targetPath = target.toPath();
-        try {
-            Files.move(tmp.toPath(), targetPath,
-                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException atomicUnsupported) {
-            Files.move(tmp.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-        }
+        // flushed to disk before the rename (PR 06), so a crash never leaves a renamed empty file
+        com.aresstack.askai.research.transition.AtomicFiles.write(target, content);
     }
 
     /** Reads a store's {@code .properties} file as UTF-8 (never the ISO-8859-1 of {@code Properties.load(InputStream)}). */

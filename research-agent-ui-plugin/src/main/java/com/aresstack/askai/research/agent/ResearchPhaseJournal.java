@@ -24,6 +24,16 @@ public final class ResearchPhaseJournal {
     private final Map<String, String> phaseByMessageId = new LinkedHashMap<String, String>();
     /** phaseId → the ONE outcome summary of that phase (latest wins). */
     private final Map<String, String> outcomeByPhase = new LinkedHashMap<String, String>();
+    /** Keys of transition effects already shown in the chat (divider, change note), once per transition. */
+    private final java.util.Set<String> shown = new java.util.LinkedHashSet<String>();
+
+    public synchronized boolean hasShown(String key) {
+        return shown.contains(key);
+    }
+
+    public synchronized void markShown(String key) {
+        shown.add(key);
+    }
 
     /** Attribute one message to a phase. Empty ids are ignored — never invent an attribution. */
     public synchronized boolean attribute(String messageId, String phaseId) {
@@ -76,6 +86,11 @@ public final class ResearchPhaseJournal {
         document.addProperty("schemaVersion", 1);
         document.add("messagePhases", messages);
         document.add("phaseOutcomes", outcomes);
+        com.google.gson.JsonArray shownKeys = new com.google.gson.JsonArray();
+        for (String key : shown) {
+            shownKeys.add(key);
+        }
+        document.add("shownEffects", shownKeys);
         return document.toString();
     }
 
@@ -85,6 +100,18 @@ public final class ResearchPhaseJournal {
      * live in the host's chat record.
      */
     public static ResearchPhaseJournal fromJson(String json) {
+        try {
+            return parse(json);
+        } catch (IllegalArgumentException unreadable) {
+            return new ResearchPhaseJournal();
+        }
+    }
+
+    /**
+     * The strict parse of PR 06: unreadable content throws, so the session moves the file aside and reports
+     * it instead of loading an empty journal that the next save would write over.
+     */
+    public static ResearchPhaseJournal parse(String json) {
         ResearchPhaseJournal journal = new ResearchPhaseJournal();
         if (json == null || json.trim().isEmpty()) {
             return journal;
@@ -93,8 +120,15 @@ public final class ResearchPhaseJournal {
             JsonObject document = JsonParser.parseString(json).getAsJsonObject();
             copyInto(document.getAsJsonObject("messagePhases"), journal.phaseByMessageId);
             copyInto(document.getAsJsonObject("phaseOutcomes"), journal.outcomeByPhase);
+            com.google.gson.JsonArray shownKeys = document.getAsJsonArray("shownEffects");
+            if (shownKeys != null) {
+                for (JsonElement key : shownKeys) {
+                    journal.shown.add(key.getAsString());
+                }
+            }
         } catch (RuntimeException unreadable) {
-            return new ResearchPhaseJournal();
+            throw new IllegalArgumentException("phase journal unreadable: " + unreadable.getMessage(),
+                    unreadable);
         }
         return journal;
     }
