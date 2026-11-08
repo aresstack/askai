@@ -85,8 +85,14 @@ public final class RetrievalBenchmarkData {
                 }
             }
             if (hits.size() != 1) {
+                StringBuilder excerpts = new StringBuilder();
+                for (String hit : hits) {
+                    String text = corpus.get(hit).text;
+                    excerpts.append(" [").append(hit).append(": ")
+                            .append(text.length() > 160 ? text.substring(0, 160) + "..." : text).append("]");
+                }
                 throw new IllegalArgumentException(what + ": terms " + terms + " match " + hits.size()
-                        + " passages of " + source + (hits.isEmpty() ? "" : " " + hits));
+                        + " passages of " + source + excerpts);
             }
             return hits.get(0);
         }
