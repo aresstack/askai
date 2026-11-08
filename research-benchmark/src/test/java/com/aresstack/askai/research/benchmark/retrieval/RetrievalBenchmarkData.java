@@ -32,27 +32,92 @@ public final class RetrievalBenchmarkData {
     /** DE→DE, DE→EN and EN→EN (query language → passage language). */
     public enum Group { DE_DE, DE_EN, EN_EN }
 
+    /**
+     * Where a target or label points: a passage id, or a source id with terms that must all occur
+     * (case-insensitive) in exactly one passage of that source. Terms survive a re-capture of the pages, ids do not.
+     */
+    public static final class Locator {
+        public final String passageId;
+        public final String source;
+        public final List<String> terms;
+
+        Locator(String passageId, String source, List<String> terms) {
+            this.passageId = passageId;
+            this.source = source;
+            this.terms = Collections.unmodifiableList(terms);
+        }
+
+        static Locator of(JsonObject json, String idKey, String sourceKey, String termsKey) {
+            List<String> terms = new ArrayList<String>();
+            for (JsonElement term : array(json, termsKey)) {
+                if (!term.getAsString().trim().isEmpty()) {
+                    terms.add(term.getAsString().trim());
+                }
+            }
+            Locator locator = new Locator(str(json, idKey), str(json, sourceKey), terms);
+            if (locator.passageId.isEmpty() && (locator.source.isEmpty() || terms.isEmpty())) {
+                throw new IllegalArgumentException("needs " + idKey + " or " + sourceKey + " with " + termsKey
+                        + ": " + json);
+            }
+            return locator;
+        }
+
+        /** The passage id in this corpus; fails when the passage is missing or the terms are ambiguous. */
+        String resolve(Map<String, Passage> corpus, String what) {
+            if (!passageId.isEmpty()) {
+                if (!corpus.containsKey(passageId)) {
+                    throw new IllegalArgumentException(what + ": passage " + passageId + " is not in the corpus");
+                }
+                return passageId;
+            }
+            List<String> hits = new ArrayList<String>();
+            for (Passage passage : corpus.values()) {
+                if (!source.equals(passage.source)) {
+                    continue;
+                }
+                String text = passage.text.toLowerCase(java.util.Locale.ROOT);
+                boolean all = true;
+                for (String term : terms) {
+                    all &= text.contains(term.toLowerCase(java.util.Locale.ROOT));
+                }
+                if (all) {
+                    hits.add(passage.id);
+                }
+            }
+            if (hits.size() != 1) {
+                throw new IllegalArgumentException(what + ": terms " + terms + " match " + hits.size()
+                        + " passages of " + source + (hits.isEmpty() ? "" : " " + hits));
+            }
+            return hits.get(0);
+        }
+    }
+
     public static final class Query {
         public final String id;
         public final Group group;
         public final String text;
+        /** Resolved against the corpus by {@link #loadCorpus}; empty before that when the file uses terms. */
         public final String targetPassageId;
+        final Locator target;
 
-        Query(String id, Group group, String text, String targetPassageId) {
+        Query(String id, Group group, String text, Locator target, String resolvedTarget) {
             this.id = id;
             this.group = group;
             this.text = text;
-            this.targetPassageId = targetPassageId;
+            this.target = target;
+            this.targetPassageId = resolvedTarget;
         }
     }
 
     public static final class Passage {
         public final String id;
+        public final String source;
         public final String language;
         public final String text;
 
-        public Passage(String id, String language, String text) {
+        public Passage(String id, String source, String language, String text) {
             this.id = id;
+            this.source = source == null ? "" : source;
             this.language = language;
             this.text = text;
         }
@@ -88,15 +153,50 @@ public final class RetrievalBenchmarkData {
         public final List<Query> queries;
         /** concept node id → its full label path ("Root > Chapter > Section"). */
         public final Map<String, String> conceptLabelPaths;
-        /** labelled passage id → the concept node it belongs to. */
+        /** labelled passage id → the concept node it belongs to (filled by {@link #resolve}). */
         public final Map<String, String> passageLabels;
+        final List<Map.Entry<Locator, String>> labelLocators;
 
         QuerySet(String topic, List<Query> queries, Map<String, String> conceptLabelPaths,
-                 Map<String, String> passageLabels) {
+                 Map<String, String> passageLabels, List<Map.Entry<Locator, String>> labelLocators) {
             this.topic = topic;
             this.queries = Collections.unmodifiableList(queries);
             this.conceptLabelPaths = Collections.unmodifiableMap(conceptLabelPaths);
             this.passageLabels = Collections.unmodifiableMap(passageLabels);
+            this.labelLocators = labelLocators;
+        }
+
+        /** The same set with every target and label resolved to a passage id of this corpus. */
+        public QuerySet resolve(Map<String, Passage> corpus) {
+            List<Query> resolved = new ArrayList<Query>();
+            List<String> problems = new ArrayList<String>();
+            for (Query q : queries) {
+                try {
+                    resolved.add(new Query(q.id, q.group, q.text, q.target, q.target.resolve(corpus, q.id)));
+                } catch (IllegalArgumentException missing) {
+                    problems.add(missing.getMessage());
+                }
+            }
+            Map<String, String> labels = new LinkedHashMap<String, String>();
+            for (Map.Entry<Locator, String> label : labelLocators) {
+                try {
+                    String id = label.getKey().resolve(corpus, "label " + label.getKey().terms);
+                    String previous = labels.put(id, label.getValue());
+                    if (previous != null) {
+                        problems.add("passage " + id + " is labelled twice (" + previous + ", " + label.getValue()
+                                + ", terms " + label.getKey().terms + ")");
+                    }
+                } catch (IllegalArgumentException missing) {
+                    problems.add(missing.getMessage());
+                }
+            }
+            if (problems.isEmpty() && labels.size() != labelLocators.size()) {
+                problems.add(labelLocators.size() + " labels resolve to only " + labels.size() + " distinct passages");
+            }
+            if (!problems.isEmpty()) {
+                throw new IllegalArgumentException(problems.size() + " unresolved: " + String.join("; ", problems));
+            }
+            return new QuerySet(topic, resolved, conceptLabelPaths, labels, labelLocators);
         }
 
         public boolean isEmpty() {
@@ -122,10 +222,11 @@ public final class RetrievalBenchmarkData {
         java.util.Set<String> ids = new java.util.HashSet<String>();
         for (JsonElement element : array(root, "queries")) {
             JsonObject q = element.getAsJsonObject();
-            Query query = new Query(str(q, "id"), Group.valueOf(str(q, "group")), str(q, "text"),
-                    str(q, "targetPassageId"));
-            if (query.id.isEmpty() || query.text.isEmpty() || query.targetPassageId.isEmpty()) {
-                throw new IllegalArgumentException("query needs id, text and targetPassageId: " + q);
+            Locator target = Locator.of(q, "targetPassageId", "targetSource", "targetTerms");
+            Query query = new Query(str(q, "id"), Group.valueOf(str(q, "group")), str(q, "text"), target,
+                    target.passageId);
+            if (query.id.isEmpty() || query.text.isEmpty()) {
+                throw new IllegalArgumentException("query needs id and text: " + q);
             }
             if (!ids.add(query.id)) {
                 throw new IllegalArgumentException("duplicate query id " + query.id);
@@ -138,18 +239,23 @@ public final class RetrievalBenchmarkData {
             nodes.put(str(n, "id"), str(n, "labelPath"));
         }
         Map<String, String> labels = new LinkedHashMap<String, String>();
+        List<Map.Entry<Locator, String>> locators = new ArrayList<Map.Entry<Locator, String>>();
         for (JsonElement element : array(root, "labelledPassages")) {
             JsonObject l = element.getAsJsonObject();
             String node = str(l, "nodeId");
             if (!nodes.containsKey(node)) {
                 throw new IllegalArgumentException("labelled passage points at unknown node " + node);
             }
-            labels.put(str(l, "passageId"), node);
+            Locator locator = Locator.of(l, "passageId", "source", "terms");
+            locators.add(new java.util.AbstractMap.SimpleEntry<Locator, String>(locator, node));
+            if (!locator.passageId.isEmpty()) {
+                labels.put(locator.passageId, node);
+            }
         }
-        return new QuerySet(str(root, "topic"), queries, nodes, labels);
+        return new QuerySet(str(root, "topic"), queries, nodes, labels, locators);
     }
 
-    /** The local corpus; every target and every labelled passage must be in it. */
+    /** The local corpus; every target and every labelled passage must resolve in it (see {@link QuerySet#resolve}). */
     public static Map<String, Passage> loadCorpus(File dataDirectory, QuerySet set) throws IOException {
         File file = new File(dataDirectory, "corpus.jsonl");
         Map<String, Passage> corpus = new LinkedHashMap<String, Passage>();
@@ -158,22 +264,12 @@ public final class RetrievalBenchmarkData {
                 continue;
             }
             JsonObject p = JsonParser.parseString(line).getAsJsonObject();
-            Passage passage = new Passage(str(p, "id"), str(p, "language"), str(p, "text"));
+            Passage passage = new Passage(str(p, "id"), str(p, "source"), str(p, "language"), str(p, "text"));
             if (corpus.put(passage.id, passage) != null) {
                 throw new IllegalArgumentException("duplicate passage id " + passage.id);
             }
         }
-        for (Query query : set.queries) {
-            if (!corpus.containsKey(query.targetPassageId)) {
-                throw new IllegalArgumentException("target " + query.targetPassageId + " of " + query.id
-                        + " is not in the corpus");
-            }
-        }
-        for (String passageId : set.passageLabels.keySet()) {
-            if (!corpus.containsKey(passageId)) {
-                throw new IllegalArgumentException("labelled passage " + passageId + " is not in the corpus");
-            }
-        }
+        set.resolve(corpus); // fails with every unresolved target and label
         return corpus;
     }
 

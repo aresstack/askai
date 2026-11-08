@@ -64,6 +64,7 @@ public class RetrievalBenchmarkTest {
                 "{\"id\":\"p1\",\"language\":\"en\",\"text\":\"one\"}",
                 "{\"id\":\"p2\",\"language\":\"en\",\"text\":\"two\"}"), StandardCharsets.UTF_8);
         assertEquals(2, RetrievalBenchmarkData.loadCorpus(dir, set).size());
+        assertEquals("p2", set.resolve(RetrievalBenchmarkData.loadCorpus(dir, set)).queries.get(0).targetPassageId);
         assertEquals(null, RetrievalBenchmarkData.loadSearchResults(dir, "q1"));
     }
 
@@ -140,6 +141,103 @@ public class RetrievalBenchmarkTest {
             assertEquals(32768, ModelProtocolLiveTest.numCtx("llama3.1:8b"));
         } finally {
             System.clearProperty("askai.benchmark.numCtx.llama3.1:8b");
+        }
+    }
+
+    @Test
+    public void termsResolveToExactlyOnePassageOfTheirSource() {
+        RetrievalBenchmarkData.QuerySet set = RetrievalBenchmarkData.parseQueries(JsonParser.parseString(
+                "{\"queries\":[{\"id\":\"q\",\"group\":\"DE_DE\",\"text\":\"x\",\"targetSource\":\"s1\","
+                        + "\"targetTerms\":[\"Lebenszyklus\",\"osgi\"]}],"
+                        + "\"conceptNodes\":[{\"id\":\"n\",\"labelPath\":\"A\"}],"
+                        + "\"labelledPassages\":[{\"source\":\"s1\",\"terms\":[\"versioniert\"],\"nodeId\":\"n\"}]}")
+                .getAsJsonObject());
+        java.util.Map<String, RetrievalBenchmarkData.Passage> corpus =
+                new java.util.LinkedHashMap<String, RetrievalBenchmarkData.Passage>();
+        corpus.put("s1-p0", new RetrievalBenchmarkData.Passage("s1-p0", "s1", "de", "Module sind nicht versioniert."));
+        corpus.put("s1-p1", new RetrievalBenchmarkData.Passage("s1-p1", "s1", "de",
+                "Module haben anders als bei OSGi keinen Lebenszyklus."));
+        corpus.put("s2-p0", new RetrievalBenchmarkData.Passage("s2-p0", "s2", "de", "OSGi Lebenszyklus"));
+        RetrievalBenchmarkData.QuerySet resolved = set.resolve(corpus);
+        assertEquals("s1-p1", resolved.queries.get(0).targetPassageId);
+        assertEquals("n", resolved.passageLabels.get("s1-p0"));
+
+        corpus.put("s1-p2", new RetrievalBenchmarkData.Passage("s1-p2", "s1", "de", "OSGi: Lebenszyklus."));
+        try {
+            set.resolve(corpus);
+            fail("ambiguous terms must fail");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("match 2 passages"));
+        }
+    }
+
+    @Test
+    public void theTopicFileHas24QueriesIn3GroupsAnd50Labels() throws Exception {
+        RetrievalBenchmarkData.QuerySet set = RetrievalBenchmarkData.loadQueries();
+        assertEquals(24, set.queries.size());
+        for (RetrievalBenchmarkData.Group group : RetrievalBenchmarkData.Group.values()) {
+            int n = 0;
+            for (RetrievalBenchmarkData.Query q : set.queries) {
+                n += q.group == group ? 1 : 0;
+            }
+            assertEquals(group.name(), 8, n);
+        }
+        assertEquals(50, set.labelLocators.size());
+    }
+
+    @Test
+    public void extractorKeepsMainTextInHeadingBoundedPassages() {
+        StringBuilder para = new StringBuilder();
+        for (int i = 0; i < 30; i++) {
+            para.append("Wort").append(i).append(' ');
+        }
+        String html = "<html><body><nav><p>Menu Home About Contact Imprint Privacy Login</p></nav><article>"
+                + "<h2>Modulpfad</h2><p>" + para + "Modulpfad.</p><p>" + para + "Ende eins.</p>"
+                + "<pre>module a { requires b; }</pre>"
+                + "<h2>Classloader</h2><p>" + para + "Classloader.</p></article>"
+                + "<footer><p>Copyright notice of the site with many words here</p></footer></body></html>";
+        List<RetrievalBenchmarkData.Passage> passages = CorpusExtractor.extract("s", "de", html);
+        assertEquals(2, passages.size());
+        assertEquals("s-p0", passages.get(0).id);
+        assertTrue(passages.get(0).text.contains("Modulpfad.") && passages.get(0).text.contains("Ende eins."));
+        assertFalse(passages.get(0).text.contains("requires"));
+        assertTrue(passages.get(1).text.endsWith("Classloader."));
+        for (RetrievalBenchmarkData.Passage p : passages) {
+            assertFalse(p.text.contains("Menu") || p.text.contains("Copyright"));
+        }
+    }
+
+    @Test
+    public void extractorKeepsInlineCodeListItemsAndBoundsLongBlocks() {
+        StringBuilder longText = new StringBuilder();
+        for (int i = 0; i < 400; i++) {
+            longText.append("wort").append(i).append(i % 20 == 19 ? ". " : " ");
+        }
+        String html = "<html><body><article><ul><li>Override <code>findClass</code> to implement a custom loader that "
+                + "reads bytes from a plugin jar and defines the class with defineClass for this plugin only.</li></ul>"
+                + "<h2>Lang</h2><p>" + longText + "</p></article></body></html>";
+        List<RetrievalBenchmarkData.Passage> passages = CorpusExtractor.extract("s", "en", html);
+        assertTrue(passages.get(0).text.contains("Override findClass to implement"));
+        for (RetrievalBenchmarkData.Passage p : passages) {
+            assertTrue(p.text, CorpusExtractor.words(p.text) <= CorpusExtractor.MAX_WORDS);
+        }
+        assertTrue(passages.size() >= 4);
+    }
+
+    @Test
+    public void twoLabelsOnOnePassageAreRejected() {
+        RetrievalBenchmarkData.QuerySet set = RetrievalBenchmarkData.parseQueries(JsonParser.parseString(
+                "{\"conceptNodes\":[{\"id\":\"n\",\"labelPath\":\"A\"}],\"labelledPassages\":["
+                        + "{\"source\":\"s\",\"terms\":[\"modul\"],\"nodeId\":\"n\"},"
+                        + "{\"source\":\"s\",\"terms\":[\"pfad\"],\"nodeId\":\"n\"}]}").getAsJsonObject());
+        java.util.Map<String, RetrievalBenchmarkData.Passage> corpus =
+                new java.util.LinkedHashMap<String, RetrievalBenchmarkData.Passage>();
+        corpus.put("s-p0", new RetrievalBenchmarkData.Passage("s-p0", "s", "de", "Modul und Pfad"));
+        try {
+            set.resolve(corpus);
+            fail("two labels on one passage must fail");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("labelled twice"));
         }
     }
 }

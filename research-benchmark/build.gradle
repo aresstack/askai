@@ -20,6 +20,8 @@ dependencies {
     testImplementation project(':research-knowledge-pipeline')
     testImplementation project(':research-knowledge-processing')
     testImplementation project(':browser-api')
+    // The corpus capture extracts the fetched pages with jsoup (HostNetwork comes from agent-workspace-api above).
+    testImplementation 'org.jsoup:jsoup:1.17.2'
     // The plugin compiles these against the host (compileOnly); a test outside the host provides them.
     testImplementation project(':mcp-runtime-api')
     testImplementation project(':mcp-solon-runtime')

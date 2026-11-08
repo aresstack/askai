@@ -9,9 +9,15 @@ one-line follow-up adopts the measured value.
 How to run (normal `test` stays model-free; both probes run only in the opt-in task):
 
 ```
+gradlew :research-benchmark:benchmark --tests '*RetrievalCorpusCaptureLiveTest*' -Daskai.benchmark.retrievalData=<local data directory>
 gradlew :research-benchmark:benchmark --tests '*ModelProtocolLiveTest*'
 gradlew :research-benchmark:benchmark --tests '*RetrievalBenchmarkLiveTest*' -Daskai.benchmark.retrievalData=<local data directory>
 ```
+
+The capture step fetches the 19 public pages of `retrieval-sources.json` into `corpus.jsonl` and fails if a query
+target or label no longer resolves. During the live test, also read the `load_duration` of the `[model-call]` log
+lines (PR 01) for every switch between chat, research and dictation; an `ollama ps` snapshot alone does not show a
+reload in between.
 
 Settings: `askai.benchmark.ollamaUrl`, `protocolModels` (default `gemma4:e2b,llama3.1:8b,gpt-oss:20b`),
 `protocolEmbeddingModel` (default `nomic-embed-text`), `embeddingCandidates` (the current preset first),
@@ -39,7 +45,7 @@ tables here together with the Ollama version and the server settings of 5.3.
 | 4 | `load_duration` for every switch between gemma4:e2b, llama3.1:8b and gpt-oss:20b | `ModelProtocolLiveTest` (two rounds through all models) | open |
 | 5 | How the chat template renders several, and non-leading, system messages | manual: `ollama show --template` per model and one request with two system messages; not automated in this PR | open |
 | 6 | Phase-1 live gate on gemma4:e2b (N = 10) and the four open checks of roadmap AP 1 | the existing live gate run (`research-benchmark` baseline subject); its result is recorded here | open |
-| 7 | Retrieval benchmark: Recall@5, Recall@10, MRR per group (DE→DE, DE→EN, EN→EN) and candidate; concept assignment of 50 labelled passages; embedding time per 100 passages; GPU memory; longest passage against the model's context; hit rate and "selects nothing" per ranking strategy | `RetrievalBenchmarkLiveTest`; needs the owner's 24 queries in `research-benchmark/src/test/resources/benchmark/retrieval/retrieval-queries.json` and the local corpus of about 300 passages (`corpus.jsonl`) plus 20 search results per query (`serp/<queryId>.json`) | open: topic and queries not chosen yet |
+| 7 | Retrieval benchmark: Recall@5, Recall@10, MRR per group (DE→DE, DE→EN, EN→EN) and candidate; concept assignment of 50 labelled passages; embedding time per 100 passages; GPU memory; longest passage against the model's context; hit rate and "selects nothing" per ranking strategy | `RetrievalBenchmarkLiveTest`; needs the owner's 24 queries in `research-benchmark/src/test/resources/benchmark/retrieval/retrieval-queries.json` and the local corpus of about 300 passages (`corpus.jsonl`) plus 20 search results per query (`serp/<queryId>.json`) | open: topic chosen (Java-Modulsystem, Classloader und Plugin-Isolation, 2026-11-08); 24 queries, 8 concept nodes and 50 labels checked in for review; corpus captured on the owner's machine; the 20 search results per query are still missing, so the ranking part reports them as missing |
 | 8 | One multilingual cross-encoder (`bge-reranker-v2-m3`) on the queries of item 7, with a reference implementation outside AskAI | outside AskAI by design (the plan forbids a new engine without measured need); score with the same query file and compare with the table of item 7 | open |
 | 9 | Does the installed Ollama honour `truncate=false` on chat and embedding calls? | `ModelProtocolLiveTest` (an overlong prompt must fail with an HTTP error) | open |
 
@@ -115,6 +121,7 @@ best mean hit rate. The report prints the qualifying candidate; the fit is decid
 
 ## What PR 04 changed in the product
 
+- The retrieval benchmark is isolated: its corpus is cut by its own heading-bounded 40-160-word segmentation, not by the productive `PassageSegmentation`; a cross-check with the productive segmentation is a follow-up.
 - `EmbeddingPort` has roles: `embedDocuments`, `embedQueries` and `embedRaw` (the old `embed(texts)` is gone, so no
   call site keeps an implicit role). Passages and the sentence windows of the passage boundaries are documents; the
   scope fence (anchors, `scope_probe` terms, sweep probes, `SearchScopeGate` candidates) stays raw.

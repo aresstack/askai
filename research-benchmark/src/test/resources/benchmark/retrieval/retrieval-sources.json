@@ -1,0 +1,24 @@
+{
+  "_comment": "Plan 5.4 item 7, topic chosen by the owner on 2026-11-08: Java module system, class loaders and plugin isolation. Public German and English pages; RetrievalCorpusCaptureLiveTest fetches them on the owner's machine (through HostNetwork) into the local data directory, because the text is third-party and is not checked in. Distractor pages carry no query target.",
+  "sources": [
+    {"id": "en-sotms", "language": "en", "url": "https://openjdk.org/projects/jigsaw/spec/sotms/"},
+    {"id": "en-baeldung-classloaders", "language": "en", "url": "https://www.baeldung.com/java-classloaders"},
+    {"id": "en-adevinta-plugins", "language": "en", "url": "https://adevinta.com/techblog/java-plugins-with-isolating-class-loaders/"},
+    {"id": "en-redhat-mc-classloading", "language": "en", "url": "https://docs.redhat.com/de/documentation/jboss_enterprise_application_platform_common_criteria_certification/5/html/jboss_microcontainer_user_guide/sect-jboss_microcontainer_user_guide-the_classloading_layer-classloading"},
+    {"id": "en-omegat-adr", "language": "en", "url": "https://omegat.readthedocs.io/en/latest/adr/2025012.PluginSecurityArchitecture.html"},
+    {"id": "en-devshorts-plugins", "language": "en", "url": "https://devshorts.github.io/onoffswitch/2015/12/12/class-loaders-hard/"},
+    {"id": "en-foojay-hierarchies", "language": "en", "url": "https://foojay.io/today/class-loader-hierarchies/"},
+    {"id": "en-baeldung-modularity", "language": "en", "url": "https://www.baeldung.com/java-modularity"},
+    {"id": "en-oracle-tutorial-load", "language": "en", "url": "https://docs.oracle.com/javase/tutorial/ext/basics/load.html"},
+    {"id": "en-qos-taxonomy", "language": "en", "url": "https://articles.qos.ch/classloader.html"},
+    {"id": "de-ia-jigsaw-tutorial", "language": "de", "url": "https://www.informatik-aktuell.de/entwicklung/programmiersprachen/java-9-das-neue-modulsystem-jigsaw-tutorial.html"},
+    {"id": "de-ia-modularity-patterns", "language": "de", "url": "https://www.informatik-aktuell.de/entwicklung/programmiersprachen/modularity-patterns-mit-dem-java-modulsystem-jigsaw-teil-1.html"},
+    {"id": "de-tutego-module", "language": "de", "url": "https://www.tutego.de/blog/javainsel/2017/10/module-entwickeln-und-einbinden/"},
+    {"id": "de-jek-modulsystem", "language": "de", "url": "https://www.xn--javaeinfacherklrt-4qb.de/?p=578"},
+    {"id": "de-ia-modulare-anwendungen", "language": "de", "url": "https://www.informatik-aktuell.de/entwicklung/programmiersprachen/modulare-anwendungen-mit-java.html"},
+    {"id": "de-ordix-java9", "language": "de", "url": "https://blog.ordix.de/neuheiten-java-9-teil"},
+    {"id": "de-hauer-classloader", "language": "de", "url": "https://www.philipphauer.de/study/se/classloader.php"},
+    {"id": "de-jek-classloader", "language": "de", "url": "https://www.xn--javaeinfacherklrt-4qb.de/?p=82"},
+    {"id": "de-ia-kotlin-java-module", "language": "de", "url": "https://www.informatik-aktuell.de/entwicklung/programmiersprachen/kotlin-und-java-modul-und-sichtbarkeitskonzepte.html"}
+  ]
+}
