@@ -571,6 +571,22 @@ public final class TeamAgentPlaybook {
      * {@link VisibleAssistantMessageValidator}), so the nudge stays low-key and the user never sees a
      * codec-level exchange.
      */
+    /** Longest parse error quoted in a repair note; the failed answer itself is never echoed (PR 17). */
+    static final int REPAIR_ERROR_CHARS = 300;
+
+    /**
+     * The parse repair of plan PR 17 (improvement 6): names why the answer could not be read, and does NOT
+     * repeat the failed answer, which cost up to 4,200 tokens of context per repair.
+     */
+    public static String repairNote(String parseError) {
+        String error = parseError == null ? "" : parseError.replace('\r', ' ').replace('\n', ' ').trim();
+        if (error.length() > REPAIR_ERROR_CHARS) {
+            error = error.substring(0, REPAIR_ERROR_CHARS) + "…";
+        }
+        return "Your previous answer could not be read" + (error.isEmpty() ? "" : " (" + error + ")")
+                + ". Answer the last message again. " + repairNudge();
+    }
+
     public static String repairNudge() {
         return "Reply again with exactly one JSON object matching the schema and nothing else — no prose, "
                 + "no code fences, nothing outside the object. Keep assistantMessage a normal, warm reply to "

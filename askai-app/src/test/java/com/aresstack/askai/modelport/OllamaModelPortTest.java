@@ -323,6 +323,25 @@ public class OllamaModelPortTest {
     }
 
     @Test
+    public void truncateFalseGoesIntoTheBodyAndIsAbsentWhenUnset() throws Exception {
+        slotModels.put("planner", "gpt-oss:20b");
+        answers.add(done("a", ""));
+        answers.add(done("b", ""));
+        Recorder research = new Recorder();
+        port.chat(request(JUDGE).truncate(Boolean.FALSE).build(), research);
+        research.await();
+        Recorder plain = new Recorder();
+        port.chat(request(JUDGE).build(), plain);
+        plain.await();
+
+        assertFalse("a research call refuses instead of cutting the prompt (plan PR 17)",
+                body(0).get("truncate").asBoolean(true));
+        assertTrue("a top-level field, never a model option", body(0).get("options").get("truncate") == null);
+        assertNull("no flag unless the caller sets one", body(1).get("truncate"));
+        assertNull("no shift is sent: it would reload the runner", body(0).get("options").get("shift"));
+    }
+
+    @Test
     public void toolsGoOutVerbatimAndToolCallsComeBackWithIdsAndRawArguments() throws Exception {
         answers.add("{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_1\","
                 + "\"function\":{\"name\":\"open\",\"arguments\":{\"url\":\"https://x\",\"n\":2}}}]},"

@@ -175,8 +175,9 @@ public class ResearchTeamAgentTest {
         TeamAgentResult result = agent.respond("hello", scoping());
         assertEquals(TeamAgentResult.Status.UNUSABLE_ANSWER, result.getStatus());
         assertEquals("exactly one bootstrap call + one repair call", 2, model.calls.size());
-        // The repair call included the previous raw answer + the nudge.
+        // The repair call carries the nudge, never the failed answer again (plan PR 17).
         assertTrue(lastUser(model.calls.get(1)).contains("one JSON object"));
+        assertFalse(model.calls.get(1).toString().contains("I cannot decide."));
     }
 
     @Test

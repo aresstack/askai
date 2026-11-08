@@ -6,9 +6,8 @@ import java.util.List;
 /**
  * Assembles the model context for ONE turn from the active phase's {@link PhaseAssistantProfile}: the phase's
  * own system prompt, the per-turn research-context system message, and the running history. This is the single
- * place where "active phase → its assistant context" is realized, and the seam where RA-P6 §10/§11 will later
- * filter to this phase's own chat plus the latest relevant artifacts (per the profile's
- * {@link PhaseContextPolicy}). For now history is passed through unchanged; the policy is carried, not enforced.
+ * place where "active phase → its assistant context" is realized. The history is never sent whole: the
+ * assembler takes the own-phase window of {@link HistoryWindow} (plan PR 17, D7) within the role's window budget.
  */
 public final class PhaseContextAssembler {
 
@@ -128,6 +127,19 @@ public final class PhaseContextAssembler {
                                       String confirmedQuestion, List<String> confirmedAspects,
                                       String proposedQuestion, List<String> proposedAspects,
                                       List<ChatMessage> history, PromptBlockMeter meter) {
+        return assemble(profile, state, confirmedQuestion, confirmedAspects, proposedQuestion, proposedAspects,
+                history, HistoryWindow.chatBudget(state.getPhaseId()), meter);
+    }
+
+    /**
+     * As above with an explicit window budget in tokens: the newest own-phase {@code USER}/{@code FINAL}
+     * entries of {@code history} that fit (0 = no history at all). The overflow guard of the TeamAgent lowers
+     * it when the whole prompt would not fit into the model's context.
+     */
+    public List<ChatMessage> assemble(PhaseAssistantProfile profile, TeamAgentStateView state,
+                                      String confirmedQuestion, List<String> confirmedAspects,
+                                      String proposedQuestion, List<String> proposedAspects,
+                                      List<ChatMessage> history, int windowTokens, PromptBlockMeter meter) {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         add(messages, meter, PromptBlockMeter.PROFILE, ChatMessage.system(profile.getSystemPrompt()));
         add(messages, meter, PromptBlockMeter.DATE, ChatMessage.system("Current date: " + currentDate.today()));
@@ -149,9 +161,10 @@ public final class PhaseContextAssembler {
         if (!concept.isEmpty()) {
             add(messages, meter, PromptBlockMeter.CONCEPT, ChatMessage.system(concept));
         }
-        if (history != null) {
-            messages.addAll(history);
-            meter.add(PromptBlockMeter.HISTORY, history);
+        List<ChatMessage> window = HistoryWindow.select(history, state.getPhaseId(), windowTokens);
+        if (!window.isEmpty()) {
+            messages.addAll(window);
+            meter.add(PromptBlockMeter.HISTORY, window);
         }
         return messages;
     }

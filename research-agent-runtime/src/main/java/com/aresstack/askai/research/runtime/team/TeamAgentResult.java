@@ -21,7 +21,9 @@ public final class TeamAgentResult {
         OK,
         MODEL_UNAVAILABLE,
         UNUSABLE_ANSWER,
-        COMMAND_REJECTED
+        COMMAND_REJECTED,
+        /** The prompt does not fit into the model's context even without history; nothing was sent (PR 17). */
+        CONTEXT_TOO_LARGE
     }
 
     private final Status status;
@@ -43,6 +45,11 @@ public final class TeamAgentResult {
 
     public static TeamAgentResult modelUnavailable(String detail) {
         return new TeamAgentResult(Status.MODEL_UNAVAILABLE, null, null, detail);
+    }
+
+    /** {@code detail} is the visible "Context too large for <model>" sentence with the sizes. */
+    public static TeamAgentResult contextTooLarge(String detail) {
+        return new TeamAgentResult(Status.CONTEXT_TOO_LARGE, null, null, detail);
     }
 
     public static TeamAgentResult unusableAnswer(String detail) {

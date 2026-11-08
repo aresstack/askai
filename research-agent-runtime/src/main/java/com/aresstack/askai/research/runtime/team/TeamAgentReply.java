@@ -35,6 +35,12 @@ public final class TeamAgentReply {
                         ? "Ich konnte gerade keine klare Antwort bilden. Formulierst du es anders, oder "
                                 + "versuchen wir es noch einmal?"
                         : "I could not form a clear answer just now. Could you rephrase, or try again?";
+            case CONTEXT_TOO_LARGE:
+                return german
+                        ? "Die Anfrage passt nicht in den Kontext des Modells, es wurde nichts gesendet"
+                                + detailSuffix(result.getDetail()) + ". Bitte kürze die Nachricht."
+                        : "The request does not fit into the model's context and nothing was sent"
+                                + detailSuffix(result.getDetail()) + ". Please shorten your message.";
             case COMMAND_REJECTED:
                 return german
                         ? "Dieser Schritt ist gerade nicht möglich. Machen wir von hier aus weiter."
