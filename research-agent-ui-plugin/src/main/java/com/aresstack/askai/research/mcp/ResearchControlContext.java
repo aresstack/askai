@@ -187,4 +187,20 @@ public interface ResearchControlContext {
     default String searchScopeEnd(String handle) {
         return null;
     }
+
+    /**
+     * The read-only summary of the effective frozen concept (plan PR 16), or {@code null} before the first
+     * committed {@code SUBMIT_SCOPE} / without a book record. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String frozenConceptSummary() {
+        return null;
+    }
+
+    /**
+     * The latest change request of the CURRENT phase until its next Finish (plan PR 16), {@code ""} when none.
+     * DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String latestChangeRequest() {
+        return "";
+    }
 }

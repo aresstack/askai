@@ -180,6 +180,46 @@ public final class TransitionEngine {
         return journal.read();
     }
 
+    /**
+     * The latest change request the user made in {@code phaseId} (plan PR 16): the comment of the newest
+     * committed {@code REQUEST_REVISION} / {@code REQUEST_OUTLINE_CHANGES} of that phase, until the phase is
+     * finished again (its next step into {@code waiting_approval}, or leaving it forward). {@code ""} when none.
+     */
+    public String latestChangeRequest(String phaseId) throws CorruptProjectFileException {
+        if (phaseId == null || phaseId.isEmpty()) {
+            return "";
+        }
+        String latest = "";
+        for (JsonObject record : journal.read()) {
+            if (!"prepared".equals(stringOf(record, "kind")) || !record.has("transition")
+                    || !isCommitted(stringOf(record, "id"))) {
+                continue;
+            }
+            PhaseTransition transition = PhaseTransition.fromJson(record.getAsJsonObject("transition"));
+            if (!phaseId.equals(transition.getFrom().getPhaseId())) {
+                continue;
+            }
+            ResearchCommandType command = transition.getCommand();
+            boolean changeRequest = command == ResearchCommandType.REQUEST_REVISION
+                    || command == ResearchCommandType.REQUEST_OUTLINE_CHANGES;
+            boolean finish = !transition.changesPhase()
+                    ? com.aresstack.askai.research.state.oo.ResearchStateIds.WAITING_APPROVAL
+                            .equals(transition.getTo().getStateId())
+                    : !command.name().startsWith("REOPEN_");
+            if (changeRequest && !transition.getComment().trim().isEmpty()) {
+                latest = transition.getComment().trim();
+            } else if (finish) {
+                latest = "";
+            }
+        }
+        return latest;
+    }
+
+    private static String stringOf(JsonObject json, String key) {
+        com.google.gson.JsonElement element = json.get(key);
+        return element == null || element.isJsonNull() ? "" : element.getAsString();
+    }
+
     // ------------------------------------------------------------------ dispatch
 
     public TransitionOutcome dispatch(ResearchCommand command) {

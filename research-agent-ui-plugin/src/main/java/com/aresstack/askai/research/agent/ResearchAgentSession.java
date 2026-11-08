@@ -204,6 +204,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 public String searchScopeEnd(String handle) {
                     return ResearchAgentSession.this.searchScopeEnd(handle);
                 }
+
+                @Override
+                public String frozenConceptSummary() {
+                    try {
+                        com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+                        return frozen == null ? null : frozen.summary();
+                    } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+                        return null;
+                    }
+                }
             });
             resources.setProjectionUpdateListener(new Runnable() {
                 public void run() {

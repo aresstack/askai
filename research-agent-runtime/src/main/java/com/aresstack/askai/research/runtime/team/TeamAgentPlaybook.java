@@ -52,6 +52,52 @@ public final class TeamAgentPlaybook {
     }
 
     /**
+     * The read-only concept summary of every phase after Concept (plan PR 16): the effective frozen concept
+     * the user approved. No edit rules: the concept can only change after the user reopens Concept.
+     */
+    public static String conceptSummaryContext(String summary) {
+        return "APPROVED CONCEPT (read-only, frozen by the user)\n" + summary.trim() + "\n"
+                + "Treat this as the fixed basis of the work. It cannot be changed in this phase; if the user "
+                + "wants to change it, tell them they can reopen Concept.";
+    }
+
+    /**
+     * The artifact block of a later phase (plan PR 16): the seam PR 15 (Sources), PR 21 (Outline) and PR 29
+     * (Document) fill with their artifact, plus the user's latest change request of that phase until its next
+     * Finish. "" when both are empty.
+     */
+    public static String phaseArtifactContext(String phaseId, String artifact, String changeRequest) {
+        String content = artifact == null ? "" : artifact.trim();
+        String request = changeRequest == null ? "" : changeRequest.trim();
+        if (content.isEmpty() && request.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(phaseLabel(phaseId)).append(" (current phase)\n");
+        if (!content.isEmpty()) {
+            sb.append(content).append('\n');
+        }
+        if (!request.isEmpty()) {
+            sb.append("Latest change request from the user: ").append(request).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private static String phaseLabel(String phaseId) {
+        String phase = phaseId == null ? "" : phaseId.trim().toLowerCase(java.util.Locale.ROOT);
+        if (PhaseAssistantProfileRegistry.RESEARCH_PHASE_ID.equals(phase)) {
+            return "SOURCES";
+        }
+        if ("outline".equals(phase)) {
+            return "OUTLINE";
+        }
+        if (PhaseAssistantProfileRegistry.DRAFT_PHASE_ID.equals(phase)
+                || PhaseAssistantProfileRegistry.FINALIZATION_PHASE_ID.equals(phase)) {
+            return "DOCUMENT";
+        }
+        return phase.isEmpty() ? "PHASE" : phase.toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /**
      * The SCOPING phase assistant prompt: an ASSISTANT that helps the user scope a research — it understands,
      * fills gaps and proposes, it does NOT drive a workflow or police a command set. The process itself is
      * owned by the application; this model only helps the user say what they want to find out. Language-neutral.

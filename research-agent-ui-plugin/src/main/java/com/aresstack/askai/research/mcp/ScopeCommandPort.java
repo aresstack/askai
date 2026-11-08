@@ -55,4 +55,9 @@ public interface ScopeCommandPort {
     default String searchScopeEnd(String handle) {
         return null;
     }
+
+    /** The read-only frozen concept summary (plan PR 16), or {@code null} when there is none. */
+    default String frozenConceptSummary() {
+        return null;
+    }
 }

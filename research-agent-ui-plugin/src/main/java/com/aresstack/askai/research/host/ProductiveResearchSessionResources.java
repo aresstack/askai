@@ -631,6 +631,21 @@ public final class ProductiveResearchSessionResources {
                     port.conceptToolLog(line);
                 }
             }
+
+            @Override
+            public String frozenConceptSummary() {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.frozenConceptSummary();
+            }
+
+            @Override
+            public String latestChangeRequest() {
+                try {
+                    return transitions().latestChangeRequest(currentState().getPhaseId());
+                } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+                    return "";
+                }
+            }
         };
     }
 

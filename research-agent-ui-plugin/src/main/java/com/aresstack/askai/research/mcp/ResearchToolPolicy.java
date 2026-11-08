@@ -48,6 +48,11 @@ public final class ResearchToolPolicy {
         tools.add(artifactReadTool(ctx));
         tools.add(sourceListTool(ctx));
         tools.add(sourceReviewContextTool(ctx));
+        // Plan PR 16: the bounded state block, the read-only frozen concept summary and the phase's latest
+        // change request, which the phase-gated context blocks of the runtime read every turn.
+        tools.add(sourceOverviewTool(ctx));
+        tools.add(conceptSummaryTool(ctx));
+        tools.add(changeRequestTool(ctx));
         // The Konzeptpapier tools (Fragestellung→Konzept rework). READING the concept is allowed in
         // every phase (frozen artifacts stay readable); WRITING is bite-wise branch editing and is
         // bound to SCOPING/running. Absent service (clickdummy/old fakes) → no concept tools at all.
@@ -55,11 +60,9 @@ public final class ResearchToolPolicy {
             tools.add(conceptReadTool(ctx));
             if (writable(phaseId, stateId, ResearchStateIds.SCOPING)) {
                 // add_cards slice: the ATOMIC list add is the model's capture instrument (the
-                // live gate lost "Debugging" to the four-round budget of single adds).
-                // concept_add stays registered for OLD runtimes only — the active contract
-                // sends add_cards even for a single card.
+                // live gate lost "Debugging" to the four-round budget of single adds). The legacy
+                // single-card concept_add is gone (plan PR 16, D11).
                 tools.add(conceptAddCardsTool(ctx));
-                tools.add(conceptAddTool(ctx));
                 // Safety slice after the slice-2 gate: NO destructive model tools. remove and
                 // rewrite left the offer entirely — the only concept removal is the host-owned
                 // conflict flow (exclude_topic -> user confirms -> the SESSION removes), and
@@ -133,6 +136,41 @@ public final class ResearchToolPolicy {
                     }
                 },
                 McpToolParameter.string("name", true, "Artifact id: outline, document"));
+    }
+
+    private static McpToolContribution sourceOverviewTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("source_overview",
+                "Counts per source status and the ten newest source titles.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        return McpToolResult.ok(SourceOverview.render(
+                                ctx.sourceRepository().find(SourceQuery.all())));
+                    }
+                });
+    }
+
+    private static McpToolContribution conceptSummaryTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("concept_summary",
+                "Read-only summary of the approved (frozen) concept: mission, deliverable, cards, "
+                        + "recorded blacklist.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        String summary = ctx.frozenConceptSummary();
+                        return McpToolResult.ok(summary == null ? "No approved concept." : summary);
+                    }
+                });
+    }
+
+    private static McpToolContribution changeRequestTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("phase_change_request",
+                "The user's latest change request for the current phase, until the phase is finished.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        String request = ctx.latestChangeRequest();
+                        return McpToolResult.ok(request == null || request.trim().isEmpty()
+                                ? "No change request." : request.trim());
+                    }
+                });
     }
 
     private static McpToolContribution sourceListTool(final ResearchControlContext ctx) {
@@ -594,44 +632,6 @@ public final class ResearchToolPolicy {
             }
         }
         return names;
-    }
-
-    private static McpToolContribution conceptAddTool(final ResearchControlContext ctx) {
-        return McpToolContribution.of("concept_add",
-                "Add ONE new topic card to the concept. "
-                        + "Example: parent_path=\"\", name=\"<card>\" (a top-level card). "
-                        + "Example: parent_path=\"<card>/<child card>\", "
-                        + "name=\"<subtopic>\". "
-                        + "If unsure whether the parent exists, call concept_read first.",
-                new McpToolHandler() {
-                    public McpToolResult invoke(McpToolCall call) {
-                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.SCOPING);
-                        if (denied != null) {
-                            return denied;
-                        }
-                        String name = call.getString("name");
-                        if (name == null || name.trim().isEmpty()) {
-                            return McpToolResult.error("Missing argument: name — example: "
-                                    + "parent_path=\"<card>\", name=\"<subtopic>\"");
-                        }
-                        com.aresstack.askai.research.concept.ConceptBranchService.EditResult result =
-                                ctx.conceptBranchService().addNode(
-                                        segmentsOf(call, "parent_path"), name.trim());
-                        if (!result.isApplied()) {
-                            return McpToolResult.error(result.getDiagnostic().describeForModel());
-                        }
-                        ctx.onConceptChanged(result.getNewRevision());
-                        return McpToolResult.ok("added \"" + name.trim() + "\" revision="
-                                + result.getNewRevision());
-                    }
-                },
-                McpToolParameter.string("parent_path", false,
-                        "The parent card's names from the concept root, separated by '/'. "
-                                + "Empty = add a top-level card."),
-                McpToolParameter.string("parent_path_json", false,
-                        "The parent segments as a JSON array of card names — the unambiguous "
-                                + "form ('/' in a name stays a character)"),
-                McpToolParameter.string("name", true, "The new card's name (short noun phrase)"));
     }
 
     /** Rename ONE card, any depth — never a deletion; children and position stay untouched. */
