@@ -97,6 +97,7 @@
       "text": "Kann ein benanntes Modul eine Abhängigkeit auf das unbenannte Modul deklarieren?",
       "targetSource": "en-sotms",
       "targetTerms": [
+        "cannot, in fact, even declare",
         "dependence upon the unnamed module"
       ]
     },
@@ -185,6 +186,7 @@
       "text": "Which module layer do most applications use?",
       "targetSource": "en-sotms",
       "targetTerms": [
+        "Most applications",
         "boot layer"
       ]
     },
@@ -213,7 +215,7 @@
       "text": "Which method does a custom class loader typically override?",
       "targetSource": "en-baeldung-classloaders",
       "targetTerms": [
-        "findClass"
+        "override the findClass"
       ]
     },
     {
@@ -343,6 +345,7 @@
     {
       "source": "en-sotms",
       "terms": [
+        "cannot, in fact, even declare",
         "dependence upon the unnamed module"
       ],
       "nodeId": "n3"
@@ -413,6 +416,7 @@
     {
       "source": "en-sotms",
       "terms": [
+        "Most applications",
         "boot layer"
       ],
       "nodeId": "n4"
@@ -435,7 +439,7 @@
     {
       "source": "en-baeldung-classloaders",
       "terms": [
-        "findClass"
+        "override the findClass"
       ],
       "nodeId": "n6"
     },
@@ -480,7 +484,8 @@
     {
       "source": "en-baeldung-classloaders",
       "terms": [
-        "bootstrap or primordial class loader"
+        "bootstrap or primordial class loader",
+        "is the parent of all the others"
       ],
       "nodeId": "n5"
     },
@@ -548,11 +553,11 @@
       "nodeId": "n7"
     },
     {
-      "source": "en-omegat-adr",
+      "source": "en-baeldung-classloaders",
       "terms": [
-        "memory leak in one plugin"
+        "calls the findClass(String) method"
       ],
-      "nodeId": "n8"
+      "nodeId": "n5"
     },
     {
       "source": "en-devshorts-plugins",
@@ -579,7 +584,8 @@
     {
       "source": "de-ia-jigsaw-tutorial",
       "terms": [
-        "Unnamed Module"
+        "Unnamed Module",
+        "für jedes Automatic Module sichtbar"
       ],
       "nodeId": "n3"
     },
@@ -593,7 +599,8 @@
     {
       "source": "de-ia-modularity-patterns",
       "terms": [
-        "Zyklen zur Laufzeit"
+        "Zyklen zur Laufzeit",
+        "weniger problematisch"
       ],
       "nodeId": "n1"
     },
