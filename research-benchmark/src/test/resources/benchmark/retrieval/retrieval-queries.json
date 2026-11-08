@@ -191,11 +191,11 @@
     {
       "id": "en-en-04",
       "group": "EN_EN",
-      "text": "How does a class loader that checks its own resources first differ from parent-first lookup?",
-      "targetSource": "en-redhat-mc-classloading",
+      "text": "How does a class loader that looks in its own local repositories first differ from parent-first delegation?",
+      "targetSource": "en-tomcat-classloader-howto",
       "targetTerms": [
-        "parent-first",
-        "own resources"
+        "local repositories",
+        "instead of delegating"
       ]
     },
     {
@@ -418,10 +418,10 @@
       "nodeId": "n4"
     },
     {
-      "source": "en-redhat-mc-classloading",
+      "source": "en-tomcat-classloader-howto",
       "terms": [
-        "parent-first",
-        "own resources"
+        "local repositories",
+        "instead of delegating"
       ],
       "nodeId": "n7"
     },
@@ -527,9 +527,9 @@
       "nodeId": "n8"
     },
     {
-      "source": "en-redhat-mc-classloading",
+      "source": "en-tomcat-classloader-howto",
       "terms": [
-        "DefaultDomain is shared"
+        "parent-child tree"
       ],
       "nodeId": "n7"
     },

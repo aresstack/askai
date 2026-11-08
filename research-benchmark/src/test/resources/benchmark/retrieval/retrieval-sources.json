@@ -4,7 +4,7 @@
     {"id": "en-sotms", "language": "en", "url": "https://openjdk.org/projects/jigsaw/spec/sotms/"},
     {"id": "en-baeldung-classloaders", "language": "en", "url": "https://www.baeldung.com/java-classloaders"},
     {"id": "en-adevinta-plugins", "language": "en", "url": "https://adevinta.com/techblog/java-plugins-with-isolating-class-loaders/"},
-    {"id": "en-redhat-mc-classloading", "language": "en", "url": "https://docs.redhat.com/de/documentation/jboss_enterprise_application_platform_common_criteria_certification/5/html/jboss_microcontainer_user_guide/sect-jboss_microcontainer_user_guide-the_classloading_layer-classloading"},
+    {"id": "en-tomcat-classloader-howto", "language": "en", "url": "https://tomcat.apache.org/tomcat-9.0-doc/class-loader-howto.html"},
     {"id": "en-omegat-adr", "language": "en", "url": "https://omegat.readthedocs.io/en/latest/adr/2025012.PluginSecurityArchitecture.html"},
     {"id": "en-devshorts-plugins", "language": "en", "url": "https://devshorts.github.io/onoffswitch/2015/12/12/class-loaders-hard/"},
     {"id": "en-foojay-hierarchies", "language": "en", "url": "https://foojay.io/today/class-loader-hierarchies/"},
