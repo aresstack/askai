@@ -71,7 +71,7 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
     }
 
     /**
-     * LLM narration is strictly opt-in (settings toggle) AND host-dependent (inference port present).
+     * LLM narration is strictly opt-in (settings toggle) AND host-dependent (model port present).
      * Both absent/off → the session keeps the static narrator, visibly identical.
      */
     private static void configureNarration(ResearchAgentSession session, AgentHostContext hostContext) {
@@ -79,8 +79,8 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 .loadLlmNarration(hostContext.getStateStore())) {
             return;
         }
-        com.aresstack.askai.agent.model.inference.AgentInferencePort port = hostContext.getService(
-                com.aresstack.askai.agent.model.inference.AgentInferencePort.class);
+        // the active phase's slot on the host's model port (plan 5.1), never the chat model
+        com.aresstack.askai.agent.model.inference.AgentInferencePort port = session.phaseInferencePort();
         if (port != null) {
             session.configureNarration(
                     new com.aresstack.askai.research.agent.narration.LlmNarrator(

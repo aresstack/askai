@@ -118,8 +118,26 @@ public final class ResearchRole {
         return toBuilder().contextTokens(tokens).build();
     }
 
+    /**
+     * The same role on another model slot: the conversation role follows the LIVE phase's slot
+     * ({@code phase.<id>}, plan 5.1), also when the profile registry falls back to its neutral profile.
+     */
+    public ResearchRole withSlot(ModelSlot other) {
+        if (other == null) {
+            throw new IllegalArgumentException("a role needs a model slot");
+        }
+        if (other.equals(slot)) {
+            return this;
+        }
+        return toBuilder(other).build();
+    }
+
     private Builder toBuilder() {
-        Builder copy = new Builder(id, slot);
+        return toBuilder(slot);
+    }
+
+    private Builder toBuilder(ModelSlot target) {
+        Builder copy = new Builder(id, target);
         copy.purpose = purpose;
         copy.promptSource = promptSource;
         copy.systemPrompt = systemPrompt;

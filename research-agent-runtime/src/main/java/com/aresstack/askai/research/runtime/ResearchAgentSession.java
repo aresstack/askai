@@ -235,7 +235,9 @@ public final class ResearchAgentSession {
         // The model-backed TeamAgent is created for EVERY session, BEFORE (and independent of) the browser:
         // the conversation runs on the central main model even while the browser stays STOPPED. It must NOT
         // live under hasBrowser() or the research loop.
-        this.mainModelChat = roleChat(com.aresstack.askai.research.runtime.role.ResearchRoles.CONVERSATION);
+        // Each phase runs on its own slot (phase.<id>, plan 5.1); the Concept transport is created up front.
+        this.mainModelChat = phaseChat(com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry
+                .SCOPING_PHASE_ID);
         for (com.aresstack.askai.research.runtime.role.ResearchRole worker
                 : com.aresstack.askai.research.runtime.role.ResearchRoles.workers()) {
             // The layout repair runs over its own structured-inference transport (buildInferencePort).
@@ -245,7 +247,12 @@ public final class ResearchAgentSession {
         }
         // The assembler reads the session's LIVE working language per turn: a set_language between turns
         // changes the next turn's context, never the history.
-        this.teamAgent = new com.aresstack.askai.research.runtime.team.ResearchTeamAgent(mainModelChat,
+        this.teamAgent = new com.aresstack.askai.research.runtime.team.ResearchTeamAgent(
+                new com.aresstack.askai.research.runtime.team.PhaseChats() {
+                    public com.aresstack.askai.research.runtime.team.MainModelChat chatFor(String phaseId) {
+                        return phaseChat(phaseId);
+                    }
+                },
                 com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry.defaults(
                         // Settings checkbox "Immer Suchvorschläge anbieten" (host env hand-off, default off).
                         "true".equalsIgnoreCase(environment.get("ASKAI_SCOPING_ALWAYS_SUGGEST")),
@@ -421,9 +428,9 @@ public final class ResearchAgentSession {
 
     /**
      * Build one model role's chat transport over the host's model port (ADR 0001, 3.2): the role names its
-     * model slot, the platform resolves it (by default to the central main model). The host-published
-     * inference descriptor ({@code ASKAI_INFERENCE_CONFIG}) still gates it: it is how AskAI says that a main
-     * model is selected, and it carries the user's per-call timeout. An absent or invalid descriptor, or a
+     * model slot, the platform resolves it (exact, parent, {@code default}; never the chat model). The
+     * host-published inference descriptor ({@code ASKAI_INFERENCE_CONFIG}) still gates it: the host writes it
+     * from the {@code default} slot, and it carries the user's per-call timeout. An absent or invalid descriptor, or a
      * host without a model port, is NOT fatal and NEVER a static fake dialogue: it yields an
      * {@code UnavailableMainModelChat}, so the very first greeting is an honest, retryable
      * {@code MODEL_UNAVAILABLE}. A later valid descriptor is swapped in via {@link ReloadableMainModelChat}.
@@ -433,12 +440,11 @@ public final class ResearchAgentSession {
         com.aresstack.askai.agent.model.port.ModelSlot slot = role.getSlot();
         if (!environment.hasInference()) {
             System.err.println("[research-agent] no inference descriptor — model slot " + slot + " unavailable");
-            // Prefer the actionable reason the host passed (e.g. "No main model is selected. Choose a chat
-            // model…"); fall back to a self-explanatory default that still points the user at the selector.
+            // Prefer the actionable reason the host passed; fall back to a self-explanatory default.
             String reason = environment.inferenceUnavailableReason != null
                     ? environment.inferenceUnavailableReason
-                    : "No main (chat) model is selected. Choose one in the model selector at the top of the "
-                            + "chat, then reopen the research tab.";
+                    : "No research model is available. Set it under Research settings -> Models, then "
+                            + "reopen the research tab.";
             return new com.aresstack.askai.research.runtime.team.UnavailableMainModelChat(reason);
         }
         if (modelPort == null) {
@@ -480,6 +486,15 @@ public final class ResearchAgentSession {
             }
             return transport.chat;
         }
+    }
+
+    /**
+     * The conversation transport of a live phase: the conversation role on slot {@code phase.<id>} (plan 5.1),
+     * through the same {@link #roleChats()} factory every role uses, so a chat model change never reaches it.
+     */
+    private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat phaseChat(String phaseId) {
+        return roleChat(com.aresstack.askai.research.runtime.role.ResearchRoles.CONVERSATION.withSlot(
+                com.aresstack.askai.research.runtime.inference.ResearchModelSlots.phase(phaseId)));
     }
 
     /**
@@ -1663,7 +1678,8 @@ public final class ResearchAgentSession {
             }
             com.aresstack.askai.research.runtime.team.ConceptAction move =
                     com.aresstack.askai.research.runtime.team.MoveActionGenerator.generate(
-                            mainModelChat, text, conceptContext);
+                            phaseChat(com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry
+                                    .SCOPING_PHASE_ID), text, conceptContext);
             String answer;
             if (move == null) {
                 conceptLog(ctx, "dedicated move generation -> unclear (no guess, no mutation)");

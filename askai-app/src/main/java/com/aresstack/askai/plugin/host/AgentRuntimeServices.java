@@ -101,10 +101,13 @@ public final class AgentRuntimeServices {
                 : new LocalRerankerConfigurationSnapshotProvider(localModelRuntime, centralConfig);
         this.rerankerCatalog = localModelRuntime == null ? null
                 : new LocalRerankerModelCatalog(localModelRuntime);
-        // Inference uses the central main model, which may live on the LOCAL runtime or a REMOTE Ollama —
-        // so it is published whenever there is a central config, even without a local runtime.
+        com.aresstack.askai.modelport.ModelPortSettingsRepository modelPortSettings =
+                com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory();
+        // The inference descriptor names the research default slot's model (plan 5.1), which may live on the
+        // LOCAL runtime or a REMOTE Ollama — so it is published whenever there is a central config.
         this.inferenceSnapshots = centralConfig == null ? null
-                : new LocalInferenceConfigurationSnapshotProvider(localModelRuntime, centralConfig);
+                : new LocalInferenceConfigurationSnapshotProvider(localModelRuntime, centralConfig,
+                        modelPortSettings);
         // The embedding model is provider-crossing (Ollama OR AskAI-local), so it is published whenever there is
         // a central config — the Ollama arm needs only the central Ollama endpoint, not a local runtime.
         this.embeddingSnapshots = centralConfig == null ? null
@@ -121,8 +124,7 @@ public final class AgentRuntimeServices {
                 : new LocalActiveResearchSessionRegistry(inferenceSnapshots, rerankerSnapshots, centralConfig);
         this.modelPort = centralConfig == null ? null
                 : com.aresstack.askai.modelport.CentralModelDirectories.productivePort(centralConfig,
-                        localModelRuntime,
-                        com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory());
+                        localModelRuntime, modelPortSettings);
         System.err.println("[agent-runtime] localRuntime=" + (localModelRuntime != null)
                 + " centralConfig=" + (centralConfig != null)
                 + " reranker.snapshotProvider.published=" + (rerankerSnapshots != null)

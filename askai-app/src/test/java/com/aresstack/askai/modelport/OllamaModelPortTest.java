@@ -63,7 +63,8 @@ import static org.junit.Assert.fail;
  */
 public class OllamaModelPortTest {
 
-    private static final ModelSlot JUDGE = ModelSlot.of("judge");
+    // a contract slot that is not an app-wide helper: helpers refuse level-only models (PR 08)
+    private static final ModelSlot JUDGE = ModelSlot.of("planner");
     private static final ModelSlot CONVERSATION = ModelSlot.of("conversation");
 
     @Rule
@@ -291,7 +292,7 @@ public class OllamaModelPortTest {
         Map<String, Integer> contexts = new HashMap<String, Integer>();
         contexts.put("gpt-oss:20b", 12288);
         settings.save(new ModelPortSettings(1, null, null, null, contexts, null, null, "15m", 600, 5));
-        slotModels.put("judge", "gpt-oss:20b");
+        slotModels.put("planner", "gpt-oss:20b");
         answers.add(done("yes", "short reasoning"));
         Recorder recorder = new Recorder();
         port.chat(request(JUDGE).thinking(ThinkingMode.LOW).temperature(0.0d).maxOutputTokens(24)
@@ -565,7 +566,7 @@ public class OllamaModelPortTest {
 
     @Test
     public void gptOssGetsThinkingLowAndLlamaNoThinkField() throws Exception {
-        slotModels.put("judge", "gpt-oss:20b");
+        slotModels.put("planner", "gpt-oss:20b");
         JsonNode auto = researchCall(JUDGE, ThinkingMode.DEFAULT, 0);
         assertEquals("low", auto.get("think").asText());
         assertEquals(16384, auto.get("options").get("num_ctx").asInt());
@@ -574,7 +575,7 @@ public class OllamaModelPortTest {
                 contract.get("think").asText());
         assertEquals("plus 1,000 tokens of reasoning room", 1160, contract.get("options").get("num_predict").asInt());
 
-        slotModels.put("judge", "llama3.1:8b");
+        slotModels.put("planner", "llama3.1:8b");
         JsonNode llama = researchCall(JUDGE, ThinkingMode.DEFAULT, 0);
         assertFalse("no think field without the thinking capability", llama.has("think"));
         assertFalse("no budget without one", llama.get("options").has("num_predict"));
@@ -588,7 +589,7 @@ public class OllamaModelPortTest {
     public void contractRolesNeverSendAThinkingValueOtherThanOff() throws Exception {
         JsonNode gemma = researchCall(JUDGE, ThinkingMode.OFF, 24);
         assertFalse(gemma.get("think").asBoolean());
-        slotModels.put("judge", "gpt-oss:20b");
+        slotModels.put("planner", "gpt-oss:20b");
         assertEquals("low", researchCall(JUDGE, ThinkingMode.OFF, 24).get("think").asText());
     }
 

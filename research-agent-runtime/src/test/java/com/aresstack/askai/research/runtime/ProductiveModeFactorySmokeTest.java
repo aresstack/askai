@@ -146,7 +146,7 @@ public class ProductiveModeFactorySmokeTest {
             assumeTrue("SKIPPED (RA-P003: first-prompt/greeting response path wedged; see problems.md): "
                     + messages, host.approvalRequested.await(30, TimeUnit.SECONDS));
             assertTrue("the model port received the conversation slot", mockModel.sawSlot(
-                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.CONVERSATION));
+                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.PHASE_SCOPING));
             // Model-driven conversation: the mock was called for BOTH the greeting bootstrap turn and the
             // user turn (the outline gate above came from the model's validated scope proposal, not a static
             // host dialogue). The greeting CONTENT reaching the chat is covered non-flakily by the in-process

@@ -853,14 +853,15 @@ public final class AskAiFrame extends JFrame {
                 agentRuntimeServices.shutdown();
             }
         }, "agent-runtime-services-shutdown"));
-        // Central model change → re-publish the running research sessions' descriptors (no direct UI→research
-        // coupling: the event flows AskAiModel → this listener → the host session registry).
+        // Reranker/embedding change → re-publish the running research sessions' descriptors (no direct
+        // UI→research coupling: the event flows AskAiModel → this listener → the host session registry).
         final com.aresstack.askai.localmodels.LocalActiveResearchSessionRegistry activeResearchSessions =
                 agentRuntimeServices.activeSessionRegistry();
         if (activeResearchSessions != null) {
             model.addAiModelSelectionListener(new com.aresstack.askai.AiModelSelectionListener() {
                 public void onMainModelChanged() {
-                    activeResearchSessions.refreshInference();
+                    // The chat model is not a research model (plan 5.1): research sessions resolve their
+                    // phase slots on the model port, so a chat model change touches no research request.
                 }
 
                 public void onRerankerOrEmbeddingsChanged() {

@@ -41,7 +41,7 @@ import java.util.Map;
 public final class ModelResourcesPanel extends JPanel {
 
     private static final String[] CAPACITY_COLUMNS = {"Model", "Concurrent calls"};
-    private static final String[] SLOT_COLUMNS = {"Slot (role)", "Model (empty = main model)", "Thinking",
+    private static final String[] SLOT_COLUMNS = {"Slot (role)", "Model (empty = inherited, default gemma4:e2b)", "Thinking",
             "Answer budget (0 = role default)"};
     private static final String[] CONTEXT_COLUMNS = {"Model", "Context tokens"};
     private static final String[] THINKING_CHOICES = {"Auto", "Off", "Low", "Medium", "High"};

@@ -26,7 +26,7 @@ import static org.junit.Assert.assertTrue;
 public class ModelCallTelemetryTest {
 
     private static final ResearchRole ROLE = ResearchRole.builder("team-conversation",
-                    ResearchModelSlots.CONVERSATION)
+                    ResearchModelSlots.PHASE_SCOPING)
             .purpose("test")
             .promptFromCaller()
             .output(RoleOutput.text("test"))
@@ -74,7 +74,7 @@ public class ModelCallTelemetryTest {
         List<String> calls = callLines();
         assertEquals("exactly one line per call: " + lines, 1, calls.size());
         String line = calls.get(0);
-        for (String field : Arrays.asList("phase=outline", "role=team-conversation", "slot=conversation",
+        for (String field : Arrays.asList("phase=outline", "role=team-conversation", "slot=phase.scoping",
                 "model=gemma4:e2b", "status=OK", "blocks=[profile=", " date=", " language=", " state=",
                 " user-message=", "prompt_eval_count=7000", "eval_count=300", "done_reason=length",
                 "thinking_chars=11", "duration_ms=1500", "load_ms=200", "prompt_eval_ms=700", "num_ctx=8192",

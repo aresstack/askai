@@ -33,7 +33,7 @@ public class MainModelCancelOnCloseTest {
             // The call's timeout is 120s; the abort must be far faster than that. Cancelled through the
             // reloadable wrapper the session holds, as a close does.
             final ReloadableMainModelChat client = new ReloadableMainModelChat(
-                    new PortMainModelChat(port, ResearchModelSlots.CONVERSATION, Duration.ofSeconds(120)));
+                    new PortMainModelChat(port, ResearchModelSlots.PHASE_SCOPING, Duration.ofSeconds(120)));
 
             final List<ChatMessage> messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("s"));

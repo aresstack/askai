@@ -44,7 +44,7 @@ public class FakeModelPortCancelRaceTest {
             };
 
             final List<String> terminals = new CopyOnWriteArrayList<String>();
-            ModelCall call = port.chat(ChatRequest.builder(ResearchModelSlots.CONVERSATION)
+            ModelCall call = port.chat(ChatRequest.builder(ResearchModelSlots.PHASE_SCOPING)
                     .message(ModelMessage.user("hello")).build(), new ChatListener() {
                 public void onCompleted(ChatResult result) {
                     terminals.add("COMPLETED");

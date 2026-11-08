@@ -40,7 +40,7 @@ public class PortMainModelPassthroughTest {
         port.enqueueScopeProposal("Great, let me confirm the scope.", "SUBMIT_SCOPE",
                 "How does pf4j isolate plugins?", Arrays.asList("class isolation", "versioning"));
         ResearchTeamAgent agent = new ResearchTeamAgent(new PortMainModelChat(port,
-                ResearchModelSlots.CONVERSATION, Duration.ofSeconds(120)));
+                ResearchModelSlots.PHASE_SCOPING, Duration.ofSeconds(120)));
 
         TeamAgentResult greeting = agent.greet(genericNew());
         assertEquals(TeamAgentResult.Status.OK, greeting.getStatus());
@@ -53,7 +53,7 @@ public class PortMainModelPassthroughTest {
 
         // The conversation slot reached the port, with the per-call timeout and no thinking setting (the
         // former client sent none), and the greeting was carried in the second turn's history.
-        assertTrue("the port saw the conversation slot", port.sawSlot(ResearchModelSlots.CONVERSATION));
+        assertTrue("the port saw the conversation slot", port.sawSlot(ResearchModelSlots.PHASE_SCOPING));
         ChatRequest second = port.requests().get(1);
         assertEquals(Duration.ofSeconds(120), second.getTimeout());
         assertEquals(ThinkingMode.DEFAULT, second.getThinking());

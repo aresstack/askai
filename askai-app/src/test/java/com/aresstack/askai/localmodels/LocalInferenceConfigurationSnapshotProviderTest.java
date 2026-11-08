@@ -100,10 +100,10 @@ public class LocalInferenceConfigurationSnapshotProviderTest {
                 new LocalInferenceConfigurationSnapshotProvider(new RecordingSources(""));
         try {
             provider.prepareForSession("s", folder.newFolder("session"));
-            fail("expected a visible failure with no main model selected");
+            fail("expected a visible failure with no default research model");
         } catch (InferenceConfigurationException expected) {
             assertTrue(expected.getMessage(),
-                    expected.getMessage().toLowerCase().contains("no main model"));
+                    expected.getMessage().toLowerCase().contains("no default research model"));
         }
     }
 

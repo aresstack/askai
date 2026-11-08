@@ -62,7 +62,7 @@ public class BlockingModelCallTest {
         };
         blocking.set(new BlockingModelCall(port));
 
-        BlockingModelCall.Outcome outcome = blocking.get().run(ChatRequest.builder(ResearchModelSlots.CONVERSATION)
+        BlockingModelCall.Outcome outcome = blocking.get().run(ChatRequest.builder(ResearchModelSlots.PHASE_SCOPING)
                 .message(ModelMessage.user("hello")).build());
 
         assertTrue("the late-registered call was cancelled", cancelled.get());
