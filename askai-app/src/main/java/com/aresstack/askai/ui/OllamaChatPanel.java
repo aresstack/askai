@@ -169,6 +169,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                     if (slashPopup != null) {
                         slashPopup.hide();
                     }
+                    // A research tab runs on its phase slots: it holds no composer model (plan 5.1).
+                    warmComposerModel((String) modelCombo.getSelectedItem());
                     refreshAgentComposerState();
                 }
             });
@@ -357,7 +359,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         this.applicationState = applicationState;
         this.modelCombo = ComicControls.<String>comboBox();
         this.modelWarmup = new ChatModelWarmup(ollamaService, model::getDefaultKeepAlive,
-                this::isDictationModel, message -> onUi(() -> setStatus(message)));
+                name -> isDictationModel(name) || isResearchSlotModel(name),
+                message -> onUi(() -> setStatus(message)));
         this.modelCombo.setRenderer(new javax.swing.DefaultListCellRenderer() {
             @Override
             public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list,
@@ -2605,16 +2608,13 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         }
         String restored = consumePendingRestoreModel(names);
         if (restored != null) {
+            // A restored tab only selects its model; it never rewrites ai.mainModel (plan 5.1).
             modelCombo.setSelectedItem(restored);
-            // Self-healing sync: the restored chat model IS the global main model for all plugins. Persist it
-            // so ai.mainModel is never empty while the chat actually uses a model — otherwise the research
-            // agent (which reads ai.mainModel) reports "no main model" even though Yapping works fine.
-            model.persistMainModel(restored);
         } else if (previous != null) {
             modelCombo.setSelectedItem(previous);
         }
         composer.setModelName((String) modelCombo.getSelectedItem());
-        modelWarmup.activate((String) modelCombo.getSelectedItem()); // load now, not on the first message
+        warmComposerModel((String) modelCombo.getSelectedItem()); // load now, not on the first message
         // Cached for the party threads (@modelname mention handles) — safe to read off the EDT.
         installedModelNames = new ArrayList<String>(names);
     }
@@ -2664,12 +2664,51 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         }
         modelCombo.setSelectedItem(modelName);
         composer.setModelName(modelName);
-        modelWarmup.activate(modelName);
+        warmComposerModel(modelName);
         refreshReasoningForModel(modelName);
         rememberState(STATE_LAST_MODEL, modelName);
         model.persistMainModel(modelName); // the chat model IS the global main model for all plugins
         transcript.appendInfo("Now chatting with " + modelName + ".");
         setStatus("Model set to " + modelName + ".");
+    }
+
+    /**
+     * Warms the composer's model, except in a research tab: there the phase slots decide which model runs, so
+     * opening a research tab loads no composer model (plan 5.1) and the tab frees what it held.
+     */
+    private void warmComposerModel(String name) {
+        if (isResearchTab()) {
+            modelWarmup.release();
+            return;
+        }
+        modelWarmup.activate(name);
+    }
+
+    /** True while an agent session (the research assistant) owns this tab's composer. */
+    private boolean isResearchTab() {
+        return chatSubmissionRouter != null && chatSubmissionRouter.isActive();
+    }
+
+    /**
+     * True when {@code name} is bound to a model-port slot (a research phase, a helper, the default slot):
+     * a chat tab never unloads such a model (plan 5.1).
+     */
+    static boolean isResearchSlotModel(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return false;
+        }
+        try {
+            com.aresstack.askai.modelport.ModelPortSettings settings =
+                    com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory().load();
+            for (String slot : settings.knownSlotNames()) {
+                if (name.trim().equals(settings.resolveModel(slot))) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (RuntimeException unreadable) {
+            return false;
+        }
     }
 
     /** True when {@code name} is the explicitly selected dictation model, which must stay loaded. */
@@ -2694,7 +2733,7 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
                 item.addActionListener(event -> {
                     modelCombo.setSelectedItem(name);
                     composer.setModelName(name);
-                    modelWarmup.activate(name);
+                    warmComposerModel(name);
                     refreshReasoningForModel(name);
                     rememberState(STATE_LAST_MODEL, name);
                     model.persistMainModel(name); // the chat model IS the global main model for all plugins

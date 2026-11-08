@@ -59,7 +59,7 @@ public final class ResearchTeamAgent {
                 || PhaseAssistantProfileRegistry.SCOPING_PHASE_ID.equalsIgnoreCase(phaseId);
     }
 
-    private final MainModelChat model;
+    private final PhaseChats chats;
     private final PhaseAssistantProfileRegistry profiles;
     private final PhaseContextAssembler contextAssembler;
     private final List<ChatMessage> history = new ArrayList<ChatMessage>();
@@ -85,19 +85,41 @@ public final class ResearchTeamAgent {
     /** Inject a custom profile registry/assembler — mainly to prove per-phase context selection in tests. */
     public ResearchTeamAgent(MainModelChat model, PhaseAssistantProfileRegistry profiles,
                              PhaseContextAssembler contextAssembler) {
-        if (model == null) {
-            throw new IllegalArgumentException("model must not be null");
+        this(PhaseChats.fixed(requireModel(model)), profiles, contextAssembler);
+    }
+
+    /**
+     * The productive agent: every call runs on the chat of the LIVE phase ({@code state.getPhaseId()}), so a
+     * turn in phase X uses slot {@code phase.X} (plan 5.1), whatever profile the registry falls back to.
+     */
+    public ResearchTeamAgent(PhaseChats chats, PhaseAssistantProfileRegistry profiles,
+                             PhaseContextAssembler contextAssembler) {
+        if (chats == null) {
+            throw new IllegalArgumentException("chats must not be null");
         }
         if (profiles == null || contextAssembler == null) {
             throw new IllegalArgumentException("profiles and contextAssembler must not be null");
         }
-        this.model = model;
+        this.chats = chats;
         this.profiles = profiles;
         this.contextAssembler = contextAssembler;
     }
 
+    private static MainModelChat requireModel(MainModelChat model) {
+        if (model == null) {
+            throw new IllegalArgumentException("model must not be null");
+        }
+        return model;
+    }
+
+    /** The model label of the Concept chat (the phase the session opens in), for logs. */
     public String modelName() {
-        return model.modelName();
+        return chats.chatFor(PhaseAssistantProfileRegistry.SCOPING_PHASE_ID).modelName();
+    }
+
+    /** The chat of a live phase (the concept tool rounds run on it). */
+    public MainModelChat chatFor(String phaseId) {
+        return chats.chatFor(phaseId == null ? "" : phaseId);
     }
 
     public String getProposedQuestion() {
@@ -306,6 +328,7 @@ public final class ResearchTeamAgent {
                                           PhaseOutputContract contract, String requiredActionType, int budget) {
         String schema = requiredActionType == null ? contract.outputSchemaJson()
                 : contract.outputSchemaJson(requiredActionType);
+        MainModelChat model = chatFor(phase);
         MainModelChatResult result = schema == null
                 ? model.complete(messages, TEMPERATURE, budget)
                 : model.completeJson(messages, TEMPERATURE, budget, schema);

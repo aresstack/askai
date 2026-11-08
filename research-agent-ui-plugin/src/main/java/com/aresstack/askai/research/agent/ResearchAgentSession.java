@@ -652,6 +652,24 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return coordinator != null && coordinator.isUsable();
     }
 
+    /**
+     * The narrator's and the visualizer's inference: the host's model port on the active phase's slot
+     * (plan 5.1), never the chat model; null without a model port.
+     */
+    public com.aresstack.askai.agent.model.inference.AgentInferencePort phaseInferencePort() {
+        com.aresstack.askai.agent.model.port.ModelPort port = hostContext == null ? null
+                : hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class);
+        if (port == null) {
+            return null;
+        }
+        return new com.aresstack.askai.research.agent.narration.PhaseSlotInferencePort(port,
+                new java.util.function.Supplier<String>() {
+                    public String get() {
+                        return currentAllowedPhaseId();
+                    }
+                });
+    }
+
     /** The phase id of the live state (productive: the authoritative resources state). */
     private String currentAllowedPhaseId() {
         com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
@@ -1323,6 +1341,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     static final String EFFECT_HYGIENE = "phase-hygiene";
     static final String EFFECT_DIVIDER = "phase-divider";
+    /** PR 08: entering a phase warms its slot's model (plan 5.1, "Switching on 16 GB"). */
+    static final String EFFECT_WARM_MODEL = "phase-model-warm";
     static final String EFFECT_CHANGE_NOTE = "change-note";
 
     private com.aresstack.askai.research.mcp.ResearchBotSessionGateway newBotGateway(
@@ -1372,6 +1392,53 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
+     * Load the model of the entered phase's slot ({@code phase.<id>}) through {@code ModelPort.warm(slot)}
+     * and show "Loading &lt;model&gt;..." while it is not resident yet (plan 5.1). Best effort: a failed load
+     * is logged; the next turn reports the slot honestly. The plugin names the slot only; the label comes
+     * from the host's binding.
+     */
+    void warmPhaseModel(String phaseId) {
+        final com.aresstack.askai.agent.model.port.ModelPort port = hostContext == null ? null
+                : hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class);
+        if (port == null) {
+            return;
+        }
+        final com.aresstack.askai.agent.model.port.ModelSlot slot =
+                com.aresstack.askai.research.runtime.inference.ResearchModelSlots.phase(phaseId);
+        String label = "";
+        boolean resident = false;
+        try {
+            com.aresstack.askai.agent.model.port.resource.ResourceSnapshot snapshot = port.resources();
+            com.aresstack.askai.agent.model.port.resource.SlotBinding binding =
+                    snapshot.bindingOf(slot).orElse(null);
+            label = binding == null ? "" : binding.getModelLabel();
+            resident = snapshot.isResident(slot);
+        } catch (RuntimeException unknown) {
+            // no snapshot: warm anyway, without the label
+        }
+        if (!resident && !label.isEmpty()) {
+            final String text = "Loading " + label + "...";
+            uiExecutor.execute(new Runnable() {
+                public void run() {
+                    if (sink != null) {
+                        sink.appendInfoMessage("phase-model-" + slot.getName() + "-"
+                                + System.currentTimeMillis(), text);
+                    }
+                }
+            });
+        }
+        try {
+            port.warm(slot).whenComplete((done, failure) -> {
+                if (failure != null) {
+                    System.err.println("[research] warming " + slot + " failed: " + failure.getMessage());
+                }
+            });
+        } catch (RuntimeException failed) {
+            System.err.println("[research] warming " + slot + " failed: " + failed.getMessage());
+        }
+    }
+
+    /**
      * Wire the first hooks of D3 into the session's transition engine. Each effect is idempotent per
      * transition id, because the recovery pass re-runs an effect whose {@code done} record is missing.
      */
@@ -1397,6 +1464,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 if (transition.changesPhase()) {
                     names.add(EFFECT_HYGIENE);
                     names.add(EFFECT_DIVIDER);
+                    names.add(EFFECT_WARM_MODEL);
                 }
                 if (!transition.getComment().isEmpty()
                         && transition.getCommand().name().startsWith("REQUEST_")) {
@@ -1446,6 +1514,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         persistJournalNow();
                     }
                 });
+            }
+        });
+        engine.registerEffect(EFFECT_WARM_MODEL, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(final com.aresstack.askai.research.transition.PhaseTransition transition) {
+                warmPhaseModel(transition.getTo().getPhaseId());
             }
         });
         engine.registerEffect(EFFECT_CHANGE_NOTE, new com.aresstack.askai.research.transition.TransitionEffect() {
@@ -5300,10 +5373,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     private synchronized com.aresstack.askai.research.visualize.LazyArtifactVisualizer artifactVisualizer() {
         if (artifactVisualizer == null && !disposed) {
-            com.aresstack.askai.agent.model.inference.AgentInferencePort port = hostContext == null ? null
-                    : hostContext.getService(com.aresstack.askai.agent.model.inference.AgentInferencePort.class);
+            com.aresstack.askai.agent.model.inference.AgentInferencePort port = phaseInferencePort();
             if (port == null) {
-                return null; // no host inference (e.g. clickdummy): no visualization, brief still works
+                return null; // no host model port (e.g. clickdummy): no visualization, brief still works
             }
             artifactVisualizer = new com.aresstack.askai.research.visualize.LazyArtifactVisualizer(
                     new com.aresstack.askai.research.visualize.ModelArtifactVisualizer(port),

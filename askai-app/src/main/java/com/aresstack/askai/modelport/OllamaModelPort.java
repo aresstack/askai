@@ -109,6 +109,14 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
 
         /** The user's default per-call timeout (the main-model timeout setting). */
         Duration defaultTimeout();
+
+        /**
+         * True when the port checks a resolved model against the endpoint's installed models before a call
+         * (plan 5.1); the productive directory does, test directories with fake clients usually not.
+         */
+        default boolean checksInstalledModels() {
+            return false;
+        }
     }
 
     /** Creates the Ollama client for a base URL (a seam for tests). */
@@ -207,11 +215,16 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         final String model = slots.modelFor(slot);
         if (model == null || model.trim().isEmpty()) {
             result.completeExceptionally(new SlotUnavailableException(slot,
-                    SlotUnavailableException.Reason.NO_BINDING,
-                    "no model is configured for this slot and no main model is selected"));
+                    SlotUnavailableException.Reason.NO_BINDING, noModelMessage(slot)));
             return result;
         }
         final String endpointId = slots.endpointFor(model);
+        String unusable = preflight(slot, endpointId, model);
+        if (unusable != null) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.NO_BINDING, unusable));
+            return result;
+        }
         ModelPortSettings settings = settings();
         // Memory planning needs fresh loaded sizes; the probe runs in the background, never here.
         residency.refreshIfOlderThan(Duration.ofSeconds(settings.getResidencyRefreshSeconds()));
@@ -353,11 +366,16 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         final String model = slots.modelFor(slot);
         if (model == null || model.trim().isEmpty()) {
             result.completeExceptionally(new SlotUnavailableException(slot,
-                    SlotUnavailableException.Reason.NO_BINDING,
-                    "no model is configured for this slot and no main model is selected"));
+                    SlotUnavailableException.Reason.NO_BINDING, noModelMessage(slot)));
             return result;
         }
         final String endpointId = slots.endpointFor(model);
+        String unusable = preflight(slot, endpointId, model);
+        if (unusable != null) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.NO_BINDING, unusable));
+            return result;
+        }
         // The load goes through admission control like a call: it waits its turn, so it never loads another
         // model in the middle of an active batch (the scheduler's model-switch ordering and capacity).
         final CompletableFuture<ModelResourceScheduler.Grant> grant = scheduler.acquire(slot, endpointId, model,
@@ -437,6 +455,69 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         }
     }
 
+    /** "No model for the Document phase. Set it under Research settings -> Models." */
+    static String noModelMessage(ModelSlot slot) {
+        return "No model for the " + ModelPortSettings.describe(slot.getName())
+                + ". Set it under Research settings -> Models.";
+    }
+
+    /**
+     * The checks before a call or a load (plan 5.1), or null when the model may be used: a helper slot needs a
+     * model that can turn thinking off (a level-only family such as {@code gpt-oss} cannot), and a resolved
+     * model must be installed on its endpoint. The installed list is cached briefly; an endpoint that cannot be
+     * asked (not running, unreachable) skips the check, so the call itself reports the endpoint.
+     */
+    String preflight(ModelSlot slot, String endpointId, String model) {
+        if (ModelPortSettings.isHelperSlot(slot.getName()) && isLevelOnly(model, null)) {
+            return ModelPortSettings.thinkingOffRequiredMessage(slot.getName());
+        }
+        if (!slots.checksInstalledModels() || com.aresstack.askai.localmodels.LocalModelNames
+                .isLocalModelName(model)) {
+            return null;
+        }
+        List<String> installed = installedModels(endpointId);
+        if (installed == null || installed.isEmpty() || isInstalled(installed, model)) {
+            return null;
+        }
+        return ModelPortSettings.notInstalledMessage(model, slot.getName());
+    }
+
+    /** {@code llama3.1:8b} matches {@code llama3.1:8b}; a bare name matches its {@code :latest} tag. */
+    static boolean isInstalled(List<String> installed, String model) {
+        String wanted = model.trim();
+        String withTag = wanted.indexOf(':') < 0 ? wanted + ":latest" : wanted;
+        for (String name : installed) {
+            if (name != null && (name.trim().equals(wanted) || name.trim().equals(withTag))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final long INSTALLED_TTL_MILLIS = 30_000L;
+    private final Map<String, Object[]> installedCache = new ConcurrentHashMap<String, Object[]>();
+
+    /** The installed model names of an endpoint (cached 30 s), or null when the endpoint cannot be asked. */
+    @SuppressWarnings("unchecked")
+    private List<String> installedModels(String endpointId) {
+        Object[] cached = installedCache.get(endpointId);
+        long now = System.currentTimeMillis();
+        if (cached != null && now - (Long) cached[0] < INSTALLED_TTL_MILLIS) {
+            return (List<String>) cached[1];
+        }
+        String baseUrl = endpoints.baseUrlIfRunning(endpointId);
+        if (baseUrl == null) {
+            return null;
+        }
+        try {
+            List<String> names = client(baseUrl).getModelNames();
+            installedCache.put(endpointId, new Object[]{now, names});
+            return names;
+        } catch (OllamaRequestException | RuntimeException unknown) {
+            return null;
+        }
+    }
+
     static String contextTooLarge(String model, int needed, int available) {
         return "Context too large for " + model + ": the call needs " + needed + " tokens, the model's context is "
                 + available + " (raise it in the model resources)";
@@ -449,7 +530,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
      */
     Object resolveThinking(ThinkingMode requested, String slot, String baseUrl, String model) {
         ThinkingMode mode = requested == null || requested == ThinkingMode.DEFAULT
-                ? settings().slotThinking(slot) : requested;
+                ? settings().resolveThinking(slot) : requested;
         Capabilities capabilities = capabilities(baseUrl, model);
         if (!capabilities.thinking) {
             return null;

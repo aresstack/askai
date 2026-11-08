@@ -54,9 +54,15 @@ public final class LocalInferenceConfigurationSnapshotProvider
     private final java.util.concurrent.atomic.AtomicLong revision =
             new java.util.concurrent.atomic.AtomicLong();
 
+    /**
+     * @param modelPortSettings the model-port settings: the descriptor's model is the research {@code default}
+     *                          slot (plan 5.1), never the chat model ({@code ai.mainModel})
+     */
     public LocalInferenceConfigurationSnapshotProvider(LocalModelRuntimeManager manager,
-                                                       AppConfigurationRepository centralConfig) {
-        this(productionSources(manager, centralConfig));
+                                                       AppConfigurationRepository centralConfig,
+                                                       com.aresstack.askai.modelport.ModelPortSettingsRepository
+                                                               modelPortSettings) {
+        this(productionSources(manager, centralConfig, modelPortSettings));
     }
 
     LocalInferenceConfigurationSnapshotProvider(EndpointSources sources) {
@@ -69,9 +75,7 @@ public final class LocalInferenceConfigurationSnapshotProvider
         String model = sources.modelName() == null ? "" : sources.modelName().trim();
         if (model.isEmpty()) {
             throw new InferenceConfigurationException(
-                    "No main model is selected. Choose a chat model in the AskAI chat window "
-                            + "(it is the shared main model for all plugins) before starting a research "
-                            + "session — the research assistant needs it to talk to you.");
+                    "No default research model is set. Set it under Research settings -> Models.");
         }
         String baseUrl = resolveBaseUrl(model);
         if (baseUrl == null || baseUrl.trim().isEmpty()) {
@@ -110,10 +114,15 @@ public final class LocalInferenceConfigurationSnapshotProvider
     }
 
     private static EndpointSources productionSources(final LocalModelRuntimeManager manager,
-                                                     final AppConfigurationRepository centralConfig) {
+                                                     final AppConfigurationRepository centralConfig,
+                                                     final com.aresstack.askai.modelport.ModelPortSettingsRepository
+                                                             modelPortSettings) {
         return new EndpointSources() {
             public String modelName() {
-                return centralConfig.load().getAiModelSelections().getMainModel();
+                // The research default slot (preset gemma4:e2b), so hasInference() holds in every research
+                // session, with or without a chat model.
+                return modelPortSettings.load().resolveModel(
+                        com.aresstack.askai.modelport.ModelPortSettings.DEFAULT_SLOT);
             }
 
             public String localRuntimeBaseUrl() throws IOException {

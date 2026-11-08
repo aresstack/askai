@@ -20,9 +20,9 @@ import java.util.List;
 public final class ResearchRoles {
 
     /**
-     * The conversation role the TeamAgent's chat transport is bound to: the conversation slot with the slot's
-     * default context. Every phase profile runs on this one transport; a profile's role declares the prompt,
-     * tools and output of its phase.
+     * The neutral conversation role (the registry's fallback profile, bound to Concept). The session re-binds
+     * it per turn to the live phase's slot ({@code phase.<id>}, plan 5.1) with
+     * {@link ResearchRole#withSlot}; a profile's role declares the prompt, tools and output of its phase.
      */
     public static final ResearchRole CONVERSATION = PhaseAssistantProfileRegistry.defaults().fallback().getRole();
 
