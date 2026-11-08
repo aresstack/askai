@@ -12,6 +12,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -30,7 +31,10 @@ public class ModelProtocolLiveTest {
     @Test
     public void modelProtocol() throws Exception {
         String ollama = System.getProperty(P + "ollamaUrl", "http://127.0.0.1:11434").replaceAll("/+$", "");
-        ProtocolProbes probes = new ProtocolProbes(ollama, 900_000);
+        // One call may take this long (default 180 s): a cold load of gpt-oss:20b takes well under a minute, so a
+        // longer wait is a stuck load and ends with a clear message instead of blocking the run for 15 minutes.
+        int callSeconds = Integer.getInteger(P + "callTimeoutSeconds", 180);
+        ProtocolProbes probes = new ProtocolProbes(ollama, callSeconds * 1000);
         String version = probes.version();
         Assume.assumeFalse("Ollama not reachable at the configured URL", "unknown".equals(version));
         List<String> models = ProtocolProbes.models(System.getProperty(P + "protocolModels",
@@ -49,22 +53,52 @@ public class ModelProtocolLiveTest {
         md.append("## Characters per token (item 2)\n\n| Model | EN chars/token | DE chars/token | DE tokens/word |\n"
                 + "|---|---|---|---|\n");
         for (String model : models) {
+            log("token probe " + model);
             long enTokens = probes.promptTokens(model, en, 8192);
             long deTokens = probes.promptTokens(model, de, 8192);
             md.append(String.format(Locale.ROOT, "| %s | %s | %s | %s |%n", model,
                     ratio(en.length(), enTokens), ratio(de.length(), deTokens),
                     deTokens <= 0 ? "?" : String.format(Locale.ROOT, "%.2f", deTokens / (double) germanWords)));
         }
-        md.append("\n## Model switches (items 3 and 4)\n\n| From | To | num_ctx | load_duration ms | GPU MiB after |\n"
-                + "|---|---|---|---|---|\n");
+        // Before each switch every loaded model is unloaded (keep_alive 0) and the test waits for /api/ps to be
+        // empty: load_duration is then a cold load, and a hang is attributed to the load, not to an eviction.
+        // After each load /api/ps must list exactly the requested model, which is the reload proof (and for
+        // llama3.1:8b the protocol half of the phase.draft check).
+        md.append("\n## Model switches (items 3 and 4)\n\n"
+                + "| From | To | num_ctx | load_duration ms | GPU MiB after | /api/ps after | Reloaded |\n"
+                + "|---|---|---|---|---|---|---|\n");
         String previous = "(start)";
+        List<String> failures = new ArrayList<String>();
         for (int round = 0; round < 2; round++) {
             for (String model : models) {
                 int numCtx = numCtx(model);
-                long load = probes.loadDurationMillis(model, numCtx);
+                log("unloading before switch " + previous + " -> " + model);
+                List<String> left = probes.unloadAll(60_000);
+                if (!left.isEmpty()) {
+                    log("still loaded after 60 s: " + left);
+                }
+                log("loading " + model + " num_ctx=" + numCtx);
+                long started = System.currentTimeMillis();
+                String load;
+                String ps;
+                String reloaded;
+                try {
+                    long ms = probes.loadDurationMillis(model, numCtx);
+                    load = ms < 0 ? "failed" : String.valueOf(ms);
+                    List<ProtocolProbes.LoadedModel> loaded = probes.loadedModels();
+                    ps = loaded.toString().replace('|', '/');
+                    reloaded = reloadVerdict(model, ms, loaded);
+                } catch (ProtocolProbes.ProbeTimeoutException timeout) {
+                    load = "timeout";
+                    ps = "-";
+                    reloaded = "no: " + timeout.getMessage().replace('|', '/');
+                    failures.add(previous + " -> " + model + ": " + timeout.getMessage());
+                }
+                log(model + " load_duration=" + load + " ms, wall " + (System.currentTimeMillis() - started)
+                        + " ms, ps " + ps);
                 long gpu = ProtocolProbes.gpuMemoryUsedMiB();
-                md.append(String.format(Locale.ROOT, "| %s | %s | %d | %s | %s |%n", previous, model, numCtx,
-                        load < 0 ? "failed" : String.valueOf(load), gpu < 0 ? "not measured" : String.valueOf(gpu)));
+                md.append(String.format(Locale.ROOT, "| %s | %s | %d | %s | %s | %s | %s |%n", previous, model,
+                        numCtx, load, gpu < 0 ? "not measured" : String.valueOf(gpu), ps, reloaded));
                 previous = model;
             }
         }
@@ -86,6 +120,33 @@ public class ModelProtocolLiveTest {
         Files.write(out.toPath(), md.toString().getBytes(StandardCharsets.UTF_8));
         System.out.println(md);
         System.out.println("[model-protocol] report " + out.getName());
+        if (!failures.isEmpty()) {
+            throw new AssertionError("model switch timed out (report " + out.getName() + "): " + failures);
+        }
+    }
+
+    /**
+     * Reload proof of one switch: Ollama reported a positive {@code load_duration} and {@code /api/ps} lists the
+     * requested model (fully in VRAM, otherwise the GPU share is named).
+     */
+    static String reloadVerdict(String model, long loadMillis, List<ProtocolProbes.LoadedModel> loaded) {
+        if (loadMillis < 0) {
+            return "no: generate failed";
+        }
+        for (ProtocolProbes.LoadedModel m : loaded) {
+            if (m.name.equals(model) || m.name.equals(model + ":latest")) {
+                if (loadMillis == 0) {
+                    return "no: load_duration 0, model was still loaded";
+                }
+                return m.gpuPercent() >= 100 ? "yes" : "yes, only " + m.gpuPercent() + "% on GPU";
+            }
+        }
+        return "no: not in /api/ps";
+    }
+
+    private static void log(String line) {
+        System.out.println("[model-protocol " + new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date())
+                + "] " + line);
     }
 
     /**

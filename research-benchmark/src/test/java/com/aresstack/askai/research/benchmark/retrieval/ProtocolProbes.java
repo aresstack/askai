@@ -58,9 +58,105 @@ public final class ProtocolProbes {
         try (OutputStream out = c.getOutputStream()) {
             out.write(body.toString().getBytes(StandardCharsets.UTF_8));
         }
-        int status = c.getResponseCode();
-        InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
-        return new Answer(status, in == null ? "" : read(in));
+        try {
+            int status = c.getResponseCode();
+            InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+            return new Answer(status, in == null ? "" : read(in));
+        } catch (java.net.SocketTimeoutException timeout) {
+            c.disconnect();
+            throw new ProbeTimeoutException("POST " + path + " got no complete answer within "
+                    + TimeUnit.MILLISECONDS.toSeconds(timeoutMillis) + " s (model "
+                    + (body.has("model") ? body.get("model").getAsString() : "?")
+                    + "); Ollama is probably waiting for VRAM or for another model to unload. Loaded now: "
+                    + safeLoadedModels(), timeout);
+        }
+    }
+
+    /** A probe call that hit its read timeout: the protocol reports it instead of waiting forever. */
+    public static final class ProbeTimeoutException extends IOException {
+        ProbeTimeoutException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** One entry of {@code /api/ps}: name, total size and the part of it in VRAM (bytes). */
+    public static final class LoadedModel {
+        public final String name;
+        public final long size;
+        public final long sizeVram;
+
+        LoadedModel(String name, long size, long sizeVram) {
+            this.name = name;
+            this.size = size;
+            this.sizeVram = sizeVram;
+        }
+
+        /** Share of the model in VRAM in percent; below 100 means Ollama spilled layers to the CPU. */
+        public int gpuPercent() {
+            return size <= 0 ? 0 : (int) Math.round(100.0 * sizeVram / size);
+        }
+
+        @Override
+        public String toString() {
+            return name + " " + (size >> 20) + " MiB " + gpuPercent() + "% GPU";
+        }
+    }
+
+    /** The models Ollama holds right now ({@code GET /api/ps}, short timeout). */
+    public List<LoadedModel> loadedModels() throws IOException {
+        HttpURLConnection c = (HttpURLConnection) new URL(baseUrl + "/api/ps").openConnection(java.net.Proxy.NO_PROXY);
+        c.setConnectTimeout(3000);
+        c.setReadTimeout(10_000);
+        List<LoadedModel> out = new ArrayList<LoadedModel>();
+        JsonElement models = JsonParser.parseString(read(c.getInputStream())).getAsJsonObject().get("models");
+        if (models != null && models.isJsonArray()) {
+            for (JsonElement e : models.getAsJsonArray()) {
+                JsonObject m = e.getAsJsonObject();
+                out.add(new LoadedModel(m.get("name").getAsString(),
+                        m.has("size") ? m.get("size").getAsLong() : 0,
+                        m.has("size_vram") ? m.get("size_vram").getAsLong() : 0));
+            }
+        }
+        return out;
+    }
+
+    private String safeLoadedModels() {
+        try {
+            return loadedModels().toString();
+        } catch (IOException | RuntimeException unavailable) {
+            return "(/api/ps unavailable: " + unavailable.getMessage() + ")";
+        }
+    }
+
+    /**
+     * Unloads every model Ollama holds ({@code keep_alive 0}) and waits until {@code /api/ps} is empty, so the next
+     * {@code load_duration} is a real cold load and the switch never waits on an eviction. Returns the names still
+     * loaded after {@code waitMillis} (empty when all are gone).
+     */
+    public List<String> unloadAll(long waitMillis) throws IOException {
+        for (LoadedModel m : loadedModels()) {
+            JsonObject body = new JsonObject();
+            body.addProperty("model", m.name);
+            body.addProperty("keep_alive", 0);
+            post("/api/generate", body);
+        }
+        long deadline = System.currentTimeMillis() + waitMillis;
+        List<String> left = new ArrayList<String>();
+        while (true) {
+            left.clear();
+            for (LoadedModel m : loadedModels()) {
+                left.add(m.name);
+            }
+            if (left.isEmpty() || System.currentTimeMillis() >= deadline) {
+                return left;
+            }
+            try {
+                Thread.sleep(250);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return left;
+            }
+        }
     }
 
     /** Length of the vector the model returns for a raw probe text. */
