@@ -15,7 +15,8 @@ import java.util.Map;
  * #RSC1# set_language language=de|en
  * #RSC1# set_scope scope=&lt;urlenc&gt;
  * #RSC1# review_sources request_id=&lt;uuid&gt; captured_through=&lt;epoch-millis&gt;
- * #RSC1# generate_probes request_id=&lt;uuid&gt; req=&lt;urlenc-json&gt;</pre>
+ * #RSC1# generate_probes request_id=&lt;uuid&gt; req=&lt;urlenc-json&gt;
+ * #RSC1# plan_queries request_id=&lt;uuid&gt; req=&lt;urlenc-json&gt;</pre>
  */
 public final class ResearchServiceCommandWire {
 

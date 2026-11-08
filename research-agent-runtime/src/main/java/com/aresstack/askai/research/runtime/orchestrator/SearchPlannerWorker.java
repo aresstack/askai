@@ -7,14 +7,9 @@ import com.aresstack.askai.research.runtime.role.ResearchRole;
 import com.aresstack.askai.research.runtime.role.RoleOutput;
 import com.aresstack.askai.research.runtime.team.ChatMessage;
 import com.aresstack.askai.research.runtime.team.MainModelChatResult;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -23,21 +18,11 @@ import java.util.Set;
  * artifacts ({@link WorkerArtifacts}) that a web research package depending on it runs through the ONE funnel
  * (SEQUENTIAL inside the package chain: plan, then search). The answer is schema-bound and checked by code:
  * empty, overlong and duplicate queries (also against what the run already searched) are refused and sent back
- * once (a setting) with the reason.
+ * once (a setting) with the reason. Prompt, schema and reader live in {@link QueryPlanner}.
  */
 public final class SearchPlannerWorker implements TaskWorker {
 
-    static final String SYSTEM =
-            "You are the search planner of a research assistant. You get ONE aspect of a research question and "
-                    + "write web search queries for it. You never search yourself.\n"
-                    + "Rules:\n"
-                    + "- Answer with the JSON object the schema asks for, nothing else.\n"
-                    + "- Each query is what a person would type into a web search engine: 3 to 10 words, concrete "
-                    + "terms, names, places and years from the aspect; no full sentences, no operators.\n"
-                    + "- The queries differ in angle (for example definition, current figures, regulation, "
-                    + "criticism), never only in word order.\n"
-                    + "- Never repeat a query listed under ALREADY SEARCHED.\n"
-                    + "- Stay inside the aspect; do not widen the topic.";
+    static final String SYSTEM = QueryPlanner.SYSTEM;
 
     /** The role: the planner slot, no tools, a per-request schema (its maxItems is the planner setting). */
     public static final ResearchRole ROLE = ResearchRole.builder("search-planner", ResearchModelSlots.PLANNER)
@@ -48,7 +33,7 @@ public final class SearchPlannerWorker implements TaskWorker {
             .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
-    static final int MAX_QUERY_LENGTH = 160;
+    static final int MAX_QUERY_LENGTH = QueryPlanner.MAX_QUERY_LENGTH;
     private static final double TEMPERATURE = 0.3;
 
     private final int maxQueries;
@@ -117,74 +102,15 @@ public final class SearchPlannerWorker implements TaskWorker {
     }
 
     static String prompt(String aspect, String brief, Set<String> searched) {
-        StringBuilder sb = new StringBuilder("ASPECT\n").append(aspect).append("\n\n");
-        if (!brief.isEmpty()) {
-            sb.append("BRIEF\n").append(brief).append("\n\n");
-        }
-        sb.append("ALREADY SEARCHED\n");
-        if (searched.isEmpty()) {
-            sb.append("(nothing yet)\n");
-        }
-        for (String query : searched) {
-            sb.append("- ").append(query).append('\n');
-        }
-        return sb.append("\nTASK: write the search queries for the aspect.").toString();
+        return QueryPlanner.prompt(aspect, brief, searched);
     }
 
     static String schema(int maxQueries) {
-        JsonObject query = new JsonObject();
-        query.addProperty("type", "string");
-        query.addProperty("minLength", 3);
-        query.addProperty("maxLength", MAX_QUERY_LENGTH);
-        JsonObject queries = new JsonObject();
-        queries.addProperty("type", "array");
-        queries.add("items", query);
-        queries.addProperty("minItems", 1);
-        queries.addProperty("maxItems", maxQueries);
-        JsonObject props = new JsonObject();
-        props.add("queries", queries);
-        JsonObject root = new JsonObject();
-        root.addProperty("type", "object");
-        root.add("properties", props);
-        JsonArray required = new JsonArray();
-        required.add("queries");
-        root.add("required", required);
-        root.addProperty("additionalProperties", false);
-        return root.toString();
+        return QueryPlanner.schema(maxQueries);
     }
 
     /** The strict reader: the distinct new queries, or the reason the answer is unusable. */
     static List<String> read(String answer, int maxQueries, Set<String> searched) throws WorkerAnswerException {
-        JsonObject root = WorkerAnswerException.object(answer);
-        JsonElement element = root.get("queries");
-        if (element == null || !element.isJsonArray()) {
-            throw new WorkerAnswerException("\"queries\" must be an array of strings");
-        }
-        Set<String> known = new java.util.HashSet<String>();
-        for (String query : searched) {
-            known.add(WorkerArtifacts.normalize(query));
-        }
-        Map<String, String> distinct = new LinkedHashMap<String, String>();
-        List<String> refused = new ArrayList<String>();
-        for (JsonElement item : element.getAsJsonArray()) {
-            if (!item.isJsonPrimitive() || !item.getAsJsonPrimitive().isString()) {
-                throw new WorkerAnswerException("every query must be a string");
-            }
-            String query = item.getAsString().replaceAll("\\s+", " ").trim();
-            String key = WorkerArtifacts.normalize(query);
-            if (query.length() < 3 || query.length() > MAX_QUERY_LENGTH) {
-                refused.add("\"" + query + "\" (length)");
-            } else if (known.contains(key)) {
-                refused.add("\"" + query + "\" (already searched)");
-            } else if (distinct.putIfAbsent(key, query) != null) {
-                refused.add("\"" + query + "\" (duplicate)");
-            }
-        }
-        if (distinct.isEmpty()) {
-            throw new WorkerAnswerException("no usable new query" + (refused.isEmpty() ? ""
-                    : "; refused: " + String.join(", ", refused)));
-        }
-        List<String> queries = new ArrayList<String>(distinct.values());
-        return queries.size() > maxQueries ? queries.subList(0, maxQueries) : queries;
+        return QueryPlanner.read(answer, maxQueries, searched);
     }
 }

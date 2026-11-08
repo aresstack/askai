@@ -951,6 +951,9 @@ public final class ResearchAgentSession {
         } else if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_CHOOSE_ADVICE
                 .equals(command.getType())) {
             handleChooseAdvice(ctx, command.getRequestId(), command.getRequest());
+        } else if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_PLAN_QUERIES
+                .equals(command.getType())) {
+            handlePlanQueries(ctx, command.getRequestId(), command.getRequest());
         } else if (command.getType().startsWith("orchestrator_")) {
             handleOrchestratorCommand(ctx, command);
         }
@@ -1206,6 +1209,29 @@ public final class ResearchAgentSession {
         ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.adviceDecision(
                 requestId,
                 com.aresstack.askai.research.runtime.scope.ScopeAdviceWire.renderResult(result)));
+    }
+
+    /**
+     * Plan PR 13: plan the search queries of the frozen concept on {@code phase.research.planner} — one planner
+     * call per node, one repair, then the base query (the planner never throws). A malformed request is answered
+     * with an empty plan, so the host never waits into its timeout. Material only: no scope or state change.
+     */
+    private void handlePlanQueries(AgentOutput ctx, String requestId, String requestJson) {
+        com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Result result;
+        try {
+            result = com.aresstack.askai.research.runtime.orchestrator.QueryPlanner.planConcept(
+                    roleChat(com.aresstack.askai.research.runtime.orchestrator.QueryPlanner.CONCEPT_ROLE),
+                    com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(requestJson),
+                    cancelled::get);
+        } catch (IllegalArgumentException malformedRequest) {
+            System.err.println("[query-plan] malformed request requestId=" + requestId + ": "
+                    + malformedRequest.getMessage());
+            result = new com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Result(null);
+        }
+        System.err.println("[query-plan] runtime answering requestId=" + requestId
+                + " nodes=" + result.getNodes().size());
+        ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.queryPlan(requestId,
+                com.aresstack.askai.research.runtime.plan.QueryPlanWire.renderResult(result)));
     }
 
     /**

@@ -45,6 +45,9 @@ public final class ResearchRunWire {
     /** Z4b: the typed advice-chooser answer; payload = decision JSON, correlated by request_id. */
     public static final String TYPE_ADVICE = "advice";
 
+    /** Plan PR 13: the typed concept query plan; payload = plan JSON, correlated by request_id. */
+    public static final String TYPE_QUERY_PLAN = "query_plan";
+
     private ResearchRunWire() {
     }
 

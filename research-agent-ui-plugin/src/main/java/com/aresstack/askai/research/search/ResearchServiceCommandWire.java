@@ -79,6 +79,18 @@ public final class ResearchServiceCommandWire {
     }
 
     /**
+     * Plan PR 13: encode a concept query plan request (the JSON built by {@code QueryPlanWireCodec}). Internal
+     * seam like generate_probes: the runtime plans every node, one typed {@code #RSX1# query_plan} answer comes
+     * back on this request id — no chat turn, no state change.
+     */
+    public static String planQueries(String requestId, String requestJson) {
+        StringBuilder sb = new StringBuilder(MARKER).append("plan_queries")
+                .append(" request_id=").append(requestId == null ? "" : requestId);
+        appendEncoded(sb, "req", requestJson);
+        return sb.toString();
+    }
+
+    /**
      * Z4b: encode an advice-chooser request (the finished offers as JSON). Internal seam like
      * generate_probes: one model call in the runtime, one typed {@code #RSX1# advice} answer back
      * on this request id — no chat turn, no state change.

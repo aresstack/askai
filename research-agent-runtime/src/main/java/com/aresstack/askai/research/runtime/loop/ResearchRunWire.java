@@ -305,6 +305,12 @@ public final class ResearchRunWire {
                 + " payload=" + encode(payloadJson);
     }
 
+    /** Plan PR 13: the typed answer to a {@code plan_queries} service command, correlated by request id. */
+    public static String queryPlan(String requestId, String payloadJson) {
+        return MARKER + "query_plan request_id=" + (requestId == null ? "" : requestId)
+                + " payload=" + encode(payloadJson);
+    }
+
     public static String manualSearchFailed(String requestId, String reason) {
         return MARKER + "manual_search_failed"
                 + " request_id=" + (requestId == null ? "" : requestId)
