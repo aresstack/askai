@@ -60,19 +60,20 @@ public final class ConceptFreezeHook implements PhaseTransitionHook {
             if (refusal != null) {
                 throw new IOException(refusal);
             }
-            FileConceptStore.Approval approval;
+            FileConceptStore.FrozenApproval frozen;
             try {
-                approval = store.approveCurrent(transition.getTimeMillis());
+                frozen = store.approveCurrentFrozen(transition.getTimeMillis());
             } catch (RuntimeException failed) {
                 throw new IOException("The concept could not be approved: " + failed.getMessage(), failed);
             }
+            FileConceptStore.Approval approval = frozen.approval;
             int revision = approval.getRevisionNumber();
             String content = store.approvedContent(revision);
             if (content == null) {
                 throw new IOException("The approved concept revision " + revision + " cannot be read.");
             }
             manifest.appendConceptPin(new ConceptPin(transition.getId(), revision, approval.isNewRevision(),
-                    FileConceptStore.sha256(content), store.workingRevision(), transition.getTimeMillis(),
+                    FileConceptStore.sha256(content), frozen.workingRevision, transition.getTimeMillis(),
                     source.mission().trim(), source.deliverable(), source.language(), source.blacklist()));
         } else if (transition.getCommand() == ResearchCommandType.REOPEN_CONCEPT) {
             manifest.appendNote(transition.getId(), ConceptPin.PHASE, REOPENED_NOTE, transition.getTimeMillis());

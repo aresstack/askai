@@ -71,6 +71,8 @@ public final class ConceptPaperView extends JPanel {
     private final JLabel modeLabel = new JLabel(" ");
     private MissionSaver missionSaver;
     private String shownMission = "";
+    /** PR 07: the concept is frozen (outside scoping/running) — every editor is read-only. */
+    private boolean frozen;
 
     private static final String EMPTY =
             "_No concept yet. Describe in the chat what you want to research._";
@@ -232,6 +234,12 @@ public final class ConceptPaperView extends JPanel {
             missionField.setText(value);
         }
         missionField.setEditable(editable);
+        if (frozen != !editable) {
+            frozen = !editable;
+            treeView.setPreview(frozen || browsingRevision >= 0);
+            editor.setEditable(!frozen && lastProjection != null && browsingRevision < 0);
+            updateControls();
+        }
         missionSaveButton.setEnabled(editable && missionSaver != null);
         modeLabel.setText(editable ? " " : modeMessage);
         modeLabel.setVisible(!editable);
@@ -239,6 +247,14 @@ public final class ConceptPaperView extends JPanel {
 
     String missionText() {
         return missionField.getText();
+    }
+
+    boolean isFrozen() {
+        return frozen;
+    }
+
+    boolean isJsonEditable() {
+        return editor.isEditable();
     }
 
     String modeText() {
@@ -492,7 +508,7 @@ public final class ConceptPaperView extends JPanel {
                 return;
             }
             browsingRevision = -1;
-            treeView.setPreview(false);
+            treeView.setPreview(frozen);
             quietStatus();
             // The restore commit notifies the listeners; their refresh re-renders the head.
             return;
@@ -555,7 +571,7 @@ public final class ConceptPaperView extends JPanel {
     /** Back to the live head in the CURRENT mode (browse-forward past the end, Discard). */
     private void leavePreview() {
         browsingRevision = -1;
-        treeView.setPreview(false);
+        treeView.setPreview(frozen);
         quietStatus();
         renderCurrent();
         renderTreeHead();
@@ -650,7 +666,7 @@ public final class ConceptPaperView extends JPanel {
         settingText = true;
         try {
             editor.setText(text);
-            editor.setEditable(editable);
+            editor.setEditable(editable && !frozen);
             editor.setCaretPosition(0);
         } finally {
             settingText = false;
@@ -664,7 +680,7 @@ public final class ConceptPaperView extends JPanel {
         // explicit restore of the shown state); the JSON mode keeps them permanently.
         saveButton.setVisible(!treeMode || previewing);
         discardButton.setVisible(!treeMode || previewing);
-        saveButton.setEnabled(editWired && (previewing || (!treeMode && dirty)));
+        saveButton.setEnabled(!frozen && editWired && (previewing || (!treeMode && dirty)));
         discardButton.setEnabled(dirty || previewing || searchView);
         olderButton.setEnabled(historyReader != null && !dirty);
         newerButton.setEnabled(historyReader != null && !dirty && previewing);

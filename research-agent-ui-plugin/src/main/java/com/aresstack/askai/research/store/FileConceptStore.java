@@ -353,6 +353,22 @@ public final class FileConceptStore {
         }
     }
 
+    /** An approval together with the working revision it froze, read under one lock. */
+    public static final class FrozenApproval {
+        public final Approval approval;
+        public final long workingRevision;
+
+        FrozenApproval(Approval approval, long workingRevision) {
+            this.approval = approval;
+            this.workingRevision = workingRevision;
+        }
+    }
+
+    /** Approve and read the working revision atomically, so no commit can slip in between (PR 07). */
+    public synchronized FrozenApproval approveCurrentFrozen(long nowMillis) {
+        return new FrozenApproval(approveCurrent(nowMillis), workingRevision());
+    }
+
     /** Freeze the current effective document as the next immutable approved revision. */
     public synchronized Approval approveCurrent(long nowMillis) {
         String content = effectiveContent();
