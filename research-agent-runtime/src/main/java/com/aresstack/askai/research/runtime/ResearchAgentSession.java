@@ -304,6 +304,13 @@ public final class ResearchAgentSession {
                                 // The host answers for its live phase, which is the turn's phase.
                                 return hostBlock("phase_change_request", "No change request.");
                             }
+                        }).withPhaseArtifact(
+                        new com.aresstack.askai.research.runtime.team.PhaseContextAssembler.PhaseArtifact() {
+                            public String rendered(String phaseId) {
+                                // Plan PR 21: the Outline block (ids, titles, coverage per chapter) from the
+                                // host's outline store. Sources (PR 15) and Document (PR 29) follow.
+                                return "outline".equals(phaseId) ? hostBlock("outline_read", "No outline.") : "";
+                            }
                         }));
         // Konzeptpapier loop budgets (host env hand-off): tool rounds ≠ repair attempts — one is the
         // WORK budget, the other the ERROR tolerance; both are settings, never hidden constants.

@@ -48,7 +48,7 @@ public final class ResearchOutlineViewContribution implements ArtifactViewContri
         });
         final Runnable refresh = new Runnable() {
             public void run() {
-                final String markdown = research.outlineMarkdown();
+                final String markdown = research.liveOutlineMarkdown();
                 final Boolean stale = research.outlineStale();
                 uiExecutor.execute(new Runnable() {
                     public void run() {

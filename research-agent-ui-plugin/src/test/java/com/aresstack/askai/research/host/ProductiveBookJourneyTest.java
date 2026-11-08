@@ -98,7 +98,7 @@ public class ProductiveBookJourneyTest {
         }
     }
 
-    private static final class Fx {
+    static final class Fx {
         final InProcessMcpServerRegistry registry = new InProcessMcpServerRegistry();
         final RecordingBackend backend = new RecordingBackend();
         final ProductiveResearchSessionResources resources;
@@ -154,7 +154,7 @@ public class ProductiveBookJourneyTest {
     }
 
     /** The user's first chat message, answered by the (recording) runtime. */
-    private static void firstMessage(Fx fx, String text) {
+    static void firstMessage(Fx fx, String text) {
         fx.session.submitPrompt(text);
         fx.session.onEvent(ResearchBackendEvent.builder(
                 com.aresstack.askai.research.backend.ResearchBackendEventType.COMPLETED)
@@ -164,7 +164,7 @@ public class ProductiveBookJourneyTest {
 
     private static long sequence;
 
-    private static void settle(Fx fx) {
+    static void settle(Fx fx) {
         try {
             assertTrue(fx.session.awaitTransitionEffects(5000));
         } catch (InterruptedException ex) {
@@ -172,7 +172,7 @@ public class ProductiveBookJourneyTest {
         }
     }
 
-    private static String phase(Fx fx) {
+    static String phase(Fx fx) {
         settle(fx);
         return fx.resources.currentState().getPhaseId() + "/" + fx.resources.currentState().getStateId();
     }
@@ -186,7 +186,7 @@ public class ProductiveBookJourneyTest {
         return commands;
     }
 
-    private static void assertHandled(String outcome) {
+    static void assertHandled(String outcome) {
         assertTrue(outcome, outcome.startsWith("handled"));
     }
 
@@ -252,6 +252,11 @@ public class ProductiveBookJourneyTest {
         assertEquals("outline/running", phase(fx));
         assertOnlyFinishTagFor(fx, "finish-outline");
 
+        String empty = fx.session.executeCommand("finish-outline", "");
+        assertTrue("PR 21 (Q24): an outline without a section is refused: " + empty,
+                empty.contains(com.aresstack.askai.research.book.OutlineFreezeHook.NO_SECTION));
+        assertEquals("outline/running", phase(fx));
+        OutlineTestSupport.makeFinishable(fx.session);
         assertHandled(fx.session.executeCommand("finish-outline", ""));
         assertEquals("outline/waiting_approval", phase(fx));
         assertHandled(fx.session.executeCommand("approve", ""));
@@ -427,6 +432,7 @@ public class ProductiveBookJourneyTest {
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertHandled(fx.session.executeCommand("finish-sources", ""));
         assertHandled(fx.session.executeCommand("approve", ""));
+        OutlineTestSupport.makeFinishable(fx.session);
         assertHandled(fx.session.executeCommand("finish-outline", ""));
         assertEquals("outline/waiting_approval", phase(fx));
         int prompts = fx.backend.prompts.size();
@@ -592,7 +598,7 @@ public class ProductiveBookJourneyTest {
     }
 
     /** A fresh temp directory for a file-backed project context (the productive contract). */
-    private static java.io.File newTempDir() {
+    static java.io.File newTempDir() {
         try {
             return java.nio.file.Files.createTempDirectory("askai-research-test").toFile();
         } catch (java.io.IOException ex) {

@@ -91,14 +91,16 @@ public class ResearchControlEndpointTest {
         assertFalse(t.contains("concept_save"));
         assertFalse(t.contains("outline_save"));
         assertFalse(t.contains("draft_save"));
-        // + the PR 16 context reads: source_overview, concept_summary, phase_change_request
-        assertEquals("scoping offers exactly the 7 read tools", 7, t.size());
+        // + the PR 16 context reads: source_overview, concept_summary, phase_change_request; + PR 21 outline_read
+        assertEquals("scoping offers exactly the 8 read tools", 8, t.size());
+        assertTrue(t.contains("outline_read"));
 
-        // OUTLINE/running → outline_save only (legacy operability for old persisted sessions).
+        // OUTLINE/running: plan PR 21 removed outline_save; the outline is read with outline_read only.
         ctx.phaseId = ResearchStateIds.OUTLINE;
         ep.refreshTools();
         t = tools(reg, ep);
-        assertTrue(t.contains("outline_save"));
+        assertFalse(t.contains("outline_save"));
+        assertTrue(t.contains("outline_read"));
         assertFalse(t.contains("concept_save"));
 
         // RESEARCH/running → source tools only; the legacy findings/notes writers are gone.
@@ -126,7 +128,7 @@ public class ResearchControlEndpointTest {
             ctx.stateId = s;
             ep.refreshTools();
             t = tools(reg, ep);
-            assertEquals("only the 7 read tools in " + s, 7, t.size());
+            assertEquals("only the 8 read tools in " + s, 8, t.size());
         }
         ep.close();
     }
@@ -153,18 +155,18 @@ public class ResearchControlEndpointTest {
     public void writesWorkWithOptimisticLockingAndAppends() {
         InProcessMcpServerRegistry reg = new InProcessMcpServerRegistry();
         Ctx ctx = new Ctx();
-        ctx.phaseId = ResearchStateIds.OUTLINE;
+        ctx.phaseId = ResearchStateIds.DRAFT;
         ResearchControlEndpoint ep = new ResearchControlEndpoint(reg, "s1", 1L, ctx);
         ep.open();
 
         // Save with the correct revision succeeds; a stale revision is a conflict, not an overwrite.
-        long rev = ctx.store.read("outline").getRevision();
-        assertFalse(call(reg, ep, "outline_save", "markdown", "# New", "expected_revision",
+        long rev = ctx.store.read("document").getRevision();
+        assertFalse(call(reg, ep, "document_save", "markdown", "# New", "expected_revision",
                 String.valueOf(rev)).isError());
-        McpToolResult stale = call(reg, ep, "outline_save", "markdown", "# Old copy",
+        McpToolResult stale = call(reg, ep, "document_save", "markdown", "# Old copy",
                 "expected_revision", String.valueOf(rev));
         assertTrue(stale.isError());
-        assertEquals("# New", ctx.store.read("outline").getMarkdown());
+        assertEquals("# New", ctx.store.read("document").getMarkdown());
 
         // #43: drafting AND finalizing happen inside the ONE Document phase on the ONE
         // canonical document (issue #32) — a later save sees the earlier one.

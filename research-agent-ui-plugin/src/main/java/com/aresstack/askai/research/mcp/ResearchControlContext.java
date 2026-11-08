@@ -203,4 +203,12 @@ public interface ResearchControlContext {
     default String latestChangeRequest() {
         return "";
     }
+
+    /**
+     * The Outline block (plan PR 21): ids, titles and coverage per chapter of the stored working outline, or
+     * {@code null} when this session has no outline store. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String outlineRead() {
+        return null;
+    }
 }

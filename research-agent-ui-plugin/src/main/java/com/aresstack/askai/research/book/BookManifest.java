@@ -64,6 +64,67 @@ public final class BookManifest {
         AtomicFiles.write(file, GSON.toJson(root));
     }
 
+    /** Append one outline pin; refused when the manifest is damaged. */
+    public synchronized void appendOutlinePin(OutlinePin pin) throws IOException {
+        JsonObject root = writableRoot();
+        root.getAsJsonArray("pins").add(pin.toJson());
+        AtomicFiles.write(file, GSON.toJson(root));
+    }
+
+    /** Every outline pin in the order written. */
+    public synchronized List<OutlinePin> outlinePins() throws CorruptProjectFileException {
+        List<OutlinePin> pins = new ArrayList<OutlinePin>();
+        for (JsonElement element : read().getAsJsonArray("pins")) {
+            JsonObject pin = element.getAsJsonObject();
+            if (OutlinePin.PHASE.equals(string(pin, "phase"))) {
+                pins.add(OutlinePin.fromJson(pin));
+            }
+        }
+        return pins;
+    }
+
+    /** The newest outline pin whose transition is committed, or {@code null}. */
+    public synchronized OutlinePin validOutlinePin(CommitCheck commits) throws CorruptProjectFileException {
+        List<OutlinePin> pins = outlinePins();
+        for (int index = pins.size() - 1; index >= 0; index--) {
+            if (commits.isCommitted(pins.get(index).getTransitionId())) {
+                return pins.get(index);
+            }
+        }
+        return null;
+    }
+
+    /** The outline pin a transition wrote, committed or not, or {@code null}. */
+    public synchronized OutlinePin outlinePinOf(String transitionId) throws CorruptProjectFileException {
+        for (OutlinePin pin : outlinePins()) {
+            if (pin.getTransitionId().equals(transitionId)) {
+                return pin;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The committed concept pin that was valid before the one {@code transitionId} wrote, or {@code null} when
+     * that transition wrote the first one (or none).
+     */
+    public synchronized ConceptPin conceptPinBefore(String transitionId, CommitCheck commits)
+            throws CorruptProjectFileException {
+        List<ConceptPin> pins = conceptPins();
+        int index = -1;
+        for (int i = 0; i < pins.size(); i++) {
+            if (pins.get(i).getTransitionId().equals(transitionId)) {
+                index = i;
+            }
+        }
+        for (int i = index - 1; i >= 0; i--) {
+            if (commits.isCommitted(pins.get(i).getTransitionId())) {
+                return pins.get(i);
+            }
+        }
+        return null;
+    }
+
     /** Append a note to the later pins (e.g. "Concept reopened"); refused when the manifest is damaged. */
     public synchronized void appendNote(String transitionId, String phase, String text, long timeMillis)
             throws IOException {
@@ -151,6 +212,8 @@ public final class BookManifest {
             for (JsonElement pin : root.getAsJsonArray("pins")) {
                 if (ConceptPin.PHASE.equals(string(pin.getAsJsonObject(), "phase"))) {
                     ConceptPin.fromJson(pin.getAsJsonObject()); // validates the fields
+                } else if (OutlinePin.PHASE.equals(string(pin.getAsJsonObject(), "phase"))) {
+                    OutlinePin.fromJson(pin.getAsJsonObject());
                 }
             }
             return root;
