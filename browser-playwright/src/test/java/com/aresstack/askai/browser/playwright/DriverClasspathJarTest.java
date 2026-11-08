@@ -77,8 +77,13 @@ public class DriverClasspathJarTest {
                          "com/aresstack/playwright4j/driver/GraalDriverMain.class")) {
                 assertNotNull(main);
             }
-            DriverClasspathJar.install(); // ours: re-detected, not mistaken for a user setting
+            DriverClasspathJar.install(); // ours (JVM-wide marker): re-detected, not mistaken for a user setting
             assertTrue(System.getProperty(DriverClasspathJar.CLASSPATH_PROPERTY).endsWith(".jar"));
+            // A jar left behind by an earlier plugin generation (marker set, static state gone) is replaced.
+            System.setProperty(DriverClasspathJar.CLASSPATH_PROPERTY, "old-generation.jar");
+            System.setProperty(DriverClasspathJar.OWNED_PROPERTY, "old-generation.jar");
+            DriverClasspathJar.install();
+            assertEquals(jar, System.getProperty(DriverClasspathJar.CLASSPATH_PROPERTY));
             System.setProperty(DriverClasspathJar.CLASSPATH_PROPERTY, "user-choice.jar");
             DriverClasspathJar.install();
             assertEquals("user-choice.jar", System.getProperty(DriverClasspathJar.CLASSPATH_PROPERTY));

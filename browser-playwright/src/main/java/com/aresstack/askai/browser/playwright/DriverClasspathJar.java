@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,6 +13,8 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
@@ -36,43 +40,88 @@ final class DriverClasspathJar {
     private static final String DRIVER_CLASSPATH_CLASS = "com.microsoft.playwright.impl.driver.DriverClasspath";
     private static final String DRIVER_CLASS = "com.microsoft.playwright.impl.driver.Driver";
 
-    /** The value this class last put into the property (null = never, or the user's value is in charge). */
-    private static String installed;
+    /**
+     * Marks the property value as ours, JVM-wide: a static field would be lost when a plugin refresh creates a
+     * new class loader, and the next generation would then mistake the old jar for a user setting.
+     */
+    static final String OWNED_PROPERTY = "askai.playwright4j.driver.classpath.owned";
+
+    /** Anchors of playwright4j's own detection (DriverClasspath.ANCHOR_RESOURCES). */
+    private static final String[] ANCHOR_RESOURCES = {
+            "com/aresstack/playwright4j/driver/GraalDriverMain.class",
+            "com/microsoft/playwright/impl/driver/Driver.class",
+            "org/graalvm/polyglot/Context.class",
+            "com/oracle/truffle/api/TruffleLanguage.class",
+            "com/oracle/truffle/js/lang/JavaScriptLanguage.class",
+            "org/jcodec/api/awt/AWTSequenceEncoder.class",
+    };
 
     private DriverClasspathJar() {
     }
 
-    /** Points the next driver start at a pathing jar; failures leave playwright4j's own detection in place. */
+    /**
+     * Points the next driver start at a pathing jar; failures leave the previous value or playwright4j's own
+     * detection in place. The property is never cleared on the way, so a launch running concurrently on
+     * another owner thread always sees a usable value.
+     */
     static synchronized void install() {
         String current = System.getProperty(CLASSPATH_PROPERTY);
-        boolean ours = current != null && current.equals(installed);
+        boolean ours = current != null && current.equals(System.getProperty(OWNED_PROPERTY));
         if (current != null && !current.trim().isEmpty() && !ours) {
             return; // configured by the user
         }
         try {
-            if (ours) {
-                System.clearProperty(CLASSPATH_PROPERTY); // re-detect: the plugin class loader may have changed
-            }
             Path cache = Paths.get(System.getProperty("java.io.tmpdir"), "playwright4j-driver");
             String classpath = resolve(cache.resolve("classpath"));
-            Path jar = write(classpath, cache.resolve("askai-pathing"));
-            installed = jar.toString();
-            System.setProperty(CLASSPATH_PROPERTY, installed);
+            String jar = write(classpath, cache.resolve("askai-pathing")).toString();
+            System.setProperty(OWNED_PROPERTY, jar);
+            System.setProperty(CLASSPATH_PROPERTY, jar);
         } catch (Exception | LinkageError failed) {
-            if (ours) {
-                System.setProperty(CLASSPATH_PROPERTY, installed); // keep the last working jar
-            }
-            System.err.println("[browser-mcp] driver classpath jar not prepared, using the full -cp: " + failed);
+            System.err.println("[browser-mcp] driver classpath jar not prepared: " + failed);
         }
     }
 
-    /** playwright4j's own classpath detection (package-private there), so both stay identical. */
+    /**
+     * playwright4j's detection (DriverClasspath.resolve) without its override check, so it can run while the
+     * override is published: anchor class sources, the URLClassLoader chain, then java.class.path. Each URL
+     * goes through playwright4j's own DriverClasspath.toClasspathEntry (nested jars are extracted there).
+     */
     private static String resolve(Path nestedJarCache) throws ReflectiveOperationException {
         Class<?> driver = Class.forName(DRIVER_CLASS, false, DriverClasspathJar.class.getClassLoader());
-        Class<?> detection = Class.forName(DRIVER_CLASSPATH_CLASS, true, driver.getClassLoader());
-        Method resolve = detection.getDeclaredMethod("resolve", ClassLoader.class, Path.class);
-        resolve.setAccessible(true);
-        return (String) resolve.invoke(null, driver.getClassLoader(), nestedJarCache);
+        ClassLoader loader = driver.getClassLoader();
+        Class<?> detection = Class.forName(DRIVER_CLASSPATH_CLASS, true, loader);
+        Method toEntry = detection.getDeclaredMethod("toClasspathEntry", URL.class, Path.class);
+        toEntry.setAccessible(true);
+        Set<URL> urls = new LinkedHashSet<URL>();
+        for (String resource : ANCHOR_RESOURCES) {
+            URL url = loader.getResource(resource);
+            if (url != null) {
+                urls.add(url);
+            }
+        }
+        if (loader.getResource(ANCHOR_RESOURCES[0]) == null) {
+            throw new IllegalStateException("playwright4j driver main class not found");
+        }
+        for (ClassLoader current = loader; current != null; current = current.getParent()) {
+            if (current instanceof URLClassLoader) {
+                for (URL url : ((URLClassLoader) current).getURLs()) {
+                    urls.add(url);
+                }
+            }
+        }
+        Set<String> entries = new LinkedHashSet<String>();
+        for (URL url : urls) {
+            String entry = (String) toEntry.invoke(null, url, nestedJarCache);
+            if (entry != null) {
+                entries.add(entry);
+            }
+        }
+        for (String element : System.getProperty("java.class.path", "").split(Pattern.quote(File.pathSeparator))) {
+            if (!element.isEmpty()) {
+                entries.add(element);
+            }
+        }
+        return String.join(File.pathSeparator, entries);
     }
 
     /**
