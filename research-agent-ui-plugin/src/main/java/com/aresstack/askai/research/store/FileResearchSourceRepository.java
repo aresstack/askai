@@ -152,6 +152,8 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
         // A NaN score is written as "" so an old file (no key) and an unscored source read back the same.
         line(sb, "rerankScore", r.hasRerankScore() ? Double.toString(r.getRerankScore()) : "");
         line(sb, "userRelevant", Boolean.toString(r.isUserRelevant()));
+        line(sb, "phaseTag", r.getPhaseTag());
+        line(sb, "planEntryId", r.getPlanEntryId());
         StoreIo.atomicWrite(file(r.getSourceId()), sb.toString());
     }
 
@@ -185,6 +187,8 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
                     .fullText(p.getProperty("fullText", "")) // "" for old files / parked (unread) sources
                     .rerankScore(parseScore(p.getProperty("rerankScore")))
                     .userRelevant(Boolean.parseBoolean(p.getProperty("userRelevant", "false"))) // false for old files
+                    .phaseTag(p.getProperty("phaseTag", ""))
+                    .planEntryId(p.getProperty("planEntryId", ""))
                     .build();
         } catch (Exception corrupt) {
             return null; // isolate a corrupt source file

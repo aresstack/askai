@@ -447,6 +447,27 @@ public final class ResearchRuntimeSettings {
                         d.choiceTimeoutSeconds));
     }
 
+    // ---- plan PR 14: the caps of the search plan (Search tab, "Search plan") -------------------------
+
+    public static final String KEY_PLAN_SOURCES_PER_NODE = "research.plan.sourcesPerNode";
+    public static final String KEY_PLAN_QUERIES_PER_NODE = "research.plan.queriesPerNode";
+    public static final String KEY_PLAN_PHASE_SOURCES = "research.plan.phaseSources";
+    /** Accepted sources (from at least two domains) that make a concept node covered. */
+    public static final int DEFAULT_PLAN_SOURCES_PER_NODE = 3;
+    /** Queries per node: the base query and up to three planner variants. */
+    public static final int DEFAULT_PLAN_QUERIES_PER_NODE = 4;
+    /** Accepted sources the whole Sources phase may collect through the plan. */
+    public static final int DEFAULT_PLAN_PHASE_SOURCES = 60;
+
+    /** The caps of the search plan, read at each queue start. */
+    public static com.aresstack.askai.research.plan.SearchPlanCoverage.Caps loadSearchPlanCaps(
+            WorkspaceStateStore store) {
+        return new com.aresstack.askai.research.plan.SearchPlanCoverage.Caps(
+                loadPositiveInt(store, KEY_PLAN_SOURCES_PER_NODE, DEFAULT_PLAN_SOURCES_PER_NODE),
+                loadPositiveInt(store, KEY_PLAN_QUERIES_PER_NODE, DEFAULT_PLAN_QUERIES_PER_NODE),
+                loadPositiveInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES));
+    }
+
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";
     /** How many model↔tool cycles ONE concept turn may make — the WORK budget of the loop. */
     public static final int DEFAULT_CONCEPT_TOOL_ROUNDS = 4;

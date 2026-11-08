@@ -69,6 +69,14 @@ public final class ResearchServiceCommand {
     /** The user answers the orchestrator's question ({@code query} carries the answer). */
     public static final String TYPE_ORCHESTRATOR_ANSWER = "orchestrator_answer";
 
+    /** Plan PR 14: rank the hits lexically. */
+    public static final String RANKING_BM25 = "bm25";
+    /** Plan PR 14: rank the hits with the installed cross-encoder; BM25 when it is unavailable. */
+    public static final String RANKING_RERANKER = "reranker";
+
+    private final String ranking;
+    private final int visitLimit;
+    private final int sourceCap;
     private final String type;
     private final String requestId;
     private final String query;
@@ -102,6 +110,20 @@ public final class ResearchServiceCommand {
 
     public ResearchServiceCommand(String type, String requestId, String query, String language,
                                   String scope, long capturedThrough, String request) {
+        this(type, requestId, query, language, scope, capturedThrough, request, null, 0, 0);
+    }
+
+    /**
+     * Plan PR 14: a manual search of a planned query carries its ranking choice ({@code bm25}, {@code reranker};
+     * empty = the typed-search default), the visit limit (top N) and the per-query source cap (0 = default).
+     */
+    public ResearchServiceCommand(String type, String requestId, String query, String language,
+                                  String scope, long capturedThrough, String request, String ranking,
+                                  int visitLimit, int sourceCap) {
+        String r = ranking == null ? "" : ranking.trim().toLowerCase(java.util.Locale.ROOT);
+        this.ranking = RANKING_RERANKER.equals(r) || RANKING_BM25.equals(r) ? r : "";
+        this.visitLimit = Math.max(0, visitLimit);
+        this.sourceCap = Math.max(0, sourceCap);
         this.capturedThrough = capturedThrough;
         this.request = request == null ? "" : request;
         this.type = type == null ? "" : type;
@@ -109,6 +131,21 @@ public final class ResearchServiceCommand {
         this.query = query == null ? "" : query;
         this.language = language == null ? "" : language;
         this.scope = scope == null ? "" : scope;
+    }
+
+    /** The ranking choice of a planned query ({@link #RANKING_BM25}, {@link #RANKING_RERANKER}); empty otherwise. */
+    public String getRanking() {
+        return ranking;
+    }
+
+    /** How many of the ranked hits a planned query visits at most; 0 = the typed-search default. */
+    public int getVisitLimit() {
+        return visitLimit;
+    }
+
+    /** How many sources a planned query accepts at most; 0 = the typed-search default. */
+    public int getSourceCap() {
+        return sourceCap;
     }
 
     public String getType() {

@@ -72,5 +72,11 @@ public enum ResearchBackendEventType {
      * surface): title = request id, text = the decision payload JSON. Routed to the waiting
      * chooser port on the backend callback thread, never rendered as chat by the mapper.
      */
-    ADVICE_DECISION
+    ADVICE_DECISION,
+
+    /**
+     * Plan PR 14: the typed answer to a host-initiated {@code plan_queries} command (internal wire): title = request
+     * id, text = the plan payload JSON. Routed to the waiting query planner on the backend callback thread.
+     */
+    QUERY_PLAN
 }

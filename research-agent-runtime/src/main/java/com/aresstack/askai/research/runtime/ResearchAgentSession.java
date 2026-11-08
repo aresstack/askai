@@ -385,17 +385,47 @@ public final class ResearchAgentSession {
         if (!useAiReranker()) {
             return bm25Reranker; // the user's default: cheap lexical scoring, model only on opt-in
         }
+        return crossEncoderFor(languageCode);
+    }
+
+
+    /**
+     * Plan PR 14 (D5): the ranking of a planned query, or {@code null} for a typed search (no ranking field).
+     * {@code reranker} ranks with the installed cross-encoder of the search language whatever "Use AI reranker"
+     * says, and falls back to BM25 per call when it is unavailable; {@code bm25} ranks lexically.
+     */
+    private com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker plannedRanking(
+            com.aresstack.askai.research.runtime.service.ResearchServiceCommand command, String languageCode) {
+        if (command.getRanking().isEmpty()) {
+            return null;
+        }
+        if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.RANKING_BM25
+                .equals(command.getRanking())) {
+            return com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker.keywords(bm25Reranker,
+                    command.getVisitLimit());
+        }
+        com.aresstack.askai.research.runtime.rerank.CandidateReranker crossEncoder;
+        try {
+            crossEncoder = crossEncoderFor(languageCode);
+        } catch (RuntimeException unavailable) {
+            System.err.println("[manual-search] planned query: cross-encoder unavailable, ranked by keywords: "
+                    + unavailable.getMessage());
+            crossEncoder = null;
+        }
+        return com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker.ranked(crossEncoder, bm25Reranker,
+                command.getVisitLimit());
+    }
+
+    /** The installed cross-encoder of a language, independent of "Use AI reranker"; {@code null} when none. */
+    private com.aresstack.askai.research.runtime.rerank.CandidateReranker crossEncoderFor(String languageCode) {
         String lang = "de".equalsIgnoreCase(languageCode) ? "de" : "en";
-        String path = "de".equals(lang) ? environment.rerankerConfigDePath
-                : environment.rerankerConfigEnPath;
+        String path = "de".equals(lang) ? environment.rerankerConfigDePath : environment.rerankerConfigEnPath;
         if (path == null) {
-            return reranker; // no per-language snapshot published → the session-start default
+            return reranker;
         }
         synchronized (rerankerByLanguage) {
-            com.aresstack.askai.research.runtime.rerank.CandidateReranker cached =
-                    rerankerByLanguage.get(lang);
+            com.aresstack.askai.research.runtime.rerank.CandidateReranker cached = rerankerByLanguage.get(lang);
             if (cached == null) {
-                // Reuse the already readiness-checked default when the language file IS the default file.
                 cached = path.equals(environment.rerankerConfigPath) && reranker != null
                         ? reranker : buildRerankerFromPath(path);
                 rerankerByLanguage.put(lang, cached);
@@ -1391,8 +1421,13 @@ public final class ResearchAgentSession {
             // The reranker for THIS search, resolved with the same immutable language snapshot as the SERP
             // request — the next search after a language switch gets the new language's reranker, a running
             // search keeps this instance (constructor injection below).
-            com.aresstack.askai.research.runtime.rerank.CandidateReranker searchReranker =
-                    rerankerFor(searchLanguage == null ? sessionLanguage.code() : searchLanguage);
+            // Plan PR 14: a planned query names its ranking and its visit limit; a typed search keeps the
+            // user's "Use AI reranker" setting (Q25).
+            final com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker plannedRanking =
+                    plannedRanking(command, searchLanguage == null ? sessionLanguage.code() : searchLanguage);
+            com.aresstack.askai.research.runtime.rerank.CandidateReranker searchReranker = plannedRanking != null
+                    ? plannedRanking
+                    : rerankerFor(searchLanguage == null ? sessionLanguage.code() : searchLanguage);
             com.aresstack.askai.research.runtime.loop.ResearchRunBudget searchBudget =
                     com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(environment.values());
             com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService acquisition =
@@ -1499,9 +1534,12 @@ public final class ResearchAgentSession {
             // The user search completes DETERMINISTICALLY: the configured accepted-source target
             // (the budget's maxAcceptedSources) and nothing else. No minimum-host heuristics, no
             // relabeled budget stops — every other ending keeps its honest reason.
+            // Plan PR 14: a planned query stops at its per-query source cap when that is lower.
             acquisition.setCompletionPolicy(
                     new com.aresstack.askai.research.runtime.acquire.FixedAcceptedSourceCountPolicy(
-                            searchBudget.getMaxAcceptedSources()));
+                            command.getSourceCap() > 0
+                                    ? Math.min(command.getSourceCap(), searchBudget.getMaxAcceptedSources())
+                                    : searchBudget.getMaxAcceptedSources()));
             // SC1: the manual search runs behind the SAME scope-control gate as the autonomous
             // loop — the internal service endpoint, never an agent tool.
             acquisition.setScopeControl(
@@ -1548,7 +1586,8 @@ public final class ResearchAgentSession {
                 System.err.println("[manual-search] execute completed requestId=" + requestId + " sources="
                         + progress.getAcceptedSources() + " reason=" + reason);
                 ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                        .manualSearchCompleted(requestId, progress.getAcceptedSources(), reason.name()));
+                        .manualSearchCompleted(requestId, progress.getAcceptedSources(), reason.name(),
+                                plannedRanking != null && plannedRanking.fellBackToKeywords()));
                 // Issue #29: the derived AI review no longer runs implicitly here. The host offers an
                 // explicit "Neue Quellen auswerten" action that arrives as a review_sources service
                 // command (see handleReviewSources) — the search turn ends with 'completed'.

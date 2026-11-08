@@ -103,7 +103,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField workerWriterSources = ComicControls.textField(3);
     /** AI reranker opt-in (default OFF = lexical BM25 scoring, no model load). */
     private final JCheckBox useAiReranker = ComicControls.checkBox(
-            "Use AI reranker (semantic model instead of BM25; applies to new sessions)", false);
+            "Use AI reranker for typed searches (semantic model instead of BM25; applies to new sessions)", false);
     /** Bot-control MCP (default ON): run_command/session_state/chat_history + service-endpoint.json. */
     private final JCheckBox botControlMcp = ComicControls.checkBox(
             "Enable MCP server (bot control; applies to new sessions)", false);
