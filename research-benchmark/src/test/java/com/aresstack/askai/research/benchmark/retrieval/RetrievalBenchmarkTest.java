@@ -206,4 +206,21 @@ public class RetrievalBenchmarkTest {
             assertFalse(p.text.contains("Menu") || p.text.contains("Copyright"));
         }
     }
+
+    @Test
+    public void extractorKeepsInlineCodeListItemsAndBoundsLongBlocks() {
+        StringBuilder longText = new StringBuilder();
+        for (int i = 0; i < 400; i++) {
+            longText.append("wort").append(i).append(i % 20 == 19 ? ". " : " ");
+        }
+        String html = "<html><body><article><ul><li>Override <code>findClass</code> to implement a custom loader that "
+                + "reads bytes from a plugin jar and defines the class with defineClass for this plugin only.</li></ul>"
+                + "<h2>Lang</h2><p>" + longText + "</p></article></body></html>";
+        List<RetrievalBenchmarkData.Passage> passages = CorpusExtractor.extract("s", "en", html);
+        assertTrue(passages.get(0).text.contains("Override findClass to implement"));
+        for (RetrievalBenchmarkData.Passage p : passages) {
+            assertTrue(p.text, CorpusExtractor.words(p.text) <= CorpusExtractor.MAX_WORDS);
+        }
+        assertTrue(passages.size() >= 4);
+    }
 }

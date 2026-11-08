@@ -62,15 +62,19 @@ public class RetrievalCorpusCaptureLiveTest {
                     lines.add(line.toString());
                 }
                 System.out.println("[retrieval-corpus] " + id + ": " + passages.size() + " passages");
+                if (passages.isEmpty()) {
+                    failed.add(id + " (no passages extracted)");
+                }
             } catch (Exception ex) {
                 failed.add(id + " (" + ex.getClass().getSimpleName() + ": " + ex.getMessage() + ")");
             }
         }
+        // Every configured source belongs to the corpus: a missing distractor would make retrieval look easier.
+        if (!failed.isEmpty()) {
+            throw new AssertionError("corpus incomplete, nothing written; not captured: " + failed);
+        }
         Files.write(new File(dir, "corpus.jsonl").toPath(), lines, StandardCharsets.UTF_8);
         System.out.println("[retrieval-corpus] " + corpus.size() + " passages written to corpus.jsonl");
-        if (!failed.isEmpty()) {
-            System.out.println("[retrieval-corpus] not captured: " + failed);
-        }
         RetrievalBenchmarkData.loadQueries().resolve(corpus); // throws with every target/label that does not match
         System.out.println("[retrieval-corpus] all 24 targets and every label resolve");
     }

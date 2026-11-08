@@ -9,7 +9,7 @@ import java.util.List;
 
 /**
  * Turns one captured HTML page into benchmark passages: the main content (article/main, else body) without navigation,
- * header, footer, sidebars, scripts and code listings; its paragraphs, list items and quotes in reading order, merged
+ * header, footer, sidebars, scripts and code listings (inline {@code <code>} stays, it carries identifiers); its paragraphs, list items and quotes in reading order, merged
  * into passages of about {@value #MIN_WORDS} to {@value #MAX_WORDS} words that never cross a heading. Ids are
  * {@code <sourceId>-p<ordinal>}; the checked-in targets point at passages by terms, so a re-capture keeps working.
  */
@@ -23,7 +23,7 @@ public final class CorpusExtractor {
 
     public static List<RetrievalBenchmarkData.Passage> extract(String sourceId, String language, String html) {
         Document doc = Jsoup.parse(html == null ? "" : html);
-        doc.select("script, style, noscript, nav, header, footer, aside, form, pre, code, table, figure, "
+        doc.select("script, style, noscript, nav, header, footer, aside, form, pre, table, figure, "
                 + "[role=navigation], .sidebar, .toc, #toc, .navbar, .menu, .breadcrumb, .comments").remove();
         Element root = doc.selectFirst("article");
         if (root == null) {
@@ -43,22 +43,24 @@ public final class CorpusExtractor {
                 flush(sourceId, language, current, passages, true);
                 continue;
             }
-            if (!block.select("p, li").isEmpty() && !"p".equals(tag)) {
+            if (!"p".equals(tag) && hasNestedBlock(block)) {
                 continue; // containers: their inner paragraphs and items come on their own
             }
             String text = block.text().trim();
             if (words(text) < 4) {
                 continue;
             }
-            if (words(current.toString()) + words(text) > MAX_WORDS) {
-                flush(sourceId, language, current, passages, true);
-            }
-            if (current.length() > 0) {
-                current.append(' ');
-            }
-            current.append(text);
-            if (words(current.toString()) >= MIN_WORDS) {
-                flush(sourceId, language, current, passages, false);
+            for (String piece : bounded(text)) {
+                if (words(current.toString()) + words(piece) > MAX_WORDS) {
+                    flush(sourceId, language, current, passages, true);
+                }
+                if (current.length() > 0) {
+                    current.append(' ');
+                }
+                current.append(piece);
+                if (words(current.toString()) >= MIN_WORDS) {
+                    flush(sourceId, language, current, passages, false);
+                }
             }
         }
         flush(sourceId, language, current, passages, true);
@@ -76,6 +78,50 @@ public final class CorpusExtractor {
             passages.add(new RetrievalBenchmarkData.Passage(id, sourceId, language, text));
         }
         current.setLength(0);
+    }
+
+    private static boolean hasNestedBlock(Element block) {
+        for (Element inner : block.select("p, li")) {
+            if (inner != block) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Splits a block longer than {@value #MAX_WORDS} words at sentence ends, and at word count as a last resort. */
+    static List<String> bounded(String text) {
+        List<String> pieces = new ArrayList<String>();
+        if (words(text) <= MAX_WORDS) {
+            pieces.add(text);
+            return pieces;
+        }
+        StringBuilder piece = new StringBuilder();
+        for (String sentence : text.split("(?<=[.!?])\\s+")) {
+            for (String part : byWords(sentence)) {
+                if (piece.length() > 0 && words(piece.toString()) + words(part) > MAX_WORDS) {
+                    pieces.add(piece.toString());
+                    piece.setLength(0);
+                }
+                if (piece.length() > 0) {
+                    piece.append(' ');
+                }
+                piece.append(part);
+            }
+        }
+        if (piece.length() > 0) {
+            pieces.add(piece.toString());
+        }
+        return pieces;
+    }
+
+    private static List<String> byWords(String sentence) {
+        String[] w = sentence.trim().split("\\s+");
+        List<String> parts = new ArrayList<String>();
+        for (int from = 0; from < w.length; from += MAX_WORDS) {
+            parts.add(String.join(" ", java.util.Arrays.copyOfRange(w, from, Math.min(w.length, from + MAX_WORDS))));
+        }
+        return parts;
     }
 
     static int words(String text) {
