@@ -413,6 +413,7 @@ public class ScopingBriefApprovalTest {
 
     /** PR 07: one first-level card and a mission, the structural minimum of submit-scope. */
     static void makeSubmittable(Fx fx) {
+        ConceptTestSupport.readyEmbedding(fx.session); // PR 12: submit-scope requires an embedding model
         addCard(fx, "Tasks");
         addCard(fx, "Applets");
         assertEquals(null, fx.session.editMission("Plugin isolation"));
