@@ -42,4 +42,12 @@ test {
     useJUnitPlatform()
     // The live browser tests self-gate on the capability probe (Assume): without an installed browser they
     // SKIP with a readable message instead of silently passing or failing the build.
+    // A failing live test prints its full exception (message, cause chain, stack) into the CI log, so a
+    // one-off failure on a runner can be diagnosed without the HTML report.
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+        showCauses true
+        showStackTraces true
+    }
 }
