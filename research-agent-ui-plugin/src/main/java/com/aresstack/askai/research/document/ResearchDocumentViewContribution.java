@@ -124,7 +124,7 @@ public final class ResearchDocumentViewContribution implements ArtifactViewContr
             final Runnable writingState = new Runnable() {
                 public void run() {
                     boolean running = research.writingRunning();
-                    writeRemaining.setEnabled(!running);
+                    writeRemaining.setEnabled(!running && research.approvedOutlineOrNull() != null);
                     rewriteStale.setEnabled(!running && !research.staleSectionTitles().isEmpty());
                     stopWriting.setEnabled(running);
                     String line = research.writingStatus();
