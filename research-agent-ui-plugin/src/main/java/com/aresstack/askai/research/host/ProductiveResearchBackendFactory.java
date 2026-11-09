@@ -707,6 +707,12 @@ public final class ProductiveResearchBackendFactory {
                             return holder[0] == null ? null : holder[0].controlContext().outlineRead();
                         }
 
+                        @Override
+                        public String outlineRegenerateChapter(String chapterId, int sections, String comment) {
+                            return holder[0] == null ? null
+                                    : holder[0].controlContext().outlineRegenerateChapter(chapterId, sections, comment);
+                        }
+
                         // The review bounds are the USER's settings (this factory carries them); the
                         // delegate's defaults would silently ignore a configured value.
                         @Override
@@ -991,6 +997,9 @@ public final class ProductiveResearchBackendFactory {
         }
         if (knowledge.corpusReader != null) {
             resources.setCorpusReader(knowledge.corpusReader);
+        }
+        if (knowledge.embeddings != null && knowledge.settings != null) {
+            resources.setOutlineEmbeddings(knowledge.embeddings, knowledge.settings);
         }
         if (knowledge.projection != null) {
             // The projection runner thread only WAITS for an explicit trigger — session open never

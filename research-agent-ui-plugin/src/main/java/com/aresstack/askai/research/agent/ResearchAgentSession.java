@@ -139,6 +139,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             // Issue #33: hand the session's derived-action commands to the resources so the internal
             // service-MCP endpoint can invoke the SAME use cases as the UI buttons.
             resources.setDerivedActions(derivedActions);
+            // Plan PR 24: outline_regenerate_chapter runs the same chapter service as the Outline tab.
+            resources.setOutlineChapterService(this::outlineChapterService);
             // Konzeptpapier: a committed concept edit (agent MCP tool) refreshes the views like any
             // other state change — marshalled to the EDT like every other refresh.
             resources.setConceptChangedListener(new Runnable() {
@@ -753,6 +755,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             ownedScheduler.shutdown();
         }
         scopeCheckExecutor.shutdownNow();
+        outlineGenerationExecutor.shutdownNow();
         com.aresstack.askai.research.scope.BackendScopeProbeGenerator waitingGenerator =
                 activeProbeGenerator;
         if (waitingGenerator != null) {
@@ -2108,6 +2111,232 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 });
     }
 
+    /** Plan PR 22: the outline generation of this session, built on first use; {@code null} without knowledge. */
+    private com.aresstack.askai.research.host.OutlineGeneration outlineGeneration;
+    private final java.util.concurrent.ExecutorService outlineGenerationExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(new java.util.concurrent.ThreadFactory() {
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "research-outline-generation");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
+
+    private synchronized com.aresstack.askai.research.host.OutlineGeneration outlineGeneration() {
+        final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
+        if (resources == null || resources.isClosed() || resources.corpusReader() == null
+                || resources.outlineEmbeddings() == null || resources.outlineRun() == null) {
+            return null;
+        }
+        if (outlineGeneration == null) {
+            com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledge =
+                    resources.outlineKnowledgeSettings();
+            outlineGeneration = new com.aresstack.askai.research.host.OutlineGeneration(
+                    new com.aresstack.askai.research.host.OutlineGeneration.Inputs() {
+                        public com.aresstack.askai.research.outline.OutlineWorkspace workspace() {
+                            return outlineWorkspace();
+                        }
+
+                        public com.aresstack.askai.research.book.FrozenConcept frozenConcept() throws Exception {
+                            return ResearchAgentSession.this.frozenConcept();
+                        }
+
+                        public com.aresstack.askai.research.store.FileConceptStore conceptStore() {
+                            com.aresstack.askai.research.concept.ConceptBranchService service =
+                                    conceptBranchService();
+                            return service == null ? null : service.store();
+                        }
+
+                        public java.util.Collection<String> pinnedSourceIds() throws Exception {
+                            java.util.List<String> ids = new java.util.ArrayList<String>();
+                            com.aresstack.askai.research.book.BookManifest manifest = bookManifest;
+                            if (manifest == null) {
+                                return ids;
+                            }
+                            final com.aresstack.askai.research.transition.TransitionEngine engine =
+                                    resources.transitions();
+                            com.aresstack.askai.research.book.SourcesPin pin = manifest.validSourcesPin(
+                                    new com.aresstack.askai.research.book.BookManifest.CommitCheck() {
+                                        public boolean isCommitted(String transitionId) {
+                                            return engine.isCommitted(transitionId);
+                                        }
+                                    });
+                            if (pin != null) {
+                                for (com.aresstack.askai.research.book.SourcesPin.Entry entry : pin.getSources()) {
+                                    ids.add(entry.getSourceId());
+                                }
+                            }
+                            return ids;
+                        }
+
+                        public java.util.Collection<com.aresstack.askai.research.sources.ResearchSourceRecord>
+                                sources() {
+                            return resources.getRepository().find(
+                                    com.aresstack.askai.research.sources.SourceQuery.all());
+                        }
+
+                        public long now() {
+                            return System.currentTimeMillis();
+                        }
+                    },
+                    resources.corpusReader(), resources.outlineEmbeddings(),
+                    new com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings(
+                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
+                                    .DEFAULT_THRESHOLD,
+                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
+                                    .DEFAULT_MARGIN,
+                            knowledge == null ? 3 : knowledge.minimumPassagesPerTopic,
+                            knowledge == null ? 2 : knowledge.minimumDistinctSourcesPerTopic),
+                    resources.outlineRun(), outlineGenerationExecutor);
+            outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
+                public com.aresstack.askai.research.outline.Outline enrich(
+                        com.aresstack.askai.research.outline.Outline generated,
+                        java.util.function.BooleanSupplier cancelled) {
+                    if (outlineChapterService() == null) {
+                        return generated;
+                    }
+                    com.aresstack.askai.research.outline.brief.OutlineEnricher.Result result =
+                            new com.aresstack.askai.research.outline.brief.OutlineEnricher(outlineBriefWorker,
+                                    outlinePassages).enrich(generated, briefContext(), cancelled);
+                    if (!result.getBriefFailures().isEmpty()) {
+                        System.err.println("[outline-brief] brief not generated for "
+                                + result.getBriefFailures().size() + " chapter(s)");
+                    }
+                    return result.getOutline();
+                }
+            });
+        }
+        return outlineGeneration;
+    }
+
+    /**
+     * Plan PR 24: the single-chapter operations (Regenerate chapter, Add suggested chapter) on the slots
+     * {@code phase.outline.labels} and {@code phase.outline.briefs} with thinking off; passages and their stored
+     * vectors come from the knowledge corpus, nothing is embedded again. {@code null} without a model port,
+     * knowledge or outline store.
+     */
+    private com.aresstack.askai.research.outline.brief.OutlineChapterService outlineChapterService;
+    private com.aresstack.askai.research.outline.brief.OutlineBriefWorker outlineBriefWorker;
+    private com.aresstack.askai.research.outline.brief.OutlinePassages outlinePassages;
+
+    /** What every label and brief call knows: the approved title, mission, language and recorded blacklist. */
+    private com.aresstack.askai.research.outline.brief.BriefContext briefContext() {
+        com.aresstack.askai.research.book.FrozenConcept frozen;
+        try {
+            frozen = frozenConcept();
+        } catch (Exception corrupt) {
+            throw new IllegalStateException(corrupt.getMessage(), corrupt);
+        }
+        if (frozen == null) {
+            throw new IllegalStateException("There is no approved concept yet.");
+        }
+        return new com.aresstack.askai.research.outline.brief.BriefContext(bookTitle(frozen), frozen.getMission(),
+                frozen.getLanguage(), frozen.getPin().getBlacklist());
+    }
+
+    /** One corpus read per outline operation (plan PR 24): passage texts, sources and stored vectors. */
+    private static final class CorpusOutlinePassages
+            implements com.aresstack.askai.research.outline.brief.OutlinePassages {
+        private final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpus;
+        private final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader.Corpus read;
+        private final java.util.Map<String, String> texts = new java.util.HashMap<String, String>();
+
+        CorpusOutlinePassages(
+                com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpus) {
+            this(corpus, null);
+        }
+
+        private CorpusOutlinePassages(
+                com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpus,
+                com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader.Corpus read) {
+            this.corpus = corpus;
+            this.read = read;
+            if (read != null) {
+                for (com.aresstack.askai.research.domain.Passage passage : read.getPassages()) {
+                    texts.put(passage.getPassageId(), passage.getText());
+                }
+            }
+        }
+
+        public com.aresstack.askai.research.outline.brief.OutlinePassages snapshot() {
+            return new CorpusOutlinePassages(corpus, corpus.read(com.aresstack.askai.research.knowledge.processing
+                    .live.ActiveKnowledgeCorpusReader.SourceFilter.ALL));
+        }
+
+        private com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader.Corpus corpus() {
+            if (read == null) {
+                throw new IllegalStateException("read passages through snapshot()");
+            }
+            return read;
+        }
+
+        public java.util.Map<String, float[]> vectors(java.util.List<String> passageIds) {
+            java.util.Map<String, float[]> found = new java.util.HashMap<String, float[]>();
+            for (String id : passageIds) {
+                com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector vector =
+                        corpus().getVectors().get(id);
+                if (vector != null) {
+                    found.put(id, vector.getValues());
+                }
+            }
+            return found;
+        }
+
+        public String text(String passageId) {
+            corpus();
+            String text = texts.get(passageId);
+            return text == null ? "" : text;
+        }
+
+        public String sourceId(String passageId) {
+            String source = corpus().sourceIdOf(passageId);
+            return source == null ? "" : source;
+        }
+    }
+
+    public synchronized com.aresstack.askai.research.outline.brief.OutlineChapterService outlineChapterService() {
+        final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
+        com.aresstack.askai.agent.model.port.ModelPort port = hostContext == null ? null
+                : hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class);
+        if (resources == null || resources.isClosed() || resources.corpusReader() == null || port == null
+                || outlineWorkspace() == null) {
+            return null;
+        }
+        if (outlineChapterService == null) {
+            java.time.Duration timeout = java.time.Duration.ofMinutes(3);
+            com.aresstack.askai.research.outline.brief.OutlineBriefWorker worker =
+                    new com.aresstack.askai.research.outline.brief.OutlineBriefWorker(
+                            com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(port,
+                                    com.aresstack.askai.research.runtime.role.ResearchRole.builder("outline-labels",
+                                            com.aresstack.askai.research.runtime.inference.ResearchModelSlots
+                                                    .PHASE_OUTLINE_LABELS)
+                                            .purpose("plan PR 24 outline labels")
+                                            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
+                                            .build(), timeout),
+                            com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(port,
+                                    com.aresstack.askai.research.runtime.role.ResearchRole.builder("outline-briefs",
+                                            com.aresstack.askai.research.runtime.inference.ResearchModelSlots
+                                                    .PHASE_OUTLINE_BRIEFS)
+                                            .purpose("plan PR 24 outline briefs")
+                                            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
+                                            .build(), timeout),
+                            new com.aresstack.askai.research.outline.brief.OutlineBriefWorker.Telemetry() {
+                                public void call(com.aresstack.askai.research.outline.brief.BriefCallTelemetry c) {
+                                    System.err.println("[outline-brief] " + c);
+                                }
+                            });
+            outlineBriefWorker = worker;
+            com.aresstack.askai.research.outline.brief.OutlinePassages passages =
+                    new CorpusOutlinePassages(resources.corpusReader());
+            outlinePassages = passages;
+            outlineChapterService = new com.aresstack.askai.research.outline.brief.OutlineChapterService(
+                    outlineWorkspace(), outlineWorkspace().jobs(),
+                    new com.aresstack.askai.research.outline.brief.ChapterRegenerator(worker, passages),
+                    this::briefContext, null);
+        }
+        return outlineChapterService;
+    }
+
     /** The session's outline workspace (plan PR 21), or {@code null} in fake mode. */
     public com.aresstack.askai.research.outline.OutlineWorkspace outlineWorkspace() {
         return productiveResources == null || productiveResources.isClosed()
@@ -2184,6 +2413,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         com.aresstack.askai.research.book.ManuscriptFreezeHook hook =
                 new com.aresstack.askai.research.book.ManuscriptFreezeHook(manuscript, outline.store(), bookManifest,
                         engine::isCommitted);
+        hook.setAssembly(() -> assembleBook(manuscript));
         engine.addHook(hook);
         engine.registerEffect(com.aresstack.askai.research.book.ManuscriptFreezeHook.EFFECT_OUTLINE,
                 hook.outlineEffect());
@@ -2234,8 +2464,45 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return "Not started yet. The manuscript opens when the workflow reaches Document.";
     }
 
-    /** Generate the read-only "document" artifact from the manuscript (plan PR 26). */
+    /** The one serial executor of the book assembler (plan PR 30): the only writer of {@code document.md}. */
+    private final java.util.concurrent.ExecutorService documentAssembler =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "research-book-assembler");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private volatile com.aresstack.askai.research.assembly.AssembledBook lastAssembledBook;
+
+    /** The latest assembly with its citations and quality report (plan PR 30), or {@code null}. */
+    public com.aresstack.askai.research.assembly.AssembledBook assembledBook() {
+        return lastAssembledBook;
+    }
+
+    /** Assemble {@code document.md} after a manuscript change, on the serial assembler executor (plan PR 30). */
     private void renderDocumentArtifact() {
+        documentAssembler.execute(this::assembleDocumentNow);
+    }
+
+    /**
+     * The quality report at the Document gate (plan PR 30, Q27): the status and its warnings; the user may approve
+     * an incomplete draft as well.
+     */
+    private void announceQualityReport() {
+        com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript = manuscript();
+        if (manuscript == null) {
+            return;
+        }
+        try {
+            com.aresstack.askai.research.assembly.BookQualityReport report = assembleBook(manuscript).getReport();
+            sayAsAgent(report.summary() + (report.isComplete() ? ""
+                    : ". You can still approve the book with these warnings."));
+        } catch (RuntimeException failed) {
+            System.err.println("[research] quality report failed: " + failed.getMessage());
+        }
+    }
+
+    /** One assembly; runs only on {@link #documentAssembler}, so it needs no lock. */
+    private void assembleDocumentNow() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return;
         }
@@ -2244,16 +2511,88 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     productiveResources.manuscriptWorkspace();
             com.aresstack.askai.plugin.api.agent.artifact.AgentArtifactStore store =
                     productiveResources.getArtifactStore();
-            String markdown = com.aresstack.askai.research.manuscript.ManuscriptDocument.markdown(
-                    approvedOutlineOrNull(), manuscript.store());
+            com.aresstack.askai.research.assembly.AssembledBook book = assembleBook(manuscript);
+            lastAssembledBook = book;
+            String markdown = book.getMarkdown();
             com.aresstack.askai.plugin.api.agent.artifact.ArtifactContent current = store.read("document");
             if (!markdown.equals(current.getMarkdown())) {
                 store.replace("document", current.getRevision(), markdown);
             }
         } catch (RuntimeException renderFailed) {
-            System.err.println("[research] document artifact render failed: " + renderFailed.getMessage());
+            System.err.println("[research] document assembly failed: " + renderFailed.getMessage());
         }
         uiExecutor.execute(this::fireStateChanged);
+    }
+
+    /**
+     * The acronym long forms of the accepted sources (plan PR 30, PR 38), read from the store PR 29 refreshes under
+     * {@code <project>/acronyms}; empty before the first writing run.
+     */
+    private java.util.List<com.aresstack.askai.research.knowledge.processing.acronym.AcronymLongForms>
+            acronymLongForms() {
+        java.io.File dir = new java.io.File(productiveResources.getProjectContext().getProjectDirectory(), "acronyms");
+        com.aresstack.askai.research.sources.ResearchSourceRepository repository = productiveResources.getRepository();
+        if (!dir.isDirectory() || repository == null) {
+            return java.util.Collections.emptyList();
+        }
+        java.util.List<String> accepted = new java.util.ArrayList<String>();
+        for (com.aresstack.askai.research.sources.ResearchSourceRecord record
+                : repository.find(com.aresstack.askai.research.sources.SourceQuery.all())) {
+            if (record.getStatus() == com.aresstack.askai.research.sources.SourceStatus.ACCEPTED) {
+                accepted.add(record.getSourceId());
+            }
+        }
+        return new com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService(
+                com.aresstack.askai.research.knowledge.processing.acronym.SentenceSegmenter.splitter(),
+                new com.aresstack.askai.research.knowledge.processing.acronym.FileSourceAcronymStore(dir.toPath()))
+                .longForms(accepted);
+    }
+
+    private com.aresstack.askai.research.assembly.AssembledBook assembleBook(
+            com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript) {
+        com.aresstack.askai.research.outline.Outline outline = null;
+        int outlineRevision = 0;
+        com.aresstack.askai.research.book.SourcesPin pin = null;
+        com.aresstack.askai.research.assembly.BookAssemblyInputs.Concept concept = null;
+        try {
+            com.aresstack.askai.research.book.ApprovedOutline approved = approvedOutline();
+            if (approved != null) {
+                outline = approved.getOutline();
+                outlineRevision = approved.getRevision();
+            }
+            final com.aresstack.askai.research.transition.TransitionEngine engine = productiveResources.transitions();
+            if (bookManifest != null) {
+                pin = bookManifest.validSourcesPin(engine::isCommitted);
+            }
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen != null) {
+                String title = frozen.getDeliverable() == null || frozen.getDeliverable().trim().isEmpty()
+                        ? frozen.getMission() : frozen.getDeliverable();
+                concept = new com.aresstack.askai.research.assembly.BookAssemblyInputs.Concept(
+                        title, frozen.getRevision(), frozen.cardNames());
+            }
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            System.err.println("[research] book assembly reads a damaged manifest: " + corrupt.getMessage());
+        }
+        com.aresstack.askai.research.assembly.BookAssemblyInput input =
+                com.aresstack.askai.research.assembly.BookAssemblyInputs.read(outline, outlineRevision,
+                        manuscript.store(), productiveResources.getRepository(), pin, concept,
+                        acronymLongForms(),
+                        System.currentTimeMillis(), java.util.TimeZone.getDefault());
+        return new com.aresstack.askai.research.assembly.BookAssembler().assemble(input);
+    }
+
+    /** The latest change request of the Outline phase (shown above the outline editor, plan PR 23); "" when none. */
+    public String outlineChangeRequest() {
+        if (productiveResources == null || productiveResources.isClosed()) {
+            return "";
+        }
+        try {
+            return productiveResources.transitions().latestChangeRequest(
+                    com.aresstack.askai.research.state.oo.ResearchStateIds.OUTLINE);
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return "";
+        }
     }
 
     /** Render the stored outline into the "outline" artifact (never from the live projection, plan PR 21). */
@@ -3888,18 +4227,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
 
         public ActionOutcome generateOutline() {
-            if (outlineStale() == null) {
+            // Plan PR 22: the button, executeCommand and the bot's run_command all run the concept-seeded
+            // generation; it refuses itself outside outline/running and while another outline job runs.
+            com.aresstack.askai.research.host.OutlineGeneration generation = outlineGeneration();
+            if (generation == null) {
                 return ActionOutcome.rejected(
                         "knowledge capability unavailable (no embedding world for this session)");
             }
-            if (!outlineClusteringAllowed()) {
-                return ActionOutcome.rejected("topics are clustered only on request while the Outline phase "
-                        + "is running");
-            }
-            return requestOutlineRebuild()
-                    ? ActionOutcome.accepted("topic discovery + outline rebuild triggered (debounced)")
-                    : ActionOutcome.rejected(
-                            "knowledge capability unavailable (no embedding world for this session)");
+            String refusal = generation.start();
+            return refusal == null
+                    ? ActionOutcome.accepted("outline generation started (progress in the outline drawer)")
+                    : ActionOutcome.rejected(refusal);
         }
     };
 
@@ -6028,6 +6366,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             outcomeOffers = java.util.Collections.emptyList(); // a phase exit clears the run offers
             showRestoredActionsIfAny();
         }
+        if (dispatched.isAccepted() && type == ResearchCommandType.REQUEST_DRAFT_REVIEW) {
+            announceQualityReport(); // plan PR 30: the gate message names the report's warnings
+        }
         return dispatched.isAccepted() ? "handled: dispatched " + cmd
                 : "rejected: " + dispatched.getStatus() + " " + dispatched.getDetail();
     }
@@ -6213,6 +6554,25 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     // ------------------------------------------------------------------ outline (explicit action, issue #29)
+
+    /**
+     * Plan PR 22: what the outline drawer shows: the stored outline (the result of "Generate outline") once it
+     * has chapters, otherwise the persisted analysis projection.
+     */
+    public String outlineDrawerMarkdown() {
+        com.aresstack.askai.research.outline.OutlineWorkspace workspace = outlineWorkspace();
+        if (workspace != null) {
+            try {
+                com.aresstack.askai.research.outline.Outline stored = workspace.current();
+                if (!stored.isEmpty()) {
+                    return com.aresstack.askai.research.outline.OutlineBlock.markdown(stored);
+                }
+            } catch (RuntimeException unreadable) {
+                // fall back to the analysis projection
+            }
+        }
+        return liveOutlineMarkdown();
+    }
 
     /**
      * The persisted live outline projection as markdown, or "" when none exists yet. Pure read for the analysis

@@ -1,0 +1,346 @@
+package com.aresstack.askai.research.assembly;
+
+import com.aresstack.askai.research.assembly.BookQualityReport.Kind;
+import com.aresstack.askai.research.knowledge.processing.acronym.AcronymLongForms;
+import com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymRecord;
+import com.aresstack.askai.research.knowledge.processing.acronym.TextSpan;
+import com.aresstack.askai.research.manuscript.ManuscriptCitation;
+import com.aresstack.askai.research.manuscript.ManuscriptSection;
+import com.aresstack.askai.research.manuscript.SectionRevision;
+import com.aresstack.askai.research.manuscript.SectionStatus;
+import com.aresstack.askai.research.outline.Outline;
+import com.aresstack.askai.research.outline.OutlineBrief;
+import com.aresstack.askai.research.outline.OutlineChapter;
+import com.aresstack.askai.research.outline.OutlineProvenance;
+import com.aresstack.askai.research.outline.OutlineSection;
+
+import org.junit.Test;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
+/** Plan PR 30: the deterministic book assembler, its citation registry and its quality report. */
+public class BookAssemblerTest {
+
+    private static final long DAY = 1793836800000L; // 2026-11-05 UTC
+
+    private static final String TEXT_A = "Solar panels convert sunlight into electricity. Their efficiency depends on "
+            + "the cell material and the temperature of the module.";
+    private static final String TEXT_B = "Wind turbines turn the kinetic energy of moving air into electrical power. "
+            + "Larger rotors capture more energy at lower wind speeds.";
+    private static final String TEXT_C = "Battery storage shifts surplus energy from sunny hours into the evening. "
+            + "Lithium cells dominate new installations today.";
+
+    private static OutlineSection section(String id, String parent, int order, String title, int target) {
+        return new OutlineSection(id, parent, order, title, new OutlineBrief("on " + title,
+                Collections.<String>emptyList(), target), OutlineProvenance.NONE, false, "");
+    }
+
+    private static OutlineChapter chapter(String id, int order, String title, OutlineSection... sections) {
+        return new OutlineChapter(id, order, title, new OutlineBrief("why " + title, Arrays.asList("k"), 0),
+                OutlineProvenance.NONE, false, "", Arrays.asList(sections));
+    }
+
+    private static Outline outline() {
+        return new Outline(Arrays.asList(
+                chapter("c1", 1, "Generation",
+                        section("s11", "c1", 1, "Solar power", 12),
+                        section("s12", "c1", 2, "Wind power", 12)),
+                chapter("c2", 2, "Storage",
+                        section("s21", "c2", 1, "Batteries", 12),
+                        section("s22", "c2", 2, "Outlook", 12))));
+    }
+
+    private static AssemblySource source(String id, String title, String text, boolean late) {
+        return new AssemblySource(id, title, "example.org", "https://example.org/" + id, DAY, "sha-" + id, text, late);
+    }
+
+    private static ManuscriptCitation cite(String marker, String sourceId, String citedText, String passageId) {
+        return new ManuscriptCitation(marker, sourceId, "sha-" + sourceId, citedText, passageId, null);
+    }
+
+    private static SectionRevision revision(String text, List<String> gaps, List<String> flags,
+                                            ManuscriptCitation... citations) {
+        return SectionRevision.builder().text(text).citations(Arrays.asList(citations)).gaps(gaps)
+                .claimFlags(flags).modelLabel("gemma4:e2b").author(SectionRevision.AUTHOR_WRITER).build(1, DAY);
+    }
+
+    private static SectionRevision revision(String text, ManuscriptCitation... citations) {
+        return revision(text, Collections.<String>emptyList(), Collections.<String>emptyList(), citations);
+    }
+
+    private static ManuscriptSection written(String id, String chapter) {
+        return new ManuscriptSection(id, chapter, SectionStatus.WRITTEN, "", 1, DAY);
+    }
+
+    /** Two chapters with two sections each, every sentence cited, nothing to report. */
+    private static BookAssemblyInput.Builder clean() {
+        return BookAssemblyInput.builder().title("Renewable Energy").assembledAt(DAY, TimeZone.getTimeZone("UTC"))
+                .conceptRevision(3).outline(outline(), 2)
+                .source(source("a", "Solar basics", TEXT_A, false))
+                .source(source("b", "Wind basics", TEXT_B, false))
+                .source(source("c", "Storage basics", TEXT_C, false))
+                .glossaryTerms(Arrays.asList("energy"))
+                .section(written("s11", "c1"), revision(
+                        "Photovoltaic modules turn light into current [1]. Hot modules lose output [1].",
+                        cite("1", "a", "Solar panels convert sunlight into electricity.", "p-a-1")))
+                .section(written("s12", "c1"), revision(
+                        "Turbines use moving air [1]. Panels and rotors complement each other [2].",
+                        cite("1", "b", "Wind turbines turn the kinetic energy of moving air into electrical power.",
+                                "p-b-1"),
+                        cite("2", "a", "Solar panels convert sunlight into electricity.", "p-a-1")))
+                .section(written("s21", "c2"), revision(
+                        "Storage moves daytime energy into the evening [1].",
+                        cite("1", "c", "Battery storage shifts surplus energy from sunny hours into the evening.",
+                                "p-c-1")))
+                .section(written("s22", "c2"), revision(
+                        "Cheaper cells and larger rotors keep costs falling [1, 2].",
+                        cite("1", "c", "Lithium cells dominate new installations today.", "p-c-2"),
+                        cite("2", "b", "Larger rotors capture more energy at lower wind speeds.", "p-b-2")));
+    }
+
+    private static final String GOLDEN = "# Renewable Energy\n"
+            + "\n"
+            + "- Writer models: gemma4:e2b\n"
+            + "- Assembled: 2026-11-05\n"
+            + "- Sources: 3\n"
+            + "- Approved concept revision: 3\n"
+            + "- Approved outline revision: 2\n"
+            + "- Book status: complete\n"
+            + "- Support checked for numbers and quotes only.\n"
+            + "\n"
+            + "## Contents\n"
+            + "\n"
+            + "- 1 Generation\n"
+            + "  - 1.1 Solar power\n"
+            + "  - 1.2 Wind power\n"
+            + "- 2 Storage\n"
+            + "  - 2.1 Batteries\n"
+            + "  - 2.2 Outlook\n"
+            + "\n"
+            + "## 1 Generation\n"
+            + "\n"
+            + "### 1.1 Solar power\n"
+            + "\n"
+            + "Photovoltaic modules turn light into current [1]. Hot modules lose output [1].\n"
+            + "\n"
+            + "### 1.2 Wind power\n"
+            + "\n"
+            + "Turbines use moving air [2]. Panels and rotors complement each other [1].\n"
+            + "\n"
+            + "## 2 Storage\n"
+            + "\n"
+            + "### 2.1 Batteries\n"
+            + "\n"
+            + "Storage moves daytime energy into the evening [3].\n"
+            + "\n"
+            + "### 2.2 Outlook\n"
+            + "\n"
+            + "Cheaper cells and larger rotors keep costs falling [3][2].\n"
+            + "\n"
+            + "## References\n"
+            + "\n"
+            + "[1] Solar basics. example.org. <https://example.org/a>. Accessed 2026-11-05.\n"
+            + "[2] Wind basics. example.org. <https://example.org/b>. Accessed 2026-11-05.\n"
+            + "[3] Storage basics. example.org. <https://example.org/c>. Accessed 2026-11-05.\n";
+
+    @Test
+    public void goldenTwoChaptersTwoSectionsRenderExactlyAndComplete() {
+        AssembledBook book = new BookAssembler().assemble(clean().build());
+        assertEquals(GOLDEN, book.getMarkdown());
+        assertEquals(BookQualityReport.Status.COMPLETE, book.getReport().getStatus());
+        assertTrue(book.getReport().getFindings().toString(), book.getReport().getFindings().isEmpty());
+        assertEquals(GOLDEN, new BookAssembler().assemble(clean().build()).getMarkdown());
+    }
+
+    @Test
+    public void everyNumberHasExactlyOneReferenceAndNoReferenceIsUnused() {
+        AssembledBook book = new BookAssembler().assemble(clean().build());
+        Set<Integer> used = usedNumbers(book.getMarkdown());
+        int references = book.getCitations().references().size();
+        assertEquals(references, used.size());
+        for (int n = 1; n <= references; n++) {
+            assertTrue(used.contains(n));
+            assertNotNull(book.getCitations().sourceOf(n));
+        }
+    }
+
+    @Test
+    public void rewriteWithSameSourcesInSameOrderKeepsNumbersOtherRewriteRenumbersDeterministically() {
+        BookAssembler assembler = new BookAssembler();
+        AssembledBook before = assembler.assemble(clean().build());
+        AssembledBook same = assembler.assemble(clean().section(written("s11", "c1"), revision(
+                "Modules generate current from light [1].",
+                cite("1", "a", "Their efficiency depends on the cell material", "p-a-2"))).build());
+        for (String id : Arrays.asList("a", "b", "c")) {
+            assertEquals(before.getCitations().numberOf(id), same.getCitations().numberOf(id));
+        }
+        AssembledBook other = assembler.assemble(clean().section(written("s11", "c1"), revision(
+                "Storage matters for solar [1].",
+                cite("1", "c", "Battery storage shifts surplus energy", "p-c-1"))).build());
+        assertEquals(1, other.getCitations().numberOf("c"));
+        assertEquals(2, other.getCitations().numberOf("b"));
+        assertEquals(3, other.getCitations().numberOf("a"));
+        assertEquals(other.getMarkdown(), assembler.assemble(clean().section(written("s11", "c1"), revision(
+                "Storage matters for solar [1].",
+                cite("1", "c", "Battery storage shifts surplus energy", "p-c-1"))).build()).getMarkdown());
+        assertEquals(3, usedNumbers(other.getMarkdown()).size());
+        assertTrue(other.getCitations().issues().isEmpty());
+    }
+
+    @Test
+    public void findingsFixtureReportsEachAndIsAnIncompleteDraft() {
+        String repeated = "Grid operators balance supply and demand every second of every day across the whole "
+                + "network [1].";
+        BookAssemblyInput input = clean()
+                .section(new ManuscriptSection("s22", "c2", SectionStatus.SKIPPED, "", 1, DAY), null)
+                .section(written("s11", "c1"), revision("Efficiency reaches 15 % in tests [1].\n\n" + repeated,
+                        Collections.<String>emptyList(), Arrays.asList("unsupported number: 15 %"),
+                        cite("1", "a", "Solar panels convert sunlight into electricity.", "p-a-1")))
+                .section(written("s21", "c2"), revision(
+                        "Battery storage shifts surplus energy from sunny hours into the evening. Lithium cells "
+                                + "dominate new installations [1].\n\n" + repeated,
+                        cite("1", "c", TEXT_C, "p-c-1")))
+                .build();
+        AssembledBook book = new BookAssembler().assemble(input);
+        BookQualityReport report = book.getReport();
+        assertEquals(1, report.count(Kind.SKIPPED_SECTION));
+        assertEquals(1, report.count(Kind.UNSUPPORTED_NUMBER));
+        assertEquals(1, report.count(Kind.NEAR_COPY));
+        assertEquals(1, report.count(Kind.REPEATED_PASSAGE));
+        assertEquals(BookQualityReport.Status.INCOMPLETE_DRAFT, report.getStatus());
+        assertTrue(book.getMarkdown().contains("- Book status: incomplete draft"));
+        assertTrue(book.getMarkdown().contains("## Open points\n\n- 2.2 Outlook: skipped."));
+        assertTrue(report.warnings().contains("1 x skipped section"));
+        assertTrue(report.toMarkdown().contains("15 %"));
+    }
+
+    @Test
+    public void gapsAndUncitedParagraphsBlockCompleteness() {
+        AssembledBook book = new BookAssembler().assemble(clean()
+                .section(written("s21", "c2"), revision("Storage needs no citation here.",
+                        Arrays.asList("No numbers on home storage in Germany."), Collections.<String>emptyList()))
+                .build());
+        assertEquals(1, book.getReport().count(Kind.UNCITED_PARAGRAPH));
+        assertEquals(1, book.getReport().count(Kind.UNCITED_SENTENCE));
+        assertEquals(1, book.getReport().count(Kind.OPEN_GAP));
+        assertFalse(book.getReport().isComplete());
+        assertTrue(book.getMarkdown().contains("- 2.1 Batteries: No numbers on home storage in Germany."));
+    }
+
+    @Test
+    public void sourceAcceptedAfterApprovalIsMarkedInReferences() {
+        AssembledBook book = new BookAssembler().assemble(clean()
+                .source(source("c", "Storage basics", TEXT_C, true)).build());
+        assertTrue(book.getMarkdown().contains(
+                "[3] Storage basics. example.org. <https://example.org/c>. Accessed 2026-11-05. "
+                        + "Accepted after the Sources approval."));
+        assertEquals(1, book.getReport().count(Kind.LATE_SOURCE));
+    }
+
+    @Test
+    public void citationsResolveAfterReEmbeddingAndMismatchIsReportedNotRepointed() {
+        BookAssemblyInput.Builder reembedded = clean().section(written("s21", "c2"), revision(
+                "Storage moves daytime energy into the evening [1].",
+                cite("1", "c", "shifts surplus energy from sunny hours", "bge-m3:seg-v2:c#7")));
+        AssembledBook book = new BookAssembler().assemble(reembedded.build());
+        assertTrue(book.getCitations().issues().isEmpty());
+        assertEquals(GOLDEN, book.getMarkdown());
+
+        AssembledBook changed = new BookAssembler().assemble(clean()
+                .source(new AssemblySource("c", "Storage basics", "example.org", "https://example.org/c", DAY,
+                        "sha-other", TEXT_C, false)).build());
+        assertEquals(2, changed.getReport().count(Kind.UNRESOLVED_CITATION));
+        assertEquals(-1, changed.getCitations().numberOf("c"));
+        assertTrue(changed.getMarkdown().contains("Storage moves daytime energy into the evening [?]."));
+        assertFalse(changed.getReport().isComplete());
+    }
+
+    @Test
+    public void conflictingLongFormsShowInReportAndAppendixWhichListsOnlyUsedAcronyms() {
+        String ragA = "Retrieval-Augmented Generation (RAG) combines search and writing.";
+        String ragB = "Retrieval-Assisted Generation (RAG) is another name.";
+        BookAssemblyInput input = clean()
+                .source(source("a", "Solar basics", TEXT_A + " " + ragA, false))
+                .source(source("b", "Wind basics", TEXT_B + " " + ragB, false))
+                .section(written("s11", "c1"), revision(
+                        "Photovoltaic modules turn light into current, and RAG helps to explain them [1].",
+                        cite("1", "a", "Solar panels convert sunlight into electricity.", "p-a-1")))
+                .acronyms(Arrays.asList(
+                        longForms("RAG", statement("a", "Retrieval-Augmented Generation"),
+                                statement("b", "Retrieval-Assisted Generation")),
+                        longForms("LLM", statement("a", "Large Language Model"))))
+                .build();
+        AssembledBook book = new BookAssembler().assemble(input);
+        assertEquals(1, book.getReport().count(Kind.ACRONYM_CONFLICT));
+        assertEquals(1, book.getReport().count(Kind.ACRONYM_FIRST_USE_WITHOUT_LONG_FORM));
+        String md = book.getMarkdown();
+        assertTrue(md, md.contains("## Abbreviations\n\n- **RAG**: Retrieval-Assisted Generation ([2]); "
+                + "Retrieval-Augmented Generation ([1]) (the sources disagree)"));
+        assertFalse(md.contains("LLM"));
+    }
+
+    @Test
+    public void acronymWithoutLongFormIsReported() {
+        AssembledBook book = new BookAssembler().assemble(clean().section(written("s21", "c2"), revision(
+                "Storage moves daytime energy into the evening, says the IEA [1].",
+                cite("1", "c", "Battery storage shifts surplus energy", "p-c-1"))).build());
+        assertEquals(1, book.getReport().count(Kind.ACRONYM_WITHOUT_LONG_FORM));
+        assertTrue(book.getMarkdown().contains("- **IEA**: no long form in the sources"));
+    }
+
+    @Test
+    public void unusedGlossaryTermIsReported() {
+        AssembledBook book = new BookAssembler().assemble(clean()
+                .glossaryTerms(Arrays.asList("energy", "hydrogen")).build());
+        assertEquals(1, book.getReport().count(Kind.UNUSED_GLOSSARY_TERM));
+        assertTrue(book.getReport().isComplete());
+    }
+
+    @Test
+    public void unknownMarkerStaysVisibleAndUnwrittenSectionsCountTowardTheTarget() {
+        AssembledBook book = new BookAssembler().assemble(clean()
+                .section(new ManuscriptSection("s22", "c2", SectionStatus.SKIPPED, "", 1, DAY), null)
+                .section(written("s21", "c2"), revision("Storage moves daytime energy into the evening [1][2].",
+                        cite("1", "c", "Battery storage shifts surplus energy", "p-c-1"))).build());
+        assertTrue(book.getMarkdown().contains("into the evening [3][?]."));
+        assertEquals(1, book.getReport().count(Kind.UNRESOLVED_CITATION));
+        assertEquals(48, book.getReport().getWordsTarget());
+    }
+
+    private static AcronymLongForms.Statement statement(String sourceId, String longForm) {
+        TextSpan span = new TextSpan(0, 1);
+        return new AcronymLongForms.Statement(sourceId, new SourceAcronymRecord.LongForm(longForm, span, span, span));
+    }
+
+    private static AcronymLongForms longForms(String acronym, AcronymLongForms.Statement... statements) {
+        return new AcronymLongForms(acronym, Arrays.asList(statements));
+    }
+
+    private static Set<Integer> usedNumbers(String markdown) {
+        String body = markdown.substring(0, markdown.indexOf("## References"));
+        Set<Integer> used = new HashSet<Integer>();
+        Matcher m = Pattern.compile("\\[(\\d+)\\]").matcher(body);
+        while (m.find()) {
+            used.add(Integer.parseInt(m.group(1)));
+        }
+        return used;
+    }
+
+    @SuppressWarnings("unused")
+    private static List<String> list(String... values) {
+        return new ArrayList<String>(Arrays.asList(values));
+    }
+}

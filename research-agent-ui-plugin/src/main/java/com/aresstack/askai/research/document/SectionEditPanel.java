@@ -59,7 +59,7 @@ final class SectionEditPanel extends JPanel {
         stored.setLineWrap(true);
         stored.setWrapStyleWord(true);
         stored.setEditable(false);
-        storedScroll.setBorder(BorderFactory.createTitledBorder("Saved text"));
+        storedScroll.setBorder(com.aresstack.comiccontrols.border.ComicBorder.titled("Saved text"));
         storedScroll.setVisible(false);
 
         JPanel top = new JPanel(new GridLayout(0, 1, 2, 2));
@@ -117,7 +117,7 @@ final class SectionEditPanel extends JPanel {
             SectionRevision revision = selectedRevision();
             if (revision != null) {
                 stored.setText(revision.getText());
-                storedScroll.setBorder(BorderFactory.createTitledBorder("Revision " + revision.getNumber()));
+                storedScroll.setBorder(com.aresstack.comiccontrols.border.ComicBorder.titled("Revision " + revision.getNumber()));
                 storedScroll.setVisible(true);
                 revalidate();
             }
@@ -148,6 +148,7 @@ final class SectionEditPanel extends JPanel {
             sections.setModel(model);
             if (selected != null) {
                 sections.setSelectedItem(selected);
+                editor.rebind(selected); // new chapter id and fingerprints, same local text
             }
         } finally {
             loading = false;
@@ -207,6 +208,9 @@ final class SectionEditPanel extends JPanel {
         storedScroll.setVisible(false);
         revalidate();
         refreshState();
+        if (editor.isDirty()) {
+            status.setText("Unsaved edits of this section were kept. Save them or reload.");
+        }
     }
 
     private void changed() {

@@ -40,6 +40,12 @@ public final class ManuscriptFreezeHook implements PhaseTransitionHook {
     private final FileOutlineStore outlines;
     private final BookManifest manifest;
     private final BookManifest.CommitCheck commits;
+    private volatile java.util.concurrent.Callable<com.aresstack.askai.research.assembly.AssembledBook> assembly;
+
+    /** Plan PR 30: the final assembly whose report and cited sources go into the pin. */
+    public void setAssembly(java.util.concurrent.Callable<com.aresstack.askai.research.assembly.AssembledBook> value) {
+        assembly = value;
+    }
 
     public ManuscriptFreezeHook(ManuscriptWorkspace manuscript, FileOutlineStore outlines, BookManifest manifest,
                                 BookManifest.CommitCheck commits) {
@@ -87,7 +93,17 @@ public final class ManuscriptFreezeHook implements PhaseTransitionHook {
                 }
             }
         }
-        return new ManuscriptPin(transitionId, outlineRevision, now, entries);
+        ManuscriptPin pin = new ManuscriptPin(transitionId, outlineRevision, now, entries);
+        java.util.concurrent.Callable<com.aresstack.askai.research.assembly.AssembledBook> source = assembly;
+        com.aresstack.askai.research.assembly.AssembledBook book = source == null ? null : source.call();
+        if (book == null) {
+            return pin;
+        }
+        java.util.Map<String, String> cited = new java.util.LinkedHashMap<String, String>();
+        for (com.aresstack.askai.research.assembly.AssemblySource s : book.getCitations().references()) {
+            cited.put(s.getSourceId(), s.getChecksum());
+        }
+        return pin.withBook(book.getReport().getStatus().label(), book.getReport().toMarkdown(), cited);
     }
 
     @Override

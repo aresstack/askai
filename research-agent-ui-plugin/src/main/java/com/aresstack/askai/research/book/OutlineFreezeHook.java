@@ -14,7 +14,7 @@ import java.util.List;
  * PR 21: the outline freeze on the transition hook (D3, D4, Q24).
  * <ul>
  * <li>before apply, {@code PROPOSE_OUTLINE} ({@code finish-outline}) is refused while no chapter has a
- * section;</li>
+ * section, and while an outline job (generation, PR 22) runs;</li>
  * <li>as the last record step of {@code APPROVE_OUTLINE}, the working outline is approved and appended as an
  * outline pin under the transition id; a failed approval refuses the transition;</li>
  * <li>{@code REOPEN_OUTLINE} appends the note "Outline reopened"; nothing is deleted;</li>
@@ -46,6 +46,9 @@ public final class OutlineFreezeHook implements PhaseTransitionHook {
 
     /** The structural reason {@code finish-outline} cannot pass now, or {@code null}. */
     public static String finishBlocker(OutlineWorkspace workspace) {
+        if (workspace.jobs().isBusy()) {
+            return workspace.jobs().busyReason() + " Finish the outline when it is done.";
+        }
         try {
             return workspace.current().hasChapterWithSection() ? null : NO_SECTION;
         } catch (FileOutlineStore.CorruptOutlineException corrupt) {
