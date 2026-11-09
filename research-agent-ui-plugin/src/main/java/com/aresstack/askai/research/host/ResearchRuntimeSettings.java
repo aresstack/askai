@@ -53,20 +53,6 @@ public final class ResearchRuntimeSettings {
         return envOverride("ASKAI_POLICY_NOVELTY_TURNS", DEFAULT_POLICY_NOVELTY_TURNS);
     }
 
-    /**
-     * #42: background topic discovery over the prepared corpus (pure CPU over persisted
-     * vectors — it never calls the embedding endpoint, so it cannot compete with the
-     * foreground GPU/LLM path). Default OFF, deliberately: no hidden background analysis
-     * until the user opts in; a settings-UI row can layer on later.
-     */
-    public static boolean backgroundTopicDiscovery() {
-        try {
-            return "true".equalsIgnoreCase(System.getenv("ASKAI_BACKGROUND_TOPIC_DISCOVERY"));
-        } catch (RuntimeException noEnv) {
-            return false;
-        }
-    }
-
     /** scope_probe (AP3): the max terms one probe judges — a bound, never hidden magic. */
     public static final int DEFAULT_SCOPE_PROBE_MAX_TERMS = 8;
 

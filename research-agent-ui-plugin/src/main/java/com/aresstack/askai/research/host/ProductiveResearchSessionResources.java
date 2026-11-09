@@ -227,15 +227,6 @@ public final class ProductiveResearchSessionResources {
         return topicDiscovery;
     }
 
-    /** #42: the optional background topic-discovery runner (null when disabled). */
-    private volatile com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
-            topicsRunner;
-
-    void setTopicsRunner(
-            com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
-        this.topicsRunner = runner;
-    }
-
     void setProjectionRunner(
             com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
         this.projectionRunner = runner;
@@ -697,9 +688,6 @@ public final class ProductiveResearchSessionResources {
         transitions.close();
         // Stop the knowledge worker FIRST (graceful: lets the current job finish). The persistent FIFO and the
         // canonical corpus outlive the session, so a mid-flight job is simply recovered on the next open.
-        if (topicsRunner != null) {
-            topicsRunner.stop();
-        }
         if (projectionRunner != null) {
             projectionRunner.stop();
         }

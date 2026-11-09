@@ -3,6 +3,7 @@ package com.aresstack.askai.research.knowledge.live;
 import com.aresstack.askai.research.domain.IdSequence;
 import com.aresstack.askai.research.domain.Passage;
 import com.aresstack.askai.research.domain.TopicProposal;
+import com.aresstack.askai.research.knowledge.ClusteringMonitor;
 import com.aresstack.askai.research.knowledge.EmbeddingPort;
 import com.aresstack.askai.research.knowledge.TopicClusterer;
 
@@ -48,6 +49,13 @@ public final class LiveOutlineProjectionBuilder {
      */
     public List<LiveTopicProjection> discoverTopics(List<Passage> passages,
                                                     Map<String, EmbeddingPort.EmbeddingVector> vectors) {
+        return discoverTopics(passages, vectors, ClusteringMonitor.NONE);
+    }
+
+    /** PR 20: the same discovery with progress and cancel. */
+    public List<LiveTopicProjection> discoverTopics(List<Passage> passages,
+                                                    Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                                    ClusteringMonitor monitor) {
         if (passages == null || passages.isEmpty()) {
             return Collections.emptyList();
         }
@@ -57,7 +65,7 @@ public final class LiveOutlineProjectionBuilder {
         // REUSE the existing clustering math; the counter-based proposal ids are ignored — live identity
         // comes deterministically from the sorted member ids.
         List<TopicProposal> proposals = new TopicClusterer(IdSequence.counting(), mergeDistanceCutoff,
-                representativesPerTopic).cluster(sorted, vectors);
+                representativesPerTopic).cluster(sorted, vectors, monitor);
         List<LiveTopicProjection> topics = new ArrayList<LiveTopicProjection>();
         for (TopicProposal proposal : proposals) {
             topics.add(new LiveTopicProjection(proposal.getMemberPassageIds(),

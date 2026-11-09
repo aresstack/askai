@@ -603,13 +603,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return stamped;
     }
 
-    /** #42: enabled setting + an existing prepared snapshot with topics — never a computation. */
+    /** #42/PR 20: the last stored snapshot with topics — never a computation, no setting anymore. */
     private boolean topicDiscoveryOffered() {
         if (productiveResources == null || productiveResources.isClosed()
                 || !com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING
-                        .equals(state.getPhaseId())
-                || !com.aresstack.askai.research.host.ResearchRuntimeSettings
-                        .backgroundTopicDiscovery()) {
+                        .equals(state.getPhaseId())) {
             return false;
         }
         com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery discovery =
@@ -629,8 +627,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     private String discoverTopicsFromSources() {
         if (!topicDiscoveryOffered()) {
-            return "rejected: no prepared topic analysis is available (background semantic "
-                    + "analysis off, or no sources processed yet)";
+            return "rejected: no stored topic analysis is available yet (topics are clustered "
+                    + "on request in the Outline phase)";
         }
         com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery discovery =
                 productiveResources.topicDiscovery();
