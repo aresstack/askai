@@ -494,6 +494,13 @@ public final class SearchPlanQueue {
             return null;
         }
         if (store.loadEntries().containsKey(entryId)) {
+            if (!record.getPriority().contains(entryId)) {
+                // a replay after a crash between the task and the record write: link the entry again
+                List<String> priority = new ArrayList<String>(record.getPriority());
+                priority.add(entryId);
+                store.saveRecord(record.withOrder(record.getOrder(), priority));
+                listener.changed();
+            }
             return entryId;
         }
         SearchPlanEntry added = SearchPlanEntry.submit(entryId, phase == null ? record.getPhase() : phase, "",
