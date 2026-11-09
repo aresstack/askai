@@ -66,6 +66,12 @@ public final class OutlineGeneration {
 
     /** Plan PR 24: labels and briefs for a fresh proposal (the session binds the model slots). */
     public interface Enrichment {
+        /**
+         * Checked before a generation starts: {@code null} when the labels and briefs can run, otherwise why not
+         * (issue #152: a broken role declaration must refuse the start instead of failing after "started").
+         */
+        String refusal();
+
         Outline enrich(Outline generated, java.util.function.BooleanSupplier cancelled);
     }
 
@@ -95,6 +101,13 @@ public final class OutlineGeneration {
         String refusal = workspace.writeRefusal();
         if (refusal != null) {
             return "Generate outline runs only while the outline phase is open. " + refusal;
+        }
+        Enrichment labelsAndBriefs = enrichment;
+        if (labelsAndBriefs != null) {
+            String notReady = labelsAndBriefs.refusal();
+            if (notReady != null) {
+                return "The outline generation cannot start: " + notReady;
+            }
         }
         final OutlineJobGuard.Job job;
         try {

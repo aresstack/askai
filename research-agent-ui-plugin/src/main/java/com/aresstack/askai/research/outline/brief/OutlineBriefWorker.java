@@ -3,11 +3,17 @@ package com.aresstack.askai.research.outline.brief;
 import com.aresstack.askai.research.outline.OutlineBrief;
 import com.aresstack.askai.research.outline.OutlineChapter;
 import com.aresstack.askai.research.outline.OutlineSection;
+import com.aresstack.askai.agent.model.port.ThinkingMode;
+import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
+import com.aresstack.askai.research.runtime.role.ResearchRole;
+import com.aresstack.askai.research.runtime.role.RoleOutput;
 import com.aresstack.askai.research.runtime.team.ChatMessage;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.runtime.team.MainModelChatResult;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -52,6 +58,33 @@ public final class OutlineBriefWorker {
         public String getFailure() {
             return failure;
         }
+    }
+
+    /**
+     * The label role on {@code phase.outline.labels} (plan PR 24). The prompts are built per call by
+     * {@link LabelContract}, hence {@code CALLER}; the answer is JSON checked by that contract. Declared here so
+     * the role has exactly one home and cannot be built without a prompt source again (issue #152).
+     */
+    public static final ResearchRole LABELS_ROLE = ResearchRole.builder("outline-labels",
+                    ResearchModelSlots.PHASE_OUTLINE_LABELS)
+            .purpose("plan PR 24: titles and one-line summaries for outline chapters and sections")
+            .promptFromCaller()
+            .output(RoleOutput.json("LabelContract"))
+            .thinking(ThinkingMode.OFF)
+            .build();
+
+    /** The brief role on {@code phase.outline.briefs} (plan PR 24); prompts from {@link BriefContract}. */
+    public static final ResearchRole BRIEFS_ROLE = ResearchRole.builder("outline-briefs",
+                    ResearchModelSlots.PHASE_OUTLINE_BRIEFS)
+            .purpose("plan PR 24: section briefs for one outline chapter")
+            .promptFromCaller()
+            .output(RoleOutput.json("BriefContract"))
+            .thinking(ThinkingMode.OFF)
+            .build();
+
+    /** The two roles of this worker, for the role inventory tests. */
+    public static List<ResearchRole> roles() {
+        return Collections.unmodifiableList(Arrays.asList(LABELS_ROLE, BRIEFS_ROLE));
     }
 
     static final String NOT_GENERATED = "Brief not generated";
