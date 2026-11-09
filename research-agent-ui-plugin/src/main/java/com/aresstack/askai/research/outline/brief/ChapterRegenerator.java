@@ -2,6 +2,7 @@ package com.aresstack.askai.research.outline.brief;
 
 import com.aresstack.askai.research.outline.Outline;
 import com.aresstack.askai.research.outline.OutlineBrief;
+import com.aresstack.askai.research.outline.OutlineCandidate;
 import com.aresstack.askai.research.outline.OutlineChapter;
 import com.aresstack.askai.research.outline.OutlineProvenance;
 import com.aresstack.askai.research.outline.OutlineSection;
@@ -126,7 +127,39 @@ public final class ChapterRegenerator {
         OutlineBriefWorker.ChapterBriefs briefs = worker.brief(context, chapter, "");
         List<OutlineChapter> chapters = new ArrayList<OutlineChapter>(stored.getChapters());
         chapters.add(briefs.getChapter());
-        return new Result(stored.withChapters(chapters), briefs.getFailure());
+        List<OutlineCandidate> remaining = new ArrayList<OutlineCandidate>();
+        for (OutlineCandidate candidate : stored.getCandidates()) {
+            if (!candidate.getClusterId().equals(clusterId)) {
+                remaining.add(candidate);
+            }
+        }
+        return new Result(stored.withChapters(chapters).withCandidates(remaining), briefs.getFailure());
+    }
+
+    /** Adopts the stored candidate {@code clusterId} (its suggested title, passages and representatives). */
+    public Result adopt(Outline stored, BriefContext context, String clusterId) {
+        for (OutlineCandidate candidate : stored.getCandidates()) {
+            if (candidate.getClusterId().equals(clusterId)) {
+                return adopt(stored, context, clusterId, candidate.getSuggestedTitle(), candidate.getPassageIds(),
+                        candidate.getRepresentativePassageIds(), averageSectionWords(stored));
+            }
+        }
+        throw new IllegalArgumentException("The suggested chapter is no longer in the outline.");
+    }
+
+    /** The mean word target of the stored sections, or 750 (the middle of Q7's 400 to 1,100) without any. */
+    static int averageSectionWords(Outline stored) {
+        int total = 0;
+        int count = 0;
+        for (OutlineChapter chapter : stored.getChapters()) {
+            for (OutlineSection section : chapter.getSections()) {
+                if (section.getBrief().getWordTarget() > 0) {
+                    total += section.getBrief().getWordTarget();
+                    count++;
+                }
+            }
+        }
+        return count == 0 ? 750 : total / count;
     }
 
     private List<OutlineSection> resplit(BriefContext context, OutlineChapter chapter, int count, String comment) {

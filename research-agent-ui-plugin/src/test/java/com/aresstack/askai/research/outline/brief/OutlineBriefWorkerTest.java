@@ -281,6 +281,24 @@ public class OutlineBriefWorkerTest {
     }
 
     @Test
+    public void adoptingAStoredCandidateRemovesItFromTheCandidates() {
+        Outline stored = stored().withCandidates(Arrays.asList(
+                new com.aresstack.askai.research.outline.OutlineCandidate("c7", "Förderung",
+                        Arrays.asList("p30"), Arrays.asList("p30"), 2),
+                new com.aresstack.askai.research.outline.OutlineCandidate("c8", "Recht",
+                        Arrays.asList("p40"), Arrays.asList("p40"), 2)));
+        ChapterRegenerator regenerator = new ChapterRegenerator(new OutlineBriefWorker(new ScriptedChat("l"),
+                new ScriptedChat("b", briefAnswer(1)), null), new Passages());
+
+        Outline adopted = regenerator.adopt(stored, CONTEXT, "c7").getOutline();
+
+        assertEquals("Förderung", adopted.getChapters().get(3).getTitle());
+        assertEquals(1, adopted.getCandidates().size());
+        assertEquals("c8", adopted.getCandidates().get(0).getClusterId());
+        assertEquals(520, adopted.getChapters().get(3).getSections().get(0).getBrief().getWordTarget());
+    }
+
+    @Test
     public void reclusteringIsDeterministic() {
         Passages passages = new Passages();
         assertEquals(SectionReclusterer.split(passages.vectors, 3), SectionReclusterer.split(passages.vectors, 3));

@@ -129,6 +129,23 @@ public final class ResearchOutlineEditorViewContribution implements ArtifactView
             public void generate() {
                 research.derivedActions().generateOutline();
             }
+
+            public String regenerateChapter(String chapterId, int sections, String comment) {
+                return chapterService(research).regenerateChapter(chapterId, sections, comment).getMessage();
+            }
+
+            public String adoptCandidate(String clusterId) {
+                return chapterService(research).adoptCandidate(clusterId).getMessage();
+            }
         };
+    }
+
+    private static com.aresstack.askai.research.outline.brief.OutlineChapterService chapterService(
+            ResearchAgentSession research) {
+        com.aresstack.askai.research.outline.brief.OutlineChapterService service = research.outlineChapterService();
+        if (service == null) {
+            throw new IllegalStateException("Chapter regeneration needs the model port and the knowledge store.");
+        }
+        return service;
     }
 }

@@ -4,7 +4,6 @@ import com.aresstack.askai.research.outline.Outline;
 import com.aresstack.askai.research.outline.OutlineJobGuard;
 import com.aresstack.askai.research.outline.OutlineWorkspace;
 
-import java.util.List;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -70,16 +69,15 @@ public final class OutlineChapterService {
         }
     }
 
-    /** "Add suggested chapter": adopts a labelled candidate cluster as a new last chapter. */
-    public Outcome adoptCandidate(String clusterId, String suggestedTitle, List<String> passageIds,
-                                  List<String> representativePassageIds, int wordTarget) {
+    /** "Add suggested chapter": adopts the stored candidate {@code clusterId} as a new last chapter. */
+    public Outcome adoptCandidate(String clusterId) {
         refuseWhenNotWritable();
         try (OutlineJobGuard.Job ignored = jobs.begin("Adding a suggested chapter")) {
             long revision = workspace.workingRevision();
-            ChapterRegenerator.Result result = regenerator.adopt(workspace.current(), context.get(), clusterId,
-                    suggestedTitle, passageIds, representativePassageIds, wordTarget);
+            ChapterRegenerator.Result result = regenerator.adopt(workspace.current(), context.get(), clusterId);
             workspace.save(result.getOutline(), revision, clock.getAsLong());
-            return new Outcome("Added the suggested chapter.", result.getBriefFailure());
+            return new Outcome(result.getBriefFailure() == null ? "Added the suggested chapter."
+                    : "Added the suggested chapter. " + result.getBriefFailure(), result.getBriefFailure());
         }
     }
 
