@@ -65,8 +65,16 @@ public class SectionContextBuilderTest {
             searches++;
             assertEquals(FP, query.getEmbeddingFingerprint());
             List<PassageSearchHit> hits = new ArrayList<PassageSearchHit>(byId.values());
-            Collections.reverse(hits); // the builder must not depend on the index's order
-            return hits.subList(0, Math.min(hits.size(), query.getMaxResults()));
+            Collections.sort(hits, new java.util.Comparator<PassageSearchHit>() {
+                @Override
+                public int compare(PassageSearchHit a, PassageSearchHit b) {
+                    return Double.compare(b.getScore(), a.getScore());
+                }
+            });
+            List<PassageSearchHit> top = new ArrayList<PassageSearchHit>(
+                    hits.subList(0, Math.min(hits.size(), query.getMaxResults())));
+            Collections.reverse(top); // the builder must not depend on the index's order
+            return top;
         }
 
         @Override
@@ -261,6 +269,31 @@ public class SectionContextBuilderTest {
         assertTrue(rendered.startsWith(EvidencePack.DATA_OPEN));
         assertEquals(rendered.indexOf(EvidencePack.DATA_CLOSE), rendered.lastIndexOf(EvidencePack.DATA_CLOSE));
         assertTrue(rendered.endsWith(EvidencePack.DATA_CLOSE));
+    }
+
+    @Test
+    public void theRetrievalWindowGrowsWhenFilteringExhaustsTheTopHits() {
+        Corpus corpus = new Corpus();
+        for (int i = 0; i < 30; i++) {
+            corpus.add("p-top" + (100 + i), "src-big", sentences("Top " + i, 2), 0.99 - i * 0.001);
+        }
+        for (int i = 0; i < 10; i++) {
+            corpus.add("p-low" + i, "src-low" + i, sentences("Low " + i, 2), 0.5 - i * 0.01);
+        }
+        Map<String, String> accepted = new HashMap<String, String>();
+        accepted.put("src-big", "c-big");
+        for (int i = 0; i < 10; i++) {
+            accepted.put("src-low" + i, "c-low" + i);
+        }
+        SectionContextRequest base = request(new EvidenceSourceSet(accepted, null, null));
+        OutlineSection noProvenance = new OutlineSection("sec-2", "ch-1", 1, "Ohne Herkunft",
+                base.getSection().getBrief(), OutlineProvenance.NONE, false, "");
+        SectionContextRequest request = new SectionContextRequest("proj", FP, base.getChapter(), noProvenance,
+                base.getSources(), "", "", null, "de");
+        EvidencePack pack = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus)
+                .build(request, WriterPackSettings.SMALL);
+        assertEquals(6, pack.getPassages().size());
+        assertEquals(2, corpus.searches);
     }
 
     @Test(expected = IllegalStateException.class)
