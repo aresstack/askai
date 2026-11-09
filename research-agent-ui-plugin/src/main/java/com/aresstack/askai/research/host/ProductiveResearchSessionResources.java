@@ -539,6 +539,21 @@ public final class ProductiveResearchSessionResources {
      * The session's ONE outline workspace (plan PR 21), bound to {@code <projectDir>/outline}. Lazy and shared:
      * the transition hooks, the MCP read and the (later) Outline tab use the SAME instance and its write guard.
      */
+    private volatile com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscriptWorkspace;
+
+    /**
+     * The session's ONE manuscript workspace (plan PR 26), bound to {@code <projectDir>/manuscript}. Lazy and
+     * shared: the transition hooks, the Document tab and the (later) writer use the SAME instance and its guard.
+     */
+    public synchronized com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscriptWorkspace() {
+        if (manuscriptWorkspace == null && !closed) {
+            manuscriptWorkspace = new com.aresstack.askai.research.manuscript.ManuscriptWorkspace(
+                    new com.aresstack.askai.research.store.FileManuscriptStore(
+                            new java.io.File(projectContext.getProjectDirectory(), "manuscript")));
+        }
+        return manuscriptWorkspace;
+    }
+
     public synchronized com.aresstack.askai.research.outline.OutlineWorkspace outlineWorkspace() {
         if (outlineWorkspace == null && !closed) {
             outlineWorkspace = new com.aresstack.askai.research.outline.OutlineWorkspace(

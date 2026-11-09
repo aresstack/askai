@@ -117,7 +117,7 @@ public class ResearchControlEndpointTest {
         ep.refreshTools();
         t = tools(reg, ep);
         assertTrue("document offers document_read", t.contains("document_read"));
-        assertTrue("document offers document_save", t.contains("document_save"));
+        assertFalse("plan PR 26: document.md is generated from the manuscript", t.contains("document_save"));
         assertFalse(t.contains("draft_read"));
         assertFalse(t.contains("draft_save"));
         assertFalse(t.contains("final_read"));
@@ -138,15 +138,14 @@ public class ResearchControlEndpointTest {
     public void executionRechecksLiveStateEvenWhenToolWasListed() {
         InProcessMcpServerRegistry reg = new InProcessMcpServerRegistry();
         Ctx ctx = new Ctx();
-        ctx.phaseId = ResearchStateIds.DRAFT;
+        ctx.phaseId = ResearchStateIds.RESEARCH;
         ResearchControlEndpoint ep = new ResearchControlEndpoint(reg, "s1", 1L, ctx);
         ep.open();
-        assertTrue(tools(reg, ep).contains("document_save"));
+        assertTrue(tools(reg, ep).contains("source_accept"));
 
         // Transition happens AFTER tools/list but BEFORE tools/call: the handler must reject server-side.
         ctx.stateId = ResearchStateIds.WAITING_APPROVAL;
-        McpToolResult denied = call(reg, ep, "document_save", "markdown", "late write",
-                "expected_revision", "0");
+        McpToolResult denied = call(reg, ep, "source_accept", "capture_id", "cap1");
         assertTrue(denied.isError());
         assertTrue(denied.getText().contains("Not allowed in the current state"));
         ep.close();
@@ -160,29 +159,8 @@ public class ResearchControlEndpointTest {
         ResearchControlEndpoint ep = new ResearchControlEndpoint(reg, "s1", 1L, ctx);
         ep.open();
 
-        // Save with the correct revision succeeds; a stale revision is a conflict, not an overwrite.
-        long rev = ctx.store.read("document").getRevision();
-        assertFalse(call(reg, ep, "document_save", "markdown", "# New", "expected_revision",
-                String.valueOf(rev)).isError());
-        McpToolResult stale = call(reg, ep, "document_save", "markdown", "# Old copy",
-                "expected_revision", String.valueOf(rev));
-        assertTrue(stale.isError());
-        assertEquals("# New", ctx.store.read("document").getMarkdown());
-
-        // #43: drafting AND finalizing happen inside the ONE Document phase on the ONE
-        // canonical document (issue #32) — a later save sees the earlier one.
-        ctx.phaseId = ResearchStateIds.DRAFT;
-        ep.refreshTools();
-        long docRev = ctx.store.read("document").getRevision();
-        assertFalse(call(reg, ep, "document_save", "markdown", "# Working document",
-                "expected_revision", String.valueOf(docRev)).isError());
-        McpToolResult finalized = call(reg, ep, "document_read");
-        assertFalse(finalized.isError());
-        assertTrue("the finalizing pass reads the drafted document", finalized.getText()
-                .contains("# Working document"));
-        assertFalse(call(reg, ep, "document_save", "markdown", "# Working document\n\nDone.",
-                "expected_revision", String.valueOf(ctx.store.read("document").getRevision())).isError());
-        assertEquals("# Working document\n\nDone.", ctx.store.read("document").getMarkdown());
+        // plan PR 26: the agent reads the generated document; it no longer writes document.md directly.
+        assertFalse(call(reg, ep, "document_read").isError());
 
         // source_accept: unknown capture rejected; known capture reports the new source id.
         ctx.phaseId = ResearchStateIds.RESEARCH;

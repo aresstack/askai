@@ -94,6 +94,40 @@ public final class BookManifest {
         return null;
     }
 
+    /** The sources pin a transition wrote, committed or not, or {@code null}. */
+    public synchronized SourcesPin sourcesPinOf(String transitionId) throws CorruptProjectFileException {
+        for (SourcesPin pin : sourcesPins()) {
+            if (pin.getTransitionId().equals(transitionId)) {
+                return pin;
+            }
+        }
+        return null;
+    }
+
+    /** Append one manuscript pin (PR 26); refused when the manifest is damaged. */
+    public synchronized void appendManuscriptPin(ManuscriptPin pin) throws IOException {
+        JsonObject root = writableRoot();
+        root.getAsJsonArray("pins").add(pin.toJson());
+        AtomicFiles.write(file, GSON.toJson(root));
+    }
+
+    /** The newest manuscript pin whose transition is committed, or {@code null}. */
+    public synchronized ManuscriptPin validManuscriptPin(CommitCheck commits) throws CorruptProjectFileException {
+        List<ManuscriptPin> pins = new ArrayList<ManuscriptPin>();
+        for (JsonElement element : read().getAsJsonArray("pins")) {
+            JsonObject pin = element.getAsJsonObject();
+            if (ManuscriptPin.PHASE.equals(string(pin, "phase"))) {
+                pins.add(ManuscriptPin.fromJson(pin));
+            }
+        }
+        for (int index = pins.size() - 1; index >= 0; index--) {
+            if (commits.isCommitted(pins.get(index).getTransitionId())) {
+                return pins.get(index);
+            }
+        }
+        return null;
+    }
+
     /** Append one outline pin; refused when the manifest is damaged. */
     public synchronized void appendOutlinePin(OutlinePin pin) throws IOException {
         JsonObject root = writableRoot();
@@ -244,6 +278,8 @@ public final class BookManifest {
                     ConceptPin.fromJson(pin.getAsJsonObject()); // validates the fields
                 } else if (SourcesPin.PHASE.equals(string(pin.getAsJsonObject(), "phase"))) {
                     SourcesPin.fromJson(pin.getAsJsonObject());
+                } else if (ManuscriptPin.PHASE.equals(string(pin.getAsJsonObject(), "phase"))) {
+                    ManuscriptPin.fromJson(pin.getAsJsonObject());
                 } else if (OutlinePin.PHASE.equals(string(pin.getAsJsonObject(), "phase"))) {
                     OutlinePin.fromJson(pin.getAsJsonObject());
                 }
