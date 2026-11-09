@@ -123,6 +123,11 @@ public final class SectionRevision {
         return createdAt;
     }
 
+    /** SHA-256 of the text, for the manuscript pin. */
+    public String textHash() {
+        return ManuscriptCitation.sha256(text);
+    }
+
     /** The content of a new revision. */
     public static final class Builder {
         private String text = "";
