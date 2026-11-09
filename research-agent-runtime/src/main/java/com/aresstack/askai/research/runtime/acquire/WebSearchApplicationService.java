@@ -619,6 +619,10 @@ public final class WebSearchApplicationService {
                 // PR 12 page lane: the typed blacklist again AFTER fetch — a redirect may land on a
                 // blocked host, and the real page title may name a blocked term the snippet did not.
                 String blacklistHit = blacklist.firstMatch(pageTitle, "", effectiveUrl);
+                if (blacklistHit == null && com.aresstack.askai.research.domain.scope.NonSourceHosts
+                        .isSearchResultPage(effectiveUrl)) {
+                    blacklistHit = SEARCH_RESULT_PAGE; // a redirect onto a site's own hit list
+                }
                 if (blacklistHit != null) {
                     listener.status("search-blacklist page skip url=" + effectiveUrl + " entry=\""
                             + blacklistHit + "\" -> not accepted, not expanded");
@@ -911,9 +915,12 @@ public final class WebSearchApplicationService {
     }
 
     /** PR 12 SERP lane: typed entries reject a hit on title, snippet or URL BEFORE the reranker. */
+    /** The blacklist "entry" a search-result page of another website is skipped under (never a source). */
+    static final String SEARCH_RESULT_PAGE = "search-result page";
+
     private List<com.aresstack.askai.browser.search.SearchResultCandidate> blacklistSerp(
             List<com.aresstack.askai.browser.search.SearchResultCandidate> candidates) {
-        if (blacklist.isEmpty() || candidates.isEmpty()) {
+        if (candidates.isEmpty()) {
             return candidates;
         }
         List<com.aresstack.askai.browser.search.SearchResultCandidate> kept =
@@ -921,6 +928,10 @@ public final class WebSearchApplicationService {
         for (com.aresstack.askai.browser.search.SearchResultCandidate candidate : candidates) {
             String hit = blacklist.firstMatch(candidate.title, candidate.snippet,
                     candidate.navigationUrl());
+            if (hit == null && com.aresstack.askai.research.domain.scope.NonSourceHosts
+                    .isSearchResultPage(candidate.navigationUrl())) {
+                hit = SEARCH_RESULT_PAGE; // a hit list of another site: never visited, never a source
+            }
             if (hit != null) {
                 listener.status("search-blacklist serp skip candidate=\"" + candidate.title
                         + "\" url=" + candidate.navigationUrl() + " entry=\"" + hit + "\"");
@@ -1270,8 +1281,11 @@ public final class WebSearchApplicationService {
             verdict = semantic;
         }
         String blockReason = AccessBlockSignals.reason(pr);
+        String errorReason = ErrorPageSignals.reason(pr);
         listener.status("readiness=" + verdict
                 + (verdict == PageReadinessJudge.Verdict.ACCESS_BLOCKED ? " reason=" + blockReason : "")
+                + (verdict == PageReadinessJudge.Verdict.UNREADABLE && errorReason != null
+                        ? " reason=ERROR_PAGE_" + errorReason : "")
                 + " [text=" + pr.textLength + " challenge=" + pr.challengeVisible
                 + (pr.challengePresent && !pr.challengeVisible ? " (artifact hidden)" : "")
                 + (pr.challengePresent ? " evidence=" + pr.challengeMarker : "")

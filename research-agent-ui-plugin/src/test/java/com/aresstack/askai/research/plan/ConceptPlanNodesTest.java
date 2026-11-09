@@ -31,9 +31,30 @@ public class ConceptPlanNodesTest {
                 "Sandbox"), labels(nodes));
         ConceptQueryPlan.Node classloader = nodes.get(1);
         assertEquals(nodes.get(0).getId(), classloader.getParentId());
-        assertEquals("Classloader Plugin-Isolation Java-Entwicklern Plugins Classloadern",
-                classloader.getBaseQuery());
+        // a first-level card adds the mission's content words; a deeper card carries its parent instead
+        assertEquals("Plugin-Isolation Java-Entwicklern Plugins Classloadern", nodes.get(0).getBaseQuery());
+        assertEquals("Classloader Plugin-Isolation", classloader.getBaseQuery());
         assertEquals(Arrays.asList("Plugin-Isolation", "Classloader"), classloader.getPath());
+    }
+
+    @Test
+    public void wordsAboutTheBookOrTheTaskNeverReachAQuery() {
+        // the live run of 2026-11-09: every query ended in "erstellen deutschsprachiges Testbuch"
+        String mission = "Wir erstellen ein deutschsprachiges Testbuch mit dem Titel 'Wearables für sicheren "
+                + "Baustellenbetrieb'. Ziel: ein kurzes praxisorientiertes Buch für Sicherheitsfachkräfte. Lege bitte "
+                + "jetzt ein klares Concept mit mehreren Themenkarten an: Sensorarten, Gefahren, Datenschutz, "
+                + "Einführung und Grenzen. Arbeite zur Prüfung der App.";
+        String concept = "{\"title\":\"\",\"subtitle\":\"\",\"concept\":[{\"Wearables für sicheren "
+                + "Baustellenbetrieb\":[{\"Sensorarten\":[]},{\"Datenschutz\":[]}]}]}";
+        List<ConceptQueryPlan.Node> nodes = ConceptPlanNodes.of(concept, concept, null, mission,
+                Collections.<String>emptyList());
+        assertEquals("Wearables für sicheren Baustellenbetrieb Sicherheitsfachkräfte Sensorarten Gefahren",
+                nodes.get(0).getBaseQuery());
+        assertEquals("Sensorarten Wearables für sicheren Baustellenbetrieb", nodes.get(1).getBaseQuery());
+        assertEquals("Datenschutz Wearables für sicheren Baustellenbetrieb", nodes.get(2).getBaseQuery());
+        for (ConceptQueryPlan.Node node : nodes) {
+            assertFalse(node.getBaseQuery(), node.getBaseQuery().matches("(?iu).*(erstellen|testbuch|titel).*"));
+        }
     }
 
     @Test

@@ -18,20 +18,31 @@ public final class ConceptQueryPlan {
     private ConceptQueryPlan() {
     }
 
-    /** One concept node: id, label, its path from the root (labels), its parent id and its base query. */
+    /**
+     * One concept node: id, label, its path from the root (labels), its parent id and its base query. In a later
+     * research cycle it also names the domains whose pages the earlier queries already found for it, so the planner
+     * can take another angle.
+     */
     public static final class Node {
         private final String id;
         private final String label;
         private final List<String> path;
         private final String parentId;
         private final String baseQuery;
+        private final List<String> foundDomains;
 
         public Node(String id, String label, List<String> path, String parentId, String baseQuery) {
+            this(id, label, path, parentId, baseQuery, null);
+        }
+
+        public Node(String id, String label, List<String> path, String parentId, String baseQuery,
+                    List<String> foundDomains) {
             this.id = text(id);
             this.label = text(label);
             this.path = copy(path);
             this.parentId = text(parentId);
             this.baseQuery = text(baseQuery);
+            this.foundDomains = copy(foundDomains);
         }
 
         public String getId() {
@@ -54,6 +65,11 @@ public final class ConceptQueryPlan {
         public String getBaseQuery() {
             return baseQuery;
         }
+
+        /** The domains of the sources the earlier cycles found for this node (empty in the first cycle). */
+        public List<String> getFoundDomains() {
+            return foundDomains;
+        }
     }
 
     /** What the host asks for. */
@@ -64,6 +80,7 @@ public final class ConceptQueryPlan {
         private final List<String> queriesRun;
         private final List<String> blacklist;
         private final int maxVariantsPerNode;
+        private final int cycle;
 
         /**
          * @param language           the language code the queries must be written in ("de", "en")
@@ -75,6 +92,15 @@ public final class ConceptQueryPlan {
          */
         public Request(String language, String bookTitle, List<Node> nodes, List<String> queriesRun,
                        List<String> blacklist, int maxVariantsPerNode) {
+            this(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, 1);
+        }
+
+        /**
+         * @param cycle the research cycle the queries are planned for: 1 is the first plan from the concept; a
+         *              later cycle plans only nodes the earlier cycles left uncovered, and asks for another angle
+         */
+        public Request(String language, String bookTitle, List<Node> nodes, List<String> queriesRun,
+                       List<String> blacklist, int maxVariantsPerNode, int cycle) {
             this.language = text(language);
             this.bookTitle = text(bookTitle);
             this.nodes = nodes == null ? Collections.<Node>emptyList()
@@ -82,6 +108,12 @@ public final class ConceptQueryPlan {
             this.queriesRun = copy(queriesRun);
             this.blacklist = copy(blacklist);
             this.maxVariantsPerNode = Math.max(0, maxVariantsPerNode);
+            this.cycle = Math.max(1, cycle);
+        }
+
+        /** The same request with the book title and blacklist of the frozen concept (the host fills them in). */
+        public Request withBook(String title, List<String> terms) {
+            return new Request(language, title, nodes, queriesRun, terms, maxVariantsPerNode, cycle);
         }
 
         public String getLanguage() {
@@ -106,6 +138,11 @@ public final class ConceptQueryPlan {
 
         public int getMaxVariantsPerNode() {
             return maxVariantsPerNode;
+        }
+
+        /** The research cycle (1 = the first plan). */
+        public int getCycle() {
+            return cycle;
         }
     }
 

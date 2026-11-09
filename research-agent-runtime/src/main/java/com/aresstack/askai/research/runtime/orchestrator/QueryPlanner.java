@@ -59,7 +59,14 @@ public final class QueryPlanner {
                     + "order.\n"
                     + "- Never repeat a query listed under ALREADY SEARCHED and never use a term listed under "
                     + "BLACKLIST.\n"
-                    + "- Stay inside the node; do not widen the topic.";
+                    + "- Stay inside the node; do not widen the topic.\n"
+                    + "- When RESEARCH CYCLE is above 1, the earlier queries did not find enough sources for the "
+                    + "node: change the strategy instead of rewording. Name the institutions, authorities, "
+                    + "associations, standards bodies, universities, journals or publishers that publish on the "
+                    + "node's subject, the kinds of document that carry evidence (study, guideline, regulation, "
+                    + "standard, report, statistics, PDF) and concrete sub-aspects, people or years. Never aim at "
+                    + "shops, booksellers or the domains listed under DOMAINS FOUND SO FAR: a book sold on three "
+                    + "sites is one book and no new knowledge.";
 
     /** The answer budget of one concept planner call. */
     public static final int CONCEPT_ANSWER_TOKENS = 256;
@@ -275,12 +282,23 @@ public final class QueryPlanner {
             sb.append("PATH\n").append(String.join(" > ", node.getPath())).append('\n');
         }
         sb.append("\nBASE QUERY\n").append(base.isEmpty() ? "(none)" : base).append("\n\n");
+        if (request.getCycle() > 1) {
+            sb.append("RESEARCH CYCLE\n").append(request.getCycle())
+                    .append(" (the queries under ALREADY SEARCHED left this node without enough sources)\n\n");
+            appendList(sb, "DOMAINS FOUND SO FAR", node.getFoundDomains(), "(none)");
+            sb.append('\n');
+        }
         appendList(sb, "ALREADY SEARCHED", searched, "(nothing yet)");
         sb.append('\n');
         appendList(sb, "BLACKLIST", request.getBlacklist(), "(none)");
-        return sb.append("\nTASK: write at most ").append(request.getMaxVariantsPerNode())
+        sb.append("\nTASK: write at most ").append(request.getMaxVariantsPerNode())
                 .append(" other search queries for the node, in ").append(languageName(request.getLanguage()))
-                .append('.').toString();
+                .append('.');
+        if (request.getCycle() > 1) {
+            sb.append(" Take another angle than the queries already searched: other publishers of evidence, other "
+                    + "kinds of document, other sub-aspects.");
+        }
+        return sb.toString();
     }
 
     static String languageName(String code) {

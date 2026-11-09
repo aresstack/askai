@@ -55,11 +55,16 @@ public class SearchPlanQueueTest {
     }
 
     private SearchPlanQueue queue(SearchPlanCoverage.Caps caps) {
-        lastQueue = newQueue(caps);
+        lastQueue = newQueue(caps, null);
         return lastQueue;
     }
 
-    private SearchPlanQueue newQueue(SearchPlanCoverage.Caps caps) {
+    private SearchPlanQueue queue(SearchPlanCoverage.Caps caps, SearchPlanQueue.Replanner replanner) {
+        lastQueue = newQueue(caps, replanner);
+        return lastQueue;
+    }
+
+    private SearchPlanQueue newQueue(SearchPlanCoverage.Caps caps, SearchPlanQueue.Replanner replanner) {
         return new SearchPlanQueue(store, port, sources, new SearchPlanQueue.Busy() {
             public boolean busy() {
                 return busy;
@@ -75,7 +80,7 @@ public class SearchPlanQueueTest {
             public long now() {
                 return ++now;
             }
-        }, caps);
+        }, caps, replanner);
     }
 
     private SearchPlanMerger.IdSource counter() {
@@ -472,10 +477,203 @@ public class SearchPlanQueueTest {
         }
     }
 
+    // ---- research cycles (M2) ------------------------------------------------------------------------
+
+    @Test
+    public void anUncoveredNodeIsPlannedAgainFromAnotherAngleInTheNextCycle() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Alpha Query", "Alpha Variant"));
+        build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")), queries);
+        sources.domains.put("s1", "shop.example");
+        sources.domains.put("s2", "two.example");
+        sources.domains.put("s3", "three.example");
+        sources.domains.put("s4", "four.example");
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("a", "Alpha Studie DGUV", "Alpha Vorschrift");
+        SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
+        sources.next = Arrays.asList("s1");
+        queue.run();
+        port.complete(false); // Alpha Query: one source, one domain
+        sources.next = Collections.emptyList();
+        port.complete(false); // Alpha Variant: nothing
+        sources.next = Arrays.asList("s2", "s3");
+        port.complete(false); // Beta Query: covered
+
+        // cycle 1 is over, A is uncovered: the queue asks the planner instead of announcing coverage
+        assertTrue(queue.isRunning());
+        assertTrue(queue.isReplanning());
+        assertTrue(outcomes.isEmpty());
+        assertEquals(1, replanner.requests.size());
+        ConceptQueryPlan.Request request = replanner.requests.get(0);
+        assertEquals(2, request.getCycle());
+        assertEquals(1, request.getNodes().size());
+        assertEquals("a", request.getNodes().get(0).getId());
+        assertEquals(Collections.singletonList("shop.example"), request.getNodes().get(0).getFoundDomains());
+        assertTrue(request.getQueriesRun().containsAll(Arrays.asList("Alpha Query", "Alpha Variant", "Beta Query")));
+        assertEquals(3, request.getMaxVariantsPerNode()); // the planner's per-call limit, never above the budget
+
+        replanner.deliver();
+        assertFalse(queue.isReplanning());
+        assertEquals(2, store.loadRecord().getCycle());
+        assertEquals("Alpha Studie DGUV", port.searched.get(3));
+        int cycleEntries = 0;
+        for (SearchPlanEntry entry : queue.entriesInOrder()) {
+            if (entry.getOrigin() == SearchPlanEntry.Origin.CYCLE) {
+                cycleEntries++;
+                assertEquals("a", entry.getNodeId());
+            }
+        }
+        assertEquals(2, cycleEntries);
+        sources.next = Arrays.asList("s4");
+        port.complete(false); // A now has two sources from two domains: covered, "Alpha Vorschrift" is skipped
+        assertEquals(1, outcomes.size());
+        SearchPlanQueue.Outcome outcome = outcomes.get(0);
+        assertEquals(SearchPlanQueue.Reason.COVERED, outcome.getReason());
+        assertEquals(2, outcome.getCycles());
+        assertEquals(4, outcome.getQueriesRun());
+        assertEquals(4, outcome.getSources());
+        assertEquals(4, outcome.getDomains());
+        assertTrue(outcome.text(), outcome.text().startsWith("Search plan finished: all 2 nodes are covered"));
+        assertTrue(outcome.text(), outcome.text().contains("2 research cycles"));
+        assertTrue(store.outcomeFile().isFile());
+        assertTrue(outcome.report().contains("A: covered (2 sources from 2 domains, 3 queries run"));
+        assertFalse(queue.isRunning());
+    }
+
+    @Test
+    public void aPlanOutOfCyclesReportsTheGapAsSpentBudgetNeverAsCoverage() throws Exception {
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("a", "Alpha Two");
+        SearchPlanQueue queue = queue(caps(3, 4, 60, 2), replanner);
+        queue.run();
+        port.complete(false); // nothing found
+        replanner.deliver();
+        port.complete(false); // nothing found again; the cycles are spent
+        assertEquals(1, outcomes.size());
+        SearchPlanQueue.Outcome outcome = outcomes.get(0);
+        assertEquals(SearchPlanQueue.Reason.BUDGET, outcome.getReason());
+        assertEquals(Collections.singletonList("A"), outcome.getUncovered());
+        assertTrue(outcome.text(), outcome.text().startsWith(
+                "Search plan stopped by its research budget, not because the topic is exhausted: 0 of 1 nodes covered"));
+        assertTrue(outcome.text(), outcome.text().contains("Still uncovered: A."));
+        assertTrue(outcome.text(), outcome.text().contains("raise \"Research cycles\""));
+        assertTrue(outcome.report(), outcome.report().contains("Reason: budget"));
+        assertTrue(outcome.report(), outcome.report().contains("- A: uncovered (0 sources from 0 domains, 2 queries run)"));
+        assertEquals("the budget stop is on record next to the plan", outcome.report(),
+                new String(java.nio.file.Files.readAllBytes(store.outcomeFile().toPath()), "UTF-8"));
+        assertEquals(1, replanner.requests.size()); // cycle 3 was never asked for
+    }
+
+    @Test
+    public void aPlannerWithoutAnAnswerEndsThePlanHonestly() throws Exception {
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = null;
+        SearchPlanQueue queue = queue(caps(3, 4, 60, 3), replanner);
+        queue.run();
+        port.complete(false);
+        replanner.deliver();
+        assertFalse(queue.isRunning());
+        assertEquals(SearchPlanQueue.Reason.PLANNER_UNAVAILABLE, outcomes.get(0).getReason());
+        assertTrue(outcomes.get(0).text(), outcomes.get(0).text().contains(
+                "the planner wrote no new queries for research cycle 2"));
+        assertEquals(1, store.loadRecord().getCycle());
+
+        // an answer that only repeats queries already run adds nothing either
+        outcomes.clear();
+        replanner.answer = answer("a", "alpha query");
+        queue.run();
+        replanner.deliver();
+        assertEquals(SearchPlanQueue.Reason.PLANNER_UNAVAILABLE, outcomes.get(0).getReason());
+        assertEquals(1, queue.entriesInOrder().size());
+    }
+
+    @Test
+    public void stopWhilePlanningTheNextCycleDropsTheLateAnswer() throws Exception {
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("a", "Alpha Two");
+        SearchPlanQueue queue = queue(caps(3, 4, 60, 3), replanner);
+        queue.run();
+        port.complete(false);
+        assertTrue(queue.isReplanning());
+        queue.stop();
+        assertFalse(queue.isRunning());
+        assertFalse(queue.isReplanning());
+        replanner.deliver(); // too late: nothing is added, nothing runs
+        assertEquals(1, store.loadRecord().getCycle());
+        assertEquals(1, queue.entriesInOrder().size());
+        assertTrue(outcomes.isEmpty());
+        assertEquals(1, port.searched.size());
+
+        queue.run(); // "Run search plan" asks again
+        assertEquals(2, replanner.requests.size());
+        replanner.deliver();
+        assertEquals("Alpha Two", port.searched.get(1));
+    }
+
+    @Test
+    public void theQueryBudgetOfANodeIsPerCycle() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Alpha Query", "Alpha One", "Alpha Two"));
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), queries);
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("a", "Alpha Three", "Alpha Four", "Alpha Five");
+        SearchPlanQueue queue = queue(caps(3, 2, 60, 2), replanner);
+        queue.run();
+        port.complete(false);
+        port.complete(false);
+        assertEquals(SearchPlanEntry.Status.SKIPPED, queue.entriesInOrder().get(2).getStatus()); // cycle-1 budget
+        assertEquals(2, replanner.requests.get(0).getMaxVariantsPerNode());
+        replanner.deliver();
+        port.complete(false);
+        port.complete(false);
+        assertEquals(Arrays.asList("Alpha Query", "Alpha One", "Alpha Three", "Alpha Four"), port.searched);
+        assertEquals(SearchPlanQueue.Reason.BUDGET, outcomes.get(0).getReason());
+    }
+
+    @Test
+    public void withoutAReplannerThePlanEndsAfterOneCycleAndSaysSo() throws Exception {
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        queue(caps(3, 4, 60)).run();
+        port.complete(false);
+        assertEquals(SearchPlanQueue.Reason.BUDGET, outcomes.get(0).getReason());
+        assertEquals(1, outcomes.get(0).getCycles());
+        assertFalse("a stop is never announced as coverage", outcomes.get(0).text().contains("covered."));
+    }
+
     // ---- fakes ---------------------------------------------------------------------------------------
 
     private static SearchPlanCoverage.Caps caps(int perNode, int queries, int phase) {
         return new SearchPlanCoverage.Caps(perNode, queries, phase);
+    }
+
+    private static SearchPlanCoverage.Caps caps(int perNode, int queries, int phase, int cycles) {
+        return new SearchPlanCoverage.Caps(perNode, queries, phase, cycles);
+    }
+
+    private static ConceptQueryPlan.Result answer(String nodeId, String... variants) {
+        return new ConceptQueryPlan.Result(Collections.singletonList(
+                new ConceptQueryPlan.NodePlan(nodeId, "", Arrays.asList(variants), "")));
+    }
+
+    /** The planner of the later cycles: records the request, answers when the test says so. */
+    private static final class FakeReplanner implements SearchPlanQueue.Replanner {
+        final List<ConceptQueryPlan.Request> requests = new ArrayList<ConceptQueryPlan.Request>();
+        ConceptQueryPlan.Result answer;
+        private SearchPlanQueue.Replanned pending;
+
+        public void replan(ConceptQueryPlan.Request request, SearchPlanQueue.Replanned callback) {
+            requests.add(request);
+            pending = callback;
+        }
+
+        void deliver() {
+            SearchPlanQueue.Replanned callback = pending;
+            pending = null;
+            callback.done(answer);
+        }
     }
 
     private final class FakePort implements SearchPlanQueue.SearchPort {

@@ -3,7 +3,7 @@ package com.aresstack.askai.research.book;
 import com.aresstack.askai.research.sources.ResearchSourceRecord;
 import com.aresstack.askai.research.sources.ResearchSourceRepository;
 import com.aresstack.askai.research.sources.SourceQuery;
-import com.aresstack.askai.research.sources.SourceStatus;
+import com.aresstack.askai.research.sources.SourceEligibility;
 import com.aresstack.askai.research.state.ResearchCommandType;
 import com.aresstack.askai.research.transition.PhaseTransition;
 import com.aresstack.askai.research.transition.PhaseTransitionHook;
@@ -27,11 +27,15 @@ public final class SourcesFreezeHook implements PhaseTransitionHook {
         this.manifest = manifest;
     }
 
-    /** The accepted sources of this moment, in repository order. */
+    /**
+     * The research sources of this moment ({@link SourceEligibility}: read, not excluded), in repository order.
+     * The pin records each one's status, so a source the user confirmed ({@code ACCEPTED}) stays told apart from
+     * one the funnel accepted ({@code NEW}).
+     */
     public static List<SourcesPin.Entry> approvedSet(ResearchSourceRepository repository) {
         List<SourcesPin.Entry> entries = new ArrayList<SourcesPin.Entry>();
         for (ResearchSourceRecord record : repository.find(SourceQuery.all())) {
-            if (record.getStatus() == SourceStatus.ACCEPTED) {
+            if (SourceEligibility.isEvidence(record)) {
                 entries.add(new SourcesPin.Entry(record.getSourceId(), record.getChecksum(),
                         record.getStatus().name()));
             }

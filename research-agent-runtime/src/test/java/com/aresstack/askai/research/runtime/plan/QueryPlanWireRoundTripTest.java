@@ -52,6 +52,20 @@ public class QueryPlanWireRoundTripTest {
     }
 
     @Test
+    public void aLaterCycleRequestSurvivesWithItsCycleAndDomains() {
+        ConceptQueryPlan.Request cycle = new ConceptQueryPlan.Request("de", "Plugins", Collections.singletonList(
+                new ConceptQueryPlan.Node("n1", "Classloader", Arrays.asList("Plugins", "Classloader"), "root",
+                        "Classloader Java", Arrays.asList("amazon.de", "ebay.de"))),
+                Collections.singletonList("Classloader Java"), Collections.<String>emptyList(), 3, 3);
+        ConceptQueryPlan.Request parsed = QueryPlanWire.parseRequest(
+                com.aresstack.askai.research.plan.QueryPlanWireCodec.encodeRequest(cycle));
+        assertEquals(3, parsed.getCycle());
+        assertEquals(Arrays.asList("amazon.de", "ebay.de"), parsed.getNodes().get(0).getFoundDomains());
+        assertEquals(1, QueryPlanWire.parseRequest(
+                com.aresstack.askai.research.plan.QueryPlanWireCodec.encodeRequest(sample())).getCycle());
+    }
+
+    @Test
     public void aRuntimePlanSurvivesIntoTheHost() {
         ConceptQueryPlan.Result runtime = new ConceptQueryPlan.Result(Arrays.asList(
                 new ConceptQueryPlan.NodePlan("root", "Java Plugin Isolation",

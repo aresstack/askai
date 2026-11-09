@@ -444,6 +444,29 @@ public final class ResearchRuntimeSettings {
     public static final int DEFAULT_PLAN_QUERIES_PER_NODE = 4;
     /** Accepted sources the whole Sources phase may collect through the plan. */
     public static final int DEFAULT_PLAN_PHASE_SOURCES = 60;
+    public static final String KEY_PLAN_CYCLES = "research.plan.cycles";
+    /**
+     * Research cycles: after each cycle the still uncovered nodes are planned again from another angle (M2). Three
+     * cycles give a node up to three times "Queries per node" queries before the plan reports it as a gap.
+     */
+    public static final int DEFAULT_PLAN_CYCLES = 3;
+
+    /**
+     * Whether every search skips shop, marketplace and document re-upload sites
+     * ({@link com.aresstack.askai.research.domain.scope.NonSourceHosts#DEFAULT}) as a host filter next to the
+     * user's blacklist. Default ON: a listing of a book is never a source of what the book says.
+     */
+    public static final String KEY_SKIP_NON_SOURCE_HOSTS = "research.search.skipNonSourceHosts";
+
+    public static boolean loadSkipNonSourceHosts(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_SKIP_NON_SOURCE_HOSTS, true);
+    }
+
+    public static void saveSkipNonSourceHosts(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_SKIP_NON_SOURCE_HOSTS, enabled);
+        }
+    }
 
     /** The caps of the search plan, read at each queue start. */
     public static com.aresstack.askai.research.plan.SearchPlanCoverage.Caps loadSearchPlanCaps(
@@ -451,7 +474,8 @@ public final class ResearchRuntimeSettings {
         return new com.aresstack.askai.research.plan.SearchPlanCoverage.Caps(
                 loadPositiveInt(store, KEY_PLAN_SOURCES_PER_NODE, DEFAULT_PLAN_SOURCES_PER_NODE),
                 loadPositiveInt(store, KEY_PLAN_QUERIES_PER_NODE, DEFAULT_PLAN_QUERIES_PER_NODE),
-                loadPositiveInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES));
+                loadPositiveInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES),
+                loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES));
     }
 
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";

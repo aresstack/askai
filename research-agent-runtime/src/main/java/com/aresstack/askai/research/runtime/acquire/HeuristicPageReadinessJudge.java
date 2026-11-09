@@ -31,6 +31,11 @@ public final class HeuristicPageReadinessJudge implements PageReadinessJudge {
         if (probe.consentPresent) {
             return Verdict.CONSENT_REQUIRED;
         }
+        // An error page ("404 - Seite nicht gefunden", "temporarily unavailable") has navigation text and a
+        // sorry note, often more than the threshold: its words decide, never its length.
+        if (ErrorPageSignals.isErrorPage(probe)) {
+            return Verdict.UNREADABLE;
+        }
         return probe.textLength >= minReadableChars ? Verdict.READABLE : Verdict.UNREADABLE;
     }
 }

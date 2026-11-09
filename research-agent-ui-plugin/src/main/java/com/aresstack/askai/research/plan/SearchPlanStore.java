@@ -52,6 +52,15 @@ public final class SearchPlanStore {
         return recordFile;
     }
 
+    /** The gap report of the last plan end ({@code search-plan/outcome.md}); rewritten at every end. */
+    public File outcomeFile() {
+        return new File(recordFile.getParentFile(), "outcome.md");
+    }
+
+    public synchronized void saveOutcome(String report) throws IOException {
+        AtomicFiles.write(outcomeFile(), report == null ? "" : report);
+    }
+
     /** The plan record, or {@code null} before the first plan. */
     public synchronized SearchPlanRecord loadRecord() throws CorruptProjectFileException {
         if (!recordFile.isFile()) {

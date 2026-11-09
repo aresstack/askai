@@ -120,8 +120,9 @@ public final class SearchPlanMerger {
                 }
             }
         }
-        return new Result(new SearchPlanRecord(phase, revision, language, recordNodes, order, priority), changed,
-                added);
+        // a re-merge (another START_RESEARCH) keeps the research cycle the plan is in
+        return new Result(new SearchPlanRecord(phase, revision, language, recordNodes, order, priority,
+                stored == null ? 1 : stored.getCycle()), changed, added);
     }
 
     /**
