@@ -2187,6 +2187,23 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             knowledge == null ? 3 : knowledge.minimumPassagesPerTopic,
                             knowledge == null ? 2 : knowledge.minimumDistinctSourcesPerTopic),
                     resources.outlineRun(), outlineGenerationExecutor);
+            outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
+                public com.aresstack.askai.research.outline.Outline enrich(
+                        com.aresstack.askai.research.outline.Outline generated,
+                        java.util.function.BooleanSupplier cancelled) {
+                    if (outlineChapterService() == null) {
+                        return generated;
+                    }
+                    com.aresstack.askai.research.outline.brief.OutlineEnricher.Result result =
+                            new com.aresstack.askai.research.outline.brief.OutlineEnricher(outlineBriefWorker,
+                                    outlinePassages).enrich(generated, briefContext(), cancelled);
+                    if (!result.getBriefFailures().isEmpty()) {
+                        System.err.println("[outline-brief] brief not generated for "
+                                + result.getBriefFailures().size() + " chapter(s)");
+                    }
+                    return result.getOutline();
+                }
+            });
         }
         return outlineGeneration;
     }
@@ -2198,6 +2215,83 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * knowledge or outline store.
      */
     private com.aresstack.askai.research.outline.brief.OutlineChapterService outlineChapterService;
+    private com.aresstack.askai.research.outline.brief.OutlineBriefWorker outlineBriefWorker;
+    private com.aresstack.askai.research.outline.brief.OutlinePassages outlinePassages;
+
+    /** What every label and brief call knows: the approved title, mission, language and recorded blacklist. */
+    private com.aresstack.askai.research.outline.brief.BriefContext briefContext() {
+        com.aresstack.askai.research.book.FrozenConcept frozen;
+        try {
+            frozen = frozenConcept();
+        } catch (Exception corrupt) {
+            throw new IllegalStateException(corrupt.getMessage(), corrupt);
+        }
+        if (frozen == null) {
+            throw new IllegalStateException("There is no approved concept yet.");
+        }
+        return new com.aresstack.askai.research.outline.brief.BriefContext(bookTitle(frozen), frozen.getMission(),
+                frozen.getLanguage(), frozen.getPin().getBlacklist());
+    }
+
+    /** One corpus read per outline operation (plan PR 24): passage texts, sources and stored vectors. */
+    private static final class CorpusOutlinePassages
+            implements com.aresstack.askai.research.outline.brief.OutlinePassages {
+        private final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpus;
+        private final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader.Corpus read;
+        private final java.util.Map<String, String> texts = new java.util.HashMap<String, String>();
+
+        CorpusOutlinePassages(
+                com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpus) {
+            this(corpus, null);
+        }
+
+        private CorpusOutlinePassages(
+                com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpus,
+                com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader.Corpus read) {
+            this.corpus = corpus;
+            this.read = read;
+            if (read != null) {
+                for (com.aresstack.askai.research.domain.Passage passage : read.getPassages()) {
+                    texts.put(passage.getPassageId(), passage.getText());
+                }
+            }
+        }
+
+        public com.aresstack.askai.research.outline.brief.OutlinePassages snapshot() {
+            return new CorpusOutlinePassages(corpus, corpus.read(com.aresstack.askai.research.knowledge.processing
+                    .live.ActiveKnowledgeCorpusReader.SourceFilter.ALL));
+        }
+
+        private com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader.Corpus corpus() {
+            if (read == null) {
+                throw new IllegalStateException("read passages through snapshot()");
+            }
+            return read;
+        }
+
+        public java.util.Map<String, float[]> vectors(java.util.List<String> passageIds) {
+            java.util.Map<String, float[]> found = new java.util.HashMap<String, float[]>();
+            for (String id : passageIds) {
+                com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector vector =
+                        corpus().getVectors().get(id);
+                if (vector != null) {
+                    found.put(id, vector.getValues());
+                }
+            }
+            return found;
+        }
+
+        public String text(String passageId) {
+            corpus();
+            String text = texts.get(passageId);
+            return text == null ? "" : text;
+        }
+
+        public String sourceId(String passageId) {
+            String source = corpus().sourceIdOf(passageId);
+            return source == null ? "" : source;
+        }
+    }
 
     public synchronized com.aresstack.askai.research.outline.brief.OutlineChapterService outlineChapterService() {
         final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
@@ -2230,56 +2324,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     System.err.println("[outline-brief] " + c);
                                 }
                             });
-            final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpus =
-                    resources.corpusReader();
+            outlineBriefWorker = worker;
             com.aresstack.askai.research.outline.brief.OutlinePassages passages =
-                    new com.aresstack.askai.research.outline.brief.OutlinePassages() {
-                        public java.util.Map<String, float[]> vectors(java.util.List<String> passageIds) {
-                            com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader
-                                    .Corpus whole = corpus.read(com.aresstack.askai.research.knowledge.processing
-                                    .live.ActiveKnowledgeCorpusReader.SourceFilter.ALL);
-                            java.util.Map<String, float[]> found = new java.util.HashMap<String, float[]>();
-                            for (String id : passageIds) {
-                                com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector vector =
-                                        whole.getVectors().get(id);
-                                if (vector != null) {
-                                    found.put(id, vector.getValues());
-                                }
-                            }
-                            return found;
-                        }
-
-                        public String text(String passageId) {
-                            com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader
-                                    .Corpus whole = corpus.read(com.aresstack.askai.research.knowledge.processing
-                                    .live.ActiveKnowledgeCorpusReader.SourceFilter.ALL);
-                            for (com.aresstack.askai.research.domain.Passage passage : whole.getPassages()) {
-                                if (passage.getPassageId().equals(passageId)) {
-                                    return passage.getText();
-                                }
-                            }
-                            return "";
-                        }
-                    };
+                    new CorpusOutlinePassages(resources.corpusReader());
+            outlinePassages = passages;
             outlineChapterService = new com.aresstack.askai.research.outline.brief.OutlineChapterService(
                     outlineWorkspace(), outlineWorkspace().jobs(),
                     new com.aresstack.askai.research.outline.brief.ChapterRegenerator(worker, passages),
-                    new java.util.function.Supplier<com.aresstack.askai.research.outline.brief.BriefContext>() {
-                        public com.aresstack.askai.research.outline.brief.BriefContext get() {
-                            com.aresstack.askai.research.book.FrozenConcept frozen;
-                            try {
-                                frozen = frozenConcept();
-                            } catch (Exception corrupt) {
-                                throw new IllegalStateException(corrupt.getMessage(), corrupt);
-                            }
-                            if (frozen == null) {
-                                throw new IllegalStateException("There is no approved concept yet.");
-                            }
-                            return new com.aresstack.askai.research.outline.brief.BriefContext(
-                                    frozen.getDeliverable(), frozen.getMission(), frozen.getLanguage(),
-                                    frozen.getPin().getBlacklist());
-                        }
-                    }, null);
+                    this::briefContext, null);
         }
         return outlineChapterService;
     }

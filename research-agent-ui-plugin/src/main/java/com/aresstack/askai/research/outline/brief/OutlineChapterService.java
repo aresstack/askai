@@ -17,12 +17,19 @@ public final class OutlineChapterService {
 
     /** An operation's outcome as one line for the user or the model, and the brief failure if any. */
     public static final class Outcome {
+        private final String chapterId;
         private final String message;
         private final String briefFailure;
 
-        Outcome(String message, String briefFailure) {
+        Outcome(String chapterId, String message, String briefFailure) {
+            this.chapterId = chapterId;
             this.message = message;
             this.briefFailure = briefFailure;
+        }
+
+        /** The regenerated or the newly adopted chapter's id. */
+        public String getChapterId() {
+            return chapterId;
         }
 
         public String getMessage() {
@@ -64,7 +71,7 @@ public final class OutlineChapterService {
                     sectionCount, comment);
             workspace.save(result.getOutline(), revision, clock.getAsLong());
             String title = stored.chapter(chapterId).getTitle();
-            return new Outcome(result.getBriefFailure() == null ? "Regenerated \"" + title + "\"."
+            return new Outcome(chapterId, result.getBriefFailure() == null ? "Regenerated \"" + title + "\"."
                     : "Regenerated \"" + title + "\". " + result.getBriefFailure(), result.getBriefFailure());
         }
     }
@@ -75,8 +82,9 @@ public final class OutlineChapterService {
         try (OutlineJobGuard.Job ignored = jobs.begin("Adding a suggested chapter")) {
             long revision = workspace.workingRevision();
             ChapterRegenerator.Result result = regenerator.adopt(workspace.current(), context.get(), clusterId);
-            workspace.save(result.getOutline(), revision, clock.getAsLong());
-            return new Outcome(result.getBriefFailure() == null ? "Added the suggested chapter."
+            java.util.List<com.aresstack.askai.research.outline.OutlineChapter> saved =
+                    workspace.save(result.getOutline(), revision, clock.getAsLong()).outline.getChapters();
+            return new Outcome(saved.get(saved.size() - 1).getId(), result.getBriefFailure() == null ? "Added the suggested chapter."
                     : "Added the suggested chapter. " + result.getBriefFailure(), result.getBriefFailure());
         }
     }

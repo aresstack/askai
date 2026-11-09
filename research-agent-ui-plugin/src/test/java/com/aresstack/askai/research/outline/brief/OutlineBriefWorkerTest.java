@@ -132,6 +132,11 @@ public class OutlineBriefWorkerTest {
         public String text(String passageId) {
             return "Text von " + passageId;
         }
+
+        @Override
+        public String sourceId(String passageId) {
+            return passageId.equals("p10") || passageId.equals("p11") ? "s1" : "s-" + passageId;
+        }
     }
 
     @Test
@@ -234,6 +239,9 @@ public class OutlineBriefWorkerTest {
                 regenerated.getSections().get(2).getTitle(), regenerated.getSections().get(3).getTitle()));
         assertEquals(Arrays.asList("p10", "p11"), regenerated.getSections().get(0).getProvenance().getPassageIds());
         assertEquals(300, regenerated.getSections().get(0).getBrief().getWordTarget());
+        assertTrue(regenerated.getSections().get(0).isThin());
+        assertFalse(regenerated.getSections().get(1).isThin());
+        assertTrue(briefs.calls.get(0).get(1).getContent().contains("[1] Thema A (summary: Kurz.)"));
         for (OutlineSection section : regenerated.getSections()) {
             assertFalse(stored.allIds().contains(section.getId()));
             assertEquals(chapterId, section.getParentId());
@@ -296,6 +304,53 @@ public class OutlineBriefWorkerTest {
         assertEquals(1, adopted.getCandidates().size());
         assertEquals("c8", adopted.getCandidates().get(0).getClusterId());
         assertEquals(520, adopted.getChapters().get(3).getSections().get(0).getBrief().getWordTarget());
+    }
+
+    @Test
+    public void unlabelledGroupsCarryExcerptsAsMaterialForTheBriefCall() {
+        Outline stored = stored();
+        ScriptedChat briefs = new ScriptedChat("briefs", briefAnswer(2));
+        ChapterRegenerator regenerator = new ChapterRegenerator(new OutlineBriefWorker(new ScriptedChat("labels"),
+                briefs, null), new Passages());
+
+        regenerator.regenerate(stored, CONTEXT, stored.getChapters().get(1).getId(), 2, "");
+
+        String prompt = briefs.calls.get(0).get(1).getContent();
+        assertTrue(prompt, prompt.contains("[1] Praxis, part 1 (material: Text von p1"));
+    }
+
+    @Test
+    public void generationLabelsUntitledSectionsAndCandidatesAndBriefsEveryChapter() {
+        Outline generated = stored();
+        OutlineChapter clustered = generated.getChapters().get(1);
+        List<OutlineSection> untitled = new ArrayList<OutlineSection>();
+        for (OutlineSection section : clustered.getSections()) {
+            untitled.add(section.withUntitled(true));
+        }
+        List<OutlineChapter> chapters = new ArrayList<OutlineChapter>(generated.getChapters());
+        chapters.set(1, clustered.withSections(untitled));
+        generated = generated.withChapters(chapters).withCandidates(Collections.singletonList(
+                new com.aresstack.askai.research.outline.OutlineCandidate("c7", "Förderung",
+                        Arrays.asList("p30"), Arrays.asList("p30"), 2)));
+        ScriptedChat labels = new ScriptedChat("labels");
+        labels.byPrompt = prompt -> "{\"title\":\"Benannt\",\"summary\":\"Kurz.\"}";
+        ScriptedChat briefs = new ScriptedChat("briefs");
+        briefs.byPrompt = prompt -> briefAnswer(prompt.contains("[3]") ? 3 : prompt.contains("[2]") ? 2 : 1);
+
+        OutlineEnricher.Result result = new OutlineEnricher(new OutlineBriefWorker(labels, briefs, null),
+                new Passages()).enrich(generated, CONTEXT, () -> false);
+
+        OutlineChapter labelled = result.getOutline().getChapters().get(1);
+        assertEquals("Benannt", labelled.getSections().get(0).getTitle());
+        assertFalse(labelled.getSections().get(0).isUntitled());
+        assertEquals("Grundlagen", result.getOutline().getChapters().get(0).getTitle());
+        assertEquals("Physik", result.getOutline().getChapters().get(0).getSections().get(0).getTitle());
+        assertEquals("Zweck 1", result.getOutline().getChapters().get(2).getSections().get(0).getBrief()
+                .getPurpose());
+        assertEquals("Benannt", result.getOutline().getCandidates().get(0).getSuggestedTitle());
+        assertEquals(3, labels.calls.size());
+        assertEquals(3, briefs.calls.size());
+        assertTrue(result.getBriefFailures().isEmpty());
     }
 
     @Test

@@ -65,6 +65,9 @@ final class BriefContract {
             OutlineSection section = sections.get(i);
             text.append('[').append(i + 1).append("] ").append(section.getTitle());
             OutlineBrief brief = section.getBrief();
+            if (!brief.getPurpose().isEmpty()) {
+                text.append(" (summary: ").append(brief.getPurpose()).append(')');
+            }
             if (!brief.getKeyPoints().isEmpty()) {
                 text.append(" (material: ").append(String.join("; ", brief.getKeyPoints())).append(')');
             }

@@ -58,13 +58,26 @@ public final class OutlineEditorView extends JPanel {
          * chapter). Runs off the EDT; returns the outcome line ("Brief not generated ..." on a failed brief).
          * @throws RuntimeException with the reason it was refused
          */
-        default String regenerateChapter(String chapterId, int sections, String comment) {
+        default JobOutcome regenerateChapter(String chapterId, int sections, String comment) {
             throw new UnsupportedOperationException("Chapter regeneration is not available.");
         }
 
         /** Plan PR 24: adopt a suggested chapter (candidate cluster). Runs off the EDT. */
-        default String adoptCandidate(String clusterId) {
+        default JobOutcome adoptCandidate(String clusterId) {
             throw new UnsupportedOperationException("Suggested chapters are not available.");
+        }
+    }
+
+    /** A chapter operation's outcome: the chapter it touched, the line to show, whether its brief failed. */
+    public static final class JobOutcome {
+        final String chapterId;
+        final String message;
+        final boolean briefFailed;
+
+        public JobOutcome(String chapterId, String message, boolean briefFailed) {
+            this.chapterId = chapterId;
+            this.message = message;
+            this.briefFailed = briefFailed;
         }
     }
 
@@ -322,14 +335,14 @@ public final class OutlineEditorView extends JPanel {
                     JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
             if (answer == JOptionPane.OK_OPTION) {
                 int sections = resplit.isSelected() ? (Integer) count.getValue() : 0;
-                runChapterJob(chapter.getId(), () -> actions.regenerateChapter(chapter.getId(), sections,
+                runChapterJob(() -> actions.regenerateChapter(chapter.getId(), sections,
                         comment.getText().trim()));
             }
         });
         retryBriefButton.addActionListener(e -> {
             OutlineEntry entry = selectedEntry();
             if (entry instanceof OutlineChapter) {
-                runChapterJob(entry.getId(), () -> actions.regenerateChapter(entry.getId(), 0, ""));
+                runChapterJob(() -> actions.regenerateChapter(entry.getId(), 0, ""));
             }
         });
         suggestedButton.addActionListener(e -> {
@@ -349,7 +362,7 @@ public final class OutlineEditorView extends JPanel {
             if (chosen != null) {
                 int index = java.util.Arrays.asList(titles).indexOf(chosen);
                 String clusterId = candidates.get(index).getClusterId();
-                runChapterJob(null, () -> actions.adoptCandidate(clusterId));
+                runChapterJob(() -> actions.adoptCandidate(clusterId));
             }
         });
         renameButton.addActionListener(e -> {
@@ -547,16 +560,16 @@ public final class OutlineEditorView extends JPanel {
     }
 
     /** Runs a chapter operation off the EDT; the status line shows its outcome or refusal. */
-    private void runChapterJob(final String chapterId, final java.util.concurrent.Callable<String> job) {
+    private void runChapterJob(final java.util.concurrent.Callable<JobOutcome> job) {
         if (actions == null || chapterJobRunning) {
             return;
         }
         chapterJobRunning = true;
         status.setText("Working on the outline...");
         updateButtons();
-        new javax.swing.SwingWorker<String, Void>() {
+        new javax.swing.SwingWorker<JobOutcome, Void>() {
             @Override
-            protected String doInBackground() throws Exception {
+            protected JobOutcome doInBackground() throws Exception {
                 return job.call();
             }
 
@@ -564,15 +577,16 @@ public final class OutlineEditorView extends JPanel {
             protected void done() {
                 chapterJobRunning = false;
                 try {
-                    String outcome = get();
-                    if (chapterId != null) {
-                        if (outcome != null && outcome.contains("Brief not generated")) {
-                            briefFailures.add(chapterId);
+                    JobOutcome outcome = get();
+                    if (outcome != null && outcome.chapterId != null) {
+                        if (outcome.briefFailed) {
+                            briefFailures.add(outcome.chapterId);
                         } else {
-                            briefFailures.remove(chapterId);
+                            briefFailures.remove(outcome.chapterId);
                         }
                     }
-                    status.setText(outcome == null ? " " : outcome);
+                    status.setText(outcome == null || outcome.message == null ? " " : outcome.message);
+                    rebuildTree(snapshot.outline, selectedId());
                 } catch (java.util.concurrent.ExecutionException failed) {
                     Throwable cause = failed.getCause() == null ? failed : failed.getCause();
                     status.setText(cause.getMessage() == null ? cause.toString() : cause.getMessage());

@@ -87,6 +87,7 @@ public final class ChapterRegenerator {
         if (chapter == null) {
             throw new IllegalArgumentException("No chapter \"" + chapterId + "\" in the outline.");
         }
+        OutlinePassages view = passages.snapshot();
         OutlineChapter working = chapter;
         if (sectionCount != 0) {
             if (sectionCount < MIN_SECTIONS || sectionCount > MAX_SECTIONS) {
@@ -97,7 +98,7 @@ public final class ChapterRegenerator {
                 throw new IllegalArgumentException("\"" + chapter.getTitle() + "\" follows the concept. Split or "
                         + "merge its sections in the outline editor.");
             }
-            working = chapter.withSections(resplit(context, chapter, sectionCount, comment));
+            working = chapter.withSections(resplit(view, context, chapter, sectionCount, comment));
         }
         OutlineBriefWorker.ChapterBriefs briefs = worker.brief(context, working, comment);
         List<OutlineChapter> chapters = new ArrayList<OutlineChapter>();
@@ -113,7 +114,8 @@ public final class ChapterRegenerator {
      */
     public Result adopt(Outline stored, BriefContext context, String clusterId, String suggestedTitle,
                         List<String> passageIds, List<String> representativePassageIds, int wordTarget) {
-        OutlineLabel label = worker.label(context, clusterId, "", texts(representativePassageIds), "");
+        OutlinePassages view = passages.snapshot();
+        OutlineLabel label = worker.label(context, clusterId, "", texts(view, representativePassageIds), "");
         String title = label != null ? label.getTitle() : clean(suggestedTitle);
         if (title.isEmpty()) {
             throw new IllegalArgumentException("The suggested chapter has no title yet. Label it and try again.");
@@ -121,7 +123,8 @@ public final class ChapterRegenerator {
         String summary = label != null ? label.getSummary() : "";
         OutlineProvenance provenance = new OutlineProvenance("", Collections.singletonList(clusterId), passageIds);
         OutlineSection section = OutlineSection.draft(title, new OutlineBrief(summary,
-                Collections.<String>emptyList(), Math.max(0, wordTarget)), provenance);
+                label != null ? Collections.<String>emptyList() : material(view, representativePassageIds),
+                Math.max(0, wordTarget)), provenance).withThin(distinctSources(view, passageIds) < 2);
         OutlineChapter chapter = OutlineChapter.draft(title, new OutlineBrief(summary,
                 Collections.<String>emptyList(), 0), provenance, Collections.singletonList(section));
         OutlineBriefWorker.ChapterBriefs briefs = worker.brief(context, chapter, "");
@@ -162,29 +165,34 @@ public final class ChapterRegenerator {
         return count == 0 ? 750 : total / count;
     }
 
-    private List<OutlineSection> resplit(BriefContext context, OutlineChapter chapter, int count, String comment) {
+    private List<OutlineSection> resplit(OutlinePassages view, BriefContext context, OutlineChapter chapter,
+                                         int count, String comment) {
         Set<String> passageIds = new LinkedHashSet<String>(chapter.getProvenance().getPassageIds());
         int words = 0;
         for (OutlineSection section : chapter.getSections()) {
             passageIds.addAll(section.getProvenance().getPassageIds());
             words += section.getBrief().getWordTarget();
         }
-        Map<String, float[]> vectors = passages.vectors(new ArrayList<String>(passageIds));
+        Map<String, float[]> vectors = view.vectors(new ArrayList<String>(passageIds));
         List<List<String>> groups = SectionReclusterer.split(vectors, count);
         List<OutlineSection> sections = new ArrayList<OutlineSection>();
         for (int i = 0; i < groups.size(); i++) {
             List<String> group = groups.get(i);
             String clusterId = chapter.getId() + "~r" + count + "." + (i + 1);
             String fallback = chapter.getTitle() + ", part " + (i + 1);
+            List<String> representatives = group.subList(0, Math.min(LabelContract.MAX_EXCERPTS, group.size()));
             OutlineLabel label = worker.label(context, clusterId, chapter.getTitle(),
-                    texts(group.subList(0, Math.min(LabelContract.MAX_EXCERPTS, group.size()))), comment);
+                    texts(view, representatives), comment);
             String title = label == null ? fallback : label.getTitle();
             String purpose = label == null ? "" : label.getSummary();
+            List<String> keyPoints = label == null ? material(view, representatives)
+                    : Collections.<String>emptyList();
             List<String> sorted = new ArrayList<String>(group);
             Collections.sort(sorted);
-            sections.add(OutlineSection.draft(title, new OutlineBrief(purpose, Collections.<String>emptyList(),
-                    share(words, count, i)), new OutlineProvenance(chapter.getProvenance().getConceptNodeId(),
-                    Collections.singletonList(clusterId), sorted)).withUntitled(label == null));
+            sections.add(OutlineSection.draft(title, new OutlineBrief(purpose, keyPoints, share(words, count, i)),
+                    new OutlineProvenance(chapter.getProvenance().getConceptNodeId(),
+                            Collections.singletonList(clusterId), sorted))
+                    .withUntitled(label == null).withThin(distinctSources(view, sorted) < 2));
         }
         return sections;
     }
@@ -194,11 +202,41 @@ public final class ChapterRegenerator {
         return words / count + (index < words % count ? 1 : 0);
     }
 
-    private List<String> texts(List<String> passageIds) {
+    /** Distinct known sources of the passages; a section below two is flagged thin (as PR 22 does). */
+    static int distinctSources(OutlinePassages view, List<String> passageIds) {
+        Set<String> sources = new LinkedHashSet<String>();
+        for (String id : passageIds) {
+            String source = view.sourceId(id);
+            if (source != null && !source.isEmpty()) {
+                sources.add(source);
+            }
+        }
+        return sources.size();
+    }
+
+    /**
+     * Without a label the brief call still needs to know what a group holds: up to three short excerpts of its
+     * representative passages, shown to the model as the section's material.
+     */
+    static List<String> material(OutlinePassages view, List<String> passageIds) {
+        List<String> points = new ArrayList<String>();
+        for (String text : texts(view, passageIds)) {
+            if (points.size() == 3) {
+                break;
+            }
+            String value = text.replaceAll("\\s+", " ").trim();
+            points.add(value.length() > MATERIAL_CHARS ? value.substring(0, MATERIAL_CHARS) + "..." : value);
+        }
+        return points;
+    }
+
+    static final int MATERIAL_CHARS = 160;
+
+    static List<String> texts(OutlinePassages view, List<String> passageIds) {
         List<String> texts = new ArrayList<String>();
         if (passageIds != null) {
             for (String id : passageIds) {
-                String text = passages.text(id);
+                String text = view.text(id);
                 if (text != null && !text.trim().isEmpty()) {
                     texts.add(text);
                 }

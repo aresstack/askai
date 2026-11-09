@@ -130,12 +130,12 @@ public final class ResearchOutlineEditorViewContribution implements ArtifactView
                 research.derivedActions().generateOutline();
             }
 
-            public String regenerateChapter(String chapterId, int sections, String comment) {
-                return chapterService(research).regenerateChapter(chapterId, sections, comment).getMessage();
+            public OutlineEditorView.JobOutcome regenerateChapter(String chapterId, int sections, String comment) {
+                return outcome(chapterService(research).regenerateChapter(chapterId, sections, comment));
             }
 
-            public String adoptCandidate(String clusterId) {
-                return chapterService(research).adoptCandidate(clusterId).getMessage();
+            public OutlineEditorView.JobOutcome adoptCandidate(String clusterId) {
+                return outcome(chapterService(research).adoptCandidate(clusterId));
             }
         };
     }
@@ -147,5 +147,11 @@ public final class ResearchOutlineEditorViewContribution implements ArtifactView
             throw new IllegalStateException("Chapter regeneration needs the model port and the knowledge store.");
         }
         return service;
+    }
+
+    private static OutlineEditorView.JobOutcome outcome(
+            com.aresstack.askai.research.outline.brief.OutlineChapterService.Outcome outcome) {
+        return new OutlineEditorView.JobOutcome(outcome.getChapterId(), outcome.getMessage(),
+                outcome.getBriefFailure() != null);
     }
 }
