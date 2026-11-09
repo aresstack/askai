@@ -211,6 +211,18 @@ public class ConceptSeededOutlineBuilderTest {
     }
 
     @Test
+    public void onlyArrayValuedPropertiesAreConceptCards() {
+        List<ConceptOutlineNode> nodes = ConceptOutlineNode.firstLevel(
+                "{\"concept\":[{\"Energy\":[\"a scalar note\",{\"Solar\":[]},{\"note\":\"x\"}]},"
+                        + "{\"Storage\":[]}]}", null, null);
+        assertEquals(2, nodes.size());
+        assertEquals("Energy", nodes.get(0).getLabel());
+        assertEquals(1, nodes.get(0).getChildren().size());
+        assertEquals("Solar", nodes.get(0).getChildren().get(0).getLabel());
+        assertEquals("path:Energy/Solar", nodes.get(0).getChildren().get(0).getId());
+    }
+
+    @Test
     public void excludedSourceContributesNothingWhileALaterBlacklistEntryDoesNot() {
         List<ResearchSourceRecord> records = Arrays.asList(
                 record("s1", SourceStatus.ACCEPTED, "Solar basics"),
