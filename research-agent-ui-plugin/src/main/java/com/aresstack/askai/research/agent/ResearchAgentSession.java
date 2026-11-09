@@ -2268,6 +2268,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private volatile com.aresstack.askai.research.drafting.WritingJobRunner writingRunner;
     private volatile com.aresstack.askai.research.drafting.ProductiveSectionContexts writingContexts;
     private volatile String lastWritingOutcome = "";
+    static final String NO_WRITER = "No writer model or knowledge index is available, so nothing was written.";
+    /** The section writer (the PR-28 writer, or one a host or test sets); {@code null} without one. */
+    private volatile com.aresstack.askai.research.drafting.SectionWriter sectionWriter;
+
+    /** Replace the section writer (a scripted writer in tests, another backend in a host). */
+    public void setSectionWriter(com.aresstack.askai.research.drafting.SectionWriter writer) {
+        this.sectionWriter = writer;
+    }
     /** Plan PR 38 in the writer path: the acronym findings per accepted source, refreshed before each run. */
     private volatile com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService writingAcronyms;
 
@@ -2310,7 +2318,19 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (manuscript == null || resources.getProjectContext() == null) {
             return;
         }
-        com.aresstack.askai.research.drafting.SectionWriter writer = productiveSectionWriter(resources, manuscript);
+        sectionWriter = productiveSectionWriter(resources, manuscript);
+        com.aresstack.askai.research.drafting.SectionWriter writer =
+                new com.aresstack.askai.research.drafting.SectionWriter() {
+                    public com.aresstack.askai.research.manuscript.SectionRevision.Builder write(
+                            com.aresstack.askai.research.drafting.SectionWriteRequest request,
+                            Cancellation cancellation) throws Exception {
+                        com.aresstack.askai.research.drafting.SectionWriter current = sectionWriter;
+                        if (current == null) {
+                            throw new IllegalStateException(NO_WRITER);
+                        }
+                        return current.write(request, cancellation);
+                    }
+                };
         final java.util.concurrent.atomic.AtomicReference<com.aresstack.askai.research.drafting.WritingJobRunner>
                 runnerRef = new java.util.concurrent.atomic.AtomicReference<
                 com.aresstack.askai.research.drafting.WritingJobRunner>();
@@ -2415,13 +2435,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 : hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class);
         if (port == null || resources.outlineEmbeddings() == null || resources.writerIndex() == null
                 || resources.corpusReader() == null || resources.getRepository() == null) {
-            return new com.aresstack.askai.research.drafting.SectionWriter() {
-                public com.aresstack.askai.research.manuscript.SectionRevision.Builder write(
-                        com.aresstack.askai.research.drafting.SectionWriteRequest request,
-                        Cancellation cancellation) {
-                    throw new IllegalStateException("No writer model or knowledge index is available.");
-                }
-            };
+            return null;
         }
         com.aresstack.askai.research.drafting.ProductiveSectionContexts contexts =
                 new com.aresstack.askai.research.drafting.ProductiveSectionContexts(resources.writerProjectId(),
@@ -2468,6 +2482,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         String refusal = manuscriptWriteRefusal();
         if (refusal != null) {
             return refusal;
+        }
+        if (sectionWriter == null) {
+            return NO_WRITER;
         }
         return runner.start(kind, id, comment);
     }
