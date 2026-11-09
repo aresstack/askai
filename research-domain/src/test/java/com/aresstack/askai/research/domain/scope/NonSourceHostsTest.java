@@ -35,6 +35,26 @@ public class NonSourceHostsTest {
     }
 
     @Test
+    public void aShopCataloguePageIsRecognisedByItsUrlShape() {
+        // live run 2026-11-09: shop.bueroheuser.de and a Shopify shop counted as sources of a concept node
+        assertTrue(NonSourceHosts.isShopCataloguePage("https://shop.bueroheuser.de/page/arbeitsschutz-bereiche"));
+        assertTrue(NonSourceHosts.isShopCataloguePage("https://store.example.com/x"));
+        assertTrue(NonSourceHosts.isShopCataloguePage("https://www.stahlgear.de/products/sicherheitsschuh"));
+        assertTrue(NonSourceHosts.isShopCataloguePage("https://www.stahlgear.de/collections/arbeitsschutz?page=2"));
+        assertTrue(NonSourceHosts.isShopCataloguePage("https://example.de/produkte/helm-123"));
+        assertFalse("a shop's editorial page can be a source",
+                NonSourceHosts.isShopCataloguePage("https://www.stahlgear.de/pages/handwerk-aktuell-v1"));
+        assertFalse(NonSourceHosts.isShopCataloguePage("https://www.stahlgear.de/blogs/news/wearables"));
+        assertFalse("a bare two-label host has no shop label", NonSourceHosts.isShopCataloguePage("https://shop.de/x"));
+        assertFalse(NonSourceHosts.isShopCataloguePage("https://www.haufe.de/id/beitrag/x.html"));
+        assertFalse(NonSourceHosts.isShopCataloguePage("https://example.org/research/productsafety"));
+        assertFalse(NonSourceHosts.isShopCataloguePage(""));
+        assertFalse(NonSourceHosts.isShopCataloguePage(null));
+        assertTrue(NonSourceHosts.isNonSourcePage("https://example.org/search?q=x"));
+        assertTrue(NonSourceHosts.isNonSourcePage("https://shop.example.de/x"));
+    }
+
+    @Test
     public void aSearchResultPageOfAWebsiteIsRecognisedByItsUrlShape() {
         assertTrue(NonSourceHosts.isSearchResultPage(
                 "https://www.dguv.de/de/suche/index.jsp?query=p306-001&filter=language%3Ade&page=118"));

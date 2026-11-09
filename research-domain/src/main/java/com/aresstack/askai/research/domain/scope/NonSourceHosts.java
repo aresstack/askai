@@ -44,6 +44,63 @@ public final class NonSourceHosts {
     private NonSourceHosts() {
     }
 
+    /** A search-result page or a shop catalogue page: never a source, whatever the query. */
+    public static boolean isNonSourcePage(String url) {
+        return isSearchResultPage(url) || isShopCataloguePage(url);
+    }
+
+    /**
+     * Whether the URL is a shop's catalogue page by its shape, on any host: a {@code shop}/{@code store}/{@code
+     * onlineshop} host label ({@code shop.bueroheuser.de}), or a Shopify-style {@code /products/},
+     * {@code /collections/}, {@code /product/}, {@code /cart}, {@code /checkout} path ({@code stahlgear.de/products/…}).
+     * A shop's editorial pages ({@code /pages/…}, {@code /blogs/…}) are not caught: a manufacturer's guide is a
+     * source even when the same host sells the product.
+     */
+    public static boolean isShopCataloguePage(String url) {
+        if (url == null) {
+            return false;
+        }
+        String value = url.trim().toLowerCase(Locale.ROOT);
+        int scheme = value.indexOf("://");
+        if (scheme < 0) {
+            return false;
+        }
+        String rest = value.substring(scheme + 3);
+        int slash = rest.indexOf('/');
+        String host = slash < 0 ? rest : rest.substring(0, slash);
+        int at = host.lastIndexOf('@');
+        if (at >= 0) {
+            host = host.substring(at + 1);
+        }
+        int colon = host.indexOf(':');
+        if (colon >= 0) {
+            host = host.substring(0, colon);
+        }
+        String[] labels = host.split("\\.");
+        if (labels.length >= 3) {
+            String first = labels[0];
+            if (first.equals("shop") || first.equals("store") || first.equals("onlineshop") || first.equals("eshop")
+                    || first.equals("webshop")) {
+                return true;
+            }
+        }
+        String pathAndQuery = slash < 0 ? "" : rest.substring(slash);
+        int cut = pathAndQuery.indexOf('?');
+        String path = cut < 0 ? pathAndQuery : pathAndQuery.substring(0, cut);
+        cut = path.indexOf('#');
+        if (cut >= 0) {
+            path = path.substring(0, cut);
+        }
+        for (String step : path.split("/")) {
+            if (step.equals("products") || step.equals("product") || step.equals("collections")
+                    || step.equals("produkt") || step.equals("produkte") || step.equals("cart")
+                    || step.equals("checkout") || step.equals("warenkorb")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Whether the URL is a search-result page of some website: a {@code q}, {@code query}, {@code search},
      * {@code suche} or {@code keyword} parameter with a value, or a {@code /search}, {@code /suche}, {@code /find}

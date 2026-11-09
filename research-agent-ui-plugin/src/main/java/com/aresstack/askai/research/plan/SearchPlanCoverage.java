@@ -10,9 +10,12 @@ import java.util.Set;
 
 /**
  * Coverage and caps of the search plan (plan PR 14, D5). A node is <em>covered</em> once it has
- * {@link Caps#getSourcesPerNode()} accepted sources from at least {@link #MIN_DOMAINS} domains. A node whose query
- * budget is spent, or that has no pending entry left, before that is <em>exhausted</em>: no further automatic query
- * runs for it, and it stays uncovered. Any other node is <em>open</em>.
+ * {@link Caps#getSourcesPerNode()} accepted sources from at least {@link #MIN_DOMAINS} domains <em>and</em> none of
+ * its planned queries is still pending: the planner's variants are the angles of the node (measurement, safety,
+ * law, …), and a node whose base query alone met the source minimum is not researched — the live run of
+ * 2026-11-09 declared all five nodes covered after six of nineteen queries that way. A node whose query budget is
+ * spent, or that has no pending entry left, without the minimum is <em>exhausted</em>: no further automatic query
+ * runs for it in this cycle, and it stays uncovered until a later cycle covers it. Any other node is <em>open</em>.
  */
 public final class SearchPlanCoverage {
 
@@ -148,7 +151,7 @@ public final class SearchPlanCoverage {
                 }
             }
             State state;
-            if (sources.size() >= caps.getSourcesPerNode() && hosts.size() >= MIN_DOMAINS) {
+            if (sources.size() >= caps.getSourcesPerNode() && hosts.size() >= MIN_DOMAINS && !pending) {
                 state = State.COVERED;
             } else if (run >= caps.queriesUpTo(caps.getCycles()) || !pending) {
                 // exhausted for now: the queue plans another cycle for it while cycles are left

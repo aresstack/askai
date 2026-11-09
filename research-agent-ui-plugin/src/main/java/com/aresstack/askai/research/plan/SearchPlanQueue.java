@@ -23,8 +23,9 @@ import java.util.concurrent.Executor;
  * ({@link #deferUntilEntryEnds}).</li>
  * <li>"Stop search plan" ({@link #stop}) cancels the current query, leaves it pending and stops the queue; "Run
  * search plan" ({@link #run}) continues. A phase change stops the queue through its registered job.</li>
- * <li>Priority entries run first, then the plan order. Entries of covered nodes and of nodes whose query budget is
- * spent are skipped; the phase cap stops the queue. Planned queries keep the recorded working language.</li>
+ * <li>Priority entries run first, then the plan order. Every planned query of a node runs (the variants are the
+ * node's angles; a node is covered only once they ran, {@link SearchPlanCoverage}); entries of nodes whose query
+ * budget is spent are skipped; the phase cap stops the queue. Planned queries keep the recorded working language.</li>
  * <li>Research cycles (M2): when no pending entry is left and nodes are still uncovered, the queue asks the
  * {@link Replanner} for the queries of the next cycle ({@link SearchPlanCycles}) while cycles are left, and runs
  * them. The {@link Outcome} says why the plan ended: every node covered, the research budget spent, the phase
@@ -506,9 +507,10 @@ public final class SearchPlanQueue {
                                 continue;
                             }
                         }
-                        int have = node == null ? 0 : node.getSources().size();
+                        // Every planned query may add up to the node's source number: the variants are the
+                        // node's angles, not spare queries for a base query that came back short.
                         int phaseLeft = c.getPhaseSources() - phaseUsed;
-                        perQueryCap = Math.max(1, Math.min(c.getSourcesPerNode() - have, phaseLeft));
+                        perQueryCap = Math.max(1, Math.min(c.getSourcesPerNode(), phaseLeft));
                         next = entry;
                         break;
                     }
