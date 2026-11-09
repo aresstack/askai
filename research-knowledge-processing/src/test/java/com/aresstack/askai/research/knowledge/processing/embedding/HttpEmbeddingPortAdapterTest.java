@@ -35,7 +35,7 @@ public class HttpEmbeddingPortAdapterTest {
 
     @Test
     public void buildsABatchRawRequestWithEscaping() {
-        assertEquals("{\"model\":\"m\",\"input\":[\"a\",\"b\\\"c\"],\"input_type\":\"raw\"}",
+        assertEquals("{\"model\":\"m\",\"input\":[\"a\",\"b\\\"c\"],\"input_type\":\"raw\",\"truncate\":false}",
                 HttpEmbeddingPortAdapter.buildRequest("m", Arrays.asList("a", "b\"c")));
     }
 

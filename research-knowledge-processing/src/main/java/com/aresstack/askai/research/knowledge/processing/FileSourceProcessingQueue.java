@@ -148,11 +148,22 @@ public final class FileSourceProcessingQueue implements SourceProcessingQueue {
      * captures processed in the old one are re-derived unless the new world already knows them).
      */
     public synchronized java.util.Set<String> captureIdsWithKnownProcessing(String embeddingFingerprint) {
+        return captureIdsWithKnownProcessing(embeddingFingerprint, null);
+    }
+
+    /**
+     * PR 20: the same, restricted to one segmentation pipeline version ({@code null} = any), so a version bump
+     * re-derives captures whose only jobs ran under an older segmentation.
+     */
+    public synchronized java.util.Set<String> captureIdsWithKnownProcessing(String embeddingFingerprint,
+                                                                           String segmentationPipelineVersion) {
         java.util.Set<String> captureIds = new java.util.HashSet<String>();
         for (SourceProcessingJob job : loadAll()) {
             if (job.getState() != SourceProcessingJob.State.SUPERSEDED
                     && embeddingFingerprint != null
-                    && embeddingFingerprint.equals(job.getRequest().getEmbeddingModelFingerprint())) {
+                    && embeddingFingerprint.equals(job.getRequest().getEmbeddingModelFingerprint())
+                    && (segmentationPipelineVersion == null || segmentationPipelineVersion.equals(
+                            job.getRequest().getSegmentationPipelineVersion()))) {
                 captureIds.add(job.getRequest().getCaptureId());
             }
         }
