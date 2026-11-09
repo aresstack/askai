@@ -10,6 +10,14 @@ import java.util.List;
  */
 public final class RegexSentenceSegmenter implements SentenceSegmentationPort {
 
+    /** Fingerprint of this segmenter in stored findings. */
+    public static final String FINGERPRINT = "regex";
+
+    @Override
+    public String fingerprint() {
+        return FINGERPRINT;
+    }
+
     @Override
     public List<String> segment(String text) {
         List<String> sentences = new ArrayList<String>();
