@@ -2234,8 +2234,27 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return "Not started yet. The manuscript opens when the workflow reaches Document.";
     }
 
-    /** Generate the read-only "document" artifact from the manuscript (plan PR 26). */
+    /** The one serial executor of the book assembler (plan PR 30): the only writer of {@code document.md}. */
+    private final java.util.concurrent.ExecutorService documentAssembler =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "research-book-assembler");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private volatile com.aresstack.askai.research.assembly.AssembledBook lastAssembledBook;
+
+    /** The latest assembly with its citations and quality report (plan PR 30), or {@code null}. */
+    public com.aresstack.askai.research.assembly.AssembledBook assembledBook() {
+        return lastAssembledBook;
+    }
+
+    /** Assemble {@code document.md} after a manuscript change, on the serial assembler executor (plan PR 30). */
     private void renderDocumentArtifact() {
+        documentAssembler.execute(this::assembleDocumentNow);
+    }
+
+    /** One assembly; runs only on {@link #documentAssembler}, so it needs no lock. */
+    private void assembleDocumentNow() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return;
         }
@@ -2244,16 +2263,52 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     productiveResources.manuscriptWorkspace();
             com.aresstack.askai.plugin.api.agent.artifact.AgentArtifactStore store =
                     productiveResources.getArtifactStore();
-            String markdown = com.aresstack.askai.research.manuscript.ManuscriptDocument.markdown(
-                    approvedOutlineOrNull(), manuscript.store());
+            com.aresstack.askai.research.assembly.AssembledBook book = assembleBook(manuscript);
+            lastAssembledBook = book;
+            String markdown = book.getMarkdown();
             com.aresstack.askai.plugin.api.agent.artifact.ArtifactContent current = store.read("document");
             if (!markdown.equals(current.getMarkdown())) {
                 store.replace("document", current.getRevision(), markdown);
             }
         } catch (RuntimeException renderFailed) {
-            System.err.println("[research] document artifact render failed: " + renderFailed.getMessage());
+            System.err.println("[research] document assembly failed: " + renderFailed.getMessage());
         }
         uiExecutor.execute(this::fireStateChanged);
+    }
+
+    private com.aresstack.askai.research.assembly.AssembledBook assembleBook(
+            com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript) {
+        com.aresstack.askai.research.outline.Outline outline = null;
+        int outlineRevision = 0;
+        com.aresstack.askai.research.book.SourcesPin pin = null;
+        com.aresstack.askai.research.assembly.BookAssemblyInputs.Concept concept = null;
+        try {
+            com.aresstack.askai.research.book.ApprovedOutline approved = approvedOutline();
+            if (approved != null) {
+                outline = approved.getOutline();
+                outlineRevision = approved.getRevision();
+            }
+            final com.aresstack.askai.research.transition.TransitionEngine engine = productiveResources.transitions();
+            if (bookManifest != null) {
+                pin = bookManifest.validSourcesPin(engine::isCommitted);
+            }
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen != null) {
+                String title = frozen.getDeliverable() == null || frozen.getDeliverable().trim().isEmpty()
+                        ? frozen.getMission() : frozen.getDeliverable();
+                concept = new com.aresstack.askai.research.assembly.BookAssemblyInputs.Concept(
+                        title, frozen.getRevision(), frozen.cardNames());
+            }
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            System.err.println("[research] book assembly reads a damaged manifest: " + corrupt.getMessage());
+        }
+        com.aresstack.askai.research.assembly.BookAssemblyInput input =
+                com.aresstack.askai.research.assembly.BookAssemblyInputs.read(outline, outlineRevision,
+                        manuscript.store(), productiveResources.getRepository(), pin, concept,
+                        java.util.Collections.<com.aresstack.askai.research.knowledge.processing.acronym
+                                .AcronymLongForms>emptyList(),
+                        System.currentTimeMillis(), java.util.TimeZone.getDefault());
+        return new com.aresstack.askai.research.assembly.BookAssembler().assemble(input);
     }
 
     /** Render the stored outline into the "outline" artifact (never from the live projection, plan PR 21). */
