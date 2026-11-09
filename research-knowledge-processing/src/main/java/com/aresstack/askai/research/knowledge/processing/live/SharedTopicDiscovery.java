@@ -103,6 +103,9 @@ public final class SharedTopicDiscovery {
         int omitted = whole.getPassages().size() - current.getPassages().size();
         List<LiveTopicProjection> topics =
                 builder.discoverTopics(current.getPassages(), current.getVectors(), monitor);
+        if (monitor != null && monitor.isCancelled()) {
+            throw new ClusteringMonitor.ClusteringCancelledException(); // never overwrite on a late cancel
+        }
         FileTopicSnapshotStore.TopicSnapshot previous = store.load();
         FileTopicSnapshotStore.TopicSnapshot snapshot = new FileTopicSnapshotStore.TopicSnapshot(
                 (previous == null ? 0L : previous.revision) + 1L,

@@ -91,6 +91,19 @@ public final class LiveOutlineProjectionBuilder {
                                               long generatedAtMillis, List<Passage> passages,
                                               List<LiveTopicProjection> topics,
                                               List<String> briefQuestions) {
+        return buildOutline(projectionRevision, embeddingFingerprint, generatedAtMillis, passages, topics,
+                briefQuestions, null);
+    }
+
+    /**
+     * PR 20: the same build with an explicit corpus fingerprint — a corpus limited for clustering still
+     * records the identity of the WHOLE active corpus, so the staleness check compares like with like.
+     * {@code null} fingerprints the given passages.
+     */
+    public LiveOutlineProjection buildOutline(long projectionRevision, String embeddingFingerprint,
+                                              long generatedAtMillis, List<Passage> passages,
+                                              List<LiveTopicProjection> topics,
+                                              List<String> briefQuestions, String corpusFingerprint) {
         if (passages == null || passages.isEmpty()) {
             return LiveOutlineProjection.empty(projectionRevision, embeddingFingerprint, generatedAtMillis);
         }
@@ -126,8 +139,8 @@ public final class LiveOutlineProjectionBuilder {
                     Collections.<String>emptyList(), Collections.<String>emptyList(), open));
         }
 
-        return new LiveOutlineProjection(projectionRevision,
-                LiveOutlineProjection.corpusFingerprintOf(includedIds), embeddingFingerprint,
+        return new LiveOutlineProjection(projectionRevision, corpusFingerprint != null ? corpusFingerprint
+                : LiveOutlineProjection.corpusFingerprintOf(includedIds), embeddingFingerprint,
                 generatedAtMillis, topicList, sections);
     }
 

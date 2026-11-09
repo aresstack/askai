@@ -115,4 +115,50 @@ public class CorpusLimitTest {
         assertEquals(12, pinned.corpus.getPassages().size());
         assertFalse("a limited run describes the whole corpus", discovery.isStale());
     }
+
+    @Test
+    public void aCancelDuringTheLastProgressStepPersistsNothing() throws Exception {
+        final ActiveKnowledgeCorpusReader.Corpus whole = corpus(new int[] {3, 3}, Collections.<String>emptyList());
+        SharedTopicDiscovery discovery = new SharedTopicDiscovery(new SharedTopicDiscovery.CorpusSource() {
+            public ActiveKnowledgeCorpusReader.Corpus read() {
+                return whole;
+            }
+        }, new LiveOutlineProjectionBuilder(), new FileTopicSnapshotStore(temp.newFolder("late")), "fpA");
+        final boolean[] cancelled = {false};
+        try {
+            discovery.refreshPinned(1L, new ClusteringMonitor() {
+                public void progress(String stage, long done, long total) {
+                    if (done == total) {
+                        cancelled[0] = true;
+                    }
+                }
+
+                public boolean isCancelled() {
+                    return cancelled[0];
+                }
+            });
+            fail("a late cancel must abort");
+        } catch (ClusteringMonitor.ClusteringCancelledException expected) {
+            assertNull(discovery.current());
+        }
+    }
+
+    @Test
+    public void anOutlineFromALimitedCorpusKeepsTheWholeCorpusIdentity() throws Exception {
+        final ActiveKnowledgeCorpusReader.Corpus whole = corpus(new int[] {10, 10}, Collections.<String>emptyList());
+        SharedTopicDiscovery discovery = new SharedTopicDiscovery(new SharedTopicDiscovery.CorpusSource() {
+            public ActiveKnowledgeCorpusReader.Corpus read() {
+                return whole;
+            }
+        }, new LiveOutlineProjectionBuilder(), new FileTopicSnapshotStore(temp.newFolder("o")), "fpA", 12);
+        SharedTopicDiscovery.Pinned pinned = discovery.refreshPinned(1L, ClusteringMonitor.NONE);
+        List<String> wholeIds = new ArrayList<String>();
+        for (Passage passage : whole.getPassages()) {
+            wholeIds.add(passage.getPassageId());
+        }
+        assertEquals(com.aresstack.askai.research.knowledge.live.LiveOutlineProjection.corpusFingerprintOf(wholeIds),
+                new LiveOutlineProjectionBuilder().buildOutline(1L, "fpA", 1L, pinned.corpus.getPassages(),
+                        pinned.snapshot.topics, Collections.<String>emptyList(),
+                        pinned.snapshot.corpusFingerprint).getCorpusFingerprint());
+    }
 }

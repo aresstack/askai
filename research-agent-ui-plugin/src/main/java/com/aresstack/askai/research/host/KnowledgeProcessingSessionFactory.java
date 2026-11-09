@@ -263,7 +263,8 @@ final class KnowledgeProcessingSessionFactory {
                                 com.aresstack.askai.research.knowledge.live.LiveOutlineProjection next =
                                         projectionBuilder.buildOutline(nextRevision, fingerprint,
                                                 System.currentTimeMillis(), corpus.getPassages(),
-                                                topics, briefQuestions);
+                                                topics, briefQuestions,
+                                                topicSnapshot.corpusFingerprint);
                                 projectionStore.save(next);
                                 System.err.println("[research-knowledge] outline rebuilt revision="
                                         + next.getProjectionRevision()
