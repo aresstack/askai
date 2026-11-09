@@ -86,6 +86,7 @@ public final class BookAssembler {
             int sectionNo = 0;
             for (OutlineSection section : chapter.getSections()) {
                 sectionNo++;
+                counts.sectionsTotal++;
                 String number = chapterNo + "." + sectionNo;
                 String label = number + " " + section.getTitle();
                 contents.append("  - ").append(label).append('\n');
@@ -112,6 +113,9 @@ public final class BookAssembler {
             plainBook.append(chapterText);
         }
 
+        if (counts.sectionsTotal == 0) {
+            findings.add(new Finding(Kind.NO_OUTLINE, "", "the approved outline has no sections"));
+        }
         for (CitationRegistry.Issue issue : registry.issues()) {
             findings.add(new Finding(Kind.UNRESOLVED_CITATION, issue.getSectionId(),
                     label(input, issue.getSectionId()) + " [" + issue.getMarker() + "]: "
@@ -510,6 +514,7 @@ public final class BookAssembler {
         int paragraphs;
         int words;
         int target;
+        int sectionsTotal;
     }
 
     private static final class ParagraphShingles {

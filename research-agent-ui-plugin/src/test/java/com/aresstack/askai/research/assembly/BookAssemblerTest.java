@@ -302,6 +302,26 @@ public class BookAssemblerTest {
     }
 
     @Test
+    public void emptyOutlineIsNeverComplete() {
+        AssembledBook book = new BookAssembler().assemble(BookAssemblyInput.builder().title("Empty")
+                .assembledAt(DAY, TimeZone.getTimeZone("UTC"))
+                .outline(new Outline(java.util.Collections.<OutlineChapter>emptyList()), 0).build());
+        assertEquals(BookQualityReport.Status.NOT_STARTED, book.getReport().getStatus());
+        assertFalse(book.getReport().isComplete());
+        assertEquals(1, book.getReport().count(Kind.NO_OUTLINE));
+        assertTrue(book.getMarkdown().contains("not started"));
+        assertFalse(book.getMarkdown().contains("Book status: complete"));
+    }
+
+    @Test
+    public void outlineWithoutWrittenSectionsIsNotStarted() {
+        AssembledBook book = new BookAssembler().assemble(BookAssemblyInput.builder().title("Unwritten")
+                .assembledAt(DAY, TimeZone.getTimeZone("UTC")).outline(outline(), 1).build());
+        assertEquals(BookQualityReport.Status.NOT_STARTED, book.getReport().getStatus());
+        assertEquals(0, book.getReport().count(Kind.NO_OUTLINE));
+    }
+
+    @Test
     public void unusedGlossaryTermIsReported() {
         AssembledBook book = new BookAssembler().assemble(clean()
                 .glossaryTerms(Arrays.asList("energy", "hydrogen")).build());

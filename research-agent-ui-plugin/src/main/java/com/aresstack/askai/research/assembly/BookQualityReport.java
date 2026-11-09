@@ -11,13 +11,15 @@ import java.util.Map;
  * The deterministic quality report of one assembly (plan PR 30, D8). The book is {@link Status#COMPLETE} when no
  * section is missing, skipped or stale, every paragraph cites a passage, every citation resolves, and no unsupported
  * number or quote, near-copy or open gap remains; otherwise it is an {@link Status#INCOMPLETE_DRAFT} with the counts.
+ * A book without any written word (no outline, no sections or nothing written yet) is {@link Status#NOT_STARTED}.
  * The report only informs: the user may approve the book either way (Q27).
  */
 public final class BookQualityReport {
 
     public enum Status {
         COMPLETE("complete"),
-        INCOMPLETE_DRAFT("incomplete draft");
+        INCOMPLETE_DRAFT("incomplete draft"),
+        NOT_STARTED("not started");
 
         private final String label;
 
@@ -32,6 +34,7 @@ public final class BookQualityReport {
 
     /** A kind of finding; {@code blocking} kinds make the book an incomplete draft. */
     public enum Kind {
+        NO_OUTLINE("outline without sections", true),
         MISSING_SECTION("section without text", true),
         SKIPPED_SECTION("skipped section", true),
         STALE_SECTION("stale section", true),
@@ -114,6 +117,9 @@ public final class BookQualityReport {
     }
 
     public Status getStatus() {
+        if (wordsWritten == 0) {
+            return Status.NOT_STARTED; // a book without a written word is never complete
+        }
         for (Finding finding : findings) {
             if (finding.getKind().isBlocking()) {
                 return Status.INCOMPLETE_DRAFT;
