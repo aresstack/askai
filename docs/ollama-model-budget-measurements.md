@@ -45,7 +45,7 @@ tables here together with the Ollama version and the server settings of 5.3.
 | 4 | `load_duration` for every switch between gemma4:e2b, llama3.1:8b and gpt-oss:20b | `ModelProtocolLiveTest` (two rounds through all models) | open |
 | 5 | How the chat template renders several, and non-leading, system messages | manual: `ollama show --template` per model and one request with two system messages; not automated in this PR | open |
 | 6 | Phase-1 live gate on gemma4:e2b (N = 10) and the four open checks of roadmap AP 1 | the existing live gate run (`research-benchmark` baseline subject); its result is recorded here | open |
-| 7 | Retrieval benchmark: Recall@5, Recall@10, MRR per group (DE→DE, DE→EN, EN→EN) and candidate; concept assignment of 50 labelled passages; embedding time per 100 passages; GPU memory; longest passage against the model's context; hit rate and "selects nothing" per ranking strategy | `RetrievalBenchmarkLiveTest`; needs the owner's 24 queries in `research-benchmark/src/test/resources/benchmark/retrieval/retrieval-queries.json` and the local corpus of about 300 passages (`corpus.jsonl`) plus 20 search results per query (`serp/<queryId>.json`) | open: topic chosen (Java-Modulsystem, Classloader und Plugin-Isolation, 2026-11-08); 24 queries, 8 concept nodes and 50 labels checked in for review; corpus captured on the owner's machine (731 passages); nomic-embed-text measured, other candidates open; the 20 search results per query are still missing, so the ranking part reports them as missing |
+| 7 | Retrieval benchmark: Recall@5, Recall@10, MRR per group (DE→DE, DE→EN, EN→EN) and candidate; concept assignment of 50 labelled passages; embedding time per 100 passages; GPU memory; longest passage against the model's context; hit rate and "selects nothing" per ranking strategy | `RetrievalBenchmarkLiveTest`; needs the owner's 24 queries in `research-benchmark/src/test/resources/benchmark/retrieval/retrieval-queries.json` and the local corpus of about 300 passages (`corpus.jsonl`) plus 20 search results per query (`serp/<queryId>.json`) | open: topic chosen (Java-Modulsystem, Classloader und Plugin-Isolation, 2026-11-08); 24 queries, 8 concept nodes and 50 labels checked in for review; corpus captured on the owner's machine (731 passages); all six candidates measured 2026-11-09, rule picks bge-m3; the 20 search results per query are still missing, so the ranking part reports them as missing |
 | 8 | One multilingual cross-encoder (`bge-reranker-v2-m3`) on the queries of item 7, with a reference implementation outside AskAI | outside AskAI by design (the plan forbids a new engine without measured need); score with the same query file and compare with the table of item 7 | open |
 | 9 | Does the installed Ollama honour `truncate=false` on chat and embedding calls? | `ModelProtocolLiveTest` (an overlong prompt must fail with an HTTP error) | open |
 
@@ -60,19 +60,24 @@ runtime's E5 models get `input_type=query`/`passage`.
 
 | Candidate | DE→DE R@5 / R@10 / MRR | DE→EN R@5 / R@10 / MRR | EN→EN R@5 / R@10 / MRR | Concept assignment (of 50) | ms / 100 passages | GPU MiB | Longest passage / context |
 |---|---|---|---|---|---|---|---|
-| nomic-embed-text (raw, before PR 04) | – / – / 0.460 | – / – / 0.017 | – / – / 0.650 | 19 | 1073 | 2306 | open |
-| nomic-embed-text (nomic-v1) | – / – / 0.626 | – / 1 of 8 / 0.029 | – / – / 0.766 | 18 | 1087 | 2306 | open |
-| nomic-embed-text-v2-moe (nomic-v1) | open | open | open | open | open | open | open |
-| bge-m3 (raw: no known scheme) | open | open | open | open | open | open | open |
-| embeddinggemma (embeddinggemma-v1) | open | open | open | open | open | open | open |
-| snowflake-arctic-embed2 (arctic-v1) | open | open | open | open | open | open | open |
-| granite-embedding:278m (raw: no known scheme) | open | open | open | open | open | open | open |
+| nomic-embed-text (raw, before PR 04) | 0.750 / 0.750 / 0.460 | 0.000 / 0.000 / 0.017 | 0.625 / 0.625 / 0.650 | 19 | 1165 | 2300 | 396 / 2048 |
+| nomic-embed-text (nomic-v1) | 0.875 / 0.875 / 0.626 | 0.000 / 0.125 / 0.029 | 0.750 / 0.750 / 0.766 | 18 | 12393 (cold load) | 2297 | 396 / 2048 |
+| nomic-embed-text-v2-moe (nomic-v1) | 0.875 / 0.875 / 0.709 | 0.625 / 0.875 / 0.607 | 0.750 / 0.750 / 0.766 | 19 | 1114 | 5048 | 270 / 512 |
+| bge-m3 (raw: no known scheme) | 0.875 / 1.000 / 0.766 | 0.875 / 1.000 / 0.713 | 0.750 / 1.000 / 0.780 | 27 | 1971 | 2899 | 270 / 8192 |
+| embeddinggemma (embeddinggemma-v1) | 0.875 / 0.875 / 0.798 | 0.875 / 1.000 / 0.745 | 0.750 / 0.750 / 0.701 | 31 | 1711 | 3283 | 264 / 2048 |
+| snowflake-arctic-embed2 (arctic-v1) | 0.875 / 0.875 / 0.779 | 0.750 / 1.000 / 0.718 | 0.750 / 0.750 / 0.765 | 28 | 2074 | 3630 | 270 / 8192 |
+| granite-embedding:278m (raw: no known scheme) | 0.750 / 0.875 / 0.469 | 0.875 / 0.875 / 0.702 | 0.750 / 0.750 / 0.701 | 32 | 1142 | 3089 | 270 / 512 |
 
-First GPU run (2026-11-08, owner's RTX 5080, Ollama 0.40.13, develop with #119): 19/19 sources, 731 passages,
-50/50 labels. Only `nomic-embed-text` was installed, so the other rows are still open. "–" means the value is in
-the owner's local report but was not passed on. Finding: the prompt scheme clearly helps (MRR DE→DE +0.17,
-EN→EN +0.12), but DE→EN (1 of 8 targets in the top 10) and concept assignment (36 %) are too weak to fix
-`nomic-embed-text` as the multilingual preset. PR 12 waits for the comparison with the other candidates.
+GPU runs on the owner's RTX 5080, Ollama 0.40.13, develop, 19/19 sources, 731 passages, 50/50 labels:
+2026-11-08 (nomic-embed-text only) and 2026-11-09 (all candidates, report `retrieval-benchmark-20261109-031050.md`,
+the table above). The 12393 ms of the prompted nomic row is the first call of the run including the model load.
+
+Result: the rule of item 7 picks **bge-m3** (Recall@10 1.000 in all three groups, MRR 0.766 / 0.713 / 0.780,
+2899 MiB, 8192-token context). `embeddinggemma` is close (best MRR DE→DE 0.798 and DE→EN 0.745, best concept
+assignment among the top three with 31 of 50, but EN→EN Recall@10 0.750). `nomic-embed-text` fails DE→EN
+(Recall@10 0.125) and is no longer a candidate for the multilingual preset. bge-m3 (about 2.9 GB) fits beside
+gemma4:e2b at 32k on 16 GB; the full phase-model mix is measured with item 3. Concept assignment stays at 64 % at
+best and is not a decision criterion of the rule.
 
 Ranking of planned queries (target in the visited top N):
 
@@ -122,7 +127,7 @@ best mean hit rate. The report prints the qualifying candidate; the fit is decid
 | 5.2 | Outline model | gemma4:e2b | item 1 | provisional |
 | 5.2 | Document model | llama3.1:8b if installed, otherwise gemma4:e2b (fits beside gemma4:e2b: about 12 to 14 GB together, unmeasured) | items 3, 4 | provisional |
 | 5.2 | Phase summaries model | the model of the phase being left | item 4 | provisional |
-| 5.2 | Embedding preset | nomic-embed-text | item 7 | provisional |
+| 5.2 | Embedding preset | bge-m3 (measured, set by PR 12) | item 7 | measured |
 | 5.2 | Ranking of planned queries | today's selection (cross-encoder when enabled, else BM25) | item 7 | provisional |
 
 ## What PR 04 changed in the product
