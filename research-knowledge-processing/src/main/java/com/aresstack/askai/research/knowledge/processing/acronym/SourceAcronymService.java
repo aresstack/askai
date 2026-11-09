@@ -9,7 +9,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -122,11 +121,19 @@ public final class SourceAcronymService {
             joined.append(text == null ? "" : text).append('\n');
         }
         String all = joined.toString();
-        for (String acronym : known.keySet()) {
-            Matcher m = Pattern.compile("(?<![\\p{L}\\p{N}])" + Pattern.quote(acronym) + "(?![\\p{L}\\p{N}])")
-                    .matcher(all);
-            if (m.find()) {
-                firstOccurrence.put(m.start(), acronym);
+        for (TermScanner.Token token : TermScanner.tokens(all)) {
+            List<TermScanner.Token> candidates = new ArrayList<TermScanner.Token>();
+            candidates.add(token);
+            candidates.addAll(TermScanner.parts(token));
+            for (TermScanner.Token candidate : candidates) {
+                if (AcronymForms.classify(candidate.text(), AcronymSettings.defaults().maxLetters())
+                        != TermKind.ACRONYM) {
+                    continue;
+                }
+                String acronym = AcronymForms.normalize(candidate.text());
+                if (known.containsKey(acronym) && !firstOccurrence.containsValue(acronym)) {
+                    firstOccurrence.put(candidate.span().start(), acronym);
+                }
             }
         }
         List<String> lines = new ArrayList<String>();

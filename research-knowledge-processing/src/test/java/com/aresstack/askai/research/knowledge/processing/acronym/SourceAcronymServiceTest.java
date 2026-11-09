@@ -190,6 +190,28 @@ public class SourceAcronymServiceTest {
     }
 
     @Test
+    public void glossaryMatchesPluralAndDottedSpellingsButNotNormalWords() {
+        SourceAcronymService service = new SourceAcronymService(SentenceSegmenter.splitter(), store());
+        service.refresh(Collections.singletonList(new SourceText("src-api", "sha",
+                "Wir nutzen ein Application Programming Interface (API) heute.")));
+        assertEquals(Collections.singletonList("API: Application Programming Interface"),
+                service.glossaryLines(Collections.singletonList("Zwei APIs genügen."),
+                        Collections.singleton("src-api"), 200));
+        assertTrue(service.glossaryLines(Collections.singletonList("Api heißt hier nichts."),
+                Collections.singleton("src-api"), 200).isEmpty());
+    }
+
+    @Test
+    public void definitionInsideInlineCodeIsNoLongForm() {
+        SourceAcronymStore store = store();
+        new SourceAcronymService(SentenceSegmenter.splitter(), store).refresh(Collections.singletonList(
+                new SourceText("src-code", "sha", "Beispiel: `Retrieval Augmented Generation (RAG)` im Code.")));
+        SourceAcronymRecord record = store.load("src-code");
+        SourceAcronymRecord.Term rag = record.term("RAG");
+        assertTrue(rag == null || rag.longForms().isEmpty());
+    }
+
+    @Test
     public void storeRoundTripsEscapedFields() {
         SourceAcronymStore store = store();
         SourceAcronymRecord record = new SourceAcronymRecord("https://x/a b", "c\tx", "1", "regex",

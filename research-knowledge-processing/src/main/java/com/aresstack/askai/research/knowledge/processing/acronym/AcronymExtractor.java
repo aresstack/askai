@@ -45,8 +45,12 @@ public final class AcronymExtractor {
         for (TermScanner.Token token : TermScanner.tokens(text)) {
             collect(token, rules, shouting, groups);
         }
+        List<TextSpan> masked = TermScanner.maskedRanges(text);
         for (TextSpan sentence : sentenceSpans(text)) {
             for (AcronymDefinition definition : definitions(text, sentence, rules)) {
+                if (overlapsAny(definition.span(), masked) || overlapsAny(definition.span(), shouting)) {
+                    continue; // code, addresses and lines in capitals state no long form either
+                }
                 String key = TermKind.ACRONYM + ":" + AcronymForms.normalize(definition.shortForm());
                 Group group = groups.get(key);
                 if (group == null) {
@@ -68,6 +72,15 @@ public final class AcronymExtractor {
             }
         });
         return new AcronymAnalysis(findings, sentences.id());
+    }
+
+    private static boolean overlapsAny(TextSpan span, List<TextSpan> ranges) {
+        for (TextSpan range : ranges) {
+            if (span.overlaps(range)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void collect(TermScanner.Token token, AcronymSettings rules, List<TextSpan> shouting,
