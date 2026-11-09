@@ -200,6 +200,20 @@ public class BookIntegrityCheckTest {
     }
 
     @Test
+    public void everyMarkerOfTheDocumentResolvesToAReference() throws Exception {
+        project("Text [1].", good());
+        String document = "# Buch\n\n## Kapitel\n\nSatz [1], Satz [2; 3] und [?].\n\n## References\n\n"
+                + "[1] Quelle A\n[2] Quelle B\n\n## Abbreviations\n\n[9] not a reference marker\n";
+
+        BookIntegrityReport report = new BookIntegrityCheck(new BookManifest(dir), ALL, concepts, outlines,
+                manuscript, sources).withDocument(document).run();
+
+        assertEquals(4, report.examined(IntegrityFinding.Check.REFERENCE));
+        assertEquals(2, report.findings(IntegrityFinding.Check.REFERENCE).size());
+        assertTrue(report.findings(IntegrityFinding.Check.REFERENCE).get(0).getMessage().contains("[3]"));
+    }
+
+    @Test
     public void anEmptyDirectoryNeverPasses() throws Exception {
         BookIntegrityReport report = BookIntegrityCheck.forProject(folder.newFolder("empty")).run();
         assertFalse(report.passed());

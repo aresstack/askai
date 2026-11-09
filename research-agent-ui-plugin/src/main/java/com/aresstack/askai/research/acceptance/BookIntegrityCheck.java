@@ -48,6 +48,8 @@ public final class BookIntegrityCheck {
     /** The marker grammar of the section writer ({@code CitationValidator}): {@code [1]}, {@code [1, 2]}. */
     static final Pattern MARKER = Pattern.compile("\\[(\\d{1,3}(?:\\s*[,;]\\s*\\d{1,3})*)\\]");
 
+    private static final Pattern REFERENCE_ENTRY = Pattern.compile("(?m)^\\[(\\d{1,3})\\] ");
+
     /** UTF-8 bytes decoded as Latin-1/CP-1252: "Ã¤" for ä, "â€ž" for „, and the replacement character. */
     private static final Pattern MOJIBAKE = Pattern.compile("�|Ã[\u0080-¿¤¶¼Ÿ„–—]|â€");
 
@@ -57,6 +59,7 @@ public final class BookIntegrityCheck {
     private final FileOutlineStore outlines;
     private final FileManuscriptStore manuscript;
     private final ResearchSourceRepository sources;
+    private final String document;
 
     public BookIntegrityCheck(BookManifest manifest, BookManifest.CommitCheck commits, FileConceptStore concepts,
                               FileOutlineStore outlines, FileManuscriptStore manuscript,
@@ -67,6 +70,22 @@ public final class BookIntegrityCheck {
         this.outlines = outlines;
         this.manuscript = manuscript;
         this.sources = sources;
+        this.document = null;
+    }
+
+    private BookIntegrityCheck(BookIntegrityCheck base, String document) {
+        this.manifest = base.manifest;
+        this.commits = base.commits;
+        this.concepts = base.concepts;
+        this.outlines = base.outlines;
+        this.manuscript = base.manuscript;
+        this.sources = base.sources;
+        this.document = document;
+    }
+
+    /** The same check that also resolves every {@code [n]} of the generated {@code document.md} (plan PR 30). */
+    public BookIntegrityCheck withDocument(String documentMarkdown) {
+        return new BookIntegrityCheck(this, documentMarkdown);
     }
 
     /**
@@ -85,7 +104,7 @@ public final class BookIntegrityCheck {
                 }
             }
         }
-        return new BookIntegrityCheck(new BookManifest(projectDirectory), new BookManifest.CommitCheck() {
+        BookIntegrityCheck check = new BookIntegrityCheck(new BookManifest(projectDirectory), new BookManifest.CommitCheck() {
             public boolean isCommitted(String transitionId) {
                 return committed.contains(transitionId);
             }
@@ -93,6 +112,12 @@ public final class BookIntegrityCheck {
                 new FileOutlineStore(new File(projectDirectory, "outline")),
                 new FileManuscriptStore(new File(projectDirectory, "manuscript")),
                 new FileResearchSourceRepository(new File(projectDirectory, "sources")));
+        File document = new File(new File(projectDirectory, "artifacts"), "document.md");
+        if (!document.isFile()) {
+            return check;
+        }
+        return check.withDocument(new String(java.nio.file.Files.readAllBytes(document.toPath()),
+                java.nio.charset.Charset.forName("UTF-8")));
     }
 
     public BookIntegrityReport run() throws Exception {
@@ -102,6 +127,9 @@ public final class BookIntegrityCheck {
         checkSourcesPins(run);
         checkManuscriptPin(run);
         checkSections(run);
+        if (document != null) {
+            checkDocument(run, document);
+        }
         Integer pins = run.examined.get(IntegrityFinding.Check.PIN_HASH);
         if (pins == null || pins == 0) {
             run.miss(IntegrityFinding.Check.PIN_HASH, "project",
@@ -222,6 +250,38 @@ public final class BookIntegrityCheck {
         }
     }
 
+    /**
+     * The assembled book: every {@code [n]} before "## References" names an entry of that list, and the assembler
+     * left no {@code [?]} for an unresolved citation.
+     */
+    static void checkDocument(Run run, String markdown) {
+        int split = markdown.lastIndexOf("\n## References");
+        String body = split < 0 ? markdown : markdown.substring(0, split);
+        Set<String> references = new HashSet<String>();
+        if (split >= 0) {
+            Matcher entry = REFERENCE_ENTRY.matcher(markdown.substring(split));
+            while (entry.find()) {
+                references.add(entry.group(1));
+            }
+        }
+        run.encoding("document.md", markdown);
+        Matcher matcher = MARKER.matcher(body);
+        while (matcher.find()) {
+            for (String number : matcher.group(1).split("\\s*[,;]\\s*")) {
+                run.examine(IntegrityFinding.Check.REFERENCE);
+                if (!references.contains(number.trim())) {
+                    run.miss(IntegrityFinding.Check.REFERENCE, "document.md",
+                            "[" + number.trim() + "] has no reference entry");
+                }
+            }
+        }
+        int unresolved = body.split("\\[\\?\\]", -1).length - 1;
+        for (int i = 0; i < unresolved; i++) {
+            run.examine(IntegrityFinding.Check.REFERENCE);
+            run.miss(IntegrityFinding.Check.REFERENCE, "document.md", "[?] marks a citation that did not resolve");
+        }
+    }
+
     private void checkCitation(Run run, String subject, ManuscriptCitation citation) {
         run.examine(IntegrityFinding.Check.CITATION_SOURCE);
         ResearchSourceRecord record = sources.get(citation.getSourceId());
@@ -253,7 +313,7 @@ public final class BookIntegrityCheck {
         return text != null && MOJIBAKE.matcher(text).find();
     }
 
-    private static final class Run {
+    static final class Run {
         final Map<IntegrityFinding.Check, Integer> examined =
                 new EnumMap<IntegrityFinding.Check, Integer>(IntegrityFinding.Check.class);
         final List<IntegrityFinding> findings = new ArrayList<IntegrityFinding>();

@@ -12,6 +12,7 @@ public final class IntegrityFinding {
         CITATION_SOURCE("Citation resolves to source and checksum"),
         CITATION_TEXT("Cited text is found in its source"),
         CITATION_MARKER("Every [n] resolves to a citation"),
+        REFERENCE("Every [n] in document.md resolves to a reference"),
         TEXT_ENCODING("Umlauts and typographic quotes are intact");
 
         private final String label;
