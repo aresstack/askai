@@ -23,7 +23,8 @@ import java.util.List;
  * are bound to phase AND run-state (never in waiting_approval/paused/blocked/failed/terminal):
  * RESEARCH/running → {@code source_accept}, {@code source_park}, {@code request_research},
  * {@code blacklist_add} (plan PR 15); DRAFT/running and FINALIZATION/running →
- * {@code document_read}, {@code document_save} — BOTH phases work on the ONE canonical document (issue #32).
+ * {@code document_read}. {@code document_save} is gone (plan PR 26): {@code document.md} is generated from the
+ * manuscript store, whose write guard is the only way section text changes.
  * The legacy per-stage tools ({@code concept_save}, {@code finding_add}, {@code notes_append},
  * {@code draft_*}, {@code final_*}) are gone: the ResearchBrief is the scoping truth and the removed legacy
  * artifacts must no longer be written by the active workflow. {@code outline_save} is gone (plan PR 21): the
@@ -103,7 +104,6 @@ public final class ResearchToolPolicy {
         // finalization are activities inside it, so the document tools live here alone.
         if (writable(phaseId, stateId, ResearchStateIds.DRAFT)) {
             tools.add(readTool(ctx, "document_read", "document"));
-            tools.add(saveTool(ctx, "document_save", "document", ResearchStateIds.DRAFT));
         }
         return tools;
     }
@@ -434,33 +434,6 @@ public final class ResearchToolPolicy {
                                 + "\n" + content.getMarkdown());
                     }
                 });
-    }
-
-    private static McpToolContribution saveTool(final ResearchControlContext ctx, String toolName,
-                                                final String artifactId, final String requiredPhaseId) {
-        return McpToolContribution.of(toolName,
-                "Replace the " + artifactId + " document (optimistic locking via expected_revision).",
-                new McpToolHandler() {
-                    public McpToolResult invoke(McpToolCall call) {
-                        McpToolResult denied = requireWritable(ctx, requiredPhaseId);
-                        if (denied != null) {
-                            return denied;
-                        }
-                        String markdown = call.getString("markdown");
-                        long expected = call.getInteger("expected_revision", -1L);
-                        if (markdown == null || expected < 0) {
-                            return McpToolResult.error("Required: markdown, expected_revision");
-                        }
-                        ArtifactWriteResult result =
-                                ctx.artifactStore().replace(artifactId, expected, markdown);
-                        return result.isSuccess()
-                                ? McpToolResult.ok("saved revision=" + result.getRevision())
-                                : McpToolResult.error("Conflict: " + result.getReason()
-                                        + " current revision=" + result.getRevision());
-                    }
-                },
-                McpToolParameter.string("markdown", true, "The full new markdown content"),
-                McpToolParameter.integer("expected_revision", true, "The revision this edit is based on"));
     }
 
     private static McpToolContribution sourceAcceptTool(final ResearchControlContext ctx) {
