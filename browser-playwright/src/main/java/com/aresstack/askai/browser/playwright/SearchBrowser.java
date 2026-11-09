@@ -5,6 +5,7 @@ import com.aresstack.serp4j.core.error.SearchErrorCategory;
 import com.aresstack.serp4j.core.error.SearchProviderException;
 import com.aresstack.serp4j.core.model.SearchRequest;
 import com.aresstack.serp4j.core.model.SearchResponse;
+import com.aresstack.serp4j.core.model.id.ProviderId;
 import com.aresstack.serp4j.core.port.ProviderDescriptor;
 import com.aresstack.serp4j.core.port.SearchContext;
 import com.aresstack.serp4j.core.port.SearchProvider;
@@ -213,7 +214,7 @@ public final class SearchBrowser implements AutoCloseable {
     private RedirectResolution resolveOnOwner(String wrapperUrl, long timeoutMillis) {
         Browser current;
         try {
-            current = ensureBrowser("redirect-resolver");
+            current = ensureBrowser(ProviderId.of("redirect-resolver"));
         } catch (SearchProviderException e) {
             return RedirectResolution.unresolved("search browser could not be started");
         }
@@ -369,7 +370,7 @@ public final class SearchBrowser implements AutoCloseable {
         return ensureBrowser(provider.getDescriptor().getId());
     }
 
-    private Browser ensureBrowser(String providerId) {
+    private Browser ensureBrowser(ProviderId providerId) {
         boolean wantHeadless = headless.getAsBoolean();
         if (browser != null && browser.isConnected() && browserHeadless == wantHeadless) {
             return browser;
