@@ -16,9 +16,16 @@ public final class AgentMessage {
     private final long createdAtMillis;
     private final DeliveryState state;
     private final String note;
+    private final boolean handedOut;
 
     public AgentMessage(String id, String runId, AgentAddress sender, String senderTaskId, AgentAddress recipient,
                         String recipientTaskId, String text, long createdAtMillis, DeliveryState state, String note) {
+        this(id, runId, sender, senderTaskId, recipient, recipientTaskId, text, createdAtMillis, state, note, false);
+    }
+
+    public AgentMessage(String id, String runId, AgentAddress sender, String senderTaskId, AgentAddress recipient,
+                        String recipientTaskId, String text, long createdAtMillis, DeliveryState state, String note,
+                        boolean handedOut) {
         if (id == null || runId == null || sender == null || recipient == null || text == null || state == null) {
             throw new IllegalArgumentException("id, runId, sender, recipient, text and state are required");
         }
@@ -32,11 +39,23 @@ public final class AgentMessage {
         this.createdAtMillis = createdAtMillis;
         this.state = state;
         this.note = note;
+        this.handedOut = handedOut;
     }
 
     public AgentMessage withState(DeliveryState newState, String newNote) {
         return new AgentMessage(id, runId, sender, senderTaskId, recipient, recipientTaskId, text, createdAtMillis,
-                newState, newNote == null ? note : newNote);
+                newState, newNote == null ? note : newNote, handedOut);
+    }
+
+    /** The same message, recorded as handed out to its recipient at least once (exempt from TTL from now on). */
+    public AgentMessage handedOut() {
+        return new AgentMessage(id, runId, sender, senderTaskId, recipient, recipientTaskId, text, createdAtMillis,
+                state, note, true);
+    }
+
+    /** {@code true} once the message was handed out; it then never expires, even after a crash of the turn. */
+    public boolean isHandedOut() {
+        return handedOut;
     }
 
     public String getId() {

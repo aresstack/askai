@@ -31,6 +31,9 @@ final class MailboxJournalCodec {
         if (m.getNote() != null) {
             o.addProperty("note", m.getNote());
         }
+        if (m.isHandedOut()) {
+            o.addProperty("handedOut", true);
+        }
         return o.toString();
     }
 
@@ -55,7 +58,8 @@ final class MailboxJournalCodec {
         }
         return new AgentMessage(o.get("id").getAsString(), o.get("runId").getAsString(), from,
                 string(o, "fromTask"), to, string(o, "toTask"), o.get("text").getAsString(),
-                o.get("at").getAsLong(), DeliveryState.valueOf(o.get("state").getAsString()), string(o, "note"));
+                o.get("at").getAsLong(), DeliveryState.valueOf(o.get("state").getAsString()), string(o, "note"),
+                o.has("handedOut") && o.get("handedOut").getAsBoolean());
     }
 
     private static String string(JsonObject o, String name) {

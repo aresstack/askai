@@ -39,6 +39,7 @@ public class FileMailboxStoreTest {
         List<AgentMessage> inbox = restarted.takeInbox("task-2");
         assertEquals(1, inbox.size());
         assertEquals("Prüfe bitte die Studie über Hitzestress.", inbox.get(0).getText());
+        restarted.acknowledge(inbox);
         // the torn tail was cut before the next append, so the journal stays readable
         assertEquals(0, AgentMailbox.open("run-7", FileMailboxStore.forRun(project, "run-7")).takeInbox("task-2").size());
     }
