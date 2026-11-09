@@ -387,6 +387,7 @@ public class ResearchRunCardsTest {
     public void outcomeRendersOneLocalizedResultCardWithTypedActionsAndFreesTheComposer() {
         Fx fx = new Fx();
         fx.reachRunningResearch();
+        fx.session.submitPrompt("research: investigate pf4j"); // plan PR 15: the user starts the loop
         assertEquals(SubmissionAvailability.BUSY, fx.session.getChatTarget().getAvailability());
 
         fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.RUN_PROGRESS)

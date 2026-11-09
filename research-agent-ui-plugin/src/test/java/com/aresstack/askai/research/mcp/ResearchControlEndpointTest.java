@@ -91,8 +91,8 @@ public class ResearchControlEndpointTest {
         assertFalse(t.contains("concept_save"));
         assertFalse(t.contains("outline_save"));
         assertFalse(t.contains("draft_save"));
-        // + the PR 16 context reads: source_overview, concept_summary, phase_change_request
-        assertEquals("scoping offers exactly the 7 read tools", 7, t.size());
+        // + the PR 16 context reads: source_overview, concept_summary, phase_change_request, and PR 15 search_plan_overview
+        assertEquals("scoping offers exactly the 8 read tools", 8, t.size());
 
         // OUTLINE/running → outline_save only (legacy operability for old persisted sessions).
         ctx.phaseId = ResearchStateIds.OUTLINE;
@@ -126,7 +126,7 @@ public class ResearchControlEndpointTest {
             ctx.stateId = s;
             ep.refreshTools();
             t = tools(reg, ep);
-            assertEquals("only the 7 read tools in " + s, 7, t.size());
+            assertEquals("only the 8 read tools in " + s, 8, t.size());
         }
         ep.close();
     }
