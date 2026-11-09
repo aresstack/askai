@@ -168,11 +168,12 @@ public interface SetupActions {
     String ALTERNATIVE_CHAT_MODEL = "llama3.1:8b";
     /**
      * Suggested when no embedding model is installed yet. The embedding model is required (Q12, PR 12).
-     * PROVISIONAL, pending benchmark: the retrieval benchmark of PR 04 has not chosen the productive
-     * multilingual model yet (nomic-embed-text scored poorly German to English). Switching the preset is a
-     * change of this constant only; installing still goes through the existing installer, never automatically.
+     * Chosen by the retrieval benchmark of PR 04 (rule 5.4 point 7, run of 2026-11-09 on an RTX 5080):
+     * bge-m3 reached Recall@10 1.000 German to German, German to English and English to English (MRR
+     * 0.766 / 0.713 / 0.780), 2899 MiB, 8192 tokens context, raw prompts. Numbers in
+     * {@code docs/ollama-model-budget-measurements.md}. Installing goes through the existing installer only.
      */
-    String RECOMMENDED_EMBEDDING_MODEL = "nomic-embed-text";
+    String RECOMMENDED_EMBEDDING_MODEL = "bge-m3";
     /** Why the embedding model is required, shown in the wizard and its final check. */
     String EMBEDDING_REQUIRED_REASON = "needed for Sources filtering, the Outline and the writing";
     /** The reranker the research agent asks for; it runs in AskAI's own local runtime (Ollama has none). */
