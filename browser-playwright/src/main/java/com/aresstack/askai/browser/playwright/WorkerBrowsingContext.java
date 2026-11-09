@@ -158,11 +158,11 @@ public final class WorkerBrowsingContext implements AutoCloseable {
             return false;
         }
         for (String line : result.split("\n")) {
-            if (line.startsWith("CHALLENGE: ")) {
-                return true;
+            if (line.startsWith("CHALLENGE: ") || line.trim().equals("challenge_visible: true")) {
+                return true; // search/poll contract, or the probe render's structured header line
             }
-            if (line.startsWith("URL: ") || line.startsWith("url: ")) {
-                return false;
+            if (line.startsWith("URL: ") || line.trim().isEmpty()) {
+                return false; // a page text follows; its content is not a typed status line
             }
         }
         return false;

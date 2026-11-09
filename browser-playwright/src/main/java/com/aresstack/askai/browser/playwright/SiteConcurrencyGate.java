@@ -160,7 +160,7 @@ final class SiteConcurrencyGate {
                                 + (now < site.coolUntil ? ", cooling down" : "") + "). Retry later.");
                     }
                     long next = deadline;
-                    if (!tookOver) {
+                    if (!tookOver && now < start + policy.waitDeadlineMillis) {
                         next = Math.min(next, start + policy.waitDeadlineMillis);
                     }
                     if (now < site.lastStart + spacing) {
