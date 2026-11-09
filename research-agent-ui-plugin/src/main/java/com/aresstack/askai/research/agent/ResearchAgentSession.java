@@ -206,6 +206,26 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 }
 
                 @Override
+                public String requestResearch(String query, String node) {
+                    return requestResearchCommand(query, node);
+                }
+
+                @Override
+                public String blacklistAdd(String entry) {
+                    return blacklistAddCommand(entry);
+                }
+
+                @Override
+                public String searchPlanOverview() {
+                    com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+                    try {
+                        return queue == null ? null : queue.overview();
+                    } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+                        return null;
+                    }
+                }
+
+                @Override
                 public String frozenConceptSummary() {
                     try {
                         com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
@@ -804,8 +824,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return state.getPendingApprovalId() != null;
     }
 
-    /** The user's research question (set once scoping is confirmed; auto-continued after approval). */
-    private volatile String researchQuestion = "";
     /** The latest scoping assistant projection (search suggestions) for the composer accessory; transient. */
     private volatile com.aresstack.askai.research.backend.ScopingAssistantUpdate latestScopingProjection;
     /** File-backed research brief store, bound to this session's project dir (null in the clickdummy). */
@@ -979,8 +997,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (productiveResources != null && !productiveResources.isClosed()) {
             // Productive mode: the model-backed TeamAgent LEADS the whole conversation (greeting, scoping,
             // outline proposal, meta questions). Forward the user's text to the runtime agent; its reply
-            // returns as an assistant message and any validated proposal returns as a SCOPE_PROPOSAL the host
-            // executes. The host no longer runs ScopingConversation or the playbook greeting/outline here —
+            // returns as an assistant message; the host owns every state change. The host no longer runs ScopingConversation or the playbook greeting/outline here —
             // those stay for FAKE mode and the legacy tests only.
             // The productive in-process agent cannot echo the user's OWN message back, so show it in the shared chat
             // here (right-aligned, by role) before the agent replies — otherwise the user's turn is invisible.
@@ -1080,49 +1097,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * Execute a VALIDATED scope proposal from the runtime TeamAgent. The host is the only command authority:
-     * a proposal only applies while still SCOPING (else the state moved on and it is dropped), and the commit
-     * + {@link #autoAdvanceTowardsResearch()} only issue transitions the state machine actually allows. The
-     * concept + outline are built deterministically FROM the model-confirmed scope — no host-side dialogue.
-     * The model never confirms its own scope: this is triggered only by the host executing the proposal.
-     */
-    private void handleScopeProposal(String question, String aspectsBlock) {
-        if (productiveResources == null || productiveResources.isClosed() || handle == null) {
-            return;
-        }
-        if (!com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING
-                .equals(productiveResources.currentState().getPhaseId())) {
-            return; // a scope proposal only applies during scoping; the host state has moved on
-        }
-        if (question == null || question.trim().isEmpty()) {
-            return;
-        }
-        java.util.List<String> aspects = new ArrayList<String>();
-        if (aspectsBlock != null && !aspectsBlock.isEmpty()) {
-            for (String part : aspectsBlock.split("\n")) {
-                if (!part.trim().isEmpty()) {
-                    aspects.add(part.trim());
-                }
-            }
-        }
-        ScopingConversation built = new ScopingConversation();
-        built.restoreCompleted(question.trim(), aspects);
-        ResearchScopeCommitService.ScopeCommitResult commit =
-                new ResearchScopeCommitService(productiveResources.getProjectContext())
-                        .commit(new ConfirmedResearchScope(question.trim(), aspects,
-                                built.buildConceptMarkdown(), built.buildOutlineMarkdown()));
-        if (!commit.isSuccess()) {
-            sayAsAgent(playbook.scopeCommitFailed(commit.getStatus() + ": " + commit.getDetail()));
-            return;
-        }
-        researchQuestion = question.trim();
-        // C5: no outline approval gate anymore — a committed scope auto-advances STRAIGHT into
-        // RESEARCH/running, so the stored question must start the research turn HERE (previously the
-        // outline-gate approval triggered it).
-        autoAdvanceTowardsResearch(); // START_RESEARCH's transition listener starts the research turn
-    }
-
-    /**
      * SCOPING/NEW → SCOPING/RUNNING when the user sends the first message of a fresh chat — synchronously,
      * BEFORE the turn reaches the runtime, so the turn's concept writes are allowed and the runtime answers
      * the topic directly. Also the handler of the runtime's GREETING_DONE signal. Idempotent.
@@ -1214,44 +1188,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         com.aresstack.askai.research.store.ResearchProjectMetadata metadata =
                 loadResult.getMetadata();
-        researchQuestion = metadata.getResearchQuestion();
         scoping.restoreCompleted(metadata.getResearchQuestion(),
                 metadata.getConfirmedFocusAreas());
         return true;
-    }
-
-    /**
-     * Advance the productive state machine through the transitions that need NO human approval
-     * (START, SUBMIT_SCOPE, PROPOSE_OUTLINE, START_RESEARCH). At an approval gate the machine stops and
-     * the approval is surfaced in the chat — the user decides; phase rules stay in the machine.
-     */
-    private void autoAdvanceTowardsResearch() {
-        for (int guard = 0; guard < 8; guard++) {
-            com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
-                    productiveResources.currentState();
-            String phase = memento.getPhaseId();
-            String stateId = memento.getStateId();
-            ResearchCommandType next = null;
-            if (com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(phase)
-                    && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW.equals(stateId)) {
-                next = ResearchCommandType.START;
-            } else if (com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(phase)
-                    && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(stateId)) {
-                next = ResearchCommandType.SUBMIT_SCOPE;
-            } else if (com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH.equals(phase)
-                    && com.aresstack.askai.research.state.oo.ResearchStateIds.WAITING.equals(stateId)) {
-                next = ResearchCommandType.START_RESEARCH;
-            }
-            if (next == null) {
-                break;
-            }
-            if (!dispatch(next, null).isAccepted()) {
-                break;
-            }
-        }
-        // Issue #34-style unification: an approval gate shows NO chat card — the red action tags
-        // (approve/changes) derive from WAITING_APPROVAL via availableActionTags(); the state-change
-        // notifications of the dispatches above already refreshed them.
     }
 
     // ------------------------------------------------------------------ ResearchSessionCommandPort
@@ -1590,9 +1529,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         state = next;
                         revision = next.getRevision();
                         invalidateNarration(); // in-flight warm texts belong to the previous situation
-                        if (transition.getCommand() == ResearchCommandType.START_RESEARCH) {
-                            maybeStartResearchTurn(); // the chained start releases the research turn
-                        }
                         showRestoredActionsIfAny();
                         fireStateChanged();
                     }
@@ -1675,6 +1611,53 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (job != null && productiveResources != null) {
             productiveResources.phaseJobs().unregister(job);
         }
+    }
+
+    /**
+     * Plan PR 15: {@code request_research} adds one plan entry; it starts nothing — "Run search plan" on the
+     * checklist runs it (a typed line in research/running starts no acquisition).
+     */
+    String requestResearchCommand(String query, String node) {
+        com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        if (queue == null || productiveResources == null) {
+            return null;
+        }
+        if (!researchRunning()) {
+            return "Not allowed in the current state (" + productiveResources.currentState().getPhaseId() + "/"
+                    + productiveResources.currentState().getStateId() + ").";
+        }
+        String text = query == null ? "" : query.trim();
+        if (text.isEmpty()) {
+            return "Tool failed: Missing argument: query";
+        }
+        String id;
+        try {
+            id = queue.addForNode(node, text);
+        } catch (Exception failed) {
+            return "Tool failed: the plan entry was not saved (" + failed.getMessage() + ")";
+        }
+        if (id == null) {
+            return "Tool failed: there is no search plan yet.";
+        }
+        technicalLog("request_research -> ADDED id=" + id + " query=\"" + text + "\"");
+        return "ADDED plan entry " + id + " \"" + text + "\". It runs when the user starts the search plan "
+                + "(\"Run search plan\" in the Sources tab); nothing was searched yet.";
+    }
+
+    /** Plan PR 15: {@code blacklist_add} — the Q2 add-only blacklist path of PR 07, as the user's "+ Add". */
+    String blacklistAddCommand(String entry) {
+        if (productiveResources == null) {
+            return null;
+        }
+        String value = entry == null ? "" : entry.trim();
+        if (value.isEmpty()) {
+            return "Tool failed: Missing argument: entry";
+        }
+        String refusal = addScopeExclusion(value);
+        technicalLog("blacklist_add -> " + (refusal == null ? "ADDED" : "REJECTED: " + refusal)
+                + " entry=\"" + value + "\"");
+        return refusal == null ? "ADDED blacklist entry \"" + value + "\" for future searches."
+                : "Tool failed: " + refusal;
     }
 
     /** Plan PR 14: whether the search plan may run now (research/running). */
@@ -2452,29 +2435,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
     }
 
-    /** Sends the stored research question to the agent once the state actually reached RUNNING. */
-    private void maybeStartResearchTurn() {
-        if (productiveResources == null) {
-            return;
-        }
-        if (deferWhilePlannedQueryRuns(new Runnable() {
-            public void run() {
-                maybeStartResearchTurn();
-            }
-        })) {
-            return; // plan PR 14: the research-loop turn waits until the planned query ends
-        }
-        // PR 06: only in research/running (until PR 15 deletes this method)
-        if (!researchQuestion.isEmpty() && handle != null
-                && com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH
-                        .equals(productiveResources.currentState().getPhaseId())
-                && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING
-                        .equals(productiveResources.currentState().getStateId())) {
-            beginAgentTurn(); // busy + preempt visualizer; cleared by the turn's terminal event
-            backend.submitPrompt(handle, new ResearchPrompt(researchQuestion, ""));
-        }
-    }
-
     public void requestChanges(String reason) {
         requestChangesResult(reason);
     }
@@ -2507,8 +2467,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * into an immutable revision and — only when that approval succeeds — dispatch exactly ONE
      * {@code SUBMIT_SCOPE}, so the state machine (the only transition authority) advances SCOPING → OUTLINE.
      * The order is fixed: persist/approve the artifact FIRST, transition only afterwards; a failed or empty
-     * approval transitions nothing. This deliberately does NOT chain further phases (no
-     * {@link #autoAdvanceTowardsResearch()}): one user click decides exactly one legal workflow transition.
+     * approval transitions nothing. This deliberately chains no further phase by itself: one user click decides
+     * exactly one legal workflow transition.
      * No model output, advice, natural-language "weiter", search suggestion or visualizer result may reach
      * this — the scoping button is the only caller.
      * <p>
@@ -3294,9 +3254,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 break;
             case USER_ATTENTION:
                 applyUserAttention(event);
-                break;
-            case SCOPE_PROPOSAL:
-                handleScopeProposal(event.getText(), event.getTechnicalDetail());
                 break;
             case GREETING_DONE:
                 startScopingOnFirstMessage();
@@ -6634,18 +6591,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return result;
     }
 
-    /** Continue with the STORED question, a fresh budget and no re-visits (the agent keeps its history). */
+    /**
+     * Plan PR 15: "run-plan" and "retry-query" drive the search plan queue (D5). Outside research/running or
+     * without a plan the user is asked to refine instead; a run offer dispatches no state command (Q13).
+     */
     private void continueResearchTurn() {
-        if (productiveResources == null || handle == null) {
-            return;
-        }
-        // A run offer dispatches no state command (Q13): a paused run is resumed by the user's "resume".
-        if (!researchQuestion.isEmpty()
-                && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING
-                        .equals(productiveResources.currentState().getStateId())) {
-            setAgentTurnInFlight(true); // cleared by the next RUN_OUTCOME / terminal
-            backend.submitPrompt(handle, new ResearchPrompt(researchQuestion, ""));
-        } else {
+        if (!runSearchPlan()) {
             narrateAsAgent("refine", narrator.refinePrompt());
         }
     }

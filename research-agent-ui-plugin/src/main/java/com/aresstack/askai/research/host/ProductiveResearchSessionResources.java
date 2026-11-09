@@ -673,6 +673,24 @@ public final class ProductiveResearchSessionResources {
             }
 
             @Override
+            public String requestResearch(String query, String node) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.requestResearch(query, node);
+            }
+
+            @Override
+            public String blacklistAdd(String entry) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.blacklistAdd(entry);
+            }
+
+            @Override
+            public String searchPlanOverview() {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.searchPlanOverview();
+            }
+
+            @Override
             public String latestChangeRequest() {
                 try {
                     return transitions().latestChangeRequest(currentState().getPhaseId());

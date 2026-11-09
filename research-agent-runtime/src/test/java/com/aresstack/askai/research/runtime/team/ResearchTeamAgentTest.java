@@ -91,7 +91,9 @@ public class ResearchTeamAgentTest {
     }
 
     @Test
-    public void modelProposedScopeIsNeverTreatedAsConfirmedButIsEchoedAsProposed() {
+    public void theStateBlockCarriesNoProposedOrConfirmedQuestion() {
+        // Plan PR 15: the proposed and confirmed question and aspects are gone; the scope travels in the
+        // phase-gated blocks only.
         FakeModel model = new FakeModel();
         model.enqueueOk("{\"assistantMessage\":\"Got it.\",\"scope\":{\"question\":\"How do EVs age?\","
                 + "\"aspects\":[\"battery\",\"cost\"]}}");
@@ -99,37 +101,11 @@ public class ResearchTeamAgentTest {
         ResearchTeamAgent agent = new ResearchTeamAgent(model);
 
         agent.respond("EV ageing", defaultPhase());
-        // The model's scope lands in the PROPOSED slot, and stays out of the CONFIRMED one.
-        assertEquals("How do EVs age?", agent.getProposedQuestion());
-        assertEquals(Arrays.asList("battery", "cost"), agent.getProposedAspects());
-        assertEquals("the model may not confirm its own scope", "", agent.getConfirmedQuestion());
-        assertTrue(agent.getConfirmedAspects().isEmpty());
-
         agent.respond("no", defaultPhase());
-        // The SECOND call's state-context carries the proposal back, explicitly labelled as NOT yet confirmed.
         // (Context order: phase prompt, current date, working language, state context.)
         String context = model.calls.get(1).get(3).getContent();
-        assertTrue(context, context.contains("How do EVs age?"));
-        assertTrue(context, context.contains("battery"));
-        assertTrue(context, context.contains("not yet confirmed"));
-        assertFalse("the working proposal must not be reflected back as confirmed",
-                context.contains("Confirmed research question"));
-    }
-
-    @Test
-    public void onlyTheHostCanPromoteScopeToConfirmed() {
-        FakeModel model = new FakeModel();
-        model.enqueueOk("{\"assistantMessage\":\"Understood.\"}");
-        ResearchTeamAgent agent = new ResearchTeamAgent(model);
-
-        agent.applyConfirmedScope("How do EVs age?", Arrays.asList("battery", "cost"));
-        agent.respond("continue", defaultPhase());
-
-        assertEquals("How do EVs age?", agent.getConfirmedQuestion());
-        assertEquals(Arrays.asList("battery", "cost"), agent.getConfirmedAspects());
-        String context = model.calls.get(0).get(3).getContent();
-        assertTrue(context, context.contains("Confirmed research question"));
-        assertTrue(context, context.contains("How do EVs age?"));
+        assertFalse(context, context.contains("research question"));
+        assertFalse(context, context.contains("not yet confirmed"));
     }
 
     @Test
@@ -247,8 +223,6 @@ public class ResearchTeamAgentTest {
         // readyForBrief flag exists anymore — only a user button can move a phase).
         assertTrue(last.isOk());
         assertFalse(last.getTurn().getSuggestedFacts().isEmpty());
-        assertEquals("smartwatches", agent.getProposedQuestion());
-        assertTrue(agent.getProposedAspects().contains("battery"));
     }
 
     @Test

@@ -67,22 +67,6 @@ public final class ResearchAgentEventMapper {
                             Boolean.parseBoolean(f.get("recoverable")),
                             f.get("limitation"), f.get("action")));
         }
-        if (ResearchRunWire.TYPE_SCOPE.equals(type)) {
-            java.util.Map<String, String> f = ResearchRunWire.fields(text);
-            // command → title, question → text, aspects → newline-joined technicalDetail. The host
-            // re-validates the command against its live state machine before executing it.
-            StringBuilder aspects = new StringBuilder();
-            for (String aspect : ResearchRunWire.decodedList(f, "aspects")) {
-                if (aspects.length() > 0) {
-                    aspects.append('\n');
-                }
-                aspects.append(aspect);
-            }
-            return ResearchBackendEvent.builder(ResearchBackendEventType.SCOPE_PROPOSAL)
-                    .title(f.get("command") == null ? "" : f.get("command"))
-                    .text(ResearchRunWire.decodedField(f, "question"))
-                    .messages("", aspects.toString());
-        }
         if (ResearchRunWire.TYPE_GREETED.equals(type)) {
             return ResearchBackendEvent.builder(ResearchBackendEventType.GREETING_DONE);
         }

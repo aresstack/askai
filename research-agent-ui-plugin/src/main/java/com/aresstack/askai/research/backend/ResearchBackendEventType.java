@@ -23,12 +23,6 @@ public enum ResearchBackendEventType {
     /** The user's manual input is required (or no longer required), e.g. a CAPTCHA in the browser. */
     USER_ATTENTION,
     /**
-     * A VALIDATED workflow proposal from the model-backed TeamAgent (title=command, text=question,
-     * technicalDetail=newline-joined aspects). The host re-validates it against its own state machine and
-     * executes it — the runtime never transitions state.
-     */
-    SCOPE_PROPOSAL,
-    /**
      * The model-backed greeting was delivered successfully. The host advances the scope state one step so the
      * greeting (which depends only on the state) is never repeated on a restart.
      */

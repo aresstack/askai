@@ -422,8 +422,8 @@ public final class TeamAgentPlaybook {
         return "You are a helpful research assistant inside AskAI, working alongside the user while they "
                 + "collect sources for their approved research concept. You advise, compare and point out "
                 + "gaps; you do NOT run searches, accept or reject sources, or act as a gatekeeper. The "
-                + "application runs every search and gives the user their own buttons to accept or park "
-                + "each source.\n\n"
+                + "application runs every search of the search plan and gives the user their own buttons to "
+                + "accept or park each source.\n\n"
                 + "How to help in this phase:\n"
                 + "- Relate what has been collected to the approved concept: which parts are already covered "
                 + "by sources, which are still thin, where sources contradict each other.\n"
@@ -436,6 +436,7 @@ public final class TeamAgentPlaybook {
                 + "- The user's own statements always win over your suggestions.\n\n"
                 + machineryRule()
                 + outputContract()
+                + sourcesActionContract()
                 + "Never claim that a search ran, that a source was accepted or that the research is "
                 + "complete: the application and the user decide that. Keep helping the user build a solid, "
                 + "well-covered set of sources.";
@@ -476,6 +477,20 @@ public final class TeamAgentPlaybook {
     }
 
     /** The structured output contract shared by every phase prompt (what {@code TeamAgentTurnParser} reads). */
+    /**
+     * Plan PR 15: the Sources assistant's two add-only actions, as an optional {@code action} field of the generic
+     * turn. The application runs it and reports the receipt itself.
+     */
+    static String sourcesActionContract() {
+        return "Optionally add ONE action field to the same JSON object, only when the user asks for it:\n"
+                + "  \"action\": { \"type\": \"request_research\", \"query\": string, \"node\": string }  "
+                + "// the user asks to search for something: adds the query to the search plan (node = the "
+                + "concept card it covers, may be empty); it runs when the user starts the plan\n"
+                + "  \"action\": { \"type\": \"blacklist_add\", \"entry\": string }  // the user wants a term "
+                + "or a domain excluded from future searches, in the user's words\n"
+                + "Without such a request, leave action out. Do not say the search already ran.\n\n";
+    }
+
     private static String outputContract() {
         return "Answer with a SINGLE JSON object and nothing else (this is between you and the app; the "
                 + "user only ever sees assistantMessage):\n"
@@ -491,26 +506,15 @@ public final class TeamAgentPlaybook {
     }
 
     /**
-     * The per-turn context (not persisted in history): the live host state, the scope the HOST has confirmed
-     * so far, and — kept strictly separate — the scope the MODEL has last proposed but that nobody has
-     * confirmed yet. Only the host (via the user + its state pattern) may promote a proposal to "confirmed":
-     * the model is told what it proposed so it can build on it, but it must never treat its own proposal as
-     * settled.
+     * The per-turn context (not persisted in history): the bounded source state the host publishes. The scope
+     * itself travels in the phase-gated blocks (the concept in Concept, the frozen concept summary later); a
+     * proposed or confirmed question no longer exists (plan PR 15).
      */
-    public static String stateContext(TeamAgentStateView state,
-                                      String confirmedQuestion, List<String> confirmedAspects,
-                                      String proposedQuestion, List<String> proposedAspects) {
+    public static String stateContext(TeamAgentStateView state) {
         // NO phase/run-state/allowed-command machinery here: the model is an assistant, not a process
         // controller. It only gets the research CONTEXT accumulated so far, so short replies build on it.
         StringBuilder sb = new StringBuilder("Research context so far (help the user build on this; the "
                 + "application owns the process):\n");
-        appendQuestion(sb, "Confirmed research question: ", confirmedQuestion);
-        appendAspects(sb, "Confirmed focus so far: ", confirmedAspects);
-        appendQuestion(sb, "Working research question (not yet confirmed): ", proposedQuestion);
-        appendAspects(sb, "Working focus (not yet confirmed): ", proposedAspects);
-        if (sb.indexOf(":", sb.indexOf("\n")) < 0) {
-            sb.append("(nothing captured yet — start by understanding what the user wants to find out)\n");
-        }
         String sources = state == null ? "" : state.getSourcesSummary();
         if (!sources.isEmpty()) {
             sb.append("\nResearch sources (web searches added these — you CAN see them; when the user "
@@ -518,25 +522,6 @@ public final class TeamAgentPlaybook {
                     + "Only state what this material actually says):\n").append(sources).append('\n');
         }
         return sb.toString();
-    }
-
-    private static void appendQuestion(StringBuilder sb, String label, String question) {
-        if (question != null && !question.trim().isEmpty()) {
-            sb.append(label).append(question).append('\n');
-        }
-    }
-
-    private static void appendAspects(StringBuilder sb, String label, List<String> aspects) {
-        if (aspects != null && !aspects.isEmpty()) {
-            sb.append(label);
-            for (int i = 0; i < aspects.size(); i++) {
-                if (i > 0) {
-                    sb.append("; ");
-                }
-                sb.append(aspects.get(i));
-            }
-            sb.append('\n');
-        }
     }
 
     /**

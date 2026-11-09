@@ -94,29 +94,6 @@ public class ResearchRunWireRoundTripTest {
     }
 
     @Test
-    public void scopeProposalRoundTripsWithQuestionAndAspects() {
-        String line = ResearchRunWire.scopeProposal("SUBMIT_SCOPE", "How do EVs age over time?",
-                java.util.Arrays.asList("battery health", "cost & resale"));
-        assertTrue(com.aresstack.askai.research.agentwire.ResearchRunWire.isWireLine(line));
-        assertEquals("scope", com.aresstack.askai.research.agentwire.ResearchRunWire.typeOf(line));
-        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
-        assertEquals("SUBMIT_SCOPE", f.get("command"));
-        // Free text travels URL-encoded (never a space on the wire) and decodes losslessly.
-        assertEquals("How do EVs age over time?",
-                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedField(f, "question"));
-        assertEquals(java.util.Arrays.asList("battery health", "cost & resale"),
-                com.aresstack.askai.research.agentwire.ResearchRunWire.decodedList(f, "aspects"));
-    }
-
-    @Test
-    public void scopeProposalWithoutAspectsOmitsTheField() {
-        String line = ResearchRunWire.scopeProposal("SUBMIT_SCOPE", "just a question", null);
-        Map<String, String> f = com.aresstack.askai.research.agentwire.ResearchRunWire.fields(line);
-        assertEquals("SUBMIT_SCOPE", f.get("command"));
-        assertTrue(com.aresstack.askai.research.agentwire.ResearchRunWire.decodedList(f, "aspects").isEmpty());
-    }
-
-    @Test
     public void greetedSignalRoundTrips() {
         String line = ResearchRunWire.greeted();
         assertTrue(com.aresstack.askai.research.agentwire.ResearchRunWire.isWireLine(line));

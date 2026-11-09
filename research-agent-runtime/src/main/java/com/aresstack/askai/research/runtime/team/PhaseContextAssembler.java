@@ -181,20 +181,14 @@ public final class PhaseContextAssembler {
      * search queries.
      */
     public List<ChatMessage> assemble(PhaseAssistantProfile profile, TeamAgentStateView state,
-                                      String confirmedQuestion, List<String> confirmedAspects,
-                                      String proposedQuestion, List<String> proposedAspects,
                                       List<ChatMessage> history) {
-        return assemble(profile, state, confirmedQuestion, confirmedAspects, proposedQuestion, proposedAspects,
-                history, new PromptBlockMeter());
+        return assemble(profile, state, history, new PromptBlockMeter());
     }
 
     /** As above, and counts every block it adds into {@code meter} (plan PR 01); the messages are the same. */
     public List<ChatMessage> assemble(PhaseAssistantProfile profile, TeamAgentStateView state,
-                                      String confirmedQuestion, List<String> confirmedAspects,
-                                      String proposedQuestion, List<String> proposedAspects,
                                       List<ChatMessage> history, PromptBlockMeter meter) {
-        return assemble(profile, state, confirmedQuestion, confirmedAspects, proposedQuestion, proposedAspects,
-                history, HistoryWindow.chatBudget(state.getPhaseId()), meter);
+        return assemble(profile, state, history, HistoryWindow.chatBudget(state.getPhaseId()), meter);
     }
 
     /**
@@ -203,16 +197,13 @@ public final class PhaseContextAssembler {
      * it when the whole prompt would not fit into the model's context.
      */
     public List<ChatMessage> assemble(PhaseAssistantProfile profile, TeamAgentStateView state,
-                                      String confirmedQuestion, List<String> confirmedAspects,
-                                      String proposedQuestion, List<String> proposedAspects,
                                       List<ChatMessage> history, int windowTokens, PromptBlockMeter meter) {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         add(messages, meter, PromptBlockMeter.PROFILE, ChatMessage.system(profile.getSystemPrompt()));
         add(messages, meter, PromptBlockMeter.DATE, ChatMessage.system("Current date: " + currentDate.today()));
         add(messages, meter, PromptBlockMeter.LANGUAGE, ChatMessage.system(
                 TeamAgentPlaybook.workingLanguageContext(currentLanguage.displayName())));
-        add(messages, meter, PromptBlockMeter.STATE, ChatMessage.system(TeamAgentPlaybook.stateContext(
-                state, confirmedQuestion, confirmedAspects, proposedQuestion, proposedAspects)));
+        add(messages, meter, PromptBlockMeter.STATE, ChatMessage.system(TeamAgentPlaybook.stateContext(state)));
         String phaseId = state == null ? "" : state.getPhaseId();
         if (PhaseActionUnion.isConcept(phaseId)) {
             // The scope the HOST holds — authoritative for this turn. Without it the model would rebuild the

@@ -213,12 +213,15 @@ public class ResearchRunCardsTest {
             session.activate();
         }
 
-        /** Drive to a running research the model-driven way: a validated scope proposal from the agent is
-         *  executed host-side. C5: no outline gate — the commit lands directly in RESEARCH/running. */
+        /** Drive to a running research the user's way: submit the concept; the chained start lands in
+         *  RESEARCH/running (plan PR 15: no scope proposal from the agent). */
         void reachRunningResearch() {
+            assertTrue(session.dispatch(ResearchCommandType.START, null).isAccepted());
             ConceptTestSupport.makeSubmittable(session);
-            event(ResearchBackendEvent.builder(ResearchBackendEventType.SCOPE_PROPOSAL)
-                    .title("SUBMIT_SCOPE").text("investigate pf4j").messages("", "focus on isolation"));
+            assertTrue(session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted());
+            if (ResearchStateIds.WAITING.equals(resources.currentState().getStateId())) {
+                assertTrue(session.dispatch(ResearchCommandType.START_RESEARCH, null).isAccepted());
+            }
             assertEquals(ResearchStateIds.RESEARCH, resources.currentState().getPhaseId());
             assertEquals(ResearchStateIds.RUNNING, resources.currentState().getStateId());
         }
@@ -424,7 +427,7 @@ public class ResearchRunCardsTest {
     }
 
     @Test
-    public void continueActionResubmitsTheStoredQuestionWithoutRetyping() {
+    public void runPlanDrivesTheSearchPlanQueueAndSubmitsNoPrompt() {
         Fx fx = new Fx();
         fx.reachRunningResearch();
         int promptsBefore = fx.backend.prompts.size();
@@ -434,10 +437,9 @@ public class ResearchRunCardsTest {
                         true, "INSUFFICIENT_HOST_DIVERSITY", "CONTINUE_RESEARCH")));
 
         fx.press("run-plan");
-        assertEquals("the stored question is submitted again", promptsBefore + 1,
-                fx.backend.prompts.size());
-        assertEquals("investigate pf4j", fx.backend.prompts.get(fx.backend.prompts.size() - 1));
-        assertEquals("a new turn is in flight", SubmissionAvailability.BUSY,
+        // Plan PR 15: the offer drives the plan queue (D5); there is no stored question to resubmit.
+        assertEquals("no research-loop prompt", promptsBefore, fx.backend.prompts.size());
+        assertEquals("the composer stays available while the plan runs", SubmissionAvailability.AVAILABLE,
                 fx.session.getChatTarget().getAvailability());
     }
 
@@ -483,8 +485,7 @@ public class ResearchRunCardsTest {
         int promptsBefore = fx.backend.prompts.size();
         fx.press("run-plan");
         assertFalse("a decision consumes the offers", lastActionIds(fx).contains("run-plan"));
-        assertEquals("continue starts exactly one new run", promptsBefore + 1,
-                fx.backend.prompts.size());
+        assertEquals("the plan queue runs, no research-loop prompt", promptsBefore, fx.backend.prompts.size());
 
     }
 
@@ -520,7 +521,7 @@ public class ResearchRunCardsTest {
 
             int promptsBefore = fx.backend.prompts.size();
             fx.press("retry-query");
-            assertEquals("retry resubmits the stored question", promptsBefore + 1,
+            assertEquals("retry drives the plan queue, no research-loop prompt", promptsBefore,
                     fx.backend.prompts.size());
         }
     }

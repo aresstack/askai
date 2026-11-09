@@ -143,6 +143,50 @@ public class SearchPlanQueueTest {
     }
 
     @Test
+    public void requestResearchAddsAnEntryForANodeByLabelOrIdAndStartsNothing() throws Exception {
+        // plan PR 15: the Sources assistant's request_research
+        build(Arrays.asList(node("a", "Classloader", "Classloader Java"), node("b", "JPMS", "JPMS Java")),
+                Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        String byLabel = queue.addForNode("jpms", "JPMS layers");
+        String byId = queue.addForNode("a", "parent delegation");
+        String free = queue.addForNode("no such card", "OSGi comparison");
+        List<SearchPlanEntry> entries = queue.entriesInOrder();
+        SearchPlanEntry last = entries.get(entries.size() - 1);
+        assertEquals(free, last.getId());
+        assertEquals("", last.getNodeId());
+        assertEquals("b", entries.get(entries.size() - 3).getNodeId());
+        assertEquals(byLabel, entries.get(entries.size() - 3).getId());
+        assertEquals(byId, entries.get(entries.size() - 2).getId());
+        assertEquals("a", entries.get(entries.size() - 2).getNodeId());
+        assertTrue("nothing searched", port.searched.isEmpty());
+        assertFalse(queue.isRunning());
+    }
+
+    @Test
+    public void withoutAPlanRequestResearchAddsNothingAndTheOverviewIsEmpty() throws Exception {
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        assertNull(queue.addForNode("", "anything"));
+        assertEquals("", queue.overview());
+    }
+
+    @Test
+    public void theOverviewNamesTheCoveragePerNodeAndTheBoundedEntries() throws Exception {
+        build(Arrays.asList(node("a", "Classloader", "Classloader Java"), node("b", "JPMS", "JPMS Java")),
+                Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        for (int i = 0; i < SearchPlanQueue.OVERVIEW_ENTRIES + 3; i++) {
+            queue.addForNode("", "extra query " + i);
+        }
+        String overview = queue.overview();
+        assertTrue(overview, overview.contains("- Classloader: open"));
+        assertTrue(overview, overview.contains("- JPMS: open"));
+        assertTrue(overview, overview.contains("[pending] Classloader Java (Classloader)"));
+        assertTrue(overview, overview.contains("more"));
+        assertFalse(overview, overview.contains("extra query " + (SearchPlanQueue.OVERVIEW_ENTRIES + 2)));
+    }
+
+    @Test
     public void aRemovedNodeIsSkippedAndKeptInactive() throws Exception {
         build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")),
                 Collections.<String, List<String>>emptyMap());
