@@ -88,6 +88,10 @@ public class OutlineBriefWorkerTest {
     }
 
     static Outline stored() {
+        return drafts().placedAgainst(Outline.EMPTY, sequence());
+    }
+
+    static Outline drafts() {
         OutlineChapter concept = OutlineChapter.draft("Grundlagen", OutlineBrief.EMPTY,
                 new OutlineProvenance("n1", null, null), Arrays.asList(
                         section("Physik", "n1a", null, 500, "p01"), section("Geschichte", "n1b", null, 500, "p02")));
@@ -97,7 +101,7 @@ public class OutlineBriefWorkerTest {
                         section("Praxis, part 2", "n2", "c2", 600, "p14", "p15", "p16", "p17")));
         OutlineChapter last = OutlineChapter.draft("Ausblick", OutlineBrief.EMPTY,
                 new OutlineProvenance("n3", null, null), Arrays.asList(section("Zukunft", "n3a", null, 400, "p20")));
-        return new Outline(Arrays.asList(concept, clustered, last)).placedAgainst(Outline.EMPTY, sequence());
+        return new Outline(Arrays.asList(concept, clustered, last));
     }
 
     static final class Passages implements OutlinePassages {
