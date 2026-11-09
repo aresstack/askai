@@ -180,5 +180,13 @@ public class BookIntegrityCheckTest {
                     }
                 }, concepts, outlines, manuscript, sources).run();
         assertEquals(0, report.examined(IntegrityFinding.Check.PIN_HASH));
+        assertFalse("a project without committed pins never passes", report.passed());
+    }
+
+    @Test
+    public void anEmptyDirectoryNeverPasses() throws Exception {
+        BookIntegrityReport report = BookIntegrityCheck.forProject(folder.newFolder("empty")).run();
+        assertFalse(report.passed());
+        assertEquals("project", report.findings().get(0).getSubject());
     }
 }

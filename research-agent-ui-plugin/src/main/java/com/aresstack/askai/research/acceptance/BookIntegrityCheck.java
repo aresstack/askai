@@ -102,6 +102,11 @@ public final class BookIntegrityCheck {
         checkSourcesPins(run);
         checkManuscriptPin(run);
         checkSections(run);
+        Integer pins = run.examined.get(IntegrityFinding.Check.PIN_HASH);
+        if (pins == null || pins == 0) {
+            run.miss(IntegrityFinding.Check.PIN_HASH, "project",
+                    "no committed pin found: wrong project path, missing book.json or lost transition journal");
+        }
         return new BookIntegrityReport(run.examined, run.findings);
     }
 
