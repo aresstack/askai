@@ -1,4 +1,4 @@
-# Parallel research team for the Sources phase: orchestrator, page workers, one search service
+# Parallel research team for the Sources phase: orchestrator, page workers, one web search tool
 
 Status: architecture and PR plan, 2026-11-09, on `develop` 1d0b734 (after PR #153, #155 and #156). No code changed by
 this document. It extends `docs/research-book-mvp-plan.md` (D5: "Phase 2 is a deterministic plan from the frozen
@@ -13,7 +13,8 @@ chat browser. The GPU is idle most of that time (the 2026-10-30 benchmark satura
 concurrent requests), and the browser waits on one page at a time.
 
 The target is a team: a **deterministic orchestrator** (Java) that owns the plan, the coverage and the task queue
-and asks a model only for judgement; a **central search service** that is the only thing that ever talks to a search
+and asks a model only for judgement; the **one existing web search tool** (the search the concept phase already
+uses, on `SearchBrowser`), made thread-safe and strictly serial, as the only thing that ever talks to a search
 engine; and **N page workers** (small model + one isolated browser user context each) that each inspect one page.
 Workers talk in natural language through exactly two operations, `send_message` and `finish_task`; routing,
 persistence, identity and permissions are Java's job. Sites are protected by a **site lease gate**: a bounded wait
@@ -21,13 +22,18 @@ per site, a deadline on every holder, and a waiter that always gets its turn (no
 burst on ResearchGate).
 
 Almost everything needed already exists and is extended, not replaced (section 1). The new code is: a site lease
-gate with deadlines (replacing the counter in `SiteConcurrencyGate`), a search-service facade with query and URL
-dedup and engine backoff, an agent mailbox with the two tools, a page worker on the existing `TaskExecutor`, a
+gate with deadlines (replacing the counter in `SiteConcurrencyGate`), thread safety, strict serialisation, spacing,
+challenge pause and dedup inside the existing web search tool, an agent mailbox with the two tools, a page worker on the existing `TaskExecutor`, a
 feedback channel from workers into `SearchPlanCycles`, and a capacity governor over the existing model and browser
-limits. Seven PRs (section 5); three of them (T1 site leases, T2 search service, T3 messaging) are independent
+limits. Seven PRs (section 5); three of them (T1 site leases, T2 web search tool, T3 messaging) are independent
 foundations that can start now without touching the MVP path.
 
 Guideline, as given: intelligent agents, the simplest possible model communication, reliable deterministic Java.
+
+Owner decisions of 2026-11-09 that this plan follows: no separate search service and no package around the search
+browser; the workers use exactly the web search MCP tool of the concept phase, which is made thread-safe and runs
+searches strictly one after another (spacing, challenge pause and dedup live inside it). Google `goto` wrappers are
+never resolved in advance; one hop when a hit is opened, centrally in the search browser.
 
 ## 1. What exists today, and what becomes of it
 
@@ -35,11 +41,11 @@ Checked in the code on `develop` c283dc2.
 
 | Component | Where | Finding | Verdict |
 |---|---|---|---|
-| `SearchPlanQueue`, `SearchPlanCycles`, `SearchPlanCoverage`, `SearchPlanStore`, `SearchPlanEntry` | plugin `research.plan` | The host-side plan of D5: entries per concept node, priority entries, coverage per node (`SourceEligibility.isEvidence`), research cycles with a `Replanner` (PR #153), honest `Outcome`, `search-plan/outcome.md`. **Runs one entry at a time** through `SearchPlanQueue.SearchPort` → `ManualWebSearchPort`; "two acquisitions never overlap" (`Busy`, `deferUntilEntryEnds`). Entries are persisted as tasks in `FileResearchTaskStore`. | **Extend.** The queue keeps plan, coverage, cycles, stop/run and the outcome. Its `SearchPort` gets a second implementation that hands the query to the search service and the hits to the page task queue instead of running the whole funnel (section 2.3). A second input feeds the replanner: worker feedback (section 2.6). |
+| `SearchPlanQueue`, `SearchPlanCycles`, `SearchPlanCoverage`, `SearchPlanStore`, `SearchPlanEntry` | plugin `research.plan` | The host-side plan of D5: entries per concept node, priority entries, coverage per node (`SourceEligibility.isEvidence`), research cycles with a `Replanner` (PR #153), honest `Outcome`, `search-plan/outcome.md`. **Runs one entry at a time** through `SearchPlanQueue.SearchPort` → `ManualWebSearchPort`; "two acquisitions never overlap" (`Busy`, `deferUntilEntryEnds`). Entries are persisted as tasks in `FileResearchTaskStore`. | **Extend.** The queue keeps plan, coverage, cycles, stop/run and the outcome. Its `SearchPort` gets a second implementation that hands the query to the web search tool and the hits to the page task queue instead of running the whole funnel (section 2.3). A second input feeds the replanner: worker feedback (section 2.6). |
 | `QueryPlanner`, `BackendQueryPlanner`, `ConceptQueryPlan` | runtime `orchestrator`, plugin `plan`, domain `plan` | Prompt and strict reader for query variants per node; the cycle request already carries `queriesRun`, `blacklist`, `foundDomains` per node and the `cycle`. | **Extend** the request with worker findings (gaps, contradictions, unproductive angles, suggested queries) and one prompt block. No second planner. |
 | `WebSearchApplicationService` | runtime `acquire` | The one funnel (≈1,500 lines): search → mandatory rerank → frontier of URL strings → park candidates → `web_probe`/`web_read` → page relevance → `source_accept` → `web_links` → budgets → typed stop reason. Serial per run; the caller's browser lane decides where it runs. | **Keep** for the serial loop, the manual search and `research:`. The page visit (probe, read, readability, consent, acceptance, link listing) is **extracted** into a reusable `PageInspection` that both the funnel and the page worker call (the cut `docs/research-search-architecture.md` section 4 asked for: "make the frontier carry candidates"). The funnel's behaviour does not change. |
-| `SearchStrategy`, `InitialSearchResult`, `BrowserEnginesSearchStrategy`, `GoogleSearchBrowserStrategy`, `SingleProviderSearchStrategy`, `ResearchSearchStrategyFactory` | runtime `search` | Query → candidates with `providerHosts`, `challenges`, `status`. Google runs in the **search browser**; DuckDuckGo/Bing still run as a step in the research browser (`LegacyBrowserSearchStrategy`); API providers (Brave, Bright Data, DataForSEO, SerpApi) over Serp4J. | **Reuse unchanged** as the engine behind the search service. |
-| `SearchBrowser`, `ResearchRuntimeShared` | browser-playwright, runtime | ONE headless search browser per AskAI JVM, owner thread, searches serialised, restarts itself. Separate from the research browser. | **This is the central search executor already.** The search service (T2) adds what is missing around it: query dedup, result dedup, spacing and backoff, one gate for all chats, and the rule that no worker context ever reaches an engine host. |
+| `SearchStrategy`, `InitialSearchResult`, `BrowserEnginesSearchStrategy`, `GoogleSearchBrowserStrategy`, `SingleProviderSearchStrategy`, `ResearchSearchStrategyFactory` | runtime `search` | Query → candidates with `providerHosts`, `challenges`, `status`. Google runs in the **search browser**; DuckDuckGo/Bing still run as a step in the research browser (`LegacyBrowserSearchStrategy`); API providers (Brave, Bright Data, DataForSEO, SerpApi) over Serp4J. | **Reuse unchanged**; they stay the engine inside the web search tool. |
+| `SearchBrowser`, `ResearchRuntimeShared` | browser-playwright, runtime | ONE headless search browser per AskAI JVM, owner thread, searches serialised, restarts itself. Separate from the research browser. | **This is the one web search tool already** (the concept phase searches with it). T2 changes it in place, nothing is built around it: a thread-safe entry, strictly one search at a time, a minimum spacing per engine request, a pause after a challenge, query and result dedup, and the rule that no worker context ever reaches an engine host. |
 | `BrowserUserContextPool`, `PlaywrightUserContextPool`, `WorkerBrowserLane`, `WorkerUserContext`, `WorkerBrowsingContext`, `WorkerBrowserLimits`, `SharedWorkerBrowserPool`, `ChatBrowserUserContexts` | runtime `browser`, browser-playwright, plugin `host` | Implemented and tested (`docs/research-browser-user-contexts.md`): worker browsers (processes) × user contexts × tabs, one pool over all chats, per-chat scopes, hung-call termination, idle stop, saved sign-in state per key, every page of a worker lands in the session's one `CaptureStore`. Settings "Worker browsers": processes 3, user contexts/process 4, tabs/user context 4, per site 2, wait 120 s. | **Reuse unchanged.** 20 workers = 5 processes × 4 user contexts; that is a settings change, not code. |
 | `SiteConcurrencyGate` | browser-playwright | A counter per site key (host without `www.`, all engines share `search-engines`), limit over all workers and chats. `enter` waits up to the **call timeout (300 s)** and then throws; `wait()`/`notifyAll()` without FIFO order; no deadline on a holder; a holder that hangs keeps its place until its lane is terminated. | **Replace the inside, keep the seam** (T1): leases with deadlines, FIFO waiters, bounded wait, per-site overrides, site health (cool-down after CAPTCHA/consent/HTTP 429). `WorkerBrowsingContext.call` keeps calling `enter`/`leave`. |
 | `TaskExecutor`, `ExecutorCapacity`, `TaskBoard`, `ProjectTaskBoard`, `FileResearchTaskStore`, `ResearchTask`, `TaskState`, `ResearchTaskResumption`, `TaskWorker`, `WorkerContext`, `WorkerResult` | runtime `orchestrator`, plugin `store`, domain `task` | A deterministic executor: persisted tasks with a closed transition table, dependencies, per-resource semaphores (`model:<endpoint>/<model>` from the port's capacity, `browser`), retries, cancel, `resume` of interrupted work, receipts and artifacts per task. Proven with parallel user contexts (`WorkerUserContextExecutionTest`). | **Reuse as the worker pool engine.** The page worker is one more `TaskWorker`; page tasks are `ResearchTask`s with role `page-worker` in the Sources phase, next to the plan entries that already live in the same store. |
@@ -65,7 +71,7 @@ Sources phase of one chat (research/running)
 ├── SearchPlanQueue (exists) ── plan, coverage, cycles, outcome, stop/run
 │       │  entry.query                                  ▲ worker feedback (gaps, suggested queries, …)
 │       ▼                                               │
-├── SearchService (T2, one per AskAI) ──────────────────┼── the ONLY path to a search engine
+├── Web search tool (exists; T2: thread-safe, strictly serial) ─┼── the ONLY path to a search engine
 │       │  SearchStrategy (exists) → SearchBrowser / Serp4J providers (exist)
 │       │  query dedup · result dedup (UrlRegistry) · one lazy goto hop per opened hit · engine rate + backoff · one gate for all chats
 │       ▼  candidates (reranked, scope-fenced, NonSourceHosts-filtered)
@@ -111,14 +117,15 @@ recorded as rejected in the registry with the worker's reason, and nothing count
 keeps accepting at its own point; only the team path moves acceptance behind the worker's answer. Java then turns
 the answer into artifacts (`FINDING`, `SOURCE_REFERENCE`), follow-up page tasks and mailbox messages. The worker has **no search tool and cannot reach an engine host** (section 2.3).
 
-**Search service (Java, one per AskAI).** Takes a query with its plan entry and language, runs it through the
-configured `SearchStrategy` (engines in the search browser, or an API provider), and returns deduplicated,
-reranked candidates. It owns the global engine limits for queries and `goto` hops alike: one engine request at a time (the `search-engines` key
-today), a minimum spacing between requests, exponential backoff and a cool-down after a challenge, over all chats.
-It refuses a query it has already run for the same project (normalised: case, whitespace, stop words), and strips
-URLs the project has already visited or rejected (`UrlRegistry`).
+**Web search tool (existing, one per AskAI).** The workers search with exactly the tool the concept phase searches
+with: the `search` path over `ManualWebSearchPort`, the configured `SearchStrategy` (engines in the search browser, or
+an API provider) and `SearchBrowser`. T2 changes that tool, not its surroundings: any thread may call it and calls
+queue (thread-safe entry); it runs **strictly one search at a time**, with a minimum spacing per engine request and a
+pause after a challenge, for queries and `goto` hops alike and over all chats; it refuses a query it has already run
+for the same project (normalised: case, whitespace, stop words) and drops URLs the project has already visited or
+rejected (`UrlRegistry`). It returns deduplicated, reranked candidates as today.
 
-### 2.3 Why no worker can bypass the search service
+### 2.3 Why no worker can bypass the web search tool
 
 Three independent guards, each sufficient on its own:
 
@@ -129,8 +136,9 @@ Three independent guards, each sufficient on its own:
    navigation (before and after redirects). T2 adds the engine deny list (`SearchEngineHosts` in `browser-api`, PR #156, plus the `providerHosts` the
    strategy reports) for worker user contexts: a navigation to an engine host fails typed (`ENGINE_HOST_REFUSED`),
    is recorded on the task, and never leaves the process. The chat browser and the search browser are not affected.
-3. **Lease identity.** The search browser and the API providers are reachable only through `SearchService`, which
-   is not on any worker's lane.
+3. **Lease identity.** The search browser and the API providers are reachable only through the web search tool,
+   whose owner thread is not on any worker's lane; a page task reaches it only through the coordinator (for a query)
+   or for its one `goto` hop.
 
 PR #156 (merged as `develop` 1d0b734) is the basis T2 builds on: `SearchEngineHosts`; the research browser never opens
 google/bing/duckduckgo; Google `goto` wrappers are resolved lazily in the search browser (`SearchBrowser.resolveRedirect`
@@ -141,17 +149,17 @@ covered only once no planned query of it is pending, and the per-query cap is `s
 **`goto` wrappers stay unresolved until a hit is actually opened; then exactly one hop, centrally in the search
 browser.** This is the owner's rule (2026-11-09, after the second live run) and what PR #156 does in the funnel's
 frontier loop; resolving hits in advance or in a batch is forbidden, because every hop is a Google request. A page
-task therefore carries the wrapper URL; right before the page worker opens it, the task asks the search service's
+task therefore carries the wrapper URL; right before the page worker opens it, the task asks the web search tool's
 redirect port (`OpaqueRedirectResolver` over `SearchBrowser.resolveRedirect`, serial on the search browser's owner
 thread) for that one hop and then navigates its own user context to the resolved target. The worker never touches an
 engine host itself; a blocked hop (`engineRedirectBlocked`) ends the task typed and puts the engine into cool-down.
 
 **Parallel workers must not raise the engine rate.** Live run 2 (2026-11-09): Google challenged the search browser
-after 13 SERP queries and about 40 `goto` hops in 16 minutes, all serial. Queries and hops are therefore one budget in
-the search service: a minimum spacing per Google request (the repair thread is asking the owner for the value) and
+after 13 SERP queries and about 40 `goto` hops in 16 minutes, all serial. Queries and hops are therefore one budget inside
+the web search tool: a minimum spacing per Google request (the repair thread is asking the owner for the value) and
 the cool-down apply to both, over all chats and workers; the number of workers changes how many pages are read at
 once, never how fast the engine is asked. Hits that wait for their hop wait in the page task queue, where nothing is
-lost. The service reports the search browser's queue length so the benchmark (T7) shows whether the engine budget,
+lost. The tool reports the search browser's queue length so the benchmark (T7) shows whether the engine budget,
 not the browsers or the model, is the ceiling; if it is, the answer is the configured engine order (for example
 DuckDuckGo after a Google block, as the repair thread proposes), never a worker that talks to an engine.
 
@@ -223,7 +231,7 @@ adds a second, continuous feed and a new origin `WORKER` on `SearchPlanEntry`:
 - **Worker feedback → entries without waiting for the cycle end.** A `TO ORCHESTRATOR` message that the review role
   turns into queries, a `FOLLOW` link that the coordinator decides to search rather than open (a link to a search
   page or a listing), and a "this node needs scientific sources, not vendor pages" note all become pending entries
-  of the running cycle with origin `WORKER` and the node they belong to. They run as soon as the search service is
+  of the running cycle with origin `WORKER` and the node they belong to. They run as soon as the web search tool is
   free; the queue keeps its priority order (PRIORITY, then WORKER, then plan order).
 - **The cycle request learns.** `ConceptQueryPlan.Request` gets three lists: `workerGaps` (per node), `contradictions`
   (source pairs with the claim), `unproductiveQueries` (queries whose pages were all `USEFUL: no` or rejected). The
@@ -247,7 +255,7 @@ and the waiter gets its turn.
 
 - **Key**: the registrable site (`PublicSuffixDomainKeyResolver`, so `www.researchgate.net` and `researchgate.net`
   are one site; subdomains of one registrable domain count as one by default). Engines keep the one key
-  `search-engines`, which only the search service uses after T2.
+  `search-engines`, which only the web search tool uses after T2.
 - **Permits per site**: default from the existing setting (2), with **per-site overrides** in a small list setting
   (`research.browser.sites.overrides`, e.g. `researchgate.net=1@10s`, `*.sciencedirect.com=1@5s`: one at a time with a
   minimum spacing of 10 s between navigations). The list ships with a short default for known strict sites and is
@@ -286,7 +294,7 @@ Resources and where their limit lives:
 | Concurrent model calls per model and endpoint | `ModelPortSettings` capacity (default 1; raise for `gemma4:e2b`) | `ModelResourceScheduler` (exists) |
 | Worker browser processes, user contexts, tabs | "Worker browsers" settings | `PlaywrightUserContextPool` (exists) |
 | Operations on one site | per-site permits and overrides | `SiteLeaseGate` (T1) |
-| Search engine requests (queries and `goto` hops) | one at a time, minimum spacing per request, backoff and cool-down | `SearchService` (T2) |
+| Search engine requests (queries and `goto` hops) | one at a time, minimum spacing per request, backoff and cool-down | the web search tool, `SearchBrowser` (T2) |
 | Page workers running at once | `research.team.maxWorkers` (default 8, see question 3) | `TeamCapacity` (T6) |
 
 Today `TaskExecutor.runReady` acquires every resource of a task before the attempt starts and releases it only when
@@ -359,7 +367,7 @@ the model call, so a page that does not match the node never costs a model turn.
 | Layer | Module | New or changed |
 |---|---|---|
 | Domain (Java 8, no AskAI dependency) | `research-domain` | `ConceptQueryPlan.Request` fields (gaps, contradictions, unproductive queries); `SearchPlanEntry.Origin.WORKER` lives in the plugin's plan package as today. |
-| Runtime library | `research-agent-runtime` | `acquire.PageInspection` (extracted), `search.SearchService` (facade + `UrlRegistry` port), `team.mailbox.*` (mailbox, router, message codec, two tools), `orchestrator.PageWorker`, `orchestrator.TeamCapacity`, role `page-worker`, role `research-gap-reviewer`, labelled-text parsers. |
+| Runtime library | `research-agent-runtime` | `acquire.PageInspection` (extracted), thread-safe, strictly serial entry of the existing web search (`ManualWebSearchPort` path, `SearchBrowser`) + `UrlRegistry` port, `team.mailbox.*` (mailbox, router, message codec, two tools), `orchestrator.PageWorker`, `orchestrator.TeamCapacity`, role `page-worker`, role `research-gap-reviewer`, labelled-text parsers. |
 | Browser backend | `browser-playwright` | `SiteLeaseGate` replaces the inside of `SiteConcurrencyGate`; engine deny list in the worker session's URL policy; site overrides in `WorkerBrowserLimits`. |
 | Plugin (host) | `research-agent-ui-plugin` | `plan.TeamSearchPort` (the queue's second `SearchPort`), `plan.PageTaskQueue`, `plan.TeamCoordinator`, file `UrlRegistry` and mailbox store under the project folder, settings rows, checklist and Sources-tab view, wiring in `ResearchAgentSession.wireSearchPlan` behind the flag. |
 
@@ -373,16 +381,18 @@ touched. UI strings English.
 | PR | Title | Depends on | Size | Starts |
 |---|---|---|---|---|
 | T1 | Site leases with deadlines, per-site overrides and site health | – | M | now |
-| T2 | Search service: one engine path, query and URL dedup, one lazy goto hop per opened hit, engine rate and backoff, engine deny list for worker contexts | PR #156 (merged) | M | now |
+| T2 | Web search tool: thread-safe and strictly serial, one engine budget (spacing, challenge pause), query and URL dedup, one lazy goto hop per opened hit, engine deny list for worker contexts | PR #156 (merged) | M | now |
 | T3 | Agent mailbox: `send_message`, `finish_task`, labelled-text answers, persistence | – | M | now |
 | T4 | Page worker and page task queue on the task executor; `PageInspection` extracted from the funnel | T1, T2, T3 | L | after MVP acceptance is stable |
-| T5 | Team coordinator: plan queue feeds the search service, worker feedback feeds the cycles, gap-review role, outcome | T4 | L | after T4 |
+| T5 | Team coordinator: plan queue feeds the web search tool, worker feedback feeds the cycles, gap-review role, outcome | T4 | L | after T4 |
 | T6 | Capacity governor and settings: team worker count over all chats, model-slot-aware limits, "Research team" settings row | T1 (interfaces), T4 | M | can start after T1 |
 | T7 | Recovery, stop/pause, stuck detection, acceptance tests 2/4/8/20, benchmark subject, Sources-tab team view | T5, T6 | L | last |
 
-Chain: T1/T3 → T4 → T5 → T7, with T2 and T6 joining. T1, T2, T3 and T6 change nothing the MVP run uses (the gate
-keeps its seam and its default behaviour for limit 2 without overrides; the service wraps the strategies; the
-mailbox and the governor are new classes); they are merged behind no flag. T4 and T5 are wired into
+Chain: T1/T3 → T4 → T5 → T7, with T2 and T6 joining. T1, T3 and T6 change nothing the MVP run uses (the gate keeps
+its seam and its default behaviour for limit 2 without overrides; the mailbox and the governor are new classes). T2
+changes the web search tool the MVP run and the concept phase also use, but for a single caller only in what the owner
+asked for: searches stay serial, the spacing default is the owner's value, dedup refuses only repeats. They are
+merged behind no flag. T4 and T5 are wired into
 `ResearchAgentSession` behind `research.team.enabled` (default off) and switched on for the live benchmark of T7
 only. Each PR comes with its tests and is merged on green CI with a regular merge commit.
 
@@ -399,20 +409,23 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
   releases; limit 2 without overrides behaves exactly as today (existing pool tests green); no unbounded wait exists
   (test with a hung holder and an injected clock).
 
-**T2 Search service** (M)
-- Change: `SearchService` in the runtime (`search(SearchRequest) → SearchOutcome` over the configured
-  `SearchStrategy`; `resolveOnOpen(candidate)` as the one lazy `goto` hop through `OpaqueRedirectResolver` when a page
-  task opens its hit, never earlier and never in a batch, with `engineRedirectBlocked` ending the task typed; one
-  engine budget (minimum spacing per Google request, cool-down) for queries and hops together; normalised query dedup
-  per project; `UrlRegistry` port with a file implementation in the plugin
-  (`search-plan/urls.jsonl`); engine spacing and backoff over all chats using the `search-engines` key; `providerHosts`
-  and `SearchEngineHosts` (browser-api) as the engine deny list applied to worker user contexts by
-  `PlaywrightBrowserSession`'s `UrlSafetyPolicy`). The manual search and the funnel keep their path; only the registry is
-  written by both, so a page the serial loop visited is not queued again by the team.
-- Done when: the same query twice yields one engine request; a URL visited by the chat browser is not a candidate for
-  the team; a worker context's navigation to any engine host fails typed and is logged; two chats searching at once
-  never overlap on the engine; a challenge on the engine backs off exponentially and the queue reports it as the
-  reason of the pause, not as "no results".
+**T2 Web search tool: thread-safe and strictly serial** (M)
+- Change: the existing web search tool in place, no new facade and no new package. `SearchBrowser` (already one owner
+  thread) and the `ManualWebSearchPort` path get a thread-safe entry that any session or worker may call, a FIFO
+  queue that runs **strictly one search at a time** over all chats, a minimum spacing per engine request (queries and
+  `goto` hops alike; the value is the owner's, see the repair thread) and a pause after a challenge with exponential
+  backoff; `resolveOnOpen(candidate)` as the one lazy `goto` hop through `OpaqueRedirectResolver` when a page task
+  opens its hit, never earlier and never in a batch, with `engineRedirectBlocked` ending the task typed; normalised
+  query dedup per project inside the tool; `UrlRegistry` port with a file implementation in the plugin
+  (`search-plan/urls.jsonl`), written by the serial funnel and the team alike so a page one path visited is not queued
+  by the other; `providerHosts` and `SearchEngineHosts` (browser-api) as the engine deny list applied to worker user
+  contexts by `PlaywrightBrowserSession`'s `UrlSafetyPolicy`. The concept phase, the manual search and the funnel keep
+  calling the same tool.
+- Done when: the same query twice yields one engine request; two sessions or workers calling at once never overlap on
+  the engine and keep the spacing (test with an injected clock); a URL visited by the chat browser is not a candidate
+  for the team; a worker context's navigation to any engine host fails typed and is logged; a challenge pauses the tool
+  for every caller and the queue reports the pause as the reason, not as "no results"; the concept phase's search
+  behaves as before for a single caller.
 
 **T3 Agent mailbox** (M)
 - Change: `AgentMailbox` (append-only store, per-recipient inboxes, delivery state, caps and TTL), `MessageRouter`
@@ -474,8 +487,10 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
 
 ## 6. Integration without disturbing the MVP
 
-- T1, T2, T3 and T6 touch no line the serial Sources run executes differently; T1 keeps the default behaviour of
-  `SiteConcurrencyGate` for limit 2 without overrides. They can be merged while the M2 to M4 live tests run.
+- T1, T3 and T6 touch no line the serial Sources run executes differently; T1 keeps the default behaviour of
+  `SiteConcurrencyGate` for limit 2 without overrides. T2 touches the web search tool itself (the owner's choice), so
+  its PR carries the concept-phase and manual-search tests and is live-checked once in the Phase-2 run before merge.
+  They can be merged while the M2 to M4 live tests run.
 - T4 and T5 are wired behind `research.team.enabled` (default off). The flag is switched on for the live benchmark
   only, after the MVP acceptance run has passed, and becomes the default only with a recorded benchmark that shows
   more useful pages per minute than the serial run at the same quality (the `BookIntegrityCheck` of PR 32 on the
@@ -492,7 +507,7 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
 |---|---|
 | One orchestrator coordinates 2, 4, 8 and then up to 20 workers | T4 executor tests (2/4/8 on fakes); T7 live benchmark 1/2/4/8/20 on the owner's machine (pool 5 × 4, model capacity per question 1) |
 | All workers analyse different pages in parallel | T4: distinct URLs per task from the registry; overlap measured in the test (max in flight = capacity) |
-| No worker bypasses the search service | T2: tool catalog, engine deny list and lease identity tests; T7 live: the search browser's request log vs. worker contexts' navigation log |
+| No worker bypasses the web search tool | T2: tool catalog, engine deny list and lease identity tests; T7 live: the search browser's request log vs. worker contexts' navigation log |
 | A worker asks the orchestrator and receives an answer | T3/T5: `TO ORCHESTRATOR` → review → follow-up task with the answer in the brief; test asserts the brief |
 | Two workers exchange information | T3: `TO WORKER 4` appears in worker 4's next turn; redirected if 4 has finished |
 | A worker proposes a research question and the orchestrator starts a search from it | T5: `WORKER` entry runs before the cycle end; test asserts the engine request |
