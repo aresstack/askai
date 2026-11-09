@@ -633,6 +633,12 @@ public final class ProductiveResearchBackendFactory {
                         }
 
                         @Override
+                        public String sectionRewrite(String section, String comment) {
+                            return holder[0] == null ? null
+                                    : holder[0].controlContext().sectionRewrite(section, comment);
+                        }
+
+                        @Override
                         public String searchPlanOverview() {
                             return holder[0] == null ? null : holder[0].controlContext().searchPlanOverview();
                         }

@@ -216,6 +216,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 }
 
                 @Override
+                public String sectionRewrite(String section, String comment) {
+                    return sectionRewriteCommand(section, comment);
+                }
+
+                @Override
                 public String searchPlanOverview() {
                     com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
                     try {
@@ -2481,6 +2486,32 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     public String rewriteSection(String sectionId, String comment) {
         return startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind.SECTION, sectionId,
                 comment == null ? "" : comment);
+    }
+
+    /** Plan PR 29: the Document assistant's {@code section_rewrite}; the section by id or title. */
+    String sectionRewriteCommand(String section, String comment) {
+        if (writingRunner == null) {
+            return null;
+        }
+        com.aresstack.askai.research.outline.Outline outline = approvedOutlineOrNull();
+        String ref = section == null ? "" : section.trim();
+        if (outline == null || ref.isEmpty()) {
+            return "Tool failed: Missing argument: section";
+        }
+        String id = null;
+        for (com.aresstack.askai.research.outline.OutlineChapter chapter : outline.getChapters()) {
+            for (com.aresstack.askai.research.outline.OutlineSection candidate : chapter.getSections()) {
+                if (candidate.getId().equals(ref) || candidate.getTitle().equalsIgnoreCase(ref)) {
+                    id = candidate.getId();
+                }
+            }
+        }
+        if (id == null) {
+            return "Tool failed: no section \"" + ref + "\" in the approved outline.";
+        }
+        String refusal = rewriteSection(id, comment);
+        return refusal == null ? "STARTED rewrite of section " + id + "; the new revision appears in the Document tab."
+                : "Not allowed: " + refusal;
     }
 
     /** "Rewrite chapter": every section of one chapter with one comment. */

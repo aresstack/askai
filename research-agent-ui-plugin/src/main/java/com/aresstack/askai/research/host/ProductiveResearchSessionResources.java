@@ -772,6 +772,12 @@ public final class ProductiveResearchSessionResources {
             }
 
             @Override
+            public String sectionRewrite(String section, String comment) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.sectionRewrite(section, comment);
+            }
+
+            @Override
             public String searchPlanOverview() {
                 com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
                 return port == null ? null : port.searchPlanOverview();
