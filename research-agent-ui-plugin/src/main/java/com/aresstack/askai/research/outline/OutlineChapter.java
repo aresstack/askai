@@ -41,6 +41,11 @@ public final class OutlineChapter extends OutlineEntry {
                 reason, sections);
     }
 
+    public OutlineChapter withBrief(OutlineBrief newBrief) {
+        return new OutlineChapter(getId(), getOrder(), getTitle(), newBrief, getProvenance(), isUserEdited(),
+                getStaleReason(), sections);
+    }
+
     public OutlineChapter withSections(List<OutlineSection> newSections) {
         return new OutlineChapter(getId(), getOrder(), getTitle(), getBrief(), getProvenance(), isUserEdited(),
                 getStaleReason(), newSections);

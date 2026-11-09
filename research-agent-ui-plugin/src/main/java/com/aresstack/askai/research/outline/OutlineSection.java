@@ -18,6 +18,11 @@ public final class OutlineSection extends OutlineEntry {
                 isUserEdited(), getStaleReason());
     }
 
+    public OutlineSection withBrief(OutlineBrief newBrief) {
+        return new OutlineSection(getId(), getParentId(), getOrder(), getTitle(), newBrief, getProvenance(),
+                isUserEdited(), getStaleReason());
+    }
+
     public OutlineSection withUserEdited(boolean edited) {
         return new OutlineSection(getId(), getParentId(), getOrder(), getTitle(), getBrief(), getProvenance(),
                 edited, getStaleReason());

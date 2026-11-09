@@ -524,6 +524,24 @@ public final class ProductiveResearchSessionResources {
         return outlineWorkspace;
     }
 
+    private final com.aresstack.askai.research.outline.OutlineJobGuard outlineJobs =
+            new com.aresstack.askai.research.outline.OutlineJobGuard();
+    private volatile com.aresstack.askai.research.outline.brief.OutlineChapterService outlineChapterService;
+
+    /** The session's one outline job guard (plan PR 22/24): generation and chapter regeneration share it. */
+    public com.aresstack.askai.research.outline.OutlineJobGuard outlineJobs() {
+        return outlineJobs;
+    }
+
+    /** Plan PR 24: the single-chapter operations; {@code null} until the session wires them. */
+    public com.aresstack.askai.research.outline.brief.OutlineChapterService outlineChapterService() {
+        return outlineChapterService;
+    }
+
+    public void setOutlineChapterService(com.aresstack.askai.research.outline.brief.OutlineChapterService service) {
+        this.outlineChapterService = service;
+    }
+
     /** Who to tell when a concept edit committed (view refresh); the session wires itself here. */
     public void setConceptChangedListener(Runnable listener) {
         this.conceptChangedListener = listener;
@@ -712,6 +730,12 @@ public final class ProductiveResearchSessionResources {
             public String searchPlanOverview() {
                 com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
                 return port == null ? null : port.searchPlanOverview();
+            }
+
+            @Override
+            public String outlineRegenerateChapter(String chapterId, int sections, String comment) {
+                com.aresstack.askai.research.outline.brief.OutlineChapterService service = outlineChapterService;
+                return service == null ? null : service.regenerateChapter(chapterId, sections, comment).getMessage();
             }
 
             @Override
