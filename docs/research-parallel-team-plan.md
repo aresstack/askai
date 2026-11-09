@@ -122,14 +122,15 @@ Three independent guards, each sufficient on its own:
    URL, or `search_*` tool. Its only browser input is the task's URL and the links Java listed from the page;
    `RoleScopedToolInvoker` refuses everything else (exists).
 2. **URL policy of the worker context.** `PlaywrightBrowserSession` already applies its `UrlSafetyPolicy` twice per
-   navigation (before and after redirects). T2 adds the engine deny list (every host of `BrowserSearchEngineCatalog` plus the `providerHosts` the
-   strategy reports) for worker user contexts: a navigation to an engine host fails typed (`ENGINE_HOST_REFUSED`),
+   navigation (before and after redirects). T2 adds the engine deny list (the `SearchEngineHosts` list in `browser-api` that the repair thread's
+   follow-up PR introduces, plus the `providerHosts` the strategy reports) for worker user contexts: a navigation to an engine host fails typed (`ENGINE_HOST_REFUSED`),
    is recorded on the task, and never leaves the process. The chat browser and the search browser are not affected.
 3. **Lease identity.** The search browser and the API providers are reachable only through `SearchService`, which
    is not on any worker's lane.
 
-The current fix in the Phase-2 repair thread (resolve `goto` links in the search browser, the research browser never
-opens google/bing/duckduckgo, node coverage only after all cycle queries) lands first; T2 builds on it and must not
+The current fix in the Phase-2 repair thread (`SearchEngineHosts`, `goto` links resolved lazily in the search browser via
+`OpaqueRedirectResolver`, the research browser never opens google/bing/duckduckgo, node coverage only after all planned
+queries) lands first; T2 builds on it and must not
 touch the same lines in parallel.
 
 ### 2.4 Communication: two operations, natural language, Java does the rest
@@ -358,7 +359,7 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
 - Change: `SearchService` in the runtime (`search(SearchRequest) → SearchOutcome` over the configured
   `SearchStrategy`; normalised query dedup per project; `UrlRegistry` port with a file implementation in the plugin
   (`search-plan/urls.jsonl`); engine spacing and backoff over all chats using the `search-engines` key; `providerHosts`
-  and `BrowserSearchEngineCatalog` hosts as the engine deny list applied to worker user contexts by
+  and `SearchEngineHosts` (browser-api) as the engine deny list applied to worker user contexts by
   `PlaywrightBrowserSession`'s `UrlSafetyPolicy`). The manual search and the funnel keep their path; only the registry is
   written by both, so a page the serial loop visited is not queued again by the team.
 - Done when: the same query twice yields one engine request; a URL visited by the chat browser is not a candidate for
