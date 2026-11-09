@@ -96,4 +96,21 @@ public class SearchRedirectResolverTest {
         assertEquals(SearchRedirectResolver.Status.UNRESOLVED,
                 SearchRedirectResolver.resolve(wrapper, OpaqueRedirectStrategy.DISCARD).getStatus());
     }
+
+    @Test
+    public void yahooWrappersDecodeTheirRuSegmentWithoutARequest() {
+        SearchRedirectResolver.Resolution resolution = SearchRedirectResolver.resolve(
+                "https://r.search.yahoo.com/_ylt=AwrE.abc;_ylu=Y29sbwNiZjEEcG9z/RV=2/RE=1762732800/RO=10/"
+                        + "RU=https%3a%2f%2fwww.baua.de%2fDE%2fThemen%2fArbeitsgestaltung%3fx%3d1/RK=2/RS=xyz-");
+        assertEquals(SearchRedirectResolver.Status.RESOLVED, resolution.getStatus());
+        assertEquals("https://www.baua.de/DE/Themen/Arbeitsgestaltung?x=1", resolution.getTargetUrl());
+        assertEquals("a wrapper without a target is discarded, never classified by Yahoo's host",
+                SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve("https://r.search.yahoo.com/_ylt=abc/RV=2/RK=2/RS=x").getStatus());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve("https://r.search.yahoo.com/RU=javascript%3aalert(1)/RK=2")
+                        .getStatus());
+        assertEquals("ordinary Yahoo pages are no wrappers", SearchRedirectResolver.Status.NOT_A_REDIRECT,
+                SearchRedirectResolver.resolve("https://finance.yahoo.com/quote/X").getStatus());
+    }
 }

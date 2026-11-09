@@ -93,10 +93,10 @@ public class SearchEngineTableEditorTest {
     @Test
     public void unknownAndNotImplementedRowsAreKeptAndShownAsSuch() throws Exception {
         onEdt(() -> {
-            String stored = "yahoo:on:3:0:0:de:off:,mystery:on:3:0:1:en:off:," + "duckduckgo:on:3:0:2:de:off:";
+            String stored = "mojeek:on:3:0:0:de:off:,mystery:on:3:0:1:en:off:," + "duckduckgo:on:3:0:2:de:off:";
             SearchEngineTableEditor editor = new SearchEngineTableEditor(stored);
             TableModel model = editor.table().getModel();
-            assertEquals("Yahoo Search  (not implemented)", model.getValueAt(0, SearchEngineTableEditor.COL_ENGINE));
+            assertEquals("Mojeek  (not implemented)", model.getValueAt(0, SearchEngineTableEditor.COL_ENGINE));
             assertEquals("mystery (unknown)", model.getValueAt(1, SearchEngineTableEditor.COL_ENGINE));
             assertEquals(stored, editor.get());
             assertFalse(model.isCellEditable(0, SearchEngineTableEditor.COL_ENGINE));
