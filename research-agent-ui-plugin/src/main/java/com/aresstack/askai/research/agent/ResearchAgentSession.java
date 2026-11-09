@@ -2263,6 +2263,34 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private volatile com.aresstack.askai.research.drafting.WritingJobRunner writingRunner;
     private volatile com.aresstack.askai.research.drafting.ProductiveSectionContexts writingContexts;
     private volatile String lastWritingOutcome = "";
+    /** Plan PR 38 in the writer path: the acronym findings per accepted source, refreshed before each run. */
+    private volatile com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService writingAcronyms;
+
+    /** Refresh the acronym findings of the accepted sources (unchanged checksums are kept by the service). */
+    private void refreshWritingAcronyms(com.aresstack.askai.research.host.ProductiveResearchSessionResources resources) {
+        com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService acronyms = writingAcronyms;
+        if (acronyms == null || resources.getRepository() == null) {
+            return;
+        }
+        java.util.List<com.aresstack.askai.research.knowledge.processing.acronym.SourceText> texts =
+                new java.util.ArrayList<com.aresstack.askai.research.knowledge.processing.acronym.SourceText>();
+        for (com.aresstack.askai.research.book.SourcesPin.Entry entry
+                : com.aresstack.askai.research.book.SourcesFreezeHook.approvedSet(resources.getRepository())) {
+            StringBuilder text = new StringBuilder();
+            for (com.aresstack.askai.research.domain.Passage passage : resources.passagesForSource(entry.getSourceId())) {
+                text.append(passage.getText()).append("\n\n");
+            }
+            if (text.length() > 0) {
+                texts.add(new com.aresstack.askai.research.knowledge.processing.acronym.SourceText(
+                        entry.getSourceId(), entry.getChecksum(), text.toString()));
+            }
+        }
+        try {
+            acronyms.refresh(texts);
+        } catch (RuntimeException failed) {
+            technicalLog("write_sections -> acronym refresh failed: " + failed.getMessage());
+        }
+    }
 
     /**
      * Plan PR 29: the writing job of the Document phase. {@code START_DRAFTING} runs {@code write_sections} as its
@@ -2317,6 +2345,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                 if (contexts != null) {
                                     contexts.refresh();
                                 }
+                                refreshWritingAcronyms(resources);
                             }
                         },
                         new com.aresstack.askai.research.drafting.WritingJobRunner.Listener() {
@@ -2395,9 +2424,23 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         com.aresstack.askai.research.drafting.ProductiveSectionContexts.of(resources.getRepository()),
                         manuscript.store(), "");
         writingContexts = contexts;
+        final com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService acronyms =
+                new com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService(
+                        com.aresstack.askai.research.knowledge.processing.acronym.SentenceSegmenter.splitter(),
+                        new com.aresstack.askai.research.knowledge.processing.acronym.FileSourceAcronymStore(
+                                new java.io.File(resources.getProjectContext().getProjectDirectory(), "acronyms")
+                                        .toPath()));
+        writingAcronyms = acronyms;
         com.aresstack.askai.research.writer.SectionContextBuilder packs =
                 new com.aresstack.askai.research.writer.SectionContextBuilder(resources.outlineEmbeddings(),
-                        resources.writerIndex(), contexts);
+                        resources.writerIndex(), contexts,
+                        new com.aresstack.askai.research.writer.AcronymGlossarySource() {
+                            public java.util.List<String> lines(java.util.List<String> passageTexts,
+                                                                java.util.Collection<String> admitted,
+                                                                int tokenBudget) {
+                                return acronyms.glossaryLines(passageTexts, admitted, tokenBudget);
+                            }
+                        });
         return new com.aresstack.askai.research.drafting.RuntimeSectionWriter(
                 com.aresstack.askai.research.runtime.writer.SectionWriter.onPort(port,
                         java.time.Duration.ofSeconds(WRITER_CALL_TIMEOUT_SECONDS),
