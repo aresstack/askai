@@ -58,7 +58,8 @@ public class BrowserSearchEnginePagingTest {
                 new BrowserSearchEngineSelection.Entry("duckduckgo", true, 5),
                 new BrowserSearchEngineSelection.Entry("bing", false));
         BrowserSearchEngineSelection selection = new BrowserSearchEngineSelection(entries, null);
-        assertEquals("duckduckgo:on:5,bing:off:3", selection.encodeEntries());
+        assertEquals("duckduckgo:on:5:0:0:de+en:off:,bing:off:3:0:1:de+en+fr+es:off:",
+                selection.encodeEntries());
 
         List<BrowserSearchEngineSelection.Entry> parsed =
                 BrowserSearchEngineSelection.parseEntries("duckduckgo:on:5,bing:off:3");
@@ -97,8 +98,8 @@ public class BrowserSearchEnginePagingTest {
                 new BrowserSearchEngineSelection.Entry("duckduckgo", true, 3, 1500),
                 new BrowserSearchEngineSelection.Entry("bing", true, 3, 0));
         BrowserSearchEngineSelection selection = new BrowserSearchEngineSelection(entries, null);
-        assertEquals("a delay of 0 is simply not written",
-                "duckduckgo:on:3:1.5,bing:on:3", selection.encodeEntries());
+        assertEquals("the delay is a column of every row, 0 included",
+                "duckduckgo:on:3:1.5:0:de+en:off:,bing:on:3:0:1:de+en+fr+es:off:", selection.encodeEntries());
         assertEquals(1500, selection.delayMillisFor("duckduckgo"));
         assertEquals(0, selection.delayMillisFor("bing"));
         assertEquals("unknown engines run without an extra pause",

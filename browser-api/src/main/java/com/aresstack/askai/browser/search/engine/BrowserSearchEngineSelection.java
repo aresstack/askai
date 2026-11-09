@@ -14,8 +14,12 @@ import java.util.List;
 public final class BrowserSearchEngineSelection {
 
     /**
-     * One line of the user's engine list: which engine, whether it takes part, how many result pages,
-     * and how long to pause before every FURTHER request to this engine (anti-captcha pacing).
+     * One row of the user's engine table (Search → Engines): which catalog engine, whether it takes part, its
+     * priority (0 runs first; rows of equal priority form one group), how many result pages, how long to pause
+     * before every FURTHER request to this engine (anti-captcha pacing), and the languages it is searched in. The
+     * same engine may have several rows, e.g. Google in German at priority 1 and in French at priority 3.
+     * <p>
+     * A row is a configuration, not an engine: it points at a {@link SearchEngineCatalog} entry by id.
      */
     public static final class Entry {
 
@@ -25,10 +29,20 @@ public final class BrowserSearchEngineSelection {
         /** No extra pause between requests to the same engine unless the user asks for one. */
         public static final int DEFAULT_DELAY_MILLIS = 0;
 
+        /**
+         * A row read from a configuration written before priorities existed; the selection gives it the priority
+         * of its list position ({@link BrowserSearchEngineSelection#BrowserSearchEngineSelection}).
+         */
+        public static final int UNSET_PRIORITY = -1;
+
         private final String engineId;
         private final boolean enabled;
         private final int resultPages;
         private final int delayMillis;
+        private final int priority;
+        private final List<String> languages;
+        private final boolean furtherLanguagesEnabled;
+        private final List<String> furtherLanguages;
 
         public Entry(String engineId, boolean enabled) {
             this(engineId, enabled, DEFAULT_RESULT_PAGES, DEFAULT_DELAY_MILLIS);
@@ -38,7 +52,20 @@ public final class BrowserSearchEngineSelection {
             this(engineId, enabled, resultPages, DEFAULT_DELAY_MILLIS);
         }
 
+        /** A row without priority and languages: priority from its list position, languages from the catalog. */
         public Entry(String engineId, boolean enabled, int resultPages, int delayMillis) {
+            this(engineId, enabled, resultPages, delayMillis, UNSET_PRIORITY,
+                    SearchEngineCatalog.defaultLanguages(engineId), false, Collections.<String>emptyList());
+        }
+
+        /**
+         * @param priority                0 = first group; {@link #UNSET_PRIORITY} = take the list position
+         * @param languages               the row's picked search languages (normalised, duplicates dropped)
+         * @param furtherLanguagesEnabled whether the free "further languages" codes take part
+         * @param furtherLanguages        free language codes beyond the picker (kept while switched off)
+         */
+        public Entry(String engineId, boolean enabled, int resultPages, int delayMillis, int priority,
+                     List<String> languages, boolean furtherLanguagesEnabled, List<String> furtherLanguages) {
             if (engineId == null || engineId.trim().isEmpty()) {
                 throw new IllegalArgumentException("engine id must not be empty");
             }
@@ -46,6 +73,18 @@ public final class BrowserSearchEngineSelection {
             this.enabled = enabled;
             this.resultPages = resultPages > 0 ? resultPages : DEFAULT_RESULT_PAGES;
             this.delayMillis = delayMillis > 0 ? delayMillis : DEFAULT_DELAY_MILLIS;
+            this.priority = priority >= 0 ? priority : UNSET_PRIORITY;
+            this.languages = Collections.unmodifiableList(new ArrayList<String>(
+                    SearchLanguages.parse(languages).getCodes()));
+            this.furtherLanguagesEnabled = furtherLanguagesEnabled;
+            this.furtherLanguages = Collections.unmodifiableList(new ArrayList<String>(
+                    SearchLanguages.parse(furtherLanguages).getCodes()));
+        }
+
+        /** The same row with another priority. */
+        public Entry withPriority(int newPriority) {
+            return new Entry(engineId, enabled, resultPages, delayMillis, newPriority, languages,
+                    furtherLanguagesEnabled, furtherLanguages);
         }
 
         public String getEngineId() {
@@ -64,6 +103,34 @@ public final class BrowserSearchEngineSelection {
         /** Pause before every request to this engine after the first, in milliseconds (0 = off). */
         public int getDelayMillis() {
             return delayMillis;
+        }
+
+        /** 0 = first group, or {@link #UNSET_PRIORITY} for a row not yet placed by a selection. */
+        public int getPriority() {
+            return priority;
+        }
+
+        /** The picked languages (normalised); may be empty = no language preference. */
+        public List<String> getLanguages() {
+            return languages;
+        }
+
+        public boolean isFurtherLanguagesEnabled() {
+            return furtherLanguagesEnabled;
+        }
+
+        /** The free further codes as entered (normalised), whether or not they are switched on. */
+        public List<String> getFurtherLanguages() {
+            return furtherLanguages;
+        }
+
+        /** The languages this row searches in: the picked ones, plus the further ones when switched on. */
+        public List<String> effectiveLanguages() {
+            List<String> all = new ArrayList<String>(languages);
+            if (furtherLanguagesEnabled) {
+                all.addAll(furtherLanguages);
+            }
+            return SearchLanguages.parse(all).getCodes();
         }
     }
 
@@ -101,10 +168,37 @@ public final class BrowserSearchEngineSelection {
     private final List<Entry> entries;
     private final EngineAcquisitionMode mode;
 
+    /**
+     * Rows without a priority (a configuration from before priorities) get their list position as priority, so the
+     * old order stays the execution order. The rows are then held sorted by priority ascending; rows of the same
+     * priority keep the order they were stored in. That stored order is observable (a browser types the engines of
+     * one group one after another and the attempt budget is spent in that order), so loading a configuration never
+     * reorders it. The engine table writes its rows sorted by priority, then engine name, so a table edited by the
+     * user is stored in exactly the order it shows.
+     */
     public BrowserSearchEngineSelection(List<Entry> entries, EngineAcquisitionMode mode) {
-        this.entries = Collections.unmodifiableList(new ArrayList<Entry>(
-                entries == null ? Collections.<Entry>emptyList() : entries));
+        List<Entry> placed = new ArrayList<Entry>();
+        if (entries != null) {
+            for (int i = 0; i < entries.size(); i++) {
+                Entry entry = entries.get(i);
+                if (entry != null) {
+                    placed.add(entry.getPriority() == Entry.UNSET_PRIORITY ? entry.withPriority(i) : entry);
+                }
+            }
+        }
+        this.entries = Collections.unmodifiableList(sorted(placed));
         this.mode = mode == null ? EngineAcquisitionMode.FIRST_USABLE : mode;
+    }
+
+    /** Priority ascending; rows of the same priority keep the given order (the sort is stable). */
+    public static List<Entry> sorted(List<Entry> entries) {
+        List<Entry> copy = new ArrayList<Entry>(entries == null ? Collections.<Entry>emptyList() : entries);
+        Collections.sort(copy, new java.util.Comparator<Entry>() {
+            public int compare(Entry a, Entry b) {
+                return a.getPriority() < b.getPriority() ? -1 : a.getPriority() == b.getPriority() ? 0 : 1;
+            }
+        });
+        return copy;
     }
 
     public List<Entry> getEntries() {
@@ -116,8 +210,8 @@ public final class BrowserSearchEngineSelection {
     }
 
     /**
-     * The engines to actually visit, in order. Entries whose id the catalog does not know are skipped:
-     * a configuration written by a newer build must not make this one search with nothing.
+     * The engines to actually visit, in order, each once. Rows whose engine has no browser driver (an engine of
+     * the catalog that is not implemented yet, or an id from a newer build) are skipped.
      */
     public List<BrowserSearchEngine> resolvedEnabledEngines() {
         List<BrowserSearchEngine> resolved = new ArrayList<BrowserSearchEngine>();
@@ -126,7 +220,7 @@ public final class BrowserSearchEngineSelection {
                 continue;
             }
             BrowserSearchEngine engine = BrowserSearchEngineCatalog.byId(entry.getEngineId());
-            if (engine != null) {
+            if (engine != null && !resolved.contains(engine)) { // a second row of the same engine: visited once
                 resolved.add(engine);
             }
         }
@@ -136,9 +230,10 @@ public final class BrowserSearchEngineSelection {
     // ------------------------------------------------------------------ flat-string form (settings codec)
 
     /**
-     * {@code "duckduckgo:on:3,bing:off:3:1.5"} — order carries the priority, so the encoding is a
-     * LIST, not a map; the third part is the engine's result-page count, the fourth its request delay
-     * in seconds (up to three decimals; a delay of 0 is simply not written).
+     * One row per comma-separated piece: {@code id:on|off:pages:delay:priority:languages:further-on|off:further}.
+     * The delay is in seconds (up to three decimals), languages are joined with {@code +}:
+     * {@code "google:on:1:15:0:de+en:off:,duckduckgo:on:3:0:1:de+en:on:pl+uk"}. The rows are written in table
+     * order (priority, name).
      */
     public String encodeEntries() {
         StringBuilder sb = new StringBuilder();
@@ -147,15 +242,53 @@ public final class BrowserSearchEngineSelection {
                 sb.append(',');
             }
             sb.append(entry.getEngineId()).append(':').append(entry.isEnabled() ? "on" : "off")
-                    .append(':').append(entry.getResultPages());
-            if (entry.getDelayMillis() > 0) {
-                sb.append(':').append(formatDelaySeconds(entry.getDelayMillis()));
-            }
+                    .append(':').append(entry.getResultPages())
+                    .append(':').append(formatDelaySeconds(entry.getDelayMillis()))
+                    .append(':').append(entry.getPriority())
+                    .append(':').append(joinCodes(entry.getLanguages()))
+                    .append(':').append(entry.isFurtherLanguagesEnabled() ? "on" : "off")
+                    .append(':').append(joinCodes(entry.getFurtherLanguages()));
         }
         return sb.toString();
     }
 
-    /** The configured result-page count for this engine (the entry's value, else the default). */
+    /**
+     * A stored engine list in the current form. A list from before priorities ({@code id:on:pages[:delay]}) is
+     * migrated so that it searches as before: under {@link EngineAcquisitionMode#ALL_ENABLED} every row gets
+     * priority 0 (one group, all merged), otherwise each row its list position (tried in order). Languages of
+     * migrated rows come from the catalog. A list already in the current form is only normalised.
+     */
+    public static String migrate(String encoded, EngineAcquisitionMode mode) {
+        List<Entry> parsed = parseEntries(encoded);
+        if (mode == EngineAcquisitionMode.ALL_ENABLED) {
+            List<Entry> flat = new ArrayList<Entry>();
+            for (Entry entry : parsed) {
+                flat.add(entry.getPriority() == Entry.UNSET_PRIORITY ? entry.withPriority(0) : entry);
+            }
+            parsed = flat;
+        }
+        return new BrowserSearchEngineSelection(parsed, mode).encodeEntries();
+    }
+
+    private static String joinCodes(List<String> codes) {
+        StringBuilder sb = new StringBuilder();
+        for (String code : codes) {
+            if (sb.length() > 0) {
+                sb.append('+');
+            }
+            sb.append(code);
+        }
+        return sb.toString();
+    }
+
+    private static List<String> splitCodes(String text) {
+        return SearchLanguages.parse(text == null ? "" : text.replace('+', ',')).getCodes();
+    }
+
+    /**
+     * The configured result-page count for this engine: the value of its first row (the highest priority), else the
+     * default.
+     */
     public int resultPagesFor(String engineId) {
         for (Entry entry : entries) {
             if (entry.getEngineId().equals(engineId)) {
@@ -165,7 +298,7 @@ public final class BrowserSearchEngineSelection {
         return Entry.DEFAULT_RESULT_PAGES;
     }
 
-    /** The configured pause before repeat requests to this engine, in milliseconds (0 = off). */
+    /** The configured pause before repeat requests to this engine (its first row), in milliseconds (0 = off). */
     public int delayMillisFor(String engineId) {
         for (Entry entry : entries) {
             if (entry.getEngineId().equals(engineId)) {
@@ -175,7 +308,11 @@ public final class BrowserSearchEngineSelection {
         return Entry.DEFAULT_DELAY_MILLIS;
     }
 
-    /** Parse the flat form; unreadable pieces are skipped rather than failing the whole configuration. */
+    /**
+     * Parse the flat form; unreadable pieces are skipped rather than failing the whole configuration. Older, shorter
+     * rows ({@code "id"}, {@code "id:on"}, {@code "id:on:3"}, {@code "id:on:3:1.5"}) keep the documented defaults for
+     * the parts they do not carry: no priority yet ({@link Entry#UNSET_PRIORITY}) and the catalog's languages.
+     */
     public static List<Entry> parseEntries(String encoded) {
         List<Entry> entries = new ArrayList<Entry>();
         if (encoded == null || encoded.trim().isEmpty()) {
@@ -186,10 +323,11 @@ public final class BrowserSearchEngineSelection {
             if (text.isEmpty()) {
                 continue;
             }
-            // "id" | "id:on" | "id:on:3" | "id:on:3:1.5" — older, shorter configurations keep the
-            // documented defaults for the parts they do not carry.
-            String[] parts = text.split(":");
+            String[] parts = text.split(":", -1);
             String id = parts[0].trim();
+            if (id.isEmpty()) {
+                continue;
+            }
             boolean enabled = parts.length < 2 || !"off".equalsIgnoreCase(parts[1].trim());
             int pages = Entry.DEFAULT_RESULT_PAGES;
             if (parts.length >= 3) {
@@ -201,9 +339,19 @@ public final class BrowserSearchEngineSelection {
             }
             int delayMillis = parts.length >= 4 ? parseDelayMillis(parts[3])
                     : Entry.DEFAULT_DELAY_MILLIS;
-            if (!id.isEmpty()) {
-                entries.add(new Entry(id, enabled, pages, delayMillis));
+            int priority = Entry.UNSET_PRIORITY;
+            if (parts.length >= 5) {
+                try {
+                    priority = Integer.parseInt(parts[4].trim());
+                } catch (NumberFormatException invalid) {
+                    priority = Entry.UNSET_PRIORITY;
+                }
             }
+            List<String> languages = parts.length >= 6 ? splitCodes(parts[5])
+                    : SearchEngineCatalog.defaultLanguages(id);
+            boolean furtherOn = parts.length >= 7 && "on".equalsIgnoreCase(parts[6].trim());
+            List<String> further = parts.length >= 8 ? splitCodes(parts[7]) : Collections.<String>emptyList();
+            entries.add(new Entry(id, enabled, pages, delayMillis, priority, languages, furtherOn, further));
         }
         return entries;
     }

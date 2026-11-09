@@ -150,7 +150,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
     private Map<String, String> effectiveValues() {
         Map<String, String> effective = new LinkedHashMap<String, String>(defaults);
         effective.putAll(LegacyBrowserSearchSettingsStore.loadValues(store));
-        return effective;
+        return LegacyBrowserSearchSettingsCodec.migrateEngineList(effective);
     }
 
     /**
@@ -211,7 +211,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
                     void set(String v) { combo.setSelectedItem(v); }
                 };
             case ENGINE_LIST:
-                final SearchEngineOrderEditor engines = new SearchEngineOrderEditor(value);
+                final SearchEngineTableEditor engines = new SearchEngineTableEditor(value);
                 return new FieldEditor(engines) {
                     String get() { return engines.get(); }
                     void set(String v) { engines.set(v); }

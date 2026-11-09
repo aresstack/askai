@@ -62,8 +62,11 @@ Consequences for the design:
 5. **Migration of `navigation.engines`.** Old entries (`id:on:pages[:delay]`) get priority = their position in the
    list under `FIRST_USABLE`, and priority 0 for all under `ALL_ENABLED`, so the search behaves exactly as before.
    Languages of migrated rows come from the catalog defaults. No backward compatibility for older builds.
-6. **Sorting.** The table sorts by priority, then engine name, then insertion order; a priority edit re-sorts when the
-   cell is committed.
+6. **Sorting.** The stored list is held sorted by priority; rows of one priority keep their stored order, because
+   that order is observable (one browser types the engines of a group one after another and the attempt budget is
+   spent in that order), so loading or migrating a configuration never reorders it. The table shows that order; a
+   committed priority edit or an added row re-sorts it by priority, then engine name, then insertion order, and the
+   table is stored as shown. Session snapshots move to schema 7 with an explicit v6 → v7 step.
 7. **"Enough usable results"** (PR C): a group is enough when it delivered at least *N* distinct result URLs that
    survive the existing filters (engine hosts, non-source hosts, blacklist). *N* is a setting
    (`navigation.minimumUsableResults`) with a default, not a constant. An engine error, a challenge or a pause never
