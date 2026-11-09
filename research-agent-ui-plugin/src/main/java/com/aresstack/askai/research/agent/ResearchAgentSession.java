@@ -416,6 +416,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         this.manualWebSearchPort = new com.aresstack.askai.research.search.BackendManualWebSearchPort(
                 backend, handle);
         restoreManualSearchedQueries(); // covered queries survive a restart (each source remembers its query)
+        String parkedPlanStart = pendingSearchPlanStart;
+        if (parkedPlanStart != null) {
+            pendingSearchPlanStart = null;
+            startSearchPlanWhenActive(parkedPlanStart); // the productive search port exists now
+        }
         wireToolActivityReadAloud();
         if (productiveResources != null && problemMessage.isEmpty()) {
             // Still restore the persisted assignment (question + focus areas) so a resumed project keeps its
@@ -1993,15 +1998,32 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             // The plan is resumable (M2): a session opened in research/running with pending entries (the app
             // or the research plugin was restarted while the plan ran) continues the plan by itself instead of
             // leaving 17 planned queries "submitted" forever, as the live run of 2026-11-09 did.
-            uiExecutor.execute(new Runnable() {
-                public void run() {
-                    if (productiveResources != null && !productiveResources.isClosed() && researchRunning()
-                            && runSearchPlan()) {
-                        technicalLog("search-plan resumed after a restart");
-                    }
-                }
-            });
+            startSearchPlanWhenActive("search-plan resumed after a restart");
         }
+    }
+
+    /** A plan start that waits for {@link #activate()}: the productive search port exists only after it. */
+    private volatile String pendingSearchPlanStart;
+
+    /**
+     * Run the search plan once the session is active (Codex, PR #153): {@code wireSearchPlan} and the plan build
+     * run before {@link #activate()} installs the productive manual search port, and a query started on the
+     * logging port would stay RUNNING forever. Before activation the start is parked and activation runs it.
+     */
+    private void startSearchPlanWhenActive(final String logLine) {
+        if (!started) {
+            pendingSearchPlanStart = logLine == null ? "" : logLine;
+            return;
+        }
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                if (productiveResources != null && !productiveResources.isClosed() && researchRunning()
+                        && runSearchPlan() && logLine != null && !logLine.isEmpty()) {
+                    technicalLog(logLine);
+                }
+                fireStateChanged();
+            }
+        });
     }
 
     /** Whether the stored plan still has pending entries (the queue has work left). */
@@ -2139,14 +2161,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             System.err.println("[search-plan] the plan could not be stored: " + failed.getMessage());
             return;
         }
-        uiExecutor.execute(new Runnable() {
-            public void run() {
-                if (productiveResources != null && researchRunning()) {
-                    runSearchPlan(); // Q4: the plan starts after the approval (it waits for a running turn)
-                }
-                fireStateChanged();
-            }
-        });
+        // Q4: the plan starts after the approval (it waits for a running turn), and never before activation
+        startSearchPlanWhenActive("search-plan started after the build");
     }
 
     /**

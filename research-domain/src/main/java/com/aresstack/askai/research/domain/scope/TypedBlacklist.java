@@ -17,6 +17,9 @@ import java.util.Set;
  * subdomains, matched against the URL host only.</li>
  * <li>Any other entry is a term: it matches case-insensitively as a whole word (or phrase) in
  * title, snippet or URL.</li>
+ * <li>An entry starting with {@code !} followed by a host name is an exemption: that host and its
+ * subdomains are never hit by a host entry ({@code !aws.amazon.com} keeps the AWS documentation while
+ * {@code amazon.com} blocks the shop). Terms still apply.</li>
  * </ul>
  * Immutable; one instance is one snapshot.
  */
@@ -88,9 +91,13 @@ public final class TypedBlacklist {
         String host = hostOf(url);
         String text = (nullToEmpty(title) + "\n" + nullToEmpty(snippet) + "\n" + nullToEmpty(url))
                 .toLowerCase(Locale.ROOT);
+        boolean exempt = isExemptHost(host);
         for (String entry : entries) {
+            if (isExemptEntry(entry)) {
+                continue;
+            }
             if (isHostEntry(entry)) {
-                if (hostMatches(host, normalizeHost(entry))) {
+                if (!exempt && hostMatches(host, normalizeHost(entry))) {
                     return entry;
                 }
             } else if (containsWord(text, entry.toLowerCase(Locale.ROOT))) {
@@ -98,6 +105,25 @@ public final class TypedBlacklist {
             }
         }
         return null;
+    }
+
+    /** {@code !host}: the host (and its subdomains) is never hit by a host entry. */
+    public static boolean isExemptEntry(String entry) {
+        String value = entry == null ? "" : entry.trim();
+        return value.startsWith("!") && isHostEntry(value.substring(1));
+    }
+
+    /** Whether an exemption entry names this host or one of its parents. */
+    public boolean isExemptHost(String host) {
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        for (String entry : entries) {
+            if (isExemptEntry(entry) && hostMatches(host, normalizeHost(entry.trim().substring(1)))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** {@code true} when any entry hits the candidate. */

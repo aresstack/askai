@@ -16,7 +16,11 @@ import java.util.Locale;
  */
 public final class NonSourceHosts {
 
-    /** The hosts the search run skips when the setting is on (subdomains included). */
+    /**
+     * The hosts the search run skips when the setting is on (subdomains included), followed by the exemptions
+     * ({@code !host}, see {@link TypedBlacklist#isExemptEntry}): the technical sites of the same companies are
+     * sources, their shops are not.
+     */
     public static final List<String> DEFAULT = Collections.unmodifiableList(Arrays.asList(
             // marketplaces
             "amazon.de", "amazon.com", "amazon.co.uk", "amazon.at", "amazon.fr", "amazon.it", "amazon.es",
@@ -32,15 +36,20 @@ public final class NonSourceHosts {
             "audible.de", "audible.com", "lovelybooks.de", "goodreads.com",
             // document re-upload sites (copies without licence or provenance)
             "scribd.com", "de.scribd.com", "dokumen.pub", "pdfcoffee.com", "yumpu.com", "studocu.com",
-            "studylib.net", "docplayer.org", "docplayer.net", "dokumente.pub"));
+            "studylib.net", "docplayer.org", "docplayer.net", "dokumente.pub",
+            // exemptions: documentation, developer and engineering sites of the companies above
+            "!aws.amazon.com", "!developer.amazon.com", "!developer.ebay.com", "!engineering.zalando.com",
+            "!research.zalando.com", "!developer.alibaba.com", "!developer.etsy.com"));
 
     private NonSourceHosts() {
     }
 
     /**
-     * Whether the URL is a search-result page of some website: a {@code /search}, {@code /suche}, {@code /find} or
-     * {@code /results} path step, or a {@code q}, {@code query}, {@code search}, {@code suche} or {@code keyword}
-     * parameter. A search engine's own result page is handled by the search provider, never here.
+     * Whether the URL is a search-result page of some website: a {@code q}, {@code query}, {@code search},
+     * {@code suche} or {@code keyword} parameter with a value, or a {@code /search}, {@code /suche}, {@code /find}
+     * or {@code /results} step among the last two path steps together with a query string (a hit list without a
+     * query is a search form, a {@code …/Array/find} reference page without one is documentation). A search
+     * engine's own result page is handled by the search provider, never here.
      */
     public static boolean isSearchResultPage(String url) {
         if (url == null || url.trim().isEmpty()) {
@@ -60,15 +69,17 @@ public final class NonSourceHosts {
         int question = pathAndQuery.indexOf('?');
         String path = question < 0 ? pathAndQuery : pathAndQuery.substring(0, question);
         String query = question < 0 ? "" : pathAndQuery.substring(question + 1);
-        for (String step : path.split("/")) {
+        if (query.isEmpty()) {
+            return false;
+        }
+        String[] steps = path.split("/");
+        for (int i = Math.max(0, steps.length - 2); i < steps.length; i++) {
+            String step = steps[i];
             if (step.equals("search") || step.equals("suche") || step.equals("find") || step.equals("results")
                     || step.equals("suchergebnisse") || step.equals("searchresults") || step.equals("search.php")
                     || step.equals("search.html") || step.equals("suche.html") || step.equals("search.jsp")) {
                 return true;
             }
-        }
-        if (query.isEmpty()) {
-            return false;
         }
         for (String pair : query.split("&")) {
             int eq = pair.indexOf('=');
