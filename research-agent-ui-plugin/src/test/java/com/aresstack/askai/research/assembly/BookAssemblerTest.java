@@ -210,10 +210,9 @@ public class BookAssemblerTest {
                         Collections.<String>emptyList(), Arrays.asList("unsupported number: 15 %"),
                         cite("1", "a", "Solar panels convert sunlight into electricity.", "p-a-1")))
                 .section(written("s21", "c2"), revision(
-                        "Battery storage shifts surplus energy from sunny hours into the evening hours [1].\n\n"
-                                + repeated,
-                        cite("1", "c", "Battery storage shifts surplus energy from sunny hours into the evening.",
-                                "p-c-1")))
+                        "Battery storage shifts surplus energy from sunny hours into the evening. Lithium cells "
+                                + "dominate new installations [1].\n\n" + repeated,
+                        cite("1", "c", TEXT_C, "p-c-1")))
                 .build();
         AssembledBook book = new BookAssembler().assemble(input);
         BookQualityReport report = book.getReport();
