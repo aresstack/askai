@@ -98,7 +98,7 @@ public class ModelProtocolLiveTest {
                     load = ms < 0 ? "failed" : String.valueOf(ms);
                     List<ProtocolProbes.LoadedModel> loaded = probes.loadedModels();
                     ps = loaded.toString().replace('|', '/');
-                    reloaded = reloadVerdict(model, ms, loaded);
+                    reloaded = reloadVerdict(model, ms, loaded) + contextVerdict(model, numCtx, loaded);
                 } catch (ProtocolProbes.ProbeTimeoutException timeout) {
                     load = "timeout";
                     ps = "-";
@@ -160,6 +160,20 @@ public class ModelProtocolLiveTest {
             }
         }
         return "no: not in /api/ps";
+    }
+
+    /**
+     * Whether Ollama allocated the requested {@code num_ctx}: compares it with {@code context_length} of
+     * {@code /api/ps}. Empty when the model is missing or the server does not report the field.
+     */
+    static String contextVerdict(String model, int numCtx, List<ProtocolProbes.LoadedModel> loaded) {
+        for (ProtocolProbes.LoadedModel m : loaded) {
+            if ((m.name.equals(model) || m.name.equals(model + ":latest")) && m.contextLength > 0) {
+                return m.contextLength == numCtx ? "; num_ctx applied"
+                        : "; num_ctx NOT applied (Ollama allocated " + m.contextLength + ")";
+            }
+        }
+        return "";
     }
 
     private static void log(String line) {
