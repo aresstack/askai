@@ -75,18 +75,20 @@ public class BookIntegrityCheckTest {
         manifest.appendSourcesPin(new SourcesPin("t-sources", 3L, Collections.singletonList(
                 new SourcesPin.Entry("src-1", CaptureStore.sha256(SOURCE_TEXT), "ACCEPTED"))));
 
-        OutlineSection section = new OutlineSection("sec-1", "ch-1", 1, "Grundlagen",
+        OutlineSection section = new OutlineSection("", "", 1, "Grundlagen",
                 new OutlineBrief("on it", Collections.<String>emptyList(), 200), OutlineProvenance.NONE, false, "");
-        outlines.commit(new Outline(Collections.singletonList(new OutlineChapter("ch-1", 1, "Einführung",
+        FileOutlineStore.Commit committed = outlines.commit(new Outline(Collections.singletonList(new OutlineChapter("", 1, "Einführung",
                 OutlineBrief.EMPTY, OutlineProvenance.NONE, false, "", Arrays.asList(section)))), 0L, 4L);
+        OutlineChapter chapter = committed.outline.getChapters().get(0);
+        String sectionId = chapter.getSections().get(0).getId();
         FileOutlineStore.Approval outline = outlines.approveCurrent(5L);
         manifest.appendOutlinePin(new OutlinePin("t-outline", outline.revisionNumber, true, outline.contentHash,
                 outline.workingRevision, 5L));
 
-        FileManuscriptStore.Write write = manuscript.save("sec-1", "ch-1", 0, SectionRevision.builder()
+        FileManuscriptStore.Write write = manuscript.save(sectionId, chapter.getId(), 0, SectionRevision.builder()
                 .text(sectionText).citations(Arrays.asList(citations)), 6L);
         manifest.appendManuscriptPin(new ManuscriptPin("t-final", outline.revisionNumber, 7L,
-                Collections.singletonList(new ManuscriptPin.Entry("sec-1", write.section.getStatus().name(),
+                Collections.singletonList(new ManuscriptPin.Entry(sectionId, write.section.getStatus().name(),
                         write.revision.getNumber(), write.revision.textHash(), "llama3.1:8b"))));
     }
 
