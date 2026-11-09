@@ -588,6 +588,20 @@ public final class WebSearchApplicationService {
                     deferredUrls.add(entry.withUrl(target));
                     continue;
                 }
+                // The SERP lane only saw the opaque wrapper: the typed blacklist and the never-a-source URL
+                // shapes (hit list, shop catalogue) judge the real address now, BEFORE the research browser
+                // opens it — a shop is not worth a page visit, let alone a notice.
+                String targetHit = blacklist.firstMatch("", "", target);
+                if (targetHit == null) {
+                    targetHit = nonSourcePageLabel(target);
+                }
+                if (targetHit != null) {
+                    progress.noteVisitedAlias(canonical);
+                    progress.noteVisitedAlias(targetCanonical);
+                    listener.status("search-blacklist target skip url=" + target + " (via " + url + ") entry=\""
+                            + targetHit + "\" -> not opened");
+                    continue;
+                }
                 url = target;
                 canonical = targetCanonical;
             }

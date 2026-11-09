@@ -330,6 +330,30 @@ public class UnresolvedRedirectCandidateTest {
     }
 
     @Test
+    public void aHopOntoAShopCatalogueIsSkippedBeforeTheResearchBrowserOpensIt() {
+        // live run 2026-11-09: the SERP lane cannot judge an opaque /goto wrapper, so shop.bueroheuser.de was
+        // navigated and only rejected after the fetch — the resolved target is judged before the visit
+        String shop = "https://shop.example.com/collections/wearables";
+        RecordingBrowser browser = new RecordingBrowser();
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        List<String> status = new ArrayList<String>();
+        ScriptedResolver resolver = new ScriptedResolver();
+        resolver.answers.put(GOTO, OpaqueRedirectResolver.Resolution.resolved(shop));
+
+        WebSearchApplicationService service = service(browser, acceptance, status, strategy(),
+                new ArrayList<WebSearchApplicationService.AcceptedSource>());
+        service.setRedirectResolver(resolver);
+        service.execute("freertos scheduling");
+
+        assertEquals("the hop was resolved once, in the search browser", Collections.singletonList(GOTO),
+                resolver.asked);
+        assertEquals("only the direct hit was opened", Collections.singletonList(DIRECT), browser.openedUrls);
+        assertEquals(1, acceptance.accepted.size());
+        assertTrue(status.toString(), status.toString().contains("search-blacklist target skip url=" + shop
+                + " (via " + GOTO + ") entry=\"shop catalogue page\" -> not opened"));
+    }
+
+    @Test
     public void aFailedNavigationOfTheResolvedTargetEndsOnlyThatVisit() {
         RecordingBrowser browser = new RecordingBrowser();
         browser.failures.put(TARGET, "navigation timeout");
