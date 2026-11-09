@@ -76,6 +76,18 @@ public final class NonSourceHosts {
         if (colon >= 0) {
             host = host.substring(0, colon);
         }
+        String pathAndQuery = slash < 0 ? "" : rest.substring(slash);
+        int cut = pathAndQuery.indexOf('?');
+        String path = cut < 0 ? pathAndQuery : pathAndQuery.substring(0, cut);
+        cut = path.indexOf('#');
+        if (cut >= 0) {
+            path = path.substring(0, cut);
+        }
+        String[] steps = path.split("/");
+        // editorial sections of a shop (Shopify's /pages/… and /blogs/…) stay eligible, whatever the host
+        if (steps.length >= 2 && (steps[1].equals("pages") || steps[1].equals("blogs"))) {
+            return false;
+        }
         String[] labels = host.split("\\.");
         if (labels.length >= 3) {
             String first = labels[0];
@@ -84,14 +96,7 @@ public final class NonSourceHosts {
                 return true;
             }
         }
-        String pathAndQuery = slash < 0 ? "" : rest.substring(slash);
-        int cut = pathAndQuery.indexOf('?');
-        String path = cut < 0 ? pathAndQuery : pathAndQuery.substring(0, cut);
-        cut = path.indexOf('#');
-        if (cut >= 0) {
-            path = path.substring(0, cut);
-        }
-        for (String step : path.split("/")) {
+        for (String step : steps) {
             if (step.equals("products") || step.equals("product") || step.equals("collections")
                     || step.equals("produkt") || step.equals("produkte") || step.equals("cart")
                     || step.equals("checkout") || step.equals("warenkorb")) {

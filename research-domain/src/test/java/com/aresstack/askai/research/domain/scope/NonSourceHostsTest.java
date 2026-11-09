@@ -45,6 +45,10 @@ public class NonSourceHostsTest {
         assertFalse("a shop's editorial page can be a source",
                 NonSourceHosts.isShopCataloguePage("https://www.stahlgear.de/pages/handwerk-aktuell-v1"));
         assertFalse(NonSourceHosts.isShopCataloguePage("https://www.stahlgear.de/blogs/news/wearables"));
+        assertFalse("an editorial page on a shop subdomain is a source",
+                NonSourceHosts.isShopCataloguePage("https://shop.example.com/blogs/news/wearables"));
+        assertFalse(NonSourceHosts.isShopCataloguePage("https://store.example.com/pages/guide?ref=x"));
+        assertTrue("…but its catalogue is not", NonSourceHosts.isShopCataloguePage("https://shop.example.com/products/x"));
         assertFalse("a bare two-label host has no shop label", NonSourceHosts.isShopCataloguePage("https://shop.de/x"));
         assertFalse(NonSourceHosts.isShopCataloguePage("https://www.haufe.de/id/beitrag/x.html"));
         assertFalse(NonSourceHosts.isShopCataloguePage("https://example.org/research/productsafety"));
