@@ -2489,6 +2489,19 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 comment == null ? "" : comment);
     }
 
+    /** The latest "Request changes" comment of the Document phase (shown on the Document tab); "" when none. */
+    public String documentChangeRequest() {
+        if (productiveResources == null || productiveResources.isClosed()) {
+            return "";
+        }
+        try {
+            return productiveResources.transitions().latestChangeRequest(
+                    com.aresstack.askai.research.state.oo.ResearchStateIds.DRAFT);
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return "";
+        }
+    }
+
     /** "Stop writing": the section in flight stays pending. */
     public void stopWriting() {
         com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
