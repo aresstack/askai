@@ -117,6 +117,51 @@ public class AgentMailboxTest {
     }
 
     @Test
+    public void refusalNotesKeepTheInboxBound() {
+        mailbox.registerWorker("t-a");
+        for (int i = 0; i < 30; i++) {
+            mailbox.send("t-a", "worker 99", "hello");
+        }
+        int pending = 0;
+        for (AgentMessage m : mailbox.messages()) {
+            if (m.getState() == DeliveryState.PENDING) {
+                pending++;
+            }
+        }
+        assertEquals(10, pending);
+    }
+
+    @Test
+    public void aFailedWriteDuringFinishLeavesTheTaskRetryable() throws Exception {
+        final boolean[] fail = {false};
+        final InMemoryMailboxStore inner = new InMemoryMailboxStore();
+        MailboxStore flaky = new MailboxStore() {
+            public void append(String line) throws java.io.IOException {
+                if (fail[0] && line.contains("\"kind\":\"worker\"")) {
+                    throw new java.io.IOException("disk full");
+                }
+                inner.append(line);
+            }
+
+            public List<String> readLines() {
+                return inner.readLines();
+            }
+        };
+        AgentMailbox box = AgentMailbox.open("run3", flaky, MailboxLimits.defaults(), clock);
+        box.registerWorker("t-a");
+        fail[0] = true;
+        try {
+            box.finishTask("t-a", "summary");
+        } catch (java.io.UncheckedIOException expected) {
+            // the worker record was not written
+        }
+        fail[0] = false;
+        assertEquals("Task finished. Your summary went to the orchestrator.", box.finishTask("t-a", "summary"));
+        AgentMailbox replayed = AgentMailbox.open("run3", inner, MailboxLimits.defaults(), clock);
+        assertEquals("Your task has already finished.", replayed.finishTask("t-a", "again"));
+    }
+
+    @Test
     public void capsAndLengthsHold() {
         mailbox.registerWorker("t-a");
         for (int i = 0; i < 4; i++) {

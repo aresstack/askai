@@ -232,8 +232,8 @@ public final class AgentMailbox {
             if (!router.isLive(number)) {
                 return "Your task has already finished.";
             }
-            router.finish(taskId);
-            persistLine(MailboxJournalCodec.encodeWorker(number, taskId, false));
+            // report and redirects are written first and the worker record last, so a failed write or a crash
+            // in between leaves the worker live and a retry of finish_task completes the job
             String body = cut(summary);
             report = store(newMessage(AgentAddress.worker(number), taskId, AgentAddress.ORCHESTRATOR, null,
                     body.isEmpty() ? "(finished without a summary)" : body, DeliveryState.PENDING, FINISH_NOTE));
@@ -244,6 +244,8 @@ public final class AgentMailbox {
                     copies.add(redirectCopy(redirected));
                 }
             }
+            persistLine(MailboxJournalCodec.encodeWorker(number, taskId, false));
+            router.finish(taskId);
         }
         notifyOrchestrator(report);
         for (AgentMessage copy : copies) {
@@ -299,6 +301,7 @@ public final class AgentMailbox {
         }
         AgentMessage note = store(newMessage(AgentAddress.ORCHESTRATOR, null, sender, senderTaskId, reason,
                 DeliveryState.PENDING, SYSTEM_NOTE));
+        trimInbox(senderTaskId);
         return new SendReceipt(false, note, reason);
     }
 
