@@ -99,6 +99,8 @@ public final class OutlineEditorView extends JPanel {
     private boolean dirty;
     private long browsingRevision = -1;
     private boolean settingText;
+    /** The revision the unsaved JSON text was based on; a save names it, so a concurrent change conflicts. */
+    private long draftRevision;
 
     public OutlineEditorView() {
         super(new BorderLayout(4, 4));
@@ -362,10 +364,14 @@ public final class OutlineEditorView extends JPanel {
     }
 
     private String save(Outline draft) {
+        return save(draft, snapshot.revision);
+    }
+
+    private String save(Outline draft, long expectedRevision) {
         if (actions == null) {
             return "This session has no outline store.";
         }
-        String refusal = actions.save(draft, snapshot.revision);
+        String refusal = actions.save(draft, expectedRevision);
         status.setText(refusal == null ? "Saved." : refusal);
         return refusal;
     }
@@ -383,7 +389,7 @@ public final class OutlineEditorView extends JPanel {
             status.setText(invalid.getMessage());
             return;
         }
-        String refusal = save(draft);
+        String refusal = save(draft, draftRevision);
         if (refusal == null) {
             dirty = false;
             browsingRevision = -1;
@@ -443,6 +449,7 @@ public final class OutlineEditorView extends JPanel {
     private void edited() {
         if (!settingText && !dirty) {
             dirty = true;
+            draftRevision = snapshot.revision;
             updateButtons();
         }
     }

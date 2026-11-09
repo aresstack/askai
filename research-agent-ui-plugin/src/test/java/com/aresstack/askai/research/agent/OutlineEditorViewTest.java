@@ -44,4 +44,35 @@ public class OutlineEditorViewTest {
             assertFalse(view.button("Save").isEnabled());
         });
     }
+
+    @Test
+    public void aJsonSaveNamesTheRevisionTheTextWasBasedOn() throws Exception {
+        final long[] expected = {-1};
+        SwingUtilities.invokeAndWait(() -> {
+            OutlineEditorView view = new OutlineEditorView();
+            view.setActions(new OutlineEditorView.Actions() {
+                public String save(Outline draft, long expectedRevision) {
+                    expected[0] = expectedRevision;
+                    return "The outline changed meanwhile.";
+                }
+
+                public String restore(long revision, long expectedRevision) {
+                    return null;
+                }
+
+                public String history(long revision) {
+                    return null;
+                }
+
+                public void generate() {
+                }
+            });
+            view.render(new OutlineEditorView.Snapshot(outline("A"), 1, null, ""));
+            view.typeJson(view.jsonText().replace("\"A\"", "\"C\""));
+            view.render(new OutlineEditorView.Snapshot(outline("B"), 2, null, ""));
+            view.button("Save").doClick();
+            assertTrue(view.isDirty());
+        });
+        assertEquals(1L, expected[0]);
+    }
 }
