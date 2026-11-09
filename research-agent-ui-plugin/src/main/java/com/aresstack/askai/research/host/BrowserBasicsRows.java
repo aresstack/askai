@@ -73,7 +73,8 @@ final class BrowserBasicsRows {
         final javax.swing.JSpinner pauseCapMinutes = ComicControls.integerSpinner(
                 ResearchRuntimeSettings.loadEnginePauseCapMinutes(store), 0, Integer.MAX_VALUE, 5, 4);
         pauseSeconds.setToolTipText("After a CAPTCHA or rate limit no search engine is asked for this long; every"
-                + " further challenge in a row doubles the pause (0 = no pause)");
+                + " further challenge in a row doubles the pause (0 = no pause). The gap between two Google"
+                + " requests is Google's delay under Engines.");
         pauseCapMinutes.setToolTipText("The longest pause the doubling may reach");
         javax.swing.event.ChangeListener savePause = e -> {
             ResearchRuntimeSettings.saveEnginePauseSeconds(store, ((Number) pauseSeconds.getValue()).intValue());
@@ -84,12 +85,8 @@ final class BrowserBasicsRows {
         pauseSeconds.addChangeListener(savePause);
         pauseCapMinutes.addChangeListener(savePause);
         form.row("Search browser", headless);
-        form.row("Pause after CAPTCHA", pauseSeconds, new javax.swing.JLabel("s, at most"), pauseCapMinutes,
+        form.row("CAPTCHA pause", pauseSeconds, new javax.swing.JLabel("s, at most"), pauseCapMinutes,
                 new javax.swing.JLabel("min"));
-        form.row("", ComicForm.hint("No search engine is asked during the pause; every further CAPTCHA in a row"
-                + " doubles it. The gap between two Google requests is Google's delay under Engines."));
-        form.row("", ComicForm.hint("The search browser opens the result pages; it is separate from the research"
-                + " browser. On (default): no window. Off: its window is visible, e.g. to answer a CAPTCHA yourself."
-                + " Applies from the next search."));
+        form.row("", ComicForm.hint("On (default): no window. Off: visible, e.g. to answer a CAPTCHA yourself."));
     }
 }
