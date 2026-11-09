@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.knowledge.processing.live;
 
 import com.aresstack.askai.research.domain.Passage;
+import com.aresstack.askai.research.knowledge.ClusteringMonitor;
 import com.aresstack.askai.research.knowledge.live.LiveOutlineProjection;
 import com.aresstack.askai.research.knowledge.live.LiveOutlineProjectionBuilder;
 import com.aresstack.askai.research.knowledge.live.LiveTopicProjection;
@@ -31,9 +32,23 @@ public final class SharedTopicDiscovery {
     private final LiveOutlineProjectionBuilder builder;
     private final FileTopicSnapshotStore store;
     private final String embeddingFingerprint;
+    private final int corpusLimit;
+
+    /** PR 20: the default corpus limit, about 144 MB as a full float matrix of 768-dimensional vectors. */
+    public static final int DEFAULT_CORPUS_LIMIT = 6000;
 
     public SharedTopicDiscovery(CorpusSource corpus, LiveOutlineProjectionBuilder builder,
                                 FileTopicSnapshotStore store, String embeddingFingerprint) {
+        this(corpus, builder, store, embeddingFingerprint, DEFAULT_CORPUS_LIMIT);
+    }
+
+    public SharedTopicDiscovery(CorpusSource corpus, LiveOutlineProjectionBuilder builder,
+                                FileTopicSnapshotStore store, String embeddingFingerprint,
+                                int corpusLimit) {
+        if (corpusLimit < 2) {
+            throw new IllegalArgumentException("corpus limit must be at least 2: " + corpusLimit);
+        }
+        this.corpusLimit = corpusLimit;
         this.corpus = corpus;
         this.builder = builder;
         this.store = store;
@@ -44,11 +59,14 @@ public final class SharedTopicDiscovery {
     public static final class Pinned {
         public final ActiveKnowledgeCorpusReader.Corpus corpus;
         public final FileTopicSnapshotStore.TopicSnapshot snapshot;
+        /** PR 20: passages of the active corpus left out because it exceeded the corpus limit. */
+        public final int omittedPassages;
 
         Pinned(ActiveKnowledgeCorpusReader.Corpus corpus,
-               FileTopicSnapshotStore.TopicSnapshot snapshot) {
+               FileTopicSnapshotStore.TopicSnapshot snapshot, int omittedPassages) {
             this.corpus = corpus;
             this.snapshot = snapshot;
+            this.omittedPassages = omittedPassages;
         }
     }
 
@@ -68,16 +86,32 @@ public final class SharedTopicDiscovery {
      * never write an older corpus's snapshot over a newer one (reads outside the lock did
      * exactly that).
      */
-    public synchronized Pinned refreshPinned(long nowMillis) {
-        ActiveKnowledgeCorpusReader.Corpus current = corpus.read();
+    public Pinned refreshPinned(long nowMillis) {
+        return refreshPinned(nowMillis, ClusteringMonitor.NONE);
+    }
+
+    /**
+     * PR 20: the same run with progress and cancel. A cancelled run throws
+     * {@link ClusteringMonitor.ClusteringCancelledException} and persists nothing. Above the corpus limit the
+     * best passages per source are kept ({@link CorpusLimit}) and {@link Pinned#omittedPassages} says how many
+     * were left out; the snapshot's corpus fingerprint stays the one of the whole corpus, so a limited run is
+     * not reported stale.
+     */
+    public synchronized Pinned refreshPinned(long nowMillis, ClusteringMonitor monitor) {
+        ActiveKnowledgeCorpusReader.Corpus whole = corpus.read();
+        ActiveKnowledgeCorpusReader.Corpus current = CorpusLimit.apply(whole, corpusLimit);
+        int omitted = whole.getPassages().size() - current.getPassages().size();
         List<LiveTopicProjection> topics =
-                builder.discoverTopics(current.getPassages(), current.getVectors());
+                builder.discoverTopics(current.getPassages(), current.getVectors(), monitor);
+        if (monitor != null && monitor.isCancelled()) {
+            throw new ClusteringMonitor.ClusteringCancelledException(); // never overwrite on a late cancel
+        }
         FileTopicSnapshotStore.TopicSnapshot previous = store.load();
         FileTopicSnapshotStore.TopicSnapshot snapshot = new FileTopicSnapshotStore.TopicSnapshot(
                 (previous == null ? 0L : previous.revision) + 1L,
-                corpusFingerprintOf(current), embeddingFingerprint, nowMillis, topics);
+                corpusFingerprintOf(whole), embeddingFingerprint, nowMillis, topics);
         store.save(snapshot);
-        return new Pinned(current, snapshot);
+        return new Pinned(current, snapshot, omitted);
     }
 
     /** The persisted snapshot, or {@code null} when none exists yet. Pure read. */

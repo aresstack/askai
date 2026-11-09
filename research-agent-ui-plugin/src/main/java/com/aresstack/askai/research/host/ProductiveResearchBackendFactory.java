@@ -526,8 +526,6 @@ public final class ProductiveResearchBackendFactory {
                 {null};
         final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner[]
                 projectionRunner = {null};
-        final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner[]
-                topicsRunner = {null};
         final com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery[]
                 topicDiscovery = {null};
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader[]
@@ -543,7 +541,6 @@ public final class ProductiveResearchBackendFactory {
         if (knowledge != null) {
             knowledgeRunner[0] = knowledge.worker;
             projectionRunner[0] = knowledge.projection;
-            topicsRunner[0] = knowledge.topicsRunner;
             topicDiscovery[0] = knowledge.topics;
             corpusReaderRef[0] = knowledge.corpusReader;
             projectionInvalidator[0] = knowledge.invalidator;
@@ -952,10 +949,6 @@ public final class ProductiveResearchBackendFactory {
             KnowledgeProcessingSessionFactory.KnowledgeSession knowledge) {
         knowledge.worker.start();
         resources.setKnowledgeRunner(knowledge.worker);
-        if (knowledge.topicsRunner != null) {
-            knowledge.topicsRunner.start();
-            resources.setTopicsRunner(knowledge.topicsRunner);
-        }
         if (knowledge.topics != null) {
             resources.setTopicDiscovery(knowledge.topics);
         }
