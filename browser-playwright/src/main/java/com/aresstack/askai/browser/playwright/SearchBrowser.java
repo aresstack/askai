@@ -246,10 +246,20 @@ public final class SearchBrowser implements AutoCloseable {
                     return RedirectResolution.blocked(wrapperUrl + " -> challenge page");
                 }
                 String meta = metaRefreshTarget(body);
-                if (meta != null && !SearchEngineHosts.isEngineHost(meta)) {
-                    return RedirectResolution.resolved(absolute(wrapperUrl, meta));
+                if (meta != null) {
+                    // a relative refresh target (/url?…, /sorry/index?…) is resolved first, then judged
+                    // exactly like a Location header
+                    String target = absolute(wrapperUrl, meta);
+                    if (SearchEngineHosts.isGoogleObstacleUrl(target)) {
+                        return RedirectResolution.blocked(target);
+                    }
+                    if (!SearchEngineHosts.isEngineHost(target)) {
+                        return RedirectResolution.resolved(target);
+                    }
+                    step1 = "engine-internal meta refresh";
+                } else {
+                    step1 = "HTTP 200 without a usable target";
                 }
-                step1 = "HTTP 200 without a usable target";
             } else {
                 step1 = "HTTP " + status;
             }
