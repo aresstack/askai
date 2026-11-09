@@ -111,7 +111,7 @@ public class OutlineEditorTest {
         refused(OutlineJson.write(stored).replace(stored.getChapters().get(1).getId(), first), "repeats the id");
         refused(OutlineJson.write(stored).replace("\"Verfahren\"", "\"  \""), "empty title");
         refused(OutlineJson.write(stored).replace(first, "ch-invented"), "Unknown chapter id");
-        refused(OutlineJson.write(stored).replaceFirst("\"sections\": \\[", "\"sections\": {\"x\": ["),
+        refused(OutlineJson.write(stored).replaceFirst("\"sections\": \\[", "\"sections\": \"none\", \"old\": ["),
                 "unknown layout");
         assertEquals(before, workspace.workingRevision());
     }
