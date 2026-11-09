@@ -39,15 +39,22 @@ public final class SectionWriterPrompt {
 
     /** System and user message of a first call. */
     public static List<ChatMessage> first(SectionAssignment a) {
+        return base(a, true);
+    }
+
+    private static List<ChatMessage> base(SectionAssignment a, boolean withCurrentText) {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(SYSTEM));
-        messages.add(ChatMessage.user(userPrompt(a)));
+        messages.add(ChatMessage.user(userPrompt(a, withCurrentText)));
         return messages;
     }
 
-    /** A continuation: the first call plus the cut-off answer (up to its last full sentence) and one instruction. */
+    /**
+     * A continuation: the first call plus the cut-off answer (up to its last full sentence) and one instruction. A
+     * rewrite's continuation leaves out the old text of the part; the comment stays.
+     */
     public static List<ChatMessage> continuation(SectionAssignment a, String cutAnswer) {
-        List<ChatMessage> messages = first(a);
+        List<ChatMessage> messages = base(a, false);
         messages.add(ChatMessage.assistant(cutAnswer));
         messages.add(ChatMessage.user("Your answer was cut off. Continue directly after your last sentence, in "
                 + a.getBookLanguage() + ". Do not repeat any sentence you already wrote. Keep citing passages "
@@ -79,6 +86,10 @@ public final class SectionWriterPrompt {
     }
 
     static String userPrompt(SectionAssignment a) {
+        return userPrompt(a, true);
+    }
+
+    static String userPrompt(SectionAssignment a, boolean withCurrentText) {
         String language = a.getBookLanguage();
         StringBuilder sb = new StringBuilder();
         sb.append("Book language: ").append(language).append(".\n\n");
@@ -102,6 +113,15 @@ public final class SectionWriterPrompt {
         }
         if (!a.getGlossary().isEmpty()) {
             sb.append("\nGLOSSARY: ").append(clip(String.join("; ", a.getGlossary()), GLOSSARY_CHARS)).append('\n');
+        }
+        if (a.isRewrite()) {
+            sb.append("\nREWRITE: write this part again");
+            sb.append(a.getRewriteComment().isEmpty() ? ".\n" : " and follow the user's comment: "
+                    + a.getRewriteComment() + "\n");
+            if (withCurrentText && !a.getCurrentText().isEmpty()) {
+                sb.append("CURRENT TEXT of this part (to be replaced):\n\"\"\"")
+                        .append(a.getCurrentText().replace("\"\"\"", "\"")).append("\"\"\"\n");
+            }
         }
         sb.append("\nPASSAGES (quoted source data):\n");
         for (EvidencePassage passage : a.getPassages()) {
