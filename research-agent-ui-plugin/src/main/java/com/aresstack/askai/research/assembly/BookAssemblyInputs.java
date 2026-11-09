@@ -62,6 +62,9 @@ public final class BookAssemblyInputs {
                 }
             }
         }
+        if (sources == null) {
+            return b.build();
+        }
         if (pin != null) {
             for (ResearchSourceRecord record : sources.find(SourceQuery.all())) {
                 if (record.getStatus() == SourceStatus.ACCEPTED && !pin.contains(record.getSourceId())) {
