@@ -2,7 +2,7 @@ package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.research.book.FrozenConcept;
 import com.aresstack.askai.research.store.FileConceptStore;
-import com.aresstack.askai.research.outline.FileOutlineStore;
+import com.aresstack.askai.research.store.FileOutlineStore;
 import com.aresstack.askai.research.outline.Outline;
 import com.aresstack.askai.research.outline.OutlineWorkspace;
 import com.aresstack.askai.research.outline.generate.OutlineGenerationInput;
@@ -19,7 +19,6 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Issue #152: when the label/brief enrichment cannot run (a mis-declared role), "Generate outline" must refuse
