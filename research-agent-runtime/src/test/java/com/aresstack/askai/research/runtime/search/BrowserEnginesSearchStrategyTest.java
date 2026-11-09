@@ -320,7 +320,7 @@ public class BrowserEnginesSearchStrategyTest {
     @Test
     public void rowsOfEnginesWithoutDriverAreSkipped() {
         BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
-                table("yahoo@0", "duckduckgo@1"), 5, null, new GroupFake());
+                table("mojeek@0", "duckduckgo@1"), 5, null, new GroupFake());
         assertEquals(Collections.singletonList(Collections.singletonList("page-engines:duckduckgo")),
                 strategy.groupNames());
     }
