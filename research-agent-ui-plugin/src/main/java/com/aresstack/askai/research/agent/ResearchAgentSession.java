@@ -2598,6 +2598,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             System.err.println("[research] document artifact render failed: " + renderFailed.getMessage());
         }
         uiExecutor.execute(this::fireStateChanged);
+    }
+
     /** The latest change request of the Outline phase (shown above the outline editor, plan PR 23); "" when none. */
     public String outlineChangeRequest() {
         if (productiveResources == null || productiveResources.isClosed()) {
