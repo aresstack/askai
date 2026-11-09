@@ -85,8 +85,8 @@ final class BrowserBasicsRows {
         pauseSeconds.addChangeListener(savePause);
         pauseCapMinutes.addChangeListener(savePause);
         form.row("Search browser", headless);
-        form.row("CAPTCHA pause", pauseSeconds, new javax.swing.JLabel("s, at most"), pauseCapMinutes,
-                new javax.swing.JLabel("min"));
-        form.row("", ComicForm.hint("On (default): no window. Off: visible, e.g. to answer a CAPTCHA yourself."));
+        form.row("Pause (s)", pauseSeconds);
+        form.row("Max pause (min)", pauseCapMinutes);
+        form.row("", ComicForm.hint("Headless (default): no window. Pause: after a CAPTCHA no engine is asked."));
     }
 }
