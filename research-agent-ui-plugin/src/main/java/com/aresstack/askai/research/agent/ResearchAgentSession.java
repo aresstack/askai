@@ -2360,6 +2360,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             knowledge == null ? 2 : knowledge.minimumDistinctSourcesPerTopic),
                     resources.outlineRun(), outlineGenerationExecutor);
             outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
+                public String refusal() {
+                    // Issue #152: a mis-declared label/brief role must refuse the start, not fail in the
+                    // background after "started" was reported.
+                    try {
+                        outlineChapterService();
+                        return null;
+                    } catch (RuntimeException broken) {
+                        return "the chapter label/brief roles are not configured: " + broken.getMessage();
+                    }
+                }
+
                 public com.aresstack.askai.research.outline.Outline enrich(
                         com.aresstack.askai.research.outline.Outline generated,
                         java.util.function.BooleanSupplier cancelled) {
@@ -2478,19 +2489,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             com.aresstack.askai.research.outline.brief.OutlineBriefWorker worker =
                     new com.aresstack.askai.research.outline.brief.OutlineBriefWorker(
                             com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(port,
-                                    com.aresstack.askai.research.runtime.role.ResearchRole.builder("outline-labels",
-                                            com.aresstack.askai.research.runtime.inference.ResearchModelSlots
-                                                    .PHASE_OUTLINE_LABELS)
-                                            .purpose("plan PR 24 outline labels")
-                                            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
-                                            .build(), timeout),
+                                    com.aresstack.askai.research.outline.brief.OutlineBriefWorker.LABELS_ROLE,
+                                    timeout),
                             com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(port,
-                                    com.aresstack.askai.research.runtime.role.ResearchRole.builder("outline-briefs",
-                                            com.aresstack.askai.research.runtime.inference.ResearchModelSlots
-                                                    .PHASE_OUTLINE_BRIEFS)
-                                            .purpose("plan PR 24 outline briefs")
-                                            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
-                                            .build(), timeout),
+                                    com.aresstack.askai.research.outline.brief.OutlineBriefWorker.BRIEFS_ROLE,
+                                    timeout),
                             new com.aresstack.askai.research.outline.brief.OutlineBriefWorker.Telemetry() {
                                 public void call(com.aresstack.askai.research.outline.brief.BriefCallTelemetry c) {
                                     System.err.println("[outline-brief] " + c);
