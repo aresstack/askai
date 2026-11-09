@@ -2249,7 +2249,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return "Not started yet. The outline opens when the workflow reaches Outline.";
     }
 
-<<<<<<< HEAD
     /**
      * Plan PR 26: the manuscript pin on {@code APPROVE_FINAL}, the stale marks after {@code APPROVE_OUTLINE} and
      * {@code APPROVE_EVIDENCE}, the one manuscript write guard and the generated {@code document.md}.
@@ -2378,6 +2377,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         uiExecutor.execute(this::fireStateChanged);
     }
 
+<<<<<<< HEAD
     private com.aresstack.askai.research.assembly.AssembledBook assembleBook(
             com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript) {
         com.aresstack.askai.research.outline.Outline outline = null;
@@ -2411,7 +2411,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                 .AcronymLongForms>emptyList(),
                         System.currentTimeMillis(), java.util.TimeZone.getDefault());
         return new com.aresstack.askai.research.assembly.BookAssembler().assemble(input);
-=======
+    }
+
     /** The latest change request of the Outline phase (shown above the outline editor, plan PR 23); "" when none. */
     public String outlineChangeRequest() {
         if (productiveResources == null || productiveResources.isClosed()) {
@@ -2423,7 +2424,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
             return "";
         }
->>>>>>> origin/develop
     }
 
     /** Render the stored outline into the "outline" artifact (never from the live projection, plan PR 21). */
