@@ -370,7 +370,9 @@ public class SearchPlanQueueTest {
                 "A: covered (3 sources from 3 domains, 2 queries run"));
         SearchPlanEntry first = queue.entriesInOrder().get(0);
         assertEquals(Arrays.asList("s1", "s2"), first.getAcceptedSourceIds());
-        assertEquals(SearchPlanEntry.Status.SKIPPED, queue.entriesInOrder().get(1).getStatus());
+        SearchPlanEntry variant = queue.entriesInOrder().get(1);
+        assertEquals(SearchPlanEntry.Status.DONE, variant.getStatus());
+        assertEquals(Collections.singletonList("s3"), variant.getAcceptedSourceIds());
     }
 
     @Test
