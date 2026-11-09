@@ -71,10 +71,11 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
     private final Browser browser;
     private final boolean camoufox;
     /**
-     * Off until the central search service carries worker discovery (T4): then worker contexts refuse every search
-     * engine host (navigation requests aborted, policy refuses before and after redirects, web_search refused).
+     * On by default: worker contexts refuse every search engine host (navigation requests aborted, policy refuses
+     * before and after redirects, web_search and web_search_prepare refused). Searches go through the central search
+     * service and its one search browser. Tests of a local search world may switch it off.
      */
-    private volatile boolean refuseSearchEngines;
+    private volatile boolean refuseSearchEngines = true;
     private final int timeoutMillis;
     /** Camoufox with the add-on: the page-read bridge of this worker browser, else null. */
     private final AddonBridge readBridge;

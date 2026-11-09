@@ -150,8 +150,11 @@ public final class SearchService {
                 return SearchServiceOutcome.of(SearchServiceOutcome.Status.TECHNICAL_PROBLEM, "", 0, diagnostics);
             }
             throttle.recordSuccess();
-            markRan(job.getProjectKey(), key);
-            return queueHits(job, result, diagnostics);
+            SearchServiceOutcome outcome = queueHits(job, result, diagnostics);
+            if (outcome.getStatus() != SearchServiceOutcome.Status.TECHNICAL_PROBLEM) {
+                markRan(job.getProjectKey(), key); // a registry failure leaves the query open for a retry
+            }
+            return outcome;
         } finally {
             engine.unlock();
         }
@@ -168,6 +171,7 @@ public final class SearchService {
         Set<String> seen = new HashSet<String>();
         int known = 0;
         int dropped = 0;
+        boolean registryFailure = false;
         for (SearchResultCandidate hit : result.candidates) {
             String url = hit.hasVerifiedTarget() ? hit.resolvedTargetUrl : hit.navigationUrl();
             if (url == null || url.trim().isEmpty()) {
@@ -184,26 +188,51 @@ public final class SearchService {
                 dropped++;
                 continue;
             }
-            if (!job.getRegistry().register(key, ORIGIN)) {
-                known++;
-                continue;
-            }
             PageCandidate page = new PageCandidate(key, hit.title, hit.snippet, job.getQuery(), hit.engineHost,
                     hit.originalRank, wrapped);
+            try {
+                // Durable PENDING first, then the in-memory queue: a crash in between is recovered by
+                // requeuePending, never lost; a page is only "done" once its visit completes it.
+                if (!job.getRegistry().enqueue(page, ORIGIN)) {
+                    known++;
+                    continue;
+                }
+            } catch (UrlRegistryException e) {
+                registryFailure = true;
+                diagnostics.add("URL registry not writable, rest of the hits not queued: " + e.getMessage());
+                break;
+            }
             job.getQueue().offer(page);
             queued.add(page);
         }
         markTransit(transit);
-        return new SearchServiceOutcome(queued.isEmpty() ? SearchServiceOutcome.Status.NOTHING_NEW
-                : SearchServiceOutcome.Status.QUEUED, queued, result.candidates.size(), known, dropped,
+        SearchServiceOutcome.Status status = !queued.isEmpty() ? SearchServiceOutcome.Status.QUEUED
+                : registryFailure ? SearchServiceOutcome.Status.TECHNICAL_PROBLEM
+                : SearchServiceOutcome.Status.NOTHING_NEW;
+        return new SearchServiceOutcome(status, queued, result.candidates.size(), known, dropped,
                 "", 0L, diagnostics);
+    }
+
+    /**
+     * After a restart: put every PENDING page of the project back on the queue (pages whose visit never completed).
+     *
+     * @return how many pages were queued again
+     */
+    public static int requeuePending(UrlRegistry registry, PageCandidateQueue queue) {
+        int count = 0;
+        for (PageCandidate page : registry.pending()) {
+            queue.offer(page);
+            count++;
+        }
+        return count;
     }
 
     /**
      * Resolve ONE queued page right before a worker visits it. A plain page comes back READY unchanged; an engine
      * wrapper is resolved in the search browser, on the same FIFO and with the same spacing and backoff as the
-     * searches, so hops never come in bursts. The resolved address is registered; one that is already known comes
-     * back ALREADY_KNOWN.
+     * searches, so hops never come in bursts. The resolved address is registered PENDING and the wrapper COMPLETED;
+     * a target that is already registered comes back ALREADY_KNOWN (its own entry gets visited). The visitor
+     * completes the READY page in the registry once its visit has ended for good; a failed visit leaves it PENDING.
      */
     public PageResolution resolveForVisit(PageCandidate page, UrlRegistry registry) throws InterruptedException {
         if (!page.isWrapped()) {
@@ -230,10 +259,20 @@ public final class SearchService {
             }
             throttle.recordSuccess();
             String target = SearchUrlNormalizer.normalize(hop.getTargetUrl());
-            if (registry != null && !registry.register(target, ORIGIN)) {
-                return new PageResolution(PageResolution.Status.ALREADY_KNOWN, page.resolvedTo(target), "");
+            PageCandidate resolved = page.resolvedTo(target);
+            if (registry == null) {
+                return new PageResolution(PageResolution.Status.READY, resolved, "");
             }
-            return new PageResolution(PageResolution.Status.READY, page.resolvedTo(target), "");
+            try {
+                // The target becomes PENDING (the visitor completes it), then the wrapper is done. A crash in
+                // between leaves both PENDING: the wrapper resolves again and finds its target already known.
+                boolean fresh = registry.enqueue(resolved, ORIGIN);
+                registry.complete(page.getUrl(), "resolved to " + target);
+                return new PageResolution(fresh ? PageResolution.Status.READY : PageResolution.Status.ALREADY_KNOWN,
+                        resolved, "");
+            } catch (UrlRegistryException e) {
+                return new PageResolution(PageResolution.Status.REGISTRY_FAILED, page, e.getMessage());
+            }
         } finally {
             engine.unlock();
         }

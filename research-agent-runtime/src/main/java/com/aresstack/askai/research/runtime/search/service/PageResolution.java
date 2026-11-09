@@ -13,7 +13,9 @@ public final class PageResolution {
         /** The engine answered this hop with a challenge; the engines are now paused: put the page back. */
         ENGINE_BLOCKED,
         /** The wrapper could not be resolved (timeout, back to the engine): drop the page. */
-        UNRESOLVED
+        UNRESOLVED,
+        /** The resolved address could not be registered durably: put the page back and try later. */
+        REGISTRY_FAILED
     }
 
     private final Status status;

@@ -136,7 +136,7 @@ public class SearchServiceTest {
 
     @Test
     public void urlVisitedByChatBrowserIsNotQueued() throws Exception {
-        registry.register("https://a.org/x", "chat-browser");
+        registry.complete("https://a.org/x", "visited by the chat browser");
         strategy.answers.add(results(hit("https://a.org/x/#top"), hit("https://b.org/y?utm_source=g")));
 
         SearchServiceOutcome outcome = service(null).search(job("p1", "q"), null);
@@ -191,6 +191,9 @@ public class SearchServiceTest {
         assertEquals(1, hops.size());
         assertEquals(PageResolution.Status.ALREADY_KNOWN, service.resolveForVisit(queue.poll(), registry).getStatus());
         assertEquals(PageResolution.Status.UNRESOLVED, service.resolveForVisit(queue.poll(), registry).getStatus());
+        assertTrue(registry.isCompleted("https://www.google.com/goto?url=1"));
+        assertTrue(registry.isKnown("https://study.org/paper"));
+        assertFalse("known is not processed", registry.isCompleted("https://study.org/paper"));
         assertEquals(Arrays.asList(4_000L, 4_000L, 4_000L), clock.sleeps);
     }
 
@@ -316,5 +319,57 @@ public class SearchServiceTest {
         assertEquals(10, strategy.calls.get());
         assertEquals(1, strategy.maxInside);
         assertFalse(service.waitingJobs() > 0);
+    }
+
+    @Test
+    public void pagesQueuedBeforeACrashComeBackAfterTheRestart() throws Exception {
+        strategy.answers.add(results(hit("https://a.org/1"), hit("https://b.org/2")));
+        service(null).search(job("p1", "q"), null);
+        registry.complete(queue.poll().getUrl(), "read"); // one page visited, then the process dies
+
+        PageCandidateQueue afterRestart = new PageCandidateQueue();
+        assertEquals(1, SearchService.requeuePending(registry, afterRestart));
+        assertEquals("https://b.org/2", afterRestart.poll().getUrl());
+    }
+
+    @Test
+    public void aFailedVisitLeavesThePagePendingForTheNextAttempt() throws Exception {
+        strategy.answers.add(results(hit("https://a.org/1")));
+        service(null).search(job("p1", "q"), null);
+        queue.poll(); // the worker's visit fails: it does not complete the page
+
+        PageCandidateQueue afterRestart = new PageCandidateQueue();
+        assertEquals(1, SearchService.requeuePending(registry, afterRestart));
+    }
+
+    @Test
+    public void anUnwritableRegistryQueuesNothingAndLeavesTheQueryOpen() throws Exception {
+        UrlRegistry broken = new UrlRegistry() {
+            public boolean isKnown(String url) {
+                return false;
+            }
+
+            public boolean isCompleted(String url) {
+                return false;
+            }
+
+            public boolean enqueue(PageCandidate page, String origin) throws UrlRegistryException {
+                throw new UrlRegistryException("disk full", null);
+            }
+
+            public void complete(String url, String outcome) throws UrlRegistryException {
+                throw new UrlRegistryException("disk full", null);
+            }
+
+            public List<PageCandidate> pending() {
+                return Collections.emptyList();
+            }
+        };
+        SearchService service = service(null);
+        SearchServiceOutcome failed = service.search(SearchJob.builder("p1", "q").registry(broken).queue(queue)
+                .build(), null);
+        assertEquals(SearchServiceOutcome.Status.TECHNICAL_PROBLEM, failed.getStatus());
+        assertEquals(0, queue.size());
+        assertEquals(SearchServiceOutcome.Status.QUEUED, service.search(job("p1", "q"), null).getStatus());
     }
 }

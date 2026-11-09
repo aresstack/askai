@@ -297,6 +297,12 @@ final class PlaywrightBrowserSession implements BrowserSession {
      */
     EngineNavigation navigateAndCaptureSearchEngines(String query, CapturedPageConsumer consumer)
             throws BrowserException {
+        if (policy.isRefusingSearchEngines()) { // web_search and web_search_prepare both start here
+            com.aresstack.askai.browser.EngineHostRefusedException refused =
+                    new com.aresstack.askai.browser.EngineHostRefusedException("search engines", "engine search");
+            logEngineRefusal(refused);
+            throw refused;
+        }
         List<BrowserLink> linksBefore = currentLinks;
         boolean hadPage = hasPage;
         searchTabsUsed = false;
