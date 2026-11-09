@@ -274,7 +274,7 @@ public final class BookAssembler {
                 shingles.add(new ParagraphShingles(id, label, paragraphNo, set));
             }
         }
-        Set<String> flags = new LinkedHashSet<String>();
+        Set<String> flags = new LinkedHashSet<String>(revision.getClaimFlags());
         for (ManuscriptCitation citation : revision.getCitations()) {
             flags.addAll(citation.getFlags());
         }
