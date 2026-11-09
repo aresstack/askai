@@ -1,0 +1,172 @@
+package com.aresstack.askai.browser.search.engine;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+import static com.aresstack.askai.browser.search.engine.SearchEngineImplementationStatus.EXPERIMENTAL;
+import static com.aresstack.askai.browser.search.engine.SearchEngineImplementationStatus.NOT_IMPLEMENTED;
+import static com.aresstack.askai.browser.search.engine.SearchEngineImplementationStatus.SUPPORTED;
+
+/**
+ * Every search engine AskAI knows by name, whether or not it can search with it yet: the international engines, the
+ * regional ones (with the languages they matter for) and further search services. The user picks from this catalog
+ * when adding a row to Search → Engines; a row of an engine that is not {@link SearchEngineCatalogEntry#isSearchable()
+ * searchable} is never offered as working.
+ * <p>
+ * The catalog describes engines; HOW AskAI drives an implemented engine (search form, selectors, paging) stays in
+ * {@link BrowserSearchEngineCatalog}, under the same id. An entry is searchable exactly when that driver exists — the
+ * test {@code SearchEngineCatalogTest} keeps the two in step, so implementing an engine means adding its driver there
+ * and raising its status here.
+ * <p>
+ * Default languages are starting values for a new row, not a claim that the engine filters by them. Operating status
+ * checked 2026-11; entries whose service could not be confirmed say so in their note instead of being removed.
+ */
+public final class SearchEngineCatalog {
+
+    public static final String GOOGLE = BrowserSearchEngineCatalog.GOOGLE;
+    public static final String BING = BrowserSearchEngineCatalog.BING;
+    public static final String YAHOO = "yahoo";
+    public static final String DUCKDUCKGO = BrowserSearchEngineCatalog.DUCKDUCKGO;
+    public static final String BRAVE = "brave";
+    public static final String MOJEEK = "mojeek";
+    public static final String QWANT = "qwant";
+    public static final String ECOSIA = "ecosia";
+    public static final String STARTPAGE = "startpage";
+    public static final String SWISSCOWS = "swisscows";
+    public static final String SEZNAM = "seznam";
+    public static final String YANDEX = "yandex";
+    public static final String RAMBLER = "rambler";
+    public static final String BAIDU = "baidu";
+    public static final String SOGOU = "sogou";
+    public static final String SEARCH_360 = "so360";
+    public static final String SHENMA = "shenma";
+    public static final String NAVER = "naver";
+    public static final String DAUM = "daum";
+    public static final String YAHOO_JAPAN = "yahoo-japan";
+    public static final String COCCOC = "coccoc";
+    public static final String YAANI = "yaani";
+    public static final String KAGI = "kagi";
+    public static final String YEP = "yep";
+    public static final String METAGER = "metager";
+    public static final String SEARXNG = "searxng";
+    public static final String MARGINALIA = "marginalia";
+    public static final String YACY = "yacy";
+
+    private static final String NO_ADAPTER = "No browser adapter yet.";
+
+    private static final List<SearchEngineCatalogEntry> ENTRIES = Collections.unmodifiableList(
+            new ArrayList<SearchEngineCatalogEntry>(Arrays.asList(
+                    entry(GOOGLE, "Google", "USA", "https://www.google.com/", "Own index",
+                            langs("de", "en", "fr", "es", "it"), SUPPORTED,
+                            "Searched in AskAI's separate search browser (Serp4J); result links are Google redirect "
+                                    + "wrappers that are resolved one at a time when a hit is opened."),
+                    entry(BING, "Bing", "USA", "https://www.bing.com/", "Own index",
+                            langs("de", "en", "fr", "es"), EXPERIMENTAL,
+                            "Search form adapter in the research browser; not validated live recently."),
+                    entry(YAHOO, "Yahoo Search", "USA", "https://search.yahoo.com/", "Mostly Bing",
+                            langs("en", "de"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(DUCKDUCKGO, "DuckDuckGo", "USA", "https://duckduckgo.com/",
+                            "Mostly Bing plus own data", langs("de", "en"), SUPPORTED,
+                            "Searched through its HTML and Lite start pages in the research browser."),
+                    entry(BRAVE, "Brave Search", "USA", "https://search.brave.com/", "Own index",
+                            langs("de", "en", "fr"), NOT_IMPLEMENTED,
+                            "No browser adapter yet; the Brave Search API is available as a search provider."),
+                    entry(MOJEEK, "Mojeek", "United Kingdom", "https://www.mojeek.com/", "Own index",
+                            langs("en", "de"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(QWANT, "Qwant", "France", "https://www.qwant.com/", "Mixed (own index and Bing)",
+                            langs("fr", "en", "de"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(ECOSIA, "Ecosia", "Germany", "https://www.ecosia.org/",
+                            "Bing, Google and a European index", langs("de", "en", "fr"), NOT_IMPLEMENTED,
+                            NO_ADAPTER),
+                    entry(STARTPAGE, "Startpage", "Netherlands", "https://www.startpage.com/", "Mostly Google",
+                            langs("de", "en", "fr"), NOT_IMPLEMENTED,
+                            "Adapter planned next: Google results with direct target URLs (no redirect wrappers)."),
+                    entry(SWISSCOWS, "Swisscows", "Switzerland", "https://swisscows.com/",
+                            "Own and partner data", langs("de", "en", "fr"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(SEZNAM, "Seznam", "Czech Republic", "https://search.seznam.cz/", "Own index",
+                            langs("cs", "sk"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(YANDEX, "Yandex", "Russia", "https://yandex.com/", "Own index",
+                            langs("ru", "en"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(RAMBLER, "Rambler", "Russia", "https://www.rambler.ru/", "Yandex-based",
+                            langs("ru"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(BAIDU, "Baidu", "China", "https://www.baidu.com/", "Own index",
+                            langs("zh-CN"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(SOGOU, "Sogou", "China", "https://www.sogou.com/", "Own and partner data",
+                            langs("zh-CN"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(SEARCH_360, "360 Search", "China", "https://www.so.com/", "Own service",
+                            langs("zh-CN"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(SHENMA, "Shenma", "China", "https://m.sm.cn/", "Mobile search engine",
+                            langs("zh-CN"), NOT_IMPLEMENTED, "No browser adapter yet; a mobile-only search site."),
+                    entry(NAVER, "Naver", "South Korea", "https://search.naver.com/", "Own search",
+                            langs("ko"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(DAUM, "Daum", "South Korea", "https://search.daum.net/", "Own and partner data",
+                            langs("ko"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(YAHOO_JAPAN, "Yahoo! JAPAN", "Japan", "https://search.yahoo.co.jp/", "Google-based",
+                            langs("ja"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(COCCOC, "Cốc Cốc", "Vietnam", "https://coccoc.com/search", "Own index",
+                            langs("vi"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(YAANI, "Yaani", "Turkey", "https://www.yaani.com.tr/", "Own service",
+                            langs("tr"), NOT_IMPLEMENTED,
+                            "No browser adapter yet; current operation could not be confirmed (checked 2026-11)."),
+                    entry(KAGI, "Kagi", "USA", "https://kagi.com/", "Own index plus other sources",
+                            langs("en", "de"), NOT_IMPLEMENTED,
+                            "No adapter yet; a paid service that needs the user's account."),
+                    entry(YEP, "Yep", "USA", "https://yep.com/", "Own index (Ahrefs)",
+                            langs("en"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(METAGER, "MetaGer", "Germany", "https://metager.de/", "Meta search",
+                            langs("de", "en"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(SEARXNG, "SearXNG", "Open source", "https://docs.searxng.org/",
+                            "Self-hostable meta search", langs("de", "en"), NOT_IMPLEMENTED,
+                            "No adapter yet; needs the address of a concrete SearXNG instance."),
+                    entry(MARGINALIA, "Marginalia Search", "Sweden", "https://search.marginalia.nu/",
+                            "Own index of the independent web", langs("en"), NOT_IMPLEMENTED, NO_ADAPTER),
+                    entry(YACY, "YaCy", "Germany", "https://yacy.net/", "Decentralised peer-to-peer index",
+                            langs("de", "en"), NOT_IMPLEMENTED,
+                            "No adapter yet; needs the address of a YaCy peer."))));
+
+    private SearchEngineCatalog() {
+    }
+
+    /** All catalog engines in catalog order (not an execution order). */
+    public static List<SearchEngineCatalogEntry> entries() {
+        return ENTRIES;
+    }
+
+    /** @return the entry with this id, or {@code null} for an id the catalog does not know */
+    public static SearchEngineCatalogEntry byId(String id) {
+        if (id == null) {
+            return null;
+        }
+        String wanted = id.trim();
+        for (SearchEngineCatalogEntry entry : ENTRIES) {
+            if (entry.getId().equals(wanted)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /** The name to show for an id: the catalog name, else the id itself (a row written by a newer build). */
+    public static String displayName(String id) {
+        SearchEngineCatalogEntry entry = byId(id);
+        return entry != null ? entry.getDisplayName() : String.valueOf(id);
+    }
+
+    /** The starting languages of a new row of this engine, or an empty list for an unknown id. */
+    public static List<String> defaultLanguages(String id) {
+        SearchEngineCatalogEntry entry = byId(id);
+        return entry != null ? entry.getDefaultLanguages() : Collections.<String>emptyList();
+    }
+
+    private static SearchEngineCatalogEntry entry(String id, String name, String origin, String homeUrl,
+                                                  String index, List<String> languages,
+                                                  SearchEngineImplementationStatus status, String note) {
+        return new SearchEngineCatalogEntry(id, name, origin, homeUrl, index, languages, status, note, false);
+    }
+
+    private static List<String> langs(String... codes) {
+        return Arrays.asList(codes);
+    }
+}
