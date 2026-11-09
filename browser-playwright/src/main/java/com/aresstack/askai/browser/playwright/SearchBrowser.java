@@ -54,6 +54,11 @@ import java.util.concurrent.RejectedExecutionException;
  *       serialised. The browser starts on the first search.</li>
  *   <li>A disconnected browser is started again before the next search; a browser that dies during a search
  *       is started again and the search is repeated once.</li>
+ *   <li>It is the ONE client that talks to the search engines, for every chat: searches and redirect hops keep a
+ *       minimum distance to each other ({@link #setEngineSpacingMillis}); a challenge pauses the engines with an
+ *       exponentially growing pause and every request during the pause fails at once as {@code BLOCKED} with the
+ *       reason, without contacting the engine; the same search asked again within
+ *       {@value #RECENT_SEARCH_TTL_MILLIS} ms is answered from memory, not from the engine.</li>
  * </ul>
  */
 public final class SearchBrowser implements AutoCloseable {
@@ -64,6 +69,20 @@ public final class SearchBrowser implements AutoCloseable {
         t.setDaemon(true);
         return t;
     });
+
+    /** Default minimum distance between two engine requests (result pages and redirect hops). */
+    public static final long DEFAULT_ENGINE_SPACING_MILLIS = 10_000L;
+    /** First pause after a challenge; every further challenge in a row doubles it, up to the cap. */
+    static final long BACKOFF_BASE_MILLIS = 60_000L;
+    static final long BACKOFF_CAP_MILLIS = 30 * 60_000L;
+    /** How long an identical search is answered from memory. */
+    static final long RECENT_SEARCH_TTL_MILLIS = 30 * 60_000L;
+
+    private final SearchEngineThrottle throttle = new SearchEngineThrottle(DEFAULT_ENGINE_SPACING_MILLIS,
+            BACKOFF_BASE_MILLIS, BACKOFF_CAP_MILLIS, SearchEngineThrottle.SYSTEM);
+    private final RecentSearches<java.util.List<Object>, SearchResponse> recent =
+            new RecentSearches<java.util.List<Object>, SearchResponse>(200, RECENT_SEARCH_TTL_MILLIS,
+                    SearchEngineThrottle.SYSTEM);
 
     private final String channel;
     /** Read before every (re)start: a changed setting takes effect with the next search. */
@@ -106,19 +125,83 @@ public final class SearchBrowser implements AutoCloseable {
         Objects.requireNonNull(provider, "provider");
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(context, "context");
+        final ProviderId id = provider.getDescriptor().getId();
+        final java.util.List<Object> key = java.util.Arrays.<Object>asList(id, request);
         return onOwner(provider, () -> {
-            Browser current = ensureBrowser(provider);
-            try {
-                return provider.search(request, context, current);
-            } catch (SearchProviderException e) {
-                if (e.getCategory() != SearchErrorCategory.UNAVAILABLE || current.isConnected()
-                        || context.getCancellation().isCancelled()) {
-                    throw e;
-                }
-                System.err.println("[search-browser] browser died during the search; starting it again");
-                return provider.search(request, context, ensureBrowser(provider));
+            SearchResponse remembered = recent.get(key);
+            if (remembered != null) {
+                System.err.println("[search-browser] same search within " + (RECENT_SEARCH_TTL_MILLIS / 60_000L)
+                        + " min, answered from memory: " + request.getQuery());
+                return remembered;
             }
+            refuseWhilePaused(id);
+            awaitEngineSlot(id);
+            Browser current = ensureBrowser(provider);
+            SearchResponse response;
+            try {
+                response = provider.search(request, context, current);
+            } catch (SearchProviderException e) {
+                if (e.getCategory() == SearchErrorCategory.UNAVAILABLE && !current.isConnected()
+                        && !context.getCancellation().isCancelled()) {
+                    System.err.println("[search-browser] browser died during the search; starting it again");
+                    awaitEngineSlot(id);
+                    try {
+                        response = provider.search(request, context, ensureBrowser(provider));
+                    } catch (SearchProviderException again) {
+                        throw noteBlock(again);
+                    }
+                } else {
+                    throw noteBlock(e);
+                }
+            }
+            throttle.recordSuccess();
+            recent.put(key, response);
+            return response;
         });
+    }
+
+    /**
+     * The minimum distance between two engine requests (searches and redirect hops) from now on; the default is
+     * {@link #DEFAULT_ENGINE_SPACING_MILLIS}.
+     */
+    public void setEngineSpacingMillis(long millis) {
+        throttle.setMinSpacingMillis(millis);
+    }
+
+    /** Why the engines are paused after a challenge, or empty when they are not. */
+    public String enginePauseReason() {
+        return throttle.pauseReason();
+    }
+
+    /** Until when the engines are paused (epoch millis), 0 or past when they are not. */
+    public long enginePausedUntil() {
+        return throttle.pausedUntil();
+    }
+
+    private void refuseWhilePaused(ProviderId id) {
+        if (throttle.isPaused()) {
+            throw new SearchProviderException(id, SearchErrorCategory.BLOCKED, "search engines paused until "
+                    + new java.util.Date(throttle.pausedUntil()) + " after: " + throttle.pauseReason());
+        }
+    }
+
+    private void awaitEngineSlot(ProviderId id) {
+        try {
+            throttle.awaitSlot();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SearchProviderException(id, SearchErrorCategory.CANCELLED,
+                    "interrupted while keeping the engine spacing");
+        }
+    }
+
+    /** A challenge or rate limit pauses every engine request; the failure itself is passed on unchanged. */
+    private SearchProviderException noteBlock(SearchProviderException e) {
+        if (e.getCategory() == SearchErrorCategory.BLOCKED || e.getCategory() == SearchErrorCategory.RATE_LIMITED) {
+            long pause = throttle.recordBlock(e.getCategory() + ": " + firstLine(String.valueOf(e.getMessage())));
+            System.err.println("[search-browser] engine challenge; engines paused for " + (pause / 1000L) + " s");
+        }
+        return e;
     }
 
     /**
@@ -196,7 +279,8 @@ public final class SearchBrowser implements AutoCloseable {
             return RedirectResolution.unresolved("search browser is closed");
         }
         try {
-            return future.get(budget * 2 + 5_000L, TimeUnit.MILLISECONDS);
+            // the hop waits its turn behind the searches and keeps the engine spacing before it runs
+            return future.get(budget * 2 + 5_000L + 3 * throttle.minSpacingMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             future.cancel(true);
@@ -211,7 +295,29 @@ public final class SearchBrowser implements AutoCloseable {
         }
     }
 
+    /** One hop, under the same pace as the searches: refused while paused, spaced, a challenge pauses the engines. */
     private RedirectResolution resolveOnOwner(String wrapperUrl, long timeoutMillis) {
+        if (throttle.isPaused()) {
+            return RedirectResolution.blocked("search engines paused after: " + throttle.pauseReason());
+        }
+        try {
+            throttle.awaitSlot();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return RedirectResolution.unresolved("interrupted while keeping the engine spacing");
+        }
+        RedirectResolution hop = hopOnOwner(wrapperUrl, timeoutMillis);
+        if (hop.status == RedirectResolution.Status.BLOCKED) {
+            long pause = throttle.recordBlock("challenge on redirect hop: " + hop.detail);
+            System.err.println("[search-browser] challenge on a redirect hop; engines paused for "
+                    + (pause / 1000L) + " s");
+        } else if (hop.status == RedirectResolution.Status.RESOLVED) {
+            throttle.recordSuccess();
+        }
+        return hop;
+    }
+
+    private RedirectResolution hopOnOwner(String wrapperUrl, long timeoutMillis) {
         Browser current;
         try {
             current = ensureBrowser(ProviderId.of("redirect-resolver"));
