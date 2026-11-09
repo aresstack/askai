@@ -67,7 +67,7 @@ Sources phase of one chat (research/running)
 │       ▼                                               │
 ├── SearchService (T2, one per AskAI) ──────────────────┼── the ONLY path to a search engine
 │       │  SearchStrategy (exists) → SearchBrowser / Serp4J providers (exist)
-│       │  query dedup · result dedup (UrlRegistry) · goto-redirect batches · engine spacing + backoff · one gate for all chats
+│       │  query dedup · result dedup (UrlRegistry) · one lazy goto hop per opened hit · engine rate + backoff · one gate for all chats
 │       ▼  candidates (reranked, scope-fenced, NonSourceHosts-filtered)
 ├── PageTaskQueue (T4) ── ResearchTask role=page-worker, one per URL, claims URL in UrlRegistry
 │       ▼
@@ -113,7 +113,7 @@ the answer into artifacts (`FINDING`, `SOURCE_REFERENCE`), follow-up page tasks 
 
 **Search service (Java, one per AskAI).** Takes a query with its plan entry and language, runs it through the
 configured `SearchStrategy` (engines in the search browser, or an API provider), and returns deduplicated,
-reranked candidates. It owns the global engine limits: one engine request at a time (the `search-engines` key
+reranked candidates. It owns the global engine limits for queries and `goto` hops alike: one engine request at a time (the `search-engines` key
 today), a minimum spacing between requests, exponential backoff and a cool-down after a challenge, over all chats.
 It refuses a query it has already run for the same project (normalised: case, whitespace, stop words), and strips
 URLs the project has already visited or rejected (`UrlRegistry`).
@@ -138,13 +138,22 @@ on its owner thread, port `OpaqueRedirectResolver`, adapter `SearchBrowserRedire
 `ResearchLoop.setRedirectResolver`); `WebSearchApplicationService` records `engineRedirectBlocked` per search; a node is
 covered only once no planned query of it is pending, and the per-query cap is `sourcesPerNode`.
 
-**The search browser is a serial resource, and every `goto` hop is one more call on it.** With twenty workers, the
-redirect resolution of their candidates must not queue behind the next engine query or starve it. T2 therefore makes
-redirect resolution part of the search service: hits are resolved in one batch right after the SERP, with
-`SearchBrowser.resolveRedirect` calls that are cheap (a request without following the redirect) and counted in the
-service's spacing; a page task is created with the **resolved** URL, so no worker ever asks the search browser for
-anything. Queries and redirect batches share the one owner thread in FIFO order; the service reports the search
-browser's queue length so the benchmark (T7) shows whether it becomes the bottleneck.
+**`goto` wrappers stay unresolved until a hit is actually opened; then exactly one hop, centrally in the search
+browser.** This is the owner's rule (2026-11-09, after the second live run) and what PR #156 does in the funnel's
+frontier loop; resolving hits in advance or in a batch is forbidden, because every hop is a Google request. A page
+task therefore carries the wrapper URL; right before the page worker opens it, the task asks the search service's
+redirect port (`OpaqueRedirectResolver` over `SearchBrowser.resolveRedirect`, serial on the search browser's owner
+thread) for that one hop and then navigates its own user context to the resolved target. The worker never touches an
+engine host itself; a blocked hop (`engineRedirectBlocked`) ends the task typed and puts the engine into cool-down.
+
+**Parallel workers must not raise the engine rate.** Live run 2 (2026-11-09): Google challenged the search browser
+after 13 SERP queries and about 40 `goto` hops in 16 minutes, all serial. Queries and hops are therefore one budget in
+the search service: a minimum spacing per Google request (the repair thread is asking the owner for the value) and
+the cool-down apply to both, over all chats and workers; the number of workers changes how many pages are read at
+once, never how fast the engine is asked. Hits that wait for their hop wait in the page task queue, where nothing is
+lost. The service reports the search browser's queue length so the benchmark (T7) shows whether the engine budget,
+not the browsers or the model, is the ceiling; if it is, the answer is the configured engine order (for example
+DuckDuckGo after a Google block, as the repair thread proposes), never a worker that talks to an engine.
 
 ### 2.4 Communication: two operations, natural language, Java does the rest
 
@@ -277,7 +286,7 @@ Resources and where their limit lives:
 | Concurrent model calls per model and endpoint | `ModelPortSettings` capacity (default 1; raise for `gemma4:e2b`) | `ModelResourceScheduler` (exists) |
 | Worker browser processes, user contexts, tabs | "Worker browsers" settings | `PlaywrightUserContextPool` (exists) |
 | Operations on one site | per-site permits and overrides | `SiteLeaseGate` (T1) |
-| Search engine requests | one at a time, spacing, backoff | `SearchService` (T2) |
+| Search engine requests (queries and `goto` hops) | one at a time, minimum spacing per request, backoff and cool-down | `SearchService` (T2) |
 | Page workers running at once | `research.team.maxWorkers` (default 8, see question 3) | `TeamCapacity` (T6) |
 
 Today `TaskExecutor.runReady` acquires every resource of a task before the attempt starts and releases it only when
@@ -364,7 +373,7 @@ touched. UI strings English.
 | PR | Title | Depends on | Size | Starts |
 |---|---|---|---|---|
 | T1 | Site leases with deadlines, per-site overrides and site health | – | M | now |
-| T2 | Search service: one engine path, query and URL dedup, redirect batches, spacing and backoff, engine deny list for worker contexts | PR #156 (merged) | M | now |
+| T2 | Search service: one engine path, query and URL dedup, one lazy goto hop per opened hit, engine rate and backoff, engine deny list for worker contexts | PR #156 (merged) | M | now |
 | T3 | Agent mailbox: `send_message`, `finish_task`, labelled-text answers, persistence | – | M | now |
 | T4 | Page worker and page task queue on the task executor; `PageInspection` extracted from the funnel | T1, T2, T3 | L | after MVP acceptance is stable |
 | T5 | Team coordinator: plan queue feeds the search service, worker feedback feeds the cycles, gap-review role, outcome | T4 | L | after T4 |
@@ -392,8 +401,10 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
 
 **T2 Search service** (M)
 - Change: `SearchService` in the runtime (`search(SearchRequest) → SearchOutcome` over the configured
-  `SearchStrategy`, followed by one redirect batch through `OpaqueRedirectResolver` so every candidate carries its
-  resolved URL and `engineRedirectBlocked` ends the batch typed; normalised query dedup per project; `UrlRegistry` port with a file implementation in the plugin
+  `SearchStrategy`; `resolveOnOpen(candidate)` as the one lazy `goto` hop through `OpaqueRedirectResolver` when a page
+  task opens its hit, never earlier and never in a batch, with `engineRedirectBlocked` ending the task typed; one
+  engine budget (minimum spacing per Google request, cool-down) for queries and hops together; normalised query dedup
+  per project; `UrlRegistry` port with a file implementation in the plugin
   (`search-plan/urls.jsonl`); engine spacing and backoff over all chats using the `search-engines` key; `providerHosts`
   and `SearchEngineHosts` (browser-api) as the engine deny list applied to worker user contexts by
   `PlaywrightBrowserSession`'s `UrlSafetyPolicy`). The manual search and the funnel keep their path; only the registry is
@@ -506,9 +517,10 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
 - **Two hotspots.** `ResearchAgentSession` and `WebSearchApplicationService` are touched by the repair thread and by
   T4/T5. Mitigation: T4's extraction is behaviour-preserving and starts from PR #156; T5's wiring is one branch
   in `wireSearchPlan`.
-- **The search browser as the serial bottleneck.** Queries and `goto` resolutions share one owner thread. Mitigation:
-  redirect batches in the service (section 2.3), spacing that counts both, the queue length in the benchmark; if it
-  binds, the next step is a second search browser identity, not a worker that talks to an engine.
+- **The search engine as the ceiling.** Queries and `goto` hops share one owner thread and one Google budget, and
+  Google blocked after 13 queries and about 40 hops in 16 minutes. Mitigation: one lazy hop per opened hit and one
+  rate budget for queries and hops (section 2.3), the queue length in the benchmark; if the budget binds, the engine
+  order with a fallback engine applies, never a second identity on Google and never a worker that talks to an engine.
 
 ## 9. Decisions for the owner
 
