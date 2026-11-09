@@ -305,9 +305,9 @@ public final class OutlineEditorView extends JPanel {
             comment.setWrapStyleWord(true);
             boolean clusters = com.aresstack.askai.research.outline.brief.ChapterRegenerator
                     .isSubClusterChapter(chapter);
-            javax.swing.JSpinner count = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(
-                    Math.max(2, Math.min(6, chapter.getSections().size())), 2, 6, 1));
-            javax.swing.JCheckBox resplit = new javax.swing.JCheckBox("Split into sections");
+            javax.swing.JSpinner count = com.aresstack.comiccontrols.control.ComicControls.integerSpinner(
+                    Math.max(2, Math.min(6, chapter.getSections().size())), 2, 6, 1, 2);
+            javax.swing.JCheckBox resplit = com.aresstack.comiccontrols.control.ComicControls.checkBox("Split into sections");
             resplit.setEnabled(clusters);
             count.setEnabled(false);
             resplit.addActionListener(ev -> count.setEnabled(resplit.isSelected()));
