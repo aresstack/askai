@@ -17,6 +17,7 @@ import java.util.Locale;
  * ({@link #isOpaqueWrapper}); its treatment is an {@link OpaqueRedirectStrategy}, shipped as
  * {@link OpaqueRedirectStrategy#DISCARD}: {@code UNRESOLVED}. The wrapper URL itself is never a result link.</li>
  * <li>DuckDuckGo: {@code /l/?uddg=<target>}</li>
+ * <li>Yahoo: {@code r.search.yahoo.com/_ylt=…/RV=2/RE=…/RO=10/RU=<url-encoded target>/RK=2/RS=…}</li>
  * <li>Google: {@code /goto?url=CAES...} — an opaque token, never decoded: always {@code UNRESOLVED}
  * (issue #41). Its HTTP resolution happens in Serp4J for API providers, not in the browser capture.</li>
  * </ul>
@@ -97,7 +98,28 @@ final class SearchRedirectResolver {
             return target != null && target.startsWith("http")
                     ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
         }
+        if (host.equals("r.search.yahoo.com") || host.endsWith(".r.search.yahoo.com")) {
+            String target = yahooTarget(url);
+            return target != null && (target.startsWith("http://") || target.startsWith("https://"))
+                    ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
+        }
         return new Resolution(Status.NOT_A_REDIRECT, url);
+    }
+
+    /** Yahoo's wrapper carries the target URL-encoded in the {@code /RU=…/} path segment. */
+    private static String yahooTarget(String url) {
+        int start = url.indexOf("/RU=");
+        if (start < 0) {
+            return null;
+        }
+        start += "/RU=".length();
+        int end = url.indexOf('/', start);
+        String encoded = end < 0 ? url.substring(start) : url.substring(start, end);
+        try {
+            return URLDecoder.decode(encoded, StandardCharsets.UTF_8.name());
+        } catch (UnsupportedEncodingException | IllegalArgumentException malformed) {
+            return null;
+        }
     }
 
     /**
