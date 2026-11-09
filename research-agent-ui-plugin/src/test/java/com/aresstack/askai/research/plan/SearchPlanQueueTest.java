@@ -342,24 +342,37 @@ public class SearchPlanQueueTest {
     }
 
     @Test
-    public void acceptedSourcesCoverANodeAndItsOtherQueriesAreSkipped() throws Exception {
+    public void aNodeIsCoveredOnlyOnceItsPlannedVariantsRanToo() throws Exception {
+        // Live run 2026-11-09: every base query met the source minimum at once, the three variants per node were
+        // skipped and the plan announced "all 5 nodes covered" after 6 of 19 queries. The variants are the node's
+        // angles: they run, each with the node's source number as its cap.
         Map<String, List<String>> queries = new HashMap<String, List<String>>();
         queries.put("a", Arrays.asList("Alpha Query", "Alpha Variant"));
         build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")), queries);
         sources.domains.put("s1", "one.example");
         sources.domains.put("s2", "two.example");
+        sources.domains.put("s3", "three.example");
         SearchPlanQueue queue = queue(caps(2, 4, 60));
         sources.next = Arrays.asList("s1", "s2");
         queue.run();
         assertEquals(2, port.caps.get(0).intValue());
         port.complete(false);
-        assertEquals("Beta Query", port.searched.get(1)); // the variant of covered a was skipped
+        assertEquals("the variant of a runs although a already has two sources", "Alpha Variant",
+                port.searched.get(1));
+        assertEquals("the variant keeps the node's source number as its cap", 2, port.caps.get(1).intValue());
+        sources.next = Arrays.asList("s3");
+        port.complete(false);
+        assertEquals("Beta Query", port.searched.get(2));
         sources.next = Collections.emptyList();
         port.complete(false);
         assertEquals(Collections.singletonList("B"), outcomes.get(0).getUncovered());
+        assertTrue(outcomes.get(0).report(), outcomes.get(0).report().contains(
+                "A: covered (3 sources from 3 domains, 2 queries run"));
         SearchPlanEntry first = queue.entriesInOrder().get(0);
         assertEquals(Arrays.asList("s1", "s2"), first.getAcceptedSourceIds());
-        assertEquals(SearchPlanEntry.Status.SKIPPED, queue.entriesInOrder().get(1).getStatus());
+        SearchPlanEntry variant = queue.entriesInOrder().get(1);
+        assertEquals(SearchPlanEntry.Status.DONE, variant.getStatus());
+        assertEquals(Collections.singletonList("s3"), variant.getAcceptedSourceIds());
     }
 
     @Test
@@ -525,18 +538,22 @@ public class SearchPlanQueueTest {
         }
         assertEquals(2, cycleEntries);
         sources.next = Arrays.asList("s4");
-        port.complete(false); // A now has two sources from two domains: covered, "Alpha Vorschrift" is skipped
+        port.complete(false); // A now has two sources from two domains — its second cycle query still runs
+        assertTrue("A is not covered while a planned query of its cycle is pending", outcomes.isEmpty());
+        assertEquals("Alpha Vorschrift", port.searched.get(4));
+        sources.next = Collections.emptyList();
+        port.complete(false); // Alpha Vorschrift: nothing new; every planned query of A ran → covered
         assertEquals(1, outcomes.size());
         SearchPlanQueue.Outcome outcome = outcomes.get(0);
         assertEquals(SearchPlanQueue.Reason.COVERED, outcome.getReason());
         assertEquals(2, outcome.getCycles());
-        assertEquals(4, outcome.getQueriesRun());
+        assertEquals(5, outcome.getQueriesRun());
         assertEquals(4, outcome.getSources());
         assertEquals(4, outcome.getDomains());
         assertTrue(outcome.text(), outcome.text().startsWith("Search plan finished: all 2 nodes are covered"));
         assertTrue(outcome.text(), outcome.text().contains("2 research cycles"));
         assertTrue(store.outcomeFile().isFile());
-        assertTrue(outcome.report().contains("A: covered (2 sources from 2 domains, 3 queries run"));
+        assertTrue(outcome.report().contains("A: covered (2 sources from 2 domains, 4 queries run"));
         assertFalse(queue.isRunning());
     }
 

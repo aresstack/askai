@@ -27,7 +27,8 @@ final class SearchPlanSettingsRows {
         ComicForm form = ComicForm.titled("Search plan");
         form.row("Sources per node", field(store, ResearchRuntimeSettings.KEY_PLAN_SOURCES_PER_NODE,
                 ResearchRuntimeSettings.DEFAULT_PLAN_SOURCES_PER_NODE,
-                "Accepted sources (from at least two domains) that make a concept node covered."));
+                "Accepted sources a planned query may add, and the minimum (from at least two domains) that makes a "
+                        + "concept node covered once its planned queries of the cycle ran."));
         JTextField cycles = field(store, ResearchRuntimeSettings.KEY_PLAN_CYCLES,
                 ResearchRuntimeSettings.DEFAULT_PLAN_CYCLES,
                 "Research cycles: after each cycle the nodes without covering sources are planned again from another "

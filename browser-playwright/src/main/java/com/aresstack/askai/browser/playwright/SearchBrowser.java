@@ -5,13 +5,22 @@ import com.aresstack.serp4j.core.error.SearchErrorCategory;
 import com.aresstack.serp4j.core.error.SearchProviderException;
 import com.aresstack.serp4j.core.model.SearchRequest;
 import com.aresstack.serp4j.core.model.SearchResponse;
+import com.aresstack.serp4j.core.model.id.ProviderId;
 import com.aresstack.serp4j.core.port.ProviderDescriptor;
 import com.aresstack.serp4j.core.port.SearchContext;
 import com.aresstack.serp4j.core.port.SearchProvider;
 import com.aresstack.serp4j.playwright.PlaywrightSearchProvider;
+import com.aresstack.askai.browser.search.engine.SearchEngineHosts;
+import com.microsoft.playwright.APIResponse;
 import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.PlaywrightException;
+import com.microsoft.playwright.Request;
+import com.microsoft.playwright.options.RequestOptions;
+import com.microsoft.playwright.options.WaitUntilState;
 
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -25,6 +34,10 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.RejectedExecutionException;
 
 /**
@@ -134,6 +147,209 @@ public final class SearchBrowser implements AutoCloseable {
         };
     }
 
+    /** The outcome of resolving an engine's redirect wrapper in the search browser. */
+    public static final class RedirectResolution {
+        public enum Status { RESOLVED, BLOCKED, UNRESOLVED }
+
+        public final Status status;
+        /** The page the wrapper points at (RESOLVED), else "". */
+        public final String targetUrl;
+        /** Where the hop ended or why nothing was resolved — diagnostics. */
+        public final String detail;
+
+        RedirectResolution(Status status, String targetUrl, String detail) {
+            this.status = status;
+            this.targetUrl = targetUrl == null ? "" : targetUrl;
+            this.detail = detail == null ? "" : detail;
+        }
+
+        static RedirectResolution resolved(String target) {
+            return new RedirectResolution(Status.RESOLVED, target, "");
+        }
+
+        static RedirectResolution blocked(String where) {
+            return new RedirectResolution(Status.BLOCKED, "", where);
+        }
+
+        static RedirectResolution unresolved(String why) {
+            return new RedirectResolution(Status.UNRESOLVED, "", why);
+        }
+    }
+
+    /**
+     * Resolve a search engine's redirect wrapper to its target with THIS browser (its cookies, its identity), on
+     * the owner thread like a search. Never throws, never waits for a person.
+     *
+     * @param wrapperUrl    the engine address a hit points at (e.g. {@code https://www.google.com/goto?url=…})
+     * @param timeoutMillis the longest the hop may take
+     */
+    public RedirectResolution resolveRedirect(String wrapperUrl, long timeoutMillis) {
+        Objects.requireNonNull(wrapperUrl, "wrapperUrl");
+        if (closed) {
+            return RedirectResolution.unresolved("search browser is closed");
+        }
+        final long budget = Math.max(1_000L, timeoutMillis);
+        Future<RedirectResolution> future;
+        try {
+            future = owner.submit(() -> resolveOnOwner(wrapperUrl, budget));
+        } catch (RejectedExecutionException e) {
+            return RedirectResolution.unresolved("search browser is closed");
+        }
+        try {
+            return future.get(budget * 2 + 5_000L, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            return RedirectResolution.unresolved("interrupted");
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            return RedirectResolution.unresolved("timeout");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            return RedirectResolution.unresolved(cause.getClass().getSimpleName()
+                    + (cause.getMessage() == null ? "" : ": " + firstLine(cause.getMessage())));
+        }
+    }
+
+    private RedirectResolution resolveOnOwner(String wrapperUrl, long timeoutMillis) {
+        Browser current;
+        try {
+            current = ensureBrowser(ProviderId.of("redirect-resolver"));
+        } catch (SearchProviderException e) {
+            return RedirectResolution.unresolved("search browser could not be started");
+        }
+        BrowserContext context = current.contexts().isEmpty() ? current.newContext() : current.contexts().get(0);
+        // Step 1: the hop as ONE request with the context's cookies, redirects not followed — the usual answer
+        // is a 3xx whose Location is the target; nothing of the target is fetched.
+        String step1 = "";
+        try {
+            APIResponse response = context.request().get(wrapperUrl,
+                    RequestOptions.create().setMaxRedirects(0).setTimeout((double) timeoutMillis));
+            int status = response.status();
+            String location = response.headers().get("location");
+            if (status >= 300 && status < 400 && location != null && !location.trim().isEmpty()) {
+                String target = absolute(wrapperUrl, location.trim());
+                if (SearchEngineHosts.isGoogleObstacleUrl(target)) {
+                    return RedirectResolution.blocked(target);
+                }
+                if (!SearchEngineHosts.isEngineHost(target)) {
+                    return RedirectResolution.resolved(target);
+                }
+                step1 = "engine-internal hop " + status;
+            } else if (status == 429 || status == 403) {
+                return RedirectResolution.blocked(wrapperUrl + " -> HTTP " + status);
+            } else if (status == 200) {
+                String body = response.text();
+                String lower = body == null ? "" : body.toLowerCase(Locale.ROOT);
+                if (lower.contains("/sorry/index") || lower.contains("id=\"captcha-form\"")
+                        || lower.contains("g-recaptcha")) {
+                    return RedirectResolution.blocked(wrapperUrl + " -> challenge page");
+                }
+                String meta = metaRefreshTarget(body);
+                if (meta != null && !SearchEngineHosts.isEngineHost(meta)) {
+                    return RedirectResolution.resolved(absolute(wrapperUrl, meta));
+                }
+                step1 = "HTTP 200 without a usable target";
+            } else {
+                step1 = "HTTP " + status;
+            }
+        } catch (PlaywrightException e) {
+            step1 = "request failed: " + firstLine(e.getMessage());
+        }
+        // Step 2: the hop as a navigation; the first document request that leaves the engine names the
+        // target and is aborted (a redirect hop is observed, not intercepted — the page is closed at once).
+        final AtomicReference<String> target = new AtomicReference<>();
+        final AtomicBoolean obstacle = new AtomicBoolean();
+        Page page = context.newPage();
+        String landed = "";
+        try {
+            page.setDefaultTimeout(timeoutMillis);
+            page.route("**/*", route -> {
+                Request request = route.request();
+                String url = request.url();
+                if ("document".equals(request.resourceType())) {
+                    if (SearchEngineHosts.isEngineHost(url)) {
+                        if (SearchEngineHosts.isGoogleObstacleUrl(url)) {
+                            obstacle.set(true);
+                        }
+                        route.resume();
+                        return;
+                    }
+                    target.compareAndSet(null, url);
+                }
+                route.abort();
+            });
+            page.onRequest(request -> {
+                String url = request.url();
+                if (SearchEngineHosts.isGoogleObstacleUrl(url)) {
+                    obstacle.set(true);
+                } else if ("document".equals(request.resourceType()) && !SearchEngineHosts.isEngineHost(url)) {
+                    target.compareAndSet(null, url);
+                }
+            });
+            try {
+                page.navigate(wrapperUrl, new Page.NavigateOptions().setTimeout((double) timeoutMillis)
+                        .setWaitUntil(WaitUntilState.COMMIT));
+            } catch (PlaywrightException ignored) {
+                // an aborted target request ends the navigation with an error: expected
+            }
+            long deadline = System.currentTimeMillis() + Math.min(timeoutMillis, 4_000L);
+            while (target.get() == null && !obstacle.get() && System.currentTimeMillis() < deadline) {
+                page.waitForTimeout(100);
+            }
+            landed = page.url() == null ? "" : page.url();
+            if (SearchEngineHosts.isGoogleObstacleUrl(landed)) {
+                obstacle.set(true);
+            } else if (target.get() == null && landed.startsWith("http") && !SearchEngineHosts.isEngineHost(landed)) {
+                target.set(landed);
+            }
+        } catch (PlaywrightException e) {
+            return RedirectResolution.unresolved(step1 + "; navigation failed: " + firstLine(e.getMessage()));
+        } finally {
+            try {
+                page.close();
+            } catch (RuntimeException ignored) {
+                // already gone
+            }
+        }
+        if (target.get() != null) {
+            return RedirectResolution.resolved(target.get());
+        }
+        if (obstacle.get()) {
+            return RedirectResolution.blocked(landed.isEmpty() ? wrapperUrl : landed);
+        }
+        return RedirectResolution.unresolved(step1 + "; navigation stayed on " + (landed.isEmpty() ? "?" : landed));
+    }
+
+    /** {@code <meta http-equiv="refresh" content="0; url=…">} of a 200 interstitial, or null. */
+    static String metaRefreshTarget(String html) {
+        if (html == null) {
+            return null;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "http-equiv\\s*=\\s*[\"']?refresh[\"']?[^>]*?content\\s*=\\s*[\"']\\s*\\d+\\s*;\\s*url\\s*=\\s*([^\"'>\\s]+)",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(html);
+        return m.find() ? m.group(1) : null;
+    }
+
+    /** A Location that is relative is resolved against the wrapper URL. */
+    static String absolute(String base, String location) {
+        try {
+            return java.net.URI.create(base).resolve(location).toString();
+        } catch (RuntimeException e) {
+            return location;
+        }
+    }
+
+    private static String firstLine(String text) {
+        if (text == null) {
+            return "";
+        }
+        int nl = text.indexOf('\n');
+        String line = nl < 0 ? text : text.substring(0, nl);
+        return line.length() > 160 ? line.substring(0, 160) : line;
+    }
+
     /** How often the browser was started (1 after the first search, +1 per restart). */
     public int getLaunchCount() {
         try {
@@ -151,6 +367,10 @@ public final class SearchBrowser implements AutoCloseable {
     }
 
     private Browser ensureBrowser(PlaywrightSearchProvider provider) {
+        return ensureBrowser(provider.getDescriptor().getId());
+    }
+
+    private Browser ensureBrowser(ProviderId providerId) {
         boolean wantHeadless = headless.getAsBoolean();
         if (browser != null && browser.isConnected() && browserHeadless == wantHeadless) {
             return browser;
@@ -191,7 +411,7 @@ public final class SearchBrowser implements AutoCloseable {
         } catch (RuntimeException e) {
             closeBrowserQuietly();
             closePlaywrightQuietly();
-            throw SearchProviderException.builder(provider.getDescriptor().getId(), SearchErrorCategory.UNAVAILABLE,
+            throw SearchProviderException.builder(providerId, SearchErrorCategory.UNAVAILABLE,
                             "search browser could not be started: " + e.getClass().getSimpleName())
                     .retryable(true).cause(e).build();
         }

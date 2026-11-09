@@ -181,6 +181,10 @@ public final class WebSearchApplicationService {
     private final AcceptedSourceListener acceptedSourceListener;
     /** true → wait for the user to solve a challenge; false → skip the blocked page (leaves it parked). */
     private final boolean challengeWaitForUser;
+    /** Resolves an engine's redirect wrapper in the search browser; null → such a hit is dropped (never opened here). */
+    private OpaqueRedirectResolver redirectResolver;
+    /** The engine answered a redirect hop with a challenge: the remaining engine redirects of this run are dropped. */
+    private boolean engineRedirectBlocked;
     /** Max scan→handle→re-scan cycles to make a concrete page readable; 0 disables the loop (read at once). */
     private final int maxReadinessRetries;
     /** Minimum body text length for a page to count as readable in the readiness probe. */
@@ -320,6 +324,15 @@ public final class WebSearchApplicationService {
         if (judge != null) {
             this.readinessJudge = judge;
         }
+    }
+
+    /**
+     * The resolver for engine redirect wrappers (Google {@code /goto?url=…}): the hop runs in the search browser,
+     * the ONE client that talks to the engine. Without a resolver such a hit is dropped — the research browser never
+     * opens a search engine address, whatever the hit says.
+     */
+    public void setRedirectResolver(OpaqueRedirectResolver resolver) {
+        this.redirectResolver = resolver;
     }
 
     /** Replace the completion policy (the manual search injects the deterministic fixed-count baseline). */
@@ -548,6 +561,36 @@ public final class WebSearchApplicationService {
                 deferredUrls.add(entry); // QUEUED_DOMAIN_BLOCKED: starts only after the challenge resolves
                 continue;
             }
+            // The research browser NEVER opens a search engine address: Google lists its hits as opaque
+            // /goto?url=… wrappers, and following them here means a second browser identity hammering the
+            // engine from the same connection until it answers with a challenge nobody can solve in a
+            // headless window. The hop runs in the search browser (one engine client) or the hit is dropped.
+            String provenanceUrl = url;
+            String provenanceCanonical = canonical;
+            if (com.aresstack.askai.browser.search.engine.SearchEngineHosts.isEngineHost(url)) {
+                String target = resolveEngineRedirect(url);
+                if (target == null) {
+                    progress.noteVisitedAlias(canonical);
+                    continue;
+                }
+                String targetCanonical = WebAcquisitionText.canonicalish(target);
+                if (progress.alreadyVisited(targetCanonical)) {
+                    progress.noteVisitedAlias(canonical);
+                    listener.status("skipped duplicate target: " + target + " (via " + url + ")");
+                    continue;
+                }
+                if (blockedFamilies.contains(familyOf(target))) {
+                    progress.noteVisitedAlias(canonical);
+                    listener.status("skipped blocked domain: " + target + " (via " + url + ")");
+                    continue;
+                }
+                if (challengedFamilies.contains(familyOf(target))) {
+                    deferredUrls.add(entry.withUrl(target));
+                    continue;
+                }
+                url = target;
+                canonical = targetCanonical;
+            }
             try {
                 ResearchStopReason g2 = beforeToolCall();
                 if (g2 != null) {
@@ -588,25 +631,28 @@ public final class WebSearchApplicationService {
                             ResearchRunActivity.pageSkipped(effectiveUrl, finalHost, pageTitle));
                     continue;
                 }
-                // askai #41 (lazy resolution): a search hit's redirect (Google /goto) is resolved HERE, by the
-                // browser's normal navigation; the final URL is the source identity, the provider URL stays
+                // askai #41 (lazy resolution): a search hit's redirect is resolved only when the hit is opened —
+                // an engine wrapper (Google /goto) by the search browser just before, any other redirect by this
+                // browser's normal navigation. The final URL is the source identity, the hit's own address stays
                 // as provenance.
-                boolean redirected = !finalCanonical.equals(canonical);
+                boolean redirected = !finalCanonical.equals(provenanceCanonical);
                 UrlResolutionStatus resolution = redirected
                         ? UrlResolutionStatus.RESOLVED : UrlResolutionStatus.DIRECT;
-                if (redirected && entry.getOrigin() == FrontierEntry.Origin.SEARCH_RESULT) {
+                if (!finalCanonical.equals(canonical) && entry.getOrigin() == FrontierEntry.Origin.SEARCH_RESULT) {
                     listener.status("redirect resolved by navigation: " + url + " -> " + effectiveUrl);
                     if (progress.alreadyVisited(finalCanonical)) {
-                        // Two hits (e.g. two /goto links) landed on the same target: dedupe on the final URL.
+                        // Two hits landed on the same target: dedupe on the final URL.
                         progress.noteVisitedAlias(canonical);
+                        progress.noteVisitedAlias(provenanceCanonical);
                         listener.status("skipped duplicate target: " + effectiveUrl + " (via " + url + ")");
                         continue;
                     }
                 }
                 progress.pageVisited(finalCanonical, finalHost);
                 if (redirected) {
-                    // A redirect: the requested address is marked visited too (but never counted).
+                    // A redirect: the requested addresses are marked visited too (but never counted).
                     progress.noteVisitedAlias(canonical);
+                    progress.noteVisitedAlias(provenanceCanonical);
                 }
                 listener.progress(progress, ResearchRunActivity.readingPage(effectiveUrl, finalHost, pageTitle));
                 if (visitSkipped()) {
@@ -619,9 +665,8 @@ public final class WebSearchApplicationService {
                 // PR 12 page lane: the typed blacklist again AFTER fetch — a redirect may land on a
                 // blocked host, and the real page title may name a blocked term the snippet did not.
                 String blacklistHit = blacklist.firstMatch(pageTitle, "", effectiveUrl);
-                if (blacklistHit == null && com.aresstack.askai.research.domain.scope.NonSourceHosts
-                        .isSearchResultPage(effectiveUrl)) {
-                    blacklistHit = SEARCH_RESULT_PAGE; // a redirect onto a site's own hit list
+                if (blacklistHit == null) {
+                    blacklistHit = nonSourcePageLabel(effectiveUrl); // a redirect onto a hit list or a shop
                 }
                 if (blacklistHit != null) {
                     listener.status("search-blacklist page skip url=" + effectiveUrl + " entry=\""
@@ -660,7 +705,7 @@ public final class WebSearchApplicationService {
                         continue;
                     }
                     ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle,
-                            redirected ? url : "", resolution);
+                            redirected ? provenanceUrl : "", resolution);
                     if (g3 != null) {
                         return g3;
                     }
@@ -917,6 +962,18 @@ public final class WebSearchApplicationService {
     /** PR 12 SERP lane: typed entries reject a hit on title, snippet or URL BEFORE the reranker. */
     /** The blacklist "entry" a search-result page of another website is skipped under (never a source). */
     static final String SEARCH_RESULT_PAGE = "search-result page";
+    static final String SHOP_CATALOGUE_PAGE = "shop catalogue page";
+
+    /** The blacklist-style label of a page that is never a source by its URL shape, or null. */
+    private static String nonSourcePageLabel(String url) {
+        if (com.aresstack.askai.research.domain.scope.NonSourceHosts.isSearchResultPage(url)) {
+            return SEARCH_RESULT_PAGE;
+        }
+        if (com.aresstack.askai.research.domain.scope.NonSourceHosts.isShopCataloguePage(url)) {
+            return SHOP_CATALOGUE_PAGE;
+        }
+        return null;
+    }
 
     private List<com.aresstack.askai.browser.search.SearchResultCandidate> blacklistSerp(
             List<com.aresstack.askai.browser.search.SearchResultCandidate> candidates) {
@@ -928,9 +985,8 @@ public final class WebSearchApplicationService {
         for (com.aresstack.askai.browser.search.SearchResultCandidate candidate : candidates) {
             String hit = blacklist.firstMatch(candidate.title, candidate.snippet,
                     candidate.navigationUrl());
-            if (hit == null && com.aresstack.askai.research.domain.scope.NonSourceHosts
-                    .isSearchResultPage(candidate.navigationUrl())) {
-                hit = SEARCH_RESULT_PAGE; // a hit list of another site: never visited, never a source
+            if (hit == null) {
+                hit = nonSourcePageLabel(candidate.navigationUrl()); // hit list or shop: never visited
             }
             if (hit != null) {
                 listener.status("search-blacklist serp skip candidate=\"" + candidate.title
@@ -2011,6 +2067,49 @@ public final class WebSearchApplicationService {
             m.put(String.valueOf(kv[i]), kv[i + 1]);
         }
         return m;
+    }
+
+    /**
+     * The target of a hit that points at a search engine, resolved in the search browser; {@code null} when the
+     * hit is dropped (no resolver, unresolved, or the engine blocks the hop). A blocked engine is remembered for
+     * the rest of the run and never reported as something the user should solve.
+     */
+    private String resolveEngineRedirect(String url) {
+        if (!com.aresstack.askai.research.search.api.SearchRedirectUrls.isOpaqueRedirect(url)) {
+            listener.status("skipped search-engine address (never opened in the research browser): " + url);
+            return null;
+        }
+        if (engineRedirectBlocked) {
+            listener.status("skipped engine redirect (engine blocked earlier in this search): " + url);
+            return null;
+        }
+        if (redirectResolver == null) {
+            listener.status("skipped unresolved engine redirect (no search browser to resolve it): " + url);
+            return null;
+        }
+        OpaqueRedirectResolver.Resolution resolution = redirectResolver.resolve(url);
+        switch (resolution.getStatus()) {
+            case RESOLVED:
+                String target = resolution.getTargetUrl();
+                if (target.isEmpty() || com.aresstack.askai.browser.search.engine.SearchEngineHosts
+                        .isEngineHost(target)) {
+                    listener.status("skipped engine redirect (target stayed on the engine): " + url);
+                    return null;
+                }
+                listener.status("redirect resolved by search browser: " + url + " -> " + target);
+                return target;
+            case BLOCKED:
+                engineRedirectBlocked = true;
+                progress.error();
+                listener.status("search engine blocked the redirect hop (challenge in the search browser) — the"
+                        + " remaining engine redirects of this search are dropped: " + url
+                        + (resolution.getDetail().isEmpty() ? "" : " [" + resolution.getDetail() + "]"));
+                return null;
+            default:
+                listener.status("skipped unresolved engine redirect: " + url
+                        + (resolution.getDetail().isEmpty() ? "" : " [" + resolution.getDetail() + "]"));
+                return null;
+        }
     }
 
     private boolean isSearchProviderSite(String host) {
