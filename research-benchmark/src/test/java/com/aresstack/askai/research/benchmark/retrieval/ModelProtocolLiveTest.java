@@ -98,7 +98,7 @@ public class ModelProtocolLiveTest {
                     load = ms < 0 ? "failed" : String.valueOf(ms);
                     List<ProtocolProbes.LoadedModel> loaded = probes.loadedModels();
                     ps = loaded.toString().replace('|', '/');
-                    reloaded = reloadVerdict(model, ms, loaded);
+                    reloaded = reloadVerdict(model, ms, loaded) + contextVerdict(model, numCtx, loaded);
                 } catch (ProtocolProbes.ProbeTimeoutException timeout) {
                     load = "timeout";
                     ps = "-";
@@ -116,7 +116,56 @@ public class ModelProtocolLiveTest {
                 }
             }
         }
-        md.append("\n## truncate=false (item 9)\n\n| Call | Model | HTTP status | Failed as required |\n"
+        // Isolated context sweep: one model, several num_ctx values, cold load each time. Shows whether Ollama
+        // allocates what was asked (context_length) and how size and load time follow it.
+        String sweepModel = System.getProperty(P + "ctxSweepModel", "llama3.1:8b");
+        List<String> sweep = ProtocolProbes.models(System.getProperty(P + "ctxSweep", "4096,8192,16384"));
+        if (failures.isEmpty() && !sweep.isEmpty() && !sweepModel.isEmpty()) {
+            md.append("\n## Context sweep\n\nModel ").append(sweepModel).append(", trained context ")
+                    .append(probes.contextLength(sweepModel)).append(".\n\n")
+                    .append("| num_ctx | load_duration ms | context_length | size MiB | VRAM MiB | GPU % | Verdict |\n"
+                            + "|---|---|---|---|---|---|---|\n");
+            for (String value : sweep) {
+                int ctx = Integer.parseInt(value);
+                List<String> left;
+                try {
+                    left = probes.unloadAll(60_000);
+                } catch (java.io.IOException stuck) {
+                    left = java.util.Collections.singletonList(stuck.getMessage());
+                }
+                if (!left.isEmpty()) {
+                    md.append(String.format(Locale.ROOT, "| %d | not measured | - | - | - | - | still loaded %s |%n",
+                            ctx, left.toString().replace('|', '/')));
+                    break;
+                }
+                log("context sweep " + sweepModel + " num_ctx=" + ctx);
+                try {
+                    long ms = probes.loadDurationMillis(sweepModel, ctx);
+                    ProtocolProbes.LoadedModel hit = null;
+                    for (ProtocolProbes.LoadedModel m : probes.loadedModels()) {
+                        if (m.name.equals(sweepModel) || m.name.equals(sweepModel + ":latest")) {
+                            hit = m;
+                        }
+                    }
+                    log("context sweep " + sweepModel + " num_ctx=" + ctx + " -> " + hit + ", load " + ms + " ms");
+                    md.append(String.format(Locale.ROOT, "| %d | %d | %s | %s | %s | %s | %s |%n", ctx, ms,
+                            hit == null ? "-" : String.valueOf(hit.contextLength),
+                            hit == null ? "-" : String.valueOf(hit.size >> 20),
+                            hit == null ? "-" : String.valueOf(hit.sizeVram >> 20),
+                            hit == null ? "-" : String.valueOf(hit.gpuPercent()),
+                            hit == null ? "not in /api/ps"
+                                    : contextVerdict(sweepModel, ctx, java.util.Collections.singletonList(hit))
+                                    .replaceFirst("^; ", "")));
+                } catch (ProtocolProbes.ProbeTimeoutException timeout) {
+                    md.append(String.format(Locale.ROOT, "| %d | timeout | - | - | - | - | %s |%n", ctx,
+                            timeout.getMessage().replace('|', '/')));
+                    failures.add("context sweep " + ctx + ": " + timeout.getMessage());
+                    break;
+                }
+            }
+        }
+        md.append("\n## truncate=false (item 9)\n\nThe chat prompt is about twice num_ctx 2048, far below the "
+                + "trained context, so a rejection means the configured window is the limit.\n\n| Call | Model | HTTP status | Failed as required |\n"
                 + "|---|---|---|---|\n");
         if (!failures.isEmpty()) {
             md.append("Not run: a model switch failed above, so Ollama is not in a usable state.\n");
@@ -160,6 +209,20 @@ public class ModelProtocolLiveTest {
             }
         }
         return "no: not in /api/ps";
+    }
+
+    /**
+     * Whether Ollama allocated the requested {@code num_ctx}: compares it with {@code context_length} of
+     * {@code /api/ps}. Empty when the model is missing or the server does not report the field.
+     */
+    static String contextVerdict(String model, int numCtx, List<ProtocolProbes.LoadedModel> loaded) {
+        for (ProtocolProbes.LoadedModel m : loaded) {
+            if ((m.name.equals(model) || m.name.equals(model + ":latest")) && m.contextLength > 0) {
+                return m.contextLength == numCtx ? "; num_ctx applied"
+                        : "; num_ctx NOT applied (Ollama allocated " + m.contextLength + ")";
+            }
+        }
+        return "";
     }
 
     private static void log(String line) {
