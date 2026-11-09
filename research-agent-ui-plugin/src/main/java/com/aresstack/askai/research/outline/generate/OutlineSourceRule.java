@@ -2,6 +2,7 @@ package com.aresstack.askai.research.outline.generate;
 
 import com.aresstack.askai.research.domain.scope.TypedBlacklist;
 import com.aresstack.askai.research.sources.ResearchSourceRecord;
+import com.aresstack.askai.research.sources.SourceEligibility;
 import com.aresstack.askai.research.sources.SourceStatus;
 
 import java.util.Collection;
@@ -29,7 +30,7 @@ public final class OutlineSourceRule {
         Set<String> eligible = new TreeSet<String>();
         for (ResearchSourceRecord record : records) {
             SourceStatus status = record.getStatus();
-            boolean inSet = status == SourceStatus.ACCEPTED
+            boolean inSet = SourceEligibility.isResearchSource(record)
                     || (pinned.contains(record.getSourceId()) && status != SourceStatus.EXCLUDED
                             && status != SourceStatus.DUPLICATE && status != SourceStatus.SUPERSEDED);
             if (!inSet) {

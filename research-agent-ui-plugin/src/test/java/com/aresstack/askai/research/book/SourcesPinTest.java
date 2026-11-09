@@ -50,6 +50,9 @@ public class SourcesPinTest {
         repository.put(source("source-1", "text one", "sha-1", SourceStatus.ACCEPTED));
         repository.put(source("source-2", "text two", "sha-2", SourceStatus.EXCLUDED));
         repository.put(source("source-3", "text three", "sha-3", SourceStatus.ACCEPTED));
+        repository.put(source("source-4", "text four", "sha-4", SourceStatus.NEW)); // the funnel's source
+        repository.put(source("source-5", "", "", SourceStatus.PARKED)); // never visited
+        repository.put(source("source-6", "text six", "sha-6", SourceStatus.DUPLICATE));
         BookManifest manifest = new BookManifest(dir);
         SourcesFreezeHook hook = new SourcesFreezeHook(repository, manifest);
 
@@ -58,12 +61,17 @@ public class SourcesPinTest {
         hook.record(transition("t-approve", ResearchCommandType.APPROVE_EVIDENCE));
 
         SourcesPin pin = new BookManifest(dir).validSourcesPin(committed("t-approve"));
-        assertEquals(2, pin.getSources().size());
+        assertEquals(3, pin.getSources().size());
         assertEquals("source-1", pin.getSources().get(0).getSourceId());
         assertEquals("sha-1", pin.getSources().get(0).getChecksum());
         assertEquals("ACCEPTED", pin.getSources().get(0).getStatus());
         assertEquals("source-3", pin.getSources().get(1).getSourceId());
+        // a source the funnel read is in the research set (SourceEligibility), with its status on record
+        assertEquals("source-4", pin.getSources().get(2).getSourceId());
+        assertEquals("NEW", pin.getSources().get(2).getStatus());
         assertFalse(pin.contains("source-2"));
+        assertFalse("a parked candidate is never pinned", pin.contains("source-5"));
+        assertFalse("a duplicate is never pinned", pin.contains("source-6"));
         assertEquals(4242L, pin.getApprovedAt());
         assertNull("a pin whose transition never committed is not valid",
                 manifest.validSourcesPin(committed("other")));

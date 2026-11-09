@@ -28,7 +28,18 @@ final class SearchPlanSettingsRows {
         form.row("Sources for the Sources phase", field(store, ResearchRuntimeSettings.KEY_PLAN_PHASE_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_PLAN_PHASE_SOURCES,
                 "The search plan stops once the Sources phase has this many accepted sources."));
+        form.row("Skip shop sites", skipNonSourceHosts(store));
         return form;
+    }
+
+    /** Every search skips marketplaces, book shops and document re-upload sites (next to the user's blacklist). */
+    private static javax.swing.JCheckBox skipNonSourceHosts(final WorkspaceStateStore store) {
+        final javax.swing.JCheckBox box = ComicControls.checkBox("Marketplaces, book shops and document re-uploads "
+                + "are never sources", ResearchRuntimeSettings.loadSkipNonSourceHosts(store));
+        box.setToolTipText("Every search skips amazon, ebay, thalia, beck-shop, scribd and similar sites as a host "
+                + "filter next to your blacklist; search-result pages of other websites are always skipped.");
+        box.addActionListener(e -> ResearchRuntimeSettings.saveSkipNonSourceHosts(store, box.isSelected()));
+        return box;
     }
 
     private static JTextField field(final WorkspaceStateStore store, final String key, final int fallback,

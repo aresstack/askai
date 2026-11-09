@@ -445,6 +445,23 @@ public final class ResearchRuntimeSettings {
     /** Accepted sources the whole Sources phase may collect through the plan. */
     public static final int DEFAULT_PLAN_PHASE_SOURCES = 60;
 
+    /**
+     * Whether every search skips shop, marketplace and document re-upload sites
+     * ({@link com.aresstack.askai.research.domain.scope.NonSourceHosts#DEFAULT}) as a host filter next to the
+     * user's blacklist. Default ON: a listing of a book is never a source of what the book says.
+     */
+    public static final String KEY_SKIP_NON_SOURCE_HOSTS = "research.search.skipNonSourceHosts";
+
+    public static boolean loadSkipNonSourceHosts(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_SKIP_NON_SOURCE_HOSTS, true);
+    }
+
+    public static void saveSkipNonSourceHosts(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_SKIP_NON_SOURCE_HOSTS, enabled);
+        }
+    }
+
     /** The caps of the search plan, read at each queue start. */
     public static com.aresstack.askai.research.plan.SearchPlanCoverage.Caps loadSearchPlanCaps(
             WorkspaceStateStore store) {
