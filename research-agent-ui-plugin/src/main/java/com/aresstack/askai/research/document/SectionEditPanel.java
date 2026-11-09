@@ -59,7 +59,7 @@ final class SectionEditPanel extends JPanel {
         stored.setLineWrap(true);
         stored.setWrapStyleWord(true);
         stored.setEditable(false);
-        storedScroll.setBorder(BorderFactory.createTitledBorder("Saved text"));
+        storedScroll.setBorder(com.aresstack.comiccontrols.border.ComicBorder.titled("Saved text"));
         storedScroll.setVisible(false);
 
         JPanel top = new JPanel(new GridLayout(0, 1, 2, 2));
@@ -117,7 +117,7 @@ final class SectionEditPanel extends JPanel {
             SectionRevision revision = selectedRevision();
             if (revision != null) {
                 stored.setText(revision.getText());
-                storedScroll.setBorder(BorderFactory.createTitledBorder("Revision " + revision.getNumber()));
+                storedScroll.setBorder(com.aresstack.comiccontrols.border.ComicBorder.titled("Revision " + revision.getNumber()));
                 storedScroll.setVisible(true);
                 revalidate();
             }
