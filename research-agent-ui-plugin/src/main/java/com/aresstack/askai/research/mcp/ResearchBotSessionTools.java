@@ -33,11 +33,14 @@ public final class ResearchBotSessionTools {
             "Execute one research command. Always-on commands: search <query> (web search), "
             + "generate-visualization, generate-outline, review-sources, check-scope. Run offers "
             + "(only while session_state lists them): run-plan, retry-query, sources, config, refine. "
-            + "Phase changes need the user: a bot cannot run submit-scope, approve, request-changes, "
-            + "continue, retry, resume, the reopen and finish commands or the 'end' offer; suggest "
-            + "them in your answer instead. Omit 'command' to send the arguments as a plain CHAT "
-            + "MESSAGE to the research agent (including the first message of a new chat). Unknown or "
-            + "refused commands are rejected with the currently valid list. Call session_state first.";
+            + "Phase changes need the user: as a structured command a bot cannot run submit-scope, "
+            + "approve, request-changes, continue, retry, resume, the reopen and finish commands or "
+            + "the 'end' offer; suggest them in your answer instead. When the PERSON behind this "
+            + "client asks for one, pass it as a slash command with 'command' omitted, e.g. "
+            + "arguments='/submit-scope': that runs the same user action as typing it into the app. "
+            + "Omit 'command' to send the arguments as a plain CHAT MESSAGE to the research agent "
+            + "(including the first message of a new chat). Unknown or refused commands are "
+            + "rejected with the currently valid list. Call session_state first.";
 
     static final String SESSION_STATE_DESCRIPTION =
             "Current research phase and run state, plus the currently valid commands (the same set the "

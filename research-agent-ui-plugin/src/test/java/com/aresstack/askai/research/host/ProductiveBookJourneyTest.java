@@ -420,7 +420,7 @@ public class ProductiveBookJourneyTest {
     }
 
     @Test
-    public void connectorSlashInvocationsUseTheSameUserCommandProcessorAsTheUi() {
+    public void slashInvocationsOnEveryMcpSurfaceUseTheSameUserCommandProcessorAsTheUi() throws Exception {
         Fx fx = new Fx();
         String started = fx.session.executeBotCommand(
                 com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR,
@@ -446,11 +446,18 @@ public class ProductiveBookJourneyTest {
         Fx botControl = new Fx();
         firstMessage(botControl, "A book");
         ConceptTestSupport.makeSubmittable(botControl.session);
+        String botStructured = botControl.session.executeBotCommand(
+                com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL, "submit-scope", "");
+        assertTrue(botStructured, botStructured.contains("Phase changes need the user"));
+        assertEquals("scoping/running", phase(botControl));
+        // The per-session endpoint is operated by people too (Q13 restricts the agent inside the app,
+        // not the human behind an MCP client): its slash invocation is the same user control.
         String botSlash = botControl.session.executeBotCommand(
                 com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL,
                 "", "/submit-scope");
         assertHandled(botSlash);
-        assertEquals("scoping/running", phase(botControl));
+        assertEquals("research/running", phase(botControl));
+        assertTrue(journalCommands(botControl, "USER").contains("SUBMIT_SCOPE"));
     }
 
     @Test
