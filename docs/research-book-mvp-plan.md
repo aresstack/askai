@@ -464,9 +464,10 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   delivers the "reranked sources" the owner asked for (BM25 alone accepts every hit with a score above 0). The host
   tags every accepted source with the phase and plan entry of its request, through the `search_request_id` that
   `ManualSourceAcceptancePort` already sends.
-- **Coverage.** A concept node is covered once it has a set number of accepted sources from at least two domains. A
-  node whose query budget is spent before that is exhausted: the plan runs no more automatic queries for it, but it
-  stays uncovered. Uncovered nodes, exhausted or not, are named on the checklist, in the run outcome and at the review
+- **Coverage.** A concept node is covered once it has a set number of accepted sources from at least two domains
+  and every planned query of its research cycle has run (the planner's variants are the node's angles; a base query
+  that meets the number alone does not cover the node). A node whose query budget is spent before that is exhausted:
+  the plan runs no more automatic queries for it in this cycle, but it stays uncovered. Uncovered nodes, exhausted or not, are named on the checklist, in the run outcome and at the review
   gate. Caps per query, per node and for the phase keep the run bounded.
 - **Control.** "Stop search plan" cancels the current query, leaves it pending and stops the queue. At session start
   the store's resume pass (`resumeAfterInterruption`) makes an interrupted entry pending again; the plan runs again

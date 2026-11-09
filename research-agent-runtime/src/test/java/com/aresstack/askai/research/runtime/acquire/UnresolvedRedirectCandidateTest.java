@@ -31,10 +31,13 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * askai #41, lazy resolution (Angelo 02.11.): an unresolved Google {@code /goto} hit stays in the research pipeline.
- * It reaches the frontier under its provider URL, is never parked under the redirect, and is resolved only when the
- * browser actually opens it: the browser follows the redirect in its normal navigation, the final URL becomes the
- * source identity and the {@code /goto} link stays as provenance. Nothing resolves it before that.
+ * askai #41, lazy resolution (Angelo 02.11.): an unresolved Google {@code /goto} hit stays in the research pipeline
+ * and is resolved only when it is actually opened — but never by the research browser. The research browser does
+ * not open a search engine address (2026-11-09: following the {@code /goto} hops from a second browser identity
+ * ended in Google's "one last step" challenge). The hop runs in the search browser through the
+ * {@link OpaqueRedirectResolver}; the final URL becomes the source identity and the {@code /goto} link stays as
+ * provenance. Without a resolver, or when it fails, the hit is dropped; when the engine blocks the hop, the remaining
+ * engine hits of the search are dropped and nobody is asked to solve anything.
  */
 public class UnresolvedRedirectCandidateTest {
 
@@ -108,6 +111,25 @@ public class UnresolvedRedirectCandidateTest {
     private static WebSearchApplicationService service(RecordingBrowser browser, RecordingAcceptance acceptance,
                                                        final List<String> status, SearchStrategy strategy,
                                                        final List<WebSearchApplicationService.AcceptedSource> sources) {
+        return service(browser, acceptance, new ResearchLoopListener() {
+            public void status(String message) {
+                status.add(message);
+            }
+
+            public void progress(ResearchRunProgress p, ResearchRunActivity activity) {
+            }
+
+            public void phaseReady(ResearchStopReason reason) {
+            }
+
+            public void attention(String reason, String family, String url, boolean resolved) {
+            }
+        }, strategy, sources);
+    }
+
+    private static WebSearchApplicationService service(RecordingBrowser browser, RecordingAcceptance acceptance,
+                                                       ResearchLoopListener listener, SearchStrategy strategy,
+                                                       final List<WebSearchApplicationService.AcceptedSource> sources) {
         return new WebSearchApplicationService(browser, ResearchRunBudget.defaults(), new ResearchRunProgress(),
                 new ResearchLoopClock() {
                     long now;
@@ -120,20 +142,7 @@ public class UnresolvedRedirectCandidateTest {
                         now += Math.max(1L, millis);
                     }
                 },
-                new ResearchLoopListener() {
-                    public void status(String message) {
-                        status.add(message);
-                    }
-
-                    public void progress(ResearchRunProgress p, ResearchRunActivity activity) {
-                    }
-
-                    public void phaseReady(ResearchStopReason reason) {
-                    }
-
-                    public void attention(String reason, String family, String url, boolean resolved) {
-                    }
-                },
+                listener,
                 new AtomicBoolean(false), strategy, null, new EngineOrderReranker(),
                 new com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver(),
                 acceptance, 0L, 1L,
@@ -147,23 +156,59 @@ public class UnresolvedRedirectCandidateTest {
                 false, 0 /* readiness loop off: web_open verbatim */, 48);
     }
 
+    /** A resolver scripted per wrapper URL; records what it was asked. */
+    private static final class ScriptedResolver implements OpaqueRedirectResolver {
+        final Map<String, Resolution> answers = new HashMap<String, Resolution>();
+        final List<String> asked = new ArrayList<String>();
+
+        public Resolution resolve(String wrapperUrl) {
+            asked.add(wrapperUrl);
+            Resolution answer = answers.get(wrapperUrl);
+            return answer == null ? Resolution.unresolved("not scripted") : answer;
+        }
+    }
+
+    private static final class RecordingListener implements ResearchLoopListener {
+        final List<String> status = new ArrayList<String>();
+        final List<String> attention = new ArrayList<String>();
+
+        public void status(String message) {
+            status.add(message);
+        }
+
+        public void progress(ResearchRunProgress p, ResearchRunActivity activity) {
+        }
+
+        public void phaseReady(ResearchStopReason reason) {
+        }
+
+        public void attention(String reason, String family, String url, boolean resolved) {
+            attention.add(reason + " " + family);
+        }
+    }
+
     @Test
-    public void aSelectedGotoHitIsResolvedOnlyByTheBrowserNavigationAndKeepsItsProvenance() {
+    public void aSelectedGotoHitIsResolvedByTheSearchBrowserAndTheResearchBrowserOpensOnlyTheTarget() {
         RecordingBrowser browser = new RecordingBrowser();
-        browser.finalUrls.put(GOTO, TARGET); // the browser follows Google's redirect
         RecordingAcceptance acceptance = new RecordingAcceptance();
         List<String> status = new ArrayList<String>();
         List<WebSearchApplicationService.AcceptedSource> sources =
                 new ArrayList<WebSearchApplicationService.AcceptedSource>();
+        ScriptedResolver resolver = new ScriptedResolver();
+        resolver.answers.put(GOTO, OpaqueRedirectResolver.Resolution.resolved(TARGET));
 
-        service(browser, acceptance, status, strategy(), sources).execute("freertos scheduling");
+        WebSearchApplicationService service = service(browser, acceptance, status, strategy(), sources);
+        service.setRedirectResolver(resolver);
+        service.execute("freertos scheduling");
 
-        assertTrue("the hit was not dropped: the browser navigated its /goto link", browser.openedUrls.contains(GOTO));
-        assertFalse("nothing resolved it before: the target itself was never requested",
-                browser.openedUrls.contains(TARGET));
-        assertFalse("never parked under the redirect (no verified target yet)", acceptance.parked.contains(GOTO));
+        assertEquals("the search browser resolved the hop, lazily, once", Collections.singletonList(GOTO),
+                resolver.asked);
+        assertFalse("the research browser never opened the engine address", browser.openedUrls.contains(GOTO));
+        assertTrue("the research browser opened the resolved target", browser.openedUrls.contains(TARGET));
+        assertFalse("never parked under the redirect (no verified target at seed time)",
+                acceptance.parked.contains(GOTO));
         assertTrue("a verified hit is still parked", acceptance.parked.contains(DIRECT));
-        assertEquals("the landing page was judged like any other page", 2, acceptance.accepted.size());
+        assertEquals(2, acceptance.accepted.size());
         WebSearchApplicationService.AcceptedSource viaGoto = sourceAt(sources, TARGET);
         assertEquals("the final URL is the source identity", TARGET, viaGoto.getPageUrl());
         assertEquals("the /goto link stays as provenance", GOTO, viaGoto.getOriginalUrl());
@@ -171,57 +216,135 @@ public class UnresolvedRedirectCandidateTest {
         WebSearchApplicationService.AcceptedSource direct = sourceAt(sources, DIRECT);
         assertEquals(UrlResolutionStatus.DIRECT, direct.getUrlResolution());
         assertEquals("", direct.getOriginalUrl());
-        assertTrue(status.toString(), status.toString().contains("redirect resolved by navigation: " + GOTO
+        assertTrue(status.toString(), status.toString().contains("redirect resolved by search browser: " + GOTO
                 + " -> " + TARGET));
     }
 
     @Test
-    public void aFailedNavigationEndsOnlyThatVisitAndKeepsTheHit() {
+    public void withoutAResolverTheGotoHitIsDroppedAndTheEngineAddressIsNeverOpened() {
         RecordingBrowser browser = new RecordingBrowser();
-        browser.failures.put(GOTO, "navigation timeout");
         RecordingAcceptance acceptance = new RecordingAcceptance();
         List<String> status = new ArrayList<String>();
 
         service(browser, acceptance, status).execute("freertos scheduling");
 
-        assertTrue(browser.openedUrls.contains(GOTO));
+        assertFalse(browser.openedUrls.contains(GOTO));
         assertTrue("the run went on with the other hit", browser.openedUrls.contains(DIRECT));
         assertEquals(1, acceptance.accepted.size());
-        assertTrue(status.toString(), status.toString().contains("url=" + GOTO + " (search hit kept)"));
+        assertTrue(status.toString(), status.toString().contains(
+                "skipped unresolved engine redirect (no search browser to resolve it): " + GOTO));
     }
 
     @Test
-    public void aRedirectToAForbiddenTargetIsNeverTakenOver() {
-        // The browser's post-redirect URL policy (PlaywrightBrowserSession.checkedSnapshot) refuses the final URL.
+    public void anUnresolvedHopDropsOnlyThatHit() {
         RecordingBrowser browser = new RecordingBrowser();
-        browser.failures.put(GOTO, "Blocked after redirect — final URL is not allowed: private network");
         RecordingAcceptance acceptance = new RecordingAcceptance();
         List<String> status = new ArrayList<String>();
-        List<WebSearchApplicationService.AcceptedSource> sources =
-                new ArrayList<WebSearchApplicationService.AcceptedSource>();
+        ScriptedResolver resolver = new ScriptedResolver();
+        resolver.answers.put(GOTO, OpaqueRedirectResolver.Resolution.unresolved("timeout"));
 
-        service(browser, acceptance, status, strategy(), sources).execute("freertos scheduling");
+        WebSearchApplicationService service = service(browser, acceptance, status, strategy(),
+                new ArrayList<WebSearchApplicationService.AcceptedSource>());
+        service.setRedirectResolver(resolver);
+        service.execute("freertos scheduling");
 
-        assertEquals("only the direct hit became a source", 1, sources.size());
-        assertEquals(DIRECT, sources.get(0).getPageUrl());
-        assertTrue(status.toString(), status.toString().contains("Blocked after redirect"));
+        assertFalse(browser.openedUrls.contains(GOTO));
+        assertTrue(browser.openedUrls.contains(DIRECT));
+        assertEquals(1, acceptance.accepted.size());
+        assertTrue(status.toString(), status.toString().contains("skipped unresolved engine redirect: " + GOTO
+                + " [timeout]"));
     }
 
     @Test
-    public void twoGotoHitsLandingOnTheSameTargetAreDedupedOnTheFinalUrl() {
+    public void aBlockedHopDropsTheRemainingEngineHitsWithoutAskingTheUser() {
         String otherGoto = "https://www.google.com/goto?url=CAESBBBB";
         RecordingBrowser browser = new RecordingBrowser();
-        browser.finalUrls.put(GOTO, TARGET);
-        browser.finalUrls.put(otherGoto, TARGET);
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        RecordingListener listener = new RecordingListener();
+        ScriptedResolver resolver = new ScriptedResolver();
+        resolver.answers.put(GOTO, OpaqueRedirectResolver.Resolution.blocked("https://www.google.com/sorry/index"));
+        resolver.answers.put(otherGoto, OpaqueRedirectResolver.Resolution.resolved("https://other.example/x"));
+
+        WebSearchApplicationService service = service(browser, acceptance, listener, strategy(Arrays.asList(
+                gotoHit(GOTO, 1), gotoHit(otherGoto, 2),
+                new SearchResultCandidate("google#3", "", DIRECT, DIRECT, "FreeRTOS Tasks", "freertos tasks",
+                        "direct.example", 3, "", "", 1.0, 1.0, Collections.<SearchResultSiteLink>emptyList()))),
+                new ArrayList<WebSearchApplicationService.AcceptedSource>());
+        service.setRedirectResolver(resolver);
+        service.execute("freertos scheduling");
+
+        assertEquals("after the block the second hop is not even attempted", Collections.singletonList(GOTO),
+                resolver.asked);
+        assertFalse(browser.openedUrls.contains(GOTO));
+        assertFalse(browser.openedUrls.contains(otherGoto));
+        assertFalse(browser.openedUrls.contains("https://other.example/x"));
+        assertTrue("the direct hit is still read", browser.openedUrls.contains(DIRECT));
+        assertTrue("a challenge in the headless search browser is nothing the user could solve: no notice",
+                listener.attention.isEmpty());
+        assertTrue(listener.status.toString(), listener.status.toString().contains(
+                "search engine blocked the redirect hop"));
+        assertTrue(listener.status.toString(), listener.status.toString().contains(
+                "skipped engine redirect (engine blocked earlier in this search): " + otherGoto));
+    }
+
+    @Test
+    public void twoGotoHitsResolvingToTheSameTargetAreDedupedOnTheTarget() {
+        String otherGoto = "https://www.google.com/goto?url=CAESBBBB";
+        RecordingBrowser browser = new RecordingBrowser();
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        List<String> status = new ArrayList<String>();
+        ScriptedResolver resolver = new ScriptedResolver();
+        resolver.answers.put(GOTO, OpaqueRedirectResolver.Resolution.resolved(TARGET));
+        resolver.answers.put(otherGoto, OpaqueRedirectResolver.Resolution.resolved(TARGET));
+
+        WebSearchApplicationService service = service(browser, acceptance, status,
+                strategy(Arrays.asList(gotoHit(GOTO, 1), gotoHit(otherGoto, 2))),
+                new ArrayList<WebSearchApplicationService.AcceptedSource>());
+        service.setRedirectResolver(resolver);
+        service.execute("freertos scheduling");
+
+        assertEquals("one source for one target", 1, acceptance.accepted.size());
+        assertEquals(Collections.singletonList(TARGET), browser.openedUrls);
+        assertTrue(status.toString(), status.toString().contains("skipped duplicate target: " + TARGET
+                + " (via " + otherGoto + ")"));
+    }
+
+    @Test
+    public void anEngineVerticalInTheFrontierIsNeverOpened() {
+        String vertical = "https://www.google.com/search?q=freertos&tbm=vid";
+        RecordingBrowser browser = new RecordingBrowser();
         RecordingAcceptance acceptance = new RecordingAcceptance();
         List<String> status = new ArrayList<String>();
 
-        service(browser, acceptance, status, strategy(Arrays.asList(gotoHit(GOTO, 1), gotoHit(otherGoto, 2))),
+        service(browser, acceptance, status, strategy(Arrays.asList(
+                new SearchResultCandidate("google#1", "", vertical, vertical, "Videos", "freertos videos",
+                        "google.com", 1, "", "", 1.0, 1.0, Collections.<SearchResultSiteLink>emptyList()),
+                new SearchResultCandidate("google#2", "", DIRECT, DIRECT, "FreeRTOS Tasks", "freertos tasks",
+                        "direct.example", 2, "", "", 1.0, 1.0, Collections.<SearchResultSiteLink>emptyList()))),
                 new ArrayList<WebSearchApplicationService.AcceptedSource>()).execute("freertos scheduling");
 
-        assertTrue(browser.openedUrls.containsAll(Arrays.asList(GOTO, otherGoto)));
-        assertEquals("one source for one target", 1, acceptance.accepted.size());
-        assertTrue(status.toString(), status.toString().contains("skipped duplicate target: " + TARGET));
+        assertEquals(Collections.singletonList(DIRECT), browser.openedUrls);
+        assertTrue(status.toString(), status.toString().contains(
+                "skipped search-engine address (never opened in the research browser): " + vertical));
+    }
+
+    @Test
+    public void aFailedNavigationOfTheResolvedTargetEndsOnlyThatVisit() {
+        RecordingBrowser browser = new RecordingBrowser();
+        browser.failures.put(TARGET, "navigation timeout");
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        List<String> status = new ArrayList<String>();
+        ScriptedResolver resolver = new ScriptedResolver();
+        resolver.answers.put(GOTO, OpaqueRedirectResolver.Resolution.resolved(TARGET));
+
+        WebSearchApplicationService service = service(browser, acceptance, status, strategy(),
+                new ArrayList<WebSearchApplicationService.AcceptedSource>());
+        service.setRedirectResolver(resolver);
+        service.execute("freertos scheduling");
+
+        assertTrue(browser.openedUrls.contains(TARGET));
+        assertTrue("the run went on with the other hit", browser.openedUrls.contains(DIRECT));
+        assertEquals(1, acceptance.accepted.size());
     }
 
     private static WebSearchApplicationService.AcceptedSource sourceAt(
@@ -232,18 +355,5 @@ public class UnresolvedRedirectCandidateTest {
             }
         }
         throw new AssertionError("no source " + url + " in " + sources.size());
-    }
-
-    @Test
-    public void aRedirectTheBrowserCannotLeaveIsTransitAndNeverASource() {
-        RecordingBrowser browser = new RecordingBrowser(); // final_url stays the google.com redirect
-        RecordingAcceptance acceptance = new RecordingAcceptance();
-        List<String> status = new ArrayList<String>();
-
-        service(browser, acceptance, status).execute("freertos scheduling");
-
-        assertTrue(browser.openedUrls.contains(GOTO));
-        assertEquals("only the direct hit became a source", 1, acceptance.accepted.size());
-        assertTrue(status.toString(), status.toString().contains("skipped search-provider page: " + GOTO));
     }
 }
