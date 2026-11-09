@@ -81,7 +81,7 @@ public final class SectionContextBuilder {
         return new EvidencePack(section.getId(), pack, chosen,
                 TokenBudget.cutAtSentence(request.getSynopsis(), SYNOPSIS_TOKENS),
                 TokenBudget.cutAtSentence(request.getPreviousSectionDigest(), DIGEST_TOKENS),
-                glossary(request.getGlossary()), request.getBookLanguage());
+                glossaryWithAcronyms(request.getGlossary(), chosen, sources), request.getBookLanguage());
     }
 
     private static List<EvidencePassage> select(List<PassageSearchHit> candidates, EvidenceSourceSet sources,
