@@ -223,4 +223,44 @@ public class ProductiveManuscriptStoreTest {
         assertEquals("My edit.", manuscript.store().current(item.sectionId).getText());
         assertEquals("Writer text.", manuscript.store().revision(item.sectionId, 1).getText());
     }
+
+    @Test
+    public void retryAfterConflictKeepsTheCitationsOfTheLocalText() {
+        Fx fx = new Fx();
+        Outline outline = toDocument(fx);
+        ManuscriptWorkspace manuscript = fx.session.manuscript();
+        SectionEditor.Item item = SectionEditor.items(outline).get(0);
+        manuscript.save(item.sectionId, item.chapterId, 0, SectionRevision.builder().text("Claim [1].")
+                .citations(Collections.singletonList(new ManuscriptCitation("1", "src-A", "sha-A", "a", "", null))),
+                2L);
+        SectionEditor editor = new SectionEditor(manuscript);
+        editor.open(item);
+        editor.edit("My claim [1].");
+        manuscript.save(item.sectionId, item.chapterId, 1, SectionRevision.builder().text("Other [1].")
+                .citations(Collections.singletonList(new ManuscriptCitation("1", "src-B", "sha-B", "b", "", null))),
+                3L);
+        assertFalse(editor.save(4L).saved);
+        assertTrue(editor.save(5L).saved);
+        assertEquals("src-A", manuscript.store().current(item.sectionId).getCitations().get(0).getSourceId());
+    }
+
+    @Test
+    public void switchingSectionsKeepsUnsavedTextAndRebindTakesNewMetadata() {
+        Fx fx = new Fx();
+        Outline outline = toDocument(fx);
+        SectionEditor editor = new SectionEditor(fx.session.manuscript());
+        List<SectionEditor.Item> items = SectionEditor.items(outline);
+        editor.open(items.get(0));
+        editor.edit("Unsaved.");
+        editor.open(items.get(1));
+        assertTrue(editor.hasDraft(items.get(0).sectionId));
+        editor.open(items.get(0));
+        assertEquals("Unsaved.", editor.localText());
+        assertTrue(editor.isDirty());
+        SectionEditor.Item renamed = SectionEditor.items(new Outline(Collections.singletonList(
+                outline.getChapters().get(0).withTitle("Renamed")))).get(0);
+        editor.rebind(renamed);
+        assertEquals("Renamed", editor.item().chapter.getTitle());
+        assertEquals("Unsaved.", editor.localText());
+    }
 }

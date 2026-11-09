@@ -148,6 +148,7 @@ final class SectionEditPanel extends JPanel {
             sections.setModel(model);
             if (selected != null) {
                 sections.setSelectedItem(selected);
+                editor.rebind(selected); // new chapter id and fingerprints, same local text
             }
         } finally {
             loading = false;
@@ -207,6 +208,9 @@ final class SectionEditPanel extends JPanel {
         storedScroll.setVisible(false);
         revalidate();
         refreshState();
+        if (editor.isDirty()) {
+            status.setText("Unsaved edits of this section were kept. Save them or reload.");
+        }
     }
 
     private void changed() {
