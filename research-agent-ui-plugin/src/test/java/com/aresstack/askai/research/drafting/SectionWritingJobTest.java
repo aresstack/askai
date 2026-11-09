@@ -50,6 +50,7 @@ public class SectionWritingJobTest {
         final Set<String> failAlways = new HashSet<String>();
         String killAt;
         String stopAt;
+        final java.util.Map<String, Runnable> during = new java.util.HashMap<String, Runnable>();
         SectionWritingJob job;
         final List<SectionWriteRequest> requests = new ArrayList<SectionWriteRequest>();
 
@@ -57,6 +58,10 @@ public class SectionWritingJobTest {
             String id = request.getSection().getId();
             calls.add(id);
             requests.add(request);
+            Runnable side = during.remove(id);
+            if (side != null) {
+                side.run();
+            }
             if (id.equals(killAt)) {
                 killAt = null;
                 throw new Kill();
@@ -264,5 +269,29 @@ public class SectionWritingJobTest {
         assertEquals(Collections.singletonList("draft|Soil moisture no field data for 2024|Section: Soil moisture"),
                 added);
         assertEquals(1, runs[0]);
+    }
+
+    @Test
+    public void aSectionTheUserSavesOrSkipsWhileTheJobRunsIsLeftAsTheUserMadeIt() {
+        writer.during.put("s3", new Runnable() {
+            public void run() {
+                manuscript.save("s5", "c2", 0, SectionRevision.builder().text("My own text.")
+                        .author(SectionRevision.AUTHOR_USER), 1L);
+                manuscript.skip("s6", "c2", 1L);
+            }
+        });
+        writer.during.put("s7", new Runnable() {
+            public void run() {
+                manuscript.skip("s7", "c3", 2L); // skipped during its own model call
+            }
+        });
+        WritingOutcome outcome = job().writeRemaining(outline);
+        assertFalse(writer.calls.contains("s5"));
+        assertFalse(writer.calls.contains("s6"));
+        assertEquals("My own text.", manuscript.store().current("s5").getText());
+        assertEquals(SectionStatus.SKIPPED, manuscript.store().section("s6").getStatus());
+        assertEquals(SectionStatus.SKIPPED, manuscript.store().section("s7").getStatus());
+        assertTrue(outcome.getFailed().isEmpty());
+        assertEquals(WritingOutcome.ACTION_FINISH, outcome.offeredAction());
     }
 }

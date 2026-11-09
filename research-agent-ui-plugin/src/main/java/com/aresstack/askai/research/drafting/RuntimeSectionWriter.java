@@ -36,8 +36,13 @@ public final class RuntimeSectionWriter implements SectionWriter {
         if (cancellation.isCancelled()) {
             throw new Cancelled();
         }
-        SectionDraft draft = writer.write(assignments.assignmentFor(request));
+        SectionAssignment assignment = assignments.assignmentFor(request);
         if (cancellation.isCancelled()) {
+            throw new Cancelled();
+        }
+        // a stop interrupts this thread, which ends the HTTP call of the model port in flight
+        SectionDraft draft = writer.write(assignment);
+        if (cancellation.isCancelled() || Thread.currentThread().isInterrupted()) {
             throw new Cancelled();
         }
         if (!draft.isOk()) {

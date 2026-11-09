@@ -46,6 +46,8 @@ public final class WritingJobRunner {
         }
     });
     private volatile String status = "";
+    /** The thread of the run in flight; "Stop writing" interrupts its model call (HTTP) as well. */
+    private volatile Thread worker;
 
     public WritingJobRunner(SectionWritingJob job, PhaseJobRegistry registry, Context context, Listener listener) {
         this.job = job;
@@ -80,19 +82,22 @@ public final class WritingJobRunner {
         final String phase = context.phaseId();
         final PhaseJobRegistry.Job registered = new PhaseJobRegistry.Job() {
             public void cancel() {
-                job.stop();
+                stop();
             }
         };
         final long token = registry.register(phase, registered);
         executor.execute(new Runnable() {
             public void run() {
                 WritingOutcome outcome;
+                worker = Thread.currentThread();
                 try {
                     context.beforeRun();
                     outcome = WritingJobRunner.this.run(kind, outline, id, comment);
                 } catch (RuntimeException failed) {
                     outcome = WritingOutcome.refused("Writing failed: " + failed.getMessage());
                 } finally {
+                    worker = null;
+                    Thread.interrupted();
                     registry.unregister(registered);
                     status = "";
                 }
@@ -107,6 +112,10 @@ public final class WritingJobRunner {
     /** "Stop writing". */
     public void stop() {
         job.stop();
+        Thread running = worker;
+        if (running != null) {
+            running.interrupt();
+        }
     }
 
     /** Called by the job's progress port. */
