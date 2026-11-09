@@ -285,10 +285,12 @@ public final class AgentMailbox {
         for (int i = 0; i < pending.size(); i++) {
             AgentMessage m = pending.get(i);
             if (i < skip) {
-                store(m.withState(DeliveryState.EXPIRED, "not shown: inbox limit"));
+                if (!m.isHandedOut()) { // mail handed out before stays for a later turn instead of expiring
+                    store(m.withState(DeliveryState.EXPIRED, "not shown: inbox limit"));
+                }
             } else {
                 inFlight.add(m.getId());
-                shown.add(m);
+                shown.add(m.isHandedOut() ? m : store(m.handedOut()));
             }
         }
         return shown;
@@ -307,7 +309,7 @@ public final class AgentMailbox {
             if (m.getRecipient().isOrchestrator() && m.getState() == DeliveryState.PENDING
                     && !inFlight.contains(m.getId())) {
                 inFlight.add(m.getId());
-                out.add(m);
+                out.add(m.isHandedOut() ? m : store(m.handedOut()));
             }
         }
         return out;
@@ -373,8 +375,15 @@ public final class AgentMailbox {
 
     private void trimInbox(String taskId) {
         List<AgentMessage> pending = pendingFor(taskId);
-        for (int i = 0; i < pending.size() - limits.getPendingPerRecipient(); i++) {
-            store(pending.get(i).withState(DeliveryState.EXPIRED, "inbox full"));
+        List<AgentMessage> evictable = new ArrayList<AgentMessage>();
+        for (AgentMessage m : pending) {
+            if (!inFlight.contains(m.getId()) && !m.isHandedOut()) {
+                evictable.add(m); // mail awaiting processing is never evicted by new traffic
+            }
+        }
+        int excess = pending.size() - limits.getPendingPerRecipient();
+        for (int i = 0; i < excess && i < evictable.size(); i++) {
+            store(evictable.get(i).withState(DeliveryState.EXPIRED, "inbox full"));
         }
     }
 
@@ -382,7 +391,7 @@ public final class AgentMailbox {
         long now = clock.millis();
         for (AgentMessage m : new ArrayList<AgentMessage>(messages.values())) {
             if (m.getState() == DeliveryState.PENDING && !m.getRecipient().isOrchestrator()
-                    && !inFlight.contains(m.getId()) && now - m.getCreatedAtMillis() > limits.getTtlMillis()) {
+                    && !inFlight.contains(m.getId()) && !m.isHandedOut() && now - m.getCreatedAtMillis() > limits.getTtlMillis()) {
                 store(m.withState(DeliveryState.EXPIRED, "not read within the time limit"));
             }
         }

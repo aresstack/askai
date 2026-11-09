@@ -185,6 +185,24 @@ public class AgentMailboxTest {
     }
 
     @Test
+    public void mailAwaitingProcessingIsNeitherEvictedNorExpired() throws Exception {
+        mailbox.registerWorker("t-b");
+        mailbox.send(null, "worker 1", "important hint");
+        List<AgentMessage> turn = mailbox.takeInbox("t-b");
+        for (int i = 0; i < 30; i++) {
+            mailbox.send(null, "worker 1", "noise " + i); // fills the inbox while the turn runs
+        }
+        now[0] += 120000L; // the turn outlives the TTL, then crashes
+        AgentMailbox restarted = AgentMailbox.open("run1", store, new MailboxLimits(3, 80, 4, 60000L, 10), clock);
+        List<AgentMessage> again = restarted.takeInbox("t-b");
+        assertEquals(1, again.size());
+        assertEquals("important hint", again.get(0).getText());
+        assertEquals(turn.get(0).getId(), again.get(0).getId());
+        restarted.acknowledge(again);
+        assertEquals(DeliveryState.DELIVERED, last(restarted.messages(), "important hint").getState());
+    }
+
+    @Test
     public void refusalNotesKeepTheInboxBound() {
         mailbox.registerWorker("t-a");
         for (int i = 0; i < 30; i++) {
