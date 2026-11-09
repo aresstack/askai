@@ -77,7 +77,14 @@ public class PassageSegmentationBudgetTest {
         }
         assertEquals("ids stay unique", passages.size(), ids.size());
         assertEquals("nothing is lost", code, joined.toString());
-        assertTrue(passages.get(1).getPassageId().startsWith("cap-1#p0.1@"));
+        assertTrue(passages.get(1).getPassageId().startsWith("cap-1#p0~001@"));
+        List<String> sorted = new java.util.ArrayList<String>();
+        for (Passage passage : passages) {
+            sorted.add(passage.getPassageId());
+        }
+        List<String> inOrder = new java.util.ArrayList<String>(sorted);
+        Collections.sort(sorted);
+        assertEquals("an id sort keeps the piece order", inOrder, sorted);
     }
 
     @Test

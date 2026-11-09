@@ -74,9 +74,9 @@ public final class PassageSegmentation {
     /**
      * PR 20: the default text budget of one embedding input, in characters. It keeps a passage inside the
      * smallest context of the supported embedding models (512 tokens of the local runtime's E5 models, about
-     * three characters per token for German and code), because embedding calls send {@code truncate=false}.
+     * two characters per token as a conservative bound for code and tables, with room for the role prefix), because embedding calls send {@code truncate=false}.
      */
-    public static final int DEFAULT_MAX_EMBEDDING_CHARS = 1500;
+    public static final int DEFAULT_MAX_EMBEDDING_CHARS = 1000;
 
     public PassageSegmentation(SentenceSegmentationPort sentenceSegmentation, EmbeddingPort embeddings,
                                String segmentationVersion) {
@@ -149,9 +149,10 @@ public final class PassageSegmentation {
                     // Deterministic, version-aware passage id from its fachliche identity (capture + position +
                     // segmentation version + embedding model), so the same captureId + pipelineVersion +
                     // embeddingFingerprint reproduces exactly the same passage ids (reprocess-idempotent). A
-                    // sentence cut to the budget adds the piece number.
+                    // sentence cut to the budget adds the zero-padded piece number after "~", which sorts after
+                    // "@", so the pieces keep their order in an id sort.
                     String passageId = capture.getCaptureId() + "#p" + piece.firstOrdinal
-                            + (piece.part > 0 ? "." + piece.part : "")
+                            + (piece.part > 0 ? String.format(java.util.Locale.ROOT, "~%03d", piece.part) : "")
                             + "@" + segmentationVersion + "-" + vector.getModelFingerprint();
                     Passage passage = new Passage(passageId, capture.getCaptureId(), piece.sentenceIds,
                             block.getHeadingPath(), piece.text, vector.getModelFingerprint(),
