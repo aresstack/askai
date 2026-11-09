@@ -69,6 +69,14 @@ public final class PassageSegmentation {
     private final int minPassageSentences;
     private final int maxPassageSentences;
     private final BoundaryMode boundaryMode;
+    private final int maxEmbeddingChars;
+
+    /**
+     * PR 20: the default text budget of one embedding input, in characters. It keeps a passage inside the
+     * smallest context of the supported embedding models (512 tokens of the local runtime's E5 models, about
+     * two characters per token as a conservative bound for code and tables, with room for the role prefix), because embedding calls send {@code truncate=false}.
+     */
+    public static final int DEFAULT_MAX_EMBEDDING_CHARS = 1000;
 
     public PassageSegmentation(SentenceSegmentationPort sentenceSegmentation, EmbeddingPort embeddings,
                                String segmentationVersion) {
@@ -93,6 +101,18 @@ public final class PassageSegmentation {
                                String segmentationVersion, String languageCode, int windowSize,
                                double boundaryThreshold, int minPassageSentences, int maxPassageSentences,
                                BoundaryMode boundaryMode) {
+        this(sentenceSegmentation, embeddings, segmentationVersion, languageCode, windowSize, boundaryThreshold,
+                minPassageSentences, maxPassageSentences, boundaryMode, DEFAULT_MAX_EMBEDDING_CHARS);
+    }
+
+    public PassageSegmentation(SentenceSegmentationPort sentenceSegmentation, EmbeddingPort embeddings,
+                               String segmentationVersion, String languageCode, int windowSize,
+                               double boundaryThreshold, int minPassageSentences, int maxPassageSentences,
+                               BoundaryMode boundaryMode, int maxEmbeddingChars) {
+        if (maxEmbeddingChars < 100) {
+            throw new IllegalArgumentException("embedding budget too small: " + maxEmbeddingChars);
+        }
+        this.maxEmbeddingChars = maxEmbeddingChars;
         this.sentenceSegmentation = sentenceSegmentation;
         this.embeddings = embeddings;
         this.segmentationVersion = segmentationVersion == null ? "" : segmentationVersion;
@@ -122,31 +142,108 @@ public final class PassageSegmentation {
             if (blockSentences.isEmpty() || block.getKind() == SourceCapture.BlockKind.HEADING) {
                 continue; // headings structure the heading path; they are no passage content
             }
-            for (List<Sentence> passageSentences : splitSemantically(blockSentences, block)) {
-                StringBuilder text = new StringBuilder();
-                List<String> sentenceIds = new ArrayList<String>();
-                for (Sentence sentence : passageSentences) {
-                    if (text.length() > 0) {
-                        text.append(' ');
-                    }
-                    text.append(sentence.getText());
-                    sentenceIds.add(sentence.getSentenceId());
+            for (List<Sentence> semantic : splitSemantically(blockSentences, block)) {
+                for (Piece piece : fitToBudget(semantic)) {
+                    EmbeddingPort.EmbeddingVector vector = embeddings.embedDocuments(
+                            java.util.Collections.singletonList(piece.text)).get(0);
+                    // Deterministic, version-aware passage id from its fachliche identity (capture + position +
+                    // segmentation version + embedding model), so the same captureId + pipelineVersion +
+                    // embeddingFingerprint reproduces exactly the same passage ids (reprocess-idempotent). A
+                    // sentence cut to the budget adds the zero-padded piece number after "~", which sorts after
+                    // "@", so the pieces keep their order in an id sort.
+                    String passageId = capture.getCaptureId() + "#p" + piece.firstOrdinal
+                            + (piece.part > 0 ? String.format(java.util.Locale.ROOT, "~%03d", piece.part) : "")
+                            + "@" + segmentationVersion + "-" + vector.getModelFingerprint();
+                    Passage passage = new Passage(passageId, capture.getCaptureId(), piece.sentenceIds,
+                            block.getHeadingPath(), piece.text, vector.getModelFingerprint(),
+                            segmentationVersion, languageCode);
+                    allPassages.add(passage);
+                    passageVectors.put(passage.getPassageId(), vector);
                 }
-                EmbeddingPort.EmbeddingVector vector = embeddings.embedDocuments(
-                        java.util.Collections.singletonList(text.toString())).get(0);
-                // Deterministic, version-aware passage id from its fachliche identity (capture + position +
-                // segmentation version + embedding model), so the same captureId + pipelineVersion +
-                // embeddingFingerprint reproduces exactly the same passage ids (reprocess-idempotent).
-                String passageId = capture.getCaptureId() + "#p" + passageSentences.get(0).getOrdinal()
-                        + "@" + segmentationVersion + "-" + vector.getModelFingerprint();
-                Passage passage = new Passage(passageId, capture.getCaptureId(), sentenceIds,
-                        block.getHeadingPath(), text.toString(), vector.getModelFingerprint(),
-                        segmentationVersion, languageCode);
-                allPassages.add(passage);
-                passageVectors.put(passage.getPassageId(), vector);
             }
         }
         return new Result(allSentences, allPassages, passageVectors);
+    }
+
+    /** One embedding input: whole sentences, or one piece of a sentence longer than the budget. */
+    private static final class Piece {
+        final int firstOrdinal;
+        final int part;
+        final List<String> sentenceIds;
+        final String text;
+
+        Piece(int firstOrdinal, int part, List<String> sentenceIds, String text) {
+            this.firstOrdinal = firstOrdinal;
+            this.part = part;
+            this.sentenceIds = sentenceIds;
+            this.text = text;
+        }
+    }
+
+    /**
+     * PR 20: splits a passage longer than the embedding budget before it is embedded. Whole sentences are
+     * grouped greedily; a single sentence above the budget (a code block or table row is one "sentence") is cut
+     * at whitespace into numbered pieces that all name that sentence.
+     */
+    private List<Piece> fitToBudget(List<Sentence> sentences) {
+        List<Piece> pieces = new ArrayList<Piece>();
+        StringBuilder text = new StringBuilder();
+        List<String> ids = new ArrayList<String>();
+        int first = -1;
+        for (Sentence sentence : sentences) {
+            String sentenceText = sentence.getText();
+            if (sentenceText.length() > maxEmbeddingChars) {
+                if (text.length() > 0) {
+                    pieces.add(new Piece(first, 0, ids, text.toString()));
+                    text = new StringBuilder();
+                    ids = new ArrayList<String>();
+                }
+                int part = 0;
+                for (String chunk : cut(sentenceText, maxEmbeddingChars)) {
+                    pieces.add(new Piece(sentence.getOrdinal(), part++,
+                            java.util.Collections.singletonList(sentence.getSentenceId()), chunk));
+                }
+                continue;
+            }
+            int joined = text.length() == 0 ? sentenceText.length() : text.length() + 1 + sentenceText.length();
+            if (text.length() > 0 && joined > maxEmbeddingChars) {
+                pieces.add(new Piece(first, 0, ids, text.toString()));
+                text = new StringBuilder();
+                ids = new ArrayList<String>();
+            }
+            if (text.length() == 0) {
+                first = sentence.getOrdinal();
+            } else {
+                text.append(' ');
+            }
+            text.append(sentenceText);
+            ids.add(sentence.getSentenceId());
+        }
+        if (text.length() > 0) {
+            pieces.add(new Piece(first, 0, ids, text.toString()));
+        }
+        return pieces;
+    }
+
+    /** Cuts a text into pieces of at most {@code budget} characters, preferring the last whitespace. */
+    static List<String> cut(String text, int budget) {
+        List<String> chunks = new ArrayList<String>();
+        int from = 0;
+        while (from < text.length()) {
+            int to = Math.min(text.length(), from + budget);
+            if (to < text.length()) {
+                int space = text.lastIndexOf(' ', to);
+                if (space > from + budget / 2) {
+                    to = space;
+                }
+            }
+            String chunk = text.substring(from, to).trim();
+            if (!chunk.isEmpty()) {
+                chunks.add(chunk);
+            }
+            from = to;
+        }
+        return chunks;
     }
 
     private List<String> sentencesOf(SourceCapture.StructuralBlock block) {
@@ -175,7 +272,9 @@ public final class PassageSegmentation {
         }
         List<String> texts = new ArrayList<String>();
         for (Sentence sentence : sentences) {
-            texts.add(sentence.getText());
+            // truncate=false: boundary detection embeds at most the budget of each sentence
+            String text = sentence.getText();
+            texts.add(text.length() > maxEmbeddingChars ? text.substring(0, maxEmbeddingChars) : text);
         }
         List<EmbeddingPort.EmbeddingVector> vectors = embeddings.embedDocuments(texts);
 

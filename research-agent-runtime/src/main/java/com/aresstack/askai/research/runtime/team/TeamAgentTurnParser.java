@@ -86,9 +86,17 @@ public final class TeamAgentTurnParser {
         List<String> suggestedFacts = asStringList(object.get("suggestedFacts"));
         List<String> openQuestions = asStringList(object.get("openQuestions"));
 
+        TeamAgentTurn.Action action = null;
+        Object actionValue = object.get("action");
+        if (actionValue instanceof Map) {
+            Map<String, Object> actionMap = (Map<String, Object>) actionValue;
+            action = new TeamAgentTurn.Action(asString(actionMap.get("type")), asString(actionMap.get("query")),
+                    asString(actionMap.get("node")), asString(actionMap.get("entry")));
+        }
+
         return new Result(new TeamAgentTurn(assistantMessage, proposedCommand, question, aspects,
                 approvalRequested, approvalSubject, searchQueries, understoodFacts, suggestedFacts,
-                openQuestions), null);
+                openQuestions, action), null);
     }
 
     /** Extract the first balanced top-level {@code {...}} object, ignoring surrounding prose or code fences. */

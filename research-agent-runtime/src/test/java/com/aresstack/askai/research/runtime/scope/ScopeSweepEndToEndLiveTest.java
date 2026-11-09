@@ -58,6 +58,9 @@ import static org.junit.Assert.assertTrue;
  */
 public class ScopeSweepEndToEndLiveTest {
 
+    /** The app's default model (ModelPortSettings.DEFAULT_MODEL), preferred when installed. */
+    private static final String PREFERRED_MODEL = com.aresstack.askai.modelport.ModelPortSettings.DEFAULT_MODEL;
+
     private static final String OLLAMA = "http://127.0.0.1:11434";
     private static final String EMBED_MODEL = "nomic-embed-text:latest";
 
@@ -279,6 +282,7 @@ public class ScopeSweepEndToEndLiveTest {
         if (configured != null && !configured.trim().isEmpty()) {
             return configured.trim();
         }
+        String fallback = null;
         int position = 0;
         while (true) {
             int key = tags.indexOf("\"name\":\"", position);
@@ -290,11 +294,21 @@ public class ScopeSweepEndToEndLiveTest {
             String name = tags.substring(start, end);
             position = end;
             String lower = name.toLowerCase(Locale.ROOT);
-            if (!lower.contains("embed") && !lower.contains("rerank") && !lower.contains("bge")) {
-                return name;
+            // The scope slot needs a model that can turn thinking off (plan 5.1): never auto-pick gpt-oss.
+            if (!lower.contains("embed") && !lower.contains("rerank") && !lower.contains("bge")
+                    && !com.aresstack.askai.modelport.ModelPortSettings.isLevelOnlyModel(name, null)) {
+                if (name.equals(PREFERRED_MODEL)) {
+                    return name;
+                }
+                if (fallback == null) {
+                    fallback = name;
+                }
             }
         }
-        Assume.assumeTrue("no chat-capable model installed on local Ollama", false);
+        if (fallback != null) {
+            return fallback;
+        }
+        Assume.assumeTrue("no chat-capable model that can turn thinking off installed on local Ollama", false);
         throw new IllegalStateException("unreachable");
     }
 

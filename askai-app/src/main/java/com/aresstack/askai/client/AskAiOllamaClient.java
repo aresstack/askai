@@ -305,7 +305,7 @@ public final class AskAiOllamaClient {
                 messages.add(toChatMessage(turn));
                 toolNames.add(turn.isTool() ? turn.getToolName() : "");
             }
-            RawChatRequest request = new RawChatRequest(think, toolNames, extras.getTools());
+            RawChatRequest request = new RawChatRequest(think, toolNames, extras.getTools(), extras.getTruncate());
             request.setModel(modelName);
             request.setMessages(messages);
             request.setKeepAlive(keepAlive);
@@ -566,12 +566,19 @@ public final class AskAiOllamaClient {
         private final Object think;
         private final List<String> toolNames;
         private final List<OllamaChatOptions.Tool> rawTools;
+        private final Boolean truncate;
 
         RawChatRequest(Object think, List<String> toolNames) {
             this(think, toolNames, null);
         }
 
         RawChatRequest(Object think, List<String> toolNames, List<OllamaChatOptions.Tool> rawTools) {
+            this(think, toolNames, rawTools, null);
+        }
+
+        RawChatRequest(Object think, List<String> toolNames, List<OllamaChatOptions.Tool> rawTools,
+                       Boolean truncate) {
+            this.truncate = truncate;
             this.think = think;
             this.toolNames = toolNames == null ? Collections.<String>emptyList() : toolNames;
             this.rawTools = rawTools == null ? Collections.<OllamaChatOptions.Tool>emptyList() : rawTools;
@@ -591,6 +598,10 @@ public final class AskAiOllamaClient {
                 body.putPOJO("think", think);
             }
             body.remove("useTools");
+            body.remove("truncate");
+            if (truncate != null) {
+                body.put("truncate", truncate.booleanValue());
+            }
             JsonNode tools = body.get("tools");
             if (tools == null || tools.isNull() || (tools.isArray() && tools.size() == 0)) {
                 body.remove("tools");

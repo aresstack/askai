@@ -89,6 +89,7 @@ final class PlaywrightCapabilityProbe {
 
         public List<String> driverCommand() {
             Map<String, String> env = new LinkedHashMap<String, String>();
+            DriverClasspathJar.install();
             return Driver.createAndInstall(env, false).createProcessBuilder().command();
         }
 

@@ -46,13 +46,27 @@ public final class ResearchOutlineViewContribution implements ArtifactViewContri
                 research.derivedActions().generateOutline();
             }
         });
+        view.setCancelAction(new Runnable() {
+            public void run() {
+                research.cancelOutlineClustering();
+            }
+        });
         final Runnable refresh = new Runnable() {
             public void run() {
                 final String markdown = research.liveOutlineMarkdown();
                 final Boolean stale = research.outlineStale();
+                final com.aresstack.askai.research.host.OutlineClusteringRun.Status run =
+                        research.outlineRunStatus();
+                final boolean allowed = research.outlineClusteringAllowed();
                 uiExecutor.execute(new Runnable() {
                     public void run() {
                         view.render(markdown, stale);
+                        view.renderRun(run == null ? "" : run.describe(),
+                                run != null && run.state
+                                        == com.aresstack.askai.research.host.OutlineClusteringRun.State.RUNNING,
+                                run != null && run.state
+                                        == com.aresstack.askai.research.host.OutlineClusteringRun.State.FAILED,
+                                allowed);
                     }
                 });
             }

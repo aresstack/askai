@@ -206,6 +206,26 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 }
 
                 @Override
+                public String requestResearch(String query, String node) {
+                    return requestResearchCommand(query, node);
+                }
+
+                @Override
+                public String blacklistAdd(String entry) {
+                    return blacklistAddCommand(entry);
+                }
+
+                @Override
+                public String searchPlanOverview() {
+                    com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+                    try {
+                        return queue == null ? null : queue.overview();
+                    } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+                        return null;
+                    }
+                }
+
+                @Override
                 public String frozenConceptSummary() {
                     try {
                         com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
@@ -603,13 +623,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return stamped;
     }
 
-    /** #42: enabled setting + an existing prepared snapshot with topics — never a computation. */
+    /** #42/PR 20: the last stored snapshot with topics — never a computation, no setting anymore. */
     private boolean topicDiscoveryOffered() {
         if (productiveResources == null || productiveResources.isClosed()
                 || !com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING
-                        .equals(state.getPhaseId())
-                || !com.aresstack.askai.research.host.ResearchRuntimeSettings
-                        .backgroundTopicDiscovery()) {
+                        .equals(state.getPhaseId())) {
             return false;
         }
         com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery discovery =
@@ -629,8 +647,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     private String discoverTopicsFromSources() {
         if (!topicDiscoveryOffered()) {
-            return "rejected: no prepared topic analysis is available (background semantic "
-                    + "analysis off, or no sources processed yet)";
+            return "rejected: no stored topic analysis is available yet (topics are clustered "
+                    + "on request in the Outline phase)";
         }
         com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery discovery =
                 productiveResources.topicDiscovery();
@@ -804,8 +822,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return state.getPendingApprovalId() != null;
     }
 
-    /** The user's research question (set once scoping is confirmed; auto-continued after approval). */
-    private volatile String researchQuestion = "";
     /** The latest scoping assistant projection (search suggestions) for the composer accessory; transient. */
     private volatile com.aresstack.askai.research.backend.ScopingAssistantUpdate latestScopingProjection;
     /** File-backed research brief store, bound to this session's project dir (null in the clickdummy). */
@@ -856,6 +872,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return;
         }
         agentTurnInFlight = inFlight;
+        if (!inFlight && searchPlanQueue != null) {
+            searchPlanQueue.kick(); // plan PR 14: the queue may start its next planned query
+        }
         if (!inFlight) {
             // The turn is over on ANY path (answer, cancel, error) — the tool-call bubble must
             // never be left thinking.
@@ -976,8 +995,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (productiveResources != null && !productiveResources.isClosed()) {
             // Productive mode: the model-backed TeamAgent LEADS the whole conversation (greeting, scoping,
             // outline proposal, meta questions). Forward the user's text to the runtime agent; its reply
-            // returns as an assistant message and any validated proposal returns as a SCOPE_PROPOSAL the host
-            // executes. The host no longer runs ScopingConversation or the playbook greeting/outline here —
+            // returns as an assistant message; the host owns every state change. The host no longer runs ScopingConversation or the playbook greeting/outline here —
             // those stay for FAKE mode and the legacy tests only.
             // The productive in-process agent cannot echo the user's OWN message back, so show it in the shared chat
             // here (right-aligned, by role) before the agent replies — otherwise the user's turn is invisible.
@@ -1033,21 +1051,39 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 lastScopeCheckQuestion = "";
                 technicalLog("[scope-check] boundary question consumed by this user turn");
             }
-            beginAgentTurn(); // busy + preempt visualizer; cleared by the turn's terminal event
-            try {
-                backend.submitPrompt(handle, new ResearchPrompt(text, activeSectionId));
-            } catch (RuntimeException submitFailed) {
-                // An immediate failure (e.g. the model endpoint answers 500 at once) must release the
-                // composer and show the reason — the user's message is already in the chat above.
-                setAgentTurnInFlight(false);
-                reportSubmitProblem("Your message could not be sent to the research agent: "
-                        + (submitFailed.getMessage() == null ? submitFailed.toString()
-                                : submitFailed.getMessage()));
+            final String typed = text;
+            final String section = activeSectionId;
+            if (deferWhilePlannedQueryRuns(new Runnable() {
+                public void run() {
+                    submitTypedTurn(typed, section);
+                }
+            })) {
+                return; // plan PR 14: the turn waits until the planned query ends
             }
+            submitTypedTurn(text, activeSectionId);
             return;
         }
         // FAKE mode: host-side explainability + the deterministic backend, unchanged. Meta questions are
         // answered from the playbook + live state, in plain language — never with internal identifiers.
+        fakeModeSubmit(text, activeSectionId);
+    }
+
+    /** The productive agent turn of a typed line (after the plan queue let it through). */
+    private void submitTypedTurn(String text, String activeSectionId) {
+        beginAgentTurn(); // busy + preempt visualizer; cleared by the turn's terminal event
+        try {
+            backend.submitPrompt(handle, new ResearchPrompt(text, activeSectionId));
+        } catch (RuntimeException submitFailed) {
+            // An immediate failure (e.g. the model endpoint answers 500 at once) must release the
+            // composer and show the reason — the user's message is already in the chat above.
+            setAgentTurnInFlight(false);
+            reportSubmitProblem("Your message could not be sent to the research agent: "
+                    + (submitFailed.getMessage() == null ? submitFailed.toString()
+                            : submitFailed.getMessage()));
+        }
+    }
+
+    private void fakeModeSubmit(String text, String activeSectionId) {
         String phaseDescription = narrator.describePhase(state.getPhaseId(), state.getStateId(),
                 !scoping.getQuestion().isEmpty());
         String explanation = narrator.explainOrNull(text, phaseDescription);
@@ -1056,49 +1092,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return;
         }
         backend.submitPrompt(handle, new ResearchPrompt(text, activeSectionId));
-    }
-
-    /**
-     * Execute a VALIDATED scope proposal from the runtime TeamAgent. The host is the only command authority:
-     * a proposal only applies while still SCOPING (else the state moved on and it is dropped), and the commit
-     * + {@link #autoAdvanceTowardsResearch()} only issue transitions the state machine actually allows. The
-     * concept + outline are built deterministically FROM the model-confirmed scope — no host-side dialogue.
-     * The model never confirms its own scope: this is triggered only by the host executing the proposal.
-     */
-    private void handleScopeProposal(String question, String aspectsBlock) {
-        if (productiveResources == null || productiveResources.isClosed() || handle == null) {
-            return;
-        }
-        if (!com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING
-                .equals(productiveResources.currentState().getPhaseId())) {
-            return; // a scope proposal only applies during scoping; the host state has moved on
-        }
-        if (question == null || question.trim().isEmpty()) {
-            return;
-        }
-        java.util.List<String> aspects = new ArrayList<String>();
-        if (aspectsBlock != null && !aspectsBlock.isEmpty()) {
-            for (String part : aspectsBlock.split("\n")) {
-                if (!part.trim().isEmpty()) {
-                    aspects.add(part.trim());
-                }
-            }
-        }
-        ScopingConversation built = new ScopingConversation();
-        built.restoreCompleted(question.trim(), aspects);
-        ResearchScopeCommitService.ScopeCommitResult commit =
-                new ResearchScopeCommitService(productiveResources.getProjectContext())
-                        .commit(new ConfirmedResearchScope(question.trim(), aspects,
-                                built.buildConceptMarkdown(), built.buildOutlineMarkdown()));
-        if (!commit.isSuccess()) {
-            sayAsAgent(playbook.scopeCommitFailed(commit.getStatus() + ": " + commit.getDetail()));
-            return;
-        }
-        researchQuestion = question.trim();
-        // C5: no outline approval gate anymore — a committed scope auto-advances STRAIGHT into
-        // RESEARCH/running, so the stored question must start the research turn HERE (previously the
-        // outline-gate approval triggered it).
-        autoAdvanceTowardsResearch(); // START_RESEARCH's transition listener starts the research turn
     }
 
     /**
@@ -1193,44 +1186,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         com.aresstack.askai.research.store.ResearchProjectMetadata metadata =
                 loadResult.getMetadata();
-        researchQuestion = metadata.getResearchQuestion();
         scoping.restoreCompleted(metadata.getResearchQuestion(),
                 metadata.getConfirmedFocusAreas());
         return true;
-    }
-
-    /**
-     * Advance the productive state machine through the transitions that need NO human approval
-     * (START, SUBMIT_SCOPE, PROPOSE_OUTLINE, START_RESEARCH). At an approval gate the machine stops and
-     * the approval is surfaced in the chat — the user decides; phase rules stay in the machine.
-     */
-    private void autoAdvanceTowardsResearch() {
-        for (int guard = 0; guard < 8; guard++) {
-            com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
-                    productiveResources.currentState();
-            String phase = memento.getPhaseId();
-            String stateId = memento.getStateId();
-            ResearchCommandType next = null;
-            if (com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(phase)
-                    && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW.equals(stateId)) {
-                next = ResearchCommandType.START;
-            } else if (com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(phase)
-                    && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(stateId)) {
-                next = ResearchCommandType.SUBMIT_SCOPE;
-            } else if (com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH.equals(phase)
-                    && com.aresstack.askai.research.state.oo.ResearchStateIds.WAITING.equals(stateId)) {
-                next = ResearchCommandType.START_RESEARCH;
-            }
-            if (next == null) {
-                break;
-            }
-            if (!dispatch(next, null).isAccepted()) {
-                break;
-            }
-        }
-        // Issue #34-style unification: an approval gate shows NO chat card — the red action tags
-        // (approve/changes) derive from WAITING_APPROVAL via availableActionTags(); the state-change
-        // notifications of the dispatches above already refreshed them.
     }
 
     // ------------------------------------------------------------------ ResearchSessionCommandPort
@@ -1459,6 +1417,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         bookManifest = new com.aresstack.askai.research.book.BookManifest(
                 resources.getProjectContext().getProjectDirectory());
         engine.addHook(new com.aresstack.askai.research.book.ConceptFreezeHook(phase1Source(), bookManifest));
+        // PR 12 (Q12): no Concept submit without an embedding model; each check re-resolves it
+        engine.addHook(new com.aresstack.askai.research.book.EmbeddingRequiredHook(
+                new com.aresstack.askai.research.book.EmbeddingRequiredHook.Readiness() {
+                    public boolean ready() {
+                        return resources.ensureEmbeddingDescriptor() != null;
+                    }
+                }));
         // PR 21: the outline freeze — finish minimum, outline pin, stale marks and the one outline write guard
         com.aresstack.askai.research.outline.OutlineWorkspace outline = resources.outlineWorkspace();
         if (outline != null) {
@@ -1564,6 +1529,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 });
             }
         });
+        wireSearchPlan(resources, engine);
+        wireApprovedSources(resources, engine); // last: the sources pin is the last record step
         engine.addListener(new com.aresstack.askai.research.transition.TransitionListener() {
             public void committed(final com.aresstack.askai.research.transition.PhaseTransition transition) {
                 // mirror the single truth into the view model for EVERY committed transition — also a
@@ -1575,15 +1542,500 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         state = next;
                         revision = next.getRevision();
                         invalidateNarration(); // in-flight warm texts belong to the previous situation
-                        if (transition.getCommand() == ResearchCommandType.START_RESEARCH) {
-                            maybeStartResearchTurn(); // the chained start releases the research turn
-                        }
                         showRestoredActionsIfAny();
                         fireStateChanged();
                     }
                 });
             }
         });
+    }
+
+    // ------------------------------------------------------------------ PR 14: the search plan queue
+
+    static final String EFFECT_SEARCH_PLAN = "search-plan-build";
+    static final String EFFECT_PRIORITY_ENTRY = "search-plan-priority";
+    static final String EFFECT_GATE_COVERAGE = "search-plan-gate-coverage";
+
+    /** The gate line naming the uncovered nodes, or {@code null} when every node is covered (plan PR 14). */
+    static String gateCoverageText(java.util.List<String> uncovered) {
+        if (uncovered == null || uncovered.isEmpty()) {
+            return null;
+        }
+        StringBuilder text = new StringBuilder(uncovered.size() == 1 ? "1 node has" : uncovered.size() + " nodes have")
+                .append(" no covering sources yet: ");
+        for (int i = 0; i < uncovered.size(); i++) {
+            text.append(i > 0 ? ", " : "").append(uncovered.get(i));
+        }
+        return text.append(". Request changes to search for them, or approve the sources as they are.").toString();
+    }
+    /** How long the plan build waits for the planner role's variants before it keeps the base queries. */
+    static final long QUERY_PLAN_TIMEOUT_MILLIS = 180_000L;
+
+    private volatile com.aresstack.askai.research.plan.SearchPlanQueue searchPlanQueue;
+    private volatile com.aresstack.askai.research.plan.BackendQueryPlanner queryPlanner;
+    private volatile com.aresstack.askai.research.transition.PhaseJobRegistry.Job searchPlanJob;
+
+    /** The search plan queue of this productive session ({@code null} in fake mode). */
+    public com.aresstack.askai.research.plan.SearchPlanQueue searchPlanQueue() {
+        return searchPlanQueue;
+    }
+
+    /** Whether the search plan queue runs. */
+    public boolean searchPlanRunning() {
+        com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        return queue != null && queue.isRunning();
+    }
+
+    /** "Run search plan" (only in research/running); the queue registers as a job of the Sources phase. */
+    public boolean runSearchPlan() {
+        final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        if (queue == null || productiveResources == null || !researchRunning()) {
+            return false;
+        }
+        queue.setCaps(com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSearchPlanCaps(hostStateStore));
+        com.aresstack.askai.research.transition.PhaseJobRegistry.Job job =
+                new com.aresstack.askai.research.transition.PhaseJobRegistry.Job() {
+                    public void cancel() {
+                        queue.stop(); // any phase change stops the queue
+                    }
+                };
+        com.aresstack.askai.research.transition.PhaseJobRegistry.Job previous = searchPlanJob;
+        if (previous != null) {
+            productiveResources.phaseJobs().unregister(previous);
+        }
+        searchPlanJob = job;
+        productiveResources.phaseJobs().register(productiveResources.currentState().getPhaseId(), job);
+        queue.run();
+        return true;
+    }
+
+    /** "Stop search plan": cancel the current planned query, leave it pending, stop the queue. */
+    public void stopSearchPlan() {
+        com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        if (queue != null) {
+            queue.stop();
+        }
+        releaseSearchPlanJob();
+    }
+
+    private void releaseSearchPlanJob() {
+        com.aresstack.askai.research.transition.PhaseJobRegistry.Job job = searchPlanJob;
+        searchPlanJob = null;
+        if (job != null && productiveResources != null) {
+            productiveResources.phaseJobs().unregister(job);
+        }
+    }
+
+    /**
+     * Plan PR 15: {@code request_research} adds one plan entry; it starts nothing — "Run search plan" on the
+     * checklist runs it (a typed line in research/running starts no acquisition).
+     */
+    String requestResearchCommand(String query, String node) {
+        com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        if (queue == null || productiveResources == null) {
+            return null;
+        }
+        if (!researchRunning()) {
+            return "Not allowed in the current state (" + productiveResources.currentState().getPhaseId() + "/"
+                    + productiveResources.currentState().getStateId() + ").";
+        }
+        String text = query == null ? "" : query.trim();
+        if (text.isEmpty()) {
+            return "Tool failed: Missing argument: query";
+        }
+        String id;
+        try {
+            id = queue.addForNode(node, text);
+        } catch (Exception failed) {
+            return "Tool failed: the plan entry was not saved (" + failed.getMessage() + ")";
+        }
+        if (id == null) {
+            return "Tool failed: there is no search plan yet.";
+        }
+        technicalLog("request_research -> ADDED id=" + id + " query=\"" + text + "\"");
+        return "ADDED plan entry " + id + " \"" + text + "\". It runs when the user starts the search plan "
+                + "(\"Run search plan\" in the Sources tab); nothing was searched yet.";
+    }
+
+    /** Plan PR 15: {@code blacklist_add} — the Q2 add-only blacklist path of PR 07, as the user's "+ Add". */
+    String blacklistAddCommand(String entry) {
+        if (productiveResources == null) {
+            return null;
+        }
+        String value = entry == null ? "" : entry.trim();
+        if (value.isEmpty()) {
+            return "Tool failed: Missing argument: entry";
+        }
+        String refusal = addScopeExclusion(value);
+        technicalLog("blacklist_add -> " + (refusal == null ? "ADDED" : "REJECTED: " + refusal)
+                + " entry=\"" + value + "\"");
+        return refusal == null ? "ADDED blacklist entry \"" + value + "\" for future searches."
+                : "Tool failed: " + refusal;
+    }
+
+    /** Plan PR 14: whether the search plan may run now (research/running). */
+    public boolean searchPlanRunnable() {
+        return searchPlanQueue != null && researchRunning();
+    }
+
+    private boolean researchRunning() {
+        com.aresstack.askai.research.state.oo.ResearchStateMemento memento = productiveResources.currentState();
+        return com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH.equals(memento.getPhaseId())
+                && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(memento.getStateId());
+    }
+
+    /**
+     * Plan PR 14 (D5): a typed search or a research-loop turn started while a planned query runs waits until that
+     * query ends. @return {@code true} when {@code work} was deferred
+     */
+    private boolean deferWhilePlannedQueryRuns(final Runnable work) {
+        com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        if (queue == null || !queue.hasRunningEntry()) {
+            return false;
+        }
+        return queue.deferUntilEntryEnds(new Runnable() {
+            public void run() {
+                uiExecutor.execute(work);
+            }
+        });
+    }
+
+    /** Another search, review or agent turn runs: the queue starts no planned query now. */
+    private boolean acquisitionBusy() {
+        return agentTurnInFlight || postSearchSummaryInFlight || activeManualSearchRequestId != null;
+    }
+
+    private void wireSearchPlan(
+            final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources,
+            com.aresstack.askai.research.transition.TransitionEngine engine) {
+        final com.aresstack.askai.research.store.ResearchProjectContext project = resources.getProjectContext();
+        final com.aresstack.askai.research.plan.SearchPlanStore store =
+                new com.aresstack.askai.research.plan.SearchPlanStore(project.getTaskStore(),
+                        project.getProjectDirectory());
+        try {
+            // the resume pass runs before the queue can start: an interrupted entry is pending again (D5)
+            store.resumeAfterInterruption(System.currentTimeMillis());
+        } catch (java.io.IOException failed) {
+            System.err.println("[search-plan] resume pass failed: " + failed.getMessage());
+        }
+        queryPlanner = new com.aresstack.askai.research.plan.BackendQueryPlanner(
+                new com.aresstack.askai.research.plan.BackendQueryPlanner.Submitter() {
+                    public boolean submit(String serviceCommand) {
+                        if (handle == null || disposed) {
+                            return false;
+                        }
+                        backend.submitServiceCommand(handle, serviceCommand);
+                        return true;
+                    }
+                }, QUERY_PLAN_TIMEOUT_MILLIS);
+        final java.util.concurrent.atomic.AtomicReference<com.aresstack.askai.research.search.ManualWebSearchHandle>
+                running = new java.util.concurrent.atomic.AtomicReference<
+                        com.aresstack.askai.research.search.ManualWebSearchHandle>();
+        searchPlanQueue = new com.aresstack.askai.research.plan.SearchPlanQueue(store,
+                new com.aresstack.askai.research.plan.SearchPlanQueue.SearchPort() {
+                    public String search(String query, String language, String ranking, int visitLimit,
+                                         int sourceCap) {
+                        // the recorded working language, never the toolbar language (D4)
+                        com.aresstack.askai.research.search.ManualWebSearchHandle h = manualWebSearchPort.search(
+                                new com.aresstack.askai.research.search.ManualWebSearchRequest(query,
+                                        ResearchLanguage.fromCode(language), ranking, visitLimit, sourceCap));
+                        running.set(h);
+                        return h.getRequestId();
+                    }
+
+                    public void cancel() {
+                        com.aresstack.askai.research.search.ManualWebSearchHandle h = running.get();
+                        if (h != null) {
+                            h.cancel();
+                        }
+                    }
+                },
+                new com.aresstack.askai.research.plan.SearchPlanQueue.Sources() {
+                    public java.util.List<String> acceptedBy(String requestId) {
+                        java.util.List<String> ids = new java.util.ArrayList<String>();
+                        for (com.aresstack.askai.research.sources.ResearchSourceRecord record
+                                : project.getSourceRepository().find(
+                                        com.aresstack.askai.research.sources.SourceQuery.all())) {
+                            if (requestId.equals(record.getSearchRequestId()) && !record.isParked()) {
+                                ids.add(record.getSourceId());
+                            }
+                        }
+                        return ids;
+                    }
+
+                    public String of(String sourceId) {
+                        com.aresstack.askai.research.sources.ResearchSourceRecord record =
+                                project.getSourceRepository().get(sourceId);
+                        return record == null ? "" : record.getOrigin();
+                    }
+                },
+                new com.aresstack.askai.research.plan.SearchPlanQueue.Busy() {
+                    public boolean busy() {
+                        return acquisitionBusy();
+                    }
+                },
+                new com.aresstack.askai.research.plan.SearchPlanQueue.Listener() {
+                    public void changed() {
+                        uiExecutor.execute(new Runnable() {
+                            public void run() {
+                                fireStateChanged();
+                            }
+                        });
+                    }
+
+                    public void finished(final com.aresstack.askai.research.plan.SearchPlanQueue.Outcome outcome) {
+                        releaseSearchPlanJob();
+                        uiExecutor.execute(new Runnable() {
+                            public void run() {
+                                if (sink != null) {
+                                    String id = "search-plan-outcome-" + System.currentTimeMillis();
+                                    sink.appendInfoMessage(id, outcome.text());
+                                    journal.attribute(id, com.aresstack.askai.research.state.oo.ResearchStateIds
+                                            .RESEARCH);
+                                    persistJournalNow();
+                                }
+                                fireStateChanged();
+                            }
+                        });
+                    }
+                },
+                new java.util.concurrent.Executor() {
+                    public void execute(Runnable command) {
+                        uiExecutor.execute(command);
+                    }
+                },
+                new com.aresstack.askai.research.plan.SearchPlanQueue.Clock() {
+                    public long now() {
+                        return System.currentTimeMillis();
+                    }
+                },
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSearchPlanCaps(hostStateStore));
+        // every source carries the phase and the plan entry of the search that found it
+        final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        com.aresstack.askai.research.capture.SourceAcceptanceService acceptance = resources.acceptance();
+        if (acceptance != null) {
+            acceptance.setSourceTagger(
+                new com.aresstack.askai.research.capture.SourceAcceptanceService.SourceTagger() {
+                    public String phaseFor(String searchRequestId) {
+                        String phase = queue.phaseFor(searchRequestId);
+                        return phase.isEmpty() ? resources.currentState().getPhaseId() : phase;
+                    }
+
+                    public String planEntryFor(String searchRequestId) {
+                        return queue.entryFor(searchRequestId);
+                    }
+                });
+        }
+        engine.addHook(new com.aresstack.askai.research.transition.PhaseTransitionHook() {
+            public java.util.List<String> effects(
+                    com.aresstack.askai.research.transition.PhaseTransition transition) {
+                if (transition.getCommand() == ResearchCommandType.START_RESEARCH) {
+                    return java.util.Collections.singletonList(EFFECT_SEARCH_PLAN);
+                }
+                boolean fromSources = transition.getFrom() != null
+                        && com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH
+                                .equals(transition.getFrom().getPhaseId());
+                if (fromSources && transition.getCommand() == ResearchCommandType.REQUEST_REVISION
+                        && !transition.getComment().trim().isEmpty()) {
+                    return java.util.Collections.singletonList(EFFECT_PRIORITY_ENTRY);
+                }
+                if (fromSources && transition.getCommand() == ResearchCommandType.REQUEST_EVIDENCE_REVIEW) {
+                    return java.util.Collections.singletonList(EFFECT_GATE_COVERAGE);
+                }
+                return java.util.Collections.<String>emptyList();
+            }
+        });
+        // plan PR 14: "Request changes" at the gate becomes a priority entry that runs first
+        engine.registerEffect(EFFECT_PRIORITY_ENTRY, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(com.aresstack.askai.research.transition.PhaseTransition transition) {
+                String comment = transition.getComment().trim();
+                try {
+                    queue.addPriority("priority-" + transition.getId(),
+                            com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
+                            com.aresstack.askai.research.plan.SearchPlanQueue.priorityQuery(comment),
+                            "Changes requested: " + comment);
+                } catch (Exception failed) {
+                    System.err.println("[search-plan] priority entry not added: " + failed.getMessage());
+                    return;
+                }
+                uiExecutor.execute(new Runnable() {
+                    public void run() {
+                        runSearchPlan();
+                    }
+                });
+            }
+        });
+        // plan PR 14: the gate message lists the uncovered nodes
+        engine.registerEffect(EFFECT_GATE_COVERAGE, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(final com.aresstack.askai.research.transition.PhaseTransition transition) {
+                final String text;
+                try {
+                    text = gateCoverageText(queue.outcome().getUncovered());
+                } catch (Exception unreadable) {
+                    System.err.println("[search-plan] coverage not read: " + unreadable.getMessage());
+                    return;
+                }
+                if (text == null || sink == null) {
+                    return;
+                }
+                uiExecutor.execute(new Runnable() {
+                    public void run() {
+                        sink.appendInfoMessage(publish("gate-coverage-" + transition.getId()), text);
+                    }
+                });
+            }
+        });
+        engine.registerEffect(EFFECT_SEARCH_PLAN, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(com.aresstack.askai.research.transition.PhaseTransition transition) {
+                // the planner call may take minutes; it must not hold the effect worker (later transitions).
+                // The marker keeps the build recoverable: a session opened after a crash builds again.
+                try {
+                    store.markBuildPending();
+                } catch (java.io.IOException failed) {
+                    System.err.println("[search-plan] build marker not written: " + failed.getMessage());
+                }
+                startSearchPlanBuild(store);
+            }
+        });
+        if (store.isBuildPending()) {
+            startSearchPlanBuild(store); // the last build did not finish before the app ended
+        }
+    }
+
+    /** Plan PR 14 (D4): shown where an approved source cannot be excluded or downgraded. */
+    public static final String REOPEN_SOURCES = "Reopen Sources to remove an approved source.";
+
+    /**
+     * Plan PR 14: the sources pin on {@code APPROVE_EVIDENCE} and the rule that an approved source is excluded or
+     * downgraded only in {@code research/running}. Sources found later are not in the pin and stay free.
+     */
+    private void wireApprovedSources(
+            final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources,
+            final com.aresstack.askai.research.transition.TransitionEngine engine) {
+        final com.aresstack.askai.research.sources.ResearchSourceRepository repository = resources.getRepository();
+        if (repository == null || bookManifest == null) {
+            return;
+        }
+        engine.addHook(new com.aresstack.askai.research.book.SourcesFreezeHook(repository, bookManifest));
+        if (repository instanceof com.aresstack.askai.research.store.FileResearchSourceRepository) {
+            ((com.aresstack.askai.research.store.FileResearchSourceRepository) repository).setUpdateGuard(
+                    new com.aresstack.askai.research.store.FileResearchSourceRepository.UpdateGuard() {
+                        public String refusal(com.aresstack.askai.research.sources.ResearchSourceRecord current,
+                                              com.aresstack.askai.research.sources.SourceUpdate update) {
+                            return approvedSourceRefusal(current, update);
+                        }
+                    });
+        }
+    }
+
+    /** The refusal for a change of an approved source, or {@code null} (plan PR 14). */
+    String approvedSourceRefusal(com.aresstack.askai.research.sources.ResearchSourceRecord current,
+                                 com.aresstack.askai.research.sources.SourceUpdate update) {
+        if (!approvedSourceDowngrade(current, update) || researchRunning()) {
+            return null;
+        }
+        return isApprovedSource(current.getSourceId()) ? REOPEN_SOURCES : null;
+    }
+
+    static boolean approvedSourceDowngrade(com.aresstack.askai.research.sources.ResearchSourceRecord current,
+                                           com.aresstack.askai.research.sources.SourceUpdate update) {
+        // excluded: the status leaves ACCEPTED; downgraded: the relevance drops
+        return current.getStatus() != update.getStatus()
+                || update.getRelevance().ordinal() < current.getRelevance().ordinal();
+    }
+
+    /** Whether the valid sources pin names this source. */
+    public boolean isApprovedSource(String sourceId) {
+        com.aresstack.askai.research.book.BookManifest manifest = bookManifest;
+        if (manifest == null || productiveResources == null || sourceId == null) {
+            return false;
+        }
+        final com.aresstack.askai.research.transition.TransitionEngine engine = productiveResources.transitions();
+        try {
+            com.aresstack.askai.research.book.SourcesPin pin = manifest.validSourcesPin(
+                    new com.aresstack.askai.research.book.BookManifest.CommitCheck() {
+                        public boolean isCommitted(String transitionId) {
+                            return engine.isCommitted(transitionId);
+                        }
+                    });
+            return pin != null && pin.contains(sourceId);
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return true; // fail closed: a damaged manifest never lets an approved source go
+        }
+    }
+
+    private void startSearchPlanBuild(final com.aresstack.askai.research.plan.SearchPlanStore store) {
+        Thread build = new Thread(new Runnable() {
+            public void run() {
+                buildSearchPlan(store);
+            }
+        }, "search-plan-build");
+        build.setDaemon(true);
+        build.start();
+    }
+
+    /**
+     * The {@code START_RESEARCH} effect (D5): build or merge the plan from the Phase-1 record minus the current
+     * blacklist, then start the queue (Q4) and release the research turn after the first planned query.
+     * Idempotent per transition: a re-run merges into the stored plan and adds nothing new.
+     */
+    private void buildSearchPlan(com.aresstack.askai.research.plan.SearchPlanStore store) {
+        com.aresstack.askai.research.book.FrozenConcept frozen;
+        try {
+            frozen = frozenConcept();
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            System.err.println("[search-plan] no plan: " + corrupt.getMessage());
+            return;
+        }
+        if (frozen == null) {
+            store.clearBuildPending(); // nothing to build from (no Phase-1 record)
+            return;
+        }
+        java.util.List<String> blacklist = new java.util.ArrayList<String>(frozen.getPin().getBlacklist());
+        for (String term : currentBlacklistTerms()) {
+            if (!blacklist.contains(term)) {
+                blacklist.add(term);
+            }
+        }
+        com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+        String identity = service == null ? null
+                : service.store().identityHistoryContent(frozen.getPin().getWorkingRevision());
+        java.util.List<com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Node> nodes =
+                com.aresstack.askai.research.plan.ConceptPlanNodes.of(frozen.getApprovedDocument(),
+                        frozen.getEffectiveDocument(), identity, frozen.getMission(), blacklist);
+        com.aresstack.askai.research.plan.SearchPlanCoverage.Caps caps =
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSearchPlanCaps(hostStateStore);
+        try {
+            com.aresstack.askai.research.plan.SearchPlanMerger.Result result =
+                    com.aresstack.askai.research.plan.SearchPlanBuilder.build(store,
+                            new com.aresstack.askai.research.plan.SearchPlanBuilder.Input(
+                                    com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
+                                    frozen.getRevision(), frozen.getLanguage(), bookTitle(frozen), nodes, blacklist),
+                            queryPlanner, caps.getQueriesPerNode(), System.currentTimeMillis());
+            store.clearBuildPending();
+            System.err.println("[search-plan] plan built: nodes=" + nodes.size() + " added=" + result.getAdded());
+        } catch (java.io.IOException | com.aresstack.askai.research.transition.CorruptProjectFileException failed) {
+            System.err.println("[search-plan] the plan could not be stored: " + failed.getMessage());
+            return;
+        }
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                if (productiveResources != null && researchRunning()) {
+                    runSearchPlan(); // Q4: the plan starts after the approval (it waits for a running turn)
+                }
+                fireStateChanged();
+            }
+        });
+    }
+
+    private static String bookTitle(com.aresstack.askai.research.book.FrozenConcept frozen) {
+        try {
+            com.google.gson.JsonElement title = com.google.gson.JsonParser.parseString(frozen.getApprovedDocument())
+                    .getAsJsonObject().get("title");
+            return title == null || !title.isJsonPrimitive() ? "" : title.getAsString();
+        } catch (RuntimeException unreadable) {
+            return "";
+        }
     }
 
     // ------------------------------------------------------------------ PR 07: concept freeze
@@ -2074,22 +2526,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
     }
 
-    /** Sends the stored research question to the agent once the state actually reached RUNNING. */
-    private void maybeStartResearchTurn() {
-        if (productiveResources == null) {
-            return;
-        }
-        // PR 06: only in research/running (until PR 15 deletes this method)
-        if (!researchQuestion.isEmpty() && handle != null
-                && com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH
-                        .equals(productiveResources.currentState().getPhaseId())
-                && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING
-                        .equals(productiveResources.currentState().getStateId())) {
-            beginAgentTurn(); // busy + preempt visualizer; cleared by the turn's terminal event
-            backend.submitPrompt(handle, new ResearchPrompt(researchQuestion, ""));
-        }
-    }
-
     public void requestChanges(String reason) {
         requestChangesResult(reason);
     }
@@ -2122,8 +2558,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * into an immutable revision and — only when that approval succeeds — dispatch exactly ONE
      * {@code SUBMIT_SCOPE}, so the state machine (the only transition authority) advances SCOPING → OUTLINE.
      * The order is fixed: persist/approve the artifact FIRST, transition only afterwards; a failed or empty
-     * approval transitions nothing. This deliberately does NOT chain further phases (no
-     * {@link #autoAdvanceTowardsResearch()}): one user click decides exactly one legal workflow transition.
+     * approval transitions nothing. This deliberately chains no further phase by itself: one user click decides
+     * exactly one legal workflow transition.
      * No model output, advice, natural-language "weiter", search suggestion or visualizer result may reach
      * this — the scoping button is the only caller.
      * <p>
@@ -2143,6 +2579,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             scopeApproveDiag("blocked reason=" + blocker);
             surfaceScopingApprovalProblem(blocker);
             return blocker;
+        }
+        if (!confirmNewlyHitSources()) {
+            scopeApproveDiag("cancelled: the user kept the previous record");
+            return ScopingApprovalOutcome.USER_CANCELLED; // nothing dispatched
         }
         scopeApproveDiag("before=" + snapshot.getPhaseId() + "/" + snapshot.getStateId());
         // PR 07: the single, explicit transition. The concept approval and the Phase-1 record are the
@@ -2200,8 +2640,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * phase-independent by contract; the yellow tags merely happen to exist only in SCOPING because that is
      * where the agent produces the suggestions, not because the service is gated to that phase.
      */
-    public void requestManualWebSearch(String query) {
+    public void requestManualWebSearch(final String query) {
         if (query == null || query.trim().isEmpty()) {
+            return;
+        }
+        // Plan PR 14: two acquisitions never overlap — a typed search waits until the planned query ends.
+        if (deferWhilePlannedQueryRuns(new Runnable() {
+            public void run() {
+                requestManualWebSearch(query);
+            }
+        })) {
             return;
         }
         // The request SNAPSHOTS the session language: a live switch never changes a running search.
@@ -2264,15 +2712,36 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * of a superseded or cancelled run are ignored. It changes NO phase and NO state — a pure service surface.
      */
     /** The accepted-source count a "completed" manual-search event carries (0 when absent). */
-    private static int acceptedCount(ResearchBackendEvent event) {
+    static int acceptedCount(ResearchBackendEvent event) {
         try {
-            return Integer.parseInt(event.getPublicMessage().trim());
+            String text = event.getPublicMessage().trim();
+            int space = text.indexOf(' ');
+            return Integer.parseInt(space < 0 ? text : text.substring(0, space));
         } catch (RuntimeException noCount) {
             return 0;
         }
     }
 
     private void applyManualSearch(ResearchBackendEvent event) {
+        try {
+            applyManualSearchEvent(event);
+        } finally {
+            // plan PR 14: resume the queue only after every busy field of this event is settled
+            com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
+            if (planQueue != null) {
+                planQueue.kick();
+            }
+        }
+    }
+
+    private void applyManualSearchEvent(ResearchBackendEvent event) {
+        com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
+        if (planQueue != null && planQueue.owns(event.getTechnicalDetail())) {
+            // Plan PR 14: a planned query posts no chat line; the plan checklist shows its status.
+            planQueue.onSearchEvent(event.getTechnicalDetail(), event.getTitle(), event.getText(),
+                    event.getPublicMessage().trim().endsWith(" keywords"));
+            return;
+        }
         if (sink == null) {
             return;
         }
@@ -2350,19 +2819,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             // Issue #29: the search is over here — the runtime no longer auto-reviews. When sources were
             // accepted, OFFER the derived AI step as an explicit action instead of running it implicitly.
             activeManualSearchRequestId = null;
-            int accepted;
-            try {
-                accepted = Integer.parseInt(event.getPublicMessage().trim());
-            } catch (RuntimeException noCount) {
-                accepted = 0;
-            }
+            int accepted = acceptedCount(event);
             if (accepted > 0) {
                 // Nothing to remember here: new sources ARE the offer. The action surface re-derives it.
                 fireStateChanged();
                 // Opt-in convenience (Research Agent settings → General, default OFF): a
                 // SUCCESSFUL search runs the same review the "Review new sources" tag triggers —
                 // the explicit-action semantics stay, only the click is automated.
-                if (com.aresstack.askai.research.host.ResearchRuntimeSettings
+                if (!searchPlanRunning() && com.aresstack.askai.research.host.ResearchRuntimeSettings
                         .loadAutoReviewAfterSearch(hostStateStore)) {
                     requestPostSearchReview();
                 }
@@ -2613,6 +3077,69 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
     }
 
+    /** PR 12: asks the user before a re-submit keeps accepted sources out; {@code true} = go on. */
+    public interface ResubmitConfirmation {
+        boolean confirm(String message);
+    }
+
+    private volatile ResubmitConfirmation resubmitConfirmation = new ResubmitConfirmation() {
+        public boolean confirm(final String message) {
+            final boolean[] yes = {false};
+            onUiAndWait(new Runnable() {
+                public void run() {
+                    yes[0] = javax.swing.JOptionPane.showConfirmDialog(null, message, "Submit concept",
+                            javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.WARNING_MESSAGE)
+                            == javax.swing.JOptionPane.OK_OPTION;
+                }
+            });
+            return yes[0];
+        }
+    };
+
+    /** Test and host seam for the re-submit confirmation. */
+    public void setResubmitConfirmation(ResubmitConfirmation confirmation) {
+        if (confirmation != null) {
+            this.resubmitConfirmation = confirmation;
+        }
+    }
+
+    /**
+     * PR 12 (D4): when the new record's typed entries hit accepted sources the previous record did not,
+     * submit-scope names them and asks; Cancel dispatches nothing. The first submit has no previous
+     * record, so the sources it hits are compared against an empty one.
+     */
+    private boolean confirmNewlyHitSources() {
+        com.aresstack.askai.research.domain.scope.TypedBlacklist previous =
+                com.aresstack.askai.research.domain.scope.TypedBlacklist.empty();
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen != null) {
+                previous = com.aresstack.askai.research.domain.scope.TypedBlacklist.of(frozen.getPin().getBlacklist());
+            }
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            // the transition engine refuses a corrupt record on its own; nothing to compare here
+        }
+        if (productiveResources == null || productiveResources.getRepository() == null) {
+            return true;
+        }
+        java.util.List<com.aresstack.askai.research.sources.ResearchSourceRecord> fresh =
+                com.aresstack.askai.research.book.BlacklistSourceMatches.newlyHit(previous,
+                        com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft()),
+                        productiveResources.getRepository().find(
+                                com.aresstack.askai.research.sources.SourceQuery.all()));
+        if (fresh.isEmpty()) {
+            return true;
+        }
+        StringBuilder message = new StringBuilder("The blacklist of this concept newly matches ").append(fresh.size())
+                .append(fresh.size() == 1 ? " accepted source" : " accepted sources")
+                .append(". It becomes part of the Phase-1 record that outline generation and the evidence packs use:");
+        for (com.aresstack.askai.research.sources.ResearchSourceRecord record : fresh) {
+            message.append("\n- ").append(com.aresstack.askai.research.book.BlacklistSourceMatches.describe(record));
+        }
+        message.append("\n\nSubmit the concept anyway?");
+        return resubmitConfirmation.confirm(message.toString());
+    }
+
     /** The last structural or hook refusal of submit-scope, shown with CONCEPT_INCOMPLETE/TRANSITION_REJECTED. */
     private volatile String lastScopingRefusal = "";
 
@@ -2638,6 +3165,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 break;
             case SESSION_INACTIVE:
                 reason = "The session is not active.";
+                break;
+            case USER_CANCELLED:
+                reason = "You cancelled it.";
                 break;
             default:
                 reason = "Unknown reason.";
@@ -2724,6 +3254,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
             return; // no UI bookkeeping — the payload never renders anywhere
         }
+        if (event.getType() == com.aresstack.askai.research.backend.ResearchBackendEventType.QUERY_PLAN) {
+            // Plan PR 14: the concept query plan — backend thread, the plan builder waits for it off the EDT.
+            com.aresstack.askai.research.plan.BackendQueryPlanner planner = queryPlanner;
+            if (planner != null) {
+                planner.deliver(event.getTitle(), event.getText());
+            }
+            return;
+        }
         if (event.getType() == com.aresstack.askai.research.backend.ResearchBackendEventType
                 .ADVICE_DECISION) {
             // Z4b: same internal transport rule as PROBE_GENERATION — backend thread, never EDT.
@@ -2807,9 +3345,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 break;
             case USER_ATTENTION:
                 applyUserAttention(event);
-                break;
-            case SCOPE_PROPOSAL:
-                handleScopeProposal(event.getText(), event.getTechnicalDetail());
                 break;
             case GREETING_DONE:
                 startScopingOnFirstMessage();
@@ -3263,6 +3798,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
 
         public ActionOutcome generateOutline() {
+            if (outlineStale() == null) {
+                return ActionOutcome.rejected(
+                        "knowledge capability unavailable (no embedding world for this session)");
+            }
+            if (!outlineClusteringAllowed()) {
+                return ActionOutcome.rejected("topics are clustered only on request while the Outline phase "
+                        + "is running");
+            }
             return requestOutlineRebuild()
                     ? ActionOutcome.accepted("topic discovery + outline rebuild triggered (debounced)")
                     : ActionOutcome.rejected(
@@ -3823,7 +4366,141 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * @return {@code null} when recorded (or already present), else the honest rejection reason
      */
     public String addScopeExclusion(String text) {
-        return applyExclusionPatch(text, true);
+        String value = text == null ? "" : text.trim();
+        String frozen = recordedPhaseRefusal(value, true);
+        if (frozen != null) {
+            return frozen;
+        }
+        String refusal = applyExclusionPatch(value, true);
+        if (refusal != null) {
+            return refusal;
+        }
+        // PR 12: a typed TERM is also the same excluded facet and OUT anchor the exclude_topic tool
+        // records, with its concept-conflict check; a host name only blocks the domain.
+        if (!com.aresstack.askai.research.domain.scope.TypedBlacklist.isHostEntry(value)) {
+            surfaceExcludeTopicNote(excludeTopicCommand(value));
+        }
+        reportAcceptedBlacklistHits(value);
+        return null;
+    }
+
+    /**
+     * PR 12 (Q2): after {@code SUBMIT_SCOPE} the recorded blacklist is part of the Phase-1 record. An
+     * entry that names a card of the approved concept is refused, and a recorded entry cannot be taken
+     * out of the live list here (switching recorded entries off comes with PR 19).
+     */
+    private String recordedPhaseRefusal(String value, boolean add) {
+        if (value.isEmpty() || conceptWriteRefusal() == null) {
+            return null; // Concept is open: the list changes the next record
+        }
+        com.aresstack.askai.research.book.FrozenConcept frozen;
+        try {
+            frozen = frozenConcept();
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return corrupt.getMessage();
+        }
+        if (frozen == null) {
+            return null;
+        }
+        if (add) {
+            for (String card : frozen.cardNames()) {
+                if (card.trim().equalsIgnoreCase(value)) {
+                    return "\"" + value + "\" is a card of the approved concept. Reopen Concept to exclude it.";
+                }
+            }
+            return null;
+        }
+        for (String recorded : frozen.getPin().getBlacklist()) {
+            if (recorded.trim().equalsIgnoreCase(value)) {
+                return "\"" + value + "\" is part of the approved concept. Reopen Concept to change it.";
+            }
+        }
+        return null;
+    }
+
+    /** A conflict or branch note of the facet path must reach the user (no model turn runs here). */
+    private void surfaceExcludeTopicNote(String reply) {
+        if (reply == null || sink == null) {
+            return;
+        }
+        final String note;
+        try {
+            com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(reply).getAsJsonObject();
+            String result = json.has("result") ? json.get("result").getAsString() : "";
+            if ("REJECTED".equals(result)) {
+                note = "The term is kept as a blacklist entry, but not as an excluded topic: "
+                        + (json.has("reason") ? json.get("reason").getAsString() : "refused");
+            } else if (json.has("conceptConflict") || json.has("conceptBranchNote")) {
+                note = json.has("userMessage") ? json.get("userMessage").getAsString() : "";
+            } else {
+                return;
+            }
+        } catch (RuntimeException unreadable) {
+            return;
+        }
+        if (note.isEmpty()) {
+            return;
+        }
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                sink.appendInfoMessage(publish("blacklist-note-" + System.nanoTime()), note);
+            }
+        });
+    }
+
+    /**
+     * PR 12 (D4): adding or editing a typed entry says how many ACCEPTED sources it hits and lists
+     * them; it excludes none of them by itself.
+     */
+    private void reportAcceptedBlacklistHits(String entry) {
+        java.util.List<com.aresstack.askai.research.sources.ResearchSourceRecord> hits =
+                acceptedBlacklistHits(com.aresstack.askai.research.domain.scope.TypedBlacklist.of(
+                        java.util.Collections.singletonList(entry)));
+        if (hits.isEmpty() || sink == null) {
+            return;
+        }
+        String described = acceptedHitsText(entry, hits, conceptWriteRefusal() == null);
+        if (!researchRunning()) {
+            for (com.aresstack.askai.research.sources.ResearchSourceRecord hit : hits) {
+                if (isApprovedSource(hit.getSourceId())) {
+                    described += "\n" + REOPEN_SOURCES; // plan PR 14: the approved set stays as it is
+                    break;
+                }
+            }
+        }
+        final String text = described;
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                sink.appendInfoMessage(publish("blacklist-hits-" + System.nanoTime()), text);
+            }
+        });
+    }
+
+    static String acceptedHitsText(String entry,
+            java.util.List<com.aresstack.askai.research.sources.ResearchSourceRecord> hits, boolean concept) {
+        StringBuilder text = new StringBuilder();
+        text.append('"').append(entry).append("\" matches ").append(hits.size())
+                .append(hits.size() == 1 ? " accepted source" : " accepted sources")
+                .append(". They stay accepted until you exclude them:");
+        for (com.aresstack.askai.research.sources.ResearchSourceRecord hit : hits) {
+            text.append("\n- ").append(com.aresstack.askai.research.book.BlacklistSourceMatches.describe(hit));
+        }
+        if (concept) {
+            text.append("\nWhen you submit the concept, the entry becomes part of the Phase-1 record that outline "
+                    + "generation and the evidence packs use.");
+        }
+        return text.toString();
+    }
+
+    /** The accepted sources a typed list hits (empty in fake mode). */
+    java.util.List<com.aresstack.askai.research.sources.ResearchSourceRecord> acceptedBlacklistHits(
+            com.aresstack.askai.research.domain.scope.TypedBlacklist list) {
+        if (productiveResources == null || productiveResources.getRepository() == null) {
+            return java.util.Collections.emptyList();
+        }
+        return com.aresstack.askai.research.book.BlacklistSourceMatches.accepted(list,
+                productiveResources.getRepository().find(
+                        com.aresstack.askai.research.sources.SourceQuery.all()));
     }
 
     /**
@@ -3833,7 +4510,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * @return {@code null} when removed (or already absent), else the honest rejection reason
      */
     public String removeScopeExclusion(String text) {
-        return applyExclusionPatch(text, false);
+        String frozen = recordedPhaseRefusal(text == null ? "" : text.trim(), false);
+        return frozen != null ? frozen : applyExclusionPatch(text, false);
     }
 
     private String applyExclusionPatch(String text, boolean add) {
@@ -3871,7 +4549,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         publishScopeFence();
                         fireStateChanged();
                     }
-                    return null;
+                    // PR 12: "+ Add" records a term as facet AND typed entry — take both back
+                    break;
                 }
             }
         }
@@ -4604,6 +5283,25 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * disappears.
      */
     String searchScopeBegin() {
+        String line = searchScopeBeginLine();
+        if (line.startsWith("UNAVAILABLE")) {
+            return line; // the run ends fail-closed anyway
+        }
+        // PR 12: the typed entries ride the SAME pinned snapshot as a second line — the runtime's
+        // deterministic term and domain filter, which needs no embedding model.
+        com.aresstack.askai.research.domain.scope.TypedBlacklist typed =
+                com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft());
+        com.google.gson.JsonArray entries = new com.google.gson.JsonArray();
+        for (String entry : typed.entries()) {
+            entries.add(entry);
+        }
+        technicalLog("search-blacklist snapshot entries=" + typed.entries().size());
+        return line + "\n"
+                + com.aresstack.askai.research.runtime.acquire.ServiceSearchScopeControlPort.BLACKLIST_PREFIX
+                + entries;
+    }
+
+    private String searchScopeBeginLine() {
         com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator =
                 scopeCoordinator();
         if (coordinator == null || !coordinator.isUsable() || productiveResources == null
@@ -5460,8 +6158,32 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * @return false when the knowledge capability is unavailable.
      */
     public boolean requestOutlineRebuild() {
-        return productiveResources != null && !productiveResources.isClosed()
+        return outlineClusteringAllowed() && productiveResources != null && !productiveResources.isClosed()
                 && productiveResources.triggerOutlineRebuild();
+    }
+
+    /** PR 20: clustering runs only on request in outline/running. */
+    public boolean outlineClusteringAllowed() {
+        com.aresstack.askai.research.state.oo.ResearchStateMemento current = state;
+        return current != null
+                && com.aresstack.askai.research.state.oo.ResearchStateIds.OUTLINE.equals(current.getPhaseId())
+                && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(current.getStateId());
+    }
+
+    /** PR 20: the clustering run the outline drawer shows, or {@code null} without a knowledge capability. */
+    public com.aresstack.askai.research.host.OutlineClusteringRun.Status outlineRunStatus() {
+        com.aresstack.askai.research.host.OutlineClusteringRun run = productiveResources == null
+                || productiveResources.isClosed() ? null : productiveResources.outlineRun();
+        return run == null ? null : run.status();
+    }
+
+    /** PR 20: Cancel in the drawer — stops a running clustering at its next check. */
+    public void cancelOutlineClustering() {
+        com.aresstack.askai.research.host.OutlineClusteringRun run = productiveResources == null
+                ? null : productiveResources.outlineRun();
+        if (run != null) {
+            run.cancel();
+        }
     }
 
     private void scheduleVisualization(String phaseId, String markdown) {
@@ -5999,18 +6721,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return result;
     }
 
-    /** Continue with the STORED question, a fresh budget and no re-visits (the agent keeps its history). */
+    /**
+     * Plan PR 15: "run-plan" and "retry-query" drive the search plan queue (D5). Outside research/running or
+     * without a plan the user is asked to refine instead; a run offer dispatches no state command (Q13).
+     */
     private void continueResearchTurn() {
-        if (productiveResources == null || handle == null) {
-            return;
-        }
-        // A run offer dispatches no state command (Q13): a paused run is resumed by the user's "resume".
-        if (!researchQuestion.isEmpty()
-                && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING
-                        .equals(productiveResources.currentState().getStateId())) {
-            setAgentTurnInFlight(true); // cleared by the next RUN_OUTCOME / terminal
-            backend.submitPrompt(handle, new ResearchPrompt(researchQuestion, ""));
-        } else {
+        if (!runSearchPlan()) {
             narrateAsAgent("refine", narrator.refinePrompt());
         }
     }

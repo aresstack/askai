@@ -125,6 +125,35 @@ public final class ProductiveResearchSessionResources {
         this.embeddingDescriptor = descriptor;
     }
 
+    /** PR 12: re-resolves the embedding model on demand ("Check again"); never downloads anything. */
+    public interface EmbeddingResolver {
+        /** The newly resolved descriptor (and the knowledge pipeline wired for it), or {@code null}. */
+        com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor resolve();
+    }
+
+    private EmbeddingResolver embeddingResolver;
+
+    void setEmbeddingResolver(EmbeddingResolver resolver) {
+        this.embeddingResolver = resolver;
+    }
+
+    /**
+     * PR 12: the embedding descriptor, re-resolved once more when none was ready yet — so a model
+     * installed after the chat was opened is picked up without a new chat. {@code null} = still none.
+     */
+    public synchronized com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor
+            ensureEmbeddingDescriptor() {
+        if (embeddingDescriptor != null || embeddingResolver == null || isClosed()) {
+            return embeddingDescriptor;
+        }
+        try {
+            return embeddingResolver.resolve();
+        } catch (RuntimeException failed) {
+            System.err.println("[research] embedding re-check failed: " + failed.getMessage());
+            return null;
+        }
+    }
+
     /** The frozen embedding snapshot of this session; null = capability honestly unavailable. */
     public com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor
             getEmbeddingDescriptor() {
@@ -198,15 +227,6 @@ public final class ProductiveResearchSessionResources {
         return topicDiscovery;
     }
 
-    /** #42: the optional background topic-discovery runner (null when disabled). */
-    private volatile com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
-            topicsRunner;
-
-    void setTopicsRunner(
-            com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
-        this.topicsRunner = runner;
-    }
-
     void setProjectionRunner(
             com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
         this.projectionRunner = runner;
@@ -224,6 +244,24 @@ public final class ProductiveResearchSessionResources {
      * thread. This is the only rebuild trigger left — nothing invalidates the projection automatically.
      * @return false when the knowledge capability is unavailable (no embedding world).
      */
+    /** PR 20: the clustering run the outline drawer shows; null while no embedding world is wired. */
+    private volatile OutlineClusteringRun outlineRun;
+
+    void setOutlineRun(OutlineClusteringRun run) {
+        this.outlineRun = run;
+        if (run != null) {
+            run.addListener(new Runnable() {
+                public void run() {
+                    fireProjectionUpdated();
+                }
+            });
+        }
+    }
+
+    public OutlineClusteringRun outlineRun() {
+        return outlineRun;
+    }
+
     public boolean triggerOutlineRebuild() {
         com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner =
                 projectionRunner;
@@ -429,6 +467,11 @@ public final class ProductiveResearchSessionResources {
     /** The transition engine of this session (hooks, effects and the recovery pass are wired by the session). */
     public com.aresstack.askai.research.transition.TransitionEngine transitions() {
         return transitions;
+    }
+
+    /** Plan PR 14: the one acceptance boundary (the session binds its phase/plan-entry tagger). */
+    public SourceAcceptanceService acceptance() {
+        return acceptance;
     }
 
     public com.aresstack.askai.research.transition.PhaseJobRegistry phaseJobs() {
@@ -654,6 +697,24 @@ public final class ProductiveResearchSessionResources {
             }
 
             @Override
+            public String requestResearch(String query, String node) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.requestResearch(query, node);
+            }
+
+            @Override
+            public String blacklistAdd(String entry) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.blacklistAdd(entry);
+            }
+
+            @Override
+            public String searchPlanOverview() {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.searchPlanOverview();
+            }
+
+            @Override
             public String outlineRead() {
                 com.aresstack.askai.research.outline.OutlineWorkspace workspace = outlineWorkspace();
                 if (workspace == null) {
@@ -683,7 +744,7 @@ public final class ProductiveResearchSessionResources {
     }
 
     /** Documented shutdown order; idempotent; safe on partial construction (nulls skipped). */
-    public void close() {
+    public synchronized void close() { // PR 12: never interleaves with a late embedding attach
         if (closed) {
             return;
         }
@@ -692,9 +753,6 @@ public final class ProductiveResearchSessionResources {
         transitions.close();
         // Stop the knowledge worker FIRST (graceful: lets the current job finish). The persistent FIFO and the
         // canonical corpus outlive the session, so a mid-flight job is simply recovered on the next open.
-        if (topicsRunner != null) {
-            topicsRunner.stop();
-        }
         if (projectionRunner != null) {
             projectionRunner.stop();
         }

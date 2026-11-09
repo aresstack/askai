@@ -12,8 +12,8 @@ import java.util.List;
  * concept with its edit rules) is sent only in Concept. Every later phase gets the read-only concept summary of
  * the effective frozen concept instead, plus ONE artifact block of its own phase: the seam that PR 15 (Sources),
  * PR 21 (Outline) and PR 29 (Document) fill, carrying the phase's latest change request until the next Finish.
- * The live phase is the host's ({@code state.getPhaseId()}), never the model's. History is still passed through
- * unchanged (PR 17 windows it).</p>
+ * The live phase is the host's ({@code state.getPhaseId()}), never the model's. The history is never sent whole:
+ * the assembler takes the own-phase window of {@link HistoryWindow} (plan PR 17, D7) within the role's budget.</p>
  */
 public final class PhaseContextAssembler {
 
@@ -181,25 +181,29 @@ public final class PhaseContextAssembler {
      * search queries.
      */
     public List<ChatMessage> assemble(PhaseAssistantProfile profile, TeamAgentStateView state,
-                                      String confirmedQuestion, List<String> confirmedAspects,
-                                      String proposedQuestion, List<String> proposedAspects,
                                       List<ChatMessage> history) {
-        return assemble(profile, state, confirmedQuestion, confirmedAspects, proposedQuestion, proposedAspects,
-                history, new PromptBlockMeter());
+        return assemble(profile, state, history, new PromptBlockMeter());
     }
 
     /** As above, and counts every block it adds into {@code meter} (plan PR 01); the messages are the same. */
     public List<ChatMessage> assemble(PhaseAssistantProfile profile, TeamAgentStateView state,
-                                      String confirmedQuestion, List<String> confirmedAspects,
-                                      String proposedQuestion, List<String> proposedAspects,
                                       List<ChatMessage> history, PromptBlockMeter meter) {
+        return assemble(profile, state, history, HistoryWindow.chatBudget(state.getPhaseId()), meter);
+    }
+
+    /**
+     * As above with an explicit window budget in tokens: the newest own-phase {@code USER}/{@code FINAL}
+     * entries of {@code history} that fit (0 = no history at all). The overflow guard of the TeamAgent lowers
+     * it when the whole prompt would not fit into the model's context.
+     */
+    public List<ChatMessage> assemble(PhaseAssistantProfile profile, TeamAgentStateView state,
+                                      List<ChatMessage> history, int windowTokens, PromptBlockMeter meter) {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         add(messages, meter, PromptBlockMeter.PROFILE, ChatMessage.system(profile.getSystemPrompt()));
         add(messages, meter, PromptBlockMeter.DATE, ChatMessage.system("Current date: " + currentDate.today()));
         add(messages, meter, PromptBlockMeter.LANGUAGE, ChatMessage.system(
                 TeamAgentPlaybook.workingLanguageContext(currentLanguage.displayName())));
-        add(messages, meter, PromptBlockMeter.STATE, ChatMessage.system(TeamAgentPlaybook.stateContext(
-                state, confirmedQuestion, confirmedAspects, proposedQuestion, proposedAspects)));
+        add(messages, meter, PromptBlockMeter.STATE, ChatMessage.system(TeamAgentPlaybook.stateContext(state)));
         String phaseId = state == null ? "" : state.getPhaseId();
         if (PhaseActionUnion.isConcept(phaseId)) {
             // The scope the HOST holds — authoritative for this turn. Without it the model would rebuild the
@@ -230,9 +234,10 @@ public final class PhaseContextAssembler {
                 add(messages, meter, PromptBlockMeter.PHASE_ARTIFACT, ChatMessage.system(artifactBlock));
             }
         }
-        if (history != null) {
-            messages.addAll(history);
-            meter.add(PromptBlockMeter.HISTORY, history);
+        List<ChatMessage> window = HistoryWindow.select(history, state.getPhaseId(), windowTokens);
+        if (!window.isEmpty()) {
+            messages.addAll(window);
+            meter.add(PromptBlockMeter.HISTORY, window);
         }
         return messages;
     }

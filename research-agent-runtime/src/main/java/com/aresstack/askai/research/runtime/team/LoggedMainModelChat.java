@@ -46,6 +46,11 @@ public final class LoggedMainModelChat implements MainModelChat {
     }
 
     @Override
+    public int contextTokens() {
+        return delegate.contextTokens();
+    }
+
+    @Override
     public String modelName() {
         return delegate.modelName();
     }

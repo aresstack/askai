@@ -29,6 +29,9 @@ public final class ResearchOutlineView extends JPanel {
     private static final String STALE_NOTE = "Veraltet — Quellen oder Passagen haben sich geändert.";
 
     private final JLabel staleNote = new JLabel();
+    /** PR 20: clustering progress, outcome or failure — the drawer's own line, not only the error stream. */
+    private final JLabel runStatus = new JLabel();
+    private final JButton cancelButton = new ComicButton("Cancel");
     private final JButton generateButton = new ComicButton("Inhaltsverzeichnis erzeugen");
     private final MarkdownView markdownView;
     // #43 slice 8: the graphical numbered chapter tree is the DEFAULT face of the outline;
@@ -55,6 +58,11 @@ public final class ResearchOutlineView extends JPanel {
         });
         toolbar.add(viewToggle);
         toolbar.add(staleNote);
+        runStatus.setVisible(false);
+        cancelButton.setVisible(false);
+        cancelButton.setToolTipText("Stop the running topic clustering; the previous topics are kept");
+        toolbar.add(runStatus);
+        toolbar.add(cancelButton);
         add(toolbar, BorderLayout.NORTH);
         javax.swing.JScrollPane treeScroll = new javax.swing.JScrollPane(treeView);
         treeScroll.setBorder(BorderFactory.createEmptyBorder());
@@ -89,6 +97,37 @@ public final class ResearchOutlineView extends JPanel {
                 }
             }
         });
+    }
+
+    /** PR 20: Cancel of a running clustering. */
+    public void setCancelAction(final Runnable action) {
+        cancelButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (action != null) {
+                    cancelButton.setEnabled(false);
+                    action.run();
+                }
+            }
+        });
+    }
+
+    /**
+     * PR 20: the clustering run line. {@code running} shows Cancel and blocks a second start; {@code allowed}
+     * is false outside outline/running, where the generate button stays disabled.
+     */
+    public void renderRun(String statusLine, boolean running, boolean failed, boolean allowed) {
+        boolean show = statusLine != null && !statusLine.isEmpty();
+        runStatus.setText(show ? statusLine : "");
+        runStatus.setForeground(failed
+                ? com.aresstack.comiccontrols.theme.ThemeColor.of("research.settingsErrorText") : getForeground());
+        runStatus.setVisible(show);
+        cancelButton.setVisible(running);
+        cancelButton.setEnabled(running);
+        if (running || !allowed) {
+            generateButton.setEnabled(false);
+        }
+        generateButton.setToolTipText(allowed ? null
+                : "Topics are clustered only while the Outline phase is running");
     }
 
     /**

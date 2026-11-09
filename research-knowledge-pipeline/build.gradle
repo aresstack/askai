@@ -9,5 +9,20 @@ dependencies {
 }
 
 test {
-    useJUnit()
+    useJUnit {
+        excludeCategories 'com.aresstack.askai.research.knowledge.SlowTests'
+    }
+}
+
+// PR 20: the slow clustering benchmark (6,000 vectors of 768 dimensions under 60 s); not part of `check`.
+tasks.register('slowTest', Test) {
+    description = 'Runs the slow-tagged tests of the research pipeline.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnit {
+        includeCategories 'com.aresstack.askai.research.knowledge.SlowTests'
+    }
+    maxHeapSize = '1g'
+    testLogging { showStandardStreams = true }
 }

@@ -7,7 +7,7 @@ package com.aresstack.askai.research.search;
  * any model/TeamAgent/state logic. Encoded {@code key=value} with URL-encoded free-text values, so no field
  * ever contains a space. The runtime's parser of the same name is the ONLY consumer.
  *
- * <pre>#RSC1# manual_search request_id=&lt;uuid&gt; query=&lt;urlenc&gt;
+ * <pre>#RSC1# manual_search request_id=&lt;uuid&gt; query=&lt;urlenc&gt; [ranking=bm25|reranker visit_limit=N source_cap=N]
  * #RSC1# set_language language=de|en
  * #RSC1# review_sources request_id=&lt;uuid&gt;</pre>
  */
@@ -30,6 +30,26 @@ public final class ResearchServiceCommandWire {
         appendEncoded(sb, "query", query);
         if (languageCode != null && !languageCode.isEmpty()) {
             sb.append(" language=").append("de".equalsIgnoreCase(languageCode) ? "de" : "en");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Plan PR 14: a manual search with the ranking choice, the visit limit (top N of the ranked hits) and the
+     * per-query source cap of a planned query. {@code ranking} is {@code bm25} or {@code reranker}; an empty ranking
+     * or a limit of 0 is left out, so the runtime keeps the typed-search defaults for it.
+     */
+    public static String manualSearch(String requestId, String query, String languageCode, String ranking,
+                                      int visitLimit, int sourceCap) {
+        StringBuilder sb = new StringBuilder(manualSearch(requestId, query, languageCode));
+        if (ranking != null && !ranking.trim().isEmpty()) {
+            sb.append(" ranking=").append("reranker".equalsIgnoreCase(ranking.trim()) ? "reranker" : "bm25");
+        }
+        if (visitLimit > 0) {
+            sb.append(" visit_limit=").append(visitLimit);
+        }
+        if (sourceCap > 0) {
+            sb.append(" source_cap=").append(sourceCap);
         }
         return sb.toString();
     }
