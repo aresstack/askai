@@ -40,7 +40,8 @@ public class LegacyBrowserSearchSettingsTest {
         assertEquals(com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE,
                 engines.getMode());
         assertEquals("Google first, DuckDuckGo behind it, Bing listed but off",
-                "google:on:1:15,duckduckgo:on:3,bing:off:3", engines.encodeEntries());
+                "google:on:1:15:0:de+en+fr+es+it:off:,duckduckgo:on:3:0:1:de+en:off:,bing:off:3:0:2:de+en+fr+es:off:",
+                engines.encodeEntries());
         assertEquals(LegacyBrowserSearchDefaults.GOOGLE_REQUEST_DELAY_MILLIS,
                 engines.delayMillisFor(com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog.GOOGLE));
         assertTrue("a fresh installation never fires Google requests back to back",

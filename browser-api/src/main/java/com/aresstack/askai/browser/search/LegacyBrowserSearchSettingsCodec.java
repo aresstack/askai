@@ -411,6 +411,7 @@ public final class LegacyBrowserSearchSettingsCodec {
      * list carried the bare word "captcha", which parked readable pages naming a CAPTCHA widget.
      */
     static Map<String, String> liftStaleShippedDefaults(Map<String, String> values) {
+        values = migrateEngineList(values);
         String stored = values.get("captcha.challengeTexts");
         if (stored == null || !SHIPPED_CHALLENGE_TEXTS_WITH_BARE_CAPTCHA.equals(entries(stored))) {
             return values;
@@ -418,6 +419,32 @@ public final class LegacyBrowserSearchSettingsCodec {
         Map<String, String> lifted = new LinkedHashMap<String, String>(values);
         lifted.put("captcha.challengeTexts", joinList(LegacyBrowserSearchDefaults.create().captcha.challengeTexts));
         return lifted;
+    }
+
+    /**
+     * The stored engine list in the current table form (priorities, languages): a list from before priorities is
+     * migrated with the stored search strategy so it searches exactly as before
+     * ({@link com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection#migrate}). Editors read the
+     * values through this too, so the table shows what the search will do.
+     */
+    public static Map<String, String> migrateEngineList(Map<String, String> values) {
+        String engines = values == null ? null : values.get("navigation.engines");
+        if (engines == null) {
+            return values;
+        }
+        com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode =
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE;
+        String storedMode = values.get("navigation.engineAcquisitionMode");
+        if (storedMode != null && "ALL_ENABLED".equals(storedMode.trim())) {
+            mode = com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED;
+        }
+        String migrated = com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.migrate(engines, mode);
+        if (migrated.equals(engines)) {
+            return values;
+        }
+        Map<String, String> copy = new LinkedHashMap<String, String>(values);
+        copy.put("navigation.engines", migrated);
+        return copy;
     }
 
     private static List<String> entries(String raw) {
