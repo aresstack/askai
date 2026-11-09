@@ -1530,6 +1530,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
         });
         wireSearchPlan(resources, engine);
+        wireManuscript(resources, engine);
         wireApprovedSources(resources, engine); // last: the sources pin is the last record step
         engine.addListener(new com.aresstack.askai.research.transition.TransitionListener() {
             public void committed(final com.aresstack.askai.research.transition.PhaseTransition transition) {
@@ -2164,6 +2165,95 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     : "The outline is frozen. Reopen Outline to change it.";
         }
         return "Not started yet. The outline opens when the workflow reaches Outline.";
+    }
+
+    /**
+     * Plan PR 26: the manuscript pin on {@code APPROVE_FINAL}, the stale marks after {@code APPROVE_OUTLINE} and
+     * {@code APPROVE_EVIDENCE}, the one manuscript write guard and the generated {@code document.md}.
+     */
+    private void wireManuscript(
+            final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources,
+            final com.aresstack.askai.research.transition.TransitionEngine engine) {
+        final com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript = resources.manuscriptWorkspace();
+        com.aresstack.askai.research.outline.OutlineWorkspace outline = resources.outlineWorkspace();
+        if (manuscript == null || outline == null || bookManifest == null) {
+            return;
+        }
+        manuscript.setWriteGuard(this::manuscriptWriteRefusal);
+        manuscript.setChangeListener(this::renderDocumentArtifact);
+        com.aresstack.askai.research.book.ManuscriptFreezeHook hook =
+                new com.aresstack.askai.research.book.ManuscriptFreezeHook(manuscript, outline.store(), bookManifest,
+                        engine::isCommitted);
+        engine.addHook(hook);
+        engine.registerEffect(com.aresstack.askai.research.book.ManuscriptFreezeHook.EFFECT_OUTLINE,
+                hook.outlineEffect());
+        engine.registerEffect(com.aresstack.askai.research.book.ManuscriptFreezeHook.EFFECT_SOURCES,
+                hook.sourcesEffect());
+        renderDocumentArtifact(); // reconcile a render lost to a crash after a change
+    }
+
+    /** The session's manuscript (plan PR 26), or {@code null} without a productive project. */
+    public com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript() {
+        return productiveResources == null ? null : productiveResources.manuscriptWorkspace();
+    }
+
+    /** The outline the Document phase writes from (the valid outline pin), or {@code null}. */
+    public com.aresstack.askai.research.outline.Outline approvedOutlineOrNull() {
+        try {
+            com.aresstack.askai.research.book.ApprovedOutline approved = approvedOutline();
+            return approved == null ? null : approved.getOutline();
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return null;
+        }
+    }
+
+    /**
+     * The one manuscript write guard (D4): {@code null} in {@code draft/running}, otherwise the reason. Read-only
+     * after {@code finish-document} until "Request changes".
+     */
+    public String manuscriptWriteRefusal() {
+        if (productiveResources == null) {
+            return null;
+        }
+        com.aresstack.askai.research.state.oo.ResearchStateMemento memento = productiveResources.currentState();
+        String phase = memento.getPhaseId();
+        String stateId = memento.getStateId();
+        if (com.aresstack.askai.research.mcp.ResearchToolPolicy.writable(phase, stateId,
+                com.aresstack.askai.research.state.oo.ResearchStateIds.DRAFT)) {
+            return null;
+        }
+        if (com.aresstack.askai.research.state.oo.ResearchStateIds.DRAFT.equals(phase)) {
+            if (com.aresstack.askai.research.state.oo.ResearchStateIds.WAITING_APPROVAL.equals(stateId)) {
+                return "Waiting for your review. Approve or Request changes.";
+            }
+            if (com.aresstack.askai.research.state.oo.ResearchStateIds.COMPLETED.equals(stateId)) {
+                return "The book is approved. The manuscript is read-only.";
+            }
+            return "The manuscript can be edited while Document is running.";
+        }
+        return "Not started yet. The manuscript opens when the workflow reaches Document.";
+    }
+
+    /** Generate the read-only "document" artifact from the manuscript (plan PR 26). */
+    private void renderDocumentArtifact() {
+        if (productiveResources == null || productiveResources.isClosed()) {
+            return;
+        }
+        try {
+            com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript =
+                    productiveResources.manuscriptWorkspace();
+            com.aresstack.askai.plugin.api.agent.artifact.AgentArtifactStore store =
+                    productiveResources.getArtifactStore();
+            String markdown = com.aresstack.askai.research.manuscript.ManuscriptDocument.markdown(
+                    approvedOutlineOrNull(), manuscript.store());
+            com.aresstack.askai.plugin.api.agent.artifact.ArtifactContent current = store.read("document");
+            if (!markdown.equals(current.getMarkdown())) {
+                store.replace("document", current.getRevision(), markdown);
+            }
+        } catch (RuntimeException renderFailed) {
+            System.err.println("[research] document artifact render failed: " + renderFailed.getMessage());
+        }
+        uiExecutor.execute(this::fireStateChanged);
     }
 
     /** Render the stored outline into the "outline" artifact (never from the live projection, plan PR 21). */

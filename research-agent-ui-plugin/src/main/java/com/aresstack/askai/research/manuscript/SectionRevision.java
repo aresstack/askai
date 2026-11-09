@@ -21,6 +21,7 @@ public final class SectionRevision {
     private final String text;
     private final List<ManuscriptCitation> citations;
     private final List<String> gaps;
+    private final List<String> claimFlags;
     private final String author;
     private final String modelLabel;
     private final String thinkingLevel;
@@ -36,6 +37,7 @@ public final class SectionRevision {
         this.text = b.text == null ? "" : b.text;
         this.citations = Collections.unmodifiableList(new ArrayList<ManuscriptCitation>(b.citations));
         this.gaps = Collections.unmodifiableList(new ArrayList<String>(b.gaps));
+        this.claimFlags = Collections.unmodifiableList(new ArrayList<String>(b.claimFlags));
         this.author = b.author == null || b.author.isEmpty() ? AUTHOR_USER : b.author;
         this.modelLabel = b.modelLabel == null ? "" : b.modelLabel;
         this.thinkingLevel = b.thinkingLevel == null ? "" : b.thinkingLevel;
@@ -62,7 +64,7 @@ public final class SectionRevision {
 
     /** A builder pre-filled with this revision's content (number and time are assigned again). */
     public Builder toBuilder() {
-        Builder b = new Builder().text(text).citations(citations).gaps(gaps).author(author)
+        Builder b = new Builder().text(text).citations(citations).gaps(gaps).claimFlags(claimFlags).author(author)
                 .modelLabel(modelLabel).thinkingLevel(thinkingLevel).promptHash(promptHash)
                 .evidenceIds(evidenceIds).sectionFingerprint(sectionFingerprint)
                 .chapterFingerprint(chapterFingerprint);
@@ -84,6 +86,14 @@ public final class SectionRevision {
 
     public List<String> getGaps() {
         return gaps;
+    }
+
+    /**
+     * Section-level claim-check flags of PR 28 ("label: detail", e.g. "unsupported number: 15 %"), including
+     * uncited sentences and paragraphs that have no citation entry.
+     */
+    public List<String> getClaimFlags() {
+        return claimFlags;
     }
 
     public String getAuthor() {
@@ -123,11 +133,17 @@ public final class SectionRevision {
         return createdAt;
     }
 
+    /** SHA-256 of the text, for the manuscript pin. */
+    public String textHash() {
+        return ManuscriptCitation.sha256(text);
+    }
+
     /** The content of a new revision. */
     public static final class Builder {
         private String text = "";
         private final List<ManuscriptCitation> citations = new ArrayList<ManuscriptCitation>();
         private final List<String> gaps = new ArrayList<String>();
+        private final List<String> claimFlags = new ArrayList<String>();
         private String author = AUTHOR_USER;
         private String modelLabel = "";
         private String thinkingLevel = "";
@@ -157,6 +173,14 @@ public final class SectionRevision {
             gaps.clear();
             if (values != null) {
                 gaps.addAll(values);
+            }
+            return this;
+        }
+
+        public Builder claimFlags(List<String> values) {
+            claimFlags.clear();
+            if (values != null) {
+                claimFlags.addAll(values);
             }
             return this;
         }
