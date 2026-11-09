@@ -57,6 +57,11 @@ public final class ReloadableMainModelChat implements MainModelChat {
     }
 
     @Override
+    public int contextTokens() {
+        return delegate.get().contextTokens();
+    }
+
+    @Override
     public String modelName() {
         return delegate.get().modelName();
     }

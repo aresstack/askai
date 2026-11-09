@@ -73,6 +73,55 @@ public final class SourceAcceptanceService {
      */
     private volatile KnowledgeProcessingScheduler knowledgeScheduler = KnowledgeProcessingScheduler.NONE;
 
+    /**
+     * Plan PR 14: names the phase and the search plan entry of the search a source came from. The host resolves
+     * both from the {@code search_request_id} the manual search port already sends; a new source carries them.
+     */
+    public interface SourceTagger {
+        /** The phase the search ran in ("" when unknown). */
+        String phaseFor(String searchRequestId);
+
+        /** The search plan entry the search belongs to ("" for a typed search). */
+        String planEntryFor(String searchRequestId);
+
+        SourceTagger NONE = new SourceTagger() {
+            public String phaseFor(String searchRequestId) {
+                return "";
+            }
+
+            public String planEntryFor(String searchRequestId) {
+                return "";
+            }
+        };
+    }
+
+    private volatile SourceTagger tagger = SourceTagger.NONE;
+
+    /** Bind the phase/plan-entry tagger (plan PR 14); {@code null} restores the no-op. */
+    public void setSourceTagger(SourceTagger tagger) {
+        this.tagger = tagger == null ? SourceTagger.NONE : tagger;
+    }
+
+    private String phaseTag(String searchRequestId) {
+        try {
+            return nz(tagger.phaseFor(searchRequestId == null ? "" : searchRequestId.trim()));
+        } catch (RuntimeException unknown) {
+            return "";
+        }
+    }
+
+    private String planEntryTag(String searchRequestId) {
+        try {
+            return nz(tagger.planEntryFor(searchRequestId == null ? "" : searchRequestId.trim()));
+        } catch (RuntimeException unknown) {
+            return "";
+        }
+    }
+
+    private static String nz(String value) {
+        return value == null ? "" : value.trim();
+    }
+
     public SourceAcceptanceService(CaptureStore captures,
                                    com.aresstack.askai.research.sources.ResearchSourceRepository repository,
                                    SourceCreator creator, ResearchSearchIndex index,
@@ -192,6 +241,10 @@ public final class SourceAcceptanceService {
                             ? (searchRequestId == null ? "" : searchRequestId.trim())
                             : parkedMatch.getSearchRequestId())
                     .userRelevant(userRelevant || parkedMatch.isUserRelevant()) // never clobber a prior ⭐
+                    .phaseTag(parkedMatch.getPhaseTag().isEmpty() ? phaseTag(searchRequestId)
+                            : parkedMatch.getPhaseTag())
+                    .planEntryId(parkedMatch.getPlanEntryId().isEmpty() ? planEntryTag(searchRequestId)
+                            : parkedMatch.getPlanEntryId())
                     .build();
         } else {
             sourceId = "source-" + sourceIds.incrementAndGet();
@@ -212,6 +265,8 @@ public final class SourceAcceptanceService {
                     .searchQuery(searchQuery == null ? "" : searchQuery.trim())
                     .searchRequestId(searchRequestId == null ? "" : searchRequestId.trim())
                     .userRelevant(userRelevant)
+                    .phaseTag(phaseTag(searchRequestId))
+                    .planEntryId(planEntryTag(searchRequestId))
                     .build();
         }
         creator.create(record);
@@ -294,6 +349,8 @@ public final class SourceAcceptanceService {
                 .revision(1L)
                 .searchQuery(searchQuery == null ? "" : searchQuery.trim())
                 .searchRequestId(searchRequestId == null ? "" : searchRequestId.trim())
+                .phaseTag(phaseTag(searchRequestId))
+                .planEntryId(planEntryTag(searchRequestId))
                 .build();
         creator.create(record);
         return new ParkResult(sourceId, true);

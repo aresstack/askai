@@ -77,8 +77,8 @@ public final class FakeModelPort implements ModelPort, AutoCloseable {
         enqueueRaw("{\"assistantMessage\":\"" + jsonEscape(assistantMessage) + "\"}");
     }
 
-    /** Queue a scope-proposing turn: an assistant message + a proposed command + the scope to confirm. */
-    public void enqueueScopeProposal(String assistantMessage, String command, String question,
+    /** Queue a turn with an assistant message, a proposed command and a legacy scope object. */
+    public void enqueueCommandProposal(String assistantMessage, String command, String question,
                                      List<String> aspects) {
         StringBuilder sb = new StringBuilder("{\"assistantMessage\":\"")
                 .append(jsonEscape(assistantMessage)).append("\",\"proposedCommand\":\"")

@@ -442,7 +442,8 @@ public final class SetupWizardPanel extends JPanel {
         Rows rows = new Rows(STEP_KNOWLEDGE, "Knowledge and research");
         rows.note("The research agent finds matching passages with the embedding model, ranks them with the "
                 + "reranker and splits sources into sentences with the OpenNLP sentence models. The reranker is "
-                + "required for web research; it runs in AskAI's own local runtime, so install it here.");
+                + "required for web research; it runs in AskAI's own local runtime, so install it here. The "
+                + "embedding model is required too (" + SetupActions.EMBEDDING_REQUIRED_REASON + ").");
         embeddingModel.setEditable(true);
         embeddingDimension.setEditable(false);
         embeddingDimension.setToolTipText("Vector length, measured with a real embedding call");

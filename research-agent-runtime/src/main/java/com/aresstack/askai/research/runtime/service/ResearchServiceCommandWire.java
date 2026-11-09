@@ -11,7 +11,7 @@ import java.util.Map;
  * field ever contains a space. The ui-plugin's encoder of the same name is the ONLY producer; a round-trip
  * test pins the format across the process boundary.
  *
- * <pre>#RSC1# manual_search request_id=&lt;uuid&gt; query=&lt;urlenc&gt;
+ * <pre>#RSC1# manual_search request_id=&lt;uuid&gt; query=&lt;urlenc&gt; [ranking=bm25|reranker visit_limit=N source_cap=N]
  * #RSC1# set_language language=de|en
  * #RSC1# set_scope scope=&lt;urlenc&gt;
  * #RSC1# review_sources request_id=&lt;uuid&gt; captured_through=&lt;epoch-millis&gt;
@@ -49,7 +49,9 @@ public final class ResearchServiceCommandWire {
         }
         return new ResearchServiceCommand(type, fields.get("request_id"), decode(fields.get("query")),
                 fields.get("language"), decode(fields.get("scope")),
-                parseLong(fields.get("captured_through")), decode(fields.get("req")));
+                parseLong(fields.get("captured_through")), decode(fields.get("req")),
+                fields.get("ranking"), (int) Math.min(Integer.MAX_VALUE, parseLong(fields.get("visit_limit"))),
+                (int) Math.min(Integer.MAX_VALUE, parseLong(fields.get("source_cap"))));
     }
 
     /** An absent or malformed pin means "no bound" — a review still reads, it just reads everything. */

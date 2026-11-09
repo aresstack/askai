@@ -21,7 +21,6 @@ public final class ResearchRunWire {
     /** A user-attention transition (manual challenge required/resolved) — rendered visibly, never a log. */
     public static final String TYPE_ATTENTION = "attention";
     /** A validated workflow proposal from the TeamAgent (command + scope) — re-validated + executed host-side. */
-    public static final String TYPE_SCOPE = "scope";
     /** A one-shot "the greeting was delivered" signal — the host advances the scope state one step. */
     public static final String TYPE_GREETED = "greeted";
     /** A display-only scoping projection (search suggestions + advisory advice). */

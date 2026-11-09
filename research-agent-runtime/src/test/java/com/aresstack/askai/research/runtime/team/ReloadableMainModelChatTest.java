@@ -50,7 +50,6 @@ public class ReloadableMainModelChatTest {
 
         agent.greet(scoping());
         agent.respond("EV ageing", scoping());
-        assertEquals("How do EVs age?", agent.getProposedQuestion());
 
         // Hot-swap the transport mid-session; the agent keeps its history + scope.
         ScriptedModel second = new ScriptedModel("model-b");
@@ -58,7 +57,6 @@ public class ReloadableMainModelChatTest {
         reloadable.swap(second);
 
         agent.respond("anything else?", scoping());
-        assertEquals("the proposed scope survived the swap", "How do EVs age?", agent.getProposedQuestion());
         // The new client received the FULL prior conversation, not a fresh one.
         List<ChatMessage> lastCall = second.lastMessages;
         assertTrue("history carried over", containsUserContent(lastCall, "EV ageing"));

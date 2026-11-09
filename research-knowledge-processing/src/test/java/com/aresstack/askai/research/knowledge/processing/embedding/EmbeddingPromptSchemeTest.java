@@ -39,28 +39,28 @@ public class EmbeddingPromptSchemeTest {
     @Test
     public void nomicQueryAndPassageGetTheirModelCardPrefixes() {
         assertEquals("{\"model\":\"nomic-embed-text:latest\",\"input\":[\"search_query: Kupferpreis 2025\"],"
-                        + "\"input_type\":\"raw\"}",
+                        + "\"input_type\":\"raw\",\"truncate\":false}",
                 body("nomic-embed-text:latest", EmbeddingPort.Role.QUERY, "Kupferpreis 2025"));
         assertEquals("{\"model\":\"nomic-embed-text:latest\",\"input\":[\"search_document: Der Preis stieg.\"],"
-                        + "\"input_type\":\"raw\"}",
+                        + "\"input_type\":\"raw\",\"truncate\":false}",
                 body("nomic-embed-text:latest", EmbeddingPort.Role.DOCUMENT, "Der Preis stieg."));
     }
 
     @Test
     public void rawRoleSendsTheTextUnchangedForEveryModel() {
-        assertEquals("{\"model\":\"nomic-embed-text:latest\",\"input\":[\"anchor\"],\"input_type\":\"raw\"}",
+        assertEquals("{\"model\":\"nomic-embed-text:latest\",\"input\":[\"anchor\"],\"input_type\":\"raw\",\"truncate\":false}",
                 body("nomic-embed-text:latest", EmbeddingPort.Role.RAW, "anchor"));
         assertEquals("{\"model\":\"local/intfloat/e5-small-v2:latest\",\"input\":[\"anchor\"],"
-                        + "\"input_type\":\"raw\"}",
+                        + "\"input_type\":\"raw\",\"truncate\":false}",
                 body("local/intfloat/e5-small-v2:latest", EmbeddingPort.Role.RAW, "anchor"));
     }
 
     @Test
     public void localE5ModelsGetTheRoleThroughInputType() {
-        assertEquals("{\"model\":\"local/intfloat/e5-small-v2:latest\",\"input\":[\"q\"],\"input_type\":\"query\"}",
+        assertEquals("{\"model\":\"local/intfloat/e5-small-v2:latest\",\"input\":[\"q\"],\"input_type\":\"query\",\"truncate\":false}",
                 body("local/intfloat/e5-small-v2:latest", EmbeddingPort.Role.QUERY, "q"));
         assertEquals("{\"model\":\"local/intfloat/e5-small-v2:latest\",\"input\":[\"p\"],"
-                        + "\"input_type\":\"passage\"}",
+                        + "\"input_type\":\"passage\",\"truncate\":false}",
                 body("local/intfloat/e5-small-v2:latest", EmbeddingPort.Role.DOCUMENT, "p"));
     }
 
@@ -70,7 +70,7 @@ public class EmbeddingPromptSchemeTest {
         assertSame(EmbeddingPromptScheme.RAW, EmbeddingPromptScheme.forModel("some-unknown-embedder"));
         assertSame(EmbeddingPromptScheme.RAW,
                 EmbeddingPromptScheme.forModel("local/sentence-transformers/all-MiniLM-L6-v2:latest"));
-        assertEquals("{\"model\":\"bge-m3:latest\",\"input\":[\"q\"],\"input_type\":\"raw\"}",
+        assertEquals("{\"model\":\"bge-m3:latest\",\"input\":[\"q\"],\"input_type\":\"raw\",\"truncate\":false}",
                 body("bge-m3:latest", EmbeddingPort.Role.QUERY, "q"));
         assertTrue(EmbeddingPromptScheme.forModel("bge-m3").isRaw());
     }

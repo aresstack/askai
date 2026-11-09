@@ -104,6 +104,8 @@ public class ScopingTurnWireTest {
         assertEquals("keep_alive is the platform's warm-keeping (default 5m)", "5m", sent.remove("keep_alive"));
         assertFalse("no think field while the model's capabilities are unknown", sent.containsKey("think"));
         assertFalse("no tools on a scoping turn", sent.containsKey("tools"));
+        assertEquals("research calls refuse an oversized prompt instead of cutting it (PR 17)", Boolean.FALSE,
+                sent.remove("truncate"));
         @SuppressWarnings("unchecked")
         Map<String, Object> sentOptions = (Map<String, Object>) sent.get("options");
         assertEquals("the model's context on every call (plan 4.1, rule 1)", 32768,

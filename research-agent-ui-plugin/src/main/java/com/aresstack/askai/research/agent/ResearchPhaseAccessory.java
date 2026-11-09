@@ -10,10 +10,9 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * The generic phase-bound surface, third pass: no strip near the composer anymore — Phase 1 shows
- * the {@link ResearchOutOfScopeSky} as a see-through layer over the TOP of the transcript
- * ({@code TRANSCRIPT_OVERLAY} placement); in every other phase the sky disappears completely (the
- * chat keeps its full height, no leftover surface). Visibility and data follow the session's state
+ * The generic phase-bound surface: the {@link ResearchOutOfScopeSky} is a see-through layer over the
+ * TOP of the transcript ({@code TRANSCRIPT_OVERLAY} placement). PR 12: the blacklist filters in every
+ * phase, so the sky is shown in every phase (Q2). Visibility and data follow the session's state
  * listener exactly like before; add/remove intents run through the session's ONE scope path.
  */
 final class ResearchPhaseAccessory implements ComposerAccessory {
@@ -65,16 +64,15 @@ final class ResearchPhaseAccessory implements ComposerAccessory {
                 // ONE projection over the ONE draft: the user-worded exclusion strings PLUS the
                 // labels of EXCLUDED facets — before this, a model-recorded excludeFacet was
                 // persisted but invisible ("Noch keine Ausschlüsse" over a stored exclusion).
-                final List<String> exclusions = scoping
-                        ? exclusionsProjection(research.currentScopeDraft())
-                        : java.util.Collections.<String>emptyList();
+                // PR 12: the blacklist filters in every phase, so the sky is shown in every phase
+                final List<String> exclusions = exclusionsProjection(research.currentScopeDraft());
                 // Read-aloud source: the host's persisted last assistant answer — while the
                 // bar's Play is active, each NEW answer is spoken automatically on this refresh.
                 final com.aresstack.askai.plugin.api.service.ChatMessageSnapshot lastAnswer =
                         scoping ? research.lastAssistantMessage() : null;
                 uiExecutor.execute(new Runnable() {
                     public void run() {
-                        view.setVisible(scoping);
+                        view.setVisible(true);
                         view.setExclusions(exclusions);
                         view.setLatestAnswer(lastAnswer == null ? null : lastAnswer.getMessageId(),
                                 lastAnswer == null ? null : lastAnswer.getText());
@@ -89,7 +87,7 @@ final class ResearchPhaseAccessory implements ComposerAccessory {
     /** A refused add/remove must stay visible — the sky would otherwise silently lie. */
     private void reportRejection(String reason) {
         if (reason != null) {
-            JOptionPane.showMessageDialog(view, reason, "Ausschluss nicht übernommen",
+            JOptionPane.showMessageDialog(view, reason, "Blacklist entry not changed",
                     JOptionPane.WARNING_MESSAGE);
         }
     }

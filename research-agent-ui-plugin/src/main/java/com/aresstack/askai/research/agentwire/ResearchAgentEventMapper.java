@@ -67,22 +67,6 @@ public final class ResearchAgentEventMapper {
                             Boolean.parseBoolean(f.get("recoverable")),
                             f.get("limitation"), f.get("action")));
         }
-        if (ResearchRunWire.TYPE_SCOPE.equals(type)) {
-            java.util.Map<String, String> f = ResearchRunWire.fields(text);
-            // command → title, question → text, aspects → newline-joined technicalDetail. The host
-            // re-validates the command against its live state machine before executing it.
-            StringBuilder aspects = new StringBuilder();
-            for (String aspect : ResearchRunWire.decodedList(f, "aspects")) {
-                if (aspects.length() > 0) {
-                    aspects.append('\n');
-                }
-                aspects.append(aspect);
-            }
-            return ResearchBackendEvent.builder(ResearchBackendEventType.SCOPE_PROPOSAL)
-                    .title(f.get("command") == null ? "" : f.get("command"))
-                    .text(ResearchRunWire.decodedField(f, "question"))
-                    .messages("", aspects.toString());
-        }
         if (ResearchRunWire.TYPE_GREETED.equals(type)) {
             return ResearchBackendEvent.builder(ResearchBackendEventType.GREETING_DONE);
         }
@@ -149,6 +133,14 @@ public final class ResearchAgentEventMapper {
                             ResearchActivityKind.TOOL_UPDATE, probeRequestId,
                             ResearchRunWire.decodedField(pf, "payload"));
         }
+        if (ResearchRunWire.TYPE_QUERY_PLAN.equals(type)) {
+            // Plan PR 14: the typed concept query plan — internal wire payload, same shape as probes.
+            java.util.Map<String, String> qf = ResearchRunWire.fields(text);
+            String planRequestId = qf.get("request_id") == null ? "" : qf.get("request_id");
+            return ResearchBackendEvent.builder(ResearchBackendEventType.QUERY_PLAN)
+                    .activity("query-plan-" + planRequestId, ResearchActivityKind.TOOL_UPDATE, planRequestId,
+                            ResearchRunWire.decodedField(qf, "payload"));
+        }
         if (ResearchRunWire.TYPE_ADVICE.equals(type)) {
             // Z4b: the typed advice decision — internal wire payload, same shape as probes.
             java.util.Map<String, String> af = ResearchRunWire.fields(text);
@@ -193,8 +185,10 @@ public final class ResearchAgentEventMapper {
             subKind = "completed";
             int results = ResearchRunWire.intField(f, "results");
             message = results == 1 ? "1 Treffer" : results + " Treffer";
-            // The raw accepted-source count for the session's post-search decision (review button or not).
-            publicMessage = Integer.toString(results);
+            // The raw accepted-source count for the session's post-search decision (review button or not);
+            // plan PR 14 appends " keywords" when a planned query was ranked by BM25 as a fallback.
+            publicMessage = Integer.toString(results)
+                    + ("keywords".equals(f.get("ranked_by")) ? " keywords" : "");
         } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_REVIEW.equals(type)) {
             subKind = "review_" + (f.get("state") == null ? "" : f.get("state").trim());
             message = "";

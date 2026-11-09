@@ -875,6 +875,22 @@ public final class ConceptToolRounds {
         return syntheticAnswer(TeamAgentPlaybook.moveTruthAnswer(german, moveOutcome), result);
     }
 
+    /**
+     * Whether a successful tool call changed the concept, for the action receipt of the turn's FINAL history
+     * entry (plan D7): READ, PROBE and OFFER are working steps, and a NO_CHANGE receipt changed nothing.
+     */
+    public static boolean isAppliedOutcome(ConceptAction action, String receipt) {
+        if (action == null) {
+            return false;
+        }
+        ConceptAction.Type type = action.getType();
+        if (type == ConceptAction.Type.READ || type == ConceptAction.Type.PROBE
+                || type == ConceptAction.Type.OFFER) {
+            return false;
+        }
+        return receipt == null || !receipt.startsWith("NO_CHANGE");
+    }
+
     /** The guard's scope (ratified): mutating actions only — READ/PROBE/OFFER repeat freely. */
     private static boolean isMutatingAction(ConceptAction.Type type) {
         return type == ConceptAction.Type.ADD_CARDS || type == ConceptAction.Type.RENAME

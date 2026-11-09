@@ -198,6 +198,13 @@ public final class WebSearchApplicationService {
     private boolean scopeOutFilter;
     /** Set when an evaluate failed inside a helper that cannot return a stop reason itself. */
     private boolean scopeControlBroken;
+    /**
+     * PR 12: the typed blacklist of the pinned snapshot — a deterministic term and domain filter
+     * that runs before rerank (SERP lane), after fetch (page lane) and on links, with or without
+     * the semantic gate.
+     */
+    private com.aresstack.askai.research.domain.scope.TypedBlacklist blacklist =
+            com.aresstack.askai.research.domain.scope.TypedBlacklist.empty();
 
     /** SC1: inject the host's scope-control port (null = feature absent, baseline behaviour). */
     public void setScopeControl(SearchScopeControlPort port) {
@@ -609,6 +616,16 @@ public final class WebSearchApplicationService {
                 String captureId = WebAcquisitionText.field(page, "capture_id");
                 String pageText = page.toLowerCase(Locale.ROOT);
 
+                // PR 12 page lane: the typed blacklist again AFTER fetch — a redirect may land on a
+                // blocked host, and the real page title may name a blocked term the snippet did not.
+                String blacklistHit = blacklist.firstMatch(pageTitle, "", effectiveUrl);
+                if (blacklistHit != null) {
+                    listener.status("search-blacklist page skip url=" + effectiveUrl + " entry=\""
+                            + blacklistHit + "\" -> not accepted, not expanded");
+                    listener.progress(progress,
+                            ResearchRunActivity.pageSkipped(effectiveUrl, finalHost, pageTitle));
+                    continue;
+                }
                 boolean relevant = isRelevantPage(entry, page, pageTitle, pageText, effectiveUrl, terms);
                 if (pageSkip.isCurrentVisitSkipped()) {
                     // The relevance answer belongs to a page the user has meanwhile abandoned. Whatever it
@@ -705,6 +722,7 @@ public final class WebSearchApplicationService {
     private ResearchStopReason seedReranking(String query,
             List<com.aresstack.askai.browser.search.SearchResultCandidate> candidates,
             List<FrontierEntry> frontier) {
+        candidates = blacklistSerp(candidates);
         if (candidates.isEmpty()) {
             return null; // nothing to rerank or open → NO_RELEVANT_PATHS via the main loop
         }
@@ -816,10 +834,15 @@ public final class WebSearchApplicationService {
     /** SC1 begin: pin the run snapshot. null = proceed; a typed reason ends the run fail-closed. */
     private ResearchStopReason beginScopeControl() {
         if (scopeControl == null) {
-            return null; // feature absent → baseline behaviour
+            // feature absent → baseline behaviour, but never silently: no blacklist applies
+            listener.status("search-blacklist NONE (no scope control) — this search runs unfiltered");
+            return null;
         }
         try {
             SearchScopeControlPort.Session scope = scopeControl.begin();
+            blacklist = scope.blacklist;
+            listener.status("search-blacklist entries=" + blacklist.entries().size()
+                    + (blacklist.isEmpty() ? " (nothing typed)" : " " + blacklist.entries()));
             scopeActive = scope.active;
             scopeHandle = scope.handle;
             scopeOutFilter = scope.outFilter;
@@ -885,6 +908,48 @@ public final class WebSearchApplicationService {
         scopeActive = false;
         scopeHandle = null;
         return java.util.Collections.emptyMap();
+    }
+
+    /** PR 12 SERP lane: typed entries reject a hit on title, snippet or URL BEFORE the reranker. */
+    private List<com.aresstack.askai.browser.search.SearchResultCandidate> blacklistSerp(
+            List<com.aresstack.askai.browser.search.SearchResultCandidate> candidates) {
+        if (blacklist.isEmpty() || candidates.isEmpty()) {
+            return candidates;
+        }
+        List<com.aresstack.askai.browser.search.SearchResultCandidate> kept =
+                new ArrayList<com.aresstack.askai.browser.search.SearchResultCandidate>();
+        for (com.aresstack.askai.browser.search.SearchResultCandidate candidate : candidates) {
+            String hit = blacklist.firstMatch(candidate.title, candidate.snippet,
+                    candidate.navigationUrl());
+            if (hit != null) {
+                listener.status("search-blacklist serp skip candidate=\"" + candidate.title
+                        + "\" url=" + candidate.navigationUrl() + " entry=\"" + hit + "\"");
+                continue;
+            }
+            kept.add(candidate);
+        }
+        return kept;
+    }
+
+    /** PR 12 link lane: a link whose URL or anchor text hits a typed entry is never enqueued. */
+    private List<String> blacklistLinks(List<String> urls, java.util.Map<String, String> documentsByUrl,
+            String parentUrl) {
+        if (blacklist.isEmpty() || urls.isEmpty()) {
+            return urls;
+        }
+        List<String> kept = new ArrayList<String>();
+        for (String linkUrl : urls) {
+            String document = documentsByUrl.get(linkUrl);
+            if (blacklist.matches(document, "", linkUrl)) {
+                continue;
+            }
+            kept.add(linkUrl);
+        }
+        if (kept.size() != urls.size()) {
+            listener.status("search-blacklist links items=" + urls.size() + " kept=" + kept.size()
+                    + " from " + parentUrl);
+        }
+        return kept;
     }
 
     /** OUT is the hard reject; UNCLASSIFIED (no usable text) is conservatively not visited. */
@@ -1052,6 +1117,7 @@ public final class WebSearchApplicationService {
      */
     private List<String> scopeFilterLinks(List<String> urls,
             java.util.Map<String, String> documentsByUrl, String parentUrl) {
+        urls = blacklistLinks(urls, documentsByUrl, parentUrl);
         if (urls.isEmpty()) {
             return urls;
         }

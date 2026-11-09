@@ -31,8 +31,18 @@ public final class ProjectTaskBoard implements TaskBoard {
 
     @Override
     public List<ResearchTask> tasks() {
-        return tasks.loadAll().getTasks();
+        // Plan PR 14: the search plan's entries live in the same task store; the orchestrated run never sees them.
+        List<ResearchTask> own = new java.util.ArrayList<ResearchTask>();
+        for (ResearchTask task : tasks.loadAll().getTasks()) {
+            if (!SEARCH_PLAN_ROLE.equals(task.getRole())) {
+                own.add(task);
+            }
+        }
+        return own;
     }
+
+    /** The role of the search plan's tasks (plan PR 14). */
+    static final String SEARCH_PLAN_ROLE = "search-plan";
 
     @Override
     public void save(ResearchTask task) {

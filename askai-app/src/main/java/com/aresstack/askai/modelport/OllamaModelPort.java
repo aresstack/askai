@@ -488,7 +488,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
      */
     String preflight(ModelSlot slot, String endpointId, String model) {
         if (ModelPortSettings.isHelperSlot(slot.getName()) && isLevelOnly(model, null)) {
-            return ModelPortSettings.thinkingOffRequiredMessage(slot.getName());
+            return ModelPortSettings.thinkingOffRequiredMessage(slot.getName(), model);
         }
         if (!slots.checksInstalledModels() || com.aresstack.askai.localmodels.LocalModelNames
                 .isLocalModelName(model)) {
@@ -632,9 +632,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
 
     /** The families that accept only thinking levels, never {@code false} (plan 4.1, rule 3). */
     static boolean isLevelOnly(String model, String family) {
-        String name = model == null ? "" : model.toLowerCase(java.util.Locale.ROOT);
-        String fam = family == null ? "" : family.toLowerCase(java.util.Locale.ROOT).replace("-", "");
-        return name.startsWith("gpt-oss") || fam.equals("gptoss");
+        return ModelPortSettings.isLevelOnlyModel(model, family);
     }
 
     private static final class Capabilities {
@@ -988,7 +986,8 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             OutputFormat format = request.getOutputFormat();
             OllamaChatOptions extras = new OllamaChatOptions(tools,
                     format.getKind() == OutputFormat.Kind.JSON_SCHEMA ? format.getSchemaJson() : null,
-                    options, format.getKind() == OutputFormat.Kind.JSON, () -> aborted.get());
+                    options, format.getKind() == OutputFormat.Kind.JSON, () -> aborted.get(),
+                    request.getTruncate());
             if (!reservation.enterWire(this)) {
                 fail(ModelFailure.Kind.RESERVATION_INVALID, "the reservation was closed before the call started");
                 finish();

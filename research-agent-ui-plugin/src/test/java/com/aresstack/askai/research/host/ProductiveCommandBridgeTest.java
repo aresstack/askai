@@ -155,57 +155,28 @@ public class ProductiveCommandBridgeTest {
         assertEquals("a plain turn commits no scope", ResearchStateIds.SCOPING,
                 fx.resources.currentState().getPhaseId());
 
-        ConceptTestSupport.makeSubmittable(fx.session);
-        // Only the HOST executing a VALIDATED agent proposal commits the scope. C5: no outline gate —
-        // the commit auto-advances straight into RESEARCH/running and submits the stored question.
-        fx.session.onEvent(ResearchBackendEvent.builder(
-                com.aresstack.askai.research.backend.ResearchBackendEventType.SCOPE_PROPOSAL)
-                .envelope("evt-1", "s1", "p1", 1L, 0L, 1L, null)
-                .title("SUBMIT_SCOPE").text("just a question").messages("", "focus on isolation").build());
-        assertEquals("the outline slot stays the LIVE projection (scoping writes none)",
-                "", fx.resources.getArtifactStore().read("outline").getMarkdown());
-        assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
-        assertEquals(ResearchStateIds.RUNNING, fx.resources.currentState().getStateId());
-        assertEquals("RESEARCH", fx.session.getState().getPhaseLabel());
-        assertEquals("the stored question was auto-continued", "just a question",
-                fx.backend.prompts.get(fx.backend.prompts.size() - 1));
     }
 
     @Test
-    public void aValidatedScopeProposalFromTheAgentCommitsScopeAndStartsResearch() {
+    public void aTypedLineInResearchRunningReachesTheSourcesAssistantAndStartsNoResearchTurn() {
+        // Plan PR 15: the user submits the concept; START_RESEARCH starts no research-loop turn with a stored
+        // question (there is none), and a typed line in research/running is a plain conversation turn.
         Fx fx = new Fx();
-        int afterActivate = fx.backend.prompts.size(); // no bootstrap turn: 0
-        // The runtime TeamAgent proposes a validated scope (as it arrives over the ACP "scope" wire line and
-        // is mapped to a SCOPE_PROPOSAL event): the host RE-VALIDATES against its own state machine, commits
-        // the model-confirmed scope and advances to the outline approval gate. The model never confirmed it
-        // itself — only the host executing the proposal does.
-        ResearchBackendEvent proposal = ResearchBackendEvent.builder(
-                com.aresstack.askai.research.backend.ResearchBackendEventType.SCOPE_PROPOSAL)
-                .envelope("evt-scope-1", "s1", "p1", 1L, 0L, 1L, null)
-                .title("SUBMIT_SCOPE")
-                .text("How does pf4j isolate plugins?")
-                .messages("", "class isolation\nversioning")
-                .build();
+        assertTrue(fx.session.dispatch(ResearchCommandType.START, null).isAccepted());
         ConceptTestSupport.makeSubmittable(fx.session);
-        fx.session.onEvent(proposal);
-
-        // C5: the committed scope auto-advances into RESEARCH/running and submits the stored question —
-        // there is no outline approval gate anymore (the live outline is a mobile projection).
+        assertTrue(fx.session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted());
+        if (ResearchStateIds.WAITING.equals(fx.resources.currentState().getStateId())) {
+            assertTrue(fx.session.dispatch(ResearchCommandType.START_RESEARCH, null).isAccepted());
+        }
         assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
         assertEquals(ResearchStateIds.RUNNING, fx.resources.currentState().getStateId());
-        assertEquals("the outline slot stays the LIVE projection (scoping writes none)",
-                "", fx.resources.getArtifactStore().read("outline").getMarkdown());
-        assertEquals("the stored question started the research turn",
-                afterActivate + 1, fx.backend.prompts.size());
+        int before = fx.backend.prompts.size();
+        assertEquals("entering research/running submits no stored question", 0, before);
 
-        // The host stays the authority: approving advances to RESEARCH/running and auto-continues with the
-        // stored question exactly once.
-        fx.session.approveCurrent();
-        assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
-        assertEquals(ResearchStateIds.RUNNING, fx.resources.currentState().getStateId());
-        assertEquals(afterActivate + 1, fx.backend.prompts.size());
-        assertEquals("How does pf4j isolate plugins?",
-                fx.backend.prompts.get(fx.backend.prompts.size() - 1));
+        fx.session.submitPrompt("which parts are still thin?");
+        assertEquals(before + 1, fx.backend.prompts.size());
+        assertEquals("the typed line travels verbatim, never as a research: turn",
+                "which parts are still thin?", fx.backend.prompts.get(fx.backend.prompts.size() - 1));
     }
 
     @Test
@@ -227,25 +198,6 @@ public class ProductiveCommandBridgeTest {
                 com.aresstack.askai.research.backend.ResearchBackendEventType.GREETING_DONE)
                 .envelope("evt-greet2", "s1", "p1", 2L, 0L, 2L, null).build());
         assertEquals(ResearchStateIds.RUNNING, fx.resources.currentState().getStateId());
-    }
-
-    @Test
-    public void aScopeProposalOutsideScopingIsDroppedNotExecuted() {
-        Fx fx = new Fx();
-        assertTrue(fx.session.dispatch(ResearchCommandType.START, null).isAccepted());
-        ConceptTestSupport.makeSubmittable(fx.session);
-        assertTrue(fx.session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted());
-        // Now past SCOPING (in OUTLINE): a late scope proposal must be dropped, never re-committed.
-        assertFalse(ResearchStateIds.SCOPING.equals(fx.resources.currentState().getPhaseId()));
-        String phaseBefore = fx.resources.currentState().getPhaseId();
-        String stateBefore = fx.resources.currentState().getStateId();
-        fx.session.onEvent(ResearchBackendEvent.builder(
-                com.aresstack.askai.research.backend.ResearchBackendEventType.SCOPE_PROPOSAL)
-                .envelope("evt-scope-late", "s1", "p1", 5L, 0L, 5L, null)
-                .title("SUBMIT_SCOPE").text("too late").messages("", "").build());
-        assertEquals("a late proposal changes nothing", phaseBefore,
-                fx.resources.currentState().getPhaseId());
-        assertEquals(stateBefore, fx.resources.currentState().getStateId());
     }
 
     @Test

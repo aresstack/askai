@@ -30,6 +30,63 @@ public final class TeamAgentTurn implements PhaseAssistantOutput {
     private final List<String> understoodFacts;
     private final List<String> suggestedFacts;
     private final List<String> openQuestions;
+    private final Action action;
+
+    /**
+     * Plan PR 15: one OPTIONAL action of the Sources assistant — {@code request_research} (adds a plan entry) or
+     * {@code blacklist_add} (an add-only blacklist entry). The runtime runs it only when the host offers that
+     * tool in the live phase; anything else is dropped.
+     */
+    public static final class Action {
+        public static final String REQUEST_RESEARCH = "request_research";
+        public static final String BLACKLIST_ADD = "blacklist_add";
+
+        private final String type;
+        private final String query;
+        private final String node;
+        private final String entry;
+
+        public Action(String type, String query, String node, String entry) {
+            this.type = trim(type);
+            this.query = trim(query);
+            this.node = trim(node);
+            this.entry = trim(entry);
+        }
+
+        public static Action requestResearch(String query, String node) {
+            return new Action(REQUEST_RESEARCH, query, node, "");
+        }
+
+        public static Action blacklistAdd(String entry) {
+            return new Action(BLACKLIST_ADD, "", "", entry);
+        }
+
+        private static String trim(String value) {
+            return value == null ? "" : value.trim();
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public String getQuery() {
+            return query;
+        }
+
+        public String getNode() {
+            return node;
+        }
+
+        public String getEntry() {
+            return entry;
+        }
+
+        /** Whether the action names a known type with its required argument. */
+        public boolean isComplete() {
+            return (REQUEST_RESEARCH.equals(type) && !query.isEmpty())
+                    || (BLACKLIST_ADD.equals(type) && !entry.isEmpty());
+        }
+    }
 
     public TeamAgentTurn(String assistantMessage, String proposedCommand, String question,
                          List<String> aspects, boolean approvalRequested, String approvalSubject,
@@ -42,6 +99,15 @@ public final class TeamAgentTurn implements PhaseAssistantOutput {
                          List<String> aspects, boolean approvalRequested, String approvalSubject,
                          List<String> searchQueries, List<String> understoodFacts,
                          List<String> suggestedFacts, List<String> openQuestions) {
+        this(assistantMessage, proposedCommand, question, aspects, approvalRequested, approvalSubject,
+                searchQueries, understoodFacts, suggestedFacts, openQuestions, null);
+    }
+
+    public TeamAgentTurn(String assistantMessage, String proposedCommand, String question,
+                         List<String> aspects, boolean approvalRequested, String approvalSubject,
+                         List<String> searchQueries, List<String> understoodFacts,
+                         List<String> suggestedFacts, List<String> openQuestions, Action action) {
+        this.action = action != null && action.isComplete() ? action : null;
         this.assistantMessage = assistantMessage == null ? "" : assistantMessage;
         this.proposedCommand = emptyToNull(proposedCommand);
         this.question = emptyToNull(question);
@@ -71,6 +137,11 @@ public final class TeamAgentTurn implements PhaseAssistantOutput {
 
     public List<String> getOpenQuestions() {
         return openQuestions;
+    }
+
+    /** The Sources assistant's action, or {@code null} (plan PR 15). */
+    public Action getAction() {
+        return action;
     }
 
     public String getAssistantMessage() {

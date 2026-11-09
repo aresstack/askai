@@ -37,7 +37,7 @@ public class PortMainModelPassthroughTest {
     public void teamAgentGreetsProposesScopeAndIgnoresDisallowedCommandsOverThePort() {
         FakeModelPort port = new FakeModelPort();
         port.enqueueMessage("Hi! What would you like to research?");
-        port.enqueueScopeProposal("Great, let me confirm the scope.", "SUBMIT_SCOPE",
+        port.enqueueCommandProposal("Great, let me confirm the scope.", "SUBMIT_SCOPE",
                 "How does pf4j isolate plugins?", Arrays.asList("class isolation", "versioning"));
         ResearchTeamAgent agent = new ResearchTeamAgent(new PortMainModelChat(port,
                 ResearchModelSlots.PHASE_SCOPING, Duration.ofSeconds(120)));
@@ -49,7 +49,6 @@ public class PortMainModelPassthroughTest {
         TeamAgentResult reply = agent.respond("pf4j isolation", genericRunning());
         assertEquals(TeamAgentResult.Status.OK, reply.getStatus());
         assertEquals("SUBMIT_SCOPE", reply.getValidatedCommand());
-        assertEquals("How does pf4j isolate plugins?", agent.getProposedQuestion());
 
         // The conversation slot reached the port, with the per-call timeout and no thinking setting (the
         // former client sent none), and the greeting was carried in the second turn's history.
@@ -64,7 +63,7 @@ public class PortMainModelPassthroughTest {
         // A legacy command the host does not allow is silently IGNORED now (the assistant no longer
         // owns the workflow): the friendly message is still shown, the command just does not surface,
         // and there is no policing repair round.
-        port.enqueueScopeProposal("Happy to keep helping.", "START_RESEARCH", "q", Arrays.asList("a"));
+        port.enqueueCommandProposal("Happy to keep helping.", "START_RESEARCH", "q", Arrays.asList("a"));
         int callsBefore = port.requests().size();
         TeamAgentResult ignored = agent.respond("go", genericRunning());
         assertEquals(TeamAgentResult.Status.OK, ignored.getStatus());
@@ -87,6 +86,8 @@ public class PortMainModelPassthroughTest {
 
         ChatRequest generic = port.requests().get(0);
         assertEquals(OutputFormat.Kind.JSON, generic.getOutputFormat().getKind());
+        assertEquals("research calls never let Ollama cut the prompt (PR 17)", Boolean.FALSE,
+                generic.getTruncate());
         assertEquals(ResearchModelSlots.SCOPE, generic.getSlot());
         assertEquals(Double.valueOf(0.2), generic.getTemperature());
         assertEquals(64, generic.getMaxOutputTokens());

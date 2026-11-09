@@ -64,6 +64,36 @@ public final class BookManifest {
         AtomicFiles.write(file, GSON.toJson(root));
     }
 
+    /** Plan PR 14: append the approved source set; refused when the manifest is damaged. */
+    public synchronized void appendSourcesPin(SourcesPin pin) throws IOException {
+        JsonObject root = writableRoot();
+        root.getAsJsonArray("pins").add(pin.toJson());
+        AtomicFiles.write(file, GSON.toJson(root));
+    }
+
+    /** Every sources pin in the order written. */
+    public synchronized List<SourcesPin> sourcesPins() throws CorruptProjectFileException {
+        List<SourcesPin> pins = new ArrayList<SourcesPin>();
+        for (JsonElement element : read().getAsJsonArray("pins")) {
+            JsonObject pin = element.getAsJsonObject();
+            if (SourcesPin.PHASE.equals(string(pin, "phase"))) {
+                pins.add(SourcesPin.fromJson(pin));
+            }
+        }
+        return pins;
+    }
+
+    /** The newest sources pin whose transition is committed, or {@code null}. */
+    public synchronized SourcesPin validSourcesPin(CommitCheck commits) throws CorruptProjectFileException {
+        List<SourcesPin> pins = sourcesPins();
+        for (int index = pins.size() - 1; index >= 0; index--) {
+            if (commits.isCommitted(pins.get(index).getTransitionId())) {
+                return pins.get(index);
+            }
+        }
+        return null;
+    }
+
     /** Append one outline pin; refused when the manifest is damaged. */
     public synchronized void appendOutlinePin(OutlinePin pin) throws IOException {
         JsonObject root = writableRoot();
@@ -212,6 +242,8 @@ public final class BookManifest {
             for (JsonElement pin : root.getAsJsonArray("pins")) {
                 if (ConceptPin.PHASE.equals(string(pin.getAsJsonObject(), "phase"))) {
                     ConceptPin.fromJson(pin.getAsJsonObject()); // validates the fields
+                } else if (SourcesPin.PHASE.equals(string(pin.getAsJsonObject(), "phase"))) {
+                    SourcesPin.fromJson(pin.getAsJsonObject());
                 } else if (OutlinePin.PHASE.equals(string(pin.getAsJsonObject(), "phase"))) {
                     OutlinePin.fromJson(pin.getAsJsonObject());
                 }

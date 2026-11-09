@@ -95,9 +95,8 @@ public class ProductiveModeFactorySmokeTest {
         host.services.put(com.aresstack.askai.agent.model.port.ModelPort.class, mockModel);
         mockModel.enqueueMessage("Hi! I'm your research assistant. What would you like to find out?");
         // The successful greeting advances the state SCOPING/NEW -> SCOPING/RUNNING (GREETING_DONE), where
-        // SUBMIT_SCOPE is the allowed command; the model uses it to submit its confirmed scope and the host
-        // executes the proposal (commit + auto-advance) to the outline gate.
-        mockModel.enqueueScopeProposal("Let me put together an outline for your approval.", "SUBMIT_SCOPE",
+        // SUBMIT_SCOPE is allowed; a proposed command is only a hint now (plan PR 15: no scope proposal wire).
+        mockModel.enqueueCommandProposal("Let me put together an outline for your approval.", "SUBMIT_SCOPE",
                 "pf4j plugin framework",
                 java.util.Arrays.asList("plugin isolation", "java 8 compatibility"));
         host.services.put(com.aresstack.askai.agent.model.inference.InferenceConfigurationSnapshotProvider.class,

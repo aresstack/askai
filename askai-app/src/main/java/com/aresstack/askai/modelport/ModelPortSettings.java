@@ -274,10 +274,24 @@ public final class ModelPortSettings {
                 + "Models -> Setup.";
     }
 
-    /** "The page judge needs a model that can turn thinking off." */
-    public static String thinkingOffRequiredMessage(String slot) {
+    /**
+     * "The page judge needs a model that can turn thinking off; gpt-oss:20b cannot. Set a model for it under
+     * Research settings -> Models."
+     */
+    public static String thinkingOffRequiredMessage(String slot, String model) {
         String role = describe(slot);
-        return "The " + role + " needs a model that can turn thinking off.";
+        return "The " + role + " needs a model that can turn thinking off; " + model.trim()
+                + " cannot. Set a model for it under Research settings -> Models.";
+    }
+
+    /**
+     * True when {@code model} belongs to a family that accepts only thinking levels, never "off" (plan 4.1,
+     * rule 3), so it can never serve a {@linkplain #isHelperSlot helper slot}.
+     */
+    public static boolean isLevelOnlyModel(String model, String family) {
+        String name = model == null ? "" : model.trim().toLowerCase(java.util.Locale.ROOT);
+        String fam = family == null ? "" : family.toLowerCase(java.util.Locale.ROOT).replace("-", "");
+        return name.startsWith("gpt-oss") || fam.equals("gptoss");
     }
 
     /** The exact slot, its parents and the default slot, in resolution order. */

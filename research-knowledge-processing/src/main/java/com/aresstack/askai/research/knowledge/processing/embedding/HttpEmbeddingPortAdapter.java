@@ -108,7 +108,8 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
             }
             sb.append(jsonString(inputs.get(i)));
         }
-        sb.append("],\"input_type\":").append(jsonString(inputType)).append('}');
+        // PR 20: never let the runtime cut a text silently; passages are split to fit before embedding.
+        sb.append("],\"input_type\":").append(jsonString(inputType)).append(",\"truncate\":false}");
         return sb.toString();
     }
 

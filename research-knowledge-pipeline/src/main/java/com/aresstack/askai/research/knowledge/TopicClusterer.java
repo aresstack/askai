@@ -14,7 +14,7 @@ import java.util.Map;
  * no fixed topic count, small isolated topics stay visible, and the merge tree naturally maps to chapter
  * hierarchies later. Deterministic: ties resolve by insertion order. The result are {@link TopicProposal}s
  * — titles/summaries come from representative passages (AI may rephrase them later, membership never
- * depends on that phrasing).
+ * depends on that phrasing). Ordering: clusters by their first passage in input order, members in input order.
  */
 public final class TopicClusterer {
 
@@ -34,55 +34,198 @@ public final class TopicClusterer {
 
     public List<TopicProposal> cluster(List<Passage> passages,
                                        Map<String, EmbeddingPort.EmbeddingVector> vectors) {
-        List<List<Passage>> clusters = new ArrayList<List<Passage>>();
-        for (Passage passage : passages) {
-            if (!vectors.containsKey(passage.getPassageId())) {
-                throw new IllegalArgumentException("no vector for passage " + passage.getPassageId());
-            }
-            List<Passage> singleton = new ArrayList<Passage>();
-            singleton.add(passage);
-            clusters.add(singleton);
-        }
-        // Agglomerate: always merge the currently closest pair until the cutoff distance is reached.
-        while (clusters.size() > 1) {
-            int bestA = -1;
-            int bestB = -1;
-            double bestDistance = Double.MAX_VALUE;
-            for (int a = 0; a < clusters.size(); a++) {
-                for (int b = a + 1; b < clusters.size(); b++) {
-                    double distance = averageLinkageDistance(clusters.get(a), clusters.get(b), vectors);
-                    if (distance < bestDistance) {
-                        bestDistance = distance;
-                        bestA = a;
-                        bestB = b;
-                    }
-                }
-            }
-            if (bestDistance > mergeDistanceCutoff) {
-                break;
-            }
-            clusters.get(bestA).addAll(clusters.remove(bestB));
-        }
+        return cluster(passages, vectors, ClusteringMonitor.NONE);
+    }
 
+    /**
+     * PR 20: average linkage over a cached condensed distance matrix of the normalised vectors, updated with
+     * Lance-Williams and walked with a nearest-neighbour chain. Average linkage is reducible, so the chain
+     * makes the same merges as the former scan of all pairs per merge, in O(n²) time and memory instead of
+     * cubic time. A cluster whose nearest neighbour lies beyond the cutoff can never merge again
+     * (reducibility: a merged cluster is never closer than the nearer of its parts) and is retired. Ties
+     * break by the lower index.
+     */
+    public List<TopicProposal> cluster(List<Passage> passages,
+                                       Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                       ClusteringMonitor monitor) {
+        ClusteringMonitor m = monitor == null ? ClusteringMonitor.NONE : monitor;
+        int n = passages.size();
+        float[][] unit = new float[n][];
+        String fingerprint = null;
+        int dimension = -1;
+        for (int i = 0; i < n; i++) {
+            EmbeddingPort.EmbeddingVector vector = vectors.get(passages.get(i).getPassageId());
+            if (vector == null) {
+                throw new IllegalArgumentException("no vector for passage " + passages.get(i).getPassageId());
+            }
+            if (fingerprint == null) {
+                fingerprint = vector.getModelFingerprint();
+                dimension = vector.getDimension();
+            } else if (!fingerprint.equals(vector.getModelFingerprint()) || dimension != vector.getDimension()) {
+                throw new IllegalArgumentException("vectors of different embedding models/dimensions must "
+                        + "never be compared: " + fingerprint + "/" + dimension + " vs "
+                        + vector.getModelFingerprint() + "/" + vector.getDimension());
+            }
+            unit[i] = normalised(vector.raw());
+        }
+        List<List<Integer>> members = agglomerate(unit, m);
         List<TopicProposal> proposals = new ArrayList<TopicProposal>();
-        for (List<Passage> cluster : clusters) {
-            proposals.add(toProposal(cluster, vectors));
+        for (List<Integer> cluster : members) {
+            List<Passage> clusterPassages = new ArrayList<Passage>();
+            for (Integer index : cluster) {
+                clusterPassages.add(passages.get(index));
+            }
+            proposals.add(toProposal(clusterPassages, vectors));
         }
         return proposals;
     }
 
-    private double averageLinkageDistance(List<Passage> a, List<Passage> b,
-                                          Map<String, EmbeddingPort.EmbeddingVector> vectors) {
-        double sum = 0;
-        int pairs = 0;
-        for (Passage pa : a) {
-            for (Passage pb : b) {
-                sum += 1.0 - VectorMath.cosine(vectors.get(pa.getPassageId()),
-                        vectors.get(pb.getPassageId()));
-                pairs++;
+    /** Clusters as lists of input indexes, members ascending, clusters ordered by their lowest member. */
+    private List<List<Integer>> agglomerate(float[][] unit, ClusteringMonitor monitor) {
+        final int n = unit.length;
+        List<List<Integer>> result = new ArrayList<List<Integer>>();
+        if (n == 0) {
+            return result;
+        }
+        float[] distance = new float[(int) Math.min(Integer.MAX_VALUE - 8L, (long) n * (n - 1) / 2)];
+        if ((long) n * (n - 1) / 2 > distance.length) {
+            throw new IllegalArgumentException("corpus too large for one similarity matrix: " + n);
+        }
+        long total = (long) n + n;
+        for (int i = 0; i < n; i++) {
+            if (monitor.isCancelled()) {
+                throw new ClusteringMonitor.ClusteringCancelledException();
+            }
+            float[] x = unit[i];
+            int base = rowBase(i, n);
+            for (int j = i + 1; j < n; j++) {
+                float[] y = unit[j];
+                double dot = 0;
+                for (int k = 0; k < x.length; k++) {
+                    dot += x[k] * y[k];
+                }
+                distance[base + j] = (float) (1.0 - dot);
+            }
+            monitor.progress("Comparing passages", i + 1, total);
+        }
+        int[] size = new int[n];
+        boolean[] active = new boolean[n];
+        List<List<Integer>> clusterMembers = new ArrayList<List<Integer>>(n);
+        for (int i = 0; i < n; i++) {
+            size[i] = 1;
+            active[i] = true;
+            List<Integer> single = new ArrayList<Integer>();
+            single.add(i);
+            clusterMembers.add(single);
+        }
+        int activeCount = n;
+        int[] chain = new int[n];
+        int chainLength = 0;
+        long steps = 0;
+        while (activeCount > 1) {
+            if (monitor.isCancelled()) {
+                throw new ClusteringMonitor.ClusteringCancelledException();
+            }
+            if (chainLength == 0) {
+                for (int i = 0; i < n; i++) {
+                    if (active[i]) {
+                        chain[chainLength++] = i;
+                        break;
+                    }
+                }
+            }
+            int a = chain[chainLength - 1];
+            int previous = chainLength >= 2 ? chain[chainLength - 2] : -1;
+            // Nearest active neighbour of a; ties prefer the chain predecessor (termination), else the lower index.
+            int best = -1;
+            float bestDistance = Float.MAX_VALUE;
+            if (previous >= 0) {
+                best = previous;
+                bestDistance = distance[index(a, previous, n)];
+            }
+            for (int j = 0; j < n; j++) {
+                if (!active[j] || j == a) {
+                    continue;
+                }
+                float d = distance[index(a, j, n)];
+                if (d < bestDistance || (d == bestDistance && j != previous && best != previous && j < best)) {
+                    bestDistance = d;
+                    best = j;
+                }
+            }
+            if (bestDistance > mergeDistanceCutoff) {
+                // a can never merge again: retire it; the chain below it stays valid.
+                active[a] = false;
+                activeCount--;
+                chainLength--;
+                result.add(clusterMembers.get(a));
+                continue;
+            }
+            if (best == previous) {
+                chainLength -= 2;
+                int keep = Math.min(a, best);
+                int drop = Math.max(a, best);
+                int sizeKeep = size[keep];
+                int sizeDrop = size[drop];
+                for (int k = 0; k < n; k++) {
+                    if (!active[k] || k == keep || k == drop) {
+                        continue;
+                    }
+                    int ik = index(keep, k, n);
+                    distance[ik] = (float) ((sizeKeep * (double) distance[ik]
+                            + sizeDrop * (double) distance[index(drop, k, n)]) / (sizeKeep + sizeDrop));
+                }
+                size[keep] = sizeKeep + sizeDrop;
+                clusterMembers.get(keep).addAll(clusterMembers.get(drop));
+                clusterMembers.set(drop, null);
+                active[drop] = false;
+                activeCount--;
+                steps++;
+                monitor.progress("Merging topics", n + steps, total);
+            } else {
+                chain[chainLength++] = best;
             }
         }
-        return sum / pairs;
+        for (int i = 0; i < n; i++) {
+            if (active[i]) {
+                result.add(clusterMembers.get(i));
+            }
+        }
+        for (List<Integer> cluster : result) {
+            java.util.Collections.sort(cluster);
+        }
+        java.util.Collections.sort(result, new java.util.Comparator<List<Integer>>() {
+            public int compare(List<Integer> x, List<Integer> y) {
+                return Integer.compare(x.get(0), y.get(0));
+            }
+        });
+        monitor.progress("Merging topics", total, total);
+        return result;
+    }
+
+    private static int rowBase(int i, int n) {
+        // offset of (i, j) is rowBase(i) + j for j > i
+        return (int) ((long) i * n - (long) i * (i + 1) / 2 - i - 1);
+    }
+
+    private static int index(int i, int j, int n) {
+        return i < j ? rowBase(i, n) + j : rowBase(j, n) + i;
+    }
+
+    private static float[] normalised(float[] values) {
+        double norm = 0;
+        for (float v : values) {
+            norm += v * v;
+        }
+        float[] out = new float[values.length];
+        if (norm == 0) {
+            return out; // cosine 0 to everything, as VectorMath.cosine treats a zero vector
+        }
+        double scale = 1.0 / Math.sqrt(norm);
+        for (int i = 0; i < values.length; i++) {
+            out[i] = (float) (values[i] * scale);
+        }
+        return out;
     }
 
     private TopicProposal toProposal(List<Passage> cluster,
