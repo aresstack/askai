@@ -70,7 +70,7 @@ public final class OutlineEditorView extends JPanel {
     }
 
     private final JLabel modeLabel = new JLabel();
-    private final JTextArea changeRequest = new JTextArea();
+    private final JTextArea changeRequest = com.aresstack.comiccontrols.control.ComicControls.textArea();
     private final JLabel status = new JLabel(" ");
     private final JButton generateButton = new ComicButton("Generate outline");
     private final JButton modeToggle = new ComicButton("JSON");
@@ -84,11 +84,11 @@ public final class OutlineEditorView extends JPanel {
     private final JButton downButton = new ComicButton("Down");
     private final JButton indentButton = new ComicButton("Indent");
     private final JButton outdentButton = new ComicButton("Outdent");
-    private final JTextArea jsonArea = new JTextArea();
+    private final JTextArea jsonArea = com.aresstack.comiccontrols.control.ComicControls.textArea();
     private final JButton saveButton = new ComicButton("Save");
     private final JButton discardButton = new ComicButton("Discard");
     private final DefaultListModel<Long> revisionModel = new DefaultListModel<Long>();
-    private final JList<Long> revisions = new JList<Long>(revisionModel);
+    private final JList<Long> revisions = com.aresstack.comiccontrols.control.ComicControls.list(revisionModel);
     private final JButton viewButton = new ComicButton("View");
     private final JButton restoreButton = new ComicButton("Restore");
     private final JPanel center = new JPanel(new CardLayout());
