@@ -22,6 +22,10 @@ public final class BrowserSearchEngineCatalog {
     public static final String STARTPAGE = "startpage";
     public static final String YAHOO = "yahoo";
     public static final String YAHOO_JAPAN = "yahoo-japan";
+    public static final String SEZNAM = "seznam";
+    public static final String YANDEX = "yandex";
+    public static final String NAVER = "naver";
+    public static final String COCCOC = "coccoc";
     /**
      * The engine a dev/test {@code --search-url=} override installs. It is not part of the catalog: it
      * exists only when someone hands the sidecar an explicit template, and it then REPLACES the
@@ -88,6 +92,31 @@ public final class BrowserSearchEngineCatalog {
                             new BrowserSearchEngine.SearchForm("https://search.yahoo.co.jp/",
                                     Arrays.asList("input[name=p]", "input[type=search]"),
                                     Arrays.asList("a.Pagenation__next", "a:has-text('次へ')"))),
+                            10),
+                    new BrowserSearchEngine(SEZNAM, "Seznam", Arrays.asList(
+                            // search.seznam.cz: search field name q; next page through "Další" (next).
+                            new BrowserSearchEngine.SearchForm("https://search.seznam.cz/",
+                                    Arrays.asList("input[name=q]", "input[type=search]"),
+                                    Arrays.asList("a[rel=next]", "a:has-text('Další')"))),
+                            10),
+                    new BrowserSearchEngine(YANDEX, "Yandex", Arrays.asList(
+                            // yandex.com: search field name text; next page through the pager's "next" item.
+                            new BrowserSearchEngine.SearchForm("https://yandex.com/",
+                                    Arrays.asList("input[name=text]", "textarea[name=text]", "input[type=search]"),
+                                    Arrays.asList("a.Pager-Item_type_next", "a.pager__item_kind_next",
+                                            "a[aria-label='Next page']", "a:has-text('дальше')"))),
+                            10),
+                    new BrowserSearchEngine(NAVER, "Naver", Arrays.asList(
+                            // www.naver.com: search field id query; next page through the pager's "다음" (next).
+                            new BrowserSearchEngine.SearchForm("https://www.naver.com/",
+                                    Arrays.asList("input#query", "input[name=query]", "input[type=search]"),
+                                    Arrays.asList("a.btn_next", "a.pg_next", "a:has-text('다음')"))),
+                            10),
+                    new BrowserSearchEngine(COCCOC, "Cốc Cốc", Arrays.asList(
+                            // coccoc.com/search: search field name query; next page through "Trang sau" (next).
+                            new BrowserSearchEngine.SearchForm("https://coccoc.com/search",
+                                    Arrays.asList("input[name=query]", "input[type=search]"),
+                                    Arrays.asList("a[rel=next]", "a:has-text('Trang sau')"))),
                             10))));
 
     private BrowserSearchEngineCatalog() {
