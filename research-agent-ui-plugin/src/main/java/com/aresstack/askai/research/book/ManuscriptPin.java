@@ -62,6 +62,9 @@ public final class ManuscriptPin {
     private final int outlineRevision;
     private final long approvedAt;
     private final List<Entry> sections;
+    private String bookStatus = "";
+    private String qualityReport = "";
+    private final java.util.Map<String, String> citedSources = new java.util.LinkedHashMap<String, String>();
 
     public ManuscriptPin(String transitionId, int outlineRevision, long approvedAt, List<Entry> sections) {
         if (transitionId == null || transitionId.isEmpty()) {
@@ -88,6 +91,33 @@ public final class ManuscriptPin {
 
     public List<Entry> getSections() {
         return sections;
+    }
+
+    /**
+     * Plan PR 30: the same pin with the quality report of the final assembly and every cited source with the
+     * checksum the book cites it by (reference order).
+     */
+    public ManuscriptPin withBook(String status, String report, java.util.Map<String, String> cited) {
+        ManuscriptPin pin = new ManuscriptPin(transitionId, outlineRevision, approvedAt, sections);
+        pin.bookStatus = status == null ? "" : status;
+        pin.qualityReport = report == null ? "" : report;
+        if (cited != null) {
+            pin.citedSources.putAll(cited);
+        }
+        return pin;
+    }
+
+    public String getBookStatus() {
+        return bookStatus;
+    }
+
+    public String getQualityReport() {
+        return qualityReport;
+    }
+
+    /** Source id to checksum of every cited source, in reference order. */
+    public java.util.Map<String, String> getCitedSources() {
+        return Collections.unmodifiableMap(citedSources);
     }
 
     /** The distinct model labels of the pinned revisions, in first-use order. */
@@ -123,6 +153,16 @@ public final class ManuscriptPin {
             labels.add(label);
         }
         json.add("modelLabels", labels);
+        json.addProperty("bookStatus", bookStatus);
+        json.addProperty("qualityReport", qualityReport);
+        JsonArray cited = new JsonArray();
+        for (java.util.Map.Entry<String, String> source : citedSources.entrySet()) {
+            JsonObject c = new JsonObject();
+            c.addProperty("sourceId", source.getKey());
+            c.addProperty("checksum", source.getValue());
+            cited.add(c);
+        }
+        json.add("citedSources", cited);
         return json;
     }
 
@@ -134,7 +174,16 @@ public final class ManuscriptPin {
                     e.get("revision").getAsInt(), BookManifest.string(e, "textHash"),
                     BookManifest.string(e, "modelLabel")));
         }
-        return new ManuscriptPin(BookManifest.string(json, "transitionId"), json.get("outlineRevision").getAsInt(),
-                json.get("approvedAt").getAsLong(), entries);
+        ManuscriptPin pin = new ManuscriptPin(BookManifest.string(json, "transitionId"),
+                json.get("outlineRevision").getAsInt(), json.get("approvedAt").getAsLong(), entries);
+        java.util.Map<String, String> cited = new java.util.LinkedHashMap<String, String>();
+        if (json.has("citedSources")) {
+            for (JsonElement element : json.getAsJsonArray("citedSources")) {
+                JsonObject c = element.getAsJsonObject();
+                cited.put(BookManifest.string(c, "sourceId"), BookManifest.string(c, "checksum"));
+            }
+        }
+        return pin.withBook(json.has("bookStatus") ? BookManifest.string(json, "bookStatus") : "",
+                json.has("qualityReport") ? BookManifest.string(json, "qualityReport") : "", cited);
     }
 }

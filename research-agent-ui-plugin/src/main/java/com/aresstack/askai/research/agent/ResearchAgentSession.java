@@ -2413,6 +2413,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         com.aresstack.askai.research.book.ManuscriptFreezeHook hook =
                 new com.aresstack.askai.research.book.ManuscriptFreezeHook(manuscript, outline.store(), bookManifest,
                         engine::isCommitted);
+        hook.setAssembly(() -> assembleBook(manuscript));
         engine.addHook(hook);
         engine.registerEffect(com.aresstack.askai.research.book.ManuscriptFreezeHook.EFFECT_OUTLINE,
                 hook.outlineEffect());
@@ -2463,8 +2464,45 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return "Not started yet. The manuscript opens when the workflow reaches Document.";
     }
 
-    /** Generate the read-only "document" artifact from the manuscript (plan PR 26). */
+    /** The one serial executor of the book assembler (plan PR 30): the only writer of {@code document.md}. */
+    private final java.util.concurrent.ExecutorService documentAssembler =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "research-book-assembler");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private volatile com.aresstack.askai.research.assembly.AssembledBook lastAssembledBook;
+
+    /** The latest assembly with its citations and quality report (plan PR 30), or {@code null}. */
+    public com.aresstack.askai.research.assembly.AssembledBook assembledBook() {
+        return lastAssembledBook;
+    }
+
+    /** Assemble {@code document.md} after a manuscript change, on the serial assembler executor (plan PR 30). */
     private void renderDocumentArtifact() {
+        documentAssembler.execute(this::assembleDocumentNow);
+    }
+
+    /**
+     * The quality report at the Document gate (plan PR 30, Q27): the status and its warnings; the user may approve
+     * an incomplete draft as well.
+     */
+    private void announceQualityReport() {
+        com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript = manuscript();
+        if (manuscript == null) {
+            return;
+        }
+        try {
+            com.aresstack.askai.research.assembly.BookQualityReport report = assembleBook(manuscript).getReport();
+            sayAsAgent(report.summary() + (report.isComplete() ? ""
+                    : ". You can still approve the book with these warnings."));
+        } catch (RuntimeException failed) {
+            System.err.println("[research] quality report failed: " + failed.getMessage());
+        }
+    }
+
+    /** One assembly; runs only on {@link #documentAssembler}, so it needs no lock. */
+    private void assembleDocumentNow() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return;
         }
@@ -2473,16 +2511,75 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     productiveResources.manuscriptWorkspace();
             com.aresstack.askai.plugin.api.agent.artifact.AgentArtifactStore store =
                     productiveResources.getArtifactStore();
-            String markdown = com.aresstack.askai.research.manuscript.ManuscriptDocument.markdown(
-                    approvedOutlineOrNull(), manuscript.store());
+            com.aresstack.askai.research.assembly.AssembledBook book = assembleBook(manuscript);
+            lastAssembledBook = book;
+            String markdown = book.getMarkdown();
             com.aresstack.askai.plugin.api.agent.artifact.ArtifactContent current = store.read("document");
             if (!markdown.equals(current.getMarkdown())) {
                 store.replace("document", current.getRevision(), markdown);
             }
         } catch (RuntimeException renderFailed) {
-            System.err.println("[research] document artifact render failed: " + renderFailed.getMessage());
+            System.err.println("[research] document assembly failed: " + renderFailed.getMessage());
         }
         uiExecutor.execute(this::fireStateChanged);
+    }
+
+    /**
+     * The acronym long forms of the accepted sources (plan PR 30, PR 38), read from the store PR 29 refreshes under
+     * {@code <project>/acronyms}; empty before the first writing run.
+     */
+    private java.util.List<com.aresstack.askai.research.knowledge.processing.acronym.AcronymLongForms>
+            acronymLongForms() {
+        java.io.File dir = new java.io.File(productiveResources.getProjectContext().getProjectDirectory(), "acronyms");
+        com.aresstack.askai.research.sources.ResearchSourceRepository repository = productiveResources.getRepository();
+        if (!dir.isDirectory() || repository == null) {
+            return java.util.Collections.emptyList();
+        }
+        java.util.List<String> accepted = new java.util.ArrayList<String>();
+        for (com.aresstack.askai.research.sources.ResearchSourceRecord record
+                : repository.find(com.aresstack.askai.research.sources.SourceQuery.all())) {
+            if (record.getStatus() == com.aresstack.askai.research.sources.SourceStatus.ACCEPTED) {
+                accepted.add(record.getSourceId());
+            }
+        }
+        return new com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService(
+                com.aresstack.askai.research.knowledge.processing.acronym.SentenceSegmenter.splitter(),
+                new com.aresstack.askai.research.knowledge.processing.acronym.FileSourceAcronymStore(dir.toPath()))
+                .longForms(accepted);
+    }
+
+    private com.aresstack.askai.research.assembly.AssembledBook assembleBook(
+            com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript) {
+        com.aresstack.askai.research.outline.Outline outline = null;
+        int outlineRevision = 0;
+        com.aresstack.askai.research.book.SourcesPin pin = null;
+        com.aresstack.askai.research.assembly.BookAssemblyInputs.Concept concept = null;
+        try {
+            com.aresstack.askai.research.book.ApprovedOutline approved = approvedOutline();
+            if (approved != null) {
+                outline = approved.getOutline();
+                outlineRevision = approved.getRevision();
+            }
+            final com.aresstack.askai.research.transition.TransitionEngine engine = productiveResources.transitions();
+            if (bookManifest != null) {
+                pin = bookManifest.validSourcesPin(engine::isCommitted);
+            }
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen != null) {
+                String title = frozen.getDeliverable() == null || frozen.getDeliverable().trim().isEmpty()
+                        ? frozen.getMission() : frozen.getDeliverable();
+                concept = new com.aresstack.askai.research.assembly.BookAssemblyInputs.Concept(
+                        title, frozen.getRevision(), frozen.cardNames());
+            }
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            System.err.println("[research] book assembly reads a damaged manifest: " + corrupt.getMessage());
+        }
+        com.aresstack.askai.research.assembly.BookAssemblyInput input =
+                com.aresstack.askai.research.assembly.BookAssemblyInputs.read(outline, outlineRevision,
+                        manuscript.store(), productiveResources.getRepository(), pin, concept,
+                        acronymLongForms(),
+                        System.currentTimeMillis(), java.util.TimeZone.getDefault());
+        return new com.aresstack.askai.research.assembly.BookAssembler().assemble(input);
     }
 
     /** The latest change request of the Outline phase (shown above the outline editor, plan PR 23); "" when none. */
@@ -6268,6 +6365,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 || type == ResearchCommandType.REQUEST_DRAFT_REVIEW)) {
             outcomeOffers = java.util.Collections.emptyList(); // a phase exit clears the run offers
             showRestoredActionsIfAny();
+        }
+        if (dispatched.isAccepted() && type == ResearchCommandType.REQUEST_DRAFT_REVIEW) {
+            announceQualityReport(); // plan PR 30: the gate message names the report's warnings
         }
         return dispatched.isAccepted() ? "handled: dispatched " + cmd
                 : "rejected: " + dispatched.getStatus() + " " + dispatched.getDetail();
