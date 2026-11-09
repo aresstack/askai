@@ -33,7 +33,7 @@ public final class SearchEngineCatalog {
     public static final String MOJEEK = "mojeek";
     public static final String QWANT = "qwant";
     public static final String ECOSIA = "ecosia";
-    public static final String STARTPAGE = "startpage";
+    public static final String STARTPAGE = BrowserSearchEngineCatalog.STARTPAGE;
     public static final String SWISSCOWS = "swisscows";
     public static final String SEZNAM = "seznam";
     public static final String YANDEX = "yandex";
@@ -81,8 +81,9 @@ public final class SearchEngineCatalog {
                             "Bing, Google and a European index", langs("de", "en", "fr"), NOT_IMPLEMENTED,
                             NO_ADAPTER),
                     entry(STARTPAGE, "Startpage", "Netherlands", "https://www.startpage.com/", "Mostly Google",
-                            langs("de", "en", "fr"), NOT_IMPLEMENTED,
-                            "Adapter planned next: Google results with direct target URLs (no redirect wrappers)."),
+                            langs("de", "en", "fr"), EXPERIMENTAL,
+                            "Search form adapter in the research browser: Google results with direct target URLs "
+                                    + "(no redirect wrappers). Not validated against the live engine yet."),
                     entry(SWISSCOWS, "Swisscows", "Switzerland", "https://swisscows.com/",
                             "Own and partner data", langs("de", "en", "fr"), NOT_IMPLEMENTED, NO_ADAPTER),
                     entry(SEZNAM, "Seznam", "Czech Republic", "https://search.seznam.cz/", "Own index",
