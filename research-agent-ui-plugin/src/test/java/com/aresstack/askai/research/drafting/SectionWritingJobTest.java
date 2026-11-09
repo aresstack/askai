@@ -232,4 +232,37 @@ public class SectionWritingJobTest {
         assertTrue(writer.calls.isEmpty());
         assertFalse(outcome.getRefusal().isEmpty());
     }
+
+    @Test
+    public void finishDocumentIsRefusedWhileSectionsAreOpenAndNamesStaleOnes() {
+        writer.failAlways.add("s2");
+        SectionWritingJob job = job();
+        job.writeRemaining(outline);
+        assertTrue(FinishDocumentCheck.refusal(job.openSections(outline)).contains("Section s2"));
+        manuscript.skip("s2", "c1", 2L);
+        assertEquals(null, FinishDocumentCheck.refusal(job.openSections(outline)));
+        manuscript.store().mark("s7", null, SectionStatus.STALE, "changed", 3L);
+        assertTrue(FinishDocumentCheck.confirmation(job.staleSections(outline)).contains("Section s7"));
+    }
+
+    @Test
+    public void researchThisGapAddsOnePriorityEntryAndRunsIt() throws Exception {
+        final List<String> added = new ArrayList<String>();
+        final int[] runs = {0};
+        GapResearch gaps = new GapResearch(new GapResearch.Queue() {
+            public String addPriority(String id, String phase, String query, String label) {
+                added.add(phase + "|" + query + "|" + label);
+                return id;
+            }
+
+            public void run() {
+                runs[0]++;
+            }
+        });
+        String id = gaps.research("s3", "Soil moisture", "no field data for 2024");
+        assertTrue(id.startsWith("gap-s3-"));
+        assertEquals(Collections.singletonList("draft|Soil moisture no field data for 2024|Section: Soil moisture"),
+                added);
+        assertEquals(1, runs[0]);
+    }
 }
