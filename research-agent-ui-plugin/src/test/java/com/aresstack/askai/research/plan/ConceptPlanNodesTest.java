@@ -73,6 +73,12 @@ public class ConceptPlanNodesTest {
                 Collections.<String>emptyList());
         assertEquals("Wearables auf Baustellen Sicherheit Sensorik Datenschutz", nodes.get(0).getBaseQuery());
         assertEquals("Technologien und Sensortypen Wearables auf Baustellen", nodes.get(1).getBaseQuery());
+        // apostrophes inside words never open or close a title (Codex on #167)
+        assertEquals("Managing blood sugar", ConceptPlanNodes.quotedTitle("Write a book on diabetes for patients "
+                + "who don't have a doctor's support, titled \"Managing blood sugar\"."));
+        assertEquals("Managing blood sugar", ConceptPlanNodes.quotedTitle("Write a book for patients who don't "
+                + "have a doctor's support, titled 'Managing blood sugar'."));
+        assertEquals(null, ConceptPlanNodes.quotedTitle("Patients who don't have a doctor's support"));
         // without a quoted title the qualities of the text still never reach a query
         List<String> keywords = ConceptPlanNodes.missionKeywords(
                 "Ein kompaktes, vollständig belegtes Praxisbuch zu Exoskeletten im Bau", Collections.<String>emptyList());

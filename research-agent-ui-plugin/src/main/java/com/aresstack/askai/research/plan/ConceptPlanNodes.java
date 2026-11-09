@@ -86,10 +86,12 @@ public final class ConceptPlanNodes {
 
     /**
      * A title quoted in the mission („…“, “…”, "…", »…«, ‚…‘, '…'): the book's subject in the author's own words,
-     * which the mission's other sentences only frame.
+     * which the mission's other sentences only frame. A quote counts only at a word boundary, so the apostrophes
+     * of "don't" and "doctor's" never open or close a title.
      */
     private static final java.util.regex.Pattern QUOTED_TITLE = java.util.regex.Pattern.compile(
-            "„([^“”\"]{4,}?)“|“([^“”\"]{4,}?)”|\"([^\"]{4,}?)\"|»([^«»]{4,}?)«|‚([^‘’']{4,}?)‘|'([^']{4,}?)'");
+            "(?<![\\p{L}\\p{N}])(?:„([^“”\"]{4,}?)“|“([^“”\"]{4,}?)”|\"([^\"]{4,}?)\"|»([^«»]{4,}?)«"
+                    + "|‚([^‘’']{4,}?)‘|'([^']{4,}?)')(?![\\p{L}\\p{N}])");
 
     private ConceptPlanNodes() {
     }
