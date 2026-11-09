@@ -31,10 +31,28 @@ public final class Outline {
     };
 
     private final List<OutlineChapter> chapters;
+    private final List<OutlineCandidate> candidates;
 
     public Outline(List<OutlineChapter> chapters) {
+        this(chapters, null);
+    }
+
+    /** Plan PR 22: an outline with the leftover clusters of its last generation listed as candidates. */
+    public Outline(List<OutlineChapter> chapters, List<OutlineCandidate> candidates) {
         this.chapters = Collections.unmodifiableList(new ArrayList<OutlineChapter>(
                 chapters == null ? Collections.<OutlineChapter>emptyList() : chapters));
+        this.candidates = Collections.unmodifiableList(new ArrayList<OutlineCandidate>(
+                candidates == null ? Collections.<OutlineCandidate>emptyList() : candidates));
+    }
+
+    /** Leftover clusters of the last generation (plan PR 22): listed, never inserted. */
+    public List<OutlineCandidate> getCandidates() {
+        return candidates;
+    }
+
+    /** A copy with the candidates replaced. */
+    public Outline withCandidates(List<OutlineCandidate> newCandidates) {
+        return new Outline(chapters, newCandidates);
     }
 
     public List<OutlineChapter> getChapters() {
@@ -79,7 +97,7 @@ public final class Outline {
 
     /** A copy with the chapters replaced. */
     public Outline withChapters(List<OutlineChapter> newChapters) {
-        return new Outline(newChapters);
+        return new Outline(newChapters, candidates);
     }
 
     /** A copy with stale reasons set on the chapters named in {@code reasons} (chapter id -> reason). */
@@ -89,7 +107,7 @@ public final class Outline {
             String reason = reasons.get(chapter.getId());
             next.add(reason == null ? chapter : chapter.withStaleReason(reason));
         }
-        return new Outline(next);
+        return new Outline(next, candidates);
     }
 
     /**
@@ -125,7 +143,7 @@ public final class Outline {
             }
             placed.add(chapter.placed(chapterId, chapterOrder, sections));
         }
-        return new Outline(placed);
+        return new Outline(placed, candidates);
     }
 
     private static void requireTitle(OutlineEntry entry) {
@@ -163,11 +181,12 @@ public final class Outline {
 
     @Override
     public boolean equals(Object other) {
-        return other instanceof Outline && chapters.equals(((Outline) other).chapters);
+        return other instanceof Outline && chapters.equals(((Outline) other).chapters)
+                && candidates.equals(((Outline) other).candidates);
     }
 
     @Override
     public int hashCode() {
-        return chapters.hashCode();
+        return chapters.hashCode() * 31 + candidates.hashCode();
     }
 }

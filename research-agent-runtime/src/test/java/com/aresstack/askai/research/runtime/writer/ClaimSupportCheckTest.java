@@ -65,6 +65,23 @@ public class ClaimSupportCheckTest {
     }
 
     @Test
+    public void multiSentenceQuotationIsChecked() {
+        List<ClaimFlag> flags = check("She said \"The sky is green. Grass is purple.\" [1]", p(1, "Nothing like it."));
+        assertEquals(1, flags.size());
+        assertEquals(ClaimFlag.Kind.UNSUPPORTED_QUOTE, flags.get(0).getKind());
+        assertTrue(check("She said \"The sky is green. Grass is purple.\" [1]",
+                p(1, "He wrote: The sky is green. Grass is purple.")).isEmpty());
+    }
+
+    @Test
+    public void unitMustMatchToo() {
+        assertEquals(1, check("The load weighed 15 kg [1].", p(1, "The journey was 15 km.")).size());
+        assertTrue(check("Die Last wog 15 kg [1].", p(1, "The load weighed 15 kilograms.")).isEmpty());
+        assertTrue(check("Der Anteil lag bei 15,5 Prozent [1].", p(1, "The share was 15.5%.")).isEmpty());
+        assertTrue(check("Rund 15 Personen [1].", p(1, "About 15 people.")).isEmpty());
+    }
+
+    @Test
     public void readingsAreCanonical() {
         assertEquals(Arrays.asList("15.5"), new java.util.ArrayList<String>(ClaimSupportCheck.readings("15,50")));
         assertEquals(Arrays.asList("1.5", "1500"), new java.util.ArrayList<String>(ClaimSupportCheck.readings("1.500")));

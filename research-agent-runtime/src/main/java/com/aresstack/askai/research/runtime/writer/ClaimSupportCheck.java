@@ -49,47 +49,61 @@ public final class ClaimSupportCheck {
         List<CitationValidator.Paragraph> paragraphs = result.getParagraphs();
         for (int p = 0; p < paragraphs.size(); p++) {
             CitationValidator.Paragraph paragraph = paragraphs.get(p);
+            StringBuilder paragraphPlain = new StringBuilder();
             for (CitationValidator.Sentence sentence : paragraph.getSentences()) {
                 Set<Integer> cited = new LinkedHashSet<Integer>(sentence.getCited());
                 cited.addAll(paragraph.getCited());
                 String plain = sentence.plainText();
+                paragraphPlain.append(paragraphPlain.length() == 0 ? "" : " ").append(plain);
                 Matcher m = NUMBER.matcher(plain);
                 while (m.find()) {
-                    if (!supported(readings(m.group()), cited, numbers)) {
+                    if (!supported(readings(m.group()), unitAfter(plain, m.end()), cited, numbers)) {
                         flags.add(new ClaimFlag(ClaimFlag.Kind.UNSUPPORTED_NUMBER, p, sentence.getText(),
                                 numberWithUnit(plain, m)));
                     }
                 }
-                for (String quote : quotesOf(plain)) {
-                    String needle = normaliseText(quote);
-                    if (needle.split(" ").length < MIN_QUOTE_WORDS) {
-                        continue;
+            }
+            // Quotations are found in the whole paragraph: a quote of several sentences spans the sentence split.
+            for (String quote : quotesOf(paragraphPlain.toString())) {
+                String needle = normaliseText(quote);
+                if (needle.split(" ").length < MIN_QUOTE_WORDS) {
+                    continue;
+                }
+                boolean found = false;
+                for (Integer n : paragraph.getCited()) {
+                    String hay = normalised.get(n);
+                    if (hay != null && (" " + hay + " ").contains(" " + needle + " ")) {
+                        found = true;
+                        break;
                     }
-                    boolean found = false;
-                    for (Integer n : cited) {
-                        String hay = normalised.get(n);
-                        if (hay != null && (" " + hay + " ").contains(" " + needle + " ")) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        flags.add(new ClaimFlag(ClaimFlag.Kind.UNSUPPORTED_QUOTE, p, sentence.getText(), quote));
-                    }
+                }
+                if (!found) {
+                    flags.add(new ClaimFlag(ClaimFlag.Kind.UNSUPPORTED_QUOTE, p, sentenceOf(paragraph, quote), quote));
                 }
             }
         }
         return flags;
     }
 
-    private static boolean supported(Set<String> readings, Set<Integer> cited, Map<Integer, Set<String>> numbers) {
+    /** The sentence a quotation starts in, for the flag; the paragraph when it spans several. */
+    private static String sentenceOf(CitationValidator.Paragraph paragraph, String quote) {
+        for (CitationValidator.Sentence s : paragraph.getSentences()) {
+            if (s.getText().contains(quote)) {
+                return s.getText();
+            }
+        }
+        return paragraph.text();
+    }
+
+    private static boolean supported(Set<String> readings, String unit, Set<Integer> cited,
+                                     Map<Integer, Set<String>> numbers) {
         for (Integer n : cited) {
             Set<String> known = numbers.get(n);
             if (known == null) {
                 continue;
             }
             for (String reading : readings) {
-                if (known.contains(reading)) {
+                if (known.contains(unit.isEmpty() ? reading : reading + "|" + unit)) {
                     return true;
                 }
             }
@@ -97,14 +111,77 @@ public final class ClaimSupportCheck {
         return false;
     }
 
-    /** Every reading of every number token of a text. */
+    /**
+     * Every reading of every number token of a text, bare ({@code 15}) and, when a known unit follows, with its
+     * canonical unit ({@code 15|kg}).
+     */
     static Set<String> numbersOf(String text) {
         Set<String> all = new LinkedHashSet<String>();
-        Matcher m = NUMBER.matcher(text == null ? "" : text);
+        String t = text == null ? "" : text;
+        Matcher m = NUMBER.matcher(t);
         while (m.find()) {
-            all.addAll(readings(m.group()));
+            String unit = unitAfter(t, m.end());
+            for (String reading : readings(m.group())) {
+                all.add(reading);
+                if (!unit.isEmpty()) {
+                    all.add(reading + "|" + unit);
+                }
+            }
         }
         return all;
+    }
+
+    private static final Pattern UNIT_WORD = Pattern.compile("\\G[\\s\u00A0\u202F]?(%|°\\s?[CF]|[€$£]|\\p{L}{1,12}\\.?)");
+    private static final Map<String, String> UNITS = new HashMap<String, String>();
+
+    static {
+        unit("%", "%", "percent", "per cent", "prozent", "pct", "vh");
+        unit("kg", "kg", "kilogram", "kilograms", "kilogramm");
+        unit("g", "g", "gram", "grams", "gramm");
+        unit("t", "t", "tonne", "tonnes", "ton", "tons", "tonnen");
+        unit("km", "km", "kilometre", "kilometres", "kilometer", "kilometers");
+        unit("m", "m", "metre", "metres", "meter", "meters");
+        unit("cm", "cm", "centimetre", "centimetres", "zentimeter");
+        unit("mm", "mm", "millimetre", "millimetres", "millimeter");
+        unit("l", "l", "litre", "litres", "liter", "liters");
+        unit("kwh", "kwh", "mwh", "gwh", "twh");
+        unit("kw", "kw");
+        unit("mw", "mw", "megawatt", "megawatts");
+        unit("gw", "gw", "gigawatt", "gigawatts");
+        unit("°c", "°c", "°", "grad");
+        unit("€", "€", "eur", "euro", "euros");
+        unit("$", "$", "usd", "dollar", "dollars");
+        unit("h", "h", "hour", "hours", "stunde", "stunden");
+        unit("min", "min", "minute", "minutes", "minuten");
+        unit("year", "year", "years", "jahr", "jahre", "jahren");
+        unit("million", "million", "millionen", "mio", "mio.", "mn");
+        unit("billion", "billion", "milliarde", "milliarden", "mrd", "mrd.", "bn");
+    }
+
+    private static void unit(String canonical, String... aliases) {
+        for (String alias : aliases) {
+            UNITS.put(alias, canonical);
+        }
+    }
+
+    /** The canonical unit right after a number ("15 kg", "15,5 %", "15 percent"); empty when none is known. */
+    static String unitAfter(String text, int end) {
+        Matcher unit = UNIT_WORD.matcher(text);
+        if (!unit.find(end)) {
+            return "";
+        }
+        String word = unit.group(1).toLowerCase(Locale.ROOT).replace(" ", "");
+        if ("kwh".equals(word) || "mwh".equals(word) || "gwh".equals(word) || "twh".equals(word)) {
+            return word; // energy units differ by their prefix; listed together only to be recognised
+        }
+        String canonical = UNITS.get(word);
+        if (canonical == null && word.endsWith(".")) {
+            canonical = UNITS.get(word.substring(0, word.length() - 1));
+        }
+        if (canonical == null && word.startsWith("per")) {
+            return "";
+        }
+        return canonical == null ? "" : canonical;
     }
 
     /**

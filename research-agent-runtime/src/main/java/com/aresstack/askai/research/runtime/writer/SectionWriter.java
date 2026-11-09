@@ -28,6 +28,7 @@ import java.util.function.Consumer;
 public final class SectionWriter {
 
     static final double TEMPERATURE = 0.3;
+    private static final String CLOSERS = "\"'\u201C\u201D\u2019\u00BB\u00AB)";
 
     private final MainModelChat chat;
     private final CitationValidator validator = new CitationValidator();
@@ -179,10 +180,16 @@ public final class SectionWriter {
         int end = -1;
         for (int i = text.length() - 1; i >= 0; i--) {
             char c = text.charAt(i);
-            if ((c == '.' || c == '!' || c == '?') && (i + 1 == text.length()
-                    || Character.isWhitespace(text.charAt(i + 1)) || text.charAt(i + 1) == '[')) {
-                end = i + 1;
-                break;
+            if (c == '.' || c == '!' || c == '?') {
+                int after = i + 1;
+                while (after < text.length() && CLOSERS.indexOf(text.charAt(after)) >= 0) {
+                    after++; // a closing quote or bracket belongs to the sentence: "rose.” [1]"
+                }
+                if (after == text.length() || Character.isWhitespace(text.charAt(after))
+                        || text.charAt(after) == '[') {
+                    end = after;
+                    break;
+                }
             }
         }
         if (end < 0) {
@@ -226,6 +233,9 @@ public final class SectionWriter {
             return cut;
         }
         boolean newParagraph = continuation.startsWith("\n");
+        if (more.regionMatches(true, 0, "GAP", 0, 3) && more.substring(3).trim().startsWith(":")) {
+            return cut + "\n" + more; // a gap line must start its own line to be parsed
+        }
         return cut + (newParagraph ? "\n\n" : " ") + more;
     }
 

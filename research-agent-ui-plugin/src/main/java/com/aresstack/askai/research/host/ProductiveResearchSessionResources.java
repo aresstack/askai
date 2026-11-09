@@ -189,6 +189,30 @@ public final class ProductiveResearchSessionResources {
         this.corpusReader = reader;
     }
 
+    /** Plan PR 22: the embedding port and topic minimums of the outline generation; null without the capability. */
+    private volatile com.aresstack.askai.research.knowledge.EmbeddingPort outlineEmbeddings;
+    private volatile com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings
+            outlineKnowledgeSettings;
+
+    void setOutlineEmbeddings(com.aresstack.askai.research.knowledge.EmbeddingPort embeddings,
+                              com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings settings) {
+        this.outlineEmbeddings = embeddings;
+        this.outlineKnowledgeSettings = settings;
+    }
+
+    public com.aresstack.askai.research.knowledge.EmbeddingPort outlineEmbeddings() {
+        return outlineEmbeddings;
+    }
+
+    public com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings outlineKnowledgeSettings() {
+        return outlineKnowledgeSettings;
+    }
+
+    /** Plan PR 22: the active corpus reader, or null without the knowledge capability. */
+    public com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader() {
+        return corpusReader;
+    }
+
     /** The ACTIVE passages derived from one source (empty without the knowledge capability). */
     public java.util.List<com.aresstack.askai.research.domain.Passage> passagesForSource(String sourceId) {
         com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader reader =
