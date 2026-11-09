@@ -16,6 +16,11 @@ public final class BrowserSearchEngineCatalog {
     public static final String DUCKDUCKGO = "duckduckgo";
     public static final String BING = "bing";
     /**
+     * Startpage (Netherlands) answers with Google's results, but its hit links point straight at the target page:
+     * no redirect wrapper to resolve, so no extra request to Google per opened hit.
+     */
+    public static final String STARTPAGE = "startpage";
+    /**
      * The engine a dev/test {@code --search-url=} override installs. It is not part of the catalog: it
      * exists only when someone hands the sidecar an explicit template, and it then REPLACES the
      * configured engines rather than joining them.
@@ -53,6 +58,18 @@ public final class BrowserSearchEngineCatalog {
                                     Arrays.asList("#sb_form_q", "textarea[name=q]", "input[name=q]"),
                                     Arrays.asList("a.sb_pagN", "a[aria-label='Next page']",
                                             "a[aria-label='Nächste Seite']"))),
+                            10),
+                    new BrowserSearchEngine(STARTPAGE, "Startpage", Arrays.asList(
+                            // Start page with one search field (id q, name query); deeper result pages through
+                            // the pagination form's "next" button. Selectors are layout alternatives, tried in order.
+                            new BrowserSearchEngine.SearchForm("https://www.startpage.com/",
+                                    Arrays.asList("input#q", "input[name=query]", "form#search input[type=search]",
+                                            "input[type=search]"),
+                                    Arrays.asList("form.pagination__form button.next",
+                                            "button.pagination__next-prev-button.next",
+                                            "a.pagination__next-prev-button.next",
+                                            "button[aria-label='Next']", "button[aria-label='Weiter']",
+                                            "button[aria-label='Nächste']"))),
                             10))));
 
     private BrowserSearchEngineCatalog() {

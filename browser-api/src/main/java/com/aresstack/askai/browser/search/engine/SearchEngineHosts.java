@@ -3,7 +3,7 @@ package com.aresstack.askai.browser.search.engine;
 import java.util.Locale;
 
 /**
- * The hosts of the web search engines AskAI searches with (Google, Bing, DuckDuckGo). The research browser never
+ * The hosts of the web search engines AskAI searches with (Google, Bing, DuckDuckGo, Startpage). The research browser never
  * navigates to one of them: a search engine is reached only through the search tool (the search browser or an API
  * provider), so one client with one identity talks to the engine. A search hit that still points at an engine
  * host — Google's opaque {@code /goto?url=…} wrapper, an engine vertical, an unresolved redirect — is resolved by
@@ -17,7 +17,7 @@ public final class SearchEngineHosts {
     /** Whether the URL or host belongs to a search engine (its result pages, redirect wrappers and verticals). */
     public static boolean isEngineHost(String urlOrHost) {
         String host = hostOf(urlOrHost);
-        return isGoogleHost(host) || isBingHost(host) || isDuckDuckGoHost(host);
+        return isGoogleHost(host) || isBingHost(host) || isDuckDuckGoHost(host) || isStartpageHost(host);
     }
 
     /** {@code google.com}, {@code www.google.de}, {@code google.co.uk}, {@code google.com.br}, … */
@@ -38,6 +38,12 @@ public final class SearchEngineHosts {
     public static boolean isDuckDuckGoHost(String urlOrHost) {
         String h = hostOf(urlOrHost);
         return h.equals("duckduckgo.com") || h.endsWith(".duckduckgo.com");
+    }
+
+    /** {@code startpage.com} and its subdomains (search pages, the "Anonymous View" proxy {@code /av/proxy}). */
+    public static boolean isStartpageHost(String urlOrHost) {
+        String h = hostOf(urlOrHost);
+        return h.equals("startpage.com") || h.endsWith(".startpage.com");
     }
 
     /** Google's challenge page ({@code /sorry/…}) or consent/sign-in interstitial: nothing a search can read. */
