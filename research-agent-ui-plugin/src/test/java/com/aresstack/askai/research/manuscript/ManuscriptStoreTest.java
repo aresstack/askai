@@ -76,7 +76,8 @@ public class ManuscriptStoreTest {
         FileManuscriptStore store = store();
         FileManuscriptStore.Write first = store.save("s1", "c1", 0, text("Über Äpfel [1].", citation("1", "src-a"))
                 .modelLabel("llama3.1:8b").thinkingLevel("off").promptHash("ph").evidenceIds(Arrays.asList("e1"))
-                .gaps(Arrays.asList("needs a number")), 100L);
+                .gaps(Arrays.asList("needs a number"))
+                .claimFlags(Arrays.asList("unsupported number: 15 %")), 100L);
         assertEquals(1, first.revision.getNumber());
         store.save("s1", null, 1, text("Second."), 200L);
 
@@ -91,6 +92,7 @@ public class ManuscriptStoreTest {
         assertEquals("ph", one.getPromptHash());
         assertEquals(Arrays.asList("e1"), one.getEvidenceIds());
         assertEquals(Arrays.asList("needs a number"), one.getGaps());
+        assertEquals(Arrays.asList("unsupported number: 15 %"), one.getClaimFlags());
         assertEquals("sha-src-a", one.getCitations().get(0).getSourceChecksum());
         assertEquals(64, one.getCitations().get(0).getCitedTextHash().length());
         assertEquals(2, reopened.revisions("s1").size());
