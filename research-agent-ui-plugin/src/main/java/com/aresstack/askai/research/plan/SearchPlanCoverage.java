@@ -19,16 +19,38 @@ public final class SearchPlanCoverage {
     /** The distinct domains a covered node needs. */
     public static final int MIN_DOMAINS = 2;
 
-    /** The caps per query, node and phase. */
+    /** The caps per query, node, research cycle and phase. */
     public static final class Caps {
         private final int sourcesPerNode;
         private final int queriesPerNode;
         private final int phaseSources;
+        private final int cycles;
 
+        /** One research cycle: the plan ends when its queries ran. */
         public Caps(int sourcesPerNode, int queriesPerNode, int phaseSources) {
+            this(sourcesPerNode, queriesPerNode, phaseSources, 1);
+        }
+
+        /**
+         * @param queriesPerNode the query budget of a node PER research cycle
+         * @param cycles         how many research cycles the plan may run: after each cycle the still uncovered
+         *                       nodes are planned again from another angle, until they are covered or the cycles
+         *                       are spent
+         */
+        public Caps(int sourcesPerNode, int queriesPerNode, int phaseSources, int cycles) {
             this.sourcesPerNode = Math.max(1, sourcesPerNode);
             this.queriesPerNode = Math.max(1, queriesPerNode);
             this.phaseSources = Math.max(1, phaseSources);
+            this.cycles = Math.max(1, cycles);
+        }
+
+        public int getCycles() {
+            return cycles;
+        }
+
+        /** The query budget of a node up to and including the given cycle. */
+        public int queriesUpTo(int cycle) {
+            return queriesPerNode * Math.max(1, cycle);
         }
 
         public int getSourcesPerNode() {
@@ -128,7 +150,8 @@ public final class SearchPlanCoverage {
             State state;
             if (sources.size() >= caps.getSourcesPerNode() && hosts.size() >= MIN_DOMAINS) {
                 state = State.COVERED;
-            } else if (run >= caps.getQueriesPerNode() || !pending) {
+            } else if (run >= caps.queriesUpTo(caps.getCycles()) || !pending) {
+                // exhausted for now: the queue plans another cycle for it while cycles are left
                 state = State.EXHAUSTED;
             } else {
                 state = State.OPEN;

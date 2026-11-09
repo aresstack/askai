@@ -8,7 +8,7 @@ import javax.swing.JTextField;
 
 /**
  * Plan PR 14: the caps of the search plan as one titled group of the Search tab ("Sources per node", "Queries per
- * node", "Sources for the Sources phase"). Each field saves on Enter and on focus loss; an invalid value is reset to
+ * node", "Research cycles", "Sources for the Sources phase"). Each field saves on Enter and on focus loss; an invalid value is reset to
  * the stored one. The queue reads the caps at each start.
  */
 final class SearchPlanSettingsRows {
@@ -24,7 +24,11 @@ final class SearchPlanSettingsRows {
                 "Accepted sources (from at least two domains) that make a concept node covered."));
         form.row("Queries per node", field(store, ResearchRuntimeSettings.KEY_PLAN_QUERIES_PER_NODE,
                 ResearchRuntimeSettings.DEFAULT_PLAN_QUERIES_PER_NODE,
-                "Planned queries per concept node: the base query and up to three variants."));
+                "Planned queries per concept node and research cycle: the base query and up to three variants."));
+        form.row("Research cycles", field(store, ResearchRuntimeSettings.KEY_PLAN_CYCLES,
+                ResearchRuntimeSettings.DEFAULT_PLAN_CYCLES,
+                "After each cycle the nodes without covering sources are planned again from another angle, "
+                        + "until they are covered or the cycles are spent. The outcome names the gaps that remain."));
         form.row("Sources for the Sources phase", field(store, ResearchRuntimeSettings.KEY_PLAN_PHASE_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_PLAN_PHASE_SOURCES,
                 "The search plan stops once the Sources phase has this many accepted sources."));

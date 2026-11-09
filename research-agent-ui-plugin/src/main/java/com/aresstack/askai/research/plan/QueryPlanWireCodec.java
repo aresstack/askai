@@ -43,6 +43,8 @@ public final class QueryPlanWireCodec {
     static final String QUERIES_RUN = "queries_run";
     static final String BLACKLIST = "blacklist";
     static final String NODES = "nodes";
+    static final String CYCLE = "cycle";
+    static final String DOMAINS_FOUND = "domains_found";
 
     private static JsonArray array(List<String> values) {
         JsonArray array = new JsonArray();
@@ -83,6 +85,7 @@ public final class QueryPlanWireCodec {
         root.addProperty(LANGUAGE, request.getLanguage());
         root.addProperty(BOOK_TITLE, request.getBookTitle());
         root.addProperty(MAX, request.getMaxVariantsPerNode());
+        root.addProperty(CYCLE, request.getCycle());
         root.add(QUERIES_RUN, array(request.getQueriesRun()));
         root.add(BLACKLIST, array(request.getBlacklist()));
         JsonArray nodes = new JsonArray();
@@ -93,6 +96,7 @@ public final class QueryPlanWireCodec {
             n.add("path", array(node.getPath()));
             n.addProperty("parent_id", node.getParentId());
             n.addProperty("base_query", node.getBaseQuery());
+            n.add(DOMAINS_FOUND, array(node.getFoundDomains()));
             nodes.add(n);
         }
         root.add(NODES, nodes);
@@ -110,12 +114,14 @@ public final class QueryPlanWireCodec {
             for (JsonElement item : array.getAsJsonArray()) {
                 JsonObject n = item.getAsJsonObject();
                 nodes.add(new ConceptQueryPlan.Node(text(n, "id"), text(n, "label"), strings(n, "path"),
-                        text(n, "parent_id"), text(n, "base_query")));
+                        text(n, "parent_id"), text(n, "base_query"), strings(n, DOMAINS_FOUND)));
             }
             JsonElement max = root.get(MAX);
+            JsonElement cycle = root.get(CYCLE);
             return new ConceptQueryPlan.Request(text(root, LANGUAGE), text(root, BOOK_TITLE), nodes,
                     strings(root, QUERIES_RUN), strings(root, BLACKLIST),
-                    max == null || !max.isJsonPrimitive() ? 0 : max.getAsInt());
+                    max == null || !max.isJsonPrimitive() ? 0 : max.getAsInt(),
+                    cycle == null || !cycle.isJsonPrimitive() ? 1 : cycle.getAsInt());
         } catch (RuntimeException malformed) {
             throw malformed instanceof IllegalArgumentException ? (IllegalArgumentException) malformed
                     : new IllegalArgumentException(malformed.getMessage(), malformed);

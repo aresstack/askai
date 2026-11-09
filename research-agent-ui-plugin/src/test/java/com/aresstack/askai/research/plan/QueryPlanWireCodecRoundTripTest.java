@@ -38,6 +38,29 @@ public class QueryPlanWireCodecRoundTripTest {
     }
 
     @Test
+    public void aLaterCycleCarriesItsNumberAndTheDomainsFoundSoFar() {
+        ConceptQueryPlan.Request request = new ConceptQueryPlan.Request("de", "Wearables am Bau",
+                Collections.singletonList(new ConceptQueryPlan.Node("n1", "Sensorarten",
+                        Arrays.asList("Wearables", "Sensorarten"), "root", "Sensorarten Wearables Baustelle",
+                        Arrays.asList("amazon.de", "thalia.de"))),
+                Arrays.asList("Sensorarten Wearables Baustelle", "Wearables Bau Sensoren"),
+                Collections.<String>emptyList(), 3, 2);
+        ConceptQueryPlan.Request runtime = QueryPlanWire.parseRequest(QueryPlanWireCodec.encodeRequest(request));
+        assertEquals(2, runtime.getCycle());
+        assertEquals(Arrays.asList("amazon.de", "thalia.de"), runtime.getNodes().get(0).getFoundDomains());
+        ConceptQueryPlan.Request back = QueryPlanWireCodec.decodeRequest(QueryPlanWire.renderRequest(runtime));
+        assertEquals(2, back.getCycle());
+        assertEquals(Arrays.asList("amazon.de", "thalia.de"), back.getNodes().get(0).getFoundDomains());
+        // a first-cycle request has neither
+        ConceptQueryPlan.Request first = QueryPlanWire.parseRequest(QueryPlanWireCodec.encodeRequest(
+                new ConceptQueryPlan.Request("de", "", Collections.singletonList(
+                        new ConceptQueryPlan.Node("n1", "x", Collections.singletonList("x"), "", "abc")),
+                        Collections.<String>emptyList(), Collections.<String>emptyList(), 2)));
+        assertEquals(1, first.getCycle());
+        assertEquals(Collections.emptyList(), first.getNodes().get(0).getFoundDomains());
+    }
+
+    @Test
     public void theResultRoundTripsRuntimeToHost() {
         ConceptQueryPlan.Result runtime = new ConceptQueryPlan.Result(Collections.singletonList(
                 new ConceptQueryPlan.NodePlan("n1", "java class loader plugins",

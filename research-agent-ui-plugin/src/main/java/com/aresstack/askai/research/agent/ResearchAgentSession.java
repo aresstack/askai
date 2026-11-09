@@ -1618,6 +1618,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
             // the count is a courtesy; the refusal stands
         }
+        if (pending == 0 && queue.isReplanning()) {
+            return "the search plan is planning its next research cycle for the uncovered nodes. Let it finish, "
+                    + "or stop the search plan first.";
+        }
         return "the search plan is still running (" + pending + " planned "
                 + (pending == 1 ? "query" : "queries") + " left). Let it finish, or stop the search plan first.";
     }
@@ -1829,7 +1833,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                         com.aresstack.askai.research.sources.SourceQuery.all())) {
                             if (requestId.equals(record.getSearchRequestId())
                                     && com.aresstack.askai.research.sources.SourceEligibility
-                                            .isResearchSource(record)) {
+                                            .isEvidence(record)) {
                                 ids.add(record.getSourceId());
                             }
                         }
@@ -1882,7 +1886,20 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         return System.currentTimeMillis();
                     }
                 },
-                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSearchPlanCaps(hostStateStore));
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSearchPlanCaps(hostStateStore),
+                new com.aresstack.askai.research.plan.SearchPlanQueue.Replanner() {
+                    public void replan(final com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Request request,
+                                       final com.aresstack.askai.research.plan.SearchPlanQueue.Replanned callback) {
+                        // the planner call may take minutes on a small model: never on the UI executor
+                        Thread planning = new Thread(new Runnable() {
+                            public void run() {
+                                callback.done(planNextCycle(request));
+                            }
+                        }, "search-plan-cycle-" + request.getCycle());
+                        planning.setDaemon(true);
+                        planning.start();
+                    }
+                });
         // every source carries the phase and the plan entry of the search that found it
         final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
         com.aresstack.askai.research.capture.SourceAcceptanceService acceptance = resources.acceptance();
@@ -2130,6 +2147,42 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 fireStateChanged();
             }
         });
+    }
+
+    /**
+     * M2: the planner request of a later research cycle, completed with the book title and the blacklist of the
+     * frozen concept (as the first plan), then answered by the planner role; {@code null} on any failure.
+     */
+    private com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Result planNextCycle(
+            com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Request request) {
+        com.aresstack.askai.research.plan.BackendQueryPlanner planner = queryPlanner;
+        if (planner == null) {
+            return null;
+        }
+        java.util.List<String> blacklist = new java.util.ArrayList<String>();
+        String title = "";
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen != null) {
+                blacklist.addAll(frozen.getPin().getBlacklist());
+                title = bookTitle(frozen);
+            }
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            technicalLog("search-plan cycle " + request.getCycle() + ": concept not read: " + corrupt.getMessage());
+            return null;
+        }
+        for (String term : currentBlacklistTerms()) {
+            if (!blacklist.contains(term)) {
+                blacklist.add(term);
+            }
+        }
+        technicalLog("search-plan cycle " + request.getCycle() + ": planning " + request.getNodes().size()
+                + " uncovered node(s), " + request.getQueriesRun().size() + " queries already run");
+        com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Result result =
+                planner.plan(request.withBook(title, blacklist));
+        technicalLog("search-plan cycle " + request.getCycle() + ": planner "
+                + (result == null ? "gave no answer" : "answered for " + result.getNodes().size() + " node(s)"));
+        return result;
     }
 
     private static String bookTitle(com.aresstack.askai.research.book.FrozenConcept frozen) {

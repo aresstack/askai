@@ -35,7 +35,7 @@ public final class SourcesFreezeHook implements PhaseTransitionHook {
     public static List<SourcesPin.Entry> approvedSet(ResearchSourceRepository repository) {
         List<SourcesPin.Entry> entries = new ArrayList<SourcesPin.Entry>();
         for (ResearchSourceRecord record : repository.find(SourceQuery.all())) {
-            if (SourceEligibility.isResearchSource(record)) {
+            if (SourceEligibility.isEvidence(record)) {
                 entries.add(new SourcesPin.Entry(record.getSourceId(), record.getChecksum(),
                         record.getStatus().name()));
             }

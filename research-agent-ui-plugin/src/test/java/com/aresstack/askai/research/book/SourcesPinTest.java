@@ -31,6 +31,15 @@ public class SourcesPinTest {
                 .fullText(text).checksum(checksum).status(status).revision(1L).build();
     }
 
+    /** A page text above {@link com.aresstack.askai.research.sources.SourceEligibility#MIN_EVIDENCE_CHARS}. */
+    private static String evidenceText() {
+        StringBuilder sb = new StringBuilder();
+        while (sb.length() < com.aresstack.askai.research.sources.SourceEligibility.MIN_EVIDENCE_CHARS + 50) {
+            sb.append("Wearables mit Sensoren erfassen Vitaldaten und Umgebungswerte auf der Baustelle. ");
+        }
+        return sb.toString();
+    }
+
     private static PhaseTransition transition(String id, ResearchCommandType command) {
         return new PhaseTransition(id, command, null, null, null, null, "", 0L, "", 4242L, null);
     }
@@ -50,9 +59,10 @@ public class SourcesPinTest {
         repository.put(source("source-1", "text one", "sha-1", SourceStatus.ACCEPTED));
         repository.put(source("source-2", "text two", "sha-2", SourceStatus.EXCLUDED));
         repository.put(source("source-3", "text three", "sha-3", SourceStatus.ACCEPTED));
-        repository.put(source("source-4", "text four", "sha-4", SourceStatus.NEW)); // the funnel's source
+        repository.put(source("source-4", evidenceText(), "sha-4", SourceStatus.NEW)); // the funnel's source
         repository.put(source("source-5", "", "", SourceStatus.PARKED)); // never visited
-        repository.put(source("source-6", "text six", "sha-6", SourceStatus.DUPLICATE));
+        repository.put(source("source-6", evidenceText(), "sha-6", SourceStatus.DUPLICATE));
+        repository.put(source("source-7", "Sensoren – Übersicht. Weiterlesen", "sha-7", SourceStatus.NEW)); // a stub
         BookManifest manifest = new BookManifest(dir);
         SourcesFreezeHook hook = new SourcesFreezeHook(repository, manifest);
 
@@ -72,6 +82,8 @@ public class SourcesPinTest {
         assertFalse(pin.contains("source-2"));
         assertFalse("a parked candidate is never pinned", pin.contains("source-5"));
         assertFalse("a duplicate is never pinned", pin.contains("source-6"));
+        assertFalse("a page with too little text is no evidence unless the user confirms it",
+                pin.contains("source-7"));
         assertEquals(4242L, pin.getApprovedAt());
         assertNull("a pin whose transition never committed is not valid",
                 manifest.validSourcesPin(committed("other")));

@@ -15,6 +15,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /** Plan PR 13: the concept query planner with a fake model. */
@@ -163,5 +164,25 @@ public class QueryPlannerTest {
         assertTrue(prompt, prompt.contains("BLACKLIST\n- Spring"));
         assertTrue(QueryPlanner.conceptPrompt(request("en", 1), node("n", "x", "abc"), "abc",
                 Collections.<String>emptyList()).startsWith("LANGUAGE\nEnglish"));
+        assertFalse(prompt, prompt.contains("RESEARCH CYCLE"));
+    }
+
+    @Test
+    public void aLaterCyclePromptNamesTheCycleTheDomainsFoundAndAsksForAnotherAngle() {
+        ConceptQueryPlan.Node node = new ConceptQueryPlan.Node("n1", "Sensorarten",
+                Arrays.asList("Wearables", "Sensorarten"), "root", "Sensorarten Wearables Baustelle",
+                Arrays.asList("amazon.de", "thalia.de", "beck-shop.de"));
+        ConceptQueryPlan.Request request = new ConceptQueryPlan.Request("de", "Wearables am Bau",
+                Collections.singletonList(node), Arrays.asList("Sensorarten Wearables Baustelle",
+                        "Wearables Bau Sensoren Arten"), Collections.<String>emptyList(), 3, 2);
+        String prompt = QueryPlanner.conceptPrompt(request, node, "Sensorarten Wearables Baustelle",
+                request.getQueriesRun());
+        assertTrue(prompt, prompt.contains("RESEARCH CYCLE\n2"));
+        assertTrue(prompt, prompt.contains("DOMAINS FOUND SO FAR\n- amazon.de\n- thalia.de\n- beck-shop.de"));
+        assertTrue(prompt, prompt.contains("ALREADY SEARCHED\n- Sensorarten Wearables Baustelle"));
+        assertTrue(prompt, prompt.endsWith("Take another angle than the queries already searched: other publishers "
+                + "of evidence, other kinds of document, other sub-aspects."));
+        assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("RESEARCH CYCLE is above 1"));
+        assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("DOMAINS FOUND SO FAR"));
     }
 }

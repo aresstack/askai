@@ -30,4 +30,24 @@ public final class SourceEligibility {
         return record != null && isEligibleStatus(record.getStatus())
                 && (!record.isParked() || record.getStatus() == SourceStatus.ACCEPTED);
     }
+
+    /**
+     * The least page text a source needs to count as evidence for coverage and for the pin. A page with less is a
+     * teaser, a listing, a stub or an error page with navigation: it may stay in the Sources list, but it covers
+     * no concept node and is not pinned unless the user confirms it ({@code ACCEPTED}).
+     */
+    public static final int MIN_EVIDENCE_CHARS = 1000;
+
+    /**
+     * Whether the record is evidence: a research source whose text is long enough to carry something, or one the
+     * user confirmed. The search plan's coverage and the Sources pin count these; GPT's review of 2026-11-09
+     * asked that a {@code NEW} record never counts blindly.
+     */
+    public static boolean isEvidence(ResearchSourceRecord record) {
+        if (!isResearchSource(record)) {
+            return false;
+        }
+        return record.getStatus() == SourceStatus.ACCEPTED
+                || record.getFullText().trim().length() >= MIN_EVIDENCE_CHARS;
+    }
 }

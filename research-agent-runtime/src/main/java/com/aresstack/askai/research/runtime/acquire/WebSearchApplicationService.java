@@ -1281,8 +1281,11 @@ public final class WebSearchApplicationService {
             verdict = semantic;
         }
         String blockReason = AccessBlockSignals.reason(pr);
+        String errorReason = ErrorPageSignals.reason(pr);
         listener.status("readiness=" + verdict
                 + (verdict == PageReadinessJudge.Verdict.ACCESS_BLOCKED ? " reason=" + blockReason : "")
+                + (verdict == PageReadinessJudge.Verdict.UNREADABLE && errorReason != null
+                        ? " reason=ERROR_PAGE_" + errorReason : "")
                 + " [text=" + pr.textLength + " challenge=" + pr.challengeVisible
                 + (pr.challengePresent && !pr.challengeVisible ? " (artifact hidden)" : "")
                 + (pr.challengePresent ? " evidence=" + pr.challengeMarker : "")
