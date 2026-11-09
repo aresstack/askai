@@ -29,10 +29,13 @@ public final class LegacyBrowserSearchConfigDocument {
      * snapshot migration); v5 = the primary-engine-plus-fallback-templates pair is replaced by an
      * ORDERED engine selection with an acquisition mode; v6 = the shipped challenge-text list no longer
      * carries the bare word "captcha" (an untouched old shipped list is lifted while decoding, see
-     * {@link LegacyBrowserSearchSettingsCodec#liftStaleShippedDefaults}). Older documents decode cleanly:
+     * {@link LegacyBrowserSearchSettingsCodec#liftStaleShippedDefaults}); v7 = the engine list is the engine
+     * table (priority, languages and further languages per row; old {@code id:on:pages[:delay]} lists are
+     * migrated while decoding with the stored acquisition mode, see
+     * {@link LegacyBrowserSearchSettingsCodec#migrateEngineList}). Older documents decode cleanly:
      * missing keys fall back to {@link LegacyBrowserSearchDefaults}, which is the migration.
      */
-    public static final int CURRENT_SCHEMA_VERSION = 6;
+    public static final int CURRENT_SCHEMA_VERSION = 7;
 
     public final int schemaVersion;
     public final long settingsRevision;

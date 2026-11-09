@@ -170,8 +170,11 @@ public final class BrowserSearchEngineSelection {
 
     /**
      * Rows without a priority (a configuration from before priorities) get their list position as priority, so the
-     * old order stays the execution order. The rows are then held sorted: priority ascending, then engine name, then
-     * the order they were given in (stable) — the order the engine table shows and the search follows.
+     * old order stays the execution order. The rows are then held sorted by priority ascending; rows of the same
+     * priority keep the order they were stored in. That stored order is observable (a browser types the engines of
+     * one group one after another and the attempt budget is spent in that order), so loading a configuration never
+     * reorders it. The engine table writes its rows sorted by priority, then engine name, so a table edited by the
+     * user is stored in exactly the order it shows.
      */
     public BrowserSearchEngineSelection(List<Entry> entries, EngineAcquisitionMode mode) {
         List<Entry> placed = new ArrayList<Entry>();
@@ -187,18 +190,14 @@ public final class BrowserSearchEngineSelection {
         this.mode = mode == null ? EngineAcquisitionMode.FIRST_USABLE : mode;
     }
 
-    /** Priority ascending, then catalog name (case-insensitive), then the given order. */
+    /** Priority ascending; rows of the same priority keep the given order (the sort is stable). */
     public static List<Entry> sorted(List<Entry> entries) {
         List<Entry> copy = new ArrayList<Entry>(entries == null ? Collections.<Entry>emptyList() : entries);
         Collections.sort(copy, new java.util.Comparator<Entry>() {
             public int compare(Entry a, Entry b) {
-                if (a.getPriority() != b.getPriority()) {
-                    return a.getPriority() < b.getPriority() ? -1 : 1;
-                }
-                return SearchEngineCatalog.displayName(a.getEngineId())
-                        .compareToIgnoreCase(SearchEngineCatalog.displayName(b.getEngineId()));
+                return a.getPriority() < b.getPriority() ? -1 : a.getPriority() == b.getPriority() ? 0 : 1;
             }
-        }); // Collections.sort is stable: equal rows keep the given order
+        });
         return copy;
     }
 
