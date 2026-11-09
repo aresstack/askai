@@ -26,8 +26,8 @@ import java.util.List;
  * {@code document_read}, {@code document_save} — BOTH phases work on the ONE canonical document (issue #32).
  * The legacy per-stage tools ({@code concept_save}, {@code finding_add}, {@code notes_append},
  * {@code draft_*}, {@code final_*}) are gone: the ResearchBrief is the scoping truth and the removed legacy
- * artifacts must no longer be written by the active workflow. {@code outline_save} stays ONLY for persisted
- * old sessions still sitting in the legacy OUTLINE phase. There is deliberately NO phase-transition tool
+ * artifacts must no longer be written by the active workflow. {@code outline_save} is gone (plan PR 21): the
+ * outline lives in the outline store and {@code outline_read} reads it in every phase. There is deliberately NO phase-transition tool
  * (no advance_phase/approve_phase/set_state).</p>
  */
 public final class ResearchToolPolicy {
@@ -56,6 +56,9 @@ public final class ResearchToolPolicy {
         tools.add(changeRequestTool(ctx));
         // Plan PR 15: the Sources block (search plan, coverage per node) — readable like the other blocks.
         tools.add(searchPlanOverviewTool(ctx));
+        // Plan PR 21: the stored outline, read-only, in every phase (frozen artifacts stay readable). There is
+        // no whole-artifact outline write anymore: outline_save is gone, content goes through the outline store.
+        tools.add(outlineReadTool(ctx));
         // The Konzeptpapier tools (Fragestellung→Konzept rework). READING the concept is allowed in
         // every phase (frozen artifacts stay readable); WRITING is bite-wise branch editing and is
         // bound to SCOPING/running. Absent service (clickdummy/old fakes) → no concept tools at all.
@@ -89,10 +92,6 @@ public final class ResearchToolPolicy {
         }
         // Phase + run-state gated writes. SCOPING has NO document tool anymore: the ResearchBrief is the
         // canonical scoping artifact (issue #32) — no second concept document beside it.
-        if (writable(phaseId, stateId, ResearchStateIds.OUTLINE)) {
-            // Legacy operability only: persisted old sessions still sitting in the OUTLINE phase.
-            tools.add(saveTool(ctx, "outline_save", "outline", ResearchStateIds.OUTLINE));
-        }
         if (writable(phaseId, stateId, ResearchStateIds.RESEARCH)) {
             tools.add(sourceAcceptTool(ctx));
             tools.add(sourceParkTool(ctx));
@@ -141,7 +140,7 @@ public final class ResearchToolPolicy {
                                 + "\n" + content.getMarkdown());
                     }
                 },
-                McpToolParameter.string("name", true, "Artifact id: outline, document"));
+                McpToolParameter.string("name", true, "Artifact id: outline (rendered from the outline store), document"));
     }
 
     private static McpToolContribution sourceOverviewTool(final ResearchControlContext ctx) {
@@ -163,6 +162,18 @@ public final class ResearchToolPolicy {
                     public McpToolResult invoke(McpToolCall call) {
                         String summary = ctx.frozenConceptSummary();
                         return McpToolResult.ok(summary == null ? "No approved concept." : summary);
+                    }
+                });
+    }
+
+    private static McpToolContribution outlineReadTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("outline_read",
+                "Read-only stored outline: chapter and section ids, titles and coverage per chapter.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        String outline = ctx.outlineRead();
+                        return McpToolResult.ok(outline == null || outline.trim().isEmpty()
+                                ? "No outline." : outline);
                     }
                 });
     }

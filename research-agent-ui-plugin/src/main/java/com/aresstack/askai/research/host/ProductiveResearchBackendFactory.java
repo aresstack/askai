@@ -690,6 +690,23 @@ public final class ProductiveResearchBackendFactory {
                             }
                         }
 
+                        // Plan PR 16/21 context reads: the defaults answer "none", so a missing forward would
+                        // silently empty the concept summary, the change request and the Outline block.
+                        @Override
+                        public String frozenConceptSummary() {
+                            return holder[0] == null ? null : holder[0].controlContext().frozenConceptSummary();
+                        }
+
+                        @Override
+                        public String latestChangeRequest() {
+                            return holder[0] == null ? "" : holder[0].controlContext().latestChangeRequest();
+                        }
+
+                        @Override
+                        public String outlineRead() {
+                            return holder[0] == null ? null : holder[0].controlContext().outlineRead();
+                        }
+
                         // The review bounds are the USER's settings (this factory carries them); the
                         // delegate's defaults would silently ignore a configured value.
                         @Override
@@ -1030,21 +1047,9 @@ public final class ProductiveResearchBackendFactory {
                 new KnowledgeProcessingSessionFactory.ProjectionListener() {
                     public void onProjectionUpdated(
                             com.aresstack.askai.research.knowledge.live.LiveOutlineProjection projection) {
-                        // Render the projection into the "outline" artifact slot (a visible LIVE view,
-                        // no approval anywhere) and let the session refresh an open view. Best-effort:
-                        // an artifact write failure only costs THIS render — the persisted projection
-                        // is already durable and the next rebuild retries.
-                        try {
-                            String markdown = com.aresstack.askai.research.knowledge.live
-                                    .LiveOutlineMarkdown.render(projection);
-                            com.aresstack.askai.plugin.api.agent.artifact.ArtifactContent current =
-                                    projectContext.getArtifactStore().read("outline");
-                            projectContext.getArtifactStore().replace("outline",
-                                    current.getRevision(), markdown);
-                        } catch (RuntimeException renderFailed) {
-                            System.err.println("[research-knowledge] live outline artifact write "
-                                    + "failed: " + renderFailed.getMessage());
-                        }
+                        // Plan PR 21: the live projection is an analysis view only. It never writes the
+                        // "outline" artifact, which is rendered from the outline store; an open drawer
+                        // re-reads the persisted projection.
                         if (resourcesRef[0] != null) {
                             resourcesRef[0].fireProjectionUpdated();
                         }

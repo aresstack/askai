@@ -509,6 +509,21 @@ public final class ProductiveResearchSessionResources {
         return conceptBranchService;
     }
 
+    private volatile com.aresstack.askai.research.outline.OutlineWorkspace outlineWorkspace;
+
+    /**
+     * The session's ONE outline workspace (plan PR 21), bound to {@code <projectDir>/outline}. Lazy and shared:
+     * the transition hooks, the MCP read and the (later) Outline tab use the SAME instance and its write guard.
+     */
+    public synchronized com.aresstack.askai.research.outline.OutlineWorkspace outlineWorkspace() {
+        if (outlineWorkspace == null && !closed) {
+            outlineWorkspace = new com.aresstack.askai.research.outline.OutlineWorkspace(
+                    new com.aresstack.askai.research.store.FileOutlineStore(
+                            new java.io.File(projectContext.getProjectDirectory(), "outline")));
+        }
+        return outlineWorkspace;
+    }
+
     /** Who to tell when a concept edit committed (view refresh); the session wires itself here. */
     public void setConceptChangedListener(Runnable listener) {
         this.conceptChangedListener = listener;
@@ -697,6 +712,20 @@ public final class ProductiveResearchSessionResources {
             public String searchPlanOverview() {
                 com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
                 return port == null ? null : port.searchPlanOverview();
+            }
+
+            @Override
+            public String outlineRead() {
+                com.aresstack.askai.research.outline.OutlineWorkspace workspace = outlineWorkspace();
+                if (workspace == null) {
+                    return null;
+                }
+                try {
+                    return com.aresstack.askai.research.outline.OutlineBlock.render(workspace.current(),
+                            workspace.workingRevision(), workspace.store().latestApprovedNumber());
+                } catch (com.aresstack.askai.research.store.FileOutlineStore.CorruptOutlineException corrupt) {
+                    return corrupt.getMessage();
+                }
             }
 
             @Override

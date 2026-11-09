@@ -1424,6 +1424,21 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         return resources.ensureEmbeddingDescriptor() != null;
                     }
                 }));
+        // PR 21: the outline freeze — finish minimum, outline pin, stale marks and the one outline write guard
+        com.aresstack.askai.research.outline.OutlineWorkspace outline = resources.outlineWorkspace();
+        if (outline != null) {
+            outline.setWriteGuard(this::outlineWriteRefusal);
+            outline.setChangeListener((changed, revision) -> renderOutlineArtifact(changed));
+            try {
+                renderOutlineArtifact(outline.current()); // reconcile a render lost to a crash after the commit
+            } catch (com.aresstack.askai.research.store.FileOutlineStore.CorruptOutlineException corrupt) {
+                System.err.println("[research] " + corrupt.getMessage());
+            }
+            engine.addHook(new com.aresstack.askai.research.book.OutlineFreezeHook(outline, bookManifest));
+            engine.registerEffect(com.aresstack.askai.research.book.ConceptStaleMarker.EFFECT,
+                    new com.aresstack.askai.research.book.ConceptStaleMarker(phase1Source(), bookManifest, outline,
+                            engine::isCommitted));
+        }
         com.aresstack.askai.research.concept.ConceptBranchService concept = resources.conceptBranchService();
         if (concept != null) {
             concept.setWriteGuard(new com.aresstack.askai.research.concept.ConceptBranchService.WriteGuard() {
@@ -2090,6 +2105,84 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         return engine.isCommitted(transitionId);
                     }
                 });
+    }
+
+    /** The session's outline workspace (plan PR 21), or {@code null} in fake mode. */
+    public com.aresstack.askai.research.outline.OutlineWorkspace outlineWorkspace() {
+        return productiveResources == null || productiveResources.isClosed()
+                ? null : productiveResources.outlineWorkspace();
+    }
+
+    /**
+     * The outline approved at {@code APPROVE_OUTLINE} (D4), verified against the book manifest.
+     * @return {@code null} before the first committed outline approval or in fake mode
+     */
+    public com.aresstack.askai.research.book.ApprovedOutline approvedOutline()
+            throws com.aresstack.askai.research.transition.CorruptProjectFileException {
+        com.aresstack.askai.research.book.BookManifest manifest = bookManifest;
+        com.aresstack.askai.research.outline.OutlineWorkspace outline = outlineWorkspace();
+        if (manifest == null || outline == null) {
+            return null;
+        }
+        return com.aresstack.askai.research.book.ApprovedOutline.read(manifest, outline.store(),
+                productiveResources.transitions()::isCommitted);
+    }
+
+    /**
+     * The one outline write guard (D4): {@code null} while outline content may change ({@code outline/running},
+     * whichever edge led there), otherwise the Outline view's message of the D4 table. Fake mode has no guard.
+     */
+    public String outlineWriteRefusal() {
+        if (productiveResources == null) {
+            return null;
+        }
+        com.aresstack.askai.research.state.oo.ResearchStateMemento memento = productiveResources.currentState();
+        String phase = memento.getPhaseId();
+        String stateId = memento.getStateId();
+        if (com.aresstack.askai.research.mcp.ResearchToolPolicy.writable(phase, stateId,
+                com.aresstack.askai.research.state.oo.ResearchStateIds.OUTLINE)) {
+            return null;
+        }
+        if (com.aresstack.askai.research.state.oo.ResearchStateIds.OUTLINE.equals(phase)) {
+            if (com.aresstack.askai.research.state.oo.ResearchStateIds.WAITING_APPROVAL.equals(stateId)) {
+                return "Waiting for your review. Approve or Request changes.";
+            }
+            if (com.aresstack.askai.research.state.oo.ResearchStateIds.WAITING.equals(stateId)) {
+                return "Starting Outline...";
+            }
+            return "Outline is " + stateId + ". Resume it to change the outline.";
+        }
+        if (com.aresstack.askai.research.state.oo.ResearchStateIds.DRAFT.equals(phase)) {
+            int revision = 0;
+            try {
+                com.aresstack.askai.research.book.ApprovedOutline approved = approvedOutline();
+                revision = approved == null ? 0 : approved.getRevision();
+            } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+                return corrupt.getMessage();
+            }
+            return revision > 0 ? "Frozen at revision " + revision + ". Reopen Outline to change it."
+                    : "The outline is frozen. Reopen Outline to change it.";
+        }
+        return "Not started yet. The outline opens when the workflow reaches Outline.";
+    }
+
+    /** Render the stored outline into the "outline" artifact (never from the live projection, plan PR 21). */
+    private void renderOutlineArtifact(com.aresstack.askai.research.outline.Outline outline) {
+        if (productiveResources == null || productiveResources.isClosed()) {
+            return;
+        }
+        try {
+            com.aresstack.askai.plugin.api.agent.artifact.AgentArtifactStore store =
+                    productiveResources.getArtifactStore();
+            String markdown = com.aresstack.askai.research.outline.OutlineBlock.markdown(outline);
+            com.aresstack.askai.plugin.api.agent.artifact.ArtifactContent current = store.read("outline");
+            if (!markdown.equals(current.getMarkdown())) {
+                store.replace("outline", current.getRevision(), markdown);
+            }
+        } catch (RuntimeException renderFailed) {
+            System.err.println("[research] outline artifact render failed: " + renderFailed.getMessage());
+        }
+        uiExecutor.execute(this::fireStateChanged);
     }
 
     /** The approved revision of the valid Phase-1 record, or 0. */
@@ -6031,13 +6124,20 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     // ------------------------------------------------------------------ outline (explicit action, issue #29)
 
-    /** The persisted outline artifact markdown, or "" when none exists yet. Pure read for the Outline tab. */
-    public String outlineMarkdown() {
+    /**
+     * The persisted live outline projection as markdown, or "" when none exists yet. Pure read for the analysis
+     * drawer; plan PR 21: the projection is an analysis view only and never the stored outline.
+     */
+    public String liveOutlineMarkdown() {
         if (productiveResources == null || productiveResources.isClosed()) {
             return "";
         }
         try {
-            return productiveResources.getArtifactStore().read("outline").getMarkdown();
+            com.aresstack.askai.research.knowledge.live.LiveOutlineProjection projection =
+                    new com.aresstack.askai.research.knowledge.processing.live.FileLiveOutlineProjectionStore(
+                            productiveResources.getProjectContext().getProjectDirectory()).load();
+            return projection == null ? ""
+                    : com.aresstack.askai.research.knowledge.live.LiveOutlineMarkdown.render(projection);
         } catch (RuntimeException unreadable) {
             return "";
         }

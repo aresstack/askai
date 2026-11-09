@@ -99,7 +99,7 @@ public class ExplicitDerivedActionsTest {
         assertNull("no embedding world → staleness is honestly unavailable", fx.session.outlineStale());
         assertFalse("the explicit rebuild reports unavailability instead of failing silently",
                 fx.session.requestOutlineRebuild());
-        assertEquals("no persisted outline artifact yet", "", fx.session.outlineMarkdown().trim());
+        assertEquals("no persisted outline artifact yet", "", fx.session.liveOutlineMarkdown().trim());
     }
 
     @Test

@@ -308,11 +308,14 @@ public final class ResearchAgentSession {
                         new com.aresstack.askai.research.runtime.team.PhaseContextAssembler
                                 .PhaseArtifact() {
                             public String rendered(String phaseId) {
-                                // Plan PR 15: the Sources block (search plan, coverage per node). Other
-                                // phases fill their blocks in PR 21 and PR 29.
-                                return com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry
-                                        .RESEARCH_PHASE_ID.equalsIgnoreCase(phaseId == null ? "" : phaseId.trim())
-                                        ? hostBlock("search_plan_overview", "No search plan.") : "";
+                                // Plan PR 15: the Sources block (search plan, coverage per node); plan PR 21: the
+                                // Outline block (ids, titles, coverage per chapter). Document follows in PR 29.
+                                String phase = phaseId == null ? "" : phaseId.trim();
+                                if (com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry
+                                        .RESEARCH_PHASE_ID.equalsIgnoreCase(phase)) {
+                                    return hostBlock("search_plan_overview", "No search plan.");
+                                }
+                                return "outline".equalsIgnoreCase(phase) ? hostBlock("outline_read", "No outline.") : "";
                             }
                         }));
         // Konzeptpapier loop budgets (host env hand-off): tool rounds ≠ repair attempts — one is the

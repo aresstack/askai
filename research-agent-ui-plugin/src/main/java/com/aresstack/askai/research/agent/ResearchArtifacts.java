@@ -42,8 +42,8 @@ public final class ResearchArtifacts {
         list.add(new Artifact("sources", "Sources", TYPE_SOURCES, ""));
         // Outline + Document are ONE tab: the outline (issue #29: persisted derived projection, stale marker,
         // explicit generate action) is the Document tab's DRAWER, the document itself shows in the main area.
-        // The "outline" artifact slot in the store (outline.md, outline_save) is unchanged — it just has no
-        // tab of its own anymore.
+        // Plan PR 21: the "outline" artifact slot (outline.md) is rendered from the outline store only, never
+        // from the live projection; outline_save is gone. It has no tab of its own until PR 23.
         // ONE canonical working document (issue #32): DRAFT and FINALIZATION both work on it. The legacy
         // concept/research-notes/findings/draft/final artifacts are deliberately NOT listed anymore — old
         // files stay untouched on disk, but they get no tabs and no active-workflow writes.
