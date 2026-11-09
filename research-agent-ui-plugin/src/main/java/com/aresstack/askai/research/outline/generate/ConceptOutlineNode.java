@@ -61,22 +61,16 @@ public final class ConceptOutlineNode {
                                                   ConceptIdentity identity, JsonElement identityRoot) {
         List<ConceptOutlineNode> nodes = new ArrayList<ConceptOutlineNode>();
         for (JsonElement element : array) {
-            if (element.isJsonPrimitive()) {
-                String name = element.getAsString();
-                if (!name.trim().isEmpty()) {
-                    List<String> path = with(parentPath, name);
-                    nodes.add(new ConceptOutlineNode(idOf(path, identity, identityRoot), name,
-                            Collections.<ConceptOutlineNode>emptyList()));
-                }
-            } else if (element.isJsonObject()) {
+            // Only array-valued object properties are cards (the ConceptIdentity rule); scalar notes and other
+            // properties are content, never outline nodes.
+            if (element.isJsonObject()) {
                 for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
-                    if (entry.getKey().trim().isEmpty()) {
+                    if (entry.getKey().trim().isEmpty() || !entry.getValue().isJsonArray()) {
                         continue;
                     }
                     List<String> path = with(parentPath, entry.getKey());
-                    List<ConceptOutlineNode> children = entry.getValue().isJsonArray()
-                            ? level(entry.getValue().getAsJsonArray(), path, identity, identityRoot)
-                            : Collections.<ConceptOutlineNode>emptyList();
+                    List<ConceptOutlineNode> children =
+                            level(entry.getValue().getAsJsonArray(), path, identity, identityRoot);
                     nodes.add(new ConceptOutlineNode(idOf(path, identity, identityRoot), entry.getKey(), children));
                 }
             }
