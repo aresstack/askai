@@ -31,13 +31,28 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
     private static final java.util.concurrent.ConcurrentHashMap<String, Object> SOURCE_LOCKS =
             new java.util.concurrent.ConcurrentHashMap<String, Object>();
 
+    /** Plan PR 14: refuses a change of an approved source outside the phase that may change it. */
+    public interface UpdateGuard {
+        /** @return {@code null} to let the update pass, otherwise the reason shown to the user. */
+        String refusal(ResearchSourceRecord current, SourceUpdate update);
+    }
+
+    /** Plan PR 14 (D4): the full text and the checksum of a source are fixed once set. */
+    public static final String TEXT_FIXED =
+            "The text of a stored source cannot be changed; a changed page becomes a new source.";
+
     private final File dir;
+    private volatile UpdateGuard guard;
 
     public FileResearchSourceRepository(File sourcesDir) {
         this.dir = sourcesDir;
         if (!dir.isDirectory()) {
             dir.mkdirs();
         }
+    }
+
+    public void setUpdateGuard(UpdateGuard guard) {
+        this.guard = guard;
     }
 
     private File file(String sourceId) {
@@ -99,6 +114,11 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
         if (current.getRevision() != expectedRevision) {
             return SourceUpdateResult.conflict(current);
         }
+        UpdateGuard rule = guard;
+        String refusal = rule == null ? null : rule.refusal(current, update);
+        if (refusal != null) {
+            return SourceUpdateResult.refused(current, refusal);
+        }
         ResearchSourceRecord next = current.toBuilder()
                 .title(update.getTitle())
                 .origin(update.getOrigin())
@@ -121,9 +141,18 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
         }
     }
 
-    /** Add or overwrite a record verbatim (used to seed a fresh project). */
+    /**
+     * Add a record, or overwrite one verbatim. Plan PR 14 (D4): once a source has its full text or its checksum,
+     * neither changes again; only a parked candidate (both empty) receives them once.
+     */
     public void put(ResearchSourceRecord record) throws IOException {
         synchronized (lockFor(record.getSourceId())) {
+            ResearchSourceRecord stored = get(record.getSourceId());
+            if (stored != null && !(stored.getFullText().isEmpty() && stored.getChecksum().isEmpty())
+                    && (!stored.getFullText().equals(record.getFullText())
+                    || !stored.getChecksum().equals(record.getChecksum()))) {
+                throw new IOException(TEXT_FIXED);
+            }
             write(record);
         }
     }
