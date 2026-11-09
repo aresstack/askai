@@ -173,6 +173,12 @@ final class PlaywrightBrowserSession implements BrowserSession {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     public WebSearchResult search(String query) throws BrowserException {
+        if (policy.isRefusingSearchEngines()) {
+            com.aresstack.askai.browser.EngineHostRefusedException refused =
+                    new com.aresstack.askai.browser.EngineHostRefusedException("search engines", "web_search");
+            logEngineRefusal(refused);
+            throw refused;
+        }
         // web_search: run the SHARED engine navigation; the consumer extracts each captured page. With
         // per-engine result-page counts, one engine may deliver SEVERAL pages — the items accumulate
         // (deduplicated by target URL) up to the configured result limit.
@@ -746,7 +752,7 @@ final class PlaywrightBrowserSession implements BrowserSession {
     }
 
     public BrowserPageSnapshot open(String url) throws BrowserException {
-        policy.check(url);
+        checkPolicy(url);
         return checkedSnapshot(driver.open(url));
     }
 
@@ -757,7 +763,7 @@ final class PlaywrightBrowserSession implements BrowserSession {
 
     @Override
     public BrowserPageReadiness probe(String url) throws BrowserException {
-        policy.check(url);
+        checkPolicy(url);
         return readinessFrom(checkedSnapshot(driver.open(url)));
     }
 
@@ -889,10 +895,28 @@ final class PlaywrightBrowserSession implements BrowserSession {
         return driver.hudInbox();
     }
 
+    /** The pre-navigation gate; an engine refusal in a worker context is logged before it propagates. */
+    private void checkPolicy(String url) throws BrowserException {
+        try {
+            policy.check(url);
+        } catch (com.aresstack.askai.browser.EngineHostRefusedException engine) {
+            logEngineRefusal(engine);
+            throw engine;
+        }
+    }
+
+    private static void logEngineRefusal(com.aresstack.askai.browser.EngineHostRefusedException refused) {
+        System.err.println("[browser-worker] " + refused.getMessage());
+    }
+
     /** The post-redirect gate: the FINAL url must pass the policy or the page is abandoned. */
     private BrowserPageSnapshot checkedSnapshot(PlaywrightPageState state) throws BrowserException {
         try {
             policy.check(state.url);
+        } catch (com.aresstack.askai.browser.EngineHostRefusedException engine) {
+            abandonPage();
+            logEngineRefusal(engine);
+            throw engine;
         } catch (BrowserException blocked) {
             abandonPage();
             throw new BrowserException("Blocked after redirect — final URL is not allowed: "

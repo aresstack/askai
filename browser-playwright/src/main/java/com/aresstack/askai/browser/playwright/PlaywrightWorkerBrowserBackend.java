@@ -235,8 +235,10 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
                     timeoutMillis, options.settings.consent, options.settings.captcha, camoufox);
             driver.setRenderedCapture(new RenderedPageDocumentCapture(options.settings.analysis));
             driver.readThroughAddon(readBridge);
-            UrlSafetyPolicy policy = options.allowPrivateNetworks
-                    ? UrlSafetyPolicy.allowingPrivateNetworks() : UrlSafetyPolicy.strict();
+            // Worker contexts never reach a search engine: searches go through the central search service.
+            UrlSafetyPolicy policy = (options.allowPrivateNetworks
+                    ? UrlSafetyPolicy.allowingPrivateNetworks() : UrlSafetyPolicy.strict())
+                    .refusingSearchEngines(java.util.Collections.<String>emptySet());
             PlaywrightBrowserSession session = new PlaywrightBrowserSession(driver, policy, BrowserLimits.defaults(),
                     options.searchUrlTemplate, null, options.settings);
             if (options.hostPortDomainKeys) {
