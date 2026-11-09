@@ -4,7 +4,21 @@ import com.aresstack.askai.modelport.ModelPortSettings;
 import com.aresstack.askai.modelport.OllamaModelPort;
 import com.aresstack.askai.research.benchmark.BenchmarkModelPortAccess;
 import com.aresstack.askai.research.benchmark.OllamaTokenMeter;
+import com.aresstack.askai.research.drafting.RuntimeSectionWriter;
+import com.aresstack.askai.research.drafting.SectionWriteRequest;
+import com.aresstack.askai.research.drafting.SectionWritingJob;
+import com.aresstack.askai.research.drafting.WritingOutcome;
+import com.aresstack.askai.research.manuscript.ManuscriptWorkspace;
+import com.aresstack.askai.research.manuscript.SectionRevision;
+import com.aresstack.askai.research.outline.Outline;
+import com.aresstack.askai.research.outline.OutlineBrief;
+import com.aresstack.askai.research.outline.OutlineChapter;
+import com.aresstack.askai.research.outline.OutlineProvenance;
+import com.aresstack.askai.research.outline.OutlineSection;
+import com.aresstack.askai.research.runtime.orchestrator.InMemoryTaskBoard;
 import com.aresstack.askai.research.runtime.writer.ClaimFlag;
+import com.aresstack.askai.research.runtime.writer.SectionAssignment;
+import com.aresstack.askai.research.store.FileManuscriptStore;
 import com.aresstack.askai.research.runtime.writer.SectionDraft;
 import com.aresstack.askai.research.runtime.writer.SectionWriter;
 
@@ -29,8 +43,8 @@ import java.util.Random;
  * The writer A/B of plan PR 31 (section 5.4), opt-in through the {@code benchmark} task:
  * <pre>gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest*'
  *   -Daskai.benchmark.writerAb.input=path/to/writer-ab-input.json</pre>
- * Each arm writes the first three sections alone and then the whole chapter in order (each section receiving the
- * digest of the one before, as the writing job does), through the productive section writer on the product's model
+ * Each arm writes the first three sections alone and then the whole chapter through the PR 29 writing job (each
+ * section receiving the digest of the one before), through the productive section writer on the product's model
  * port. The run writes the blind rating sheet, the anonymous measurements and the key into the report directory.
  * After the owner filled the sheet, a second call with {@code -Daskai.benchmark.writerAb.rated=<sheet>} and
  * {@code -Daskai.benchmark.writerAb.key=<key>} prints the resolved ranking and the preset the rule chooses.
@@ -86,20 +100,7 @@ public class WriterAbLiveTest {
                                 }
                             }));
                 }
-                samples.add(measure(meter, input, WriterAbDecision.CHAPTER, arm.getModel(), maxPassages(input),
-                        new Run() {
-                            public List<SectionDraft> drafts() {
-                                List<SectionDraft> drafts = new ArrayList<SectionDraft>();
-                                String digest = "";
-                                for (WriterAbInput.Section section : input.sections) {
-                                    SectionDraft draft = writer.write(input.assignment(section, arm, answerTokens,
-                                            digest));
-                                    drafts.add(draft);
-                                    digest = digest(draft.getText());
-                                }
-                                return drafts;
-                            }
-                        }));
+                samples.add(chapterByWritingJob(meter, input, arm, writer, answerTokens));
             }
         }
         Assume.assumeFalse("no arm selected by -Daskai.benchmark.models", models.isEmpty());
@@ -129,13 +130,7 @@ public class WriterAbLiveTest {
         OllamaTokenMeter.Usage before = meter.snapshot();
         long start = System.nanoTime();
         StringBuilder text = new StringBuilder();
-        Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
-        counts.put("failed sections", 0);
-        for (ClaimFlag.Kind kind : ClaimFlag.Kind.values()) {
-            counts.put(kind.label(), 0);
-        }
-        counts.put("writer gaps", 0);
-        counts.put("stripped markers", 0);
+        Map<String, Integer> counts = emptyCounts();
         for (SectionDraft draft : run.drafts()) {
             if (!draft.isOk()) {
                 counts.put("failed sections", counts.get("failed sections") + 1);
@@ -153,6 +148,85 @@ public class WriterAbLiveTest {
         long tokens = meter.snapshot().minus(before).totalTokens();
         return new WriterAbSample(item, model, text.toString(), seconds, tokens,
                 WriterSampleMetrics.measure(text.toString(), passages, input.language), counts);
+    }
+
+
+    /**
+     * The sample chapter as the product writes it: the PR 29 writing job over a one-chapter outline, on a fresh
+     * manuscript store, with the productive section writer adapter; each section's assignment gets the digest of the
+     * section the job stored before it.
+     */
+    private static WriterAbSample chapterByWritingJob(OllamaTokenMeter meter, final WriterAbInput input,
+                                                      final WriterAbArm arm, SectionWriter writer,
+                                                      final int answerTokens) throws Exception {
+        File dir = Files.createTempDirectory("writer-ab-manuscript").toFile();
+        final ManuscriptWorkspace manuscript = new ManuscriptWorkspace(new FileManuscriptStore(dir));
+        final Map<String, WriterAbInput.Section> byId = new LinkedHashMap<String, WriterAbInput.Section>();
+        List<OutlineSection> sections = new ArrayList<OutlineSection>();
+        for (WriterAbInput.Section section : input.sections) {
+            byId.put(section.id, section);
+            sections.add(new OutlineSection(section.id, "ab-chapter", sections.size() + 1, section.title,
+                    new OutlineBrief(section.brief, section.keyPoints, section.words), OutlineProvenance.NONE,
+                    false, ""));
+        }
+        Outline outline = new Outline(Arrays.asList(new OutlineChapter("ab-chapter", 1, "Sample chapter",
+                new OutlineBrief(input.synopsis, new ArrayList<String>(), 0), OutlineProvenance.NONE, false, "",
+                sections)));
+        final List<String> order = new ArrayList<String>(byId.keySet());
+        RuntimeSectionWriter adapter = new RuntimeSectionWriter(writer, new RuntimeSectionWriter.Assignments() {
+            public SectionAssignment assignmentFor(SectionWriteRequest request) {
+                String id = request.getSection().getId();
+                int index = order.indexOf(id);
+                String digest = "";
+                if (index > 0) {
+                    SectionRevision previous = manuscript.store().current(order.get(index - 1));
+                    digest = previous == null ? "" : digest(previous.getText());
+                }
+                return input.assignment(byId.get(id), arm, answerTokens, digest);
+            }
+        });
+        SectionWritingJob job = new SectionWritingJob(new InMemoryTaskBoard(), manuscript, adapter, null, null);
+
+        meter.awaitIdle(60_000L);
+        OllamaTokenMeter.Usage before = meter.snapshot();
+        long start = System.nanoTime();
+        WritingOutcome outcome = job.writeRemaining(outline);
+        double seconds = (System.nanoTime() - start) / 1e9;
+        meter.awaitIdle(60_000L);
+        long tokens = meter.snapshot().minus(before).totalTokens();
+
+        StringBuilder text = new StringBuilder();
+        Map<String, Integer> counts = emptyCounts();
+        counts.put("failed sections", outcome.getFailed().size() + outcome.getRemaining().size());
+        for (String id : order) {
+            SectionRevision revision = manuscript.store().current(id);
+            if (revision == null) {
+                continue;
+            }
+            text.append(text.length() == 0 ? "" : "\n\n").append(revision.getText().trim());
+            for (String line : revision.getClaimFlags()) {
+                for (ClaimFlag.Kind kind : ClaimFlag.Kind.values()) {
+                    if (line.startsWith(kind.label() + ":")) {
+                        counts.put(kind.label(), counts.get(kind.label()) + 1);
+                    }
+                }
+            }
+            counts.put("writer gaps", counts.get("writer gaps") + revision.getGaps().size());
+        }
+        counts.remove("stripped markers");
+        return new WriterAbSample(WriterAbDecision.CHAPTER, arm.getModel(), text.toString(), seconds, tokens,
+                WriterSampleMetrics.measure(text.toString(), maxPassages(input), input.language), counts);
+    }
+
+    private static Map<String, Integer> emptyCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
+        counts.put("failed sections", 0);
+        for (ClaimFlag.Kind kind : ClaimFlag.Kind.values()) {
+            counts.put(kind.label(), 0);
+        }
+        counts.put("writer gaps", 0);
+        counts.put("stripped markers", 0);
+        return counts;
     }
 
     /** The last paragraph, cut to about 80 words: what the next section of the chapter continues from. */

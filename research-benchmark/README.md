@@ -104,7 +104,7 @@ gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest*' -Daskai.bench
 ```
 
 Each of `gemma4:e2b` (450-word parts), `llama3.1:8b` and `gpt-oss:20b` (1,100 words) writes sections 1-3 alone and
-the whole chapter in order (each section gets the digest of the one before). The report directory receives
+the whole chapter through the PR 29 writing job (each section gets the digest of the one before). The report directory receives
 `writer-ab-<time>-sheet.md` (blind, shuffled letters per item), `-metrics.md` (time, tokens, citation validity,
 uncited-paragraph rate, language drift, claim-check and gap counts, without names) and `-key.txt`. Fill one
 `Ranking:` line per item in the sheet without opening the key, then:
