@@ -24,6 +24,8 @@ public final class SectionAssignment {
     private final int sectionWords;
     private final int wordsPerCall;
     private final int answerTokens;
+    private final String rewriteComment;
+    private final String currentText;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -38,6 +40,8 @@ public final class SectionAssignment {
         this.wordsPerCall = Math.max(50, b.wordsPerCall);
         this.sectionWords = b.sectionWords > 0 ? b.sectionWords : this.wordsPerCall;
         this.answerTokens = Math.max(0, b.answerTokens);
+        this.rewriteComment = b.rewriteComment;
+        this.currentText = b.currentText;
     }
 
     public static Builder builder(String sectionId) {
@@ -95,6 +99,21 @@ public final class SectionAssignment {
         return answerTokens;
     }
 
+    /** The user's comment of "Rewrite section" or "Rewrite chapter"; empty for a first draft. */
+    public String getRewriteComment() {
+        return rewriteComment;
+    }
+
+    /** The current text of the part being rewritten; empty for a first draft. Never sent with a continuation. */
+    public String getCurrentText() {
+        return currentText;
+    }
+
+    /** True for "Rewrite section" or "Rewrite chapter" (a comment or a current text is set). */
+    public boolean isRewrite() {
+        return !rewriteComment.isEmpty() || !currentText.isEmpty();
+    }
+
     /** A copy for one key-point part of the section, with that part's key points, words and digest. */
     SectionAssignment part(List<String> partKeyPoints, int words, String digest) {
         Builder b = new Builder(sectionId);
@@ -109,6 +128,8 @@ public final class SectionAssignment {
         b.wordsPerCall = words;
         b.sectionWords = words;
         b.answerTokens = answerTokens;
+        b.rewriteComment = rewriteComment;
+        b.currentText = currentText;
         return new SectionAssignment(b);
     }
 
@@ -125,6 +146,8 @@ public final class SectionAssignment {
         private int sectionWords;
         private int wordsPerCall = 450;
         private int answerTokens = 1200;
+        private String rewriteComment = "";
+        private String currentText = "";
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -185,6 +208,16 @@ public final class SectionAssignment {
 
         public Builder answerTokens(int value) {
             this.answerTokens = value;
+            return this;
+        }
+
+        public Builder rewriteComment(String value) {
+            this.rewriteComment = value == null ? "" : value.trim();
+            return this;
+        }
+
+        public Builder currentText(String value) {
+            this.currentText = value == null ? "" : value.trim();
             return this;
         }
 

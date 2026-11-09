@@ -25,6 +25,10 @@ public final class CitationValidator {
     private static final Pattern BULLET = Pattern.compile("^\\s*(?:[-*•]|\\d{1,2}[.)])\\s+");
     /** A sentence ends at . ! ? (optionally a closing quote or bracket) followed by whitespace. */
     private static final Pattern SENTENCE_END = Pattern.compile("(?<=[.!?][\"“”»’')]?)\\s+");
+    /** A part ending in a short abbreviation ("z.", "B.", "Dr.", "ca.", "vgl.") continues in the next part. */
+    private static final Pattern ABBREVIATION = Pattern.compile(
+            "(?:^|\\s)(?:\\p{L}|ca|dr|nr|vgl|bzw|usw|etc|prof|abb|kap|mio|mrd|jh|evtl|ggf|inkl|tab|e\\.g|i\\.e|vs)\\.$",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern LEADING_MARKERS = Pattern.compile("^((?:\\s*" + MARKER.pattern() + ")+)\\s*");
 
     /** One sentence with the passage numbers it cites. */
@@ -238,7 +242,7 @@ public final class CitationValidator {
                     continue;
                 }
             }
-            if (!parts.isEmpty() && startsLowercase(part)) {
+            if (!parts.isEmpty() && (startsLowercase(part) || ABBREVIATION.matcher(parts.get(parts.size() - 1)).find())) {
                 int last = parts.size() - 1; // "z. B. die" – an abbreviation, not a sentence end
                 parts.set(last, parts.get(last) + " " + part);
                 continue;

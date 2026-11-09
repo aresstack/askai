@@ -160,7 +160,11 @@ public final class SectionWriter {
             return cut; // the cut text up to its last full sentence stays usable
         }
         remember(more, model);
-        return join(cut, more.getText() == null ? "" : more.getText());
+        String rest = more.getText() == null ? "" : more.getText();
+        if (more.isCutOff()) {
+            rest = upToLastFullSentence(rest); // no second continuation: the fragment is dropped
+        }
+        return join(cut, rest);
     }
 
     private static void remember(MainModelChatResult result, String[] model) {

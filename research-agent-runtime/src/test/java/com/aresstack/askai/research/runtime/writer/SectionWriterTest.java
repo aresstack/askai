@@ -156,6 +156,19 @@ public class SectionWriterTest {
     }
 
     @Test
+    public void rewriteSendsCommentAndCurrentTextButContinuationOmitsTheOldText() {
+        SectionAssignment a = SectionAssignment.builder("s1").title("T").passages(pack(6))
+                .rewriteComment("kürzer").currentText("Alter Text des Teils [1].").bookLanguage("German").build();
+        ScriptedChat chat = new ScriptedChat().cutOff("Neu [1]. Abgeschn").answer("Weiter [2].");
+        SectionDraft draft = new SectionWriter(chat, null).write(a);
+        assertTrue(chat.requests.get(0).get(1).getContent().contains("Alter Text des Teils"));
+        assertTrue(chat.requests.get(0).get(1).getContent().contains("kürzer"));
+        assertFalse(chat.requests.get(1).get(1).getContent().contains("Alter Text des Teils"));
+        assertTrue(chat.requests.get(1).get(1).getContent().contains("kürzer"));
+        assertEquals("Neu [1]. Weiter [2].", draft.getText());
+    }
+
+    @Test
     public void longSectionIsSplitByKeyPoints() {
         SectionAssignment a = SectionAssignment.builder("s1").title("T")
                 .keyPoints(Arrays.asList("k1", "k2", "k3", "k4")).passages(pack(6)).wordsPerCall(450)

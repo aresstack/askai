@@ -63,6 +63,14 @@ public final class ClaimFlag {
         return what + ": " + sentence;
     }
 
+    /**
+     * The line stored in {@code SectionRevision.claimFlags} (PR 26): {@code unsupported number: 15 %}, or the
+     * sentence for uncited findings ({@code uncited sentence: <sentence>}).
+     */
+    public String revisionLine() {
+        return kind.label() + ": " + (detail.isEmpty() ? sentence : detail);
+    }
+
     @Override
     public String toString() {
         return describe();
