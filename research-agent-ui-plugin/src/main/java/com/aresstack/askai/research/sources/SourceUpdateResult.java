@@ -40,6 +40,11 @@ public final class SourceUpdateResult {
         return new SourceUpdateResult(Status.FAILED, current, "Could not save the source: " + reason);
     }
 
+    /** A rule refused the update (plan PR 14); the reason is shown as it is. Nothing changed. */
+    public static SourceUpdateResult refused(ResearchSourceRecord current, String reason) {
+        return new SourceUpdateResult(Status.FAILED, current, reason);
+    }
+
     public Status getStatus() {
         return status;
     }

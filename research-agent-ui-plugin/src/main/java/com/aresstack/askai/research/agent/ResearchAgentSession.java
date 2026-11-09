@@ -1578,6 +1578,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
         });
         wireSearchPlan(resources, engine);
+        wireApprovedSources(resources, engine); // last: the sources pin is the last record step
         engine.addListener(new com.aresstack.askai.research.transition.TransitionListener() {
             public void committed(final com.aresstack.askai.research.transition.PhaseTransition transition) {
                 // mirror the single truth into the view model for EVERY committed transition — also a
@@ -1831,6 +1832,68 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
         if (store.isBuildPending()) {
             startSearchPlanBuild(store); // the last build did not finish before the app ended
+        }
+    }
+
+    /** Plan PR 14 (D4): shown where an approved source cannot be excluded or downgraded. */
+    public static final String REOPEN_SOURCES = "Reopen Sources to remove an approved source.";
+
+    /**
+     * Plan PR 14: the sources pin on {@code APPROVE_EVIDENCE} and the rule that an approved source is excluded or
+     * downgraded only in {@code research/running}. Sources found later are not in the pin and stay free.
+     */
+    private void wireApprovedSources(
+            final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources,
+            final com.aresstack.askai.research.transition.TransitionEngine engine) {
+        final com.aresstack.askai.research.sources.ResearchSourceRepository repository = resources.getRepository();
+        if (repository == null || bookManifest == null) {
+            return;
+        }
+        engine.addHook(new com.aresstack.askai.research.book.SourcesFreezeHook(repository, bookManifest));
+        if (repository instanceof com.aresstack.askai.research.store.FileResearchSourceRepository) {
+            ((com.aresstack.askai.research.store.FileResearchSourceRepository) repository).setUpdateGuard(
+                    new com.aresstack.askai.research.store.FileResearchSourceRepository.UpdateGuard() {
+                        public String refusal(com.aresstack.askai.research.sources.ResearchSourceRecord current,
+                                              com.aresstack.askai.research.sources.SourceUpdate update) {
+                            return approvedSourceRefusal(current, update);
+                        }
+                    });
+        }
+    }
+
+    /** The refusal for a change of an approved source, or {@code null} (plan PR 14). */
+    String approvedSourceRefusal(com.aresstack.askai.research.sources.ResearchSourceRecord current,
+                                 com.aresstack.askai.research.sources.SourceUpdate update) {
+        if (!approvedSourceDowngrade(current, update) || researchRunning()) {
+            return null;
+        }
+        return isApprovedSource(current.getSourceId()) ? REOPEN_SOURCES : null;
+    }
+
+    static boolean approvedSourceDowngrade(com.aresstack.askai.research.sources.ResearchSourceRecord current,
+                                           com.aresstack.askai.research.sources.SourceUpdate update) {
+        // excluded: the status leaves ACCEPTED; downgraded: the relevance drops
+        return current.getStatus() != update.getStatus()
+                || update.getRelevance().ordinal() < current.getRelevance().ordinal();
+    }
+
+    /** Whether the valid sources pin names this source. */
+    public boolean isApprovedSource(String sourceId) {
+        com.aresstack.askai.research.book.BookManifest manifest = bookManifest;
+        if (manifest == null || productiveResources == null || sourceId == null) {
+            return false;
+        }
+        final com.aresstack.askai.research.transition.TransitionEngine engine = productiveResources.transitions();
+        try {
+            com.aresstack.askai.research.book.SourcesPin pin = manifest.validSourcesPin(
+                    new com.aresstack.askai.research.book.BookManifest.CommitCheck() {
+                        public boolean isCommitted(String transitionId) {
+                            return engine.isCommitted(transitionId);
+                        }
+                    });
+            return pin != null && pin.contains(sourceId);
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return true; // fail closed: a damaged manifest never lets an approved source go
         }
     }
 
@@ -4269,7 +4332,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (hits.isEmpty() || sink == null) {
             return;
         }
-        final String text = acceptedHitsText(entry, hits, conceptWriteRefusal() == null);
+        String described = acceptedHitsText(entry, hits, conceptWriteRefusal() == null);
+        if (!researchRunning()) {
+            for (com.aresstack.askai.research.sources.ResearchSourceRecord hit : hits) {
+                if (isApprovedSource(hit.getSourceId())) {
+                    described += "\n" + REOPEN_SOURCES; // plan PR 14: the approved set stays as it is
+                    break;
+                }
+            }
+        }
+        final String text = described;
         uiExecutor.execute(new Runnable() {
             public void run() {
                 sink.appendInfoMessage(publish("blacklist-hits-" + System.nanoTime()), text);
