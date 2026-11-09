@@ -197,7 +197,7 @@ public class WriterAbLiveTest {
 
         StringBuilder text = new StringBuilder();
         Map<String, Integer> counts = emptyCounts();
-        counts.put("failed sections", outcome.getFailed().size() + outcome.getRemaining().size());
+        counts.put("failed sections", outcome.getRemaining().size());
         for (String id : order) {
             SectionRevision revision = manuscript.store().current(id);
             if (revision == null) {

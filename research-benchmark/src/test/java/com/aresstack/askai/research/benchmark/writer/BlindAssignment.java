@@ -56,7 +56,7 @@ public final class BlindAssignment {
     /** Turns the owner's ranking (letters, best first) into models, best first. */
     public List<String> resolve(List<String> lettersBestFirst) {
         if (lettersBestFirst.size() != letterToModel.size()
-                || !letterToModel.keySet().containsAll(lettersBestFirst)) {
+                || !new java.util.HashSet<String>(lettersBestFirst).equals(letterToModel.keySet())) {
             throw new IllegalArgumentException("ranking of " + item + " must name each of " + letterToModel.keySet()
                     + " once: " + lettersBestFirst);
         }

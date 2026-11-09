@@ -82,6 +82,11 @@ public class WriterAbTest {
         BlindAssignment.shuffle("section 1", MODELS, new Random(1)).resolve(Arrays.asList("A", "B"));
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void duplicateLetterIsRejected() {
+        BlindAssignment.shuffle("section 1", MODELS, new Random(1)).resolve(Arrays.asList("A", "A", "C"));
+    }
+
     @Test
     public void llamaStaysWhenItWinsChapterAndTwoSections() {
         Map<String, List<String>> r = rankings(order(WriterAbArm.LLAMA), order(WriterAbArm.LLAMA),
