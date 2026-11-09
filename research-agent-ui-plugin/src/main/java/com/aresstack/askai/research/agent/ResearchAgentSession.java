@@ -723,6 +723,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return;
         }
         disposed = true;
+        com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
+        if (runner != null) {
+            runner.shutdown();
+        }
         // FIRST: leave the public session directory, so no new external call can reach a session that is
         // being torn down. unregister() removes exactly THIS registration — a chat that was reopened in the
         // meantime keeps its own. deactivate() deliberately does NOT do this: a background session stays
@@ -1532,6 +1536,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
         wireSearchPlan(resources, engine);
         wireManuscript(resources, engine);
+        wireWritingJob(resources, engine);
         wireApprovedSources(resources, engine); // last: the sources pin is the last record step
         engine.addListener(new com.aresstack.askai.research.transition.TransitionListener() {
             public void committed(final com.aresstack.askai.research.transition.PhaseTransition transition) {
@@ -2248,6 +2253,263 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         return "Not started yet. The outline opens when the workflow reaches Outline.";
     }
+
+    // ------------------------------------------------------------------ plan PR 29: writing job
+
+    static final String EFFECT_WRITE_SECTIONS = "write_sections";
+    /** The writer's call timeout; a section call above it fails one attempt. */
+    static final long WRITER_CALL_TIMEOUT_SECONDS = 900L;
+
+    private volatile com.aresstack.askai.research.drafting.WritingJobRunner writingRunner;
+    private volatile com.aresstack.askai.research.drafting.ProductiveSectionContexts writingContexts;
+    private volatile String lastWritingOutcome = "";
+
+    /**
+     * Plan PR 29: the writing job of the Document phase. {@code START_DRAFTING} runs {@code write_sections} as its
+     * after-apply effect; the job registers as a Document job, never dispatches a phase command, and a section
+     * left WORKING by a killed app goes back to pending on open. {@code finish-document} is refused while sections
+     * have neither text nor "Skip".
+     */
+    private void wireWritingJob(
+            final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources,
+            final com.aresstack.askai.research.transition.TransitionEngine engine) {
+        final com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript = resources.manuscriptWorkspace();
+        if (manuscript == null || resources.getProjectContext() == null) {
+            return;
+        }
+        com.aresstack.askai.research.drafting.SectionWriter writer = productiveSectionWriter(resources, manuscript);
+        final java.util.concurrent.atomic.AtomicReference<com.aresstack.askai.research.drafting.WritingJobRunner>
+                runnerRef = new java.util.concurrent.atomic.AtomicReference<
+                com.aresstack.askai.research.drafting.WritingJobRunner>();
+        com.aresstack.askai.research.drafting.SectionWritingJob job =
+                new com.aresstack.askai.research.drafting.SectionWritingJob(
+                        new com.aresstack.askai.research.store.ProjectTaskBoard(resources.getProjectContext()),
+                        manuscript, writer, new com.aresstack.askai.research.drafting.SectionWritingJob.Progress() {
+                            public void progress(String text) {
+                                com.aresstack.askai.research.drafting.WritingJobRunner runner = runnerRef.get();
+                                if (runner != null) {
+                                    runner.progress(text);
+                                }
+                            }
+                        }, null);
+        try {
+            int returned = job.resume();
+            if (returned > 0) {
+                technicalLog("write_sections -> resume returned " + returned + " interrupted section(s) to pending");
+            }
+        } catch (RuntimeException unreadable) {
+            technicalLog("write_sections -> resume failed: " + unreadable.getMessage());
+        }
+        com.aresstack.askai.research.drafting.WritingJobRunner runner =
+                new com.aresstack.askai.research.drafting.WritingJobRunner(job, resources.phaseJobs(),
+                        new com.aresstack.askai.research.drafting.WritingJobRunner.Context() {
+                            public com.aresstack.askai.research.outline.Outline approvedOutline() {
+                                return approvedOutlineOrNull();
+                            }
+
+                            public String phaseId() {
+                                return resources.currentState().getPhaseId();
+                            }
+
+                            public void beforeRun() {
+                                com.aresstack.askai.research.drafting.ProductiveSectionContexts contexts =
+                                        writingContexts;
+                                if (contexts != null) {
+                                    contexts.refresh();
+                                }
+                            }
+                        },
+                        new com.aresstack.askai.research.drafting.WritingJobRunner.Listener() {
+                            public void progress(final String text) {
+                                technicalLog("write_sections -> " + text);
+                                uiExecutor.execute(new Runnable() {
+                                    public void run() {
+                                        fireStateChanged();
+                                    }
+                                });
+                            }
+
+                            public void finished(
+                                    final com.aresstack.askai.research.drafting.WritingOutcome outcome) {
+                                lastWritingOutcome = outcome.text();
+                                uiExecutor.execute(new Runnable() {
+                                    public void run() {
+                                        if (sink != null) {
+                                            String id = "writing-outcome-" + System.currentTimeMillis();
+                                            sink.appendInfoMessage(id, outcome.text());
+                                            journal.attribute(id,
+                                                    com.aresstack.askai.research.state.oo.ResearchStateIds.DRAFT);
+                                            persistJournalNow();
+                                        }
+                                        fireStateChanged();
+                                    }
+                                });
+                            }
+                        });
+        runnerRef.set(runner);
+        writingRunner = runner;
+        engine.addHook(new com.aresstack.askai.research.transition.PhaseTransitionHook() {
+            public String check(com.aresstack.askai.research.transition.PhaseTransition transition) {
+                if (transition.getCommand() != ResearchCommandType.REQUEST_DRAFT_REVIEW) {
+                    return null;
+                }
+                com.aresstack.askai.research.outline.Outline outline = approvedOutlineOrNull();
+                return outline == null ? null : com.aresstack.askai.research.drafting.FinishDocumentCheck.refusal(
+                        writingRunner.job().openSections(outline));
+            }
+
+            public java.util.List<String> effects(
+                    com.aresstack.askai.research.transition.PhaseTransition transition) {
+                return transition.getCommand() == ResearchCommandType.START_DRAFTING
+                        ? java.util.Collections.singletonList(EFFECT_WRITE_SECTIONS)
+                        : java.util.Collections.<String>emptyList();
+            }
+        });
+        engine.registerEffect(EFFECT_WRITE_SECTIONS, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(com.aresstack.askai.research.transition.PhaseTransition transition) {
+                // idempotent: the job only writes sections without text
+                writeRemainingSections();
+            }
+        });
+    }
+
+    /** The PR-28 writer on the {@code phase.draft.writer} slot fed by PR-27 evidence packs, or a refusing stub. */
+    private com.aresstack.askai.research.drafting.SectionWriter productiveSectionWriter(
+            com.aresstack.askai.research.host.ProductiveResearchSessionResources resources,
+            com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript) {
+        com.aresstack.askai.agent.model.port.ModelPort port = hostContext == null ? null
+                : hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class);
+        if (port == null || resources.outlineEmbeddings() == null || resources.writerIndex() == null
+                || resources.corpusReader() == null || resources.getRepository() == null) {
+            return new com.aresstack.askai.research.drafting.SectionWriter() {
+                public com.aresstack.askai.research.manuscript.SectionRevision.Builder write(
+                        com.aresstack.askai.research.drafting.SectionWriteRequest request,
+                        Cancellation cancellation) {
+                    throw new IllegalStateException("No writer model or knowledge index is available.");
+                }
+            };
+        }
+        com.aresstack.askai.research.drafting.ProductiveSectionContexts contexts =
+                new com.aresstack.askai.research.drafting.ProductiveSectionContexts(resources.writerProjectId(),
+                        resources.writerEmbeddingFingerprint(), resources.corpusReader(),
+                        com.aresstack.askai.research.drafting.ProductiveSectionContexts.of(resources.getRepository()),
+                        manuscript.store(), "");
+        writingContexts = contexts;
+        com.aresstack.askai.research.writer.SectionContextBuilder packs =
+                new com.aresstack.askai.research.writer.SectionContextBuilder(resources.outlineEmbeddings(),
+                        resources.writerIndex(), contexts);
+        return new com.aresstack.askai.research.drafting.RuntimeSectionWriter(
+                com.aresstack.askai.research.runtime.writer.SectionWriter.onPort(port,
+                        java.time.Duration.ofSeconds(WRITER_CALL_TIMEOUT_SECONDS),
+                        new java.util.function.Consumer<String>() {
+                            public void accept(String line) {
+                                technicalLog(line);
+                            }
+                        }),
+                new com.aresstack.askai.research.drafting.EvidenceAssignments(packs, contexts,
+                        new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
+                                com.aresstack.askai.research.writer.WriterPackSettings.LARGE, 1100, 3072)));
+    }
+
+    private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,
+                                String comment) {
+        com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
+        if (runner == null) {
+            return "The writing job is not available in this session.";
+        }
+        String refusal = manuscriptWriteRefusal();
+        if (refusal != null) {
+            return refusal;
+        }
+        return runner.start(kind, id, comment);
+    }
+
+    /** {@code write_sections} and "Write remaining sections"; @return {@code null} or why it did not start. */
+    public String writeRemainingSections() {
+        return startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind.REMAINING, null, null);
+    }
+
+    /** "Rewrite stale sections". */
+    public String rewriteStaleSections() {
+        return startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind.STALE, null, "");
+    }
+
+    /** "Rewrite section" with an optional comment (also the Document assistant's {@code section_rewrite}). */
+    public String rewriteSection(String sectionId, String comment) {
+        return startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind.SECTION, sectionId,
+                comment == null ? "" : comment);
+    }
+
+    /** "Rewrite chapter": every section of one chapter with one comment. */
+    public String rewriteChapter(String chapterId, String comment) {
+        return startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind.CHAPTER, chapterId,
+                comment == null ? "" : comment);
+    }
+
+    /** "Stop writing": the section in flight stays pending. */
+    public void stopWriting() {
+        com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
+        if (runner != null) {
+            runner.stop();
+        }
+    }
+
+    public boolean writingRunning() {
+        com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
+        return runner != null && runner.isRunning();
+    }
+
+    /** The Document block of the PR-16 seam: job status and current section, or the last outcome. */
+    public String writingStatus() {
+        com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
+        if (runner == null) {
+            return "";
+        }
+        return runner.isRunning() ? runner.status() : lastWritingOutcome;
+    }
+
+    /** Titles of the stale sections, for "Rewrite stale sections". */
+    public java.util.List<String> staleSectionTitles() {
+        com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
+        com.aresstack.askai.research.outline.Outline outline = approvedOutlineOrNull();
+        return runner == null || outline == null ? java.util.Collections.<String>emptyList()
+                : runner.job().staleSections(outline);
+    }
+
+    /** The {@code finish-document} confirmation text, naming stale sections. */
+    public String finishDocumentConfirmation() {
+        return com.aresstack.askai.research.drafting.FinishDocumentCheck.confirmation(staleSectionTitles());
+    }
+
+    /**
+     * "Research this gap": one priority entry of the search plan with the section title and the gap, run in
+     * {@code draft/running} without a phase change. @return the entry id or why not
+     */
+    public String researchGap(String sectionId, String sectionTitle, String gap) {
+        final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        if (queue == null || productiveResources == null) {
+            return "Not possible: there is no search plan in this session.";
+        }
+        if (manuscriptWriteRefusal() != null) {
+            return "Not possible: gap research runs while Document is running.";
+        }
+        try {
+            return new com.aresstack.askai.research.drafting.GapResearch(
+                    new com.aresstack.askai.research.drafting.GapResearch.Queue() {
+                        public String addPriority(String entryId, String phase, String query, String label)
+                                throws Exception {
+                            return queue.addPriority(entryId, phase, query, label);
+                        }
+
+                        public void run() {
+                            queue.run();
+                        }
+                    }).research(sectionId, sectionTitle, gap);
+        } catch (Exception failed) {
+            return "Not possible: the plan entry was not saved (" + failed.getMessage() + ")";
+        }
+    }
+
 
     /**
      * Plan PR 26: the manuscript pin on {@code APPROVE_FINAL}, the stale marks after {@code APPROVE_OUTLINE} and
