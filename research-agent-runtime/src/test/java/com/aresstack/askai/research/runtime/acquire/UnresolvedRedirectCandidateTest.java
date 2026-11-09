@@ -311,7 +311,8 @@ public class UnresolvedRedirectCandidateTest {
 
     @Test
     public void anEngineVerticalInTheFrontierIsNeverOpened() {
-        String vertical = "https://www.google.com/search?q=freertos&tbm=vid";
+        // an engine page without a query parameter: the hit-list rule does not catch it, the engine guard must
+        String vertical = "https://www.google.com/maps/place/FreeRTOS";
         RecordingBrowser browser = new RecordingBrowser();
         RecordingAcceptance acceptance = new RecordingAcceptance();
         List<String> status = new ArrayList<String>();
