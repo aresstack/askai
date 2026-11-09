@@ -115,7 +115,7 @@ public final class OutlineEditorView extends JPanel {
         changeRequest.setLineWrap(true);
         changeRequest.setWrapStyleWord(true);
         changeRequest.setOpaque(false);
-        changeRequest.setBorder(BorderFactory.createTitledBorder("Change request"));
+        changeRequest.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         north.add(changeRequest, BorderLayout.CENTER);
         add(north, BorderLayout.NORTH);
 
@@ -187,7 +187,7 @@ public final class OutlineEditorView extends JPanel {
         snapshot = next;
         boolean editable = editable();
         modeLabel.setText(editable ? "Editable" : next.refusal);
-        changeRequest.setText(next.changeRequest);
+        changeRequest.setText("Change request: " + next.changeRequest);
         changeRequest.setVisible(!next.changeRequest.isEmpty());
         rebuildTree(next.outline, selected);
         Long chosen = revisions.getSelectedValue();
