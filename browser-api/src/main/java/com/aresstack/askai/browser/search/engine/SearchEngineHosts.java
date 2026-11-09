@@ -3,7 +3,7 @@ package com.aresstack.askai.browser.search.engine;
 import java.util.Locale;
 
 /**
- * The hosts of the web search engines AskAI searches with (Google, Bing, DuckDuckGo, Startpage, Yahoo, Yahoo! JAPAN). The research browser never
+ * The hosts of the web search engines AskAI searches with (Google, Bing, DuckDuckGo, Startpage, Yahoo, Yahoo! JAPAN, Seznam, Yandex, Naver, Cốc Cốc). The research browser never
  * navigates to one of them: a search engine is reached only through the search tool (the search browser or an API
  * provider), so one client with one identity talks to the engine. A search hit that still points at an engine
  * host — Google's opaque {@code /goto?url=…} wrapper, an engine vertical, an unresolved redirect — is resolved by
@@ -18,7 +18,8 @@ public final class SearchEngineHosts {
     public static boolean isEngineHost(String urlOrHost) {
         String host = hostOf(urlOrHost);
         return isGoogleHost(host) || isBingHost(host) || isDuckDuckGoHost(host) || isStartpageHost(host)
-                || isYahooSearchHost(host);
+                || isYahooSearchHost(host) || isSeznamSearchHost(host) || isYandexHost(host)
+                || isNaverSearchHost(host) || isCocCocHost(host);
     }
 
     /** {@code google.com}, {@code www.google.de}, {@code google.co.uk}, {@code google.com.br}, … */
@@ -56,6 +57,35 @@ public final class SearchEngineHosts {
         String h = hostOf(urlOrHost);
         return h.equals("search.yahoo.com") || h.endsWith(".search.yahoo.com")
                 || h.equals("search.yahoo.co.jp") || h.endsWith(".search.yahoo.co.jp");
+    }
+
+    /** {@code search.seznam.cz} and its subdomains; Seznam's news and other sites are ordinary sites. */
+    public static boolean isSeznamSearchHost(String urlOrHost) {
+        String h = hostOf(urlOrHost);
+        return h.equals("search.seznam.cz") || h.endsWith(".search.seznam.cz");
+    }
+
+    /** Yandex search ({@code yandex.com}, {@code yandex.ru}, {@code yandex.com.tr}, {@code ya.ru}, subdomains). */
+    public static boolean isYandexHost(String urlOrHost) {
+        String h = hostOf(urlOrHost);
+        return h.matches("(.+\\.)?yandex\\.(com|ru|by|kz|uz|com\\.tr|com\\.am|com\\.ge|az|fr|eu)")
+                || h.equals("ya.ru") || h.endsWith(".ya.ru");
+    }
+
+    /**
+     * Naver's search ({@code search.naver.com} and its subdomains) and its start page ({@code www.naver.com});
+     * Naver blogs, news and cafés ({@code blog.naver.com}, …) are ordinary sites and may be sources.
+     */
+    public static boolean isNaverSearchHost(String urlOrHost) {
+        String h = hostOf(urlOrHost);
+        return h.equals("search.naver.com") || h.endsWith(".search.naver.com") || h.equals("naver.com")
+                || h.equals("www.naver.com");
+    }
+
+    /** {@code coccoc.com} and its subdomains (the search engine and its redirect pages). */
+    public static boolean isCocCocHost(String urlOrHost) {
+        String h = hostOf(urlOrHost);
+        return h.equals("coccoc.com") || h.endsWith(".coccoc.com");
     }
 
     /** Google's challenge page ({@code /sorry/…}) or consent/sign-in interstitial: nothing a search can read. */
