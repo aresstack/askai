@@ -313,6 +313,59 @@ public class SearchPlanQueueTest {
     }
 
     @Test
+    public void threeFailedQueriesInARowPauseThePlanWithTheFailureOnRecord() throws Exception {
+        // live run 2026-11-09: Google blocked the search browser and the plan burnt 30 queries in 2.5 minutes
+        Map<String, List<String>> variants = new java.util.HashMap<String, List<String>>();
+        variants.put("a", Arrays.asList("Alpha Two", "Alpha Three", "Alpha Four", "Alpha Five"));
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), variants);
+        SearchPlanQueue queue = queue(caps(3, 5, 60));
+        queue.run();
+        port.fail("The search failed: search engine presented an obstacle: challenge");
+        port.fail("The search failed: search engine presented an obstacle: challenge");
+        assertTrue("two failures are not yet a pause", outcomes.isEmpty());
+        assertEquals(3, port.searched.size());
+        port.fail("The search failed: search engine presented an obstacle: challenge");
+        assertEquals(1, outcomes.size());
+        SearchPlanQueue.Outcome outcome = outcomes.get(0);
+        assertEquals(SearchPlanQueue.Reason.SEARCH_FAILED, outcome.getReason());
+        assertFalse(queue.isRunning());
+        assertEquals("no fourth query was sent against the blocked engine", 3, port.searched.size());
+        assertTrue(outcome.text(), outcome.text().startsWith("Search plan paused: 3 planned searches in a row failed"));
+        assertTrue(outcome.text(), outcome.text().contains("presented an obstacle: challenge"));
+        assertTrue(outcome.text(), outcome.text().contains("remaining queries stay pending"));
+        assertTrue(outcome.report(), outcome.report().contains("Reason: search_failed"));
+        List<SearchPlanEntry.Status> statuses = new ArrayList<SearchPlanEntry.Status>();
+        for (SearchPlanEntry entry : queue.entriesInOrder()) {
+            statuses.add(entry.getStatus());
+        }
+        assertFalse("nothing is failed for good: " + statuses, statuses.contains(SearchPlanEntry.Status.FAILED));
+        assertFalse("nothing is skipped: " + statuses, statuses.contains(SearchPlanEntry.Status.SKIPPED));
+        assertFalse("nothing is done: " + statuses, statuses.contains(SearchPlanEntry.Status.DONE));
+        // a later run starts with fresh chances
+        queue.run();
+        assertEquals(4, port.searched.size());
+        port.fail("still blocked");
+        port.fail("still blocked");
+        assertEquals("the streak restarted with the run", 1, outcomes.size());
+    }
+
+    @Test
+    public void aQueryThatSearchedResetsTheFailureStreak() throws Exception {
+        Map<String, List<String>> variants = new java.util.HashMap<String, List<String>>();
+        variants.put("a", Arrays.asList("Alpha Two", "Alpha Three", "Alpha Four", "Alpha Five"));
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), variants);
+        SearchPlanQueue queue = queue(caps(3, 5, 60));
+        queue.run();
+        port.fail("blocked");
+        port.fail("blocked");
+        port.complete(false); // the engine answered (nothing found is still an answer)
+        port.fail("blocked");
+        port.fail("blocked");
+        assertTrue("two failures after a success are not a pause", outcomes.isEmpty());
+        assertTrue(queue.isRunning());
+    }
+
+    @Test
     public void stopCancelsTheCurrentQueryAndLeavesItPending() throws Exception {
         build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
         SearchPlanQueue queue = queue(caps(3, 4, 60));

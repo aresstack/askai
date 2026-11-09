@@ -94,8 +94,16 @@ public final class SearchPlanQueue {
         /** The source limit of the Sources phase stopped the queue. */
         PHASE_CAP,
         /** The planner gave no usable query for the next cycle (model unavailable or an unusable answer). */
-        PLANNER_UNAVAILABLE
+        PLANNER_UNAVAILABLE,
+        /**
+         * {@link #MAX_CONSECUTIVE_FAILURES} planned searches in a row (retries included) failed before any page
+         * was searched (the engine blocked or the browser is gone): the plan pauses, every entry stays pending.
+         */
+        SEARCH_FAILED
     }
+
+    /** Planned searches that may fail in a row before the queue pauses with {@link Reason#SEARCH_FAILED}. */
+    static final int MAX_CONSECUTIVE_FAILURES = 3;
 
     /**
      * The outcome of the plan: the reason it ended, how many nodes are covered, which are not, and what it cost
@@ -111,9 +119,16 @@ public final class SearchPlanQueue {
         private final int sources;
         private final int domains;
         private final List<String> nodeLines;
+        private final String detail;
 
         Outcome(Reason reason, int nodes, List<String> uncovered, int cycles, int queriesRun, int sources,
                 int domains, List<String> nodeLines) {
+            this(reason, nodes, uncovered, cycles, queriesRun, sources, domains, nodeLines, "");
+        }
+
+        Outcome(Reason reason, int nodes, List<String> uncovered, int cycles, int queriesRun, int sources,
+                int domains, List<String> nodeLines, String detail) {
+            this.detail = detail == null ? "" : detail;
             this.reason = reason;
             this.nodes = nodes;
             this.uncovered = Collections.unmodifiableList(uncovered);
@@ -177,6 +192,13 @@ public final class SearchPlanQueue {
                             .append(cost).append("); ").append(covered).append(" of ").append(nodes)
                             .append(" nodes covered.");
                     break;
+                case SEARCH_FAILED:
+                    sb.append("Search plan paused: ").append(MAX_CONSECUTIVE_FAILURES)
+                            .append(" planned searches in a row failed before any page was searched")
+                            .append(detail.isEmpty() ? "" : " (last: " + detail + ")").append("; ")
+                            .append(covered).append(" of ").append(nodes).append(" nodes covered (").append(cost)
+                            .append(").");
+                    break;
                 case PLANNER_UNAVAILABLE:
                     sb.append("Search plan stopped: the planner wrote no new queries for research cycle ")
                             .append(cycles + 1).append(" (model unavailable or no usable answer); ")
@@ -205,6 +227,11 @@ public final class SearchPlanQueue {
                 case PLANNER_UNAVAILABLE:
                     sb.append(" Run the search plan again to retry, add queries for these nodes yourself, or finish "
                             + "Sources with these gaps on record.");
+                    break;
+                case SEARCH_FAILED:
+                    sb.append(" The remaining queries stay pending: check the search engine (a blocked engine needs "
+                            + "a pause or a fallback engine in the browser settings), then run the plan again, or "
+                            + "finish Sources with these gaps on record.");
                     break;
                 default:
                     sb.append(" Add queries for these nodes, raise \"Research cycles\" and run the plan again, or "
@@ -244,6 +271,9 @@ public final class SearchPlanQueue {
     private boolean running;
     private SearchPlanEntry current;
     private boolean stopRequested;
+    /** Planned queries that failed in a row since the last one that searched (see {@link Reason#SEARCH_FAILED}). */
+    private int failedStreak;
+    private String lastFailure = "";
     /** A later research cycle is being planned (the queue is running without a running entry). */
     private boolean replanning;
     /** Guards a planner answer against a stop or a restart meanwhile. */
@@ -321,6 +351,7 @@ public final class SearchPlanQueue {
             }
             running = true;
             stopRequested = false;
+            failedStreak = 0; // a new run gets its own chances
         }
         listener.changed();
         scheduleNext();
@@ -377,6 +408,7 @@ public final class SearchPlanQueue {
         if (!"completed".equals(subKind) && !"failed".equals(subKind)) {
             return;
         }
+        Outcome paused = null;
         synchronized (this) {
             if (current == null || !requestId.equals(current.getRequestId())) {
                 return; // a late event of an entry that already ended
@@ -394,11 +426,27 @@ public final class SearchPlanQueue {
                     }
                     entry = entry.done(now);
                     store.save(entry);
+                    failedStreak = 0;
                 } else if (stopRequested) {
                     backToPending(entry, now);
                 } else {
-                    store.save(entry.failedRun(detail == null || detail.isEmpty() ? "The search failed" : detail,
-                            now));
+                    String reason = detail == null || detail.isEmpty() ? "The search failed" : detail;
+                    store.save(entry.failedRun(reason, now));
+                    failedStreak++;
+                    lastFailure = reason;
+                    if (failedStreak >= MAX_CONSECUTIVE_FAILURES && running) {
+                        // live run 2026-11-09: Google blocked the search browser after 13 queries and the plan
+                        // then burnt 30 queries of three cycles in 2.5 minutes, each failing in 5 s, and called the
+                        // result "budget". A failing engine is not a research result: pause, keep the rest pending.
+                        running = false;
+                        SearchPlanRecord record = store.loadRecord();
+                        Map<String, SearchPlanEntry> all = store.loadEntries();
+                        if (record != null) {
+                            SearchPlanCoverage.Caps c = caps;
+                            paused = outcome(record, all, c, SearchPlanCoverage.of(record, all.values(), c, sources),
+                                    Reason.SEARCH_FAILED, lastFailure);
+                        }
+                    }
                 }
             } catch (IOException | CorruptProjectFileException | RuntimeException failed) {
                 System.err.println("[search-plan] entry " + entry.getId() + " not recorded: " + failed.getMessage());
@@ -407,6 +455,10 @@ public final class SearchPlanQueue {
             stopRequested = false;
         }
         listener.changed();
+        if (paused != null) {
+            finish(paused);
+            return;
+        }
         scheduleNext();
     }
 
@@ -653,6 +705,12 @@ public final class SearchPlanQueue {
     private Outcome outcome(SearchPlanRecord record, Map<String, SearchPlanEntry> entries,
                             SearchPlanCoverage.Caps c, Map<String, SearchPlanCoverage.NodeCoverage> coverage,
                             Reason forced) {
+        return outcome(record, entries, c, coverage, forced, "");
+    }
+
+    private Outcome outcome(SearchPlanRecord record, Map<String, SearchPlanEntry> entries,
+                            SearchPlanCoverage.Caps c, Map<String, SearchPlanCoverage.NodeCoverage> coverage,
+                            Reason forced, String detail) {
         List<String> uncovered = new ArrayList<String>();
         List<String> lines = new ArrayList<String>();
         java.util.Set<String> allSources = new java.util.LinkedHashSet<String>();
@@ -682,7 +740,7 @@ public final class SearchPlanQueue {
         }
         Reason reason = forced != null ? forced : uncovered.isEmpty() ? Reason.COVERED : Reason.BUDGET;
         return new Outcome(reason, coverage.size(), uncovered, record.getCycle(), run, allSources.size(),
-                allDomains.size(), lines);
+                allDomains.size(), lines, detail);
     }
 
     // ---- the user's edits (checklist) --------------------------------------------------------------------
