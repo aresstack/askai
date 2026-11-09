@@ -51,6 +51,9 @@ public class SearchServiceTest {
 
         public InitialSearchResult search(InitialSearchRequest request, CancellationSignal cancellation,
                                           SearchBudgetGate budget) {
+            if (!budget.beforeToolCall()) {
+                return results();
+            }
             calls.incrementAndGet();
             int now = inside.incrementAndGet();
             maxInside = Math.max(maxInside, now);
@@ -184,6 +187,11 @@ public class SearchServiceTest {
         assertEquals(3, outcome.getDropped());
         assertTrue(outcome.getPauseReason().contains("redirect hop"));
         assertEquals(SearchServiceOutcome.Status.ENGINE_PAUSED, service.search(job("p1", "other"), null).getStatus());
+
+        clock.now = outcome.getPausedUntil();
+        strategy.answers.add(results(hit("https://direct.org/a")));
+        assertEquals("blocked query stays retryable", SearchServiceOutcome.Status.QUEUED,
+                service.search(job("p1", "q"), null).getStatus());
     }
 
     @Test
@@ -220,6 +228,21 @@ public class SearchServiceTest {
         service.search(job("p1", "a"), null);
         service.search(job("p1", "b"), null);
         assertEquals(Collections.singletonList(4_000L), clock.sleeps);
+    }
+
+    @Test
+    public void everyStrategyCallOfOneJobIsSpaced() throws Exception {
+        SearchStrategy paging = new SearchStrategy() {
+            public InitialSearchResult search(InitialSearchRequest r, CancellationSignal c, SearchBudgetGate b) {
+                for (int page = 0; page < 3; page++) {
+                    b.beforeToolCall();
+                }
+                return results(hit("https://a.org/p"));
+            }
+        };
+        new SearchService(paging, null, new EngineThrottle(4_000L, 60_000L, 600_000L, clock), clock)
+                .search(job("p1", "q"), null);
+        assertEquals(Arrays.asList(4_000L, 4_000L), clock.sleeps);
     }
 
     @Test

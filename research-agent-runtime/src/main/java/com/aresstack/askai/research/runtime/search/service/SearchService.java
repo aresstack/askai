@@ -111,15 +111,29 @@ public final class SearchService {
                 return SearchServiceOutcome.of(SearchServiceOutcome.Status.ENGINE_PAUSED, throttle.pauseReason(),
                         throttle.pausedUntil(), diagnostics);
             }
-            throttle.awaitSlot();
             InitialSearchResult result;
             try {
+                // Every external call of the strategy (each result page, each engine) waits for its slot.
                 result = strategy.search(new InitialSearchRequest(job.getQuery(), job.getResultCount(),
                         job.getLanguage(), job.getCountry()), cancel, new SearchBudgetGate() {
                     public boolean beforeToolCall() {
-                        return !cancel.isCancelled();
+                        if (cancel.isCancelled()) {
+                            return false;
+                        }
+                        try {
+                            throttle.awaitSlot();
+                            return true;
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return false;
+                        }
                     }
                 });
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedException("search interrupted while waiting for the engine");
+                }
+            } catch (InterruptedException e) {
+                throw e;
             } catch (Exception e) {
                 diagnostics.add("search failed: " + e.getClass().getSimpleName()
                         + (e.getMessage() == null ? "" : ": " + e.getMessage()));
@@ -137,8 +151,11 @@ public final class SearchService {
                 return SearchServiceOutcome.of(SearchServiceOutcome.Status.TECHNICAL_PROBLEM, "", 0, diagnostics);
             }
             throttle.recordSuccess();
-            markRan(job.getProjectKey(), key);
-            return queueHits(job, result, diagnostics);
+            SearchServiceOutcome outcome = queueHits(job, result, diagnostics);
+            if (!outcome.isEngineRedirectBlocked()) {
+                markRan(job.getProjectKey(), key); // a blocked or interrupted batch stays retryable
+            }
+            return outcome;
         } finally {
             engine.unlock();
         }

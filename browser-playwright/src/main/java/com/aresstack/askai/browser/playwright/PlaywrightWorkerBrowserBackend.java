@@ -70,6 +70,11 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
     private final Playwright playwright;
     private final Browser browser;
     private final boolean camoufox;
+    /**
+     * Off until the central search service carries worker discovery (T4): then worker contexts refuse every search
+     * engine host (navigation requests aborted, policy refuses before and after redirects, web_search refused).
+     */
+    private volatile boolean refuseSearchEngines;
     private final int timeoutMillis;
     /** Camoufox with the add-on: the page-read bridge of this worker browser, else null. */
     private final AddonBridge readBridge;
@@ -204,10 +209,19 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
             BrowserContext context = browser.newContext(contextOptions);
             context.setDefaultNavigationTimeout(timeoutMillis);
             context.setDefaultTimeout(timeoutMillis);
-            if (!options.allowPrivateNetworks) {
-                final Predicate<String> allowed = new PlaywrightSessionFactory.PrivateTargetRequestFilter();
+            final boolean refuseEngines = refuseSearchEngines;
+            if (!options.allowPrivateNetworks || refuseEngines) {
+                final Predicate<String> allowed = options.allowPrivateNetworks ? url -> true
+                        : new PlaywrightSessionFactory.PrivateTargetRequestFilter();
                 context.route("**/*", route -> {
-                    if (allowed.test(route.request().url())) {
+                    if (refuseEngines && route.request().isNavigationRequest()
+                            && com.aresstack.askai.browser.search.engine.SearchEngineHosts.isEngineHost(
+                            route.request().url())) {
+                        System.err.println("[browser-worker] " + com.aresstack.askai.browser
+                                .EngineHostRefusedException.CODE + ": navigation request aborted: "
+                                + route.request().url());
+                        route.abort();
+                    } else if (allowed.test(route.request().url())) {
                         route.resume();
                     } else {
                         route.abort();
@@ -220,6 +234,11 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
         } catch (PlaywrightException ex) {
             throw new BrowserException("Creating the worker user context failed: " + firstLine(ex));
         }
+    }
+
+    /** Worker contexts created from now on refuse search engine hosts (see {@link #refuseSearchEngines}). */
+    public void setRefuseSearchEngines(boolean refuse) {
+        this.refuseSearchEngines = refuse;
     }
 
     @Override
@@ -236,9 +255,11 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
             driver.setRenderedCapture(new RenderedPageDocumentCapture(options.settings.analysis));
             driver.readThroughAddon(readBridge);
             // Worker contexts never reach a search engine: searches go through the central search service.
-            UrlSafetyPolicy policy = (options.allowPrivateNetworks
-                    ? UrlSafetyPolicy.allowingPrivateNetworks() : UrlSafetyPolicy.strict())
-                    .refusingSearchEngines(java.util.Collections.<String>emptySet());
+            UrlSafetyPolicy policy = options.allowPrivateNetworks
+                    ? UrlSafetyPolicy.allowingPrivateNetworks() : UrlSafetyPolicy.strict();
+            if (refuseSearchEngines) {
+                policy = policy.refusingSearchEngines(java.util.Collections.<String>emptySet());
+            }
             PlaywrightBrowserSession session = new PlaywrightBrowserSession(driver, policy, BrowserLimits.defaults(),
                     options.searchUrlTemplate, null, options.settings);
             if (options.hostPortDomainKeys) {
