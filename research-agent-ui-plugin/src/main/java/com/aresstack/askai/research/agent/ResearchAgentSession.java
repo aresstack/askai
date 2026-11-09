@@ -6972,9 +6972,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     String arguments) {
         String cmd = command == null ? "" : command.trim().toLowerCase(java.util.Locale.ROOT);
         String args = arguments == null ? "" : arguments.trim();
-        if (surface == com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR
-                && (cmd.startsWith("/") || (cmd.isEmpty() && args.startsWith("/")))) {
-            return executeConnectorSlashCommand(cmd.isEmpty() ? args : cmd + (args.isEmpty() ? "" : " " + args));
+        if (cmd.startsWith("/") || (cmd.isEmpty() && args.startsWith("/"))) {
+            // An explicit slash invocation on ANY MCP surface (the per-session endpoint as well as the
+            // ChatGPT connector) is a person's control, exactly like typing it into the composer: Q13
+            // restricts the agent inside the application, not the human behind an MCP client.
+            return executeSlashCommand(surface, cmd.isEmpty() ? args : cmd + (args.isEmpty() ? "" : " " + args));
         }
         if ("pause".equals(cmd) || "cancel".equals(cmd)) {
             return "rejected: '" + cmd + "' is no command. Valid now: " + validBotCommandNames();
@@ -6993,11 +6995,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * Interpret an explicit slash invocation from the interactive ChatGPT connector as a user
-     * control, using the same command processor as the application's slash-command surface.
-     * Keep ordinary bot-control calls and non-slash messages under the bot actor policy.
+     * Interpret an explicit slash invocation from an MCP surface (per-session bot control or the
+     * ChatGPT connector) as a user control, using the same command processor as the application's
+     * slash-command surface. Ordinary structured bot-control calls and non-slash messages stay under
+     * the bot actor policy, so an agent cannot approve or change phases by accident.
      */
-    private String executeConnectorSlashCommand(String slashLine) {
+    private String executeSlashCommand(com.aresstack.askai.research.state.CommandSurface surface,
+                                       String slashLine) {
         String invocation = slashLine.substring(1).trim();
         if (invocation.isEmpty()) {
             return "rejected: a slash command name is required";
@@ -7010,8 +7014,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return "rejected: unknown slash command '/" + name + "'";
         }
         String processorCommand = "map".equals(name) ? "generate-visualization" : name;
-        return executeCommand(new CommandOrigin(com.aresstack.askai.research.state.CommandActor.USER,
-                com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR,
+        return executeCommand(new CommandOrigin(com.aresstack.askai.research.state.CommandActor.USER, surface,
                 com.aresstack.askai.research.state.ResearchCommand.NO_REVISION),
                 processorCommand, arguments);
     }
