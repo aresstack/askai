@@ -97,6 +97,32 @@ public final class OutlineWorkspace {
         return commit;
     }
 
+    /**
+     * Save an editor draft (plan PR 23, tree gestures and raw JSON alike): duplicate ids and empty titles are
+     * refused with a reason, known ids keep their provenance, edited and new entries get the user-edited flag.
+     */
+    public FileOutlineStore.Commit saveEdits(Outline draft, long expectedRevision, long nowMillis) {
+        String refusal = guard.refusal();
+        if (refusal != null) {
+            throw new WriteRefusedException(refusal);
+        }
+        OutlineEdits.validate(draft);
+        return save(OutlineEdits.markEdits(draft, store.working()), expectedRevision, nowMillis);
+    }
+
+    /** Make working revision {@code revision} the head again (the editor's restore); guarded like a save. */
+    public FileOutlineStore.Commit restore(long revision, long expectedRevision, long nowMillis) {
+        String refusal = guard.refusal();
+        if (refusal != null) {
+            throw new WriteRefusedException(refusal);
+        }
+        FileOutlineStore.Commit commit = store.restore(revision, expectedRevision, nowMillis);
+        if (commit.changed) {
+            listener.outlineChanged(commit.outline, commit.revision);
+        }
+        return commit;
+    }
+
     /** The after-apply stale marks (chapter id -> reason); exempt from the write guard. */
     public FileOutlineStore.Commit markChaptersStale(Map<String, String> reasons, long nowMillis) {
         FileOutlineStore.Commit commit = store.markChaptersStale(reasons, nowMillis);
