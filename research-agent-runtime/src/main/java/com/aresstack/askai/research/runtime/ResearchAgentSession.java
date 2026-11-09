@@ -812,6 +812,28 @@ public final class ResearchAgentSession {
         return ResearchRuntimeShared.process().searchBrowser();
     }
 
+    /** The search-browser resolver for engine redirect wrappers; null when the search browser cannot be had. */
+    private com.aresstack.askai.research.runtime.acquire.OpaqueRedirectResolver redirectResolver() {
+        try {
+            return new com.aresstack.askai.research.runtime.search.SearchBrowserRedirectResolver(
+                    ensureSearchBrowser());
+        } catch (RuntimeException e) {
+            System.err.println("[research-agent] no search browser for redirect resolution: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Whether a CAPTCHA/consent wall on a page waits for the user: the setting, unless the research browser runs
+     * headless ({@code ASKAI_RESEARCH_BROWSER_HEADLESS=true}) — then there is no window to solve anything in, the
+     * page is skipped and nobody is asked.
+     */
+    private boolean challengeWaitForUser() {
+        boolean headless = "true".equalsIgnoreCase(
+                String.valueOf(environment.get("ASKAI_RESEARCH_BROWSER_HEADLESS")).trim());
+        return loadBrowserSearchSettings().captcha.waitForUser && !headless;
+    }
+
     public void cancel() {
         System.err.println("[research-agent] cancel");
         cancelled.set(true);
@@ -1606,9 +1628,12 @@ public final class ResearchAgentSession {
                                     return null;
                                 }
                             },
-                            loadBrowserSearchSettings().captcha.waitForUser,
+                            challengeWaitForUser(),
                             loadBrowserSearchSettings().readiness.maximumPageReadinessRetries,
                             loadBrowserSearchSettings().readiness.minimumReadableCharacters);
+            // Engine redirect wrappers (Google /goto) are resolved in the search browser — the one client that
+            // talks to the engine; the research browser never opens an engine address.
+            acquisition.setRedirectResolver(redirectResolver());
             // The user search completes DETERMINISTICALLY: the configured accepted-source target
             // (the budget's maxAcceptedSources) and nothing else. No minimum-host heuristics, no
             // relabeled budget stops — every other ending keeps its honest reason.
@@ -2330,6 +2355,8 @@ public final class ResearchAgentSession {
             // setting decides between BM25 (default) and the model reranker of the session language.
             if (reranker != null) {
                 loop.setReranker(rerankerFor(sessionLanguage.code()));
+                loop.setRedirectResolver(redirectResolver());
+                loop.setChallengeWaitForUser(challengeWaitForUser());
             }
             // Inject the session's chosen initial-search strategy (null → keep the default browser path).
             // On the API-provider path inference is irrelevant; on the browser path weave the productive

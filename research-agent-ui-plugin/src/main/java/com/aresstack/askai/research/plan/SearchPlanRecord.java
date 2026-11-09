@@ -59,9 +59,18 @@ public final class SearchPlanRecord {
     private final List<Node> nodes;
     private final List<String> order;
     private final List<String> priority;
+    private final int cycle;
 
+    /** The first research cycle. */
     public SearchPlanRecord(String phase, int conceptRevision, String language, List<Node> nodes,
                             List<String> order, List<String> priority) {
+        this(phase, conceptRevision, language, nodes, order, priority, 1);
+    }
+
+    /** @param cycle the research cycle the plan is in (1 = the plan built from the concept) */
+    public SearchPlanRecord(String phase, int conceptRevision, String language, List<Node> nodes,
+                            List<String> order, List<String> priority, int cycle) {
+        this.cycle = Math.max(1, cycle);
         this.phase = phase == null ? "" : phase;
         this.conceptRevision = conceptRevision;
         this.language = language == null ? "" : language;
@@ -108,8 +117,20 @@ public final class SearchPlanRecord {
         return null;
     }
 
+    /** The research cycle the plan is in: 1 after the build, one more per re-plan of the uncovered nodes. */
+    public int getCycle() {
+        return cycle;
+    }
+
     public SearchPlanRecord withOrder(List<String> newOrder, List<String> newPriority) {
-        return new SearchPlanRecord(phase, conceptRevision, language, nodes, newOrder, newPriority);
+        return new SearchPlanRecord(phase, conceptRevision, language, nodes, newOrder, newPriority, cycle);
+    }
+
+    /** The next research cycle with the entries it added appended to the order. */
+    public SearchPlanRecord nextCycle(List<String> addedIds) {
+        List<String> newOrder = new ArrayList<String>(order);
+        newOrder.addAll(addedIds);
+        return new SearchPlanRecord(phase, conceptRevision, language, nodes, newOrder, priority, cycle + 1);
     }
 
     // ---- JSON ------------------------------------------------------------------------------------------
@@ -134,6 +155,7 @@ public final class SearchPlanRecord {
         root.add("nodes", nodeArray);
         root.add("order", strings(order));
         root.add("priority", strings(priority));
+        root.addProperty("cycle", cycle);
         return new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(root) + "\n";
     }
 
@@ -151,7 +173,7 @@ public final class SearchPlanRecord {
         }
         return new SearchPlanRecord(root.get("phase").getAsString(), root.get("conceptRevision").getAsInt(),
                 root.get("language").getAsString(), nodes, strings(root.getAsJsonArray("order")),
-                strings(root.getAsJsonArray("priority")));
+                strings(root.getAsJsonArray("priority")), root.has("cycle") ? root.get("cycle").getAsInt() : 1);
     }
 
     private static JsonArray strings(List<String> values) {

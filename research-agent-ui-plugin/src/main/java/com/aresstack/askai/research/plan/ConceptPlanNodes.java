@@ -9,6 +9,7 @@ import com.google.gson.JsonParser;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -23,8 +24,11 @@ import java.util.Set;
  * <li>The id of a card comes from the concept's ID sidecar of the working revision the Phase-1 record names, so a
  * renamed card keeps its id. A plain string item has no sidecar id; it gets one from its parent id and its label.
  * Without a readable sidecar every node gets a label-path id.</li>
- * <li>The base query is the node label, the parent label and up to three mission keywords, at most
- * {@value ConceptQueryPlan#MAX_QUERY_LENGTH} characters, with every blacklist term removed.</li>
+ * <li>The base query is the node label and the parent label; a first-level card (no parent) adds up to three
+ * mission keywords instead. At most {@value ConceptQueryPlan#MAX_QUERY_LENGTH} characters, every blacklist term
+ * removed. Mission keywords are content words only: the words a mission uses to talk about the book itself
+ * ("erstellen", "Testbuch", "Kapitel", "write", "chapters") never reach a query — the live run of 2026-11-09
+ * searched for "Sensorarten Wearables für sicheren Baustellenbetrieb erstellen deutschsprachiges Testbuch".</li>
  * </ul>
  */
 public final class ConceptPlanNodes {
@@ -46,7 +50,31 @@ public final class ConceptPlanNodes {
             "einer", "eines", "für", "gegen", "hat", "haben", "ihre", "ihren", "ist", "jede", "jeder", "kann",
             "können", "leser", "mehr", "mit", "nach", "nicht", "noch", "nur", "oder", "ohne", "sich", "sie", "sind",
             "soll", "sollen", "sowie", "über", "um", "und", "unter", "vom", "von", "vor", "was", "welche", "wenn",
-            "werden", "wie", "wird", "zum", "zur", "zwischen", "erklärt", "erklären", "zeigt", "zeigen"));
+            "werden", "wie", "wird", "zum", "zur", "zwischen", "erklärt", "erklären", "zeigt", "zeigen",
+            // words about the book, the task or the test itself, never about its subject (English)
+            "write", "writes", "writing", "written", "create", "creates", "creating", "created", "make", "makes",
+            "making", "draft", "drafts", "produce", "produces", "chapter", "chapters", "section", "sections",
+            "title", "titled", "called", "named", "guide", "handbook", "manual", "textbook", "ebook", "volume",
+            "pages", "page", "words", "short", "brief", "long", "concise", "practical", "practice", "oriented",
+            "introduction", "overview", "summary", "concept", "outline", "cards", "card", "topic", "topics",
+            "please", "now", "then", "first", "next", "goal", "goals", "aim", "aims", "purpose", "target",
+            "audience", "test", "tests", "testing", "trial", "sample", "example", "examples", "check", "checks",
+            "app", "application", "project", "work", "works", "language", "german", "english", "version",
+            // the same in German
+            "schreibe", "schreiben", "schreibt", "verfasse", "verfassen", "verfasst", "erstelle", "erstellen",
+            "erstellt", "erzeuge", "erzeugen", "lege", "legen", "anlegen", "mache", "machen", "arbeite", "arbeiten",
+            "kapitel", "abschnitt", "abschnitte", "titel", "genannt", "namens", "buch", "buches", "bücher",
+            "handbuch", "leitfaden", "ratgeber", "lehrbuch", "testbuch", "fachbuch", "sachbuch", "band",
+            "seiten", "seite", "wörter", "worte", "kurz", "kurzes", "kurze", "kurzer", "knapp", "knappes", "lang",
+            "langes", "praxisorientiert", "praxisorientiertes", "praxisorientierte", "praxisnah", "praxisnahes",
+            "einführung", "überblick", "übersicht", "zusammenfassung", "konzept", "concept", "gliederung",
+            "themenkarten", "themenkarte", "karten", "karte", "thema", "themen", "bitte", "jetzt", "dann",
+            "zuerst", "danach", "ziel", "ziele", "zweck", "zielgruppe", "leserschaft", "test", "tests", "prüfung",
+            "probe", "beispiel", "beispiele", "app", "anwendung", "projekt", "arbeit", "sprache", "deutsch",
+            "deutschsprachig", "deutschsprachiges", "deutschsprachige", "englisch", "englischsprachig",
+            "englischsprachiges", "version", "klar", "klares", "klare", "mehrere", "mehreren", "viele", "vielen",
+            "einige", "einigen", "folgende", "folgenden", "wir", "uns", "unser", "unsere", "unserem", "unseren",
+            "ich", "mein", "meine", "meinem", "meinen", "ein", "einen", "einem", "einer", "eines"));
 
     private ConceptPlanNodes() {
     }
@@ -100,7 +128,7 @@ public final class ConceptPlanNodes {
                 String id = "item:" + FileConceptStore.sha256(parentId + "/" + label.toLowerCase(Locale.ROOT))
                         .substring(0, 16);
                 out.add(new ConceptQueryPlan.Node(id, label, nodePath, parentId,
-                        baseQuery(label, parentLabel, keywords, blacklist)));
+                        baseQuery(label, parentLabel, keywordsFor(path, keywords), blacklist)));
             } else if (element.isJsonObject()) {
                 for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
                     String label = entry.getKey().trim();
@@ -113,12 +141,20 @@ public final class ConceptPlanNodes {
                         id = "path:" + FileConceptStore.sha256(joinLower(nodePath)).substring(0, 16);
                     }
                     out.add(new ConceptQueryPlan.Node(id, label, trimmed(nodePath), parentId,
-                            baseQuery(label, parentLabel, keywords, blacklist)));
+                            baseQuery(label, parentLabel, keywordsFor(path, keywords), blacklist)));
                     walk(entry.getValue().getAsJsonArray(), nodePath, id, approvedRoot, identity, keywords,
                             blacklist, out);
                 }
             }
         }
+    }
+
+    /**
+     * The mission keywords of a node: only a first-level card takes them. A deeper card already carries its
+     * parent's label, and the mission's words would only pull every query of the book towards the same phrase.
+     */
+    private static List<String> keywordsFor(List<String> parentPath, List<String> keywords) {
+        return parentPath.isEmpty() ? keywords : Collections.<String>emptyList();
     }
 
     /** A card named exactly like a blacklist term is left out with its subtree (the current blacklist, D5). */

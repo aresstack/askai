@@ -10,25 +10,50 @@ import java.util.Set;
 
 /**
  * Coverage and caps of the search plan (plan PR 14, D5). A node is <em>covered</em> once it has
- * {@link Caps#getSourcesPerNode()} accepted sources from at least {@link #MIN_DOMAINS} domains. A node whose query
- * budget is spent, or that has no pending entry left, before that is <em>exhausted</em>: no further automatic query
- * runs for it, and it stays uncovered. Any other node is <em>open</em>.
+ * {@link Caps#getSourcesPerNode()} accepted sources from at least {@link #MIN_DOMAINS} domains <em>and</em> none of
+ * its planned queries is still pending: the planner's variants are the angles of the node (measurement, safety,
+ * law, …), and a node whose base query alone met the source minimum is not researched — the live run of
+ * 2026-11-09 declared all five nodes covered after six of nineteen queries that way. A node whose query budget is
+ * spent, or that has no pending entry left, without the minimum is <em>exhausted</em>: no further automatic query
+ * runs for it in this cycle, and it stays uncovered until a later cycle covers it. Any other node is <em>open</em>.
  */
 public final class SearchPlanCoverage {
 
     /** The distinct domains a covered node needs. */
     public static final int MIN_DOMAINS = 2;
 
-    /** The caps per query, node and phase. */
+    /** The caps per query, node, research cycle and phase. */
     public static final class Caps {
         private final int sourcesPerNode;
         private final int queriesPerNode;
         private final int phaseSources;
+        private final int cycles;
 
+        /** One research cycle: the plan ends when its queries ran. */
         public Caps(int sourcesPerNode, int queriesPerNode, int phaseSources) {
+            this(sourcesPerNode, queriesPerNode, phaseSources, 1);
+        }
+
+        /**
+         * @param queriesPerNode the query budget of a node PER research cycle
+         * @param cycles         how many research cycles the plan may run: after each cycle the still uncovered
+         *                       nodes are planned again from another angle, until they are covered or the cycles
+         *                       are spent
+         */
+        public Caps(int sourcesPerNode, int queriesPerNode, int phaseSources, int cycles) {
             this.sourcesPerNode = Math.max(1, sourcesPerNode);
             this.queriesPerNode = Math.max(1, queriesPerNode);
             this.phaseSources = Math.max(1, phaseSources);
+            this.cycles = Math.max(1, cycles);
+        }
+
+        public int getCycles() {
+            return cycles;
+        }
+
+        /** The query budget of a node up to and including the given cycle. */
+        public int queriesUpTo(int cycle) {
+            return queriesPerNode * Math.max(1, cycle);
         }
 
         public int getSourcesPerNode() {
@@ -126,9 +151,10 @@ public final class SearchPlanCoverage {
                 }
             }
             State state;
-            if (sources.size() >= caps.getSourcesPerNode() && hosts.size() >= MIN_DOMAINS) {
+            if (sources.size() >= caps.getSourcesPerNode() && hosts.size() >= MIN_DOMAINS && !pending) {
                 state = State.COVERED;
-            } else if (run >= caps.getQueriesPerNode() || !pending) {
+            } else if (run >= caps.queriesUpTo(caps.getCycles()) || !pending) {
+                // exhausted for now: the queue plans another cycle for it while cycles are left
                 state = State.EXHAUSTED;
             } else {
                 state = State.OPEN;

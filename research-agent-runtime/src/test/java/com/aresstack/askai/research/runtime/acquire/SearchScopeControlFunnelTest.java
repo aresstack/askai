@@ -409,6 +409,45 @@ public class SearchScopeControlFunnelTest {
     }
 
     @Test
+    public void aSearchResultPageOfAnotherSiteIsNeverVisitedNorParked() {
+        // the live run of 2026-11-09 stored two dguv.de hit lists as sources
+        final int[] calls = {0};
+        SearchStrategy strategy = new SearchStrategy() {
+            public InitialSearchResult search(InitialSearchRequest request, CancellationSignal cancellation,
+                                              SearchBudgetGate budget) {
+                calls[0]++;
+                return new InitialSearchResult(Arrays.asList(
+                        candidate("https://kept.example/scheduling", "FreeRTOS Scheduling Guide",
+                                "freertos scheduling"),
+                        candidate("https://www.dguv.de/de/suche/index.jsp?query=freertos&page=3", "DGUV - Suche",
+                                "freertos scheduling treffer"),
+                        candidate("https://second.example/tasks", "FreeRTOS Task Basics", "freertos tasks")),
+                        new ArrayList<String>(),
+                        Collections.<com.aresstack.askai.browser.search.repair.SearchChallengeState>emptyList(),
+                        new ArrayList<String>());
+            }
+        };
+        RecordingBrowser browser = new RecordingBrowser();
+        browser.pageReply = "capture_id=c1 final_url=https://kept.example/scheduling "
+                + "title=\"irrelevant page\"\nnothing about the query here";
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        List<String> status = new ArrayList<String>();
+        WebSearchApplicationService service = service(browser, strategy, acceptance, status);
+        ScriptedScope scope = new ScriptedScope();
+        scope.inactive = true; // no blacklist, no semantic gate: the URL shape alone decides
+        service.setScopeControl(scope);
+
+        service.execute("freertos scheduling");
+
+        assertEquals(Arrays.asList("https://kept.example/scheduling", "https://second.example/tasks"),
+                acceptance.parked);
+        assertFalse(browser.openedUrls.toString(),
+                browser.openedUrls.contains("https://www.dguv.de/de/suche/index.jsp?query=freertos&page=3"));
+        assertTrue(status.toString(), status.toString().contains("entry=\""
+                + WebSearchApplicationService.SEARCH_RESULT_PAGE + "\""));
+    }
+
+    @Test
     public void aTypedHostNameNeverReachesTheVisitStage() {
         int[] calls = {0};
         RecordingBrowser browser = new RecordingBrowser();

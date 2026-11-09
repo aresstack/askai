@@ -2,7 +2,7 @@ package com.aresstack.askai.research.book;
 
 import com.aresstack.askai.research.domain.scope.TypedBlacklist;
 import com.aresstack.askai.research.sources.ResearchSourceRecord;
-import com.aresstack.askai.research.sources.SourceStatus;
+import com.aresstack.askai.research.sources.SourceEligibility;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,7 +28,7 @@ public final class BlacklistSourceMatches {
             return hits;
         }
         for (ResearchSourceRecord record : records) {
-            if (record.getStatus() == SourceStatus.ACCEPTED
+            if (SourceEligibility.isResearchSource(record)
                     && blacklist.matches(record.getTitle(), record.getExcerpt(), record.getUrl())) {
                 hits.add(record);
             }

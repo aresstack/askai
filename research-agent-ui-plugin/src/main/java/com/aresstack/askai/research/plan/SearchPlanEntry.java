@@ -41,6 +41,8 @@ public final class SearchPlanEntry {
         BASE,
         /** A variant the planner role wrote. */
         VARIANT,
+        /** A query the planner wrote in a later research cycle for a node the earlier cycles left uncovered. */
+        CYCLE,
         /** Added or edited by the user. */
         USER,
         /** The comment of "Request changes" at the Sources gate; runs first. */

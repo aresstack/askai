@@ -62,6 +62,37 @@ public final class ResearchChatCommands {
         return commands;
     }
 
+    /**
+     * THE dispatcher for a typed slash line outside the composer (MCP clients): the same contributions,
+     * the same parse the host applies (name, then whitespace-separated arguments), the same processor.
+     * {@code UNKNOWN} when no contribution owns the name.
+     */
+    public static CommandExecutionResult execute(String slashLine, AgentSessionContext context) {
+        String body = slashLine == null ? "" : slashLine.trim();
+        body = body.startsWith("/") ? body.substring(1).trim() : body;
+        if (body.isEmpty()) {
+            return CommandExecutionResult.rejected("a slash command name is required");
+        }
+        String[] tokens = body.split("\\s+");
+        String name = tokens[0].toLowerCase(java.util.Locale.ROOT);
+        List<String> arguments = new ArrayList<String>(java.util.Arrays.asList(tokens).subList(1, tokens.length));
+        for (ChatCommandContribution contribution : all()) {
+            if (contribution.getDescriptor().getName().equals(name)) {
+                return contribution.execute(new CommandInvocation(name, arguments, slashLine), context);
+            }
+        }
+        return CommandExecutionResult.unknown();
+    }
+
+    /** Every slash command name, for an honest rejection. */
+    public static String names() {
+        StringBuilder sb = new StringBuilder();
+        for (ChatCommandContribution contribution : all()) {
+            sb.append(sb.length() == 0 ? "/" : ", /").append(contribution.getDescriptor().getName());
+        }
+        return sb.toString();
+    }
+
     /** The red-tag twins exposed as slash commands (the test guards the sync). */
     static List<String> processorCommandNames() {
         return java.util.Arrays.asList(

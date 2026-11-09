@@ -9,7 +9,7 @@ import com.aresstack.askai.research.outline.Outline;
 import com.aresstack.askai.research.sources.ResearchSourceRecord;
 import com.aresstack.askai.research.sources.ResearchSourceRepository;
 import com.aresstack.askai.research.sources.SourceQuery;
-import com.aresstack.askai.research.sources.SourceStatus;
+import com.aresstack.askai.research.sources.SourceEligibility;
 import com.aresstack.askai.research.store.FileManuscriptStore;
 
 import java.net.URI;
@@ -67,7 +67,7 @@ public final class BookAssemblyInputs {
         }
         if (pin != null) {
             for (ResearchSourceRecord record : sources.find(SourceQuery.all())) {
-                if (record.getStatus() == SourceStatus.ACCEPTED && !pin.contains(record.getSourceId())) {
+                if (SourceEligibility.isResearchSource(record) && !pin.contains(record.getSourceId())) {
                     sourceIds.add(record.getSourceId());
                 }
             }
@@ -77,7 +77,7 @@ public final class BookAssemblyInputs {
             if (record != null) {
                 b.source(new AssemblySource(id, record.getTitle(), site(record.getUrl()), record.getUrl(),
                         record.getCapturedAt(), record.getChecksum(), record.getFullText(),
-                        pin != null && record.getStatus() == SourceStatus.ACCEPTED && !pin.contains(id)));
+                        pin != null && SourceEligibility.isResearchSource(record) && !pin.contains(id)));
             }
         }
         return b.build();

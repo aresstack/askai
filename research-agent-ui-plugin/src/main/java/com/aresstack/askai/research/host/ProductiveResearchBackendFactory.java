@@ -821,6 +821,9 @@ public final class ProductiveResearchBackendFactory {
             baseEnv.put("ASKAI_SEARCH_MAX_ERRORS", String.valueOf(searchMaxErrors));
             // "KI-Reranker verwenden": OFF = the runtime scores lexically (BM25, no model call).
             baseEnv.put("ASKAI_USE_AI_RERANKER", String.valueOf(useAiReranker));
+            // A headless research browser has no window: the runtime then skips a CAPTCHA/consent wall instead
+            // of asking the user to solve it "in the open browser window".
+            baseEnv.put("ASKAI_RESEARCH_BROWSER_HEADLESS", String.valueOf(config.isHeadless()));
             // "Orchestrated research" and its limits (ADR 0001 lane F).
             baseEnv.putAll(orchestratorEnvironment);
             // Dev/test hand-off for local test worlds (like the former per-run browser flags): a Google-shaped
