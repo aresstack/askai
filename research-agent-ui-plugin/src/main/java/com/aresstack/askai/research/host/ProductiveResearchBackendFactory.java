@@ -1130,7 +1130,10 @@ public final class ProductiveResearchBackendFactory {
             }
             java.util.Set<String> currentWorldCaptureIds = new java.util.HashSet<String>();
             for (com.aresstack.askai.research.domain.Passage passage : knowledgeProject.passages().values()) {
-                if (activeWorld.equals(passage.getEmbeddingFingerprint())) {
+                // PR 20: the segmentation version belongs to the world too, so a bump re-derives once.
+                if (activeWorld.equals(passage.getEmbeddingFingerprint())
+                        && knowledgeSettings.segmentationPipelineVersion.equals(
+                                passage.getSegmentationPipelineVersion())) {
                     currentWorldCaptureIds.add(passage.getCaptureId());
                 }
             }
@@ -1143,7 +1146,8 @@ public final class ProductiveResearchBackendFactory {
             }
             int stale = com.aresstack.askai.research.knowledge.processing.ProcessingReconciliation
                     .reembedStale(captureSourceIds, currentWorldCaptureIds,
-                            processingQueue.captureIdsWithKnownProcessing(activeWorld), eligibleSourceIds,
+                            processingQueue.captureIdsWithKnownProcessing(activeWorld,
+                                    knowledgeSettings.segmentationPipelineVersion), eligibleSourceIds,
                             new com.aresstack.askai.research.knowledge.processing
                                     .ProcessingReconciliation.MissingJobScheduler() {
                                 public void enqueue(String captureId, String sourceId) {
