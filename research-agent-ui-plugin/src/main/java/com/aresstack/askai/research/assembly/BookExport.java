@@ -12,8 +12,13 @@ public final class BookExport {
     private BookExport() {
     }
 
+    /** The file an export to {@code target} writes: {@code .md} is appended when the name has no extension. */
+    public static File resolve(File target) {
+        return target.getName().contains(".") ? target : new File(target.getPath() + ".md");
+    }
+
     public static File write(String documentMarkdown, File target) throws IOException {
-        File file = target.getName().contains(".") ? target : new File(target.getPath() + ".md");
+        File file = resolve(target);
         File parent = file.getAbsoluteFile().getParentFile();
         File temp = File.createTempFile("book-export", ".md", parent);
         try {

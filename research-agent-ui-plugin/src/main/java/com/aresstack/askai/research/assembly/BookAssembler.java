@@ -90,6 +90,7 @@ public final class BookAssembler {
                 String label = number + " " + section.getTitle();
                 contents.append("  - ").append(label).append('\n');
                 body.append("### ").append(label).append("\n\n");
+                counts.target += section.getBrief().getWordTarget();
                 String text = sectionText(input, section, label, findings, openPoints);
                 if (text == null) {
                     continue;
@@ -107,7 +108,7 @@ public final class BookAssembler {
                 chapterText.append(plain).append("\n\n");
                 checkSection(section, label, text, plain, revision, byMarker, findings, shingles, counts);
             }
-            chapterPlain.put(chapter.getTitle(), chapterText.toString());
+            chapterPlain.put(chapterNo + " " + chapter.getTitle(), chapterText.toString());
             plainBook.append(chapterText);
         }
 
@@ -177,7 +178,7 @@ public final class BookAssembler {
         ManuscriptSection ms = input.section(section.getId());
         SectionRevision revision = input.revision(section.getId());
         SectionStatus status = ms == null ? SectionStatus.PENDING : ms.getStatus();
-        if (input.isThin(section.getId())) {
+        if (input.isThin(section.getId()) || section.isThin()) {
             findings.add(new Finding(Kind.THIN_SECTION, section.getId(), label));
             openPoints.add(label + ": few sources cover this section.");
         }
@@ -218,8 +219,8 @@ public final class BookAssembler {
                 int global = registry.resolve(sectionId, local, citation, input);
                 if (global > 0) {
                     numbers.add("[" + global + "]");
-                } else if (citation != null) {
-                    unresolved = true;
+                } else {
+                    unresolved = true; // an unknown marker stays visible as well
                 }
             }
             StringBuilder replacement = new StringBuilder();
@@ -289,7 +290,6 @@ public final class BookAssembler {
         int written = words(plain).size();
         int target = section.getBrief().getWordTarget();
         counts.words += written;
-        counts.target += target;
         if (target > 0 && (written * 2 < target || written * 2 > target * 3)) {
             findings.add(new Finding(Kind.WORDS_OFF_TARGET, id, label + ": " + written + " of " + target + " words"));
         }

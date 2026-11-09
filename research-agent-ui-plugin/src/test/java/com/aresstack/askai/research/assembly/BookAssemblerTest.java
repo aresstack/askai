@@ -309,6 +309,17 @@ public class BookAssemblerTest {
         assertTrue(book.getReport().isComplete());
     }
 
+    @Test
+    public void unknownMarkerStaysVisibleAndUnwrittenSectionsCountTowardTheTarget() {
+        AssembledBook book = new BookAssembler().assemble(clean()
+                .section(new ManuscriptSection("s22", "c2", SectionStatus.SKIPPED, "", 1, DAY), null)
+                .section(written("s21", "c2"), revision("Storage moves daytime energy into the evening [1][2].",
+                        cite("1", "c", "Battery storage shifts surplus energy", "p-c-1"))).build());
+        assertTrue(book.getMarkdown().contains("into the evening [3][?]."));
+        assertEquals(1, book.getReport().count(Kind.UNRESOLVED_CITATION));
+        assertEquals(48, book.getReport().getWordsTarget());
+    }
+
     private static AcronymLongForms.Statement statement(String sourceId, String longForm) {
         TextSpan span = new TextSpan(0, 1);
         return new AcronymLongForms.Statement(sourceId, new SourceAcronymRecord.LongForm(longForm, span, span, span));

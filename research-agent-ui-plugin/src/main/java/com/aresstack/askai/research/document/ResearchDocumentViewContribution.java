@@ -128,6 +128,13 @@ public final class ResearchDocumentViewContribution implements ArtifactViewContr
                 if (chooser.showSaveDialog(export) != javax.swing.JFileChooser.APPROVE_OPTION) {
                     return;
                 }
+                java.io.File target = com.aresstack.askai.research.assembly.BookExport.resolve(
+                        chooser.getSelectedFile());
+                if (target.exists() && javax.swing.JOptionPane.showConfirmDialog(export,
+                        target.getName() + " already exists. Replace it?", "Export book",
+                        javax.swing.JOptionPane.YES_NO_OPTION) != javax.swing.JOptionPane.YES_OPTION) {
+                    return;
+                }
                 try {
                     java.io.File written = com.aresstack.askai.research.assembly.BookExport.write(
                             store.read(artifactId).getMarkdown(), chooser.getSelectedFile());
