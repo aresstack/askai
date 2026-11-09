@@ -9,6 +9,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -21,6 +23,7 @@ import java.util.List;
 public final class OpenNlpSentenceSegmenter implements SentenceSegmentationPort {
 
     private final SentenceDetectorME detector;
+    private final String fingerprint;
 
     public OpenNlpSentenceSegmenter(File sentenceModelFile) throws IOException {
         InputStream in = new FileInputStream(sentenceModelFile);
@@ -28,6 +31,36 @@ public final class OpenNlpSentenceSegmenter implements SentenceSegmentationPort 
             this.detector = new SentenceDetectorME(new SentenceModel(in));
         } finally {
             in.close();
+        }
+        this.fingerprint = "opennlp-" + checksum(sentenceModelFile);
+    }
+
+    /** {@code opennlp-} plus the SHA-256 of the model file: another model gives other sentences (PR 38). */
+    @Override
+    public String fingerprint() {
+        return fingerprint;
+    }
+
+    private static String checksum(File file) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            InputStream in = new FileInputStream(file);
+            try {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = in.read(buffer)) > 0) {
+                    digest.update(buffer, 0, read);
+                }
+            } finally {
+                in.close();
+            }
+            StringBuilder hex = new StringBuilder();
+            for (byte b : digest.digest()) {
+                hex.append(String.format("%02x", b & 0xff));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
         }
     }
 
