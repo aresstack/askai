@@ -41,7 +41,7 @@ final class BrowserToolSet {
             case "web_search":
                 return search(str(args, "query"), engines(args));
             case "web_search_prepare":
-                return repair().prepare(str(args, "query"));
+                return prepare(str(args, "query"), engines(args));
             case "web_search_apply_layout":
                 return repair().applyLayout(str(args, "submission"));
             case "web_search_discard_repair":
@@ -137,6 +137,22 @@ final class BrowserToolSet {
               .append(" — ").append(link.getUrl()).append('\n');
         }
         return sb.length() == 0 ? "No links." : sb.toString();
+    }
+
+    /**
+     * web_search_prepare, optionally for one priority group of Search → Engines ({@code engines}): then exactly those
+     * engines, all of them, merged together.
+     */
+    private String prepare(final String query, List<String> engineIds) throws BrowserException {
+        if (engineIds == null) {
+            return repair().prepare(query);
+        }
+        if (!(session instanceof PlaywrightBrowserSession)) {
+            throw new BrowserException("This browser backend does not take engines for web_search_prepare.");
+        }
+        final SearchLayoutRepairTools tools = repair();
+        return ((PlaywrightBrowserSession) session).withEngineGroup(engineIds,
+                () -> tools.prepare(query, com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED));
     }
 
     private SearchLayoutRepairTools repair() throws BrowserException {

@@ -765,13 +765,17 @@ public final class ResearchAgentSession {
         return false;
     }
 
-    /** The Browser (SERP) search over {@code pageEngines} (the research browser's DuckDuckGo/Bing search). */
+    /**
+     * The Browser (SERP) search over {@code pageEngines} (the research browser's engine search): the priority groups
+     * of Search → Engines, with the configured "enough results".
+     */
     private com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy browserEngines(
             com.aresstack.askai.research.runtime.search.SearchStrategy pageEngines) {
+        com.aresstack.askai.browser.search.LegacySearchNavigationSettings navigation =
+                loadBrowserSearchSettings().navigation;
         return new com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy(
-                browserEngineSelection != null ? browserEngineSelection
-                        : loadBrowserSearchSettings().navigation.engineSelection,
-                googleSearchStrategy, pageEngines);
+                browserEngineSelection != null ? browserEngineSelection : navigation.engineSelection,
+                navigation.minimumUsableResults, googleSearchStrategy, pageEngines);
     }
 
     private static String providerLabel(
