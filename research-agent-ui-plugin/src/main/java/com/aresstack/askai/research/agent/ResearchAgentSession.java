@@ -4,10 +4,12 @@ import com.aresstack.askai.plugin.api.agent.AgentArtifact;
 import com.aresstack.askai.plugin.api.agent.AgentConversationSink;
 import com.aresstack.askai.plugin.api.agent.AgentHostContext;
 import com.aresstack.askai.plugin.api.agent.AgentSession;
+import com.aresstack.askai.plugin.api.agent.AgentSessionContext;
 import com.aresstack.askai.plugin.api.agent.AgentStateSnapshot;
 import com.aresstack.askai.plugin.api.agent.ChatSubmissionTarget;
 import com.aresstack.askai.plugin.api.agent.SubmissionAvailability;
 import com.aresstack.askai.plugin.api.agent.artifact.AgentArtifactStore;
+import com.aresstack.askai.plugin.api.agent.command.CommandExecutionResult;
 import com.aresstack.askai.plugin.api.service.UiExecutor;
 import com.aresstack.askai.research.backend.ResearchBackendEvent;
 import com.aresstack.askai.research.backend.ResearchProjectRequest;
@@ -6976,7 +6978,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             // An explicit slash invocation on ANY MCP surface (the per-session endpoint as well as the
             // ChatGPT connector) is a person's control, exactly like typing it into the composer: Q13
             // restricts the agent inside the application, not the human behind an MCP client.
-            return executeSlashCommand(surface, cmd.isEmpty() ? args : cmd + (args.isEmpty() ? "" : " " + args));
+            return executeSlashCommand(cmd.isEmpty() ? args : cmd + (args.isEmpty() ? "" : " " + args));
         }
         if ("pause".equals(cmd) || "cancel".equals(cmd)) {
             return "rejected: '" + cmd + "' is no command. Valid now: " + validBotCommandNames();
@@ -6995,28 +6997,37 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * Interpret an explicit slash invocation from an MCP surface (per-session bot control or the
-     * ChatGPT connector) as a user control, using the same command processor as the application's
-     * slash-command surface. Ordinary structured bot-control calls and non-slash messages stay under
-     * the bot actor policy, so an agent cannot approve or change phases by accident.
+     * A slash line from an MCP client is the person's control: it runs through the SAME slash
+     * commands the composer dispatches ({@link ResearchChatCommands}), so there is one parser and one
+     * processor for a typed "/submit-scope" wherever it is typed. Ordinary structured bot-control
+     * calls and non-slash messages stay under the bot actor policy.
      */
-    private String executeSlashCommand(com.aresstack.askai.research.state.CommandSurface surface,
-                                       String slashLine) {
-        String invocation = slashLine.substring(1).trim();
-        if (invocation.isEmpty()) {
-            return "rejected: a slash command name is required";
+    private String executeSlashCommand(String slashLine) {
+        CommandExecutionResult result = ResearchChatCommands.execute(slashLine, new HeadlessCommandContext());
+        String message = result.getMessage() == null ? "" : result.getMessage().trim();
+        switch (result.getStatus()) {
+            case HANDLED:
+                return message.isEmpty() ? "handled" : "handled: " + message;
+            case REJECTED:
+                return message.isEmpty() ? "rejected" : "rejected: " + message;
+            default:
+                return "rejected: unknown slash command. Valid: " + ResearchChatCommands.names();
         }
-        String[] parts = invocation.split("\\s+", 2);
-        String name = parts[0].toLowerCase(java.util.Locale.ROOT);
-        String arguments = parts.length == 2 ? parts[1].trim() : "";
-        if (!ResearchChatCommands.processorCommandNames().contains(name)
-                && !"search".equals(name) && !"map".equals(name)) {
-            return "rejected: unknown slash command '/" + name + "'";
+    }
+
+    /** The composer-less context a slash command sees when it arrives through an MCP client. */
+    private final class HeadlessCommandContext implements AgentSessionContext {
+        public AgentSession getSession() {
+            return ResearchAgentSession.this;
         }
-        String processorCommand = "map".equals(name) ? "generate-visualization" : name;
-        return executeCommand(new CommandOrigin(com.aresstack.askai.research.state.CommandActor.USER, surface,
-                com.aresstack.askai.research.state.ResearchCommand.NO_REVISION),
-                processorCommand, arguments);
+
+        public void openArtifact(String artifactId) {
+            // No chat surface to reveal a tab in: the artifact stays where it is.
+        }
+
+        public UiExecutor getUiExecutor() {
+            return uiExecutor;
+        }
     }
 
     /** The semantic commands valid right now; only the user can run them (Q13). */
