@@ -211,6 +211,7 @@ Settings are stored in `%APPDATA%\.askai\askai.properties` (`~/.askai/` if
 - [docs/research-chatgpt-connector.md](docs/research-chatgpt-connector.md): ChatGPT connector (German)
 - [docs/browser-mcp.md](docs/browser-mcp.md): the browser backend
 - [docs/research-browser-user-contexts.md](docs/research-browser-user-contexts.md): parallel web research with WebDriver BiDi user contexts per worker
+- [docs/research-parallel-team-plan.md](docs/research-parallel-team-plan.md): architecture and PR plan for the parallel research team of the Sources phase (orchestrator, page workers, one search service, site leases)
 - [docs/agent-plugin-development.md](docs/agent-plugin-development.md): writing chat agent plugins
 - [docs/plugin-lifecycle.md](docs/plugin-lifecycle.md): plugin lifecycle
 - [docs/mcp-runtime.md](docs/mcp-runtime.md), [docs/mcp-marketplace.md](docs/mcp-marketplace.md): MCP infrastructure
