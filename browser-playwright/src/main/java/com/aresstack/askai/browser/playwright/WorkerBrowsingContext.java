@@ -17,6 +17,8 @@ public final class WorkerBrowsingContext implements AutoCloseable {
     /** The site of the page this tab shows (gate key for follow/back), or null before the first page. */
     private volatile String currentSite;
     private volatile boolean closed;
+    /** The site whose lease this tab lost (deadline or a waiter took over); its next call there fails typed. */
+    private volatile String expiredSite;
 
     WorkerBrowsingContext(WorkerUserContext userContext, String backendId, String id) {
         this.userContext = userContext;
@@ -49,7 +51,13 @@ public final class WorkerBrowsingContext implements AutoCloseable {
         PlaywrightUserContextPool pool = userContext.pool();
         long timeout = pool.limits().callTimeoutMillis;
         String site = siteKey(tool, arguments);
-        pool.sites().enter(site, timeout);
+        if (site != null && site.equals(expiredSite)) {
+            expiredSite = null;
+            throw new BrowserException(SiteConcurrencyGate.SITE_LEASE_EXPIRED + " — " + id + " lost its place on "
+                    + site + "; another worker gets the site. Retry this page later.");
+        }
+        SiteConcurrencyGate gate = pool.sites();
+        SiteConcurrencyGate.Lease lease = gate.enter(site, timeout);
         try {
             String result = userContext.lane().call(new WorkerBrowserLane.LaneTask<String>() {
                 public String run(WorkerBrowserBackend backend) throws BrowserException {
@@ -58,6 +66,11 @@ public final class WorkerBrowsingContext implements AutoCloseable {
             }, timeout);
             if (reportsClosedBrowser(result)) {
                 throw lost();
+            }
+            if (reportsChallenge(result)) {
+                gate.coolDown(site);
+            } else {
+                gate.healthy(site);
             }
             rememberSite(result);
             return result;
@@ -73,7 +86,9 @@ public final class WorkerBrowsingContext implements AutoCloseable {
             }
             throw failed;
         } finally {
-            pool.sites().leave(site);
+            if (gate.leave(lease)) {
+                expiredSite = site;
+            }
         }
     }
 
@@ -132,6 +147,21 @@ public final class WorkerBrowsingContext implements AutoCloseable {
                 return true;
             }
             if (line.startsWith("URL: ") || line.startsWith("url: ")) {
+                return false; // a page text follows; its content is not a typed status line
+            }
+        }
+        return false;
+    }
+
+    private static boolean reportsChallenge(String result) {
+        if (result == null) {
+            return false;
+        }
+        for (String line : result.split("\n")) {
+            if (line.startsWith("CHALLENGE: ") || line.trim().equals("challenge_visible: true")) {
+                return true; // search/poll contract, or the probe render's structured header line
+            }
+            if (line.startsWith("URL: ") || line.trim().isEmpty()) {
                 return false; // a page text follows; its content is not a typed status line
             }
         }
