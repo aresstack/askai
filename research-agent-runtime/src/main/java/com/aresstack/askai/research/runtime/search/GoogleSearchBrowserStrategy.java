@@ -20,6 +20,13 @@ public final class GoogleSearchBrowserStrategy {
     /** Upper bound of one Google search including a possible browser (re)start. */
     public static final long SEARCH_TIMEOUT_MILLIS = 90_000L;
 
+    /**
+     * Engine spacing waits one Google call can sit through in the search browser: a redirect hop queued ahead of
+     * it, the call itself, and its retry after a browser restart. The call's time limit grows by that many delays,
+     * so a long Google delay of Search → Engines never times a search out before it ran.
+     */
+    static final int SPACING_WAITS_PER_CALL = 3;
+
     /** Google lists about ten organic results per page and ignores {@code num}. */
     public static final int GOOGLE_PAGE_SIZE = 10;
 
@@ -67,7 +74,12 @@ public final class GoogleSearchBrowserStrategy {
                 com.aresstack.askai.research.search.api.SearchEngine.GOOGLE,
                 searchBrowser.asSearchProvider(google.build()));
         return new SingleProviderSearchStrategy(new AsyncModuleSearchProvider(SearchProviderId.GOOGLE_BROWSER,
-                SearchEngine.GOOGLE, web, SEARCH_TIMEOUT_MILLIS), SearchEngine.GOOGLE,
+                SearchEngine.GOOGLE, web, callTimeoutMillis(delayMillis)), SearchEngine.GOOGLE,
                 resultPages, GOOGLE_PAGE_SIZE, 0L); // the search browser keeps the delay, not each strategy
+    }
+
+    /** Time limit of one Google call: {@link #SEARCH_TIMEOUT_MILLIS} plus the spacing waits it may sit through. */
+    static long callTimeoutMillis(long delayMillis) {
+        return SEARCH_TIMEOUT_MILLIS + SPACING_WAITS_PER_CALL * Math.max(0L, delayMillis);
     }
 }
