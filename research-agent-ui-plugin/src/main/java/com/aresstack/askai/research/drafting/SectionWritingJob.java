@@ -53,6 +53,9 @@ public final class SectionWritingJob {
         long now();
     }
 
+    /** A section the user saved, skipped or that moved on while the job ran: left as the user made it. */
+    static final String LEFT_TO_USER = "changed by you meanwhile";
+
     private final TaskBoard board;
     private final ManuscriptWorkspace manuscript;
     private final SectionWriter writer;
@@ -202,6 +205,8 @@ public final class SectionWritingJob {
                 String failure = writeOne(target, role, comment, cancel, differences);
                 if (failure == null) {
                     written.add(target.section.getId());
+                } else if (LEFT_TO_USER.equals(failure)) {
+                    continue;
                 } else if (!cancel.get()) {
                     failed.put(target.section.getTitle(), failure);
                     if (manuscript.writeRefusal() != null) {
@@ -227,19 +232,38 @@ public final class SectionWritingJob {
         };
         String reason = "";
         for (int attempt = 1; attempt <= ATTEMPTS; attempt++) {
+            ManuscriptSection state = manuscript.store().section(sectionId);
+            if (!stillEligible(role, state)) {
+                board.save(task.cancel(LEFT_TO_USER, clock.now()));
+                return LEFT_TO_USER;
+            }
             task = task.start(ENDPOINT, clock.now());
             board.save(task);
-            ManuscriptSection state = manuscript.store().section(sectionId);
             int expected = state == null ? 0 : state.getRevision();
+            SectionStatus statusBefore = state == null ? SectionStatus.PENDING : state.getStatus();
             SectionRevision current = state != null && state.hasText()
                     ? manuscript.store().revision(sectionId, state.getRevision()) : null;
             SectionWriteRequest request = comment == null || current == null
                     ? SectionWriteRequest.draft(target.chapter, target.section)
                     : SectionWriteRequest.rewrite(target.chapter, target.section, comment, current.getText());
             try {
-                SectionRevision.Builder content = writer.write(request, cancellation);
+                SectionRevision.Builder content;
+                try {
+                    content = writer.write(request, cancellation);
+                } finally {
+                    if (cancel.get()) {
+                        Thread.interrupted(); // a stop may interrupt the call; the saves below must not see it
+                    }
+                }
                 if (cancel.get()) {
                     throw new SectionWriter.Cancelled();
+                }
+                ManuscriptSection now = manuscript.store().section(sectionId);
+                if ((now == null ? 0 : now.getRevision()) != expected
+                        || (now == null ? SectionStatus.PENDING : now.getStatus()) != statusBefore) {
+                    // the user saved, skipped or restored the section during the model call: keep that
+                    board.save(task.cancel(LEFT_TO_USER, clock.now()));
+                    return LEFT_TO_USER;
                 }
                 content.sectionFingerprint(OutlineFingerprint.of(target.section))
                         .chapterFingerprint(OutlineFingerprint.of(target.chapter));
@@ -253,6 +277,9 @@ public final class SectionWritingJob {
             } catch (SectionWriter.Cancelled stopped) {
                 board.save(task.cancel("stopped", clock.now()));
                 return "stopped";
+            } catch (FileManuscriptStore.SectionConflictException moved) {
+                board.save(task.cancel(LEFT_TO_USER, clock.now()));
+                return LEFT_TO_USER;
             } catch (ManuscriptWorkspace.WriteRefusedException refused) {
                 board.save(task.cancel(refused.getMessage(), clock.now()));
                 return refused.getMessage();
@@ -304,6 +331,16 @@ public final class SectionWritingJob {
                 TaskBudget.unlimited(), RETRY_LIMIT, clock.now());
         board.save(task);
         return task;
+    }
+
+    /** A draft only writes a pending or failed section; a rewrite needs text and no Skip or orphan mark. */
+    private static boolean stillEligible(String role, ManuscriptSection state) {
+        SectionStatus status = state == null ? SectionStatus.PENDING : state.getStatus();
+        if (ROLE_WRITE.equals(role)) {
+            return status == SectionStatus.PENDING || status == SectionStatus.FAILED;
+        }
+        return state != null && state.hasText() && status != SectionStatus.SKIPPED
+                && status != SectionStatus.ORPHAN;
     }
 
     static String taskPrefix(String role, String sectionId) {

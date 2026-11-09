@@ -39,17 +39,18 @@ public final class ProductiveSectionContexts implements EvidenceAssignments.Cont
     private final ActiveKnowledgeCorpusReader corpus;
     private final AcceptedSources sources;
     private final FileManuscriptStore manuscript;
-    private final String bookLanguage;
+    private final java.util.function.Supplier<String> bookLanguage;
     private volatile Map<String, PassageSearchHit> passages;
 
     public ProductiveSectionContexts(String projectId, String embeddingFingerprint, ActiveKnowledgeCorpusReader corpus,
-                                     AcceptedSources sources, FileManuscriptStore manuscript, String bookLanguage) {
+                                     AcceptedSources sources, FileManuscriptStore manuscript,
+                                     java.util.function.Supplier<String> bookLanguage) {
         this.projectId = projectId;
         this.embeddingFingerprint = embeddingFingerprint;
         this.corpus = corpus;
         this.sources = sources;
         this.manuscript = manuscript;
-        this.bookLanguage = bookLanguage == null ? "" : bookLanguage;
+        this.bookLanguage = bookLanguage;
     }
 
     /** The accepted sources of a repository, as {@link SourcesFreezeHook#approvedSet} lists them. */
@@ -75,7 +76,13 @@ public final class ProductiveSectionContexts implements EvidenceAssignments.Cont
                 Collections.<String>emptyList());
         return new SectionContextRequest(projectId, embeddingFingerprint, request.getChapter(), request.getSection(),
                 set, request.getChapter().getBrief().getPurpose(), previousDigest(request),
-                Collections.<String>emptyList(), bookLanguage);
+                Collections.<String>emptyList(), language());
+    }
+
+    /** The approved concept's language at write time ("" lets the writer fall back). */
+    private String language() {
+        String value = bookLanguage == null ? null : bookLanguage.get();
+        return value == null ? "" : value;
     }
 
     public PassageSearchHit passage(String project, String passageId) {

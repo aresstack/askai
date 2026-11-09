@@ -2588,7 +2588,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 new com.aresstack.askai.research.drafting.ProductiveSectionContexts(resources.writerProjectId(),
                         resources.writerEmbeddingFingerprint(), resources.corpusReader(),
                         com.aresstack.askai.research.drafting.ProductiveSectionContexts.of(resources.getRepository()),
-                        manuscript.store(), "");
+                        manuscript.store(), new java.util.function.Supplier<String>() {
+                            public String get() {
+                                try {
+                                    com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+                                    return frozen == null ? "" : frozen.getLanguage();
+                                } catch (Exception unreadable) {
+                                    return "";
+                                }
+                            }
+                        });
         writingContexts = contexts;
         final com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService acronyms =
                 new com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService(
@@ -2753,6 +2762,20 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }
 
                         public void run() {
+                            // a job of the Document phase: leaving Document stops the gap search (D3)
+                            com.aresstack.askai.research.transition.PhaseJobRegistry.Job job =
+                                    new com.aresstack.askai.research.transition.PhaseJobRegistry.Job() {
+                                        public void cancel() {
+                                            queue.stop();
+                                        }
+                                    };
+                            com.aresstack.askai.research.transition.PhaseJobRegistry.Job previous = searchPlanJob;
+                            if (previous != null) {
+                                productiveResources.phaseJobs().unregister(previous);
+                            }
+                            searchPlanJob = job;
+                            productiveResources.phaseJobs().register(
+                                    productiveResources.currentState().getPhaseId(), job);
                             queue.run();
                         }
                     }).research(sectionId, sectionTitle, gap);
