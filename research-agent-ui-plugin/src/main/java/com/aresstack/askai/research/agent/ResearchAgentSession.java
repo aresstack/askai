@@ -6206,6 +6206,25 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     // ------------------------------------------------------------------ outline (explicit action, issue #29)
 
     /**
+     * Plan PR 22: what the outline drawer shows: the stored outline (the result of "Generate outline") once it
+     * has chapters, otherwise the persisted analysis projection.
+     */
+    public String outlineDrawerMarkdown() {
+        com.aresstack.askai.research.outline.OutlineWorkspace workspace = outlineWorkspace();
+        if (workspace != null) {
+            try {
+                com.aresstack.askai.research.outline.Outline stored = workspace.current();
+                if (!stored.isEmpty()) {
+                    return com.aresstack.askai.research.outline.OutlineBlock.markdown(stored);
+                }
+            } catch (RuntimeException unreadable) {
+                // fall back to the analysis projection
+            }
+        }
+        return liveOutlineMarkdown();
+    }
+
+    /**
      * The persisted live outline projection as markdown, or "" when none exists yet. Pure read for the analysis
      * drawer; plan PR 21: the projection is an analysis view only and never the stored outline.
      */

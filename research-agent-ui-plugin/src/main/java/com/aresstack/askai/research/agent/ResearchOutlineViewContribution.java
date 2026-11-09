@@ -53,7 +53,7 @@ public final class ResearchOutlineViewContribution implements ArtifactViewContri
         });
         final Runnable refresh = new Runnable() {
             public void run() {
-                final String markdown = research.liveOutlineMarkdown();
+                final String markdown = research.outlineDrawerMarkdown();
                 final Boolean stale = research.outlineStale();
                 final com.aresstack.askai.research.host.OutlineClusteringRun.Status run =
                         research.outlineRunStatus();

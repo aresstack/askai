@@ -196,6 +196,21 @@ public class ConceptSeededOutlineBuilderTest {
     }
 
     @Test
+    public void editedSectionSurvivesWhenItsGeneratedChapterDisappears() {
+        Outline first = placed(build("", new RecordingPort()));
+        OutlineChapter energy = first.getChapters().get(0);
+        List<OutlineSection> sections = new ArrayList<OutlineSection>(energy.getSections());
+        sections.set(1, sections.get(1).withTitle("My wind notes").withUserEdited(true));
+        List<OutlineChapter> chapters = new ArrayList<OutlineChapter>(first.getChapters());
+        chapters.set(0, energy.withSections(sections));
+
+        Outline merged = OutlineProvenanceMerge.merge(first.withChapters(chapters), Outline.EMPTY);
+        assertEquals(1, merged.getChapters().size());
+        assertEquals(energy.getId(), merged.getChapters().get(0).getId());
+        assertEquals(Collections.singletonList("My wind notes"), sectionTitles(merged.getChapters().get(0)));
+    }
+
+    @Test
     public void excludedSourceContributesNothingWhileALaterBlacklistEntryDoesNot() {
         List<ResearchSourceRecord> records = Arrays.asList(
                 record("s1", SourceStatus.ACCEPTED, "Solar basics"),

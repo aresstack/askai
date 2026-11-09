@@ -17,7 +17,8 @@ import java.util.Set;
  * <li>a match keeps its id; a user-edited entry keeps its title (no longer untitled) and its brief, a generated
  * one takes the new title and brief; brief, provenance and flags are regenerated, stale marks cleared;</li>
  * <li>entries the user added (no concept node) and edited entries the proposal no longer produces are kept after
- * the generated ones, in their old order; unedited generated entries that are gone are dropped;</li>
+ * the generated ones, in their old order (a vanished generated chapter is kept with only those sections);
+ * unedited generated entries that are gone are dropped;</li>
  * <li>the proposal's candidates replace the old ones.</li>
  * </ul>
  */
@@ -51,9 +52,22 @@ public final class OutlineProvenanceMerge {
                     old.isUserEdited(), "", sections));
         }
         for (OutlineChapter old : stored.getChapters()) {
-            if (!usedChapters.contains(old.getId()) && keep(old.getProvenance().getConceptNodeId(),
-                    old.isUserEdited())) {
+            if (usedChapters.contains(old.getId())) {
+                continue;
+            }
+            if (keep(old.getProvenance().getConceptNodeId(), old.isUserEdited())) {
                 chapters.add(old);
+                continue;
+            }
+            // A generated chapter that is gone still carries the sections the user edited or added.
+            List<OutlineSection> owned = new ArrayList<OutlineSection>();
+            for (OutlineSection section : old.getSections()) {
+                if (keep(section.getProvenance().getConceptNodeId(), section.isUserEdited())) {
+                    owned.add(section);
+                }
+            }
+            if (!owned.isEmpty()) {
+                chapters.add(old.withSections(owned));
             }
         }
         return new Outline(chapters, proposal.getCandidates());
