@@ -373,10 +373,10 @@ public class PlaywrightBrowserSessionTest {
         assertEquals("google", selected.get(0).getId());
         assertEquals("bing", selected.get(1).getId());
         try {
-            PlaywrightBrowserSession.selectEngines(java.util.Arrays.asList("yahoo"));
+            PlaywrightBrowserSession.selectEngines(java.util.Arrays.asList("mojeek"));
             fail("an unknown engine must be refused");
         } catch (BrowserException refused) {
-            assertTrue(refused.getMessage(), refused.getMessage().contains("Unknown search engine: \"yahoo\""));
+            assertTrue(refused.getMessage(), refused.getMessage().contains("Unknown search engine: \"mojeek\""));
         }
         assertEquals(java.util.Arrays.asList("duckduckgo", "bing"),
                 BrowserToolSet.engines(java.util.Collections.<String, Object>singletonMap("engines",

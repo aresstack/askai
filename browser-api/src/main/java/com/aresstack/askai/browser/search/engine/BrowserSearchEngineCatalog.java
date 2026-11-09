@@ -20,6 +20,8 @@ public final class BrowserSearchEngineCatalog {
      * no redirect wrapper to resolve, so no extra request to Google per opened hit.
      */
     public static final String STARTPAGE = "startpage";
+    public static final String YAHOO = "yahoo";
+    public static final String YAHOO_JAPAN = "yahoo-japan";
     /**
      * The engine a dev/test {@code --search-url=} override installs. It is not part of the catalog: it
      * exists only when someone hands the sidecar an explicit template, and it then REPLACES the
@@ -70,6 +72,22 @@ public final class BrowserSearchEngineCatalog {
                                             "a.pagination__next-prev-button.next",
                                             "button[aria-label='Next']", "button[aria-label='Weiter']",
                                             "button[aria-label='Nächste']"))),
+                            10),
+                    new BrowserSearchEngine(YAHOO, "Yahoo Search", Arrays.asList(
+                            // search.yahoo.com: one search field (id yschsp, name p); deeper pages through the
+                            // pagination "next" link. Result links are r.search.yahoo.com wrappers whose target is
+                            // in the RU= path segment and is decoded without a request (SearchRedirectResolver).
+                            // An EU consent page (guce/consent.yahoo.com) is handled by the general consent step.
+                            new BrowserSearchEngine.SearchForm("https://search.yahoo.com/",
+                                    Arrays.asList("input#yschsp", "input[name=p]", "input[type=search]"),
+                                    Arrays.asList("a.next", "a[aria-label='Next']", "a[aria-label='Weiter']",
+                                            "a[aria-label='Nächste']"))),
+                            7), // Yahoo shows seven organic results per page
+                    new BrowserSearchEngine(YAHOO_JAPAN, "Yahoo! JAPAN", Arrays.asList(
+                            // search.yahoo.co.jp: search field name p; next page through the "次へ" link.
+                            new BrowserSearchEngine.SearchForm("https://search.yahoo.co.jp/",
+                                    Arrays.asList("input[name=p]", "input[type=search]"),
+                                    Arrays.asList("a.Pagenation__next", "a:has-text('次へ')"))),
                             10))));
 
     private BrowserSearchEngineCatalog() {

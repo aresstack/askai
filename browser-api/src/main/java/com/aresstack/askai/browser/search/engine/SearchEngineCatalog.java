@@ -27,7 +27,7 @@ public final class SearchEngineCatalog {
 
     public static final String GOOGLE = BrowserSearchEngineCatalog.GOOGLE;
     public static final String BING = BrowserSearchEngineCatalog.BING;
-    public static final String YAHOO = "yahoo";
+    public static final String YAHOO = BrowserSearchEngineCatalog.YAHOO;
     public static final String DUCKDUCKGO = BrowserSearchEngineCatalog.DUCKDUCKGO;
     public static final String BRAVE = "brave";
     public static final String MOJEEK = "mojeek";
@@ -44,7 +44,7 @@ public final class SearchEngineCatalog {
     public static final String SHENMA = "shenma";
     public static final String NAVER = "naver";
     public static final String DAUM = "daum";
-    public static final String YAHOO_JAPAN = "yahoo-japan";
+    public static final String YAHOO_JAPAN = BrowserSearchEngineCatalog.YAHOO_JAPAN;
     public static final String COCCOC = "coccoc";
     public static final String YAANI = "yaani";
     public static final String KAGI = "kagi";
@@ -66,7 +66,9 @@ public final class SearchEngineCatalog {
                             langs("de", "en", "fr", "es"), EXPERIMENTAL,
                             "Search form adapter in the research browser; not validated live recently."),
                     entry(YAHOO, "Yahoo Search", "USA", "https://search.yahoo.com/", "Mostly Bing",
-                            langs("en", "de"), NOT_IMPLEMENTED, NO_ADAPTER),
+                            langs("en", "de"), EXPERIMENTAL,
+                            "Search form adapter in the research browser; result wrappers (r.search.yahoo.com, RU=) "
+                                    + "are decoded without a request. Not validated against the live engine yet."),
                     entry(DUCKDUCKGO, "DuckDuckGo", "USA", "https://duckduckgo.com/",
                             "Mostly Bing plus own data", langs("de", "en"), SUPPORTED,
                             "Searched through its HTML and Lite start pages in the research browser."),
@@ -105,7 +107,9 @@ public final class SearchEngineCatalog {
                     entry(DAUM, "Daum", "South Korea", "https://search.daum.net/", "Own and partner data",
                             langs("ko"), NOT_IMPLEMENTED, NO_ADAPTER),
                     entry(YAHOO_JAPAN, "Yahoo! JAPAN", "Japan", "https://search.yahoo.co.jp/", "Google-based",
-                            langs("ja"), NOT_IMPLEMENTED, NO_ADAPTER),
+                            langs("ja"), EXPERIMENTAL,
+                            "Search form adapter in the research browser (Japanese text is typed as Unicode, no "
+                                    + "input method needed). Not validated against the live engine yet."),
                     entry(COCCOC, "Cốc Cốc", "Vietnam", "https://coccoc.com/search", "Own index",
                             langs("vi"), NOT_IMPLEMENTED, NO_ADAPTER),
                     entry(YAANI, "Yaani", "Turkey", "https://www.yaani.com.tr/", "Own service",
