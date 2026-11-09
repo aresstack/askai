@@ -563,6 +563,15 @@ public final class ProductiveResearchSessionResources {
         return outlineWorkspace;
     }
 
+    private volatile java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService>
+            outlineChapterService;
+
+    /** Plan PR 24: the single-chapter operations; the session wires a lazy supplier (it owns the model port). */
+    public void setOutlineChapterService(
+            java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService> service) {
+        this.outlineChapterService = service;
+    }
+
     /** Who to tell when a concept edit committed (view refresh); the session wires itself here. */
     public void setConceptChangedListener(Runnable listener) {
         this.conceptChangedListener = listener;
@@ -751,6 +760,15 @@ public final class ProductiveResearchSessionResources {
             public String searchPlanOverview() {
                 com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
                 return port == null ? null : port.searchPlanOverview();
+            }
+
+            @Override
+            public String outlineRegenerateChapter(String chapterId, int sections, String comment) {
+                java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService>
+                        supplier = outlineChapterService;
+                com.aresstack.askai.research.outline.brief.OutlineChapterService service =
+                        supplier == null ? null : supplier.get();
+                return service == null ? null : service.regenerateChapter(chapterId, sections, comment).getMessage();
             }
 
             @Override
