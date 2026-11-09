@@ -364,6 +364,33 @@ public class SearchPlanQueueTest {
     }
 
     @Test
+    public void aGateCommentBecomesOnePriorityEntryWithItsCommentShown() throws Exception {
+        build(Arrays.asList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        StringBuilder longComment = new StringBuilder("Please find more on licensing");
+        while (longComment.length() < 300) {
+            longComment.append(" and more");
+        }
+        String query = SearchPlanQueue.priorityQuery(longComment.toString());
+        assertTrue(query.length() <= 160);
+        assertEquals("priority-t1", queue.addPriority("priority-t1", "research", query,
+                "Changes requested: " + longComment));
+        assertEquals("the effect is idempotent per transition", "priority-t1",
+                queue.addPriority("priority-t1", "research", query, "again"));
+        List<SearchPlanEntry> entries = queue.entriesInOrder();
+        assertEquals(2, entries.size());
+        assertEquals("priority-t1", entries.get(0).getId());
+        assertTrue(entries.get(0).getNodeLabel().startsWith("Changes requested: Please find"));
+
+        // a crash after the task but before the record: the replay links it again
+        SearchPlanRecord record = store.loadRecord();
+        store.saveRecord(record.withOrder(record.getOrder(), Collections.<String>emptyList()));
+        assertEquals(1, queue.entriesInOrder().size());
+        queue.addPriority("priority-t1", "research", query, "replay");
+        assertEquals("priority-t1", queue.entriesInOrder().get(0).getId());
+    }
+
+    @Test
     public void aPriorityEntryRunsFirstAndUserEditsReplaceEntries() throws Exception {
         build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")),
                 Collections.<String, List<String>>emptyMap());

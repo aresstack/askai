@@ -47,6 +47,14 @@ public final class ResearchSourcesViewContribution implements ArtifactViewContri
                     }
                 }
             });
+            // Plan PR 14: the search plan checklist (shown once a plan exists)
+            final SearchPlanChecklistPanel checklist = new SearchPlanChecklistPanel(new SessionPlan(research));
+            view.setPlanChecklist(checklist);
+            research.addStateListener(new Runnable() {
+                public void run() {
+                    checklist.refresh();
+                }
+            });
             // Keep the table live: every session state change (run finished, approval, continuation)
             // re-reads the repository, so freshly accepted sources appear without manual filtering.
             research.addStateListener(new Runnable() {
@@ -79,5 +87,92 @@ public final class ResearchSourcesViewContribution implements ArtifactViewContri
         JPanel placeholder = new JPanel(new BorderLayout());
         placeholder.add(new JLabel("No source repository available."), BorderLayout.NORTH);
         return placeholder;
+    }
+
+    /** The checklist over the session's search plan queue; every failure is logged and leaves the plan as it is. */
+    static final class SessionPlan implements SearchPlanChecklistPanel.Plan {
+        private final ResearchAgentSession research;
+
+        SessionPlan(ResearchAgentSession research) {
+            this.research = research;
+        }
+
+        private com.aresstack.askai.research.plan.SearchPlanQueue queue() {
+            return research.searchPlanQueue();
+        }
+
+        public java.util.List<com.aresstack.askai.research.plan.SearchPlanEntry> entries() {
+            com.aresstack.askai.research.plan.SearchPlanQueue queue = queue();
+            if (queue == null) {
+                return java.util.Collections.emptyList();
+            }
+            try {
+                return queue.entriesInOrder();
+            } catch (Exception unreadable) {
+                return java.util.Collections.emptyList();
+            }
+        }
+
+        public boolean running() {
+            return research.searchPlanRunning();
+        }
+
+        public boolean runnable() {
+            return research.searchPlanRunnable();
+        }
+
+        public java.util.List<String> uncovered() {
+            com.aresstack.askai.research.plan.SearchPlanQueue queue = queue();
+            if (queue == null) {
+                return java.util.Collections.emptyList();
+            }
+            try {
+                return queue.outcome().getUncovered();
+            } catch (Exception unreadable) {
+                return java.util.Collections.emptyList();
+            }
+        }
+
+        public void run() {
+            research.runSearchPlan();
+        }
+
+        public void stop() {
+            research.stopSearchPlan();
+        }
+
+        public void drop(String entryId) {
+            try {
+                queue().drop(entryId);
+            } catch (Exception failed) {
+                System.err.println("[search-plan] drop failed: " + failed.getMessage());
+            }
+        }
+
+        public void edit(String entryId, String query) {
+            try {
+                queue().edit(entryId, query);
+            } catch (Exception failed) {
+                System.err.println("[search-plan] edit failed: " + failed.getMessage());
+            }
+        }
+
+        public void rerun(String entryId) {
+            try {
+                queue().rerun(entryId);
+                research.runSearchPlan();
+            } catch (Exception failed) {
+                System.err.println("[search-plan] re-run failed: " + failed.getMessage());
+            }
+        }
+
+        public void searchAgain() {
+            try {
+                queue().searchAgain();
+                research.runSearchPlan();
+            } catch (Exception failed) {
+                System.err.println("[search-plan] search again failed: " + failed.getMessage());
+            }
+        }
     }
 }
