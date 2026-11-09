@@ -2377,6 +2377,30 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         uiExecutor.execute(this::fireStateChanged);
     }
 
+    /**
+     * The acronym long forms of the accepted sources (plan PR 30, PR 38), read from the store PR 29 refreshes under
+     * {@code <project>/acronyms}; empty before the first writing run.
+     */
+    private java.util.List<com.aresstack.askai.research.knowledge.processing.acronym.AcronymLongForms>
+            acronymLongForms() {
+        java.io.File dir = new java.io.File(productiveResources.getProjectContext().getProjectDirectory(), "acronyms");
+        com.aresstack.askai.research.sources.ResearchSourceRepository repository = productiveResources.getRepository();
+        if (!dir.isDirectory() || repository == null) {
+            return java.util.Collections.emptyList();
+        }
+        java.util.List<String> accepted = new java.util.ArrayList<String>();
+        for (com.aresstack.askai.research.sources.ResearchSourceRecord record
+                : repository.find(com.aresstack.askai.research.sources.SourceQuery.all())) {
+            if (record.getStatus() == com.aresstack.askai.research.sources.SourceStatus.ACCEPTED) {
+                accepted.add(record.getSourceId());
+            }
+        }
+        return new com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService(
+                com.aresstack.askai.research.knowledge.processing.acronym.SentenceSegmenter.splitter(),
+                new com.aresstack.askai.research.knowledge.processing.acronym.FileSourceAcronymStore(dir.toPath()))
+                .longForms(accepted);
+    }
+
     private com.aresstack.askai.research.assembly.AssembledBook assembleBook(
             com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript) {
         com.aresstack.askai.research.outline.Outline outline = null;
@@ -2406,8 +2430,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         com.aresstack.askai.research.assembly.BookAssemblyInput input =
                 com.aresstack.askai.research.assembly.BookAssemblyInputs.read(outline, outlineRevision,
                         manuscript.store(), productiveResources.getRepository(), pin, concept,
-                        java.util.Collections.<com.aresstack.askai.research.knowledge.processing.acronym
-                                .AcronymLongForms>emptyList(),
+                        acronymLongForms(),
                         System.currentTimeMillis(), java.util.TimeZone.getDefault());
         return new com.aresstack.askai.research.assembly.BookAssembler().assemble(input);
     }
