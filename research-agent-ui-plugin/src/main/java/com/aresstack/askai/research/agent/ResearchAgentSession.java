@@ -3748,6 +3748,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
 
         public ActionOutcome generateOutline() {
+            if (outlineStale() == null) {
+                return ActionOutcome.rejected(
+                        "knowledge capability unavailable (no embedding world for this session)");
+            }
+            if (!outlineClusteringAllowed()) {
+                return ActionOutcome.rejected("topics are clustered only on request while the Outline phase "
+                        + "is running");
+            }
             return requestOutlineRebuild()
                     ? ActionOutcome.accepted("topic discovery + outline rebuild triggered (debounced)")
                     : ActionOutcome.rejected(
@@ -6093,8 +6101,32 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * @return false when the knowledge capability is unavailable.
      */
     public boolean requestOutlineRebuild() {
-        return productiveResources != null && !productiveResources.isClosed()
+        return outlineClusteringAllowed() && productiveResources != null && !productiveResources.isClosed()
                 && productiveResources.triggerOutlineRebuild();
+    }
+
+    /** PR 20: clustering runs only on request in outline/running. */
+    public boolean outlineClusteringAllowed() {
+        com.aresstack.askai.research.state.oo.ResearchStateMemento current = state;
+        return current != null
+                && com.aresstack.askai.research.state.oo.ResearchStateIds.OUTLINE.equals(current.getPhaseId())
+                && com.aresstack.askai.research.state.oo.ResearchStateIds.RUNNING.equals(current.getStateId());
+    }
+
+    /** PR 20: the clustering run the outline drawer shows, or {@code null} without a knowledge capability. */
+    public com.aresstack.askai.research.host.OutlineClusteringRun.Status outlineRunStatus() {
+        com.aresstack.askai.research.host.OutlineClusteringRun run = productiveResources == null
+                || productiveResources.isClosed() ? null : productiveResources.outlineRun();
+        return run == null ? null : run.status();
+    }
+
+    /** PR 20: Cancel in the drawer — stops a running clustering at its next check. */
+    public void cancelOutlineClustering() {
+        com.aresstack.askai.research.host.OutlineClusteringRun run = productiveResources == null
+                ? null : productiveResources.outlineRun();
+        if (run != null) {
+            run.cancel();
+        }
     }
 
     private void scheduleVisualization(String phaseId, String markdown) {

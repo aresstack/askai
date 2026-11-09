@@ -952,6 +952,9 @@ public final class ProductiveResearchBackendFactory {
         if (knowledge.topics != null) {
             resources.setTopicDiscovery(knowledge.topics);
         }
+        if (knowledge.outlineRun != null) {
+            resources.setOutlineRun(knowledge.outlineRun);
+        }
         if (knowledge.corpusReader != null) {
             resources.setCorpusReader(knowledge.corpusReader);
         }

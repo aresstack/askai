@@ -244,6 +244,24 @@ public final class ProductiveResearchSessionResources {
      * thread. This is the only rebuild trigger left — nothing invalidates the projection automatically.
      * @return false when the knowledge capability is unavailable (no embedding world).
      */
+    /** PR 20: the clustering run the outline drawer shows; null while no embedding world is wired. */
+    private volatile OutlineClusteringRun outlineRun;
+
+    void setOutlineRun(OutlineClusteringRun run) {
+        this.outlineRun = run;
+        if (run != null) {
+            run.addListener(new Runnable() {
+                public void run() {
+                    fireProjectionUpdated();
+                }
+            });
+        }
+    }
+
+    public OutlineClusteringRun outlineRun() {
+        return outlineRun;
+    }
+
     public boolean triggerOutlineRebuild() {
         com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner =
                 projectionRunner;

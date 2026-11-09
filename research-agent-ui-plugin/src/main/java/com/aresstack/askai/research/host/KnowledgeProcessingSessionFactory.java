@@ -67,6 +67,8 @@ final class KnowledgeProcessingSessionFactory {
         final OutlineStalenessCheck staleness;
         /** #42: the SHARED phase-neutral topic discovery (phase 1 + outline consume it). */
         final com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery topics;
+        /** PR 20: progress, Cancel and outcome of the clustering run, read by the outline drawer. */
+        final OutlineClusteringRun outlineRun;
         /** #28/#39.7: read-only per-source passage inspection over the active corpus. */
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader;
 
@@ -78,7 +80,9 @@ final class KnowledgeProcessingSessionFactory {
                          OutlineStalenessCheck staleness,
                          com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery topics,
                          com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader
-                                 corpusReader) {
+                                 corpusReader,
+                         OutlineClusteringRun outlineRun) {
+            this.outlineRun = outlineRun;
             this.worker = worker;
             this.projection = projection;
             this.invalidator = invalidator;
@@ -226,6 +230,7 @@ final class KnowledgeProcessingSessionFactory {
                                 .FileTopicSnapshotStore(projectDir),
                         documentFingerprint);
         final String fingerprint = documentFingerprint;
+        final OutlineClusteringRun outlineRun = new OutlineClusteringRun();
         final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner projection =
                 new com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner(
                         new com.aresstack.askai.research.knowledge.processing.live
@@ -243,9 +248,25 @@ final class KnowledgeProcessingSessionFactory {
                                 // and returns it with the topics: one coherent pair, and no
                                 // concurrent refresh can persist an older corpus's snapshot
                                 // over a newer one.
+                                // PR 20: progress, Cancel and failures reach the outline drawer.
+                                outlineRun.started();
                                 com.aresstack.askai.research.knowledge.processing.live
-                                        .SharedTopicDiscovery.Pinned pinned =
-                                        sharedTopics.refreshPinned(System.currentTimeMillis());
+                                        .SharedTopicDiscovery.Pinned pinned;
+                                try {
+                                    pinned = sharedTopics.refreshPinned(System.currentTimeMillis(), outlineRun);
+                                } catch (com.aresstack.askai.research.knowledge.ClusteringMonitor
+                                        .ClusteringCancelledException cancelled) {
+                                    outlineRun.cancelled();
+                                    System.err.println("[research-knowledge] clustering cancelled");
+                                    return;
+                                } catch (RuntimeException failed) {
+                                    outlineRun.failed(failed.getMessage());
+                                    throw failed;
+                                } catch (OutOfMemoryError tooLarge) {
+                                    outlineRun.failed("not enough memory for the similarity matrix; "
+                                            + "lower the corpus limit");
+                                    return;
+                                }
                                 com.aresstack.askai.research.knowledge.processing.live
                                         .ActiveKnowledgeCorpusReader.Corpus corpus = pinned.corpus;
                                 com.aresstack.askai.research.knowledge.processing.live
@@ -265,7 +286,13 @@ final class KnowledgeProcessingSessionFactory {
                                                 System.currentTimeMillis(), corpus.getPassages(),
                                                 topics, briefQuestions,
                                                 topicSnapshot.corpusFingerprint);
-                                projectionStore.save(next);
+                                try {
+                                    projectionStore.save(next);
+                                } catch (RuntimeException failed) {
+                                    outlineRun.failed(failed.getMessage());
+                                    throw failed;
+                                }
+                                outlineRun.finished(pinned.omittedPassages);
                                 System.err.println("[research-knowledge] outline rebuilt revision="
                                         + next.getProjectionRevision()
                                         + " topics=" + next.getTopics().size()
@@ -319,7 +346,7 @@ final class KnowledgeProcessingSessionFactory {
             }
         };
         return new KnowledgeSession(workerRunner, projection, projection, staleness,
-                sharedTopics, corpusReader);
+                sharedTopics, corpusReader, outlineRun);
     }
 
     /** Wrap the diagnostics listener so a COMPLETED job NOTIFIES the UI (staleness re-check) — no rebuild. */
