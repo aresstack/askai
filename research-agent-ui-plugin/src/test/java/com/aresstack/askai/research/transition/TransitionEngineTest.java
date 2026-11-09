@@ -178,7 +178,9 @@ public class TransitionEngineTest {
                     TransitionOutcome outcome = fx.engine.dispatch(new ResearchCommand(type, "c", actor,
                             surface, "corr", ResearchCommand.NO_REVISION, ""));
                     String row = type + " " + actor + " " + surface;
-                    if (actor == CommandActor.BOT) {
+                    if (actor == CommandActor.BOT && type == ResearchCommandType.START) {
+                        assertTrue(row, outcome.isCommitted());
+                    } else if (actor == CommandActor.BOT) {
                         assertEquals(row, TransitionOutcome.Kind.ACTOR_REFUSED, outcome.getKind());
                         assertEquals(row, "Phase changes need the user", outcome.getReason());
                     } else if (actor == CommandActor.HOST) {

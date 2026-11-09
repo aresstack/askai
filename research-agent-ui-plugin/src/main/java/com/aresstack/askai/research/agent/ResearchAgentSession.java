@@ -6775,9 +6775,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     /**
      * The BOT entry (bot control and the ChatGPT connector): from PR 05 on a connected bot dispatches
-     * no state command (Q13). Every semantic command, the {@code end} offer and a plain chat message
-     * in {@code scoping/new} (which would dispatch {@code START}) are refused; {@code pause} and
-     * {@code cancel} are no commands at all. Service commands and the run offers {@code run-plan}
+     * no approval or phase-changing command (Q13). Refuse semantic commands and the {@code end}
+     * offer, but allow the first plain chat message to initialize {@code scoping/new} with START.
+     * Treat {@code pause} and {@code cancel} as non-commands. Service commands and {@code run-plan}
      * and {@code retry-query} run as for the user. PR 06 moves this rule into the actor policy.
      */
     public String executeBotCommand(String command, String arguments) {
@@ -6801,18 +6801,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (!cmd.isEmpty() && outcomeOffers.contains(cmd) && !BOT_RUNNABLE_OFFERS.contains(cmd)) {
             return "rejected: Phase changes need the user ('" + cmd + "'). Valid now: "
                     + validBotCommandNames();
-        }
-        if (cmd.isEmpty() && !args.isEmpty()) {
-            com.aresstack.askai.research.state.oo.ResearchStateMemento memento =
-                    productiveResources != null ? productiveResources.currentState() : state;
-            if (memento != null
-                    && com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING
-                            .equals(memento.getPhaseId())
-                    && com.aresstack.askai.research.state.oo.ResearchStateIds.NEW
-                            .equals(memento.getStateId())) {
-                return "rejected: " + com.aresstack.askai.research.transition.ActorPolicy.BOT_REFUSAL
-                        + " (the first chat message starts the concept phase).";
-            }
         }
         return executeCommand(new CommandOrigin(com.aresstack.askai.research.state.CommandActor.BOT, surface,
                 com.aresstack.askai.research.state.ResearchCommand.NO_REVISION), cmd, args);

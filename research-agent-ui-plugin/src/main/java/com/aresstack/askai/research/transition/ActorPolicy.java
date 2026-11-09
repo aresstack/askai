@@ -5,8 +5,9 @@ import com.aresstack.askai.research.state.ResearchCommandType;
 
 /**
  * The pure actor policy of D2 and Q13. Every {@link ResearchCommandType} is a state command, so only the
- * {@link CommandActor#USER} may send one: a bot is refused with "Phase changes need the user", and the host
- * dispatches no state command of its own. Commands that dispatch no state command (service commands, run
+ * {@link CommandActor#USER} may send one except initial {@link ResearchCommandType#START}, which
+ * a bot may trigger with its first chat message. Refuse bot approvals and phase changes; refuse host
+ * dispatches. Commands that dispatch no state command (service commands, run
  * offers such as {@code run-plan}) never reach the state machine and are not decided here.
  */
 public final class ActorPolicy {
@@ -26,7 +27,7 @@ public final class ActorPolicy {
             case USER:
                 return null;
             case BOT:
-                return BOT_REFUSAL;
+                return command == ResearchCommandType.START ? null : BOT_REFUSAL;
             default:
                 return HOST_REFUSAL;
         }

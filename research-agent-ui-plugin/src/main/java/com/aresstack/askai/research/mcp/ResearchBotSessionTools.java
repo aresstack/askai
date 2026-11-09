@@ -36,7 +36,7 @@ public final class ResearchBotSessionTools {
             + "Phase changes need the user: a bot cannot run submit-scope, approve, request-changes, "
             + "continue, retry, resume, the reopen and finish commands or the 'end' offer; suggest "
             + "them in your answer instead. Omit 'command' to send the arguments as a plain CHAT "
-            + "MESSAGE to the research agent (refused before the first user message). Unknown or "
+            + "MESSAGE to the research agent (including the first message of a new chat). Unknown or "
             + "refused commands are rejected with the currently valid list. Call session_state first.";
 
     static final String SESSION_STATE_DESCRIPTION =

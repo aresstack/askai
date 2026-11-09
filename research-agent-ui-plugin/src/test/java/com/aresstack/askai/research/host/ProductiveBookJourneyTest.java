@@ -156,6 +156,10 @@ public class ProductiveBookJourneyTest {
     /** The user's first chat message, answered by the (recording) runtime. */
     static void firstMessage(Fx fx, String text) {
         fx.session.submitPrompt(text);
+        completeMessage(fx);
+    }
+
+    private static void completeMessage(Fx fx) {
         fx.session.onEvent(ResearchBackendEvent.builder(
                 com.aresstack.askai.research.backend.ResearchBackendEventType.COMPLETED)
                 .envelope("evt-complete-" + (++sequence), "s1", "p1", sequence, 0L, sequence, null)
@@ -346,10 +350,11 @@ public class ProductiveBookJourneyTest {
     @Test
     public void aConnectedBotRunsOffersButNeverChangesThePhase() {
         Fx fx = new Fx();
-        assertTrue("a plain bot chat message in scoping/new would START",
-                fx.session.executeBotCommand("", "hello").startsWith("rejected"));
-        assertEquals("scoping/new", phase(fx));
-        firstMessage(fx, "A book about plugin isolation in Java");
+        String firstTurn = fx.session.executeBotCommand("", "A book about plugin isolation in Java");
+        assertTrue(firstTurn, firstTurn.startsWith("handled:"));
+        assertEquals("scoping/running", phase(fx));
+        assertEquals(1, fx.backend.prompts.size());
+        completeMessage(fx);
         for (String name : new String[] {"submit-scope", "approve", "request-changes", "continue",
                 "retry", "resume", "reopen-concept", "finish-sources", "finish-outline",
                 "finish-document"}) {
@@ -416,14 +421,19 @@ public class ProductiveBookJourneyTest {
 
     @Test
     public void botAndHostStateCommandsAreRefusedOnEverySurface() {
-        Fx fx = new Fx();
         for (com.aresstack.askai.research.state.CommandSurface surface : new com.aresstack.askai.research
                 .state.CommandSurface[] {com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL,
                 com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR}) {
-            String chat = fx.session.executeBotCommand(surface, "", "hello");
-            assertTrue(chat, chat.startsWith("rejected") && chat.contains("Phase changes need the user"));
-            assertEquals("scoping/new", phase(fx));
+            Fx initial = new Fx();
+            String chat = initial.session.executeBotCommand(surface, "", "hello");
+            assertTrue(chat, chat.startsWith("handled:"));
+            assertEquals("scoping/running", phase(initial));
+            assertEquals(1, initial.backend.prompts.size());
+            String approval = initial.session.executeBotCommand(surface, "submit-scope", "");
+            assertTrue(approval, approval.contains("Phase changes need the user"));
+            assertEquals("scoping/running", phase(initial));
         }
+        Fx fx = new Fx();
         firstMessage(fx, "A book");
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
