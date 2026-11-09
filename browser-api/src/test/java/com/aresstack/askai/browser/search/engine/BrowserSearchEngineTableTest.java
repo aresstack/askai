@@ -110,11 +110,11 @@ public class BrowserSearchEngineTableTest {
     @Test
     public void aRowOfAnEngineWithoutDriverIsKeptButNeverVisited() {
         BrowserSearchEngineSelection selection = new BrowserSearchEngineSelection(Arrays.asList(
-                row("startpage", 0, "de"), row("duckduckgo", 1, "de")), null);
+                row("yahoo", 0, "de"), row("duckduckgo", 1, "de")), null);
         assertEquals(2, selection.getEntries().size());
         assertEquals(1, selection.resolvedEnabledEngines().size());
         assertEquals("duckduckgo", selection.resolvedEnabledEngines().get(0).getId());
-        assertFalse(SearchEngineCatalog.byId("startpage").isSearchable());
+        assertFalse(SearchEngineCatalog.byId("yahoo").isSearchable());
     }
 
     @Test
