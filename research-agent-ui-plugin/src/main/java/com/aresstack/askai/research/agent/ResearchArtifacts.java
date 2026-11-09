@@ -23,6 +23,7 @@ public final class ResearchArtifacts {
     public static final String TYPE_STATE = "research.state";
     public static final String TYPE_BRIEF = "research.brief";
     public static final String TYPE_OUTLINE = "research.outline";
+    public static final String TYPE_OUTLINE_EDITOR = "research.outline.editor";
     public static final String TYPE_DOCUMENT = "research.document";
     public static final String TYPE_RUNTIME = "research.runtime";
     public static final String TYPE_SEARCH_SETTINGS = "research.search.settings";
@@ -40,10 +41,10 @@ public final class ResearchArtifacts {
         // Sources sit BEFORE the outline: the concept already yields the first sources, and the outline is
         // (going to be) GENERATED FROM the sources — the tab order mirrors that logical flow.
         list.add(new Artifact("sources", "Sources", TYPE_SOURCES, ""));
-        // Outline + Document are ONE tab: the outline (issue #29: persisted derived projection, stale marker,
-        // explicit generate action) is the Document tab's DRAWER, the document itself shows in the main area.
-        // Plan PR 21: the "outline" artifact slot (outline.md) is rendered from the outline store only, never
-        // from the live projection; outline_save is gone. It has no tab of its own until PR 23.
+        // Plan PR 23: the Outline tab edits the stored outline (the "outline" slot, outline.md, is rendered
+        // from the store, never from the live projection). The live projection stays an analysis view in the
+        // Document tab's drawer, without a generate button.
+        list.add(new Artifact("outline", "Outline", TYPE_OUTLINE_EDITOR, "outline.md"));
         // ONE canonical working document (issue #32): DRAFT and FINALIZATION both work on it. The legacy
         // concept/research-notes/findings/draft/final artifacts are deliberately NOT listed anymore — old
         // files stay untouched on disk, but they get no tabs and no active-workflow writes.

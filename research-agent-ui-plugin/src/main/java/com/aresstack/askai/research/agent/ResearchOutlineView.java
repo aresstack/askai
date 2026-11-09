@@ -43,6 +43,7 @@ public final class ResearchOutlineView extends JPanel {
         this.markdownView = markdownViewFactory.create(
                 MarkdownViewOptions.builder().selectable(true).build());
         staleNote.setVisible(false);
+        generateButton.setVisible(false); // shown only when a generate action is wired (plan PR 23: none in the drawer)
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         toolbar.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         toolbar.add(generateButton);
@@ -77,6 +78,7 @@ public final class ResearchOutlineView extends JPanel {
 
     /** The explicit rebuild trigger (issue #29) — the ONLY thing that starts topic/outline processing. */
     public void setGenerateAction(final Runnable action) {
+        generateButton.setVisible(action != null);
         generateButton.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent e) {
                 if (action != null) {
