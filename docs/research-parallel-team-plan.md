@@ -1,6 +1,6 @@
 # Parallel research team for the Sources phase: orchestrator, page workers, one search service
 
-Status: architecture and PR plan, 2026-11-09, on `develop` c283dc2 (after PR #153 and #155). No code changed by
+Status: architecture and PR plan, 2026-11-09, on `develop` 1d0b734 (after PR #153, #155 and #156). No code changed by
 this document. It extends `docs/research-book-mvp-plan.md` (D5: "Phase 2 is a deterministic plan from the frozen
 concept, run through the one funnel") and ADR 0001 (orchestrator, task executor, resource scheduling). The MVP
 acceptance run has priority; nothing here changes the productive path until the flag of section 6 is switched on.
@@ -67,7 +67,7 @@ Sources phase of one chat (research/running)
 │       ▼                                               │
 ├── SearchService (T2, one per AskAI) ──────────────────┼── the ONLY path to a search engine
 │       │  SearchStrategy (exists) → SearchBrowser / Serp4J providers (exist)
-│       │  query dedup · result dedup (UrlRegistry) · engine spacing + backoff · one gate for all chats
+│       │  query dedup · result dedup (UrlRegistry) · goto-redirect batches · engine spacing + backoff · one gate for all chats
 │       ▼  candidates (reranked, scope-fenced, NonSourceHosts-filtered)
 ├── PageTaskQueue (T4) ── ResearchTask role=page-worker, one per URL, claims URL in UrlRegistry
 │       ▼
@@ -126,16 +126,25 @@ Three independent guards, each sufficient on its own:
    URL, or `search_*` tool. Its only browser input is the task's URL and the links Java listed from the page;
    `RoleScopedToolInvoker` refuses everything else (exists).
 2. **URL policy of the worker context.** `PlaywrightBrowserSession` already applies its `UrlSafetyPolicy` twice per
-   navigation (before and after redirects). T2 adds the engine deny list (the `SearchEngineHosts` list in `browser-api` that the repair thread's
-   follow-up PR introduces, plus the `providerHosts` the strategy reports) for worker user contexts: a navigation to an engine host fails typed (`ENGINE_HOST_REFUSED`),
+   navigation (before and after redirects). T2 adds the engine deny list (`SearchEngineHosts` in `browser-api`, PR #156, plus the `providerHosts` the
+   strategy reports) for worker user contexts: a navigation to an engine host fails typed (`ENGINE_HOST_REFUSED`),
    is recorded on the task, and never leaves the process. The chat browser and the search browser are not affected.
 3. **Lease identity.** The search browser and the API providers are reachable only through `SearchService`, which
    is not on any worker's lane.
 
-The current fix in the Phase-2 repair thread (`SearchEngineHosts`, `goto` links resolved lazily in the search browser via
-`OpaqueRedirectResolver`, the research browser never opens google/bing/duckduckgo, node coverage only after all planned
-queries) lands first; T2 builds on it and must not
-touch the same lines in parallel.
+PR #156 (merged as `develop` 1d0b734) is the basis T2 builds on: `SearchEngineHosts`; the research browser never opens
+google/bing/duckduckgo; Google `goto` wrappers are resolved lazily in the search browser (`SearchBrowser.resolveRedirect`
+on its owner thread, port `OpaqueRedirectResolver`, adapter `SearchBrowserRedirectResolver`, set through
+`ResearchLoop.setRedirectResolver`); `WebSearchApplicationService` records `engineRedirectBlocked` per search; a node is
+covered only once no planned query of it is pending, and the per-query cap is `sourcesPerNode`.
+
+**The search browser is a serial resource, and every `goto` hop is one more call on it.** With twenty workers, the
+redirect resolution of their candidates must not queue behind the next engine query or starve it. T2 therefore makes
+redirect resolution part of the search service: hits are resolved in one batch right after the SERP, with
+`SearchBrowser.resolveRedirect` calls that are cheap (a request without following the redirect) and counted in the
+service's spacing; a page task is created with the **resolved** URL, so no worker ever asks the search browser for
+anything. Queries and redirect batches share the one owner thread in FIFO order; the service reports the search
+browser's queue length so the benchmark (T7) shows whether it becomes the bottleneck.
 
 ### 2.4 Communication: two operations, natural language, Java does the rest
 
@@ -355,7 +364,7 @@ touched. UI strings English.
 | PR | Title | Depends on | Size | Starts |
 |---|---|---|---|---|
 | T1 | Site leases with deadlines, per-site overrides and site health | – | M | now |
-| T2 | Search service: one engine path, query and URL dedup, spacing and backoff, engine deny list for worker contexts | the repair thread's search-browser fix (merged first) | M | after that merge |
+| T2 | Search service: one engine path, query and URL dedup, redirect batches, spacing and backoff, engine deny list for worker contexts | PR #156 (merged) | M | now |
 | T3 | Agent mailbox: `send_message`, `finish_task`, labelled-text answers, persistence | – | M | now |
 | T4 | Page worker and page task queue on the task executor; `PageInspection` extracted from the funnel | T1, T2, T3 | L | after MVP acceptance is stable |
 | T5 | Team coordinator: plan queue feeds the search service, worker feedback feeds the cycles, gap-review role, outcome | T4 | L | after T4 |
@@ -383,7 +392,8 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
 
 **T2 Search service** (M)
 - Change: `SearchService` in the runtime (`search(SearchRequest) → SearchOutcome` over the configured
-  `SearchStrategy`; normalised query dedup per project; `UrlRegistry` port with a file implementation in the plugin
+  `SearchStrategy`, followed by one redirect batch through `OpaqueRedirectResolver` so every candidate carries its
+  resolved URL and `engineRedirectBlocked` ends the batch typed; normalised query dedup per project; `UrlRegistry` port with a file implementation in the plugin
   (`search-plan/urls.jsonl`); engine spacing and backoff over all chats using the `search-engines` key; `providerHosts`
   and `SearchEngineHosts` (browser-api) as the engine deny list applied to worker user contexts by
   `PlaywrightBrowserSession`'s `UrlSafetyPolicy`). The manual search and the funnel keep their path; only the registry is
@@ -459,9 +469,9 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
   only, after the MVP acceptance run has passed, and becomes the default only with a recorded benchmark that shows
   more useful pages per minute than the serial run at the same quality (the `BookIntegrityCheck` of PR 32 on the
   resulting book).
-- The repair thread's change to the search browser (goto resolution, engine hosts never in the research browser,
-  coverage after all cycle queries) is merged before T2 starts. Conflicts are settled with that thread directly;
-  `ResearchAgentSession.wireSearchPlan` and `WebSearchApplicationService` are the two shared hotspots.
+- The repair thread's search-browser fix is merged (PR #156, `develop` 1d0b734); T2 starts from it. Conflicts with that
+  thread's further work are settled directly; `ResearchAgentSession.wireSearchPlan` and `WebSearchApplicationService`
+  are the two shared hotspots.
 - Rebase rule from the MVP plan: dependent PRs start on their predecessor's branch and merge it continuously; after the
   predecessor's merge they are transferred cleanly onto `develop`.
 
@@ -494,8 +504,11 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
   reads the port's capacity; the sizing table names the combinations; the owner's Ollama settings are not changed by
   code.
 - **Two hotspots.** `ResearchAgentSession` and `WebSearchApplicationService` are touched by the repair thread and by
-  T4/T5. Mitigation: T4's extraction is behaviour-preserving and lands after the repair; T5's wiring is one branch
+  T4/T5. Mitigation: T4's extraction is behaviour-preserving and starts from PR #156; T5's wiring is one branch
   in `wireSearchPlan`.
+- **The search browser as the serial bottleneck.** Queries and `goto` resolutions share one owner thread. Mitigation:
+  redirect batches in the service (section 2.3), spacing that counts both, the queue length in the benchmark; if it
+  binds, the next step is a second search browser identity, not a worker that talks to an engine.
 
 ## 9. Decisions for the owner
 
