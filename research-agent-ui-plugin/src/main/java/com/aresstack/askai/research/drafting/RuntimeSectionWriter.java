@@ -58,7 +58,12 @@ public final class RuntimeSectionWriter implements SectionWriter {
                 evidenceIds.add(passage.getPassageId());
             }
         }
+        List<String> flags = new ArrayList<String>();
+        for (com.aresstack.askai.research.runtime.writer.ClaimFlag flag : draft.getFlags()) {
+            flags.add(flag.revisionLine());
+        }
         return SectionRevision.builder().text(draft.getText()).citations(citations).gaps(draft.getGaps())
+                .claimFlags(flags)
                 .author(SectionRevision.AUTHOR_WRITER).modelLabel(draft.getModelLabel())
                 .promptHash(draft.getPromptHash()).evidenceIds(evidenceIds);
     }

@@ -282,6 +282,7 @@ public final class FileManuscriptStore {
         }
         json.add("citations", citations);
         json.add("gaps", strings(revision.getGaps()));
+        json.add("claimFlags", strings(revision.getClaimFlags()));
         json.addProperty("author", revision.getAuthor());
         json.addProperty("modelLabel", revision.getModelLabel());
         json.addProperty("thinkingLevel", revision.getThinkingLevel());
@@ -308,7 +309,8 @@ public final class FileManuscriptStore {
             citations.add(citation);
         }
         return SectionRevision.builder().text(string(json, "text")).citations(citations)
-                .gaps(list(json.getAsJsonArray("gaps"))).author(string(json, "author"))
+                .gaps(list(json.getAsJsonArray("gaps")))
+                .claimFlags(list(json.getAsJsonArray("claimFlags"))).author(string(json, "author"))
                 .modelLabel(string(json, "modelLabel")).thinkingLevel(string(json, "thinkingLevel"))
                 .promptHash(string(json, "promptHash")).evidenceIds(list(json.getAsJsonArray("evidenceIds")))
                 .sectionFingerprint(string(json, "sectionFingerprint"))

@@ -61,9 +61,26 @@ public final class SectionEditor {
         }
     }
 
+    /** Unsaved text of a section the user left, kept until it is saved (no edit is lost by switching). */
+    private static final class Draft {
+        final String text;
+        final int baseRevision;
+        final int loadedRevision;
+
+        Draft(String text, int baseRevision, int loadedRevision) {
+            this.text = text;
+            this.baseRevision = baseRevision;
+            this.loadedRevision = loadedRevision;
+        }
+    }
+
     private final ManuscriptWorkspace manuscript;
+    private final java.util.Map<String, Draft> drafts = new java.util.HashMap<String, Draft>();
     private Item item;
+    /** The revision a save is expected to follow (advances on a conflict). */
     private int loadedRevision;
+    /** The revision the local text and its markers came from; its citation map is what a save keeps. */
+    private int baseRevision;
     private String localText = "";
     private boolean dirty;
 
@@ -91,17 +108,47 @@ public final class SectionEditor {
         return items;
     }
 
-    /** Open a section: the local text becomes its current revision. */
+    /**
+     * Open a section: the local text becomes its current revision, or the unsaved draft left there before. The
+     * unsaved text of the section being left is kept as its draft.
+     */
     public void open(Item next) {
+        if (item != null && dirty) {
+            drafts.put(item.sectionId, new Draft(localText, baseRevision, loadedRevision));
+        }
+        Draft draft = next == null ? null : drafts.remove(next.sectionId);
         item = next;
+        if (draft != null) {
+            localText = draft.text;
+            baseRevision = draft.baseRevision;
+            loadedRevision = draft.loadedRevision;
+            dirty = true;
+            return;
+        }
         SectionRevision current = next == null ? null : manuscript.store().current(next.sectionId);
         loadedRevision = current == null ? 0 : current.getNumber();
         ManuscriptSection state = next == null ? null : manuscript.store().section(next.sectionId);
         if (state != null) {
             loadedRevision = state.getRevision();
         }
+        baseRevision = current == null ? 0 : current.getNumber();
         localText = current == null ? "" : current.getText();
         dirty = false;
+    }
+
+    /**
+     * Take the metadata of a newly approved outline entry for the open section (same id) without touching its
+     * local text, so a save uses the current chapter id and fingerprints.
+     */
+    public void rebind(Item updated) {
+        if (item != null && updated != null && item.sectionId.equals(updated.sectionId)) {
+            item = updated;
+        }
+    }
+
+    /** Whether a section has unsaved text kept from an earlier visit. */
+    public boolean hasDraft(String sectionId) {
+        return drafts.containsKey(sectionId);
     }
 
     public Item item() {
@@ -132,8 +179,8 @@ public final class SectionEditor {
     /** The local markers of the text with the source each one cites ("[1] source-id"), or "no source". */
     public List<String> markers() {
         List<String> lines = new ArrayList<String>();
-        SectionRevision current = item == null || loadedRevision == 0
-                ? null : manuscript.store().revision(item.sectionId, loadedRevision);
+        SectionRevision current = item == null || baseRevision == 0
+                ? null : manuscript.store().revision(item.sectionId, baseRevision);
         Matcher matcher = MARKER.matcher(localText);
         List<String> seen = new ArrayList<String>();
         while (matcher.find()) {
@@ -156,8 +203,8 @@ public final class SectionEditor {
         if (item == null) {
             return new SaveResult(false, "Choose a section first.", "");
         }
-        SectionRevision base = loadedRevision == 0 ? null : manuscript.store().revision(item.sectionId,
-                loadedRevision);
+        SectionRevision base = baseRevision == 0 ? null : manuscript.store().revision(item.sectionId,
+                baseRevision);
         List<ManuscriptCitation> kept = new ArrayList<ManuscriptCitation>();
         if (base != null) {
             for (ManuscriptCitation citation : base.getCitations()) {
@@ -176,10 +223,12 @@ public final class SectionEditor {
             FileManuscriptStore.Write write = manuscript.save(item.sectionId, item.chapterId, loadedRevision,
                     content, nowMillis);
             loadedRevision = write.revision.getNumber();
+            baseRevision = loadedRevision;
             dirty = false;
             return new SaveResult(true, "Saved (revision " + loadedRevision + ").", "");
         } catch (FileManuscriptStore.SectionConflictException conflict) {
-            loadedRevision = conflict.getCurrentRevision(); // the next save goes on top, keeping both texts
+            // the next save goes on top, keeping both texts; the citations stay those of the local text's base
+            loadedRevision = conflict.getCurrentRevision();
             return new SaveResult(false, conflict.getMessage(), conflict.getCurrentText());
         } catch (ManuscriptWorkspace.WriteRefusedException refused) {
             return new SaveResult(false, "Not saved: " + refused.getMessage(), "");
