@@ -83,6 +83,12 @@ public final class ResearchSourcesView extends JPanel {
     private final com.aresstack.comiccontrols.theme.ComicPalette palette =
             com.aresstack.comiccontrols.theme.ComicPalette.defaultPalette();
 
+    /** Plan PR 14: the search plan checklist above the source table. */
+    public void setPlanChecklist(javax.swing.JComponent checklist) {
+        add(checklist, BorderLayout.NORTH);
+        revalidate();
+    }
+
     public ResearchSourcesView(ResearchSourceRepository repository, Set<String> knownSectionIds) {
         super(new BorderLayout(6, 8));
         this.repository = repository;

@@ -1604,6 +1604,21 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     // ------------------------------------------------------------------ PR 14: the search plan queue
 
     static final String EFFECT_SEARCH_PLAN = "search-plan-build";
+    static final String EFFECT_PRIORITY_ENTRY = "search-plan-priority";
+    static final String EFFECT_GATE_COVERAGE = "search-plan-gate-coverage";
+
+    /** The gate line naming the uncovered nodes, or {@code null} when every node is covered (plan PR 14). */
+    static String gateCoverageText(java.util.List<String> uncovered) {
+        if (uncovered == null || uncovered.isEmpty()) {
+            return null;
+        }
+        StringBuilder text = new StringBuilder(uncovered.size() == 1 ? "1 node has" : uncovered.size() + " nodes have")
+                .append(" no covering sources yet: ");
+        for (int i = 0; i < uncovered.size(); i++) {
+            text.append(i > 0 ? ", " : "").append(uncovered.get(i));
+        }
+        return text.append(". Request changes to search for them, or approve the sources as they are.").toString();
+    }
     /** How long the plan build waits for the planner role's variants before it keeps the base queries. */
     static final long QUERY_PLAN_TIMEOUT_MILLIS = 180_000L;
 
@@ -1660,6 +1675,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if (job != null && productiveResources != null) {
             productiveResources.phaseJobs().unregister(job);
         }
+    }
+
+    /** Plan PR 14: whether the search plan may run now (research/running). */
+    public boolean searchPlanRunnable() {
+        return searchPlanQueue != null && researchRunning();
     }
 
     private boolean researchRunning() {
@@ -1813,9 +1833,60 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         engine.addHook(new com.aresstack.askai.research.transition.PhaseTransitionHook() {
             public java.util.List<String> effects(
                     com.aresstack.askai.research.transition.PhaseTransition transition) {
-                return transition.getCommand() == ResearchCommandType.START_RESEARCH
-                        ? java.util.Collections.singletonList(EFFECT_SEARCH_PLAN)
-                        : java.util.Collections.<String>emptyList();
+                if (transition.getCommand() == ResearchCommandType.START_RESEARCH) {
+                    return java.util.Collections.singletonList(EFFECT_SEARCH_PLAN);
+                }
+                boolean fromSources = transition.getFrom() != null
+                        && com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH
+                                .equals(transition.getFrom().getPhaseId());
+                if (fromSources && transition.getCommand() == ResearchCommandType.REQUEST_REVISION
+                        && !transition.getComment().trim().isEmpty()) {
+                    return java.util.Collections.singletonList(EFFECT_PRIORITY_ENTRY);
+                }
+                if (fromSources && transition.getCommand() == ResearchCommandType.REQUEST_EVIDENCE_REVIEW) {
+                    return java.util.Collections.singletonList(EFFECT_GATE_COVERAGE);
+                }
+                return java.util.Collections.<String>emptyList();
+            }
+        });
+        // plan PR 14: "Request changes" at the gate becomes a priority entry that runs first
+        engine.registerEffect(EFFECT_PRIORITY_ENTRY, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(com.aresstack.askai.research.transition.PhaseTransition transition) {
+                String comment = transition.getComment().trim();
+                try {
+                    queue.addPriority("priority-" + transition.getId(),
+                            com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
+                            com.aresstack.askai.research.plan.SearchPlanQueue.priorityQuery(comment),
+                            "Changes requested: " + comment);
+                } catch (Exception failed) {
+                    System.err.println("[search-plan] priority entry not added: " + failed.getMessage());
+                    return;
+                }
+                uiExecutor.execute(new Runnable() {
+                    public void run() {
+                        runSearchPlan();
+                    }
+                });
+            }
+        });
+        // plan PR 14: the gate message lists the uncovered nodes
+        engine.registerEffect(EFFECT_GATE_COVERAGE, new com.aresstack.askai.research.transition.TransitionEffect() {
+            public void run(final com.aresstack.askai.research.transition.PhaseTransition transition) {
+                final String text;
+                try {
+                    text = gateCoverageText(queue.outcome().getUncovered());
+                } catch (Exception unreadable) {
+                    System.err.println("[search-plan] coverage not read: " + unreadable.getMessage());
+                    return;
+                }
+                if (text == null || sink == null) {
+                    return;
+                }
+                uiExecutor.execute(new Runnable() {
+                    public void run() {
+                        sink.appendInfoMessage(publish("gate-coverage-" + transition.getId()), text);
+                    }
+                });
             }
         });
         engine.registerEffect(EFFECT_SEARCH_PLAN, new com.aresstack.askai.research.transition.TransitionEffect() {

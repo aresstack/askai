@@ -480,18 +480,41 @@ public final class SearchPlanQueue {
 
     /** Add a priority entry (the "Request changes" comment at the gate); it runs first. */
     public synchronized String addPriority(String phase, String query) throws IOException, CorruptProjectFileException {
+        return addPriority(newId(), phase, query, "");
+    }
+
+    /**
+     * Add a priority entry under a fixed id (idempotent: an existing id is kept as it is). {@code label} is shown
+     * on the checklist, e.g. the comment of "Request changes" at the gate (plan PR 14).
+     */
+    public synchronized String addPriority(String entryId, String phase, String query, String label)
+            throws IOException, CorruptProjectFileException {
         SearchPlanRecord record = store.loadRecord();
         if (record == null || blank(query)) {
             return null;
         }
-        SearchPlanEntry added = SearchPlanEntry.submit(newId(), phase == null ? record.getPhase() : phase, "", "",
-                query, SearchPlanEntry.Origin.PRIORITY, clock.now());
+        if (store.loadEntries().containsKey(entryId)) {
+            return entryId;
+        }
+        SearchPlanEntry added = SearchPlanEntry.submit(entryId, phase == null ? record.getPhase() : phase, "",
+                label == null ? "" : label, query, SearchPlanEntry.Origin.PRIORITY, clock.now());
         store.save(added);
         List<String> priority = new ArrayList<String>(record.getPriority());
         priority.add(added.getId());
         store.saveRecord(record.withOrder(record.getOrder(), priority));
         listener.changed();
         return added.getId();
+    }
+
+    /** A gate comment as a search query: the first words that fit the query limit. */
+    public static String priorityQuery(String comment) {
+        String text = comment == null ? "" : comment.replaceAll("\\s+", " ").trim();
+        int max = com.aresstack.askai.research.domain.plan.ConceptQueryPlan.MAX_QUERY_LENGTH;
+        if (text.length() > max) {
+            int cut = text.lastIndexOf(' ', max);
+            text = text.substring(0, cut > 0 ? cut : max).trim();
+        }
+        return text;
     }
 
     /** Re-run an ended entry: a new pending task for the same node and query right after it. */
