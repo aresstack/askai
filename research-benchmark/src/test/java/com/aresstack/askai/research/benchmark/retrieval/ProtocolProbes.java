@@ -84,11 +84,18 @@ public final class ProtocolProbes {
         public final String name;
         public final long size;
         public final long sizeVram;
+        /** {@code context_length} Ollama actually allocated, or -1 when the server does not report it. */
+        public final long contextLength;
 
         LoadedModel(String name, long size, long sizeVram) {
+            this(name, size, sizeVram, -1);
+        }
+
+        LoadedModel(String name, long size, long sizeVram, long contextLength) {
             this.name = name;
             this.size = size;
             this.sizeVram = sizeVram;
+            this.contextLength = contextLength;
         }
 
         /** Share of the model in VRAM in percent; below 100 means Ollama spilled layers to the CPU. */
@@ -98,7 +105,8 @@ public final class ProtocolProbes {
 
         @Override
         public String toString() {
-            return name + " " + (size >> 20) + " MiB " + gpuPercent() + "% GPU";
+            return name + " " + (size >> 20) + " MiB " + gpuPercent() + "% GPU"
+                    + (contextLength > 0 ? " ctx " + contextLength : "");
         }
     }
 
@@ -114,7 +122,8 @@ public final class ProtocolProbes {
                 JsonObject m = e.getAsJsonObject();
                 out.add(new LoadedModel(m.get("name").getAsString(),
                         m.has("size") ? m.get("size").getAsLong() : 0,
-                        m.has("size_vram") ? m.get("size_vram").getAsLong() : 0));
+                        m.has("size_vram") ? m.get("size_vram").getAsLong() : 0,
+                        m.has("context_length") ? m.get("context_length").getAsLong() : -1));
             }
         }
         return out;
