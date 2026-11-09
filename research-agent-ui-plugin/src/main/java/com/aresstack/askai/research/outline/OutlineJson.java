@@ -60,6 +60,10 @@ public final class OutlineJson {
                 JsonObject json = element.getAsJsonObject();
                 List<OutlineSection> sections = new ArrayList<OutlineSection>();
                 JsonElement array = json.get("sections");
+                if (array != null && !array.isJsonNull() && !array.isJsonArray()) {
+                    throw new IllegalArgumentException("The outline has an unknown layout: \"sections\" of \""
+                            + string(json, "title") + "\" is not a list.");
+                }
                 if (array != null && array.isJsonArray()) {
                     for (JsonElement sectionElement : array.getAsJsonArray()) {
                         JsonObject section = sectionElement.getAsJsonObject();

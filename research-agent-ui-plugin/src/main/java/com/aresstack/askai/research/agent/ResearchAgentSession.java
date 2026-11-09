@@ -2166,6 +2166,19 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return "Not started yet. The outline opens when the workflow reaches Outline.";
     }
 
+    /** The latest change request of the Outline phase (shown above the outline editor, plan PR 23); "" when none. */
+    public String outlineChangeRequest() {
+        if (productiveResources == null || productiveResources.isClosed()) {
+            return "";
+        }
+        try {
+            return productiveResources.transitions().latestChangeRequest(
+                    com.aresstack.askai.research.state.oo.ResearchStateIds.OUTLINE);
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return "";
+        }
+    }
+
     /** Render the stored outline into the "outline" artifact (never from the live projection, plan PR 21). */
     private void renderOutlineArtifact(com.aresstack.askai.research.outline.Outline outline) {
         if (productiveResources == null || productiveResources.isClosed()) {
