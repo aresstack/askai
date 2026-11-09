@@ -60,6 +60,10 @@ public final class ResearchToolPolicy {
         // Plan PR 21: the stored outline, read-only, in every phase (frozen artifacts stay readable). There is
         // no whole-artifact outline write anymore: outline_save is gone, content goes through the outline store.
         tools.add(outlineReadTool(ctx));
+        // Plan PR 24: the single-chapter regeneration of the Outline tab, as a tool in outline/running only.
+        if (writable(phaseId, stateId, ResearchStateIds.OUTLINE)) {
+            tools.add(outlineRegenerateChapterTool(ctx));
+        }
         // The Konzeptpapier tools (Fragestellung→Konzept rework). READING the concept is allowed in
         // every phase (frozen artifacts stay readable); WRITING is bite-wise branch editing and is
         // bound to SCOPING/running. Absent service (clickdummy/old fakes) → no concept tools at all.
@@ -165,6 +169,41 @@ public final class ResearchToolPolicy {
                         return McpToolResult.ok(summary == null ? "No approved concept." : summary);
                     }
                 });
+    }
+
+    private static McpToolContribution outlineRegenerateChapterTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("outline_regenerate_chapter",
+                "Regenerate ONE outline chapter; it keeps its id and every other chapter stays as it is. "
+                        + "sections=0 writes new briefs for its sections; sections=2..6 re-splits a chapter built "
+                        + "from source clusters into that many sections. Example: chapter_id=\"ch-3\", "
+                        + "sections=4, comment=\"more on costs\".",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.OUTLINE);
+                        if (denied != null) {
+                            return denied;
+                        }
+                        String chapterId = call.getString("chapter_id");
+                        if (chapterId == null || chapterId.trim().isEmpty()) {
+                            return McpToolResult.error("Missing argument: chapter_id (see outline_read)");
+                        }
+                        long sections = call.getInteger("sections", 0);
+                        String comment = call.getString("comment");
+                        try {
+                            String outcome = ctx.outlineRegenerateChapter(chapterId.trim(), (int) sections,
+                                    comment == null ? "" : comment.trim());
+                            return outcome == null
+                                    ? McpToolResult.error("Chapter regeneration is not available in this session.")
+                                    : McpToolResult.ok(outcome);
+                        } catch (RuntimeException refused) {
+                            return McpToolResult.error(refused.getMessage());
+                        }
+                    }
+                },
+                McpToolParameter.string("chapter_id", true, "The chapter id from outline_read."),
+                McpToolParameter.integer("sections", false,
+                        "0 = new briefs only; 2 to 6 = re-split a cluster chapter into that many sections."),
+                McpToolParameter.string("comment", false, "What the new chapter should do differently."));
     }
 
     private static McpToolContribution outlineReadTool(final ResearchControlContext ctx) {

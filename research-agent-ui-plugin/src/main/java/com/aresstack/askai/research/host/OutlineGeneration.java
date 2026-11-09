@@ -61,6 +61,17 @@ public final class OutlineGeneration {
     private final OutlineGenerationInput.Settings settings;
     private final OutlineClusteringRun run;
     private final Executor executor;
+    /** Plan PR 24: the label and brief pass after the model-free proposal; {@code null} = none. */
+    private volatile Enrichment enrichment;
+
+    /** Plan PR 24: labels and briefs for a fresh proposal (the session binds the model slots). */
+    public interface Enrichment {
+        Outline enrich(Outline generated, java.util.function.BooleanSupplier cancelled);
+    }
+
+    public void setEnrichment(Enrichment enrichment) {
+        this.enrichment = enrichment;
+    }
 
     public OutlineGeneration(Inputs inputs, ActiveKnowledgeCorpusReader corpus, EmbeddingPort embeddings,
                              OutlineGenerationInput.Settings settings, OutlineClusteringRun run, Executor executor) {
@@ -121,7 +132,16 @@ public final class OutlineGeneration {
             if (monitor.isCancelled()) {
                 throw new ClusteringMonitor.ClusteringCancelledException();
             }
-            workspace.save(OutlineProvenanceMerge.merge(stored, result.outline), expected, inputs.now());
+            Outline proposal = result.outline;
+            Enrichment labelsAndBriefs = enrichment;
+            if (labelsAndBriefs != null) {
+                monitor.progress("Writing chapter labels and briefs", 0, 1);
+                proposal = labelsAndBriefs.enrich(proposal, monitor::isCancelled);
+                if (monitor.isCancelled()) {
+                    throw new ClusteringMonitor.ClusteringCancelledException();
+                }
+            }
+            workspace.save(OutlineProvenanceMerge.merge(stored, proposal), expected, inputs.now());
             System.err.println("[research-outline] generated chapters=" + result.outline.getChapters().size()
                     + " assigned=" + result.assignedPassages + " unassigned=" + result.unassignedPassages
                     + " candidates=" + result.outline.getCandidates().size()

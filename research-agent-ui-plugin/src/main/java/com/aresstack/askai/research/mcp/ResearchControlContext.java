@@ -244,4 +244,13 @@ public interface ResearchControlContext {
     default String outlineRead() {
         return null;
     }
+
+    /**
+     * Plan PR 24: regenerate one chapter of the working outline ({@code sections} 0 = brief again, 2 to 6 =
+     * re-split a sub-cluster chapter; the comment steers labels and briefs). Returns the outcome line, or
+     * {@code null} when this session cannot regenerate chapters. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String outlineRegenerateChapter(String chapterId, int sections, String comment) {
+        return null;
+    }
 }

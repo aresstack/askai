@@ -52,6 +52,33 @@ public final class OutlineEditorView extends JPanel {
         String history(long revision);
 
         void generate();
+
+        /**
+         * Plan PR 24: regenerate one chapter ({@code sections} 0 = new briefs, 2 to 6 = re-split a cluster
+         * chapter). Runs off the EDT; returns the outcome line ("Brief not generated ..." on a failed brief).
+         * @throws RuntimeException with the reason it was refused
+         */
+        default JobOutcome regenerateChapter(String chapterId, int sections, String comment) {
+            throw new UnsupportedOperationException("Chapter regeneration is not available.");
+        }
+
+        /** Plan PR 24: adopt a suggested chapter (candidate cluster). Runs off the EDT. */
+        default JobOutcome adoptCandidate(String clusterId) {
+            throw new UnsupportedOperationException("Suggested chapters are not available.");
+        }
+    }
+
+    /** A chapter operation's outcome: the chapter it touched, the line to show, whether its brief failed. */
+    public static final class JobOutcome {
+        final String chapterId;
+        final String message;
+        final boolean briefFailed;
+
+        public JobOutcome(String chapterId, String message, boolean briefFailed) {
+            this.chapterId = chapterId;
+            this.message = message;
+            this.briefFailed = briefFailed;
+        }
     }
 
     /** One consistent read of the session for a repaint. */
@@ -84,6 +111,12 @@ public final class OutlineEditorView extends JPanel {
     private final JButton downButton = new ComicButton("Down");
     private final JButton indentButton = new ComicButton("Indent");
     private final JButton outdentButton = new ComicButton("Outdent");
+    private final JButton regenerateButton = new ComicButton("Regenerate chapter");
+    private final JButton retryBriefButton = new ComicButton("Retry brief");
+    private final JButton suggestedButton = new ComicButton("Add suggested chapter");
+    /** Chapter ids whose last brief call failed ("Brief not generated"); cleared on a successful retry. */
+    private final java.util.Set<String> briefFailures = new java.util.HashSet<String>();
+    private boolean chapterJobRunning;
     private final JTextArea jsonArea = com.aresstack.comiccontrols.control.ComicControls.textArea();
     private final JButton saveButton = new ComicButton("Save");
     private final JButton discardButton = new ComicButton("Discard");
@@ -108,6 +141,7 @@ public final class OutlineEditorView extends JPanel {
         JPanel north = new JPanel(new BorderLayout(4, 2));
         JPanel head = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 4));
         head.add(generateButton);
+        head.add(suggestedButton);
         head.add(modeToggle);
         head.add(modeLabel);
         north.add(head, BorderLayout.NORTH);
@@ -127,7 +161,7 @@ public final class OutlineEditorView extends JPanel {
         treeCard.add(new JScrollPane(tree), BorderLayout.CENTER);
         JPanel treeButtons = new JPanel(new WrapLayout(FlowLayout.LEFT, 6, 4));
         for (JButton button : new JButton[]{renameButton, addChapterButton, addSectionButton, deleteButton,
-                upButton, downButton, indentButton, outdentButton}) {
+                upButton, downButton, indentButton, outdentButton, regenerateButton, retryBriefButton}) {
             treeButtons.add(button);
         }
         treeCard.add(treeButtons, BorderLayout.SOUTH);
@@ -242,7 +276,7 @@ public final class OutlineEditorView extends JPanel {
     JButton button(String text) {
         for (JButton b : new JButton[]{renameButton, addChapterButton, addSectionButton, deleteButton, upButton,
                 downButton, indentButton, outdentButton, saveButton, discardButton, viewButton, restoreButton,
-                generateButton, modeToggle}) {
+                generateButton, modeToggle, regenerateButton, retryBriefButton, suggestedButton}) {
             if (b.getText().equals(text)) {
                 return b;
             }
@@ -270,6 +304,65 @@ public final class OutlineEditorView extends JPanel {
         generateButton.addActionListener(e -> {
             if (actions != null) {
                 actions.generate();
+            }
+        });
+        regenerateButton.addActionListener(e -> {
+            OutlineEntry entry = selectedEntry();
+            if (!(entry instanceof OutlineChapter)) {
+                return;
+            }
+            OutlineChapter chapter = (OutlineChapter) entry;
+            JTextArea comment = com.aresstack.comiccontrols.control.ComicControls.textArea();
+            comment.setRows(3);
+            comment.setLineWrap(true);
+            comment.setWrapStyleWord(true);
+            boolean clusters = com.aresstack.askai.research.outline.brief.ChapterRegenerator
+                    .isSubClusterChapter(chapter);
+            javax.swing.JSpinner count = com.aresstack.comiccontrols.control.ComicControls.integerSpinner(
+                    Math.max(2, Math.min(6, chapter.getSections().size())), 2, 6, 1, 2);
+            javax.swing.JCheckBox resplit = com.aresstack.comiccontrols.control.ComicControls.checkBox("Split into sections");
+            resplit.setEnabled(clusters);
+            count.setEnabled(false);
+            resplit.addActionListener(ev -> count.setEnabled(resplit.isSelected()));
+            JPanel form = new JPanel(new BorderLayout(4, 4));
+            JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+            row.add(resplit);
+            row.add(count);
+            form.add(new JLabel("Comment (optional)"), BorderLayout.NORTH);
+            form.add(new JScrollPane(comment), BorderLayout.CENTER);
+            form.add(row, BorderLayout.SOUTH);
+            int answer = JOptionPane.showConfirmDialog(this, form, "Regenerate \"" + chapter.getTitle() + "\"",
+                    JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+            if (answer == JOptionPane.OK_OPTION) {
+                int sections = resplit.isSelected() ? (Integer) count.getValue() : 0;
+                runChapterJob(() -> actions.regenerateChapter(chapter.getId(), sections,
+                        comment.getText().trim()));
+            }
+        });
+        retryBriefButton.addActionListener(e -> {
+            OutlineEntry entry = selectedEntry();
+            if (entry instanceof OutlineChapter) {
+                runChapterJob(() -> actions.regenerateChapter(entry.getId(), 0, ""));
+            }
+        });
+        suggestedButton.addActionListener(e -> {
+            java.util.List<com.aresstack.askai.research.outline.OutlineCandidate> candidates =
+                    snapshot.outline.getCandidates();
+            if (candidates.isEmpty()) {
+                return;
+            }
+            String[] titles = new String[candidates.size()];
+            for (int i = 0; i < titles.length; i++) {
+                com.aresstack.askai.research.outline.OutlineCandidate candidate = candidates.get(i);
+                titles[i] = (i + 1) + ". " + candidate.getSuggestedTitle() + " (" + candidate.getSourceCount()
+                        + " sources)";
+            }
+            Object chosen = JOptionPane.showInputDialog(this, "Suggested chapter", "Add suggested chapter",
+                    JOptionPane.PLAIN_MESSAGE, null, titles, titles[0]);
+            if (chosen != null) {
+                int index = java.util.Arrays.asList(titles).indexOf(chosen);
+                String clusterId = candidates.get(index).getClusterId();
+                runChapterJob(() -> actions.adoptCandidate(clusterId));
             }
         });
         renameButton.addActionListener(e -> {
@@ -466,6 +559,50 @@ public final class OutlineEditorView extends JPanel {
         }
     }
 
+    /** Runs a chapter operation off the EDT; the status line shows its outcome or refusal. */
+    private void runChapterJob(final java.util.concurrent.Callable<JobOutcome> job) {
+        if (actions == null || chapterJobRunning) {
+            return;
+        }
+        chapterJobRunning = true;
+        status.setText("Working on the outline...");
+        updateButtons();
+        new javax.swing.SwingWorker<JobOutcome, Void>() {
+            @Override
+            protected JobOutcome doInBackground() throws Exception {
+                return job.call();
+            }
+
+            @Override
+            protected void done() {
+                chapterJobRunning = false;
+                try {
+                    JobOutcome outcome = get();
+                    if (outcome != null && outcome.chapterId != null) {
+                        if (outcome.briefFailed) {
+                            briefFailures.add(outcome.chapterId);
+                        } else {
+                            briefFailures.remove(outcome.chapterId);
+                        }
+                    }
+                    status.setText(outcome == null || outcome.message == null ? " " : outcome.message);
+                    rebuildTree(snapshot.outline, selectedId());
+                } catch (java.util.concurrent.ExecutionException failed) {
+                    Throwable cause = failed.getCause() == null ? failed : failed.getCause();
+                    status.setText(cause.getMessage() == null ? cause.toString() : cause.getMessage());
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                updateButtons();
+            }
+        }.execute();
+    }
+
+    /** Whether the last brief call of this chapter failed (the "Brief not generated" marker). */
+    boolean briefNotGenerated(String chapterId) {
+        return briefFailures.contains(chapterId);
+    }
+
     private void updateButtons() {
         boolean editable = editable() && actions != null;
         OutlineEntry entry = selectedEntry();
@@ -482,6 +619,11 @@ public final class OutlineEditorView extends JPanel {
         indentButton.setEnabled(editable && clean && chapter
                 && snapshot.outline.getChapters().indexOf(entry) > 0);
         outdentButton.setEnabled(editable && clean && entry instanceof OutlineSection);
+        regenerateButton.setEnabled(editable && clean && chapter && !chapterJobRunning);
+        retryBriefButton.setVisible(chapter && briefFailures.contains(entry.getId()));
+        retryBriefButton.setEnabled(editable && clean && !chapterJobRunning);
+        suggestedButton.setEnabled(editable && clean && !chapterJobRunning
+                && !snapshot.outline.getCandidates().isEmpty());
         jsonArea.setEditable(editable && browsingRevision < 0);
         saveButton.setEnabled(editable && (dirty || browsingRevision >= 0));
         discardButton.setEnabled(dirty || browsingRevision >= 0);
@@ -541,7 +683,7 @@ public final class OutlineEditorView extends JPanel {
     }
 
     /** A tree row: number, title and the marks of the entry. */
-    private static final class Row {
+    private final class Row {
         final OutlineEntry entry;
         final String number;
 
@@ -558,6 +700,9 @@ public final class OutlineEditorView extends JPanel {
             }
             if (entry.isStale()) {
                 text.append("  (stale: ").append(entry.getStaleReason()).append(')');
+            }
+            if (entry instanceof OutlineChapter && briefFailures.contains(entry.getId())) {
+                text.append("  (Brief not generated)");
             }
             return text.toString();
         }

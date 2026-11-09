@@ -53,6 +53,12 @@ public final class ResearchDocumentViewContribution implements ArtifactViewContr
         final String artifactId = context.getArtifact().getId();
         final DocumentPageView page = new DocumentPageView();
         final JLabel status = new JLabel(" ");
+        final JLabel report = new JLabel(" ");
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        toolbar.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+        AgentSession session = context.getSession();
+        final ResearchAgentSession research = session instanceof ResearchAgentSession
+                ? (ResearchAgentSession) session : null;
         final JPanel center = new JPanel(new CardLayout());
         JScrollPane pageScroll = new JScrollPane(page);
         pageScroll.setBorder(BorderFactory.createEmptyBorder());
@@ -70,14 +76,15 @@ public final class ResearchDocumentViewContribution implements ArtifactViewContr
                 }
                 ArtifactContent content = store.read(artifactId);
                 page.setDocumentMarkdown(content.getMarkdown());
+                com.aresstack.askai.research.assembly.AssembledBook book =
+                        research == null ? null : research.assembledBook();
+                report.setText(book == null ? " " : book.getReport().summary());
+                report.setToolTipText(book == null ? null : "<html><pre>"
+                        + book.getReport().toMarkdown().replace("&", "&amp;").replace("<", "&lt;")
+                        + "</pre></html>");
             }
         };
 
-        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        toolbar.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
-        AgentSession session = context.getSession();
-        final ResearchAgentSession research = session instanceof ResearchAgentSession
-                ? (ResearchAgentSession) session : null;
         final ManuscriptWorkspace manuscript = research == null ? null : research.manuscript();
         final boolean[] editing = {false};
         if (manuscript != null) {
@@ -140,6 +147,35 @@ public final class ResearchDocumentViewContribution implements ArtifactViewContr
         } else if (research != null) {
             research.addStateListener(loadPage);
         }
+        final JButton export = new ComicButton("Export book...");
+        export.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (store == null) {
+                    return;
+                }
+                javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+                chooser.setSelectedFile(new java.io.File("book.md"));
+                if (chooser.showSaveDialog(export) != javax.swing.JFileChooser.APPROVE_OPTION) {
+                    return;
+                }
+                java.io.File target = com.aresstack.askai.research.assembly.BookExport.resolve(
+                        chooser.getSelectedFile());
+                if (target.exists() && javax.swing.JOptionPane.showConfirmDialog(export,
+                        target.getName() + " already exists. Replace it?", "Export book",
+                        javax.swing.JOptionPane.YES_NO_OPTION) != javax.swing.JOptionPane.YES_OPTION) {
+                    return;
+                }
+                try {
+                    java.io.File written = com.aresstack.askai.research.assembly.BookExport.write(
+                            store.read(artifactId).getMarkdown(), chooser.getSelectedFile());
+                    status.setText("Exported to " + written.getName());
+                } catch (java.io.IOException failed) {
+                    status.setText("Export failed: " + failed.getMessage());
+                }
+            }
+        });
+        toolbar.add(export);
+        toolbar.add(report);
         toolbar.add(status);
         // plan PR 29: the latest "Request changes" comment; "Rewrite section" in Edit acts on it
         final JLabel changeRequest = new JLabel(" ");
