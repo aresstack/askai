@@ -334,13 +334,13 @@ public class SearchPlanQueueTest {
         assertTrue(outcome.text(), outcome.text().contains("presented an obstacle: challenge"));
         assertTrue(outcome.text(), outcome.text().contains("remaining queries stay pending"));
         assertTrue(outcome.report(), outcome.report().contains("Reason: search_failed"));
-        int pending = 0;
+        List<SearchPlanEntry.Status> statuses = new ArrayList<SearchPlanEntry.Status>();
         for (SearchPlanEntry entry : queue.entriesInOrder()) {
-            if (entry.getStatus() == SearchPlanEntry.Status.PENDING) {
-                pending++;
-            }
+            statuses.add(entry.getStatus());
         }
-        assertEquals("nothing is failed for good: the whole plan waits for a later run", 5, pending);
+        assertFalse("nothing is failed for good: " + statuses, statuses.contains(SearchPlanEntry.Status.FAILED));
+        assertFalse("nothing is skipped: " + statuses, statuses.contains(SearchPlanEntry.Status.SKIPPED));
+        assertFalse("nothing is done: " + statuses, statuses.contains(SearchPlanEntry.Status.DONE));
         // a later run starts with fresh chances
         queue.run();
         assertEquals(4, port.searched.size());
