@@ -19,6 +19,19 @@ public class ModelReloadVerdictTest {
     }
 
     @Test
+    public void contextMismatchIsNamed() {
+        ProtocolProbes.LoadedModel big = new ProtocolProbes.LoadedModel("llama3.1:8b", 100, 100, 131072);
+        ProtocolProbes.LoadedModel ok = new ProtocolProbes.LoadedModel("llama3.1:8b", 100, 100, 16384);
+        ProtocolProbes.LoadedModel unknown = new ProtocolProbes.LoadedModel("llama3.1:8b", 100, 100);
+        assertEquals("; num_ctx NOT applied (Ollama allocated 131072)",
+                ModelProtocolLiveTest.contextVerdict("llama3.1:8b", 16384, Collections.singletonList(big)));
+        assertEquals("; num_ctx applied",
+                ModelProtocolLiveTest.contextVerdict("llama3.1:8b", 16384, Collections.singletonList(ok)));
+        assertEquals("", ModelProtocolLiveTest.contextVerdict("llama3.1:8b", 16384,
+                Collections.singletonList(unknown)));
+    }
+
+    @Test
     public void listedWithPositiveLoadDurationIsAReload() throws Exception {
         assertEquals("yes", ModelProtocolLiveTest.reloadVerdict("llama3.1:8b", 2100,
                 Collections.singletonList(loaded("llama3.1:8b", 100, 100))));
