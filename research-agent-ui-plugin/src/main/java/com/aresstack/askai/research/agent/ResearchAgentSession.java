@@ -6790,6 +6790,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     String arguments) {
         String cmd = command == null ? "" : command.trim().toLowerCase(java.util.Locale.ROOT);
         String args = arguments == null ? "" : arguments.trim();
+        if (surface == com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR
+                && (cmd.startsWith("/") || (cmd.isEmpty() && args.startsWith("/")))) {
+            return executeConnectorSlashCommand(cmd.isEmpty() ? args : cmd + (args.isEmpty() ? "" : " " + args));
+        }
         if ("pause".equals(cmd) || "cancel".equals(cmd)) {
             return "rejected: '" + cmd + "' is no command. Valid now: " + validBotCommandNames();
         }
@@ -6804,6 +6808,30 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         return executeCommand(new CommandOrigin(com.aresstack.askai.research.state.CommandActor.BOT, surface,
                 com.aresstack.askai.research.state.ResearchCommand.NO_REVISION), cmd, args);
+    }
+
+    /**
+     * Interpret an explicit slash invocation from the interactive ChatGPT connector as a user
+     * control, using the same command processor as the application's slash-command surface.
+     * Keep ordinary bot-control calls and non-slash messages under the bot actor policy.
+     */
+    private String executeConnectorSlashCommand(String slashLine) {
+        String invocation = slashLine.substring(1).trim();
+        if (invocation.isEmpty()) {
+            return "rejected: a slash command name is required";
+        }
+        String[] parts = invocation.split("\\s+", 2);
+        String name = parts[0].toLowerCase(java.util.Locale.ROOT);
+        String arguments = parts.length == 2 ? parts[1].trim() : "";
+        if (!ResearchChatCommands.processorCommandNames().contains(name)
+                && !"search".equals(name) && !"map".equals(name)) {
+            return "rejected: unknown slash command '/" + name + "'";
+        }
+        String processorCommand = "map".equals(name) ? "generate-visualization" : name;
+        return executeCommand(new CommandOrigin(com.aresstack.askai.research.state.CommandActor.USER,
+                com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR,
+                com.aresstack.askai.research.state.ResearchCommand.NO_REVISION),
+                processorCommand, arguments);
     }
 
     /** The semantic commands valid right now; only the user can run them (Q13). */

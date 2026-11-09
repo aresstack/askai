@@ -142,7 +142,11 @@ public final class ResearchBotDirectoryTools {
     private static McpToolContribution runCommandTool(final ResearchBotSessionDirectory directory) {
         return McpToolContribution.of("run_command",
                 ResearchBotSessionTools.RUN_COMMAND_DESCRIPTION
-                        + " Pass sessionId to drive a specific session (see sessions_list).",
+                        + " Pass sessionId to drive a specific session (see sessions_list)."
+                        + " On this interactive ChatGPT connector, submit explicit UI slash commands"
+                        + " as arguments='/submit-scope' with command omitted; this runs the same"
+                        + " user action as typing /submit-scope in the app. Structured commands"
+                        + " without a slash keep the bot actor restrictions.",
                 new McpToolHandler() {
                     public McpToolResult invoke(McpToolCall call) {
                         Resolution resolution = resolve(directory, call);

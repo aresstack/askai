@@ -420,6 +420,40 @@ public class ProductiveBookJourneyTest {
     }
 
     @Test
+    public void connectorSlashInvocationsUseTheSameUserCommandProcessorAsTheUi() {
+        Fx fx = new Fx();
+        String started = fx.session.executeBotCommand(
+                com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR,
+                "", "A book about software architecture");
+        assertHandled(started);
+        completeMessage(fx);
+        assertEquals("scoping/running", phase(fx));
+        ConceptTestSupport.makeSubmittable(fx.session);
+
+        String structuredBotCommand = fx.session.executeBotCommand(
+                com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR,
+                "submit-scope", "");
+        assertTrue(structuredBotCommand, structuredBotCommand.contains("Phase changes need the user"));
+        assertEquals("scoping/running", phase(fx));
+
+        String slashCommand = fx.session.executeBotCommand(
+                com.aresstack.askai.research.state.CommandSurface.CHATGPT_CONNECTOR,
+                "", "/submit-scope");
+        assertHandled(slashCommand);
+        assertEquals("research/running", phase(fx));
+        assertEquals(1, fx.backend.prompts.size());
+
+        Fx botControl = new Fx();
+        firstMessage(botControl, "A book");
+        ConceptTestSupport.makeSubmittable(botControl.session);
+        String botSlash = botControl.session.executeBotCommand(
+                com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL,
+                "", "/submit-scope");
+        assertHandled(botSlash);
+        assertEquals("scoping/running", phase(botControl));
+    }
+
+    @Test
     public void botAndHostStateCommandsAreRefusedOnEverySurface() {
         for (com.aresstack.askai.research.state.CommandSurface surface : new com.aresstack.askai.research
                 .state.CommandSurface[] {com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL,
