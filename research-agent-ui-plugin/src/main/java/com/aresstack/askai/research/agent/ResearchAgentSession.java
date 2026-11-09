@@ -2267,6 +2267,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         com.aresstack.askai.research.book.ManuscriptFreezeHook hook =
                 new com.aresstack.askai.research.book.ManuscriptFreezeHook(manuscript, outline.store(), bookManifest,
                         engine::isCommitted);
+        hook.setAssembly(() -> assembleBook(manuscript));
         engine.addHook(hook);
         engine.registerEffect(com.aresstack.askai.research.book.ManuscriptFreezeHook.EFFECT_OUTLINE,
                 hook.outlineEffect());
@@ -2334,6 +2335,24 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     /** Assemble {@code document.md} after a manuscript change, on the serial assembler executor (plan PR 30). */
     private void renderDocumentArtifact() {
         documentAssembler.execute(this::assembleDocumentNow);
+    }
+
+    /**
+     * The quality report at the Document gate (plan PR 30, Q27): the status and its warnings; the user may approve
+     * an incomplete draft as well.
+     */
+    private void announceQualityReport() {
+        com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript = manuscript();
+        if (manuscript == null) {
+            return;
+        }
+        try {
+            com.aresstack.askai.research.assembly.BookQualityReport report = assembleBook(manuscript).getReport();
+            sayAsAgent(report.summary() + (report.isComplete() ? ""
+                    : ". You can still approve the book with these warnings."));
+        } catch (RuntimeException failed) {
+            System.err.println("[research] quality report failed: " + failed.getMessage());
+        }
     }
 
     /** One assembly; runs only on {@link #documentAssembler}, so it needs no lock. */
@@ -6177,6 +6196,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 || type == ResearchCommandType.REQUEST_DRAFT_REVIEW)) {
             outcomeOffers = java.util.Collections.emptyList(); // a phase exit clears the run offers
             showRestoredActionsIfAny();
+        }
+        if (dispatched.isAccepted() && type == ResearchCommandType.REQUEST_DRAFT_REVIEW) {
+            announceQualityReport(); // plan PR 30: the gate message names the report's warnings
         }
         return dispatched.isAccepted() ? "handled: dispatched " + cmd
                 : "rejected: " + dispatched.getStatus() + " " + dispatched.getDetail();
