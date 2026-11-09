@@ -9,7 +9,6 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class SearchEngineThrottleTest {
@@ -65,23 +64,9 @@ public class SearchEngineThrottleTest {
     }
 
     @Test
-    public void theSameSearchIsAnsweredFromMemoryWithinItsTimeToLive() {
-        RecentSearches<String, String> recent = new RecentSearches<String, String>(2, 1_000L, clock);
-        recent.put("google|wearables", "answer");
-        assertEquals("answer", recent.get("google|wearables"));
-        clock.now += 1_001L;
-        assertNull("too old", recent.get("google|wearables"));
-    }
-
-    @Test
-    public void rememberedSearchesAreBounded() {
-        RecentSearches<String, String> recent = new RecentSearches<String, String>(2, 60_000L, clock);
-        recent.put("a", "1");
-        recent.put("b", "2");
-        recent.get("a");
-        recent.put("c", "3");
-        assertEquals(2, recent.size());
-        assertNull("least recently used left first", recent.get("b"));
-        assertEquals("1", recent.get("a"));
+    public void aZeroPauseFromTheSettingsMeansNoPause() {
+        throttle.setPause(0L, 0L);
+        assertEquals(0L, throttle.recordBlock("challenge"));
+        assertFalse(throttle.isPaused());
     }
 }

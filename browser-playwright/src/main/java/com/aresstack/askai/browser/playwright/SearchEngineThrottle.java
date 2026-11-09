@@ -3,7 +3,7 @@ package com.aresstack.askai.browser.playwright;
 /**
  * The search browser's pace towards the engines (key {@code search-engines}): every engine request, a result page
  * or a redirect hop, keeps a minimum distance to the previous one; a challenge or block pauses the engines with an
- * exponentially growing pause (base, 2×base, 4×base, … up to the cap) that the next normal answer resets. The search
+ * exponentially growing pause (base, 2×base, 4×base, … up to the cap; both from the settings) that the next normal answer resets. The search
  * browser calls it on its owner thread, so requests from every chat share one pace in arrival order.
  */
 final class SearchEngineThrottle {
@@ -29,8 +29,8 @@ final class SearchEngineThrottle {
 
     private final Clock clock;
     private volatile long minSpacingMillis;
-    private final long backoffBaseMillis;
-    private final long backoffCapMillis;
+    private volatile long backoffBaseMillis;
+    private volatile long backoffCapMillis;
 
     private long lastRequestAt = Long.MIN_VALUE;
     private long pausedUntil;
@@ -38,10 +38,15 @@ final class SearchEngineThrottle {
     private String pauseReason = "";
 
     SearchEngineThrottle(long minSpacingMillis, long backoffBaseMillis, long backoffCapMillis, Clock clock) {
-        this.minSpacingMillis = Math.max(0L, minSpacingMillis);
-        this.backoffBaseMillis = Math.max(1L, backoffBaseMillis);
-        this.backoffCapMillis = Math.max(this.backoffBaseMillis, backoffCapMillis);
         this.clock = clock == null ? SYSTEM : clock;
+        setMinSpacingMillis(minSpacingMillis);
+        setPause(backoffBaseMillis, backoffCapMillis);
+    }
+
+    /** First pause after a challenge (0 = no pause) and the longest pause the doubling may reach. */
+    void setPause(long baseMillis, long capMillis) {
+        this.backoffBaseMillis = Math.max(0L, baseMillis);
+        this.backoffCapMillis = Math.max(this.backoffBaseMillis, capMillis);
     }
 
     void setMinSpacingMillis(long millis) {
@@ -87,7 +92,7 @@ final class SearchEngineThrottle {
     /** The engine answered with a challenge or block: pause it, twice as long as last time. @return the pause */
     synchronized long recordBlock(String reason) {
         long pause = backoffBaseMillis << Math.min(consecutiveBlocks, 30);
-        if (pause <= 0 || pause > backoffCapMillis) {
+        if (pause < 0 || pause > backoffCapMillis) {
             pause = backoffCapMillis;
         }
         consecutiveBlocks++;

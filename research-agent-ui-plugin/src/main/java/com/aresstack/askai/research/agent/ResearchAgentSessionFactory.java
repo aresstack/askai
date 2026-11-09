@@ -147,6 +147,7 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
         // The shared search browser follows the persisted window setting (Search → Browser (SERP)).
         com.aresstack.askai.research.runtime.ResearchRuntimeShared.process().setSearchBrowserHeadless(
                 ResearchRuntimeSettings.loadSearchBrowserHeadless(hostContext.getStateStore()));
+        ResearchRuntimeSettings.applyEnginePause(hostContext.getStateStore());
         // The knowledge worker's OpenNLP sentence resolver uses the SAME persisted session language ("en"/"de").
         factory.setResearchLanguageCode(ResearchRuntimeSettings.loadLanguage(hostContext.getStateStore()));
         factory.setBotControlMcpEnabled(

@@ -44,7 +44,8 @@ public final class GoogleSearchBrowserStrategy {
 
     /**
      * @param resultPages Google result pages one search fetches in the search browser (page n = {@code start=n*10})
-     * @param delayMillis pause before every page after the first
+     * @param delayMillis the Google request delay of Search → Engines: the search browser keeps it between EVERY
+     *                    request to the engine (each result page, each search, each redirect hop), for all chats
      */
     public static SearchStrategy create(SearchBrowser searchBrowser, Locale locale, String searchUrl,
                                         int resultPages, long delayMillis) {
@@ -60,12 +61,13 @@ public final class GoogleSearchBrowserStrategy {
         if (locale != null && !locale.getCountry().isEmpty()) {
             google.defaultCountry(locale.getCountry());
         }
+        searchBrowser.setEngineSpacingMillis(delayMillis);
         Serp4jWebSearchProvider web = new Serp4jWebSearchProvider(
                 com.aresstack.askai.research.search.api.SearchProviderId.GOOGLE_BROWSER,
                 com.aresstack.askai.research.search.api.SearchEngine.GOOGLE,
                 searchBrowser.asSearchProvider(google.build()));
         return new SingleProviderSearchStrategy(new AsyncModuleSearchProvider(SearchProviderId.GOOGLE_BROWSER,
                 SearchEngine.GOOGLE, web, SEARCH_TIMEOUT_MILLIS), SearchEngine.GOOGLE,
-                resultPages, GOOGLE_PAGE_SIZE, delayMillis);
+                resultPages, GOOGLE_PAGE_SIZE, 0L); // the search browser keeps the delay, not each strategy
     }
 }

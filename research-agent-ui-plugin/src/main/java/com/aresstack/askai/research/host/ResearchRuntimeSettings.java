@@ -29,6 +29,37 @@ public final class ResearchRuntimeSettings {
     static final String KEY_SEARCH_BROWSER_HEADLESS = WorkspaceStateStore.GLOBAL_KEY_PREFIX
             + "research.runtime.searchBrowserHeadless";
 
+    /** The search engines' first pause after a challenge, in seconds (app-wide: one search browser). */
+    static final String KEY_ENGINE_PAUSE_SECONDS = WorkspaceStateStore.GLOBAL_KEY_PREFIX
+            + "research.runtime.enginePauseSeconds";
+    /** The longest pause the doubling may reach, in minutes. */
+    static final String KEY_ENGINE_PAUSE_CAP_MINUTES = WorkspaceStateStore.GLOBAL_KEY_PREFIX
+            + "research.runtime.enginePauseCapMinutes";
+    public static final int DEFAULT_ENGINE_PAUSE_SECONDS = 60;
+    public static final int DEFAULT_ENGINE_PAUSE_CAP_MINUTES = 30;
+
+    public static int loadEnginePauseSeconds(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_ENGINE_PAUSE_SECONDS, DEFAULT_ENGINE_PAUSE_SECONDS);
+    }
+
+    public static void saveEnginePauseSeconds(WorkspaceStateStore store, int seconds) {
+        saveNonNegativeInt(store, KEY_ENGINE_PAUSE_SECONDS, seconds);
+    }
+
+    public static int loadEnginePauseCapMinutes(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_ENGINE_PAUSE_CAP_MINUTES, DEFAULT_ENGINE_PAUSE_CAP_MINUTES);
+    }
+
+    public static void saveEnginePauseCapMinutes(WorkspaceStateStore store, int minutes) {
+        saveNonNegativeInt(store, KEY_ENGINE_PAUSE_CAP_MINUTES, minutes);
+    }
+
+    /** Hands the stored engine pause to the one search browser of this AskAI. */
+    public static void applyEnginePause(WorkspaceStateStore store) {
+        com.aresstack.askai.research.runtime.ResearchRuntimeShared.process().setEnginePause(
+                loadEnginePauseSeconds(store) * 1000L, loadEnginePauseCapMinutes(store) * 60_000L);
+    }
+
     /** Whether the search browser runs headless (default {@code true}). */
     public static boolean loadSearchBrowserHeadless(WorkspaceStateStore store) {
         return store == null || store.getBoolean(KEY_SEARCH_BROWSER_HEADLESS, true);

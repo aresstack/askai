@@ -56,9 +56,8 @@ import java.util.concurrent.RejectedExecutionException;
  *       is started again and the search is repeated once.</li>
  *   <li>It is the ONE client that talks to the search engines, for every chat: searches and redirect hops keep a
  *       minimum distance to each other ({@link #setEngineSpacingMillis}); a challenge pauses the engines with an
- *       exponentially growing pause and every request during the pause fails at once as {@code BLOCKED} with the
- *       reason, without contacting the engine; the same search asked again within
- *       {@value #RECENT_SEARCH_TTL_MILLIS} ms is answered from memory, not from the engine.</li>
+ *       exponentially growing pause ({@link #setEnginePause}) and every request during the pause fails at once as
+ *       {@code BLOCKED} with the reason, without contacting the engine.</li>
  * </ul>
  */
 public final class SearchBrowser implements AutoCloseable {
@@ -70,19 +69,8 @@ public final class SearchBrowser implements AutoCloseable {
         return t;
     });
 
-    /** Default minimum distance between two engine requests (result pages and redirect hops). */
-    public static final long DEFAULT_ENGINE_SPACING_MILLIS = 10_000L;
-    /** First pause after a challenge; every further challenge in a row doubles it, up to the cap. */
-    static final long BACKOFF_BASE_MILLIS = 60_000L;
-    static final long BACKOFF_CAP_MILLIS = 30 * 60_000L;
-    /** How long an identical search is answered from memory. */
-    static final long RECENT_SEARCH_TTL_MILLIS = 30 * 60_000L;
-
-    private final SearchEngineThrottle throttle = new SearchEngineThrottle(DEFAULT_ENGINE_SPACING_MILLIS,
-            BACKOFF_BASE_MILLIS, BACKOFF_CAP_MILLIS, SearchEngineThrottle.SYSTEM);
-    private final RecentSearches<java.util.List<Object>, SearchResponse> recent =
-            new RecentSearches<java.util.List<Object>, SearchResponse>(200, RECENT_SEARCH_TTL_MILLIS,
-                    SearchEngineThrottle.SYSTEM);
+    /** The engine pace; spacing and pause come from the settings ({@link #setEngineSpacingMillis}, {@link #setEnginePause}). */
+    private final SearchEngineThrottle throttle = new SearchEngineThrottle(0L, 0L, 0L, SearchEngineThrottle.SYSTEM);
 
     private final String channel;
     /** Read before every (re)start: a changed setting takes effect with the next search. */
@@ -126,14 +114,7 @@ public final class SearchBrowser implements AutoCloseable {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(context, "context");
         final ProviderId id = provider.getDescriptor().getId();
-        final java.util.List<Object> key = java.util.Arrays.<Object>asList(id, request);
         return onOwner(provider, () -> {
-            SearchResponse remembered = recent.get(key);
-            if (remembered != null) {
-                System.err.println("[search-browser] same search within " + (RECENT_SEARCH_TTL_MILLIS / 60_000L)
-                        + " min, answered from memory: " + request.getQuery());
-                return remembered;
-            }
             refuseWhilePaused(id);
             awaitEngineSlot(id);
             Browser current = ensureBrowser(provider);
@@ -155,17 +136,21 @@ public final class SearchBrowser implements AutoCloseable {
                 }
             }
             throttle.recordSuccess();
-            recent.put(key, response);
             return response;
         });
     }
 
-    /**
-     * The minimum distance between two engine requests (searches and redirect hops) from now on; the default is
-     * {@link #DEFAULT_ENGINE_SPACING_MILLIS}.
-     */
+    /** The minimum distance between two engine requests (searches, result pages and redirect hops), from now on. */
     public void setEngineSpacingMillis(long millis) {
         throttle.setMinSpacingMillis(millis);
+    }
+
+    /**
+     * The pause after a challenge or rate limit: {@code baseMillis} the first time (0 = no pause), doubled with every
+     * further challenge in a row up to {@code capMillis}; a normal answer starts again at the base.
+     */
+    public void setEnginePause(long baseMillis, long capMillis) {
+        throttle.setPause(baseMillis, capMillis);
     }
 
     /** Why the engines are paused after a challenge, or empty when they are not. */
