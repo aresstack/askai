@@ -21,7 +21,8 @@ import java.util.List;
  *
  * <p>Always readable: {@code research_status}, {@code artifact_read(name)}, {@code source_list}. Write tools
  * are bound to phase AND run-state (never in waiting_approval/paused/blocked/failed/terminal):
- * RESEARCH/running → {@code source_accept}, {@code source_park}; DRAFT/running and FINALIZATION/running →
+ * RESEARCH/running → {@code source_accept}, {@code source_park}, {@code request_research},
+ * {@code blacklist_add} (plan PR 15); DRAFT/running and FINALIZATION/running →
  * {@code document_read}, {@code document_save} — BOTH phases work on the ONE canonical document (issue #32).
  * The legacy per-stage tools ({@code concept_save}, {@code finding_add}, {@code notes_append},
  * {@code draft_*}, {@code final_*}) are gone: the ResearchBrief is the scoping truth and the removed legacy
@@ -53,6 +54,8 @@ public final class ResearchToolPolicy {
         tools.add(sourceOverviewTool(ctx));
         tools.add(conceptSummaryTool(ctx));
         tools.add(changeRequestTool(ctx));
+        // Plan PR 15: the Sources block (search plan, coverage per node) — readable like the other blocks.
+        tools.add(searchPlanOverviewTool(ctx));
         // The Konzeptpapier tools (Fragestellung→Konzept rework). READING the concept is allowed in
         // every phase (frozen artifacts stay readable); WRITING is bite-wise branch editing and is
         // bound to SCOPING/running. Absent service (clickdummy/old fakes) → no concept tools at all.
@@ -93,6 +96,9 @@ public final class ResearchToolPolicy {
         if (writable(phaseId, stateId, ResearchStateIds.RESEARCH)) {
             tools.add(sourceAcceptTool(ctx));
             tools.add(sourceParkTool(ctx));
+            // Plan PR 15: the Sources assistant only ADDS — plan entries and blacklist entries (D11).
+            tools.add(requestResearchTool(ctx));
+            tools.add(blacklistAddTool(ctx));
         }
         // #43: DOCUMENT (id "draft") is the ONE writing phase — drafting, review and
         // finalization are activities inside it, so the document tools live here alone.
@@ -171,6 +177,69 @@ public final class ResearchToolPolicy {
                                 ? "No change request." : request.trim());
                     }
                 });
+    }
+
+    private static McpToolContribution searchPlanOverviewTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("search_plan_overview",
+                "The search plan of the Sources phase: coverage per concept node and the planned queries.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        String overview = ctx.searchPlanOverview();
+                        return McpToolResult.ok(overview == null || overview.trim().isEmpty()
+                                ? "No search plan." : overview.trim());
+                    }
+                });
+    }
+
+    /** A port answer as a tool result: {@code null} = unsupported, a failure prefix = an error result. */
+    private static McpToolResult portResult(String reply) {
+        if (reply == null) {
+            return McpToolResult.error("This session has no search plan.");
+        }
+        return reply.startsWith("Tool failed:") || reply.startsWith("Not allowed")
+                ? McpToolResult.error(reply) : McpToolResult.ok(reply);
+    }
+
+    private static McpToolContribution requestResearchTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("request_research",
+                "Add one query to the search plan when the user asks to search for something. It runs when the "
+                        + "user starts the plan; nothing is searched now. Example: query=\"<topic> overview\", "
+                        + "node=\"<concept card>\".",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.RESEARCH);
+                        if (denied != null) {
+                            return denied;
+                        }
+                        String query = call.getString("query");
+                        if (query == null || query.trim().isEmpty()) {
+                            return McpToolResult.error("Missing argument: query — example: query=\"<topic>\"");
+                        }
+                        return portResult(ctx.requestResearch(query.trim(), call.getString("node")));
+                    }
+                },
+                McpToolParameter.string("query", true, "The search query"),
+                McpToolParameter.string("node", false, "The concept card it belongs to (label or id)"));
+    }
+
+    private static McpToolContribution blacklistAddTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("blacklist_add",
+                "Add a blacklist entry the user asked for (a term or a domain), in the USER'S words. Future "
+                        + "searches skip it; accepted sources stay. Example: entry=\"<term>\".",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.RESEARCH);
+                        if (denied != null) {
+                            return denied;
+                        }
+                        String entry = call.getString("entry");
+                        if (entry == null || entry.trim().isEmpty()) {
+                            return McpToolResult.error("Missing argument: entry — example: entry=\"<term>\"");
+                        }
+                        return portResult(ctx.blacklistAdd(entry.trim()));
+                    }
+                },
+                McpToolParameter.string("entry", true, "The term or domain in the user's own words"));
     }
 
     private static McpToolContribution sourceListTool(final ResearchControlContext ctx) {

@@ -92,8 +92,7 @@ public class PhaseHistoryWindowTest {
         for (String phase : phases) {
             PromptBlockMeter meter = new PromptBlockMeter();
             PhaseAssistantProfile profile = PhaseAssistantProfileRegistry.defaults().forPhase(phase);
-            List<ChatMessage> messages = assembler().assemble(profile, view(phase), "",
-                    Collections.<String>emptyList(), "", Collections.<String>emptyList(), history, meter);
+            List<ChatMessage> messages = assembler().assemble(profile, view(phase), history, meter);
             Integer chars = meter.blocks().get(PromptBlockMeter.HISTORY);
             int tokens = chars == null ? 0 : (chars + 2) / 3;
             assertTrue(phase + " window within its budget", tokens <= HistoryWindow.chatBudget(phase));

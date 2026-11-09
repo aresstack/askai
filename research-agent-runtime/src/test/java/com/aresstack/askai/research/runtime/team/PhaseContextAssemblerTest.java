@@ -21,8 +21,7 @@ public class PhaseContextAssemblerTest {
         PhaseAssistantProfile profile = PhaseAssistantProfileRegistry.defaults().forPhase("scoping");
         TeamAgentStateView state = new TeamAgentStateView("scoping", "new", Arrays.<String>asList());
 
-        List<ChatMessage> messages = assembler.assemble(profile, state, "",
-                Collections.<String>emptyList(), "", Collections.<String>emptyList(), null);
+        List<ChatMessage> messages = assembler.assemble(profile, state, null);
 
         boolean found = false;
         for (ChatMessage message : messages) {
@@ -59,14 +58,12 @@ public class PhaseContextAssemblerTest {
                 ChatMessage.assistant("Dann sollten wir zuerst den Fokus klären.")
                         .tagged("scoping", ChatMessage.Kind.FINAL));
 
-        List<ChatMessage> turnOne = assembler.assemble(profile, state, "",
-                Collections.<String>emptyList(), "", Collections.<String>emptyList(), history);
+        List<ChatMessage> turnOne = assembler.assemble(profile, state, history);
         assertTrue("turn 1 works in German",
                 containsSystem(turnOne, "Current working language: German."));
 
         language[0] = "English"; // set_language between the turns — no new assembler, no model call
-        List<ChatMessage> turnTwo = assembler.assemble(profile, state, "",
-                Collections.<String>emptyList(), "", Collections.<String>emptyList(), history);
+        List<ChatMessage> turnTwo = assembler.assemble(profile, state, history);
         assertTrue("turn 2 works in English",
                 containsSystem(turnTwo, "Current working language: English."));
         assertTrue("the instruction protects historical content",

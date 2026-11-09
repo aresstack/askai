@@ -129,8 +129,7 @@ public class PhaseContextToolsTest {
         TeamAgentStateView view = new TeamAgentStateView(ResearchStateIds.RESEARCH, ResearchStateIds.RUNNING,
                 Collections.<String>emptyList()).withSources(overview);
         PromptBlockMeter meter = new PromptBlockMeter().add(PromptBlockMeter.STATE, ChatMessage.system(
-                TeamAgentPlaybook.stateContext(view, "How do Java class loaders isolate plugins?",
-                        Collections.singletonList("Module system"), "", Collections.<String>emptyList())));
+                TeamAgentPlaybook.stateContext(view)));
         assertTrue("state block tokens=" + meter.estimatedTokens(), meter.estimatedTokens() < 450);
     }
 

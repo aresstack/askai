@@ -478,6 +478,88 @@ public final class SearchPlanQueue {
         return added.getId();
     }
 
+    /**
+     * Plan PR 15: the Sources assistant's {@code request_research}. {@code node} may name a concept node by id or
+     * by label (case-insensitive); an unknown or blank node makes a free entry. @return the new entry id, or
+     * {@code null} without a plan or with a blank query
+     */
+    public synchronized String addForNode(String node, String query) throws IOException, CorruptProjectFileException {
+        SearchPlanRecord record = store.loadRecord();
+        if (record == null) {
+            return null;
+        }
+        return add(resolveNode(record, node), query);
+    }
+
+    private static String resolveNode(SearchPlanRecord record, String node) {
+        String wanted = node == null ? "" : node.trim();
+        if (wanted.isEmpty()) {
+            return null;
+        }
+        if (record.node(wanted) != null) {
+            return wanted;
+        }
+        for (SearchPlanRecord.Node candidate : record.getNodes()) {
+            if (candidate.getLabel().trim().equalsIgnoreCase(wanted)) {
+                return candidate.getId();
+            }
+        }
+        return null;
+    }
+
+    /** How many entries the Sources block lists at most (the rest is counted). */
+    static final int OVERVIEW_ENTRIES = 15;
+
+    /**
+     * Plan PR 15: the Sources block of the assistant's context — coverage per node and the bounded plan in run
+     * order. {@code ""} without a plan.
+     */
+    public String overview() throws CorruptProjectFileException {
+        SearchPlanRecord record = store.loadRecord();
+        if (record == null) {
+            return "";
+        }
+        Map<String, SearchPlanEntry> all = store.loadEntries();
+        Map<String, SearchPlanCoverage.NodeCoverage> coverage =
+                SearchPlanCoverage.of(record, all.values(), caps, sources);
+        StringBuilder sb = new StringBuilder("Search plan coverage per concept node:\n");
+        for (SearchPlanRecord.Node node : record.getNodes()) {
+            SearchPlanCoverage.NodeCoverage nc = coverage.get(node.getId());
+            if (nc != null) {
+                sb.append("- ").append(node.getLabel()).append(": ")
+                        .append(nc.getState().name().toLowerCase(java.util.Locale.ROOT)).append('\n');
+            }
+        }
+        List<SearchPlanEntry> entries = entriesInOrder();
+        int[] counts = new int[SearchPlanEntry.Status.values().length];
+        for (SearchPlanEntry entry : entries) {
+            counts[entry.getStatus().ordinal()]++;
+        }
+        sb.append("Search plan entries: ").append(entries.size());
+        for (SearchPlanEntry.Status status : SearchPlanEntry.Status.values()) {
+            if (counts[status.ordinal()] > 0) {
+                sb.append(", ").append(counts[status.ordinal()]).append(' ')
+                        .append(status.name().toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+        sb.append(isRunning() ? " (the plan is running)\n" : " (the plan is not running)\n");
+        int shown = 0;
+        for (SearchPlanEntry entry : entries) {
+            if (shown == OVERVIEW_ENTRIES) {
+                sb.append("- … ").append(entries.size() - shown).append(" more\n");
+                break;
+            }
+            sb.append("- [").append(entry.getStatus().name().toLowerCase(java.util.Locale.ROOT)).append("] ")
+                    .append(entry.getQuery());
+            if (!entry.getNodeLabel().isEmpty()) {
+                sb.append(" (").append(entry.getNodeLabel()).append(')');
+            }
+            sb.append('\n');
+            shown++;
+        }
+        return sb.toString().trim();
+    }
+
     /** Add a priority entry (the "Request changes" comment at the gate); it runs first. */
     public synchronized String addPriority(String phase, String query) throws IOException, CorruptProjectFileException {
         return addPriority(newId(), phase, query, "");

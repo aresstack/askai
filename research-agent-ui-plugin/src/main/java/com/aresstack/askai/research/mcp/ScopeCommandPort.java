@@ -60,4 +60,29 @@ public interface ScopeCommandPort {
     default String frozenConceptSummary() {
         return null;
     }
+
+    /**
+     * Plan PR 15: the Sources assistant's {@code request_research} adds one plan entry for a concept node (id or
+     * label; blank = a free entry). Returns {@code null} when unsupported. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String requestResearch(String query, String node) {
+        return null;
+    }
+
+    /**
+     * Plan PR 15: the Sources assistant's {@code blacklist_add} on the add-only path of PR 07 (an entry after
+     * {@code SUBMIT_SCOPE}; a term also becomes an excluded facet for the semantic gate, like
+     * {@code exclude_topic}). Returns {@code null} when unsupported. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String blacklistAdd(String entry) {
+        return null;
+    }
+
+    /**
+     * Plan PR 15: the Sources block (search plan, coverage per node), {@code null} without a plan.
+     * DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String searchPlanOverview() {
+        return null;
+    }
 }

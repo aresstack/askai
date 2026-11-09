@@ -163,7 +163,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // Orchestrated research (ADR 0001 lane F/G): the plan of work packages, its limits and the worker browsers.
         com.aresstack.comiccontrols.control.ComicForm orchestrator =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Orchestrator");
-        orchestrator.row("", orchestratorEnabled);
+        // Plan PR 15 (Q5): the Sources phase runs the deterministic plan queue; the orchestrated-mode opt-in is
+        // hidden (its stored value stays) until the owner confirms its removal (PR 37).
         orchestrator.row("Limits", group(labelled("Rounds", orchestratorMaxRounds),
                 labelled("Packages", orchestratorMaxTasks), labelled("Per round", orchestratorTasksPerRound),
                 labelled("Tokens", orchestratorTokenBudget), labelled("Minutes", orchestratorTimeBudget),

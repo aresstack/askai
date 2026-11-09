@@ -9,16 +9,12 @@ import java.util.List;
  * validated {@link TeamAgentTurn} by calling the configured main model ({@link MainModelChat}).
  *
  * <p>It is deliberately transport-agnostic and transport-free so the whole conversation can be driven in a unit
- * test with a scripted fake model. The host's two nested state patterns stay the authority in three ways:</p>
+ * test with a scripted fake model. The host's two nested state patterns stay the authority in two ways:</p>
  * <ul>
  *   <li><b>Commands.</b> The engine only PROPOSES a command and pre-validates that proposal against the live
  *       allowed set ({@link TeamAgentStateView}). An out-of-set command triggers ONE bounded repair; if the
  *       model insists, the turn is a {@link TeamAgentResult.Status#COMMAND_REJECTED} whose misleading message
  *       is withheld — never run, never invented, never falsely claimed.</li>
- *   <li><b>Scope.</b> The model may only PROPOSE a scope ({@link #getProposedQuestion()} /
- *       {@link #getProposedAspects()}). Only the host promotes a proposal to confirmed via
- *       {@link #applyConfirmedScope(String, List)}; the model is never allowed to mark its own scope as
- *       confirmed.</li>
  *   <li><b>Retries.</b> A user message is held as a single pending turn and only committed to history once the
  *       model answers usably, so {@link #retryPendingTurn(TeamAgentStateView)} after a failure never
  *       duplicates the user's message.</li>
@@ -75,14 +71,6 @@ public final class ResearchTeamAgent {
     private final PhaseContextAssembler contextAssembler;
     private final List<ChatMessage> history = new ArrayList<ChatMessage>();
 
-    /** Scope the HOST has confirmed (never set by the model). */
-    private String confirmedQuestion = "";
-    private final List<String> confirmedAspects = new ArrayList<String>();
-
-    /** Scope the MODEL last proposed but that nobody has confirmed yet. */
-    private String proposedQuestion = "";
-    private final List<String> proposedAspects = new ArrayList<String>();
-
     private boolean greeted;
     private TeamAgentResult greetingResult;
 
@@ -137,38 +125,6 @@ public final class ResearchTeamAgent {
     /** The chat of a live phase (the concept tool rounds run on it). */
     public MainModelChat chatFor(String phaseId) {
         return chats.chatFor(phaseId == null ? "" : phaseId);
-    }
-
-    public synchronized String getProposedQuestion() {
-        return proposedQuestion;
-    }
-
-    public synchronized List<String> getProposedAspects() {
-        return new ArrayList<String>(proposedAspects);
-    }
-
-    public synchronized String getConfirmedQuestion() {
-        return confirmedQuestion;
-    }
-
-    public synchronized List<String> getConfirmedAspects() {
-        return new ArrayList<String>(confirmedAspects);
-    }
-
-    /**
-     * Promote a scope to confirmed. Only the HOST calls this — after the user (via the host state pattern) has
-     * approved it. The model is then told this scope is settled, but it can never set it itself.
-     */
-    public synchronized void applyConfirmedScope(String question, List<String> aspects) {
-        confirmedQuestion = question == null ? "" : question.trim();
-        confirmedAspects.clear();
-        if (aspects != null) {
-            for (String aspect : aspects) {
-                if (aspect != null && !aspect.trim().isEmpty()) {
-                    confirmedAspects.add(aspect.trim());
-                }
-            }
-        }
     }
 
     /**
@@ -243,7 +199,6 @@ public final class ResearchTeamAgent {
             greeted = true;
             greetingResult = result;
             turnFinalIndex = recordFinal(state, result.getOutput());
-            foldProposal(result.getOutput());
         }
         return result;
     }
@@ -286,7 +241,6 @@ public final class ResearchTeamAgent {
                 history.set(turnFinalIndex, previous.tagged(previous.getPhase(), ChatMessage.Kind.TOOL_ROUND));
             }
             turnFinalIndex = recordFinal(state, result.getOutput());
-            foldProposal(result.getOutput());
         }
         return result;
     }
@@ -300,7 +254,6 @@ public final class ResearchTeamAgent {
             turnFinalIndex = -1;
             turnUserIndex = -1;
             recordFinal(state, result.getOutput());
-            foldProposal(result.getOutput());
         }
         return result;
     }
@@ -348,7 +301,6 @@ public final class ResearchTeamAgent {
             turnUserIndex = history.size() - 1;
             pendingUserTurn = null;
             turnFinalIndex = recordFinal(state, result.getOutput());
-            foldProposal(result.getOutput());
         }
         return result;
     }
@@ -377,8 +329,7 @@ public final class ResearchTeamAgent {
         int window = windowTokens;
         while (true) {
             PromptBlockMeter meter = new PromptBlockMeter();
-            List<ChatMessage> messages = contextAssembler.assemble(profile, state, confirmedQuestion,
-                    confirmedAspects, proposedQuestion, proposedAspects, windowSource, window, meter);
+            List<ChatMessage> messages = contextAssembler.assemble(profile, state, windowSource, window, meter);
             for (ChatMessage entry : pinned) {
                 append(messages, meter, PromptBlockMeter.OPEN_TURN, entry);
             }
@@ -542,25 +493,6 @@ public final class ResearchTeamAgent {
         history.add(ChatMessage.assistant(output.canonicalJson())
                 .tagged(PhaseKeys.normalize(state.getPhaseId()), ChatMessage.Kind.FINAL));
         return history.size() - 1;
-    }
-
-    /**
-     * Fold a scope update from the model into the PROPOSED scope (last statement wins for the question). Only
-     * the generic turn carries a proposed question/aspects; a phase-specific output (e.g. the scoping brief)
-     * has no such fields, so nothing is folded for it.
-     */
-    private void foldProposal(PhaseAssistantOutput output) {
-        if (!(output instanceof TeamAgentTurn)) {
-            return;
-        }
-        TeamAgentTurn turn = (TeamAgentTurn) output;
-        if (turn.getQuestion() != null) {
-            proposedQuestion = turn.getQuestion();
-        }
-        if (!turn.getAspects().isEmpty()) {
-            proposedAspects.clear();
-            proposedAspects.addAll(turn.getAspects());
-        }
     }
 
     /** A fitted prompt OR the guard's visible failure — never both. */

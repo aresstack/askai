@@ -620,6 +620,23 @@ public final class ProductiveResearchBackendFactory {
                                     : holder[0].controlContext().excludeTopic(topic);
                         }
 
+                        // plan PR 15: the Sources assistant's actions and block, forwarded explicitly as well
+                        @Override
+                        public String requestResearch(String query, String node) {
+                            return holder[0] == null ? null
+                                    : holder[0].controlContext().requestResearch(query, node);
+                        }
+
+                        @Override
+                        public String blacklistAdd(String entry) {
+                            return holder[0] == null ? null : holder[0].controlContext().blacklistAdd(entry);
+                        }
+
+                        @Override
+                        public String searchPlanOverview() {
+                            return holder[0] == null ? null : holder[0].controlContext().searchPlanOverview();
+                        }
+
                         @Override
                         public String resolveConceptConflict(String conflictId, String decision) {
                             return holder[0] == null ? null
