@@ -40,9 +40,17 @@ public final class SectionContextBuilder {
     private final EmbeddingPort embeddings;
     private final SemanticKnowledgeIndex index;
     private final EvidencePassageLookup passages;
+    private final AcronymGlossarySource acronyms;
 
     public SectionContextBuilder(EmbeddingPort embeddings, SemanticKnowledgeIndex index,
                                  EvidencePassageLookup passages) {
+        this(embeddings, index, passages, AcronymGlossarySource.NONE);
+    }
+
+    /** With acronym lines from the sources (PR 38) appended to the glossary block, within its budget. */
+    public SectionContextBuilder(EmbeddingPort embeddings, SemanticKnowledgeIndex index,
+                                 EvidencePassageLookup passages, AcronymGlossarySource acronyms) {
+        this.acronyms = acronyms == null ? AcronymGlossarySource.NONE : acronyms;
         if (embeddings == null || index == null || passages == null) {
             throw new IllegalArgumentException("the section context builder needs embeddings, index and passages");
         }
@@ -167,6 +175,30 @@ public final class SectionContextBuilder {
             }
             out.append(text);
         }
+    }
+
+    /** Concept labels first, then acronym lines of the chosen passages in the budget the labels leave. */
+    private List<String> glossaryWithAcronyms(List<String> labels, List<EvidencePassage> chosen,
+                                              EvidenceSourceSet sources) {
+        List<String> glossary = glossary(labels);
+        int chars = 0;
+        for (String label : glossary) {
+            chars += label.length() + 2;
+        }
+        int remainingTokens = GLOSSARY_TOKENS - (chars + TokenBudget.CHARS_PER_TOKEN - 1) / TokenBudget.CHARS_PER_TOKEN;
+        if (remainingTokens <= 0 || chosen.isEmpty()) {
+            return glossary;
+        }
+        List<String> texts = new ArrayList<String>();
+        for (EvidencePassage passage : chosen) {
+            texts.add(passage.getText());
+        }
+        for (String line : acronyms.lines(texts, sources.admittedSourceIds(), remainingTokens)) {
+            if (!glossary.contains(line)) {
+                glossary.add(line);
+            }
+        }
+        return glossary;
     }
 
     /** Distinct labels in their given order, within the glossary budget. */
