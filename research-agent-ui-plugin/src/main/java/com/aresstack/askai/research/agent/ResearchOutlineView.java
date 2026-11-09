@@ -118,7 +118,8 @@ public final class ResearchOutlineView extends JPanel {
     public void renderRun(String statusLine, boolean running, boolean failed, boolean allowed) {
         boolean show = statusLine != null && !statusLine.isEmpty();
         runStatus.setText(show ? statusLine : "");
-        runStatus.setForeground(failed ? new java.awt.Color(0xB0, 0x20, 0x20) : getForeground());
+        runStatus.setForeground(failed
+                ? com.aresstack.comiccontrols.theme.ThemeColor.of("research.settingsErrorText") : getForeground());
         runStatus.setVisible(show);
         cancelButton.setVisible(running);
         cancelButton.setEnabled(running);
