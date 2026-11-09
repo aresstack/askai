@@ -74,7 +74,22 @@ public final class ConceptPlanNodes {
             "deutschsprachig", "deutschsprachiges", "deutschsprachige", "englisch", "englischsprachig",
             "englischsprachiges", "version", "klar", "klares", "klare", "mehrere", "mehreren", "viele", "vielen",
             "einige", "einigen", "folgende", "folgenden", "wir", "uns", "unser", "unsere", "unserem", "unseren",
-            "ich", "mein", "meine", "meinem", "meinen", "ein", "einen", "einem", "einer", "eines"));
+            "ich", "mein", "meine", "meinem", "meinen", "ein", "einen", "einem", "einer", "eines",
+            // how the book should be written — qualities of the text, never its subject (English, German)
+            "compact", "complete", "completely", "fully", "sourced", "cited", "referenced", "comprehensive",
+            "detailed", "thorough", "thoroughly", "readable", "accessible", "length", "extent",
+            "kompakt", "kompaktes", "kompakte", "kompakter", "vollständig", "vollständiges", "vollständige",
+            "belegt", "belegtes", "belegte", "belegten", "umfassend", "umfassendes", "umfassende", "ausführlich",
+            "ausführliches", "ausführliche", "fundiert", "fundiertes", "fundierte", "verständlich",
+            "verständliches", "verständliche", "detailliert", "detailliertes", "detaillierte", "umfang", "deutsches",
+            "deutsche"));
+
+    /**
+     * A title quoted in the mission („…“, “…”, "…", »…«, ‚…‘, '…'): the book's subject in the author's own words,
+     * which the mission's other sentences only frame.
+     */
+    private static final java.util.regex.Pattern QUOTED_TITLE = java.util.regex.Pattern.compile(
+            "„([^“”\"]{4,}?)“|“([^“”\"]{4,}?)”|\"([^\"]{4,}?)\"|»([^«»]{4,}?)«|‚([^‘’']{4,}?)‘|'([^']{4,}?)'");
 
     private ConceptPlanNodes() {
     }
@@ -192,14 +207,40 @@ public final class ConceptPlanNodes {
         return query.length() < ConceptQueryPlan.MIN_QUERY_LENGTH ? "" : query;
     }
 
-    /** Up to the first content words of the mission, in order, without stopwords and blacklist terms. */
+    /**
+     * The content words of the mission, in order, without stopwords and blacklist terms: the words of a quoted
+     * title first (the live run of 2026-11-09 queried "kompaktes vollständig belegtes" — the three content words
+     * before the title — on every first-level card), then the rest of the mission.
+     */
     static List<String> missionKeywords(String mission, List<String> blacklist) {
         List<String> keywords = new ArrayList<String>();
         if (mission == null) {
             return keywords;
         }
         Set<String> seen = new HashSet<String>();
-        String cleaned = removeTerms(mission, blacklist);
+        String title = quotedTitle(mission);
+        if (title != null) {
+            addKeywords(removeTerms(title, blacklist), keywords, seen);
+        }
+        addKeywords(removeTerms(mission, blacklist), keywords, seen);
+        return keywords;
+    }
+
+    /** The first quoted phrase of the mission with at least two words, or {@code null}. */
+    static String quotedTitle(String mission) {
+        java.util.regex.Matcher m = QUOTED_TITLE.matcher(mission);
+        while (m.find()) {
+            for (int group = 1; group <= m.groupCount(); group++) {
+                String phrase = m.group(group);
+                if (phrase != null && phrase.trim().split("\\s+").length >= 2) {
+                    return phrase.trim();
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void addKeywords(String cleaned, List<String> keywords, Set<String> seen) {
         for (String raw : cleaned.split("[^\\p{L}\\p{N}\\-]+")) {
             String word = raw.replaceAll("^-+|-+$", "");
             String lower = word.toLowerCase(Locale.ROOT);
@@ -208,7 +249,6 @@ public final class ConceptPlanNodes {
             }
             keywords.add(word);
         }
-        return keywords;
     }
 
     /** Remove every blacklist term (whole words, case-insensitive) and squeeze the spaces. */

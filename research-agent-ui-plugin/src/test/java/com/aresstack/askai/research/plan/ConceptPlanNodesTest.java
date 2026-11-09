@@ -58,6 +58,28 @@ public class ConceptPlanNodesTest {
     }
 
     @Test
+    public void aQuotedTitleNamesTheSubjectBeforeTheMissionsOtherWords() {
+        // the live run of 2026-11-09 (project b85f2dc2): the root query read
+        // "Wearables auf Baustellen Erstelle Konzept kompaktes" — framing words instead of the book's subject
+        String mission = "Erstelle das Konzept für ein kompaktes, vollständig belegtes deutsches Praxisbuch "
+                + "„Wearables auf Baustellen: Sicherheit, Sensorik und Datenschutz“ für Sicherheitsfachkräfte, "
+                + "Umfang 20–30 Seiten. Vier Hauptthemen: (1) Technologien und Sensortypen, (2) reale "
+                + "Arbeitsschutz-Gefährdungen und praktische Wirksamkeit.";
+        String concept = "{\"title\":\"\",\"subtitle\":\"\",\"concept\":[{\"Wearables auf Baustellen\":"
+                + "[{\"Technologien und Sensortypen\":[]}]}]}";
+        assertEquals("Wearables auf Baustellen: Sicherheit, Sensorik und Datenschutz",
+                ConceptPlanNodes.quotedTitle(mission));
+        List<ConceptQueryPlan.Node> nodes = ConceptPlanNodes.of(concept, concept, null, mission,
+                Collections.<String>emptyList());
+        assertEquals("Wearables auf Baustellen Sicherheit Sensorik Datenschutz", nodes.get(0).getBaseQuery());
+        assertEquals("Technologien und Sensortypen Wearables auf Baustellen", nodes.get(1).getBaseQuery());
+        // without a quoted title the qualities of the text still never reach a query
+        List<String> keywords = ConceptPlanNodes.missionKeywords(
+                "Ein kompaktes, vollständig belegtes Praxisbuch zu Exoskeletten im Bau", Collections.<String>emptyList());
+        assertEquals(Arrays.asList("Praxisbuch", "Exoskeletten"), keywords);
+    }
+
+    @Test
     public void theBlacklistRemovesNodesAndTermsFromEveryQuery() {
         List<ConceptQueryPlan.Node> nodes = ConceptPlanNodes.of(CONCEPT, CONCEPT, null, MISSION,
                 Arrays.asList("Spring Boot", "JPMS", "Plugins"));
