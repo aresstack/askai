@@ -37,9 +37,10 @@ import java.util.List;
  * The engine table of Search → Engines: one row per engine CONFIGURATION, any number of rows, the same engine as
  * often as wanted. Columns: Active · Engine · Priority · Delay (s) · Pages · Languages · More · Further languages.
  * <p>
- * Priority 0 runs first; rows with the same priority form one group. The table is always sorted by priority, then
- * engine name, then the order the rows came in; a priority edit re-sorts when the cell is committed (Enter or leaving
- * the cell), never while typing. Languages are picked from a check-box menu (click the cell); "More" switches on the
+ * Priority 0 runs first; rows with the same priority form one group. The table shows the stored order (priority
+ * ascending, the stored order within a priority, which is also the order the search uses); a committed priority edit
+ * (Enter or leaving the cell, never while typing) or an added row re-sorts it by priority, then engine name, then the
+ * order the rows came in. Languages are picked from a check-box menu (click the cell); "More" switches on the
  * free "Further languages" codes ({@code pl, uk, id}), which are validated and normalised on commit — a piece that
  * is not a language code is named below the table and not stored.
  * <p>
