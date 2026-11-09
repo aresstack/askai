@@ -46,6 +46,11 @@ final class SectionEditPanel extends JPanel {
     private final JButton skip = new ComicButton("Skip section");
     private final JButton view = new ComicButton("View");
     private final JButton restore = new ComicButton("Restore");
+    private final javax.swing.JTextField comment = ComicControls.textField(24);
+    private final JButton rewriteSection = new ComicButton("Rewrite section");
+    private final JButton rewriteChapter = new ComicButton("Rewrite chapter");
+    private final javax.swing.JTextField gap = ComicControls.textField(24);
+    private final JButton researchGap = new ComicButton("Research this gap");
     private boolean loading;
 
     SectionEditPanel(SectionEditor editor, ResearchAgentSession session, JLabel status) {
@@ -77,7 +82,39 @@ final class SectionEditPanel extends JPanel {
         history.add(view);
         history.add(restore);
         top.add(history);
+        // plan PR 29: rewrite one section or the whole chapter with a comment; research an open point
+        JPanel rewrite = row();
+        rewrite.add(new JLabel("Comment"));
+        rewrite.add(comment);
+        rewrite.add(rewriteSection);
+        rewrite.add(rewriteChapter);
+        top.add(rewrite);
+        JPanel gapRow = row();
+        gapRow.add(new JLabel("Open point"));
+        gapRow.add(gap);
+        gapRow.add(researchGap);
+        top.add(gapRow);
         add(top, BorderLayout.NORTH);
+        rewriteSection.addActionListener(e -> {
+            SectionEditor.Item item = editor.item();
+            if (item != null) {
+                report(session.rewriteSection(item.sectionId, comment.getText()), "Rewriting the section...");
+            }
+        });
+        rewriteChapter.addActionListener(e -> {
+            SectionEditor.Item item = editor.item();
+            if (item != null) {
+                report(session.rewriteChapter(item.chapterId, comment.getText()), "Rewriting the chapter...");
+            }
+        });
+        researchGap.addActionListener(e -> {
+            SectionEditor.Item item = editor.item();
+            if (item != null) {
+                String result = session.researchGap(item.sectionId, item.section.getTitle(), gap.getText());
+                status.setText(result != null && result.startsWith("gap-")
+                        ? "Gap search added to the search plan and started." : result);
+            }
+        });
 
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JScrollPane(text), storedScroll);
         split.setResizeWeight(0.7);
@@ -262,5 +299,10 @@ final class SectionEditPanel extends JPanel {
         } catch (RuntimeException failed) {
             status.setText("Not restored: " + failed.getMessage());
         }
+    }
+
+    /** Show why a writer action did not start, or that it started. */
+    private void report(String refusal, String started) {
+        status.setText(refusal == null ? started : refusal);
     }
 }

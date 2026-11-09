@@ -108,6 +108,7 @@ public final class ResearchToolPolicy {
         // finalization are activities inside it, so the document tools live here alone.
         if (writable(phaseId, stateId, ResearchStateIds.DRAFT)) {
             tools.add(readTool(ctx, "document_read", "document"));
+            tools.add(sectionRewriteTool(ctx));
         }
         return tools;
     }
@@ -270,6 +271,32 @@ public final class ResearchToolPolicy {
                 },
                 McpToolParameter.string("query", true, "The search query"),
                 McpToolParameter.string("node", false, "The concept card it belongs to (label or id)"));
+    }
+
+    private static McpToolContribution sectionRewriteTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("section_rewrite",
+                "Rewrite one section when the user asks for a change to it, with the user's comment. Writes a new "
+                        + "revision of exactly that section. Example: section=\"<section title>\", "
+                        + "comment=\"<what to change>\".",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.DRAFT);
+                        if (denied != null) {
+                            return denied;
+                        }
+                        String section = call.getString("section");
+                        if (section == null || section.trim().isEmpty()) {
+                            return McpToolResult.error("Missing argument: section — example: section=\"<title>\"");
+                        }
+                        String reply = ctx.sectionRewrite(section.trim(), call.getString("comment"));
+                        if (reply == null) {
+                            return McpToolResult.error("This session has no writing job.");
+                        }
+                        return portResult(reply);
+                    }
+                },
+                McpToolParameter.string("section", true, "The section title or id"),
+                McpToolParameter.string("comment", false, "What the user wants changed"));
     }
 
     private static McpToolContribution blacklistAddTool(final ResearchControlContext ctx) {

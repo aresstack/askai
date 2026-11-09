@@ -208,6 +208,30 @@ public final class ProductiveResearchSessionResources {
         return outlineKnowledgeSettings;
     }
 
+    /** Plan PR 29: the semantic index, project id and embedding world of the writer's evidence packs. */
+    private volatile com.aresstack.askai.research.knowledge.processing.index.SemanticKnowledgeIndex writerIndex;
+    private volatile String writerProjectId;
+    private volatile String writerEmbeddingFingerprint;
+
+    void setWriterKnowledge(com.aresstack.askai.research.knowledge.processing.index.SemanticKnowledgeIndex index,
+                            String projectId, String embeddingFingerprint) {
+        this.writerIndex = index;
+        this.writerProjectId = projectId;
+        this.writerEmbeddingFingerprint = embeddingFingerprint;
+    }
+
+    public com.aresstack.askai.research.knowledge.processing.index.SemanticKnowledgeIndex writerIndex() {
+        return writerIndex;
+    }
+
+    public String writerProjectId() {
+        return writerProjectId;
+    }
+
+    public String writerEmbeddingFingerprint() {
+        return writerEmbeddingFingerprint;
+    }
+
     /** Plan PR 22: the active corpus reader, or null without the knowledge capability. */
     public com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader() {
         return corpusReader;
@@ -754,6 +778,12 @@ public final class ProductiveResearchSessionResources {
             public String blacklistAdd(String entry) {
                 com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
                 return port == null ? null : port.blacklistAdd(entry);
+            }
+
+            @Override
+            public String sectionRewrite(String section, String comment) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.sectionRewrite(section, comment);
             }
 
             @Override

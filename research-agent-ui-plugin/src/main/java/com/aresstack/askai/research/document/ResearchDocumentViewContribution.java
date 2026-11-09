@@ -105,6 +105,36 @@ public final class ResearchDocumentViewContribution implements ArtifactViewContr
                 }
             });
             toolbar.add(toggle);
+            // plan PR 29: the writing job (Document tab); the job never changes the phase
+            final JButton writeRemaining = new ComicButton("Write remaining sections");
+            final JButton stopWriting = new ComicButton("Stop writing");
+            final JButton rewriteStale = new ComicButton("Rewrite stale sections");
+            writeRemaining.addActionListener(e -> {
+                String refusal = research.writeRemainingSections();
+                status.setText(refusal == null ? "Writing..." : refusal);
+            });
+            stopWriting.addActionListener(e -> research.stopWriting());
+            rewriteStale.addActionListener(e -> {
+                String refusal = research.rewriteStaleSections();
+                status.setText(refusal == null ? "Rewriting stale sections..." : refusal);
+            });
+            toolbar.add(writeRemaining);
+            toolbar.add(stopWriting);
+            toolbar.add(rewriteStale);
+            final Runnable writingState = new Runnable() {
+                public void run() {
+                    boolean running = research.writingRunning();
+                    writeRemaining.setEnabled(!running);
+                    rewriteStale.setEnabled(!running && !research.staleSectionTitles().isEmpty());
+                    stopWriting.setEnabled(running);
+                    String line = research.writingStatus();
+                    if (line != null && !line.isEmpty()) {
+                        status.setText(line);
+                    }
+                }
+            };
+            research.addStateListener(writingState);
+            writingState.run();
             research.addStateListener(new Runnable() {
                 public void run() {
                     if (editing[0]) {
@@ -147,10 +177,27 @@ public final class ResearchDocumentViewContribution implements ArtifactViewContr
         toolbar.add(export);
         toolbar.add(report);
         toolbar.add(status);
+        // plan PR 29: the latest "Request changes" comment; "Rewrite section" in Edit acts on it
+        final JLabel changeRequest = new JLabel(" ");
+        if (research != null) {
+            final Runnable showRequest = new Runnable() {
+                public void run() {
+                    String comment = research.documentChangeRequest();
+                    changeRequest.setText(comment == null || comment.isEmpty() ? " "
+                            : "Requested changes: " + comment + " (use Edit > Rewrite section)");
+                }
+            };
+            research.addStateListener(showRequest);
+            showRequest.run();
+        }
 
         JPanel root = new JPanel(new BorderLayout(4, 4));
         root.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
-        root.add(toolbar, BorderLayout.NORTH);
+        JPanel north = new JPanel(new BorderLayout());
+        north.setOpaque(false);
+        north.add(toolbar, BorderLayout.NORTH);
+        north.add(changeRequest, BorderLayout.SOUTH);
+        root.add(north, BorderLayout.NORTH);
         root.add(center, BorderLayout.CENTER);
         loadPage.run();
         // the document in the main area, the outline in the drawer

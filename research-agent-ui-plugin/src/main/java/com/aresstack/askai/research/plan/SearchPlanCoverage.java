@@ -146,4 +146,15 @@ public final class SearchPlanCoverage {
         }
         return all.size();
     }
+
+    /** The accepted sources of the entries of one phase (a Document gap search has its own budget, PR 29). */
+    public static int phaseSources(Collection<SearchPlanEntry> entries, String phase) {
+        Set<String> all = new HashSet<String>();
+        for (SearchPlanEntry entry : entries) {
+            if (phase == null || phase.equals(entry.getPhase())) {
+                all.addAll(entry.getAcceptedSourceIds());
+            }
+        }
+        return all.size();
+    }
 }

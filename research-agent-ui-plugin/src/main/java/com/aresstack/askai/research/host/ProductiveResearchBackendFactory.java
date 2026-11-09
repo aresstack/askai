@@ -633,6 +633,12 @@ public final class ProductiveResearchBackendFactory {
                         }
 
                         @Override
+                        public String sectionRewrite(String section, String comment) {
+                            return holder[0] == null ? null
+                                    : holder[0].controlContext().sectionRewrite(section, comment);
+                        }
+
+                        @Override
                         public String searchPlanOverview() {
                             return holder[0] == null ? null : holder[0].controlContext().searchPlanOverview();
                         }
@@ -1000,6 +1006,9 @@ public final class ProductiveResearchBackendFactory {
         }
         if (knowledge.embeddings != null && knowledge.settings != null) {
             resources.setOutlineEmbeddings(knowledge.embeddings, knowledge.settings);
+        }
+        if (knowledge.index != null) {
+            resources.setWriterKnowledge(knowledge.index, knowledge.projectId, knowledge.embeddingFingerprint);
         }
         if (knowledge.projection != null) {
             // The projection runner thread only WAITS for an explicit trigger — session open never

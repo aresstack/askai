@@ -333,13 +333,18 @@ public final class SearchPlanQueue {
                 SearchPlanCoverage.Caps c = caps;
                 SearchPlanEntry next = null;
                 int perQueryCap = c.getSourcesPerNode();
-                boolean capReached = SearchPlanCoverage.phaseSources(entries.values()) >= c.getPhaseSources();
-                if (!capReached) {
+                boolean capReached = false;
+                {
                     List<String> ids = new ArrayList<String>(record.getPriority());
                     ids.addAll(record.getOrder());
                     for (String id : ids) {
                         SearchPlanEntry entry = entries.get(id);
                         if (entry == null || entry.getStatus() != SearchPlanEntry.Status.PENDING) {
+                            continue;
+                        }
+                        int phaseUsed = SearchPlanCoverage.phaseSources(entries.values(), entry.getPhase());
+                        if (phaseUsed >= c.getPhaseSources()) {
+                            capReached = true; // this entry's phase spent its budget; another phase may not have
                             continue;
                         }
                         Map<String, SearchPlanCoverage.NodeCoverage> coverage =
@@ -362,7 +367,7 @@ public final class SearchPlanQueue {
                             }
                         }
                         int have = node == null ? 0 : node.getSources().size();
-                        int phaseLeft = c.getPhaseSources() - SearchPlanCoverage.phaseSources(entries.values());
+                        int phaseLeft = c.getPhaseSources() - phaseUsed;
                         perQueryCap = Math.max(1, Math.min(c.getSourcesPerNode() - have, phaseLeft));
                         next = entry;
                         break;
@@ -412,7 +417,7 @@ public final class SearchPlanQueue {
         }
         Map<String, SearchPlanEntry> entries = store.loadEntries();
         return outcome(record, entries, caps,
-                SearchPlanCoverage.phaseSources(entries.values()) >= caps.getPhaseSources());
+                SearchPlanCoverage.phaseSources(entries.values(), record.getPhase()) >= caps.getPhaseSources());
     }
 
     private Outcome outcome(SearchPlanRecord record, Map<String, SearchPlanEntry> entries,
