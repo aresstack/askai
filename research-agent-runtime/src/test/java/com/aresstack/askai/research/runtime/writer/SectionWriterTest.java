@@ -184,6 +184,20 @@ public class SectionWriterTest {
     }
 
     @Test
+    public void continuationStartingWithGapKeepsItOnItsOwnLine() {
+        assertEquals("The rate rose [1].\nGAP: Later figures", SectionWriter.join("The rate rose [1].", "GAP: Later figures"));
+        CitationValidator.Result r = new CitationValidator().validate(
+                SectionWriter.join("The rate rose [1].", "GAP: Later figures"), 3);
+        assertEquals(Arrays.asList("Later figures"), r.getGaps());
+    }
+
+    @Test
+    public void cutKeepsSentenceEndingInsideQuotes() {
+        assertEquals("She said \u201CThe rate rose.\u201D [1]",
+                SectionWriter.upToLastFullSentence("She said \u201CThe rate rose.\u201D [1] Then an unfinished"));
+    }
+
+    @Test
     public void failedCallGivesFailedDraft() {
         SectionDraft draft = new SectionWriter(new ScriptedChat(), null).write(assignment(6));
         assertFalse(draft.isOk());
