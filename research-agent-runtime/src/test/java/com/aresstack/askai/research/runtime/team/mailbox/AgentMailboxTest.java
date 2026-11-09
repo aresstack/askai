@@ -117,6 +117,74 @@ public class AgentMailboxTest {
     }
 
     @Test
+    public void handedOutMailIsOnlyDeliveredAfterAcknowledgeAndComesBackAfterACrash() throws Exception {
+        mailbox.registerWorker("t-a");
+        mailbox.registerWorker("t-b");
+        mailbox.send("t-a", "worker 2", "hint for b");
+        mailbox.send("t-a", "orchestrator", "report for the lead");
+
+        List<AgentMessage> inbox = mailbox.takeInbox("t-b");
+        List<AgentMessage> review = mailbox.drainOrchestrator(10);
+        assertEquals(1, inbox.size());
+        assertEquals(1, review.size());
+        assertTrue(mailbox.takeInbox("t-b").isEmpty()); // not handed out twice in one process
+        assertTrue(mailbox.drainOrchestrator(10).isEmpty());
+
+        // crash before either recipient processed its mail: both come back
+        AgentMailbox restarted = AgentMailbox.open("run1", store, new MailboxLimits(3, 80, 4, 60000L, 10), clock);
+        assertEquals(1, restarted.takeInbox("t-b").size());
+        List<AgentMessage> again = restarted.drainOrchestrator(10);
+        assertEquals("report for the lead", again.get(0).getText());
+        restarted.acknowledge(again);
+        assertEquals(DeliveryState.DELIVERED, last(restarted.messages(), "report for the lead").getState());
+
+        // a failed turn gives its mail back; a re-registered (re-queued) task sees it again too
+        List<AgentMessage> failedTurn = restarted.drainOrchestrator(10);
+        assertTrue(failedTurn.isEmpty());
+        restarted.registerWorker("t-b");
+        List<AgentMessage> retry = restarted.takeInbox("t-b");
+        assertEquals(1, retry.size());
+        restarted.release(retry);
+        assertEquals(1, restarted.takeInbox("t-b").size());
+    }
+
+    @Test
+    public void aFinishRetriedAfterACrashProducesNoSecondReportOrCopy() throws Exception {
+        final boolean[] fail = {false};
+        final InMemoryMailboxStore inner = new InMemoryMailboxStore();
+        MailboxStore flaky = new MailboxStore() {
+            public void append(String line) throws java.io.IOException {
+                if (fail[0] && line.contains("\"kind\":\"worker\"")) {
+                    throw new java.io.IOException("crash");
+                }
+                inner.append(line);
+            }
+
+            public List<String> readLines() {
+                return inner.readLines();
+            }
+        };
+        AgentMailbox box = AgentMailbox.open("run4", flaky, MailboxLimits.defaults(), clock);
+        box.registerWorker("t-a");
+        box.registerWorker("t-b");
+        box.send("t-a", "worker 2", "unread hint");
+        fail[0] = true;
+        try {
+            box.finishTask("t-b", "first summary");
+        } catch (java.io.UncheckedIOException expected) {
+            // crash before the worker record
+        }
+        fail[0] = false;
+        AgentMailbox replayed = AgentMailbox.open("run4", inner, MailboxLimits.defaults(), clock);
+        replayed.registerWorker("t-b");
+        assertEquals("Task finished. Your summary went to the orchestrator.", replayed.finishTask("t-b", "second"));
+        List<AgentMessage> review = replayed.drainOrchestrator(10);
+        assertEquals(2, review.size());
+        assertEquals("first summary", review.get(0).getText());
+        assertTrue(review.get(1).getText().contains("unread hint"));
+    }
+
+    @Test
     public void refusalNotesKeepTheInboxBound() {
         mailbox.registerWorker("t-a");
         for (int i = 0; i < 30; i++) {

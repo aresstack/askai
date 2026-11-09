@@ -43,6 +43,7 @@ public final class AgentMailbox {
     private final MessageRouter router = new MessageRouter();
     private final Map<String, AgentMessage> messages = new LinkedHashMap<String, AgentMessage>();
     private final Map<String, Integer> sendsByTask = new LinkedHashMap<String, Integer>();
+    private final java.util.Set<String> inFlight = new java.util.HashSet<String>();
     private volatile Listener listener;
     private long sequence;
 
@@ -137,6 +138,9 @@ public final class AgentMailbox {
     public synchronized int registerWorker(String taskId) {
         requireTask(taskId);
         int number = router.register(taskId);
+        for (AgentMessage m : pendingFor(taskId)) {
+            inFlight.remove(m.getId()); // a re-queued task sees what its crashed turn never processed
+        }
         persistLine(MailboxJournalCodec.encodeWorker(number, taskId, true));
         return number;
     }
@@ -234,15 +238,23 @@ public final class AgentMailbox {
             }
             // report and redirects are written first and the worker record last, so a failed write or a crash
             // in between leaves the worker live and a retry of finish_task completes the job
-            String body = cut(summary);
-            report = store(newMessage(AgentAddress.worker(number), taskId, AgentAddress.ORCHESTRATOR, null,
-                    body.isEmpty() ? "(finished without a summary)" : body, DeliveryState.PENDING, FINISH_NOTE));
+            // every write here has a fixed id, so a retry after a crash or failed write re-uses what was already
+            // written instead of producing a second report or a second redirect copy
+            String reportId = runId + "-finish-" + number;
+            report = messages.get(reportId);
+            if (report == null) {
+                String body = cut(summary);
+                report = store(new AgentMessage(reportId, runId, AgentAddress.worker(number), taskId,
+                        AgentAddress.ORCHESTRATOR, null, body.isEmpty() ? "(finished without a summary)" : body,
+                        clock.millis(), DeliveryState.PENDING, FINISH_NOTE));
+            }
             for (AgentMessage pending : pendingFor(taskId)) {
-                AgentMessage redirected = store(pending.withState(DeliveryState.REDIRECTED,
-                        pending.getRecipient().key() + " finished before reading it"));
                 if (!pending.getSender().isOrchestrator() && !SYSTEM_NOTE.equals(pending.getNote())) {
-                    copies.add(redirectCopy(redirected));
+                    copies.add(redirectCopy(pending)); // the copy first: a crash now loses nothing
                 }
+                store(pending.withState(DeliveryState.REDIRECTED,
+                        pending.getRecipient().key() + " finished before reading it"));
+                inFlight.remove(pending.getId());
             }
             persistLine(MailboxJournalCodec.encodeWorker(number, taskId, false));
             router.finish(taskId);
@@ -256,11 +268,18 @@ public final class AgentMailbox {
 
     /**
      * The worker's inbox for its next turn: the last {@link MailboxLimits#getInboxShown()} pending messages, oldest
-     * first, marked delivered. Older pending messages beyond that are dropped as expired.
+     * first. They are handed out, not yet delivered: the caller calls {@link #acknowledge} once the turn that saw
+     * them has been processed and saved. Until then they are not handed out again; after a restart, or when the
+     * task is registered again, they come back. Older pending messages beyond the limit are dropped as expired.
      */
     public synchronized List<AgentMessage> takeInbox(String taskId) {
         expireStale();
-        List<AgentMessage> pending = pendingFor(taskId);
+        List<AgentMessage> pending = new ArrayList<AgentMessage>();
+        for (AgentMessage m : pendingFor(taskId)) {
+            if (!inFlight.contains(m.getId())) {
+                pending.add(m);
+            }
+        }
         int skip = Math.max(0, pending.size() - limits.getInboxShown());
         List<AgentMessage> shown = new ArrayList<AgentMessage>();
         for (int i = 0; i < pending.size(); i++) {
@@ -268,24 +287,48 @@ public final class AgentMailbox {
             if (i < skip) {
                 store(m.withState(DeliveryState.EXPIRED, "not shown: inbox limit"));
             } else {
-                shown.add(store(m.withState(DeliveryState.DELIVERED, null)));
+                inFlight.add(m.getId());
+                shown.add(m);
             }
         }
         return shown;
     }
 
-    /** The orchestrator's pending mail, oldest first, at most {@code max}, marked delivered. */
+    /**
+     * The orchestrator's pending mail, oldest first, at most {@code max}; handed out like {@link #takeInbox} and
+     * delivered only by {@link #acknowledge}, so a crash during the review loses no worker report.
+     */
     public synchronized List<AgentMessage> drainOrchestrator(int max) {
         List<AgentMessage> out = new ArrayList<AgentMessage>();
         for (AgentMessage m : new ArrayList<AgentMessage>(messages.values())) {
             if (out.size() >= max) {
                 break;
             }
-            if (m.getRecipient().isOrchestrator() && m.getState() == DeliveryState.PENDING) {
-                out.add(store(m.withState(DeliveryState.DELIVERED, null)));
+            if (m.getRecipient().isOrchestrator() && m.getState() == DeliveryState.PENDING
+                    && !inFlight.contains(m.getId())) {
+                inFlight.add(m.getId());
+                out.add(m);
             }
         }
         return out;
+    }
+
+    /** Marks handed-out messages as delivered: their recipient has processed them. Unknown or settled ids are ignored. */
+    public synchronized void acknowledge(List<AgentMessage> processed) {
+        for (AgentMessage m : processed) {
+            AgentMessage current = messages.get(m.getId());
+            if (current != null && current.getState() == DeliveryState.PENDING) {
+                store(current.withState(DeliveryState.DELIVERED, null));
+            }
+            inFlight.remove(m.getId());
+        }
+    }
+
+    /** Gives handed-out messages back unprocessed (the turn failed); they are handed out again next time. */
+    public synchronized void release(List<AgentMessage> unprocessed) {
+        for (AgentMessage m : unprocessed) {
+            inFlight.remove(m.getId());
+        }
     }
 
     /** All messages of the run in order of creation (latest state each). */
@@ -306,9 +349,15 @@ public final class AgentMailbox {
     }
 
     private AgentMessage redirectCopy(AgentMessage original) {
+        String copyId = original.getId() + "-r";
+        AgentMessage existing = messages.get(copyId);
+        if (existing != null) {
+            return existing;
+        }
         String text = "(meant for " + original.getRecipient().key() + ", who has finished) " + original.getText();
-        return store(newMessage(original.getSender(), original.getSenderTaskId(), AgentAddress.ORCHESTRATOR, null,
-                cut(text), DeliveryState.PENDING, REDIRECT_PREFIX + original.getRecipient().key()));
+        return store(new AgentMessage(copyId, runId, original.getSender(), original.getSenderTaskId(),
+                AgentAddress.ORCHESTRATOR, null, cut(text), clock.millis(), DeliveryState.PENDING,
+                REDIRECT_PREFIX + original.getRecipient().key()));
     }
 
     private List<AgentMessage> pendingFor(String taskId) {
@@ -333,7 +382,7 @@ public final class AgentMailbox {
         long now = clock.millis();
         for (AgentMessage m : new ArrayList<AgentMessage>(messages.values())) {
             if (m.getState() == DeliveryState.PENDING && !m.getRecipient().isOrchestrator()
-                    && now - m.getCreatedAtMillis() > limits.getTtlMillis()) {
+                    && !inFlight.contains(m.getId()) && now - m.getCreatedAtMillis() > limits.getTtlMillis()) {
                 store(m.withState(DeliveryState.EXPIRED, "not read within the time limit"));
             }
         }
