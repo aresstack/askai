@@ -151,7 +151,7 @@ public final class ChapterRegenerator {
             Collections.sort(sorted);
             sections.add(OutlineSection.draft(title, new OutlineBrief(purpose, Collections.<String>emptyList(),
                     share(words, count, i)), new OutlineProvenance(chapter.getProvenance().getConceptNodeId(),
-                    Collections.singletonList(clusterId), sorted)));
+                    Collections.singletonList(clusterId), sorted)).withUntitled(label == null));
         }
         return sections;
     }

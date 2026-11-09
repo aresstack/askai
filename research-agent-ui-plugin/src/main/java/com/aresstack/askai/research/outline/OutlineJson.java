@@ -31,12 +31,32 @@ public final class OutlineJson {
             JsonObject json = entry(chapter);
             JsonArray sections = new JsonArray();
             for (OutlineSection section : chapter.getSections()) {
-                sections.add(entry(section));
+                JsonObject sectionJson = entry(section);
+                if (section.isUntitled()) {
+                    sectionJson.addProperty("untitled", true);
+                }
+                if (section.isThin()) {
+                    sectionJson.addProperty("thin", true);
+                }
+                sections.add(sectionJson);
             }
             json.add("sections", sections);
             chapters.add(json);
         }
         root.add("chapters", chapters);
+        if (!outline.getCandidates().isEmpty()) {
+            JsonArray candidates = new JsonArray();
+            for (OutlineCandidate candidate : outline.getCandidates()) {
+                JsonObject json = new JsonObject();
+                json.addProperty("cluster", candidate.getClusterId());
+                json.addProperty("title", candidate.getSuggestedTitle());
+                json.add("passages", strings(candidate.getPassageIds()));
+                json.add("representatives", strings(candidate.getRepresentativePassageIds()));
+                json.addProperty("sources", candidate.getSourceCount());
+                candidates.add(json);
+            }
+            root.add("candidates", candidates);
+        }
         return GSON.toJson(root) + "\n";
     }
 
@@ -65,7 +85,8 @@ public final class OutlineJson {
                         JsonObject section = sectionElement.getAsJsonObject();
                         sections.add(new OutlineSection(string(section, "id"), string(section, "parent"),
                                 integer(section, "order"), string(section, "title"), brief(section),
-                                provenance(section), bool(section, "userEdited"), string(section, "stale")));
+                                provenance(section), bool(section, "userEdited"), string(section, "stale"),
+                                bool(section, "untitled"), bool(section, "thin")));
                     }
                 }
                 chapters.add(new OutlineChapter(string(json, "id"), integer(json, "order"), string(json, "title"),
@@ -76,7 +97,20 @@ public final class OutlineJson {
         } catch (RuntimeException broken) {
             throw new IllegalArgumentException("The outline is damaged: " + broken.getMessage(), broken);
         }
-        return new Outline(chapters);
+        List<OutlineCandidate> candidates = new ArrayList<OutlineCandidate>();
+        JsonElement candidateArray = root.get("candidates");
+        try {
+            if (candidateArray != null && candidateArray.isJsonArray()) {
+                for (JsonElement element : candidateArray.getAsJsonArray()) {
+                    JsonObject json = element.getAsJsonObject();
+                    candidates.add(new OutlineCandidate(string(json, "cluster"), string(json, "title"),
+                            list(json, "passages"), list(json, "representatives"), integer(json, "sources")));
+                }
+            }
+        } catch (RuntimeException broken) {
+            throw new IllegalArgumentException("The outline candidates are damaged: " + broken.getMessage(), broken);
+        }
+        return new Outline(chapters, candidates);
     }
 
     private static JsonObject entry(OutlineEntry entry) {

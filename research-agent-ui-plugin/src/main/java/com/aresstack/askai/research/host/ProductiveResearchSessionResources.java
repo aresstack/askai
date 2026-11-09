@@ -189,6 +189,30 @@ public final class ProductiveResearchSessionResources {
         this.corpusReader = reader;
     }
 
+    /** Plan PR 22: the embedding port and topic minimums of the outline generation; null without the capability. */
+    private volatile com.aresstack.askai.research.knowledge.EmbeddingPort outlineEmbeddings;
+    private volatile com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings
+            outlineKnowledgeSettings;
+
+    void setOutlineEmbeddings(com.aresstack.askai.research.knowledge.EmbeddingPort embeddings,
+                              com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings settings) {
+        this.outlineEmbeddings = embeddings;
+        this.outlineKnowledgeSettings = settings;
+    }
+
+    public com.aresstack.askai.research.knowledge.EmbeddingPort outlineEmbeddings() {
+        return outlineEmbeddings;
+    }
+
+    public com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings outlineKnowledgeSettings() {
+        return outlineKnowledgeSettings;
+    }
+
+    /** Plan PR 22: the active corpus reader, or null without the knowledge capability. */
+    public com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader() {
+        return corpusReader;
+    }
+
     /** The ACTIVE passages derived from one source (empty without the knowledge capability). */
     public java.util.List<com.aresstack.askai.research.domain.Passage> passagesForSource(String sourceId) {
         com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader reader =
@@ -524,21 +548,12 @@ public final class ProductiveResearchSessionResources {
         return outlineWorkspace;
     }
 
-    private final com.aresstack.askai.research.outline.OutlineJobGuard outlineJobs =
-            new com.aresstack.askai.research.outline.OutlineJobGuard();
-    private volatile com.aresstack.askai.research.outline.brief.OutlineChapterService outlineChapterService;
+    private volatile java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService>
+            outlineChapterService;
 
-    /** The session's one outline job guard (plan PR 22/24): generation and chapter regeneration share it. */
-    public com.aresstack.askai.research.outline.OutlineJobGuard outlineJobs() {
-        return outlineJobs;
-    }
-
-    /** Plan PR 24: the single-chapter operations; {@code null} until the session wires them. */
-    public com.aresstack.askai.research.outline.brief.OutlineChapterService outlineChapterService() {
-        return outlineChapterService;
-    }
-
-    public void setOutlineChapterService(com.aresstack.askai.research.outline.brief.OutlineChapterService service) {
+    /** Plan PR 24: the single-chapter operations; the session wires a lazy supplier (it owns the model port). */
+    public void setOutlineChapterService(
+            java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService> service) {
         this.outlineChapterService = service;
     }
 
@@ -734,7 +749,10 @@ public final class ProductiveResearchSessionResources {
 
             @Override
             public String outlineRegenerateChapter(String chapterId, int sections, String comment) {
-                com.aresstack.askai.research.outline.brief.OutlineChapterService service = outlineChapterService;
+                java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService>
+                        supplier = outlineChapterService;
+                com.aresstack.askai.research.outline.brief.OutlineChapterService service =
+                        supplier == null ? null : supplier.get();
                 return service == null ? null : service.regenerateChapter(chapterId, sections, comment).getMessage();
             }
 

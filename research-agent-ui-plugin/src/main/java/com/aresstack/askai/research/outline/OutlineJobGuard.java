@@ -1,52 +1,49 @@
 package com.aresstack.askai.research.outline;
 
-import java.util.concurrent.atomic.AtomicReference;
-
 /**
- * The one outline job that may run at a time (plan PR 22 and PR 24): a generation, a single-chapter
- * regeneration or a brief run. While a job runs, {@code finish-outline} is refused with {@link #busyReason()}
- * and a second job is refused instead of interleaving its writes with the first.
+ * One outline job at a time per session (plan PR 22, shared with PR 24): a generation and a single-chapter
+ * regeneration exclude each other, and {@code finish-outline} is refused while a job runs.
  */
 public final class OutlineJobGuard {
 
-    /** A started job; close it in a {@code finally} block. */
+    /** The running job; closing it frees the guard. */
     public interface Job extends AutoCloseable {
         @Override
         void close();
     }
 
-    private final AtomicReference<String> running = new AtomicReference<String>();
+    private String running;
 
     /**
-     * Starts {@code label} (shown as "... is running").
-     * @throws IllegalStateException while another job runs
+     * Start a job.
+     * @throws IllegalStateException with {@link #busyReason()} when another job runs
      */
-    public Job begin(final String label) {
-        final String name = label == null || label.trim().isEmpty() ? "An outline job" : label.trim();
-        if (!running.compareAndSet(null, name)) {
-            throw new IllegalStateException(running.get() + " is running. Wait until it ends or cancel it.");
+    public synchronized Job begin(String label) {
+        if (running != null) {
+            throw new IllegalStateException(busyReason());
         }
+        final String mine = label == null || label.trim().isEmpty() ? "an outline job" : label.trim();
+        running = mine;
         return new Job() {
             private boolean closed;
 
-            @Override
-            public synchronized void close() {
-                if (!closed) {
-                    closed = true;
-                    running.compareAndSet(name, null);
+            public void close() {
+                synchronized (OutlineJobGuard.this) {
+                    if (!closed) {
+                        closed = true;
+                        running = null;
+                    }
                 }
             }
         };
     }
 
-    /** Whether a job runs now. */
-    public boolean isBusy() {
-        return running.get() != null;
+    public synchronized boolean isBusy() {
+        return running != null;
     }
 
-    /** The refusal of {@code finish-outline} while a job runs, or {@code null}. */
-    public String busyReason() {
-        String name = running.get();
-        return name == null ? null : name + " is running. Finish the outline after it ends.";
+    /** Why the outline is busy, or {@code ""}. */
+    public synchronized String busyReason() {
+        return running == null ? "" : "The outline is busy: " + running + " is running.";
     }
 }
