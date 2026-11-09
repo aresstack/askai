@@ -2377,7 +2377,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         uiExecutor.execute(this::fireStateChanged);
     }
 
-<<<<<<< HEAD
     private com.aresstack.askai.research.assembly.AssembledBook assembleBook(
             com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript) {
         com.aresstack.askai.research.outline.Outline outline = null;
