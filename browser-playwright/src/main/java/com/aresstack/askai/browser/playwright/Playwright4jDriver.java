@@ -1967,9 +1967,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         Map<String, String> environment = new java.util.HashMap<String, String>(System.getenv());
         environment.putAll(launch.environment());
         Map<String, Object> prefs = new LinkedHashMap<String, Object>(launch.prefs());
-        // Playwright's BiDi layer misses history traversals restored from the back-forward cache
-        // (page.url() stays stale, goBack never settles) — the same pref Argos sets.
-        prefs.putIfAbsent("browser.sessionhistory.max_total_viewers", 0);
+        CamoufoxSessionPrefs.apply(prefs); // no bfcache + no blocking "resend data" prompt
         BrowserType.LaunchPersistentContextOptions options = new BrowserType.LaunchPersistentContextOptions()
                 .setChannel("moz-firefox")
                 .setExecutablePath(executable)

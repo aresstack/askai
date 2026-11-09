@@ -140,7 +140,7 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
                 Map<String, String> environment = new java.util.HashMap<String, String>(System.getenv());
                 environment.putAll(launch.environment());
                 Map<String, Object> prefs = new LinkedHashMap<String, Object>(launch.prefs());
-                prefs.putIfAbsent("browser.sessionhistory.max_total_viewers", 0);
+                CamoufoxSessionPrefs.apply(prefs); // no bfcache + no blocking "resend data" prompt
                 // Non-persistent: Playwright gives the process a throw-away profile and deletes it on close.
                 BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
                         .setChannel("moz-firefox")
