@@ -89,7 +89,7 @@ public final class WritingJobRunner {
                 WritingOutcome outcome;
                 try {
                     context.beforeRun();
-                    outcome = run(kind, outline, id, comment);
+                    outcome = WritingJobRunner.this.run(kind, outline, id, comment);
                 } catch (RuntimeException failed) {
                     outcome = WritingOutcome.refused("Writing failed: " + failed.getMessage());
                 } finally {
