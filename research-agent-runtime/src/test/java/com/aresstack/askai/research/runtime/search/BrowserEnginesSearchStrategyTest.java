@@ -243,6 +243,48 @@ public class BrowserEnginesSearchStrategyTest {
     }
 
     @Test
+    public void anInterruptedGroupEndsItsStepsBeforeTheSearchReturnsAndRunsNoFurtherGroup() throws Exception {
+        final java.util.concurrent.atomic.AtomicBoolean googleEnded = new java.util.concurrent.atomic.AtomicBoolean();
+        final java.util.concurrent.CountDownLatch googleStarted = new java.util.concurrent.CountDownLatch(1);
+        SearchStrategy slowGoogle = (r, c, b) -> {
+            googleStarted.countDown();
+            long until = System.currentTimeMillis() + 300;
+            while (System.currentTimeMillis() < until) {
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException ignored) {
+                    // a browser call that does not react to interrupts
+                }
+            }
+            googleEnded.set(true);
+            return InitialSearchResult.empty(new ArrayList<String>());
+        };
+        GroupFake pages = new GroupFake();
+        pages.urlsPerEngine.put("duckduckgo", urls("d", 1));
+        pages.urlsPerEngine.put("bing", urls("b", 5));
+        final BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
+                table("google@0", "duckduckgo@0", "bing@1"), 5, slowGoogle, pages);
+        final java.util.concurrent.atomic.AtomicBoolean endedWhenReturned =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        Thread caller = new Thread(() -> {
+            try {
+                strategy.search(REQUEST, NOT_CANCELLED, BUDGET);
+            } catch (Exception ignored) {
+                // the outcome itself does not matter here
+            }
+            endedWhenReturned.set(googleEnded.get());
+        });
+        caller.start();
+        googleStarted.await();
+        caller.interrupt();
+        caller.join(5_000);
+        assertTrue("the abandoned step must have ended before the one-search lock is released",
+                endedWhenReturned.get());
+        assertFalse("no further group after an interrupt",
+                pages.calls.contains(Collections.singletonList("bing")));
+    }
+
+    @Test
     public void aBlockedGroupCountsNothingAndTheNextGroupRuns() throws Exception {
         GroupFake pages = new GroupFake();
         pages.failure = new IllegalStateException("challenge: unusual traffic");

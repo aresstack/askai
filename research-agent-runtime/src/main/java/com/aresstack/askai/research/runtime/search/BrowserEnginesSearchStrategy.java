@@ -263,6 +263,10 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
             }
             diagnostics.add("browser search: priority group " + (g + 1) + "/" + groups.size() + " "
                     + groupNames().get(g) + " -> " + usable + " usable of " + minimumUsableResults + " wanted");
+            if (Thread.currentThread().isInterrupted()) {
+                cancelled = true; // interrupted: no further group, the next search may start
+                break;
+            }
             if (usable >= minimumUsableResults) {
                 break;
             }
@@ -302,15 +306,27 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
             outcomes.put(only, runStep(only, request, cancellation, budget));
             return outcomes;
         }
+        final java.util.concurrent.CountDownLatch finished = new java.util.concurrent.CountDownLatch(group.size());
         Map<Step, Future<Object>> running = new LinkedHashMap<Step, Future<Object>>();
         for (final Step step : group) {
-            running.put(step, GROUP_STEPS.submit(() -> runStep(step, request, cancellation, budget)));
+            running.put(step, GROUP_STEPS.submit(() -> {
+                try {
+                    return runStep(step, request, cancellation, budget);
+                } finally {
+                    finished.countDown();
+                }
+            }));
         }
+        boolean interrupted = false;
         for (Map.Entry<Step, Future<Object>> entry : running.entrySet()) {
+            if (interrupted) {
+                outcomes.put(entry.getKey(), new IllegalStateException("interrupted while searching"));
+                continue;
+            }
             try {
                 outcomes.put(entry.getKey(), entry.getValue().get());
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                interrupted = true;
                 outcomes.put(entry.getKey(), new IllegalStateException("interrupted while searching"));
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause();
@@ -318,7 +334,31 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
                         : new IllegalStateException(String.valueOf(cause)));
             }
         }
+        if (interrupted) {
+            // Stop the steps and wait until they have really ended: the caller releases the one-search lock right
+            // after this, and an abandoned step must never type into a browser while the next search runs.
+            for (Future<Object> future : running.values()) {
+                future.cancel(true);
+            }
+            awaitUninterruptibly(finished);
+            Thread.currentThread().interrupt();
+        }
         return outcomes;
+    }
+
+    private static void awaitUninterruptibly(java.util.concurrent.CountDownLatch latch) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                latch.await();
+                break;
+            } catch (InterruptedException again) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static Object runStep(Step step, InitialSearchRequest request, CancellationSignal cancellation,
