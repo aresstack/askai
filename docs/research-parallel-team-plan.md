@@ -101,11 +101,15 @@ PLANNER_UNAVAILABLE, plus STOPPED).
 **Page worker (model + isolated browser).** Gets one URL, the node and the query it came from, a two-line brief
 ("find statements that support or contradict …; the book is about …") and its inbox. Java does the browsing: lease a
 user context, take a site lease, probe and read the page through `PageInspection`, run the page relevance gate,
-accept or park through the session's acceptance service, list the links. Then the model gets the brief, the page
-text (bounded by the slot's context) and the link list, and answers in plain text: what the page says that matters,
+**park** the capture through the session's acceptance port (`SourceAcceptancePort.park`, exists: a parked record
+with title, excerpt and score, not yet a source), list the links. Then the model gets the brief, the page text
+(bounded by the slot's context) and the link list, and answers in plain text: what the page says that matters,
 whether it is useful (and why not), which of the listed links (at most k) are worth a look, and any message to the
-orchestrator or another worker. Java turns the answer into artifacts (`FINDING`, `SOURCE_REFERENCE`), follow-up page
-tasks and mailbox messages. The worker has **no search tool and cannot reach an engine host** (section 2.3).
+orchestrator or another worker. Only now does Java decide about the source: `USEFUL: yes` or `partly` → `accept`
+(the one idempotent path, knowledge processing starts here); `USEFUL: no` → the capture stays parked, the URL is
+recorded as rejected in the registry with the worker's reason, and nothing counts for coverage. The serial funnel
+keeps accepting at its own point; only the team path moves acceptance behind the worker's answer. Java then turns
+the answer into artifacts (`FINDING`, `SOURCE_REFERENCE`), follow-up page tasks and mailbox messages. The worker has **no search tool and cannot reach an engine host** (section 2.3).
 
 **Search service (Java, one per AskAI).** Takes a query with its plan entry and language, runs it through the
 configured `SearchStrategy` (engines in the search browser, or an API provider), and returns deduplicated,
@@ -211,7 +215,8 @@ adds a second, continuous feed and a new origin `WORKER` on `SearchPlanEntry`:
   the reviewer gets those as `UNPRODUCTIVE`. A node with two unproductive cycles is reported as "needs another
   kind of source" in the outcome instead of being searched a third time the same way.
 - **Coverage stays the deterministic rule.** `SearchPlanCoverage` decides covered/uncovered from evidence sources and
-  domains; a worker's `USEFUL: yes` is not coverage, an accepted source is. The reviewer's `COVERED` line is a hint
+  domains; a worker's `USEFUL: yes` is not coverage, an accepted source is, and a page the worker rejected is never
+  accepted (section 2.2), so it cannot count. The reviewer's `COVERED` line is a hint
   that is logged, never applied.
 
 ### 2.7 Site coordination: leases with deadlines, never a deadlock
@@ -229,14 +234,24 @@ and the waiter gets its turn.
   (`research.browser.sites.overrides`, e.g. `researchgate.net=1@10s`, `*.sciencedirect.com=1@5s`: one at a time with a
   minimum spacing of 10 s between navigations). The list ships with a short default for known strict sites and is
   editable in the "Worker browsers" row.
-- **Lease**: `enter` returns a lease with a **hold deadline** (default 90 s, bounded by the call timeout). A holder
-  past its deadline is **expired**: its next browser call on that site fails typed (`SITE_LEASE_EXPIRED`); the page
-  worker records the obstacle and ends its attempt `retryable` with a site backoff, so another worker (or the same one
-  later) visits the URL. Expiry never kills the browser process; it only takes the place away.
-- **Waiting**: FIFO per site, bounded by the smaller of the task's remaining time and the acquire setting; a waiter
-  whose wait exceeds the **wait deadline** (default 60 s) gets the place of the oldest holder, which is expired as
-  above. So the second worker always comes to its turn, and the first one is told, in a typed way, that it lost the
-  site.
+- **Lease**: `enter` returns a lease with a **hold deadline** (default 90 s). A holder past its deadline is
+  **expired**: its next browser call on that site fails typed (`SITE_LEASE_EXPIRED`); the page worker records the
+  obstacle and ends its attempt `retryable` with a site backoff, so another worker (or the same one later) visits the
+  URL. Expiry never kills the browser process; it only takes the place away.
+- **An operation in flight is never overlapped.** `WorkerBrowsingContext.call` holds the gate around the whole lane
+  call, so a permit is handed on only once the holder's **current operation has returned** (or its lane was
+  terminated by the call timeout), never while it runs. To keep that bounded, worker tabs get their own
+  **navigation timeout** (`context.setDefaultNavigationTimeout`, already set per worker context in
+  `PlaywrightWorkerBrowserBackend`; new setting, default 45 s) that is at most the hold deadline, so no single
+  operation on a site can outlive the hold deadline by more than that. The call timeout (300 s) stays the bound for a
+  hung lane, as today.
+- **Waiting**: FIFO per site, bounded by the smaller of the task's remaining time and the acquire setting. A waiter
+  whose wait exceeds the **wait deadline** (default 60 s) marks the oldest holder expired and gets its place as soon
+  as that holder's running operation has ended (worst case: wait deadline + navigation timeout). A waiter whose
+  remaining task time is shorter than that worst case fails typed (`SITE_BUSY`) and its task is re-queued with a
+  site backoff instead of taking an occupied permit. So the second worker always comes to its turn or ends typed,
+  the first one is told, in a typed way, that it lost the site, and two operations on `researchgate.net=1` never
+  overlap.
 - **Site health**: a CAPTCHA, a consent wall that the guard cannot dismiss, HTTP 429/503 or a `temporarily
   unavailable` page (the `ErrorPageSignals` of PR #153) puts the site into **cool-down** for all workers and chats
   (exponential, 30 s to 10 min); pending page tasks of that site stay queued and are dispatched after the cool-down,
@@ -256,18 +271,27 @@ Resources and where their limit lives:
 | Search engine requests | one at a time, spacing, backoff | `SearchService` (T2) |
 | Page workers running at once | `research.team.maxWorkers` (default 8, see question 3) | `TeamCapacity` (T6) |
 
-`TeamCapacity` computes the effective worker count at every dispatch:
+Today `TaskExecutor.runReady` acquires every resource of a task before the attempt starts and releases it only when
+the attempt ends, and `ExecutorCapacity.fromPort` gives every task a model permit; a page task that browses for a
+minute would hold a model place the whole time, so 8 model places would mean 8 page workers. T6 therefore lets a
+worker declare its admission resources (`TaskWorker.resources()`, default = today's model + browser): the page
+worker declares **`team-worker` and `browser` only, no model permit**. Its one model call is admitted by
+`ModelResourceScheduler` (the real admission control: capacity per model and endpoint, grouping, GPU budget), where
+it queues while the browser work of the other workers goes on. Page-task admission and model-call admission are
+thus separate; nothing is ever sent to Ollama beyond the model's capacity.
+
+`TeamCapacity` computes the `team-worker` count at every dispatch:
 `min(maxWorkers setting, pool capacity (processes × user contexts), model capacity of the page-worker slot ×
 workersPerModelSlot)`, where `workersPerModelSlot` (default 2) reflects that a page worker spends most of its time
-in the browser, not in the model; the model calls of 16 workers queue on 8 model places without harm, because the
-scheduler orders them and the browser work continues. The count is **global over all chats** (one plugin-wide
-semaphore like `SharedWorkerBrowserPool`), so two research chats share 8 workers instead of starting 16. Tasks
-beyond the capacity wait in the queue; nothing is dropped. Settings changes apply at the next dispatch.
+in the browser, not in the model. The count is **global over all chats** (one plugin-wide semaphore like
+`SharedWorkerBrowserPool`), so two research chats share 8 workers instead of starting 16. Tasks beyond the capacity
+wait in the queue; nothing is dropped. Settings changes apply at the next dispatch.
 
 Target configuration for the RTX 5080 (16 GB) as measured: `gemma4:e2b` with 16 to 20 concurrent requests needs
 `OLLAMA_NUM_PARALLEL` ≥ 16 **on the server**, which is the owner's setting (today 8; open question 1). Until it is
-raised, the governor's honest maximum is 8 model places × 2 = 16 workers, which the browser pool (3 × 4 = 12 user
-contexts by default) caps at 12; 20 workers need the pool at 5 × 4 and the model at ≥ 10 places.
+raised, the governor's honest maximum is 8 model places × 2 = 16 workers (16 browsing, at most 8 model calls in
+flight), which the browser pool (3 × 4 = 12 user contexts by default) caps at 12; 20 workers need the pool at 5 × 4
+and the model at ≥ 10 places.
 
 ### 2.9 Robustness and resumption
 
@@ -279,7 +303,7 @@ contexts by default) caps at 12; 20 workers need the pool at 5 × 4 and the mode
 | Idempotent result merge | Acceptance by canonical URL + hash (exists); coverage computed from the store, never from in-memory counters. |
 | Bounded retries | `ResearchTask.retryLimit` (exists); site backoff counts as a retry with a delay; a URL that fails twice is recorded `UNREADABLE` and never queued again. |
 | Stuck workers | Task time budget (exists); a browser call past the call timeout terminates only that worker browser (exists); the site lease expiry (T1) frees the site; the coordinator marks a task whose `WorkerContext.progress` has been silent for the task's time budget as interrupted and re-queues it. |
-| Pause and stop | "Stop search plan" (exists) cancels the running search, calls `TaskExecutor.cancelOpen` for page tasks (they go back to pending, leases are closed within milliseconds, see `WorkerUserContextExecutionTest`), and stops the queue; "Run search plan" continues with the pending tasks. A phase change stops the team the same way (exists for the queue). |
+| Pause and stop | `TaskExecutor.cancelOpen` moves tasks to `CANCELED`, which is terminal, so it is **not** the pause. T7 adds `TaskExecutor.suspendOpen`: running attempts are interrupted (leases close within milliseconds, see `WorkerUserContextExecutionTest`), each open page task goes `WORKING → SUBMITTED` through a new `ResearchTask.suspend` (the table already allows the transition; unlike `requeue` it counts no retry), and the task keeps its URL claim. "Stop search plan" (exists) cancels the running search, suspends the page tasks and stops the queue; "Run search plan" dispatches the submitted tasks again. A phase change or a run abort uses `cancelOpen` as today and releases the claims of the cancelled tasks. |
 | No blocking cycles | Messages never block; no worker waits for a reply (2.4); the coordinator's review is a bounded model call with a timeout and `PLANNER_UNAVAILABLE` as the typed failure. |
 | Deterministic storage | One `CaptureStore` and one acceptance per session (exists); tasks keyed by id; messages keyed by sequence number; the outcome report lists every node, every unproductive query and every refused site. |
 
@@ -350,8 +374,10 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
   parsed override list, cool-down registry fed by `WorkerBrowsingContext` on challenge/consent/429/`ErrorPageSignals`).
   `WorkerBrowserLimits` gets `siteOverrides`, `holdDeadlineMillis`, `waitDeadlineMillis`; `ResearchRuntimeSettings`
   reads them; the "Worker browsers" row gets the override field (fit test 540 to 1600 px).
-- Done when: two leases on `researchgate.net=1` never overlap and keep 10 s spacing; a holder past its deadline fails
-  typed on its next call and the waiter proceeds within the wait deadline; a cool-down parks the site for everyone and
+- Done when: two leases on `researchgate.net=1` never overlap and keep 10 s spacing, also when the holder's operation
+  is still running at the waiter's deadline (the permit moves only after that operation returned); a holder past its
+  deadline fails typed on its next call and the waiter proceeds within wait deadline + navigation timeout, or ends
+  typed when its task has less time than that; a cool-down parks the site for everyone and
   releases; limit 2 without overrides behaves exactly as today (existing pool tests green); no unbounded wait exists
   (test with a hung holder and an injected clock).
 
@@ -386,7 +412,8 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
   `WorkerContext` gets the inbox and the display number.
 - Done when: `TaskExecutor` runs 2, 4 and 8 page tasks in parallel on a fake pool and `FakeModelPort`, every lease
   and site lease is given back, the chat browser is never used, every accepted source carries the plan entry id, a
-  `USEFUL: no` page produces no source, `FOLLOW` yields at most k follow-up tasks on the same registry, a crash in one
+  `USEFUL: no` page stays parked, is recorded as rejected and never counts for coverage, `FOLLOW` yields at most k
+  follow-up tasks on the same registry, a crash in one
   worker leaves the others running, and the funnel's own tests are unchanged.
 
 **T5 Team coordinator** (L)
@@ -402,18 +429,22 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
   (`SearchPlanQueueTest` unchanged).
 
 **T6 Capacity governor and settings** (M)
-- Change: `TeamCapacity` (effective worker count from setting, pool capacity, model capacity of the page-worker slot
-  and `workersPerModelSlot`; one plugin-wide semaphore over all chats; live settings), settings row "Research team"
+- Change: `TaskWorker.resources()` with `ExecutorCapacity` honouring it (the page worker holds `team-worker` and
+  `browser`, no model permit; model calls are admitted by `ModelResourceScheduler`), `TeamCapacity` (effective worker
+  count from setting, pool capacity, model capacity of the page-worker slot and `workersPerModelSlot`; one plugin-wide
+  semaphore over all chats; live settings), settings row "Research team"
   (max workers, workers per model slot, follow-link limit, hold and wait deadlines; the per-site overrides stay in
   "Worker browsers"), a note in the Model resources panel that the capacity of the worker's model bounds the team,
   `docs/ollama-model-budget-measurements.md` gains the sizing table of section 2.8.
 - Done when: two chats share the configured worker count; a raised model capacity raises the effective count at the
-  next dispatch; a lowered pool capacity lowers it; tasks beyond the capacity wait and none is lost (test with 20
-  tasks, capacity 4, then 8).
+  next dispatch; a lowered pool capacity lowers it; with model capacity 8 and 16 workers, 16 tasks browse while the
+  `FakeModelPort` never sees more than 8 calls in flight; tasks beyond the capacity wait and none is lost (test with
+  20 tasks, capacity 4, then 8).
 
 **T7 Recovery, control and benchmark** (L)
-- Change: restart replay (tasks, claims, messages), stop/pause through `SearchPlanQueue.stop` and
-  `TaskExecutor.cancelOpen`, stuck detection on silent progress, Sources-tab team view (workers, their page, site
+- Change: restart replay (tasks, claims, messages), resumable pause through `SearchPlanQueue.stop` and the new
+  `TaskExecutor.suspendOpen` / `ResearchTask.suspend` (no retry counted, claims kept), abort through `cancelOpen`
+  (claims released), stuck detection on silent progress, Sources-tab team view (workers, their page, site
   waits and cool-downs, the mailbox of the run), `research-benchmark` subject `parallel-team` with the metric
   **useful pages per minute** (pages whose source was accepted and whose summary passed the relevance gate) next to
   the baseline, run at 1, 2, 4, 8 and 20 workers; `docs/research-parallel-team-plan.md` gets the measured table.
