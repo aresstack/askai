@@ -27,16 +27,26 @@ public final class LegacyBrowserSearchDefaults {
     }
 
     /**
-     * The engines a fresh installation searches with: Google first (in the search browser), DuckDuckGo behind it,
-     * and only until one of them delivers. Bing stays in the list but off — DuckDuckGo's results come from Bing.
-     * Google fetches one result page by default; more pages are a setting ("google:on:3").
+     * The pause before each further Google request, in milliseconds — the "Delay (s)" of the Google entry under
+     * Search → Engines. The search browser keeps it between EVERY Google request (searches, result pages,
+     * redirect hops, across all chats). Live run 2026-11-09: 13 searches and about 40 redirect hops in 16 minutes
+     * with no pause ended in a challenge that blocked the search browser for the rest of the run; 15 s caps the
+     * rate at four requests a minute and spreads the bursts of hops that follow a result page.
+     */
+    public static final int GOOGLE_REQUEST_DELAY_MILLIS = 15_000;
+
+    /**
+     * The engines a fresh installation searches with: Google first (in the search browser, paced by
+     * {@link #GOOGLE_REQUEST_DELAY_MILLIS}), DuckDuckGo behind it as the fallback when Google fails or is
+     * blocked, and only until one of them delivers. Bing stays in the list but off — DuckDuckGo's results come
+     * from Bing. Google fetches one result page by default; more pages are a setting ("google:on:3").
      */
     public static com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engineSelection() {
         return new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection(
                 Arrays.asList(
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
-                                        .GOOGLE, true, 1),
+                                        .GOOGLE, true, 1, GOOGLE_REQUEST_DELAY_MILLIS),
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
                                         .DUCKDUCKGO, true),
