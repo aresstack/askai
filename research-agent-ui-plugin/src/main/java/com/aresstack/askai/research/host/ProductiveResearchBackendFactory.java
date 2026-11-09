@@ -992,6 +992,9 @@ public final class ProductiveResearchBackendFactory {
         if (knowledge.corpusReader != null) {
             resources.setCorpusReader(knowledge.corpusReader);
         }
+        if (knowledge.embeddings != null && knowledge.settings != null) {
+            resources.setOutlineEmbeddings(knowledge.embeddings, knowledge.settings);
+        }
         if (knowledge.projection != null) {
             // The projection runner thread only WAITS for an explicit trigger — session open never
             // invalidates or rebuilds the outline anymore (issue #29). The persisted projection is

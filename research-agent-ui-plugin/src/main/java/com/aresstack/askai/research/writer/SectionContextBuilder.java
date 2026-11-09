@@ -34,6 +34,8 @@ public final class SectionContextBuilder {
     static final int GLOSSARY_TOKENS = 200;
     /** Semantic hits fetched per pack slot, so that filtered and capped sources still leave enough candidates. */
     static final int SEARCH_FACTOR = 4;
+    /** The largest retrieval window; the window doubles up to it while filtering leaves the pack short. */
+    static final int MAX_SEARCH_WINDOW = 4096;
 
     private final EmbeddingPort embeddings;
     private final SemanticKnowledgeIndex index;
@@ -62,15 +64,36 @@ public final class SectionContextBuilder {
         OutlineSection section = request.getSection();
         EvidenceSourceSet sources = request.getSources();
 
-        List<PassageSearchHit> candidates = new ArrayList<PassageSearchHit>();
+        List<PassageSearchHit> provenance = new ArrayList<PassageSearchHit>();
         for (String passageId : section.getProvenance().getPassageIds()) {
             PassageSearchHit hit = passages.passage(request.getProjectId(), passageId);
             if (hit != null) {
-                candidates.add(hit);
+                provenance.add(hit);
             }
         }
-        candidates.addAll(searchBrief(request, pack));
+        List<EvidencePassage> chosen = select(provenance, sources, pack);
+        float[] query = chosen.size() < pack.getPassageCount() ? embedBrief(request) : null;
+        // Admission, deduplication and the per-source cap apply after retrieval, so the window grows until the
+        // pack is full or the index has no further hits.
+        for (int limit = pack.getPassageCount() * SEARCH_FACTOR;
+             query != null && chosen.size() < pack.getPassageCount(); limit *= 2) {
+            List<PassageSearchHit> hits = search(request, query, limit);
+            List<PassageSearchHit> candidates = new ArrayList<PassageSearchHit>(provenance);
+            candidates.addAll(hits);
+            chosen = select(candidates, sources, pack);
+            if (hits.size() < limit || limit >= MAX_SEARCH_WINDOW) {
+                break;
+            }
+        }
 
+        return new EvidencePack(section.getId(), pack, chosen,
+                TokenBudget.cutAtSentence(request.getSynopsis(), SYNOPSIS_TOKENS),
+                TokenBudget.cutAtSentence(request.getPreviousSectionDigest(), DIGEST_TOKENS),
+                glossaryWithAcronyms(request.getGlossary(), chosen, sources), request.getBookLanguage());
+    }
+
+    private static List<EvidencePassage> select(List<PassageSearchHit> candidates, EvidenceSourceSet sources,
+                                                WriterPackSettings pack) {
         List<EvidencePassage> chosen = new ArrayList<EvidencePassage>();
         Set<String> seenIds = new HashSet<String>();
         Set<String> seenTexts = new HashSet<String>();
@@ -95,17 +118,14 @@ public final class SectionContextBuilder {
             chosen.add(new EvidencePassage(chosen.size() + 1, hit.getPassageId(), sourceId,
                     sources.checksum(sourceId), text));
         }
-
-        return new EvidencePack(section.getId(), pack, chosen,
-                TokenBudget.cutAtSentence(request.getSynopsis(), SYNOPSIS_TOKENS),
-                TokenBudget.cutAtSentence(request.getPreviousSectionDigest(), DIGEST_TOKENS),
-                glossaryWithAcronyms(request.getGlossary(), chosen, sources), request.getBookLanguage());
+        return chosen;
     }
 
-    private List<PassageSearchHit> searchBrief(SectionContextRequest request, WriterPackSettings pack) {
+    /** The brief as one query vector of the active world, or {@code null} when the brief is empty. */
+    private float[] embedBrief(SectionContextRequest request) {
         String query = briefQuery(request.getChapter(), request.getSection());
         if (query.isEmpty()) {
-            return Collections.emptyList();
+            return null;
         }
         List<EmbeddingPort.EmbeddingVector> vectors = embeddings.embedQueries(Collections.singletonList(query));
         if (vectors.size() != 1) {
@@ -116,9 +136,12 @@ public final class SectionContextBuilder {
             throw new IllegalStateException("the brief was embedded in world " + vector.getModelFingerprint()
                     + ", the passages live in " + request.getEmbeddingFingerprint());
         }
+        return vector.getValues();
+    }
+
+    private List<PassageSearchHit> search(SectionContextRequest request, float[] query, int limit) {
         List<PassageSearchHit> hits = new ArrayList<PassageSearchHit>(index.semanticSearch(request.getProjectId(),
-                new PassageSemanticQuery(request.getEmbeddingFingerprint(), vector.getValues(),
-                        pack.getPassageCount() * SEARCH_FACTOR)));
+                new PassageSemanticQuery(request.getEmbeddingFingerprint(), query, limit)));
         Collections.sort(hits, new Comparator<PassageSearchHit>() {
             @Override
             public int compare(PassageSearchHit a, PassageSearchHit b) {

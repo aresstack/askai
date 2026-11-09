@@ -41,11 +41,17 @@ public final class OutlineWorkspace {
     };
 
     private final FileOutlineStore store;
+    private final OutlineJobGuard jobs = new OutlineJobGuard();
     private volatile WriteGuard guard = OPEN;
     private volatile ChangeListener listener = NOBODY;
 
     public OutlineWorkspace(FileOutlineStore store) {
         this.store = store;
+    }
+
+    /** The session's one outline job guard (plan PR 22): generation and regeneration exclude each other. */
+    public OutlineJobGuard jobs() {
+        return jobs;
     }
 
     public FileOutlineStore store() {
@@ -85,6 +91,32 @@ public final class OutlineWorkspace {
             throw new WriteRefusedException(refusal);
         }
         FileOutlineStore.Commit commit = store.commit(draft, expectedRevision, nowMillis);
+        if (commit.changed) {
+            listener.outlineChanged(commit.outline, commit.revision);
+        }
+        return commit;
+    }
+
+    /**
+     * Save an editor draft (plan PR 23, tree gestures and raw JSON alike): duplicate ids and empty titles are
+     * refused with a reason, known ids keep their provenance, edited and new entries get the user-edited flag.
+     */
+    public FileOutlineStore.Commit saveEdits(Outline draft, long expectedRevision, long nowMillis) {
+        String refusal = guard.refusal();
+        if (refusal != null) {
+            throw new WriteRefusedException(refusal);
+        }
+        OutlineEdits.validate(draft);
+        return save(OutlineEdits.markEdits(draft, store.working()), expectedRevision, nowMillis);
+    }
+
+    /** Make working revision {@code revision} the head again (the editor's restore); guarded like a save. */
+    public FileOutlineStore.Commit restore(long revision, long expectedRevision, long nowMillis) {
+        String refusal = guard.refusal();
+        if (refusal != null) {
+            throw new WriteRefusedException(refusal);
+        }
+        FileOutlineStore.Commit commit = store.restore(revision, expectedRevision, nowMillis);
         if (commit.changed) {
             listener.outlineChanged(commit.outline, commit.revision);
         }

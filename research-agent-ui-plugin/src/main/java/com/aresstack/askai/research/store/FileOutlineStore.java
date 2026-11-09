@@ -169,6 +169,24 @@ public final class FileOutlineStore {
         return new Commit(revision, next, true);
     }
 
+    /**
+     * Make working revision {@code revision} the head again (plan PR 23): its entries were placed by this store,
+     * so the historical ids return unchanged, even ids the current head no longer has.
+     * @throws RevisionConflictException when the working revision moved on
+     * @throws IllegalArgumentException  when there is no such revision
+     */
+    public synchronized Commit restore(long revision, long expectedRevision, long nowMillis) {
+        long current = workingRevision();
+        if (expectedRevision != current) {
+            throw new RevisionConflictException(expectedRevision, current);
+        }
+        Outline historical = revision <= 0 || revision > current ? null : workingHistory(revision);
+        if (historical == null) {
+            throw new IllegalArgumentException("There is no outline revision " + revision + ".");
+        }
+        return write(historical, working(), current, nowMillis);
+    }
+
     /** The outline at working revision {@code revision}, or {@code null} when there is none. */
     public synchronized Outline workingHistory(long revision) {
         String content = readOrNull(historyJson(revision));
