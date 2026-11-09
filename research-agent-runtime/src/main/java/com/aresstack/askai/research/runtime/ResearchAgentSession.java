@@ -778,6 +778,25 @@ public final class ResearchAgentSession {
                 navigation.minimumUsableResults, googleSearchStrategy, pageEngines);
     }
 
+    /** The search progress label of the Browser (SERP) search: "Google" when it asks Google only, else none. */
+    private static String browserEnginesLabel(
+            com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy engines) {
+        return engines.isGoogleOnly() ? providerLabel(
+                com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER) : null;
+    }
+
+    /** The SERP layout repair of a worker's search: its metered port, else the session's, else none. */
+    private com.aresstack.askai.browser.search.inference.StructuredInferencePort layoutRepairPort(
+            com.aresstack.askai.browser.search.inference.StructuredInferencePort metered) {
+        if (metered != null) {
+            return metered;
+        }
+        if (inferencePort != null) {
+            return inferencePort;
+        }
+        return new com.aresstack.askai.browser.search.analysis.UnavailableStructuredInferencePort();
+    }
+
     private static String providerLabel(
             com.aresstack.askai.research.runtime.search.provider.SearchProviderId providerId) {
         switch (providerId) {
@@ -1231,8 +1250,19 @@ public final class ResearchAgentSession {
                         boundedBy(budget, maxDurationMillis));
         com.aresstack.askai.browser.search.inference.StructuredInferencePort metered =
                 meteredInference(tokens, exhausted);
-        if (metered != null) {
-            loop.setStructuredInferencePort(metered);
+        if (searchStrategy == null) {
+            // Workers search with the concept phase's web search tool, never in their own tabs (those refuse
+            // search engines): the configured engines, Google in the search browser and the page engines in
+            // the chat browser, one search at a time across all workers and chats.
+            com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy engines =
+                    browserEngines(com.aresstack.askai.research.runtime.search.LegacyBrowserSearchStrategyFactory
+                            .createDefault(browser != null ? browser : browserLane, loadBrowserSearchSettings(),
+                                    new java.util.function.LongSupplier() {
+                                        public long getAsLong() {
+                                            return System.currentTimeMillis();
+                                        }
+                                    }, layoutRepairPort(metered)));
+            loop.setSearchStrategy(engines, browserEnginesLabel(engines));
         }
         loop.setAcceptedSourceObserver(accepted);
         com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(query);
@@ -2374,9 +2404,7 @@ public final class ResearchAgentSession {
                 // Browser (SERP): the configured engines around the loop's own research-browser search.
                 com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy engines =
                         browserEngines(loop.searchStrategy());
-                loop.setSearchStrategy(engines, engines.isGoogleOnly() ? providerLabel(
-                        com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER)
-                        : null);
+                loop.setSearchStrategy(engines, browserEnginesLabel(engines));
             }
             // SC1: the autonomous loop gets the same scope-control lane (internal service
             // endpoint) — a canonical OUT is filtered identically on both acquisition paths.

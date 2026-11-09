@@ -255,7 +255,7 @@ final class PlaywrightWorkerBrowserBackend implements WorkerBrowserBackend {
                     timeoutMillis, options.settings.consent, options.settings.captcha, camoufox);
             driver.setRenderedCapture(new RenderedPageDocumentCapture(options.settings.analysis));
             driver.readThroughAddon(readBridge);
-            // Worker contexts never reach a search engine: searches go through the central search service.
+            // Worker contexts never reach a search engine: workers search with the concept phase's web search tool.
             UrlSafetyPolicy policy = options.allowPrivateNetworks
                     ? UrlSafetyPolicy.allowingPrivateNetworks() : UrlSafetyPolicy.strict();
             if (refuseSearchEngines) {
