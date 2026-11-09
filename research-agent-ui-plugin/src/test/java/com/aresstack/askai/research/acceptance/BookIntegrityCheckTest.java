@@ -184,6 +184,22 @@ public class BookIntegrityCheckTest {
     }
 
     @Test
+    public void aPinnedSourceWhoseTextWasLostBreaksItsPin() throws Exception {
+        project("Ohne Zitat.");
+        for (File file : new File(dir, "sources").listFiles()) {
+            String content = new String(Files.readAllBytes(file.toPath()), Charset.forName("UTF-8"));
+            Files.write(file.toPath(), content.replaceAll("(?m)^fullText=.*$", "fullText=")
+                    .getBytes(Charset.forName("UTF-8")));
+        }
+        sources = new FileResearchSourceRepository(new File(dir, "sources"));
+
+        BookIntegrityReport report = check();
+
+        assertEquals(1, report.findings(IntegrityFinding.Check.PIN_HASH).size());
+        assertEquals("source src-1", report.findings(IntegrityFinding.Check.PIN_HASH).get(0).getSubject());
+    }
+
+    @Test
     public void anEmptyDirectoryNeverPasses() throws Exception {
         BookIntegrityReport report = BookIntegrityCheck.forProject(folder.newFolder("empty")).run();
         assertFalse(report.passed());

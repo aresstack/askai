@@ -164,7 +164,7 @@ public final class BookIntegrityCheck {
                 if (!entry.getChecksum().equals(record.getChecksum())) {
                     run.miss(IntegrityFinding.Check.PIN_HASH, subject,
                             "the source checksum changed after the sources approval");
-                } else if (!record.getFullText().isEmpty() && !entry.getChecksum().isEmpty()
+                } else if (!entry.getChecksum().isEmpty()
                         && !entry.getChecksum().equals(CaptureStore.sha256(record.getFullText()))) {
                     run.miss(IntegrityFinding.Check.PIN_HASH, subject,
                             "the stored text differs from its checksum");
