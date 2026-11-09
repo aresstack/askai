@@ -30,11 +30,11 @@ public class BrowserSearchEngineTableTest {
     }
 
     @Test
-    public void rowsAreSortedByPriorityThenNameThenGivenOrder() {
+    public void rowsAreSortedByPriorityAndKeepTheirStoredOrderWithinAPriority() {
         BrowserSearchEngineSelection selection = new BrowserSearchEngineSelection(Arrays.asList(
                 row("google", 1, "de"), row("startpage", 0, "de"), row("duckduckgo", 0, "en"),
                 row("google", 3, "fr", "es"), row("bing", 1, "de")), null);
-        assertEquals(Arrays.asList("duckduckgo@0", "startpage@0", "bing@1", "google@1", "google@3"),
+        assertEquals(Arrays.asList("startpage@0", "duckduckgo@0", "google@1", "bing@1", "google@3"),
                 ids(selection));
     }
 
@@ -90,7 +90,8 @@ public class BrowserSearchEngineTableTest {
                 EngineAcquisitionMode.ALL_ENABLED);
         BrowserSearchEngineSelection selection = new BrowserSearchEngineSelection(
                 BrowserSearchEngineSelection.parseEntries(migrated), EngineAcquisitionMode.ALL_ENABLED);
-        assertEquals(Arrays.asList("bing@0", "duckduckgo@0"), ids(selection));
+        assertEquals("the old list order stays the order the attempt budget is spent in",
+                Arrays.asList("duckduckgo@0", "bing@0"), ids(selection));
         assertEquals(1500, selection.delayMillisFor("bing"));
     }
 

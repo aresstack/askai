@@ -108,6 +108,30 @@ public class SearchProcessingProfileSnapshotTest {
     }
 
     @Test
+    public void aV6SnapshotWithAnOldEngineListMigratesToTheTableInItsFrozenOrder() {
+        // A session frozen before the engine table: old engine form, ALL_ENABLED, and the digest the old build
+        // computed over that form. Restoring it must not reject it as corrupt and must keep the frozen order.
+        java.util.Map<String, String> v6Values = new java.util.LinkedHashMap<String, String>(
+                LegacyBrowserSearchSettingsCodec.toValues(LegacyBrowserSearchDefaults.create()));
+        v6Values.put("navigation.engines", "duckduckgo:on:3,bing:on:3:1.5,google:off:1:15");
+        v6Values.put("navigation.engineAcquisitionMode", "ALL_ENABLED");
+        String v6Json = new LegacyBrowserSearchConfigDocument(6, 9L, "digest-of-the-old-engine-form",
+                "frozen-session", 42L, v6Values).toJson();
+        SearchProcessingProfileSnapshot migrated = SearchProcessingProfileSnapshot.parse(v6Json);
+        assertEquals(LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION, migrated.schemaVersion);
+        java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry> rows =
+                migrated.settings.navigation.engineSelection.getEntries();
+        assertEquals("duckduckgo", rows.get(0).getEngineId());
+        assertEquals("bing", rows.get(1).getEngineId());
+        assertEquals("google", rows.get(2).getEngineId());
+        assertEquals(0, rows.get(0).getPriority());
+        assertEquals(0, rows.get(1).getPriority());
+        assertEquals(1500, rows.get(1).getDelayMillis());
+        assertEquals("the restored snapshot round-trips with its recomputed digest", migrated.settingsDigest,
+                SearchProcessingProfileSnapshot.parse(migrated.toJson()).settingsDigest);
+    }
+
+    @Test
     public void v3StaleDisabledAiResolverDefaultIsLiftedToTheProductiveDefault() {
         // A frozen pre-v4 session profile carrying the stale SHIPPED default (disabled AND empty
         // model profile — the validator never accepted that combination as a deliberate choice):
