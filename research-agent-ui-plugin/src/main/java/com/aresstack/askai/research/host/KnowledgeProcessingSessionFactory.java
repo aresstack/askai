@@ -74,6 +74,10 @@ final class KnowledgeProcessingSessionFactory {
         /** Plan PR 22: the session's embedding port (label paths are embedded as queries) and topic minimums. */
         com.aresstack.askai.research.knowledge.EmbeddingPort embeddings;
         KnowledgeProcessingSettings settings;
+        /** Plan PR 29: the semantic index, project id and active embedding world of the writer's evidence packs. */
+        SemanticKnowledgeIndex index;
+        String projectId;
+        String embeddingFingerprint;
 
         KnowledgeSession(KnowledgeProcessingRunner worker,
                          com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
@@ -352,6 +356,9 @@ final class KnowledgeProcessingSessionFactory {
                 sharedTopics, corpusReader, outlineRun);
         session.embeddings = embeddings;
         session.settings = settings;
+        session.index = index;
+        session.projectId = projectId;
+        session.embeddingFingerprint = fingerprint;
         return session;
     }
 

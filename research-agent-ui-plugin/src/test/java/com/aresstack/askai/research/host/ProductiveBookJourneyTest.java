@@ -186,6 +186,20 @@ public class ProductiveBookJourneyTest {
         return commands;
     }
 
+    static void awaitWriting(Fx fx) {
+        long deadline = System.currentTimeMillis() + 10000L;
+        try {
+            Thread.sleep(50L);
+            while ((fx.session.writingRunning() || fx.session.writingStatus().isEmpty())
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20L);
+            }
+        } catch (InterruptedException ex) {
+            throw new IllegalStateException(ex);
+        }
+        assertFalse("the writing job finished", fx.session.writingRunning());
+    }
+
     static void assertHandled(String outcome) {
         assertTrue(outcome, outcome.startsWith("handled"));
     }
@@ -259,8 +273,29 @@ public class ProductiveBookJourneyTest {
         OutlineTestSupport.makeFinishable(fx.session);
         assertHandled(fx.session.executeCommand("finish-outline", ""));
         assertEquals("outline/waiting_approval", phase(fx));
+        final List<String> written = new ArrayList<String>();
+        fx.session.setSectionWriter(new com.aresstack.askai.research.drafting.SectionWriter() {
+            public com.aresstack.askai.research.manuscript.SectionRevision.Builder write(
+                    com.aresstack.askai.research.drafting.SectionWriteRequest request, Cancellation cancellation) {
+                synchronized (written) {
+                    written.add(request.getSection().getId());
+                }
+                return com.aresstack.askai.research.manuscript.SectionRevision.builder()
+                        .text("Scripted text of " + request.getSection().getTitle() + ".")
+                        .author(com.aresstack.askai.research.manuscript.SectionRevision.AUTHOR_WRITER)
+                        .modelLabel("scripted");
+            }
+        });
         assertHandled(fx.session.executeCommand("approve", ""));
         assertEquals("approving the outline also starts the writing", "draft/running", phase(fx));
+        awaitWriting(fx);
+        assertFalse("the scripted writer wrote every section", written.isEmpty());
+        assertTrue("every section has text", fx.session.manuscript().store().sections().size() > 0);
+        for (com.aresstack.askai.research.manuscript.ManuscriptSection section
+                : fx.session.manuscript().store().sections()) {
+            assertTrue(section.getSectionId(), section.hasText());
+        }
+        assertEquals("the job dispatched no phase command", "draft/running", phase(fx));
         assertOnlyFinishTagFor(fx, "finish-document");
 
         assertHandled(fx.session.executeCommand("finish-document", ""));

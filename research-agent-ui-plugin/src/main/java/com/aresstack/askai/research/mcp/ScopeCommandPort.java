@@ -79,6 +79,14 @@ public interface ScopeCommandPort {
     }
 
     /**
+     * Plan PR 29: the Document assistant's {@code section_rewrite} reruns the section writer for one section (id or
+     * title) with the user's comment. Returns {@code null} when unsupported. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String sectionRewrite(String section, String comment) {
+        return null;
+    }
+
+    /**
      * Plan PR 15: the Sources block (search plan, coverage per node), {@code null} without a plan.
      * DELEGATING WRAPPERS MUST FORWARD THIS.
      */
