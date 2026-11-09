@@ -234,11 +234,11 @@ public class BrowserEnginesSearchStrategyTest {
         Fake google = new Fake(urls("g", 2));
         BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
                 table("google@0", "duckduckgo@0", "bing@0"), 5, google, pages);
-        assertEquals(Collections.singletonList(Arrays.asList("google", "page-engines:bing+duckduckgo")),
+        assertEquals(Collections.singletonList(Arrays.asList("google", "page-engines:duckduckgo+bing")),
                 strategy.groupNames());
         InitialSearchResult result = strategy.search(REQUEST, NOT_CANCELLED, BUDGET);
         assertEquals(1, google.calls);
-        assertEquals(Collections.singletonList(Arrays.asList("bing", "duckduckgo")), pages.calls);
+        assertEquals(Collections.singletonList(Arrays.asList("duckduckgo", "bing")), pages.calls);
         assertEquals(6, result.candidates.size());
     }
 

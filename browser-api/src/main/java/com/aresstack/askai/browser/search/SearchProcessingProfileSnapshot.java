@@ -78,6 +78,11 @@ public final class SearchProcessingProfileSnapshot {
         switch (document.schemaVersion) {
             case LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION:
                 return document;
+            case 7:
+                // v7 → v8: the new key navigation.minimumUsableResults takes its central default while decoding
+                // (LegacyBrowserSearchDefaults.MINIMUM_USABLE_RESULTS). The stored digest covered the key set
+                // without it, so it is recomputed like every older migration.
+                return document;
             case 6:
                 // v6 → v7: the frozen engine list in the old form (id:on:pages[:delay]) becomes the engine table
                 // while decoding (LegacyBrowserSearchSettingsCodec.migrateEngineList): priority = list position

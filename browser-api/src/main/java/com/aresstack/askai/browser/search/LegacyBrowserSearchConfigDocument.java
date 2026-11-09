@@ -32,10 +32,12 @@ public final class LegacyBrowserSearchConfigDocument {
      * {@link LegacyBrowserSearchSettingsCodec#liftStaleShippedDefaults}); v7 = the engine list is the engine
      * table (priority, languages and further languages per row; old {@code id:on:pages[:delay]} lists are
      * migrated while decoding with the stored acquisition mode, see
-     * {@link LegacyBrowserSearchSettingsCodec#migrateEngineList}). Older documents decode cleanly:
+     * {@link LegacyBrowserSearchSettingsCodec#migrateEngineList}); v8 = priority groups with the "enough
+     * results" setting {@code navigation.minimumUsableResults} (a document without it takes the central
+     * default). Older documents decode cleanly:
      * missing keys fall back to {@link LegacyBrowserSearchDefaults}, which is the migration.
      */
-    public static final int CURRENT_SCHEMA_VERSION = 7;
+    public static final int CURRENT_SCHEMA_VERSION = 8;
 
     public final int schemaVersion;
     public final long settingsRevision;
