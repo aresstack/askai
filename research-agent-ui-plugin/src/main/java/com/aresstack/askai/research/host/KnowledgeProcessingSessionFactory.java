@@ -71,6 +71,9 @@ final class KnowledgeProcessingSessionFactory {
         final OutlineClusteringRun outlineRun;
         /** #28/#39.7: read-only per-source passage inspection over the active corpus. */
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader;
+        /** Plan PR 22: the session's embedding port (label paths are embedded as queries) and topic minimums. */
+        com.aresstack.askai.research.knowledge.EmbeddingPort embeddings;
+        KnowledgeProcessingSettings settings;
 
         KnowledgeSession(KnowledgeProcessingRunner worker,
                          com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
@@ -345,8 +348,11 @@ final class KnowledgeProcessingSessionFactory {
                 return projectionStore.load() != null;
             }
         };
-        return new KnowledgeSession(workerRunner, projection, projection, staleness,
+        KnowledgeSession session = new KnowledgeSession(workerRunner, projection, projection, staleness,
                 sharedTopics, corpusReader, outlineRun);
+        session.embeddings = embeddings;
+        session.settings = settings;
+        return session;
     }
 
     /** Wrap the diagnostics listener so a COMPLETED job NOTIFIES the UI (staleness re-check) — no rebuild. */
