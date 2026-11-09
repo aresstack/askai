@@ -29,27 +29,25 @@ public final class SearchServiceOutcome {
     private final int hits;
     private final int alreadyKnown;
     private final int dropped;
-    private final boolean engineRedirectBlocked;
     private final String pauseReason;
     private final long pausedUntil;
     private final List<String> diagnostics;
 
     SearchServiceOutcome(Status status, List<PageCandidate> queued, int hits, int alreadyKnown, int dropped,
-                         boolean engineRedirectBlocked, String pauseReason, long pausedUntil,
+                         String pauseReason, long pausedUntil,
                          List<String> diagnostics) {
         this.status = status;
         this.queued = Collections.unmodifiableList(new ArrayList<PageCandidate>(queued));
         this.hits = hits;
         this.alreadyKnown = alreadyKnown;
         this.dropped = dropped;
-        this.engineRedirectBlocked = engineRedirectBlocked;
         this.pauseReason = pauseReason == null ? "" : pauseReason;
         this.pausedUntil = pausedUntil;
         this.diagnostics = Collections.unmodifiableList(new ArrayList<String>(diagnostics));
     }
 
     static SearchServiceOutcome of(Status status, String pauseReason, long pausedUntil, List<String> diagnostics) {
-        return new SearchServiceOutcome(status, Collections.<PageCandidate>emptyList(), 0, 0, 0, false,
+        return new SearchServiceOutcome(status, Collections.<PageCandidate>emptyList(), 0, 0, 0,
                 pauseReason, pausedUntil, diagnostics);
     }
 
@@ -72,14 +70,9 @@ public final class SearchServiceOutcome {
         return alreadyKnown;
     }
 
-    /** Hits dropped: unresolvable engine wrappers, engine addresses, duplicates within the batch, no URL. */
+    /** Hits dropped: engine wrappers without a resolver, duplicates within the batch, no URL. */
     public int getDropped() {
         return dropped;
-    }
-
-    /** The engine answered a redirect hop with a challenge; the rest of the batch was dropped. */
-    public boolean isEngineRedirectBlocked() {
-        return engineRedirectBlocked;
     }
 
     /** Why the engines are paused (empty when they are not). */

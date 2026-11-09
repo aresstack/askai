@@ -26,10 +26,10 @@ import java.util.concurrent.locks.ReentrantLock;
  * The ONE path from the research team to a search engine, one instance per AskAI JVM. It takes search jobs from any
  * chat, runs them one at a time in arrival order over the configured {@link SearchStrategy} (the search browser or
  * an API provider), keeps the engine spacing and backs off exponentially after a challenge
- * ({@link EngineThrottle}), resolves the engine's redirect wrappers right after the SERP in one batch through the
- * {@link OpaqueRedirectResolver} (the search browser, on the same FIFO), and puts every new, resolved page on the
- * job's {@link PageCandidateQueue}. Workers therefore never ask the search browser for anything and never see an
- * engine address.
+ * ({@link EngineThrottle}) and puts every new page on the job's {@link PageCandidateQueue}. Engine redirect wrappers
+ * (Google {@code /goto}) stay unresolved in the queue and are resolved lazily, one at a time, when a worker takes the
+ * page ({@link #resolveForVisit}), in the search browser and under the same spacing. Workers never open an engine
+ * address themselves.
  *
  * <p>Deduplication: a query (lower-case, whitespace collapsed) runs once per project; a page whose normalised URL is
  * already in the project's {@link UrlRegistry} (visited by the chat browser or queued before) is not queued again.
@@ -140,7 +140,6 @@ public final class SearchService {
                 return SearchServiceOutcome.of(SearchServiceOutcome.Status.TECHNICAL_PROBLEM, "", 0, diagnostics);
             }
             diagnostics.addAll(result.diagnostics);
-            providerHosts.addAll(result.providerHosts);
             if (result.candidates.isEmpty() && !result.challenges.isEmpty()) {
                 throttle.recordBlock("challenge on " + result.challenges.get(0).family);
                 diagnostics.add("engine challenge; engines paused until " + throttle.pausedUntil());
@@ -151,81 +150,111 @@ public final class SearchService {
                 return SearchServiceOutcome.of(SearchServiceOutcome.Status.TECHNICAL_PROBLEM, "", 0, diagnostics);
             }
             throttle.recordSuccess();
-            SearchServiceOutcome outcome = queueHits(job, result, diagnostics);
-            if (!outcome.isEngineRedirectBlocked()) {
-                markRan(job.getProjectKey(), key); // a blocked or interrupted batch stays retryable
-            }
-            return outcome;
+            markRan(job.getProjectKey(), key);
+            return queueHits(job, result, diagnostics);
         } finally {
             engine.unlock();
         }
     }
 
-    /** The redirect batch and the hand-off to the queue; runs under the engine lock (same FIFO as the SERPs). */
-    private SearchServiceOutcome queueHits(SearchJob job, InitialSearchResult result, List<String> diagnostics)
-            throws InterruptedException {
-        Set<String> transit = new HashSet<String>();
-        for (String host : result.providerHosts) {
-            transit.add(bareHost(host));
-        }
+    /**
+     * The hand-off to the queue; runs under the engine lock. Engine redirect wrappers (Google {@code /goto}) are
+     * NOT resolved here: resolving a whole SERP at once is exactly the burst that got AskAI blocked. They are queued
+     * unresolved and resolved one by one, only when a worker takes the page ({@link #resolveForVisit}).
+     */
+    private SearchServiceOutcome queueHits(SearchJob job, InitialSearchResult result, List<String> diagnostics) {
+        Set<String> transit = transitHosts(result.providerHosts);
         List<PageCandidate> queued = new ArrayList<PageCandidate>();
         Set<String> seen = new HashSet<String>();
         int known = 0;
         int dropped = 0;
-        boolean redirectBlocked = false;
         for (SearchResultCandidate hit : result.candidates) {
-            if (redirectBlocked) {
-                dropped++;
-                continue;
-            }
             String url = hit.hasVerifiedTarget() ? hit.resolvedTargetUrl : hit.navigationUrl();
             if (url == null || url.trim().isEmpty()) {
                 dropped++;
                 continue;
             }
-            if (isEngineAddress(url, transit)) {
-                if (redirectResolver == null) {
-                    dropped++;
-                    continue;
-                }
-                throttle.awaitSlot();
-                OpaqueRedirectResolver.Resolution hop = redirectResolver.resolve(url);
-                if (hop.getStatus() == OpaqueRedirectResolver.Resolution.Status.BLOCKED) {
-                    redirectBlocked = true;
-                    throttle.recordBlock("challenge on redirect hop" + (hop.getDetail().isEmpty() ? ""
-                            : ": " + hop.getDetail()));
-                    diagnostics.add("engine blocked a redirect hop; rest of the batch dropped");
-                    dropped++;
-                    continue;
-                }
-                if (hop.getStatus() != OpaqueRedirectResolver.Resolution.Status.RESOLVED
-                        || isEngineAddress(hop.getTargetUrl(), transit)) {
-                    dropped++;
-                    continue;
-                }
-                url = hop.getTargetUrl();
-            }
-            String normalized = SearchUrlNormalizer.normalize(url);
-            if (!seen.add(normalized)) {
+            boolean wrapped = isEngineAddress(url, transit);
+            if (wrapped && redirectResolver == null) {
                 dropped++;
                 continue;
             }
-            if (!job.getRegistry().register(normalized, ORIGIN)) {
+            String key = wrapped ? url.trim() : SearchUrlNormalizer.normalize(url);
+            if (!seen.add(key)) {
+                dropped++;
+                continue;
+            }
+            if (!job.getRegistry().register(key, ORIGIN)) {
                 known++;
                 continue;
             }
-            PageCandidate page = new PageCandidate(normalized, hit.title, hit.snippet, job.getQuery(),
-                    hit.engineHost, hit.originalRank);
+            PageCandidate page = new PageCandidate(key, hit.title, hit.snippet, job.getQuery(), hit.engineHost,
+                    hit.originalRank, wrapped);
             job.getQueue().offer(page);
             queued.add(page);
         }
-        SearchServiceOutcome.Status status = queued.isEmpty()
-                ? (redirectBlocked ? SearchServiceOutcome.Status.ENGINE_BLOCKED
-                : SearchServiceOutcome.Status.NOTHING_NEW)
-                : SearchServiceOutcome.Status.QUEUED;
-        boolean paused = throttle.isPaused();
-        return new SearchServiceOutcome(status, queued, result.candidates.size(), known, dropped, redirectBlocked,
-                paused ? throttle.pauseReason() : "", paused ? throttle.pausedUntil() : 0L, diagnostics);
+        markTransit(transit);
+        return new SearchServiceOutcome(queued.isEmpty() ? SearchServiceOutcome.Status.NOTHING_NEW
+                : SearchServiceOutcome.Status.QUEUED, queued, result.candidates.size(), known, dropped,
+                "", 0L, diagnostics);
+    }
+
+    /**
+     * Resolve ONE queued page right before a worker visits it. A plain page comes back READY unchanged; an engine
+     * wrapper is resolved in the search browser, on the same FIFO and with the same spacing and backoff as the
+     * searches, so hops never come in bursts. The resolved address is registered; one that is already known comes
+     * back ALREADY_KNOWN.
+     */
+    public PageResolution resolveForVisit(PageCandidate page, UrlRegistry registry) throws InterruptedException {
+        if (!page.isWrapped()) {
+            return new PageResolution(PageResolution.Status.READY, page, "");
+        }
+        if (redirectResolver == null) {
+            return new PageResolution(PageResolution.Status.UNRESOLVED, page, "no redirect resolver");
+        }
+        engine.lockInterruptibly();
+        try {
+            if (throttle.isPaused()) {
+                return new PageResolution(PageResolution.Status.ENGINE_PAUSED, page, throttle.pauseReason());
+            }
+            throttle.awaitSlot();
+            OpaqueRedirectResolver.Resolution hop = redirectResolver.resolve(page.getUrl());
+            if (hop.getStatus() == OpaqueRedirectResolver.Resolution.Status.BLOCKED) {
+                throttle.recordBlock("challenge on redirect hop" + (hop.getDetail().isEmpty() ? ""
+                        : ": " + hop.getDetail()));
+                return new PageResolution(PageResolution.Status.ENGINE_BLOCKED, page, throttle.pauseReason());
+            }
+            if (hop.getStatus() != OpaqueRedirectResolver.Resolution.Status.RESOLVED
+                    || isEngineAddress(hop.getTargetUrl(), transitSnapshot())) {
+                return new PageResolution(PageResolution.Status.UNRESOLVED, page, hop.getDetail());
+            }
+            throttle.recordSuccess();
+            String target = SearchUrlNormalizer.normalize(hop.getTargetUrl());
+            if (registry != null && !registry.register(target, ORIGIN)) {
+                return new PageResolution(PageResolution.Status.ALREADY_KNOWN, page.resolvedTo(target), "");
+            }
+            return new PageResolution(PageResolution.Status.READY, page.resolvedTo(target), "");
+        } finally {
+            engine.unlock();
+        }
+    }
+
+    private static Set<String> transitHosts(List<String> hosts) {
+        Set<String> transit = new HashSet<String>();
+        for (String host : hosts) {
+            transit.add(bareHost(host));
+        }
+        return transit;
+    }
+
+    private void markTransit(Set<String> transit) {
+        providerHosts.addAll(transit);
+    }
+
+    private Set<String> transitSnapshot() {
+        synchronized (providerHosts) {
+            return new HashSet<String>(providerHosts);
+        }
     }
 
     private static boolean isEngineAddress(String url, Set<String> transit) {

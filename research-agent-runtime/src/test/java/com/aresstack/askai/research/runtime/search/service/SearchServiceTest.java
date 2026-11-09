@@ -149,49 +149,68 @@ public class SearchServiceTest {
     }
 
     @Test
-    public void engineWrappersAreResolvedInTheBatchAndNeverQueued() throws Exception {
+    public void wrappersAreQueuedUnresolvedAndNoHopRunsWithTheSearch() throws Exception {
         final List<String> hops = new ArrayList<String>();
         OpaqueRedirectResolver resolver = new OpaqueRedirectResolver() {
             public Resolution resolve(String wrapperUrl) {
                 hops.add(wrapperUrl);
-                return wrapperUrl.contains("loop") ? Resolution.resolved("https://www.google.com/search?q=x")
-                        : Resolution.resolved("https://study.org/paper");
+                return Resolution.resolved("https://study.org/paper");
             }
         };
         strategy.answers.add(results(gotoHit("https://www.google.com/goto?url=abc"),
-                gotoHit("https://www.google.com/goto?url=loop"), hit("https://www.bing.com/ck/a?u=1")));
+                gotoHit("https://www.google.com/goto?url=abc"), hit("https://direct.org/a")));
 
         SearchServiceOutcome outcome = service(resolver).search(job("p1", "q"), null);
 
-        assertEquals(3, hops.size());
-        assertEquals(1, outcome.getQueued().size());
-        assertEquals("https://study.org/paper", outcome.getQueued().get(0).getUrl());
-        assertEquals(2, outcome.getDropped()); // the hop back to the engine, and the bing hit resolving to a duplicate
+        assertTrue("no hop at search time", hops.isEmpty());
+        assertEquals(2, outcome.getQueued().size());
+        assertTrue(outcome.getQueued().get(0).isWrapped());
+        assertFalse(outcome.getQueued().get(1).isWrapped());
+        assertEquals(1, outcome.getDropped());
     }
 
     @Test
-    public void blockedHopEndsTheBatchTypedAndPausesTheEngines() throws Exception {
+    public void wrapperIsResolvedLazilyOneAtATimeWithSpacing() throws Exception {
+        final List<String> hops = new ArrayList<String>();
+        OpaqueRedirectResolver resolver = new OpaqueRedirectResolver() {
+            public Resolution resolve(String wrapperUrl) {
+                hops.add(wrapperUrl);
+                return wrapperUrl.endsWith("loop") ? Resolution.resolved("https://www.google.com/search?q=x")
+                        : Resolution.resolved("https://study.org/paper?utm_source=g");
+            }
+        };
+        strategy.answers.add(results(gotoHit("https://www.google.com/goto?url=1"),
+                gotoHit("https://www.google.com/goto?url=2"), gotoHit("https://www.google.com/goto?url=loop")));
+        SearchService service = service(resolver);
+        service.search(job("p1", "q"), null);
+
+        PageResolution first = service.resolveForVisit(queue.poll(), registry);
+        assertEquals(PageResolution.Status.READY, first.getStatus());
+        assertEquals("https://study.org/paper", first.getPage().getUrl());
+        assertFalse(first.getPage().isWrapped());
+        assertEquals(1, hops.size());
+        assertEquals(PageResolution.Status.ALREADY_KNOWN, service.resolveForVisit(queue.poll(), registry).getStatus());
+        assertEquals(PageResolution.Status.UNRESOLVED, service.resolveForVisit(queue.poll(), registry).getStatus());
+        assertEquals(Arrays.asList(4_000L, 4_000L, 4_000L), clock.sleeps);
+    }
+
+    @Test
+    public void blockedHopPausesTheEnginesAndThePageCanGoBack() throws Exception {
         OpaqueRedirectResolver resolver = new OpaqueRedirectResolver() {
             public Resolution resolve(String wrapperUrl) {
                 return Resolution.blocked("sorry page");
             }
         };
         strategy.answers.add(results(gotoHit("https://www.google.com/goto?url=1"),
-                gotoHit("https://www.google.com/goto?url=2"), hit("https://direct.org/a")));
+                gotoHit("https://www.google.com/goto?url=2")));
         SearchService service = service(resolver);
+        service.search(job("p1", "q"), null);
 
-        SearchServiceOutcome outcome = service.search(job("p1", "q"), null);
-
-        assertTrue(outcome.isEngineRedirectBlocked());
-        assertEquals(SearchServiceOutcome.Status.ENGINE_BLOCKED, outcome.getStatus());
-        assertEquals(3, outcome.getDropped());
-        assertTrue(outcome.getPauseReason().contains("redirect hop"));
+        PageResolution blocked = service.resolveForVisit(queue.poll(), registry);
+        assertEquals(PageResolution.Status.ENGINE_BLOCKED, blocked.getStatus());
+        assertTrue(blocked.getDetail().contains("redirect hop"));
+        assertEquals(PageResolution.Status.ENGINE_PAUSED, service.resolveForVisit(queue.poll(), registry).getStatus());
         assertEquals(SearchServiceOutcome.Status.ENGINE_PAUSED, service.search(job("p1", "other"), null).getStatus());
-
-        clock.now = outcome.getPausedUntil();
-        strategy.answers.add(results(hit("https://direct.org/a")));
-        assertEquals("blocked query stays retryable", SearchServiceOutcome.Status.QUEUED,
-                service.search(job("p1", "q"), null).getStatus());
     }
 
     @Test
