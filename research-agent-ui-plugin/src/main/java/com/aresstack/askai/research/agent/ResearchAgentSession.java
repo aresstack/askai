@@ -753,6 +753,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             ownedScheduler.shutdown();
         }
         scopeCheckExecutor.shutdownNow();
+        outlineGenerationExecutor.shutdownNow();
         com.aresstack.askai.research.scope.BackendScopeProbeGenerator waitingGenerator =
                 activeProbeGenerator;
         if (waitingGenerator != null) {
@@ -2105,6 +2106,87 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         return engine.isCommitted(transitionId);
                     }
                 });
+    }
+
+    /** Plan PR 22: the outline generation of this session, built on first use; {@code null} without knowledge. */
+    private com.aresstack.askai.research.host.OutlineGeneration outlineGeneration;
+    private final java.util.concurrent.ExecutorService outlineGenerationExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(new java.util.concurrent.ThreadFactory() {
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "research-outline-generation");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
+
+    private synchronized com.aresstack.askai.research.host.OutlineGeneration outlineGeneration() {
+        final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
+        if (resources == null || resources.isClosed() || resources.corpusReader() == null
+                || resources.outlineEmbeddings() == null || resources.outlineRun() == null) {
+            return null;
+        }
+        if (outlineGeneration == null) {
+            com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledge =
+                    resources.outlineKnowledgeSettings();
+            outlineGeneration = new com.aresstack.askai.research.host.OutlineGeneration(
+                    new com.aresstack.askai.research.host.OutlineGeneration.Inputs() {
+                        public com.aresstack.askai.research.outline.OutlineWorkspace workspace() {
+                            return outlineWorkspace();
+                        }
+
+                        public com.aresstack.askai.research.book.FrozenConcept frozenConcept() throws Exception {
+                            return ResearchAgentSession.this.frozenConcept();
+                        }
+
+                        public com.aresstack.askai.research.store.FileConceptStore conceptStore() {
+                            com.aresstack.askai.research.concept.ConceptBranchService service =
+                                    conceptBranchService();
+                            return service == null ? null : service.store();
+                        }
+
+                        public java.util.Collection<String> pinnedSourceIds() throws Exception {
+                            java.util.List<String> ids = new java.util.ArrayList<String>();
+                            com.aresstack.askai.research.book.BookManifest manifest = bookManifest;
+                            if (manifest == null) {
+                                return ids;
+                            }
+                            final com.aresstack.askai.research.transition.TransitionEngine engine =
+                                    resources.transitions();
+                            com.aresstack.askai.research.book.SourcesPin pin = manifest.validSourcesPin(
+                                    new com.aresstack.askai.research.book.BookManifest.CommitCheck() {
+                                        public boolean isCommitted(String transitionId) {
+                                            return engine.isCommitted(transitionId);
+                                        }
+                                    });
+                            if (pin != null) {
+                                for (com.aresstack.askai.research.book.SourcesPin.Entry entry : pin.getSources()) {
+                                    ids.add(entry.getSourceId());
+                                }
+                            }
+                            return ids;
+                        }
+
+                        public java.util.Collection<com.aresstack.askai.research.sources.ResearchSourceRecord>
+                                sources() {
+                            return resources.getRepository().find(
+                                    com.aresstack.askai.research.sources.SourceQuery.all());
+                        }
+
+                        public long now() {
+                            return System.currentTimeMillis();
+                        }
+                    },
+                    resources.corpusReader(), resources.outlineEmbeddings(),
+                    new com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings(
+                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
+                                    .DEFAULT_THRESHOLD,
+                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
+                                    .DEFAULT_MARGIN,
+                            knowledge == null ? 3 : knowledge.minimumPassagesPerTopic,
+                            knowledge == null ? 2 : knowledge.minimumDistinctSourcesPerTopic),
+                    resources.outlineRun(), outlineGenerationExecutor);
+        }
+        return outlineGeneration;
     }
 
     /** The session's outline workspace (plan PR 21), or {@code null} in fake mode. */
@@ -3798,18 +3880,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
 
         public ActionOutcome generateOutline() {
-            if (outlineStale() == null) {
+            // Plan PR 22: the button, executeCommand and the bot's run_command all run the concept-seeded
+            // generation; it refuses itself outside outline/running and while another outline job runs.
+            com.aresstack.askai.research.host.OutlineGeneration generation = outlineGeneration();
+            if (generation == null) {
                 return ActionOutcome.rejected(
                         "knowledge capability unavailable (no embedding world for this session)");
             }
-            if (!outlineClusteringAllowed()) {
-                return ActionOutcome.rejected("topics are clustered only on request while the Outline phase "
-                        + "is running");
-            }
-            return requestOutlineRebuild()
-                    ? ActionOutcome.accepted("topic discovery + outline rebuild triggered (debounced)")
-                    : ActionOutcome.rejected(
-                            "knowledge capability unavailable (no embedding world for this session)");
+            String refusal = generation.start();
+            return refusal == null
+                    ? ActionOutcome.accepted("outline generation started (progress in the outline drawer)")
+                    : ActionOutcome.rejected(refusal);
         }
     };
 

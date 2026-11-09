@@ -41,11 +41,17 @@ public final class OutlineWorkspace {
     };
 
     private final FileOutlineStore store;
+    private final OutlineJobGuard jobs = new OutlineJobGuard();
     private volatile WriteGuard guard = OPEN;
     private volatile ChangeListener listener = NOBODY;
 
     public OutlineWorkspace(FileOutlineStore store) {
         this.store = store;
+    }
+
+    /** The session's one outline job guard (plan PR 22): generation and regeneration exclude each other. */
+    public OutlineJobGuard jobs() {
+        return jobs;
     }
 
     public FileOutlineStore store() {
