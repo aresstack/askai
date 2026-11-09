@@ -13,7 +13,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/**
+/** Test fixture (plan PR 22 removed the unwired production builder; the legacy vertical slice still needs proposals).
+ *
  * Concept + outline PROPOSALS from evidence: confirmed brief + topic clusters + representative passages
  * + the brief's questions — never straight from a model prompt. Questions are assigned to the topic with
  * the highest token overlap of its representative text; questions no topic covers become IDENTIFIED GAPS

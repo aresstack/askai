@@ -56,9 +56,21 @@ public final class OutlineBlock {
             for (OutlineSection section : chapter.getSections()) {
                 sb.append("### ").append(chapter.getOrder()).append('.').append(section.getOrder()).append(' ')
                         .append(section.getTitle().trim()).append('\n');
+                if (section.isThin()) {
+                    sb.append("\n> Thin: fewer than two sources. Search for \"").append(section.getTitle().trim())
+                            .append("\".\n");
+                }
                 appendBrief(section, sb);
             }
             sb.append('\n');
+        }
+        if (!outline.getCandidates().isEmpty()) {
+            sb.append("## Candidates (not in the outline)\n\n");
+            for (OutlineCandidate candidate : outline.getCandidates()) {
+                sb.append("- ").append(candidate.getSuggestedTitle().trim().isEmpty() ? candidate.getClusterId()
+                        : candidate.getSuggestedTitle().trim()).append(" (").append(candidate.getPassageIds().size())
+                        .append(" passages, ").append(candidate.getSourceCount()).append(" sources)\n");
+            }
         }
         return sb.toString();
     }

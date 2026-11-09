@@ -19,12 +19,13 @@ import java.util.Set;
  * captures take turns, one passage per turn, captures of ⭐-marked sources first in each round, the rest in
  * capture-id order. The result keeps the reader's passage-id order, so downstream stays deterministic.
  */
-final class CorpusLimit {
+public final class CorpusLimit {
 
     private CorpusLimit() {
     }
 
-    static ActiveKnowledgeCorpusReader.Corpus apply(ActiveKnowledgeCorpusReader.Corpus corpus, int limit) {
+    /** The corpus cut to {@code limit} passages (PR 20); also used by the outline generation (PR 22). */
+    public static ActiveKnowledgeCorpusReader.Corpus apply(ActiveKnowledgeCorpusReader.Corpus corpus, int limit) {
         List<Passage> passages = corpus.getPassages();
         if (passages.size() <= limit) {
             return corpus;
@@ -87,7 +88,7 @@ final class CorpusLimit {
                 }
             }
         }
-        return new ActiveKnowledgeCorpusReader.Corpus(keptPassages, keptVectors, keptStarred);
+        return new ActiveKnowledgeCorpusReader.Corpus(keptPassages, keptVectors, keptStarred, corpus.sourceIds());
     }
 
     private static List<Passage> rankByTypicality(List<Passage> capture,
