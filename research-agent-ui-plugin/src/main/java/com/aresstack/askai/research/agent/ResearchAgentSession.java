@@ -2352,22 +2352,28 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return discovery;
     }
 
+    /** The fence anchors embedded as documents (the passages' world); the gate keeps its raw ones apart. */
+    private static final String TOPIC_FENCE_VECTORS_FILE = "topic-fence-anchor-vectors.json";
+
     /** The discovery the session's analysis inputs are bound to (a re-attached knowledge pipeline is bound again). */
     private com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery analysisBoundTo;
 
     /**
      * D6: the search fence for the topic analysis: the SAME anchors (concept as IN, blacklist as OUT via
-     * {@code ConceptAnchorProjection}), anchor vector index, embedder and thresholds as the search scope gate
-     * ({@link #searchScopeBeginLine()}); {@code null} without anchors or when they cannot be read (topics are then
-     * UNCLASSIFIED, never guessed).
+     * {@code ConceptAnchorProjection}) and thresholds as the search scope gate ({@link #searchScopeBeginLine()}),
+     * embedded in the passages' vector world (document role of the knowledge embedding, its own cached index next to
+     * the gate's raw one) so a topic centroid is comparable; {@code null} without anchors or when they cannot be read
+     * (topics are then UNCLASSIFIED, never guessed).
      */
     private com.aresstack.askai.research.knowledge.topic.ScopeFence currentScopeFence() {
         com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();
         com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
         if (coordinator == null || !coordinator.isUsable() || resources == null || resources.isClosed()
-                || resources.getEmbeddingDescriptor() == null) {
+                || resources.outlineEmbeddings() == null || resources.writerEmbeddingFingerprint() == null) {
             return null;
         }
+        final com.aresstack.askai.research.knowledge.EmbeddingPort embeddings = resources.outlineEmbeddings();
+        String documentWorld = resources.writerEmbeddingFingerprint();
         com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = coordinator.current();
         com.aresstack.askai.research.concept.ConceptBranchService conceptService = conceptBranchService();
         java.util.List<com.aresstack.askai.research.domain.scope.ScopeAnchor> fenceAnchors =
@@ -2382,18 +2388,26 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         for (com.aresstack.askai.research.domain.scope.ScopeAnchor anchor : fenceAnchors) {
             labels.put(anchor.getAnchorId(), anchor.getSemanticText());
         }
-        com.aresstack.askai.research.scope.EmbeddingSnapshotSweepEmbedder embedder =
-                new com.aresstack.askai.research.scope.EmbeddingSnapshotSweepEmbedder(
-                        resources.getEmbeddingDescriptor());
+        com.aresstack.askai.research.store.ScopeAnchorVectorIndex.AnchorEmbedder documentEmbedder =
+                new com.aresstack.askai.research.store.ScopeAnchorVectorIndex.AnchorEmbedder() {
+                    public java.util.List<float[]> embed(java.util.List<String> semanticTexts) {
+                        java.util.List<float[]> values = new java.util.ArrayList<float[]>();
+                        for (com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector vector
+                                : embeddings.embedDocuments(semanticTexts)) {
+                            values.add(vector.getValues());
+                        }
+                        return values;
+                    }
+                };
         try {
             return new com.aresstack.askai.research.knowledge.topic.ScopeFence(
                     new com.aresstack.askai.research.store.ScopeAnchorVectorIndex(new java.io.File(
-                            resources.getProjectContext().getProjectDirectory(), "scope-anchor-vectors.json"))
-                            .vectorsFor(fenceAnchors, embedder.modelFingerprint(), embedder),
+                            resources.getProjectContext().getProjectDirectory(), TOPIC_FENCE_VECTORS_FILE))
+                            .vectorsFor(fenceAnchors, documentWorld, documentEmbedder),
                     labels,
                     com.aresstack.askai.research.host.ResearchRuntimeSettings
                             .loadScopeSweepConfiguration(getHostStateStore()).fenceThresholds,
-                    draft.getRevision());
+                    draft.getRevision(), documentWorld);
         } catch (java.io.IOException | RuntimeException unreadable) {
             technicalLog("topic-analysis fence unavailable: " + unreadable.getMessage());
             return null;
