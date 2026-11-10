@@ -64,9 +64,8 @@ public final class ResearchSourcesView extends JPanel {
             java.awt.Component component = super.prepareRenderer(renderer, row, column);
             if (!isRowSelected(row)) {
                 java.awt.Color tint = accessTint(tableModel.accessStateAt(convertRowIndexToModel(row)));
-                if (tint != null) {
-                    component.setBackground(tint);
-                }
+                // Renderers are reused: an unmarked row must get the normal background back explicitly.
+                component.setBackground(tint != null ? tint : getBackground());
             }
             return component;
         }

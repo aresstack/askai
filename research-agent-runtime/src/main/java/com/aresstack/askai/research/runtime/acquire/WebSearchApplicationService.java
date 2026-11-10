@@ -1373,9 +1373,12 @@ public final class WebSearchApplicationService {
                     listener.status("skipping interactive-challenge page (wait-for-user disabled): " + url);
                     return null; // leave parked
                 }
-                listener.attention("CAPTCHA", family, url, false);
+                // Report the website that SHOWS the check (after redirects), where the source is recorded.
+                String challengedUrl = pr.url == null || pr.url.trim().isEmpty() ? url : pr.url.trim();
+                String challengedFamily = familyOf(challengedUrl);
+                listener.attention("CAPTCHA", challengedFamily, challengedUrl, false);
                 // a solvable challenge has no business timeout: cooperative wait
-                return resolvedIfRead("CAPTCHA", family, url, waitForUserThenRead(url));
+                return resolvedIfRead("CAPTCHA", challengedFamily, challengedUrl, waitForUserThenRead(url));
             case ACCESS_BLOCKED:
                 // TERMINAL block: nothing to solve — never wait for the user, never accept. Skip this URL and
                 // remember the domain so no other candidate on it is re-opened this run.
