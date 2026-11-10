@@ -46,6 +46,7 @@ public final class QueryPlanWire {
     static final String NODES = "nodes";
     static final String CYCLE = "cycle";
     static final String DOMAINS_FOUND = "domains_found";
+    static final String WORKER_NOTES = "worker_notes";
 
     private static JsonArray array(List<String> values) {
         JsonArray array = new JsonArray();
@@ -98,6 +99,7 @@ public final class QueryPlanWire {
             n.addProperty("parent_id", node.getParentId());
             n.addProperty("base_query", node.getBaseQuery());
             n.add(DOMAINS_FOUND, array(node.getFoundDomains()));
+            n.add(WORKER_NOTES, array(node.getWorkerNotes()));
             nodes.add(n);
         }
         root.add(NODES, nodes);
@@ -115,7 +117,8 @@ public final class QueryPlanWire {
             for (JsonElement item : array.getAsJsonArray()) {
                 JsonObject n = item.getAsJsonObject();
                 nodes.add(new ConceptQueryPlan.Node(text(n, "id"), text(n, "label"), strings(n, "path"),
-                        text(n, "parent_id"), text(n, "base_query"), strings(n, DOMAINS_FOUND)));
+                        text(n, "parent_id"), text(n, "base_query"), strings(n, DOMAINS_FOUND),
+                        strings(n, WORKER_NOTES)));
             }
             JsonElement max = root.get(MAX);
             JsonElement cycle = root.get(CYCLE);

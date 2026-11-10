@@ -57,4 +57,35 @@ public class PlannedManualSearchWireRoundTripTest {
         assertEquals("2", com.aresstack.askai.research.agentwire.ResearchAgentEventMapper.mapMessage("p", plain)
                 .build().getPublicMessage());
     }
+
+    @Test
+    public void aTeamQueryCarriesThePageWorkersBrief() {
+        String envelope = com.aresstack.askai.research.search.ResearchServiceCommandWire.teamSearch("req-5",
+                "Hitzestress Bau Smartwatch", "de", "reranker", 9, 3, "Hitze & Gesundheit", "Wearables auf Baustellen",
+                2, 12000, 512);
+        ResearchServiceCommand command = ResearchServiceCommandWire.parse(envelope);
+        assertTrue(command.isTeam());
+        assertEquals("Hitzestress Bau Smartwatch", command.getQuery());
+        assertEquals("Hitze & Gesundheit", command.getTeamNode());
+        assertEquals("Wearables auf Baustellen", command.getTeamBook());
+        assertEquals(2, command.getTeamFollow());
+        assertEquals(12000, command.getTeamPageCharacters());
+        assertEquals(512, command.getTeamAnswerTokens());
+        assertEquals(3, command.getSourceCap());
+        ResearchServiceCommand plain = ResearchServiceCommandWire.parse(
+                com.aresstack.askai.research.search.ResearchServiceCommandWire.manualSearch("req-6", "q x", "en",
+                        "bm25", 0, 0));
+        assertEquals(false, plain.isTeam());
+        assertEquals(0, plain.getTeamAnswerTokens());
+    }
+
+    @Test
+    public void aPageWorkerReportReachesTheHostAsATeamNote() {
+        String line = ResearchRunWire.manualSearchTeamNote("req-7", "worker 2: search for DGUV Regel 112-198");
+        com.aresstack.askai.research.backend.ResearchBackendEvent event =
+                com.aresstack.askai.research.agentwire.ResearchAgentEventMapper.mapMessage("p", line).build();
+        assertEquals("team_note", event.getTitle());
+        assertEquals("worker 2: search for DGUV Regel 112-198", event.getText());
+        assertEquals("req-7", event.getTechnicalDetail());
+    }
 }

@@ -1825,6 +1825,24 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         return h.getRequestId();
                     }
 
+                    public String searchAsTeam(String query, String language, String ranking, int visitLimit,
+                                               int sourceCap, String nodeLabel) {
+                        // plan T5: the same search through the one web search tool; the runtime reads its pages
+                        // in a worker browser of their own, beside the other planned queries
+                        com.aresstack.askai.research.search.ManualWebSearchHandle h = manualWebSearchPort.search(
+                                new com.aresstack.askai.research.search.ManualWebSearchRequest(query,
+                                        ResearchLanguage.fromCode(language), ranking, visitLimit, sourceCap)
+                                        .asTeam(nodeLabel, bookTitleForTeam(),
+                                                com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamFollowLinks(hostStateStore),
+                                                com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamPageCharacters(hostStateStore),
+                                                com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamAnswerTokens(hostStateStore)));
+                        running.set(h);
+                        return h.getRequestId();
+                    }
+
                     public void cancel() {
                         com.aresstack.askai.research.search.ManualWebSearchHandle h = running.get();
                         if (h != null) {
@@ -1907,6 +1925,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         planning.start();
                     }
                 });
+        // plan T5: the research team runs several planned queries at once (read at every dispatch)
+        searchPlanQueue.setTeam(new com.aresstack.askai.research.plan.SearchPlanQueue.Team() {
+            public int workers() {
+                return com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTeamWorkers(hostStateStore);
+            }
+        });
         // every source carries the phase and the plan entry of the search that found it
         final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
         com.aresstack.askai.research.capture.SourceAcceptanceService acceptance = resources.acceptance();
@@ -2165,6 +2189,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         // Q4: the plan starts after the approval (it waits for a running turn), and never before activation
         startSearchPlanWhenActive("search-plan started after the build");
+    }
+
+    /** Plan T5: the book title of the frozen concept for the page workers' brief; empty when none is frozen. */
+    private String bookTitleForTeam() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            return frozen == null ? "" : bookTitle(frozen);
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return "";
+        }
     }
 
     /**

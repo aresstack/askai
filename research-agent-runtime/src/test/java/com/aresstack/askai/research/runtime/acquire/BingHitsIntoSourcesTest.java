@@ -124,6 +124,53 @@ public class BingHitsIntoSourcesTest {
                 browser.opened.subList(0, acceptance.acceptedUrls.size()), acceptance.acceptedUrls);
     }
 
+    /**
+     * Plan T4: with a page worker as judge, every relevant page goes to it with its text; a page it calls not useful
+     * never becomes a source, the run takes the next hit instead.
+     */
+    @Test
+    public void aPageWorkerDecidesWhichOpenedPagesBecomeSources() throws Exception {
+        RenderedPageDocument serp = new Gson().fromJson(
+                new String(Files.readAllBytes(CAPTURES.resolve("answer-card-run-1.capture.json")),
+                        StandardCharsets.UTF_8), RenderedPageDocument.class);
+        ScriptedBrowser browser = new ScriptedBrowser(new SearchLayoutRepairTools(
+                LegacyBrowserSearchDefaults.create(), new CapturedBing(serp), () -> 0L));
+        RecordingAcceptance acceptance = new RecordingAcceptance();
+        ResearchRunBudget budget = ResearchRunBudget.defaults();
+        WebSearchApplicationService service = new WebSearchApplicationService(browser, budget,
+                new ResearchRunProgress(), new SteppingClock(), new RecordingListener(new ArrayList<String>()),
+                new AtomicBoolean(false),
+                new LegacyBrowserSearchStrategy(new McpLayoutRepairClient(browser, null), () -> 0L),
+                null, new Bm25CandidateReranker(),
+                new com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver(),
+                acceptance, 0L, 1L,
+                new WebSearchApplicationService.AcceptedSourceListener() {
+                    public ResearchStopReason onAccepted(
+                            WebSearchApplicationService.AcceptedSource source,
+                            WebSearchApplicationService.ToolBudget toolBudget) {
+                        acceptance.acceptedUrls.add(source.getPageUrl());
+                        return null;
+                    }
+                },
+                false, 2, 200);
+        service.setCompletionPolicy(new FixedAcceptedSourceCountPolicy(3));
+        final List<String> judged = new ArrayList<String>();
+        service.setPageJudge(new PageJudge() {
+            public Verdict judge(Page page) {
+                judged.add(page.getUrl());
+                assertEquals(QUERY, page.getQuery());
+                assertTrue(page.getText(), page.getText().startsWith("Java 21 is a long-term support"));
+                return new Verdict(judged.size() % 2 == 0, "every second page", Collections.<Integer>emptyList());
+            }
+        });
+
+        ResearchStopReason reason = service.execute(QUERY);
+
+        assertEquals(ResearchStopReason.SUFFICIENT_EVIDENCE, reason);
+        assertEquals(Arrays.asList(judged.get(1), judged.get(3), judged.get(5)), acceptance.acceptedUrls);
+        assertEquals(6, judged.size()); // the run stops at its target: no page beyond is judged
+    }
+
     /** The engine navigation of {@code web_search_prepare}, replaced by the captured Bing page. */
     private static final class CapturedBing implements RenderedPageSource {
         private final RenderedPageDocument serp;

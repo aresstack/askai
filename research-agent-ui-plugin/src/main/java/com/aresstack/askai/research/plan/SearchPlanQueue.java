@@ -13,15 +13,19 @@ import java.util.Map;
 import java.util.concurrent.Executor;
 
 /**
- * The host-side search plan queue (plan PR 14, D5). It runs one pending entry at a time through the manual search
- * port, with its own correlation ids, so every planned query gets the readiness judge, the SERP language and the
- * scope gate of the manual search, and the search provider of the Search tab. It sets no agent-turn flag and posts
- * no chat line per query.
+ * The host-side search plan queue (plan PR 14, D5). It runs pending entries through the manual search port, with
+ * its own correlation ids, so every planned query gets the readiness judge, the SERP language and the scope gate of
+ * the manual search, and the search provider of the Search tab. It sets no agent-turn flag and posts no chat line
+ * per query.
  * <ul>
- * <li>Two acquisitions never overlap: the queue starts an entry only while no other search or research turn runs
- * ({@link Busy}), and a typed search or research-loop turn started while an entry runs waits until that entry ends
- * ({@link #deferUntilEntryEnds}).</li>
- * <li>"Stop search plan" ({@link #stop}) cancels the current query, leaves it pending and stops the queue; "Run
+ * <li>The research team (plan T5, {@link Team}): with the team on, up to {@link Team#workers()} entries run at the
+ * same time, each in its own worker browser of the runtime; their searches still go one after another through the
+ * one web search tool, only the page work runs side by side. With the team off exactly one entry runs at a
+ * time.</li>
+ * <li>A typed search or a research turn never overlaps the plan: the queue starts an entry only while no other
+ * search or research turn runs ({@link Busy}), and a typed search or research-loop turn started while entries run
+ * waits until they have ended ({@link #deferUntilEntryEnds}); no new entry starts while one waits.</li>
+ * <li>"Stop search plan" ({@link #stop}) cancels the running queries, leaves them pending and stops the queue; "Run
  * search plan" ({@link #run}) continues. A phase change stops the queue through its registered job.</li>
  * <li>Priority entries run first, then the plan order. Every planned query of a node runs (the variants are the
  * node's angles; a node is covered only once they ran, {@link SearchPlanCoverage}); entries of nodes whose query
@@ -38,6 +42,10 @@ public final class SearchPlanQueue {
     static final String NODE_BUDGET = "The query budget of the node is spent";
     static final String STOPPED = "Stopped by the user";
     static final String KEYWORD_FALLBACK = "Ranked by keywords, reranker unavailable";
+    /** The sub-kind of a page worker's message to the orchestrator (plan T4). */
+    static final String TEAM_NOTE = "team_note";
+    /** The runtime's failure reason when a team query got no tab in the team's page browser. */
+    static final String NO_WORKER_BROWSER = "NO_WORKER_BROWSER";
 
     /** The ranking a planned query asks for until the retrieval benchmark of PR 04 fixes another one. */
     public static final String PLANNED_RANKING = "reranker";
@@ -47,6 +55,18 @@ public final class SearchPlanQueue {
         /** Start a search; @return its request id. */
         String search(String query, String language, String ranking, int visitLimit, int sourceCap);
 
+        /**
+         * Start a planned query of the research team (plan T5): the search goes through the one web search tool as
+         * always, its pages are read by a page worker in its own worker browser. {@code nodeLabel} is the concept
+         * node the query belongs to (the page worker's brief). A port without a team runs it like any search.
+         *
+         * @return its request id
+         */
+        default String searchAsTeam(String query, String language, String ranking, int visitLimit, int sourceCap,
+                                    String nodeLabel) {
+            return search(query, language, ranking, visitLimit, sourceCap);
+        }
+
         /** Cancel the running search. */
         void cancel();
     }
@@ -54,6 +74,22 @@ public final class SearchPlanQueue {
     /** The accepted sources of a search request. */
     public interface Sources extends SearchPlanCoverage.Domains {
         List<String> acceptedBy(String requestId);
+    }
+
+    /**
+     * The research team of the Sources phase (plan T5): how many planned queries may run at the same time, each in
+     * its own worker browser. {@code 0} switches the team off: one entry at a time in the chat browser, as before.
+     * Read at every dispatch, so a settings change applies to the next entry.
+     */
+    public interface Team {
+        int workers();
+
+        /** No team: one entry at a time. */
+        Team OFF = new Team() {
+            public int workers() {
+                return 0;
+            }
+        };
     }
 
     /** Whether another acquisition (a typed search, a review, a research turn) runs right now. */
@@ -267,10 +303,17 @@ public final class SearchPlanQueue {
     private final Clock clock;
     private final Replanner replanner;
     private volatile SearchPlanCoverage.Caps caps;
+    private volatile Team team = Team.OFF;
+    /** Set when the runtime had no worker browser for a team query: this run goes on one query at a time. */
+    private volatile boolean noWorkerBrowser;
 
     private boolean running;
-    private SearchPlanEntry current;
-    private boolean stopRequested;
+    /** The entries running right now, by request id, in start order (at most one with the team off). */
+    private final Map<String, SearchPlanEntry> runningEntries = new LinkedHashMap<String, SearchPlanEntry>();
+    /** The source cap each running entry was started with: the phase budget they may still use. */
+    private final Map<String, Integer> runningCaps = new HashMap<String, Integer>();
+    /** Running entries the user stopped: their end puts them back to pending instead of failing them. */
+    private final java.util.Set<String> stopping = new java.util.HashSet<String>();
     /** Planned queries that failed in a row since the last one that searched (see {@link Reason#SEARCH_FAILED}). */
     private int failedStreak;
     private String lastFailure = "";
@@ -307,6 +350,46 @@ public final class SearchPlanQueue {
         }
     }
 
+    /** The research team (plan T5); {@link Team#OFF} keeps one entry at a time. */
+    public void setTeam(Team team) {
+        this.team = team == null ? Team.OFF : team;
+    }
+
+    /** How many entries may run at once: the team's workers, at least one. */
+    private int slots() {
+        return teamOn() ? Math.max(1, team.workers()) : 1;
+    }
+
+    /** Whether the planned queries run as team work (each in its own worker browser). */
+    private boolean teamOn() {
+        return !noWorkerBrowser && team.workers() > 0;
+    }
+
+    /**
+     * Plan T4: the runtime's report that a page worker of a running query wrote to the orchestrator. The note is
+     * kept on the entry, so the next research cycle's planner reads what the team found and missed.
+     */
+    private void recordTeamNote(String requestId, String note) {
+        synchronized (this) {
+            SearchPlanEntry entry = requestId == null ? null : runningEntries.get(requestId);
+            if (entry == null || note == null || note.trim().isEmpty()) {
+                return;
+            }
+            try {
+                SearchPlanEntry noted = entry.withTeamNote(note, clock.now());
+                if (noted != entry) {
+                    store.save(noted);
+                    runningEntries.put(requestId, noted);
+                }
+            } catch (IOException | RuntimeException failed) {
+                System.err.println("[search-plan] team note of " + entry.getId() + " not recorded: "
+                        + failed.getMessage());
+                return;
+            }
+        }
+        listener.changed();
+    }
+
     public SearchPlanStore store() {
         return store;
     }
@@ -318,7 +401,12 @@ public final class SearchPlanQueue {
 
     /** Whether a planned query runs right now. */
     public synchronized boolean hasRunningEntry() {
-        return current != null;
+        return !runningEntries.isEmpty();
+    }
+
+    /** How many planned queries run right now (the research team runs several at once). */
+    public synchronized int runningEntryCount() {
+        return runningEntries.size();
     }
 
     /** Whether the queue waits for the planner of the next research cycle. */
@@ -350,23 +438,23 @@ public final class SearchPlanQueue {
                 return;
             }
             running = true;
-            stopRequested = false;
             failedStreak = 0; // a new run gets its own chances
+            noWorkerBrowser = false; // and tries the research team again
         }
         listener.changed();
         scheduleNext();
     }
 
-    /** "Stop search plan" (and any phase change): cancel the current query, leave it pending, stop the queue. */
+    /** "Stop search plan" (and any phase change): cancel the running queries, leave them pending, stop the queue. */
     public void stop() {
         boolean cancel;
         synchronized (this) {
-            if (!running && current == null) {
+            if (!running && runningEntries.isEmpty()) {
                 return;
             }
             running = false;
-            cancel = current != null;
-            stopRequested = cancel;
+            cancel = !runningEntries.isEmpty();
+            stopping.addAll(runningEntries.keySet());
             if (replanning) {
                 replanning = false;
                 replanGeneration++; // a planner answer that arrives later is dropped
@@ -381,7 +469,7 @@ public final class SearchPlanQueue {
     /** Another acquisition ended: the queue may start its next entry. */
     public void kick() {
         synchronized (this) {
-            if (current != null || (!running && deferred.isEmpty())) {
+            if ((!running && deferred.isEmpty()) || runningEntries.size() >= slots()) {
                 return;
             }
         }
@@ -389,12 +477,12 @@ public final class SearchPlanQueue {
     }
 
     /**
-     * Run {@code work} once the running entry ends, or right away when none runs.
+     * Run {@code work} once the running entries have ended, or right away when none runs.
      * @return {@code true} when it was deferred
      */
     public boolean deferUntilEntryEnds(Runnable work) {
         synchronized (this) {
-            if (current != null || !deferred.isEmpty()) {
+            if (!runningEntries.isEmpty() || !deferred.isEmpty()) {
                 deferred.add(work);
                 return true;
             }
@@ -405,16 +493,21 @@ public final class SearchPlanQueue {
 
     /** A lifecycle event of a planned query ({@code started|progress|completed|failed}). */
     public void onSearchEvent(String requestId, String subKind, String detail, boolean keywordFallback) {
+        if (TEAM_NOTE.equals(subKind)) {
+            recordTeamNote(requestId, detail);
+            return;
+        }
         if (!"completed".equals(subKind) && !"failed".equals(subKind)) {
             return;
         }
         Outcome paused = null;
         synchronized (this) {
-            if (current == null || !requestId.equals(current.getRequestId())) {
+            SearchPlanEntry ended = requestId == null ? null : runningEntries.get(requestId);
+            if (ended == null) {
                 return; // a late event of an entry that already ended
             }
             long now = clock.now();
-            SearchPlanEntry entry = current;
+            SearchPlanEntry entry = ended;
             try {
                 // sources accepted before a stop or a failure still count for coverage and caps
                 for (String sourceId : sources.acceptedBy(requestId)) {
@@ -427,7 +520,13 @@ public final class SearchPlanQueue {
                     entry = entry.done(now);
                     store.save(entry);
                     failedStreak = 0;
-                } else if (stopRequested) {
+                } else if (stopping.contains(requestId)) {
+                    backToPending(entry, now);
+                } else if (NO_WORKER_BROWSER.equals(detail)) {
+                    // the chat has no worker browser (or none came free): the plan goes on one query at a time in
+                    // the chat browser instead of failing every planned query
+                    System.err.println("[search-plan] no worker browser for the research team: one query at a time");
+                    noWorkerBrowser = true;
                     backToPending(entry, now);
                 } else {
                     String reason = detail == null || detail.isEmpty() ? "The search failed" : detail;
@@ -451,8 +550,9 @@ public final class SearchPlanQueue {
             } catch (IOException | CorruptProjectFileException | RuntimeException failed) {
                 System.err.println("[search-plan] entry " + entry.getId() + " not recorded: " + failed.getMessage());
             }
-            current = null;
-            stopRequested = false;
+            runningEntries.remove(requestId);
+            runningCaps.remove(requestId);
+            stopping.remove(requestId);
         }
         listener.changed();
         if (paused != null) {
@@ -469,7 +569,7 @@ public final class SearchPlanQueue {
     private boolean releaseOneDeferred() {
         Runnable work;
         synchronized (this) {
-            if (current != null || deferred.isEmpty() || busy.busy()) {
+            if (!runningEntries.isEmpty() || deferred.isEmpty() || busy.busy()) {
                 return false;
             }
             work = deferred.remove(0);
@@ -512,8 +612,10 @@ public final class SearchPlanQueue {
         }
         Outcome outcome = null;
         ConceptQueryPlan.Request nextCycle = null;
+        boolean fillMore = false;
         synchronized (this) {
-            if (!running || current != null || replanning || busy.busy()) {
+            if (!running || replanning || busy.busy() || !deferred.isEmpty()
+                    || runningEntries.size() >= slots()) {
                 return; // a busy acquisition calls kick() when it ends; a planner answer re-enters here
             }
             try {
@@ -535,7 +637,8 @@ public final class SearchPlanQueue {
                         if (entry == null || entry.getStatus() != SearchPlanEntry.Status.PENDING) {
                             continue;
                         }
-                        int phaseUsed = SearchPlanCoverage.phaseSources(entries.values(), entry.getPhase());
+                        int phaseUsed = SearchPlanCoverage.phaseSources(entries.values(), entry.getPhase())
+                                + reservedSources(entry.getPhase());
                         if (phaseUsed >= c.getPhaseSources()) {
                             capReached = true; // this entry's phase spent its budget; another phase may not have
                             continue;
@@ -554,7 +657,8 @@ public final class SearchPlanQueue {
                                 skip(entries, entry, NODE_COVERED);
                                 continue;
                             }
-                            if (node.getQueriesRun() >= c.queriesUpTo(record.getCycle())) {
+                            if (node.getQueriesRun() + runningFor(entry.getNodeId())
+                                    >= c.queriesUpTo(record.getCycle())) {
                                 skip(entries, entry, NODE_BUDGET); // the budget of this cycle
                                 continue;
                             }
@@ -567,7 +671,9 @@ public final class SearchPlanQueue {
                         break;
                     }
                 }
-                if (next == null) {
+                if (next == null && !runningEntries.isEmpty()) {
+                    // nothing more to start now: the running entries end first, then the plan decides how it goes on
+                } else if (next == null) {
                     Map<String, SearchPlanEntry> all = store.loadEntries();
                     Map<String, SearchPlanCoverage.NodeCoverage> coverage =
                             SearchPlanCoverage.of(record, all.values(), c, sources);
@@ -580,12 +686,18 @@ public final class SearchPlanQueue {
                         outcome = outcome(record, all, c, coverage, capReached ? Reason.PHASE_CAP : null);
                     }
                 } else {
-                    String requestId = port.search(next.getQuery(), record.getLanguage(), PLANNED_RANKING,
-                            visitLimit(perQueryCap), perQueryCap);
+                    String requestId = teamOn()
+                            ? port.searchAsTeam(next.getQuery(), record.getLanguage(), PLANNED_RANKING,
+                                    visitLimit(perQueryCap), perQueryCap, next.getNodeLabel())
+                            : port.search(next.getQuery(), record.getLanguage(), PLANNED_RANKING,
+                                    visitLimit(perQueryCap), perQueryCap);
                     entryByRequest.put(requestId, next.getId());
                     phaseByRequest.put(requestId, next.getPhase());
-                    current = next.started(requestId, clock.now());
-                    store.save(current);
+                    SearchPlanEntry started = next.started(requestId, clock.now());
+                    runningEntries.put(requestId, started);
+                    runningCaps.put(requestId, perQueryCap);
+                    store.save(started);
+                    fillMore = runningEntries.size() < slots();
                 }
             } catch (CorruptProjectFileException corrupt) {
                 running = false;
@@ -602,6 +714,32 @@ public final class SearchPlanQueue {
         if (outcome != null) {
             finish(outcome);
         }
+        if (fillMore) {
+            scheduleNext(); // the team has a free worker: start the next planned query beside the running ones
+        }
+    }
+
+    /** The sources the running entries of {@code phase} may still add (their caps): reserved, not yet counted. */
+    private int reservedSources(String phase) {
+        int reserved = 0;
+        for (Map.Entry<String, SearchPlanEntry> active : runningEntries.entrySet()) {
+            if (active.getValue().getPhase().equals(phase)) {
+                Integer cap = runningCaps.get(active.getKey());
+                reserved += cap == null ? 0 : cap;
+            }
+        }
+        return reserved;
+    }
+
+    /** How many entries of {@code nodeId} run right now (they count against the node's query budget). */
+    private int runningFor(String nodeId) {
+        int count = 0;
+        for (SearchPlanEntry active : runningEntries.values()) {
+            if (active.getNodeId().equals(nodeId)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private void finish(Outcome outcome) {

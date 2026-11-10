@@ -274,7 +274,7 @@ public final class WebSearchApplicationService {
      * the HUD disabled, the fault is in the overlay/binding; if it dies either way, it is a general browser
      * regression. When off, {@link #renderHud} / {@link #pollHudCommands} never touch the browser.
      */
-    private final boolean hudEnabled =
+    private volatile boolean hudEnabled =
             !"false".equalsIgnoreCase(System.getProperty("askai.research.hud.enabled", "true"));
     /** Throttles identical, per-tick HUD failure logs (render/poll run every probe tick during a user-wait). */
     private String lastHudErrorLine;
@@ -317,6 +317,26 @@ public final class WebSearchApplicationService {
         this.minReadableChars = minReadableChars;
         this.readinessJudge = new HeuristicPageReadinessJudge(minReadableChars);
         this.completionPolicy = new MinimumEvidenceCompletionPolicy(budget);
+    }
+
+    /** The page worker of a research-team run (plan T4); null = the funnel decides alone, as always. */
+    private volatile PageJudge pageJudge;
+
+    /**
+     * Let a page worker judge every page that passed the deterministic gates (plan T4): only a page it calls useful
+     * becomes a source, and only the links it picks are opened. Without a judge the funnel accepts and expands as
+     * it always did.
+     */
+    public void setPageJudge(PageJudge judge) {
+        this.pageJudge = judge;
+    }
+
+    /**
+     * Switch the research HUD off for this run (plan T5): a page worker's tab in a worker browser has nobody to show
+     * the overlay to, and its controls (pause, skip, delay) belong to the chat browser the user watches.
+     */
+    public void disableHud() {
+        this.hudEnabled = false;
     }
 
     /** Replace the default heuristic readiness judge (e.g. a model-backed one for a user search). No-op on null. */
@@ -716,6 +736,48 @@ public final class WebSearchApplicationService {
                         listener.progress(progress,
                                 ResearchRunActivity.pageSkipped(effectiveUrl, finalHost,
                                         pageTitle));
+                        continue;
+                    }
+                    PageJudge judge = pageJudge;
+                    if (judge != null) {
+                        // Plan T4: the page worker reads the page before it may become a source. Its candidate
+                        // links are the ones the relevance model picked; the worker chooses among them.
+                        ResearchStopReason gj = beforeToolCall();
+                        if (gj != null) {
+                            return gj;
+                        }
+                        List<String> candidates = selectLinksToFollow(callBrowser("web_links", args()), url, terms);
+                        progress.success();
+                        if (scopeControlBroken) {
+                            return ResearchStopReason.SCOPE_CONTROL_UNAVAILABLE;
+                        }
+                        listener.progress(progress, ResearchRunActivity.readingPage(effectiveUrl, finalHost,
+                                pageTitle));
+                        PageJudge.Verdict verdict = judge.judge(new PageJudge.Page(relevanceQuery, effectiveUrl,
+                                pageTitle, WebAcquisitionText.bodyOf(page), candidates));
+                        if (cancelled.get()) {
+                            return ResearchStopReason.USER_CANCELLED;
+                        }
+                        if (verdict != null && !verdict.isUseful()) {
+                            listener.status("page worker: not useful url=" + effectiveUrl + " reason=\""
+                                    + verdict.getReason() + "\" -> left parked, not expanded");
+                            listener.progress(progress,
+                                    ResearchRunActivity.pageSkipped(effectiveUrl, finalHost, pageTitle));
+                            continue;
+                        }
+                        ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle,
+                                redirected ? provenanceUrl : "", resolution);
+                        if (g3 != null) {
+                            return g3;
+                        }
+                        List<String> chosen = verdict == null ? candidates : verdict.select(candidates);
+                        if (verdict == null) {
+                            listener.status("page worker gave no verdict url=" + effectiveUrl
+                                    + " -> accepted and expanded by the funnel's own rules");
+                        }
+                        for (String linkUrl : chosen) {
+                            frontier.add(FrontierEntry.fromDiscoveredLink(linkUrl, url));
+                        }
                         continue;
                     }
                     ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle,

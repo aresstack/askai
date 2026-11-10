@@ -232,6 +232,17 @@ public final class ResearchRunWire {
         return sb.toString();
     }
 
+    /**
+     * Plan T4: a page worker's message to the orchestrator (a finding, a gap, its final summary), URL-encoded and
+     * correlated by the requestId of the planned query the worker visits.
+     */
+    public static String manualSearchTeamNote(String requestId, String note) {
+        StringBuilder sb = new StringBuilder(MARKER).append("manual_search_team_note")
+                .append(" request_id=").append(requestId == null ? "" : requestId);
+        appendEncoded(sb, "note", note);
+        return sb.toString();
+    }
+
     /** A manual search finished: the result count and the strategy status (RESULTS|NO_RESULTS|…). */
     /**
      * Plan PR 14: as {@link #manualSearchCompleted(String, int, String)}; {@code keywordFallback} marks a planned

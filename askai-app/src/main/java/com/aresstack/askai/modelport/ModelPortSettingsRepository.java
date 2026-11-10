@@ -28,6 +28,13 @@ public final class ModelPortSettingsRepository {
 
     private static final String DEFAULT_CAPACITY = "capacity.default";
     private static final String MODEL_CAPACITY = "capacity.model.";
+    /**
+     * Revision of the stored defaults. A file without it was written while the default capacity was 1, which the
+     * panel stored as an explicit value: that stored 1 is the old default, not the user's choice, and becomes the
+     * new default (plan T5: parallel page workers need parallel model calls).
+     */
+    private static final String DEFAULTS_REVISION = "defaults.revision";
+    static final int CURRENT_DEFAULTS_REVISION = 2;
     private static final String ENDPOINT_BUDGET = "endpoint.";
     private static final String ENDPOINT_BUDGET_SUFFIX = ".memoryBudgetMb";
     private static final String SLOT = "slot.";
@@ -91,6 +98,7 @@ public final class ModelPortSettingsRepository {
     public synchronized void save(ModelPortSettings settings) throws IOException {
         Properties properties = new Properties();
         properties.setProperty(DEFAULT_CAPACITY, String.valueOf(settings.getDefaultCapacity()));
+        properties.setProperty(DEFAULTS_REVISION, String.valueOf(CURRENT_DEFAULTS_REVISION));
         for (Map.Entry<String, Integer> entry : settings.getModelCapacities().entrySet()) {
             properties.setProperty(MODEL_CAPACITY + entry.getKey(), String.valueOf(entry.getValue()));
         }
@@ -168,8 +176,13 @@ public final class ModelPortSettingsRepository {
                         intOr(value, 0));
             }
         }
+        int defaultCapacity = intOr(properties.getProperty(DEFAULT_CAPACITY), ModelPortSettings.DEFAULT_CAPACITY);
+        if (intOr(properties.getProperty(DEFAULTS_REVISION), 1) < CURRENT_DEFAULTS_REVISION
+                && defaultCapacity == ModelPortSettings.FORMER_DEFAULT_CAPACITY) {
+            defaultCapacity = ModelPortSettings.DEFAULT_CAPACITY; // the old shipped default, not a choice
+        }
         return new ModelPortSettings(
-                intOr(properties.getProperty(DEFAULT_CAPACITY), ModelPortSettings.DEFAULT_CAPACITY),
+                defaultCapacity,
                 capacities, budgets, slotModels, modelContexts, slotThinking, slotAnswers,
                 properties.getProperty(KEEP_ALIVE, ModelPortSettings.DEFAULT_KEEP_ALIVE),
                 intOr(properties.getProperty(IMPLICIT_WAIT), ModelPortSettings.DEFAULT_IMPLICIT_WAIT_SECONDS),

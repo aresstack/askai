@@ -34,6 +34,8 @@ public final class SearchPlanEntry {
     private static final String LABEL = "label=";
     private static final String REQUEST = "request";
     private static final String RANKING = "ranking";
+    /** Plan T4: a page worker's message to the orchestrator about this query (one receipt per message). */
+    private static final String TEAM = "team";
 
     /** Where the query came from. */
     public enum Origin {
@@ -182,6 +184,26 @@ public final class SearchPlanEntry {
 
     SearchPlanEntry withNote(String note, long atMillis) {
         return new SearchPlanEntry(task.withReceipt(new TaskReceipt(RANKING, true, clean(note), atMillis)));
+    }
+
+    /** Plan T4: this entry with one more page worker message to the orchestrator; blank ones are ignored. */
+    SearchPlanEntry withTeamNote(String note, long atMillis) {
+        String text = clean(note);
+        if (text.isEmpty() || getTeamNotes().contains(text)) {
+            return this;
+        }
+        return new SearchPlanEntry(task.withReceipt(new TaskReceipt(TEAM, true, text, atMillis)));
+    }
+
+    /** Plan T4: what the page workers of this query reported to the orchestrator, oldest first. */
+    public List<String> getTeamNotes() {
+        List<String> notes = new java.util.ArrayList<String>();
+        for (TaskReceipt receipt : task.getReceipts()) {
+            if (TEAM.equals(receipt.getToolName())) {
+                notes.add(receipt.getReceipt());
+            }
+        }
+        return notes;
     }
 
     SearchPlanEntry done(long atMillis) {

@@ -72,7 +72,8 @@ public final class SearchPlanCycles {
             ConceptQueryPlan.Node concept = node.node();
             uncovered.add(new ConceptQueryPlan.Node(concept.getId(), concept.getLabel(), concept.getPath(),
                     concept.getParentId(), concept.getBaseQuery(),
-                    nc == null ? null : new ArrayList<String>(nc.getDomains())));
+                    nc == null ? null : new ArrayList<String>(nc.getDomains()),
+                    teamNotes(entries, node.getId(), 2 * Math.max(1, caps.getQueriesPerNode()))));
         }
         if (uncovered.isEmpty()) {
             return null;
@@ -86,6 +87,30 @@ public final class SearchPlanCycles {
         int perNode = Math.max(1, Math.min(MAX_QUERIES_PER_NODE_AND_CYCLE, caps.getQueriesPerNode()));
         return new ConceptQueryPlan.Request(record.getLanguage(), "", uncovered, new ArrayList<String>(run),
                 java.util.Collections.<String>emptyList(), perNode, record.getCycle() + 1);
+    }
+
+    /**
+     * Plan T4: the newest {@code max} page worker reports of the node's queries, oldest first. Bounded by the plan's
+     * own queries-per-node setting, so a node's planner prompt stays the same size however many cycles ran.
+     */
+    static List<String> teamNotes(Collection<SearchPlanEntry> entries, String nodeId, int max) {
+        List<SearchPlanEntry> ofNode = new ArrayList<SearchPlanEntry>();
+        for (SearchPlanEntry entry : entries) {
+            if (nodeId.equals(entry.getNodeId()) && !entry.getTeamNotes().isEmpty()) {
+                ofNode.add(entry);
+            }
+        }
+        java.util.Collections.sort(ofNode, new java.util.Comparator<SearchPlanEntry>() {
+            public int compare(SearchPlanEntry a, SearchPlanEntry b) {
+                return Long.compare(a.getCreatedAtMillis(), b.getCreatedAtMillis());
+            }
+        });
+        LinkedHashSet<String> notes = new LinkedHashSet<String>();
+        for (SearchPlanEntry entry : ofNode) {
+            notes.addAll(entry.getTeamNotes());
+        }
+        List<String> all = new ArrayList<String>(notes);
+        return all.size() <= max ? all : new ArrayList<String>(all.subList(all.size() - max, all.size()));
     }
 
     /**

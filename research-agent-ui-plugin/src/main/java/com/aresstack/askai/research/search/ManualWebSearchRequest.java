@@ -16,6 +16,18 @@ public final class ManualWebSearchRequest {
     private final String ranking;
     private final int visitLimit;
     private final int sourceCap;
+    /** Plan T5: run as research-team work (its pages read in a worker browser by a page worker). */
+    private final boolean team;
+    /** Plan T5: the concept node of a team query (the page worker's brief); empty otherwise. */
+    private final String teamNode;
+    /** Plan T5: the book title of a team query (the page worker's brief); empty otherwise. */
+    private final String teamBook;
+    /** Plan T4: at most this many links a page worker may pick per page. */
+    private final int teamFollow;
+    /** Plan T4: at most this much page text a page worker reads. */
+    private final int teamPageCharacters;
+    /** Plan T4: the longest answer of one page worker turn (tokens). */
+    private final int teamAnswerTokens;
 
     /** English snapshot convenience (legacy callers/tests without a session language). */
     public ManualWebSearchRequest(String query) {
@@ -32,11 +44,57 @@ public final class ManualWebSearchRequest {
      */
     public ManualWebSearchRequest(String query, ResearchLanguage language, String ranking, int visitLimit,
                                   int sourceCap) {
+        this(query, language, ranking, visitLimit, sourceCap, false, "", "", 0, 0, 0);
+    }
+
+    private ManualWebSearchRequest(String query, ResearchLanguage language, String ranking, int visitLimit,
+                                   int sourceCap, boolean team, String teamNode, String teamBook, int teamFollow,
+                                   int teamPageCharacters, int teamAnswerTokens) {
+        this.team = team;
+        this.teamAnswerTokens = Math.max(0, teamAnswerTokens);
+        this.teamFollow = Math.max(0, teamFollow);
+        this.teamPageCharacters = Math.max(0, teamPageCharacters);
+        this.teamNode = teamNode == null ? "" : teamNode.trim();
+        this.teamBook = teamBook == null ? "" : teamBook.trim();
         this.query = query == null ? "" : query.trim();
         this.language = language == null ? ResearchLanguage.ENGLISH : language;
         this.ranking = ranking == null ? "" : ranking.trim();
         this.visitLimit = Math.max(0, visitLimit);
         this.sourceCap = Math.max(0, sourceCap);
+    }
+
+    /**
+     * Plan T5: the same planned query as research-team work. The search itself still goes through the one web
+     * search tool; the runtime reads its pages in a worker browser of its own, beside the other team queries.
+     */
+    public ManualWebSearchRequest asTeam(String nodeLabel, String bookTitle, int followLinks, int pageCharacters,
+                                         int answerTokens) {
+        return new ManualWebSearchRequest(query, language, ranking, visitLimit, sourceCap, true, nodeLabel,
+                bookTitle, followLinks, pageCharacters, answerTokens);
+    }
+
+    public int getTeamAnswerTokens() {
+        return teamAnswerTokens;
+    }
+
+    public int getTeamFollow() {
+        return teamFollow;
+    }
+
+    public int getTeamPageCharacters() {
+        return teamPageCharacters;
+    }
+
+    public boolean isTeam() {
+        return team;
+    }
+
+    public String getTeamNode() {
+        return teamNode;
+    }
+
+    public String getTeamBook() {
+        return teamBook;
     }
 
     public String getRanking() {

@@ -30,6 +30,7 @@ public final class ConceptQueryPlan {
         private final String parentId;
         private final String baseQuery;
         private final List<String> foundDomains;
+        private final List<String> workerNotes;
 
         public Node(String id, String label, List<String> path, String parentId, String baseQuery) {
             this(id, label, path, parentId, baseQuery, null);
@@ -37,6 +38,16 @@ public final class ConceptQueryPlan {
 
         public Node(String id, String label, List<String> path, String parentId, String baseQuery,
                     List<String> foundDomains) {
+            this(id, label, path, parentId, baseQuery, foundDomains, null);
+        }
+
+        /**
+         * @param workerNotes what the research team's page workers reported to the orchestrator about this node in
+         *                    the earlier cycles (findings, gaps, suggested searches); empty without a team
+         */
+        public Node(String id, String label, List<String> path, String parentId, String baseQuery,
+                    List<String> foundDomains, List<String> workerNotes) {
+            this.workerNotes = copy(workerNotes);
             this.id = text(id);
             this.label = text(label);
             this.path = copy(path);
@@ -69,6 +80,11 @@ public final class ConceptQueryPlan {
         /** The domains of the sources the earlier cycles found for this node (empty in the first cycle). */
         public List<String> getFoundDomains() {
             return foundDomains;
+        }
+
+        /** Plan T4: what the page workers reported about this node in the earlier cycles (empty without a team). */
+        public List<String> getWorkerNotes() {
+            return workerNotes;
         }
     }
 

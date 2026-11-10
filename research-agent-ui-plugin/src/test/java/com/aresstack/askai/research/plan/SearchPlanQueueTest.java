@@ -746,6 +746,115 @@ public class SearchPlanQueueTest {
         }
     }
 
+
+    // ---- plan T5: the research team -------------------------------------------------------------------
+
+    private static SearchPlanQueue.Team team(final int workers) {
+        return new SearchPlanQueue.Team() {
+            public int workers() {
+                return workers;
+            }
+        };
+    }
+
+    private void fourQueriesOverTwoNodes() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Classloader Java", "Classloader Leck"));
+        queries.put("b", Arrays.asList("JPMS Java", "JPMS Layer"));
+        build(Arrays.asList(node("a", "Classloader", "Classloader Java"), node("b", "JPMS", "JPMS Java")), queries);
+    }
+
+    @Test
+    public void theTeamRunsAsManyPlannedQueriesAtOnceAsItHasWorkers() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(3));
+        queue.run();
+        assertEquals(3, port.searched.size()); // three page workers, three queries side by side
+        assertEquals(port.requests, port.teamRequests);
+        assertEquals(Arrays.asList("Classloader", "Classloader", "JPMS"), port.teamNodes);
+        assertEquals(3, queue.runningEntryCount());
+        port.completeRequest("req-2"); // the second query ends first: its worker takes the fourth
+        assertEquals(4, port.searched.size());
+        assertEquals("JPMS Layer", port.searched.get(3));
+        port.completeRequest("req-1");
+        port.completeRequest("req-3");
+        port.completeRequest("req-4");
+        assertEquals(0, queue.runningEntryCount());
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            assertEquals(SearchPlanEntry.Status.DONE, entry.getStatus());
+        }
+    }
+
+    @Test
+    public void withoutTheTeamThePlanStaysOneQueryAtATime() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(0));
+        queue.run();
+        assertEquals(1, port.searched.size());
+        assertTrue(port.teamRequests.isEmpty());
+    }
+
+    @Test
+    public void stopSendsEveryRunningTeamQueryBackToPending() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        assertEquals(2, port.searched.size());
+        queue.stop();
+        assertEquals(1, port.cancels);
+        current().onSearchEvent("req-1", "failed", "CANCELLED", false);
+        current().onSearchEvent("req-2", "failed", "CANCELLED", false);
+        assertFalse(queue.isRunning());
+        assertEquals(2, port.searched.size()); // nothing new started after the stop
+        int pending = 0;
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            if (entry.getStatus() == SearchPlanEntry.Status.PENDING) {
+                pending++;
+            }
+        }
+        assertEquals(4, pending);
+    }
+
+    @Test
+    public void aMissingWorkerBrowserTurnsTheRunIntoOneQueryAtATime() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        current().onSearchEvent("req-1", "failed", SearchPlanQueue.NO_WORKER_BROWSER, false);
+        current().onSearchEvent("req-2", "failed", SearchPlanQueue.NO_WORKER_BROWSER, false);
+        assertTrue(queue.isRunning()); // no failure streak: the queries went back to pending
+        assertEquals(3, port.searched.size());
+        assertEquals(2, port.teamRequests.size()); // the third runs in the chat browser, alone
+        assertEquals(1, queue.runningEntryCount());
+    }
+
+    @Test
+    public void aPageWorkerReportStaysOnItsEntryAndReachesTheNextCyclePlanner() throws Exception {
+        build(Collections.singletonList(node("a", "Classloader", "Classloader Java")),
+                Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        current().onSearchEvent("req-1", "team_note", "worker 1: search for OSGi class loading", false);
+        current().onSearchEvent("req-1", "team_note", "worker 1: search for OSGi class loading", false);
+        port.completeRequest("req-1");
+        SearchPlanEntry done = store.loadEntries().values().iterator().next();
+        assertEquals(Collections.singletonList("worker 1: search for OSGi class loading"), done.getTeamNotes());
+        Map<String, SearchPlanEntry> all = store.loadEntries();
+        SearchPlanCoverage.Caps c = caps(3, 4, 60);
+        ConceptQueryPlan.Request next = SearchPlanCycles.nextCycleRequest(store.loadRecord(), all.values(),
+                SearchPlanCoverage.of(store.loadRecord(), all.values(), c, sources), c);
+        assertNotNull(next);
+        assertEquals(Collections.singletonList("worker 1: search for OSGi class loading"),
+                next.getNodes().get(0).getWorkerNotes());
+    }
+
+    // ---- fakes ---------------------------------------------------------------------------------------
+
     private final class FakePort implements SearchPlanQueue.SearchPort {
         final List<String> searched = new ArrayList<String>();
         final List<String> languages = new ArrayList<String>();
@@ -754,6 +863,21 @@ public class SearchPlanQueueTest {
         final List<String> requests = new ArrayList<String>();
         SearchPlanQueue owner;
         int cancels;
+        final List<String> teamRequests = new ArrayList<String>();
+        final List<String> teamNodes = new ArrayList<String>();
+
+        public String searchAsTeam(String query, String language, String ranking, int visitLimit, int sourceCap,
+                                   String nodeLabel) {
+            String id = search(query, language, ranking, visitLimit, sourceCap);
+            teamRequests.add(id);
+            teamNodes.add(nodeLabel);
+            return id;
+        }
+
+        void completeRequest(String id) {
+            sources.byRequest.put(id, new ArrayList<String>(sources.next));
+            current().onSearchEvent(id, "completed", "", false);
+        }
 
         public String search(String query, String language, String ranking, int visitLimit, int sourceCap) {
             searched.add(query);

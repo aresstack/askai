@@ -485,6 +485,47 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
 - Done when: the acceptance list of section 7 is green in tests, and the live benchmark on the owner's machine is
   recorded with throughput, GPU memory (`ollama ps`), browser processes and refused sites per configuration.
 
+## 5a. Implementation status of T4/T5 (2026-11-10)
+
+The owner's clarification of 2026-11-10 01:35 is binding and changes the browser picture of section 2: there is ONE
+search browser (mostly headless) and ONE page browser; every page worker gets its own **tab** in the page browser, not
+a browser or user context of its own. Searches never leave the search browser; Google goto links are resolved there,
+one after another (T2).
+
+What is built:
+
+- **Parallel plan queue.** `SearchPlanQueue` runs up to `research.team.workers` planned queries at once (default 4,
+  bounded by the worker browsers' "Tabs/user context"); with the team off it is the serial queue of `develop`. The
+  phase source cap reserves the running queries' caps, the per-node query budget counts running queries, Stop sends
+  every running query back to pending.
+- **Team tabs.** `TeamTabs` opens one user context of the chat's worker browsers for the whole team and hands out one
+  tab per running query; the context closes with the last tab. Site leases (T1) keep two tabs off the same site, the
+  engine deny list (T2) keeps every tab off the search engines.
+- **Page worker.** `PageWorker` is the funnel's `PageJudge`: for every relevant opened page one call on the
+  `page-worker` role (slot `phase.research.worker`, falls back to the Sources model, thinking off) with the section 3
+  prompt; the labelled answer decides accept or park, picks at most `research.team.followLinks` links for the frontier,
+  and routes `TO ORCHESTRATOR` / `TO WORKER n` through the T3 mailbox. Several workers call the model at the same
+  time; the model port's default capacity per model is raised from 1 to 4 (migrated, a chosen value stays).
+- **Worker feedback.** The orchestrator's mail reaches the host as `manual_search_team_note`, is stored on the plan
+  entry and goes into the next research cycle's planner request (`worker_notes`, prompt block
+  "WHAT THE PAGE WORKERS REPORTED").
+- **Settings.** Settings, Research, "Research team": on/off (default ON, owner's decision), workers, links to follow,
+  page characters, answer tokens.
+
+Deviations from sections 2 and 5, on purpose:
+
+- Parallelism is per planned query: each worker works through the hits of one query in its own tab, several queries
+  run side by side. Hits of ONE query are not yet spread over several tabs; that needs the frontier loop of
+  `WebSearchApplicationService` split per hit (the `PageInspection` extraction of T4), which is the next step.
+- The page worker hooks into the funnel through the `PageJudge` seam instead of a `PageInspection` extraction and a
+  `PageTaskQueue`; the funnel without a judge is unchanged.
+- Worker notes feed the next cycle; a `WORKER` entry that runs inside the running cycle, the gap-review role and the
+  plugin-wide governor over all chats (T6) are still open.
+- When a chat has no worker browser, the first team query reports `NO_WORKER_BROWSER`, goes back to pending, and the
+  run continues one query at a time in the chat browser.
+
+The live benchmark (T7) runs after live run 3 of the MVP acceptance.
+
 ## 6. Integration without disturbing the MVP
 
 - T1, T3 and T6 touch no line the serial Sources run executes differently; T1 keeps the default behaviour of

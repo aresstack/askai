@@ -860,6 +860,9 @@ public final class ResearchAgentSession {
     public void cancel() {
         System.err.println("[research-agent] cancel");
         cancelled.set(true);
+        for (java.util.concurrent.atomic.AtomicBoolean team : teamRuns) {
+            team.set(true); // every running team query stops too (plan T5)
+        }
         // Abort any in-flight model call so a pause/cancel or a session/tab close returns promptly instead of
         // waiting out the full model timeout; the aborted call surfaces as an honest non-OK turn.
         for (RoleTransport transport : roleTransports()) {
@@ -1518,6 +1521,12 @@ public final class ResearchAgentSession {
                     .manualSearchFailed(requestId, "SEARCH_UNAVAILABLE"));
             return;
         }
+        // Plan T5: a team query reads its pages in its own worker browser and stops with its own flag, so a later
+        // service command of this session (which clears the session flag) never revives a stopped team query.
+        com.aresstack.askai.research.runtime.browser.TeamTabs.Tab teamLease = null;
+        ToolInvoker teamBrowser = null;
+        java.util.concurrent.atomic.AtomicBoolean runCancelled = cancelled;
+        com.aresstack.askai.research.runtime.acquire.PageWorker pageWorker = null;
         try {
             // Resolve the SAME strategy the loop uses: the session API-provider strategy, else the legacy
             // browser default over this browser invoker.
@@ -1550,6 +1559,22 @@ public final class ResearchAgentSession {
                         .manualSearchFailed(requestId, "SEARCH_UNAVAILABLE"));
                 return;
             }
+            if (command.isTeam()) {
+                // Plan T5: the search went through the one web search tool above (one at a time for every chat
+                // and worker); the hits of this planned query are visited by a page worker in its own tab of the
+                // team's page browser, beside the other page workers.
+                teamLease = acquireTeamTab(requestId);
+                if (teamLease == null) {
+                    ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                            .manualSearchFailed(requestId, NO_WORKER_BROWSER));
+                    return;
+                }
+                runCancelled = new java.util.concurrent.atomic.AtomicBoolean(cancelled.get());
+                teamRuns.add(runCancelled);
+                teamBrowser = teamLease.tools();
+                System.err.println("[team] planned query requestId=" + requestId + " visits its hits in a tab of "
+                        + "user context " + teamLease.userContextId() + " (node \"" + command.getTeamNode() + "\")");
+            }
             com.aresstack.askai.research.runtime.loop.ResearchRunProgress progress =
                     new com.aresstack.askai.research.runtime.loop.ResearchRunProgress();
             // The reranker for THIS search, resolved with the same immutable language snapshot as the SERP
@@ -1564,9 +1589,10 @@ public final class ResearchAgentSession {
                     : rerankerFor(searchLanguage == null ? sessionLanguage.code() : searchLanguage);
             com.aresstack.askai.research.runtime.loop.ResearchRunBudget searchBudget =
                     com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(environment.values());
+            final java.util.concurrent.atomic.AtomicBoolean stopFlag = runCancelled;
             com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService acquisition =
                     new com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService(
-                            browser,
+                            teamBrowser != null ? teamBrowser : browser,
                             searchBudget,
                             progress,
                             new com.aresstack.askai.research.runtime.loop.ResearchLoopClock() {
@@ -1641,7 +1667,7 @@ public final class ResearchAgentSession {
                                             .attention(reason, domainFamily, url, resolved));
                                 }
                             },
-                            cancelled,
+                            stopFlag,
                             strategy,
                             apiLabel,
                             searchReranker,
@@ -1662,9 +1688,16 @@ public final class ResearchAgentSession {
                                     return null;
                                 }
                             },
-                            challengeWaitForUser(),
+                            // a page worker never waits for a person: nobody watches its worker browser
+                            teamBrowser == null && challengeWaitForUser(),
                             loadBrowserSearchSettings().readiness.maximumPageReadinessRetries,
                             loadBrowserSearchSettings().readiness.minimumReadableCharacters);
+            if (teamBrowser != null) {
+                acquisition.disableHud(); // the overlay and its controls belong to the chat browser
+                // Plan T4: one model call per opened page; several page workers call the model at the same time
+                pageWorker = newPageWorker(requestId, command);
+                acquisition.setPageJudge(relayingJudge(ctx, pageWorker));
+            }
             // Engine redirect wrappers (Google /goto) are resolved in the search browser — the one client that
             // talks to the engine; the research browser never opens an engine address.
             acquisition.setRedirectResolver(redirectResolver());
@@ -1706,7 +1739,12 @@ public final class ResearchAgentSession {
             // The user's text IS the search query — never a term-set reconstruction of it.
             com.aresstack.askai.research.runtime.loop.ResearchStopReason reason =
                     acquisition.execute(query);
-            if (cancelled.get()) {
+            if (pageWorker != null) {
+                // the worker's summary reaches the plan before the query's end does
+                pageWorker.finish();
+                relayTeamNotes(ctx);
+            }
+            if (runCancelled.get()) {
                 ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
                         .manualSearchFailed(requestId, "CANCELLED"));
             } else if (com.aresstack.askai.research.runtime.service.ManualSearchOutcome
@@ -1737,9 +1775,144 @@ public final class ResearchAgentSession {
                     + (failure.getMessage() == null ? "" : ": " + failure.getMessage()));
             failure.printStackTrace();
             ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                    .manualSearchFailed(requestId, cancelled.get() ? "CANCELLED" : "SEARCH_FAILED"));
+                    .manualSearchFailed(requestId, runCancelled.get() ? "CANCELLED" : "SEARCH_FAILED"));
+        } finally {
+            if (pageWorker != null) {
+                pageWorker.finish(); // idempotent: a failed run still ends the worker's task in the mailbox
+            }
+            if (teamLease != null) {
+                teamRuns.remove(runCancelled);
+                teamLease.close(); // the tab goes back, also on cancel and failure
+            }
         }
     }
+
+    /**
+     * Plan T4: the page worker of one team query, registered in this chat's team mailbox under the query's
+     * requestId. Its model calls go through the page worker role's own transport (slot {@code phase.research.worker},
+     * falling back to the Sources model), which the model port runs beside the other workers' calls.
+     */
+    private com.aresstack.askai.research.runtime.acquire.PageWorker newPageWorker(String requestId,
+            com.aresstack.askai.research.runtime.service.ResearchServiceCommand command) {
+        com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox mailbox = teamMailbox();
+        mailbox.registerWorker(requestId);
+        final com.aresstack.askai.research.runtime.team.ReloadableMainModelChat chat =
+                roleChat(com.aresstack.askai.research.runtime.acquire.PageWorker.ROLE);
+        final int answerTokens = command.getTeamAnswerTokens(); // 0 = the model's own limit
+        return new com.aresstack.askai.research.runtime.acquire.PageWorker(
+                new com.aresstack.askai.research.runtime.acquire.PageWorker.Model() {
+                    public String complete(
+                            java.util.List<com.aresstack.askai.research.runtime.acquire.PageWorker.Turn> turns) {
+                        java.util.List<com.aresstack.askai.research.runtime.team.ChatMessage> messages =
+                                new java.util.ArrayList<com.aresstack.askai.research.runtime.team.ChatMessage>();
+                        for (com.aresstack.askai.research.runtime.acquire.PageWorker.Turn turn : turns) {
+                            messages.add("system".equals(turn.getRole())
+                                    ? com.aresstack.askai.research.runtime.team.ChatMessage.system(turn.getText())
+                                    : "assistant".equals(turn.getRole())
+                                    ? com.aresstack.askai.research.runtime.team.ChatMessage.assistant(turn.getText())
+                                    : com.aresstack.askai.research.runtime.team.ChatMessage.user(turn.getText()));
+                        }
+                        com.aresstack.askai.research.runtime.team.MainModelChatResult result =
+                                chat.complete(messages, 0.0, answerTokens);
+                        return result.isOk() ? result.getText() : null;
+                    }
+                },
+                mailbox, requestId, command.getTeamNode(), command.getTeamBook(), command.getTeamFollow(),
+                command.getTeamPageCharacters() > 0 ? command.getTeamPageCharacters() : Integer.MAX_VALUE,
+                new com.aresstack.askai.research.runtime.acquire.PageWorker.Log() {
+                    public void line(String text) {
+                        System.err.println(text);
+                    }
+                });
+    }
+
+    /** The page worker as the funnel's judge; after every page its messages to the orchestrator go to the host. */
+    private com.aresstack.askai.research.runtime.acquire.PageJudge relayingJudge(final AgentOutput ctx,
+            final com.aresstack.askai.research.runtime.acquire.PageWorker worker) {
+        return new com.aresstack.askai.research.runtime.acquire.PageJudge() {
+            public Verdict judge(Page page) {
+                Verdict verdict = worker.judge(page);
+                relayTeamNotes(ctx);
+                return verdict;
+            }
+        };
+    }
+
+    /**
+     * Plan T4: the orchestrator's mail goes to the host as {@code manual_search_team_note} lines, each correlated
+     * with the planned query of the worker that wrote it; the plan (Java) decides what to do with it. A line that
+     * is out is delivered.
+     */
+    private void relayTeamNotes(AgentOutput ctx) {
+        com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox mailbox = teamMailbox();
+        java.util.List<com.aresstack.askai.research.runtime.team.mailbox.AgentMessage> mail =
+                mailbox.drainOrchestrator(Integer.MAX_VALUE);
+        for (com.aresstack.askai.research.runtime.team.mailbox.AgentMessage message : mail) {
+            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.manualSearchTeamNote(
+                    message.getSenderTaskId(), message.getSender().key() + ": " + message.getText()));
+        }
+        mailbox.acknowledge(mail);
+    }
+
+    private com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox teamMailbox;
+
+    /** This chat's team mailbox (plan T3), opened on first use; it lives as long as the chat's agent. */
+    private synchronized com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox teamMailbox() {
+        if (teamMailbox == null) {
+            try {
+                teamMailbox = com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox.open(
+                        "team-" + Integer.toHexString(System.identityHashCode(this)),
+                        new com.aresstack.askai.research.runtime.team.mailbox.InMemoryMailboxStore());
+            } catch (java.io.IOException impossible) {
+                throw new IllegalStateException("the in-memory mailbox store cannot fail", impossible);
+            }
+        }
+        return teamMailbox;
+    }
+
+    /** The failure reason of a team query that got no worker browser within the pool's wait setting. */
+    static final String NO_WORKER_BROWSER = "NO_WORKER_BROWSER";
+
+    /**
+     * A tab of its own in the team's page browser for one team query (plan T5): one user context of this chat's
+     * worker browsers holds the tabs of all page workers. {@code null} when the chat has no worker browsers, none
+     * came free within the wait setting or the tab limit is reached, so the query fails honestly and stays in the
+     * plan.
+     */
+    private com.aresstack.askai.research.runtime.browser.TeamTabs.Tab acquireTeamTab(String requestId) {
+        com.aresstack.askai.research.runtime.browser.TeamTabs tabs = teamTabs();
+        if (tabs == null || !tabs.available()) {
+            System.err.println("[team] no worker browsers in this chat: requestId=" + requestId);
+            return null;
+        }
+        try {
+            return tabs.acquire(requestId);
+        } catch (com.aresstack.askai.research.runtime.browser.BrowserCapacityException busy) {
+            System.err.println("[team] no tab for requestId=" + requestId + ": " + busy.getMessage());
+            return null;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    private com.aresstack.askai.research.runtime.browser.TeamTabs teamTabs;
+
+    /** The team's page browser over this chat's worker browsers, made on first use. */
+    private synchronized com.aresstack.askai.research.runtime.browser.TeamTabs teamTabs() {
+        com.aresstack.askai.research.runtime.browser.BrowserUserContextPool pool = browserUserContexts;
+        if (pool == null) {
+            return null;
+        }
+        if (teamTabs == null) {
+            teamTabs = new com.aresstack.askai.research.runtime.browser.TeamTabs(pool);
+        }
+        return teamTabs;
+    }
+
+    /** The stop flags of the team queries running now; {@link #cancel()} sets every one of them. */
+    private final java.util.Set<java.util.concurrent.atomic.AtomicBoolean> teamRuns =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
      * The TeamAgent REVIEWS the sources it was pointed at. Issue #29: this runs ONLY from the explicit

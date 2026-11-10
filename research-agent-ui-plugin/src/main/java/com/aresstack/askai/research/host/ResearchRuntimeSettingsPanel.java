@@ -50,6 +50,12 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField browserToolTimeout = ComicControls.textField(4);
     private final JTextField browserIdleStop = ComicControls.textField(4);
     private final JTextField searchMaxErrors = ComicControls.textField(4);
+    // Research team (plan T5): the Sources phase's planned queries side by side, one page worker each.
+    private final JCheckBox teamEnabled = ComicControls.checkBox("Parallel page workers in Sources", true);
+    private final JTextField teamWorkers = ComicControls.textField(3);
+    private final JTextField teamFollowLinks = ComicControls.textField(3);
+    private final JTextField teamPageCharacters = ComicControls.textField(6);
+    private final JTextField teamAnswerTokens = ComicControls.textField(5);
     // Worker browsers (parallel research workers): separate from the model capacity.
     private final JTextField workerProcesses = ComicControls.textField(3);
     private final JTextField workerUserContexts = ComicControls.textField(3);
@@ -160,6 +166,13 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         limits.row("Concept loop", group(labelled("Tool rounds", conceptToolRounds),
                 labelled("Repairs", conceptRepairAttempts)));
 
+        // Plan T5: the research team of the Sources phase and the worker browsers its page workers read in.
+        com.aresstack.comiccontrols.control.ComicForm team =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Research team");
+        team.row("Sources phase", group(teamEnabled, labelled("Workers", teamWorkers)));
+        team.row("Page worker", group(labelled("Links to follow", teamFollowLinks),
+                labelled("Page characters", teamPageCharacters), labelled("Answer tokens", teamAnswerTokens)));
+
         // Orchestrated research (ADR 0001 lane F/G): the plan of work packages, its limits and the worker browsers.
         com.aresstack.comiccontrols.control.ComicForm orchestrator =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Orchestrator");
@@ -232,8 +245,10 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
         com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
         actions.actions(save, check, busy);
-        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, orchestrator, scope, scopeAdvanced);
-        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, orchestrator, scope, scopeAdvanced, actions),
+        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, team, orchestrator, scope,
+                scopeAdvanced);
+        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, team, orchestrator, scope, scopeAdvanced,
+                actions),
                 BorderLayout.NORTH);
 
         results.setEditable(false);
@@ -366,6 +381,31 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "How long the browser stays open after a search without a new browser command before it "
                         + "is stopped. Keeping it warm saves the browser start (about 10 s) on the next "
                         + "search; 0 = stop right after each search.");
+        teamEnabled.setSelected(ResearchRuntimeSettings.loadTeamEnabled(store));
+        teamEnabled.setToolTipText("The planned queries of the Sources phase run side by side: each page worker "
+                + "visits its hits in its own tab of one page browser, never two tabs on the same site at once. The "
+                + "searches still go one after another through the search browser. Applies to the next planned "
+                + "query.");
+        teamEnabled.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveTeamEnabled(ResearchRuntimeSettingsPanel.this.store,
+                        teamEnabled.isSelected());
+            }
+        });
+        bindLimit(teamWorkers, ResearchRuntimeSettings.KEY_TEAM_WORKERS, ResearchRuntimeSettings.DEFAULT_TEAM_WORKERS,
+                "How many page workers run at the same time. Each has its own tab in one page browser (at most "
+                        + "Worker browsers > Tabs/user context) and its own call to the Sources model; the model "
+                        + "capacity in AI models > Model resources decides how many calls run in parallel.");
+        bindNonNegativeLimit(teamFollowLinks, ResearchRuntimeSettings.KEY_TEAM_FOLLOW_LINKS,
+                ResearchRuntimeSettings.DEFAULT_TEAM_FOLLOW_LINKS,
+                "How many of a page's links a page worker may pick to open next (one level deep); 0 = none.");
+        bindLimit(teamPageCharacters, ResearchRuntimeSettings.KEY_TEAM_PAGE_CHARACTERS,
+                ResearchRuntimeSettings.DEFAULT_TEAM_PAGE_CHARACTERS,
+                "How much of a page's text one page worker reads (characters). Longer pages are cut. Mind the "
+                        + "model's context when many workers run at once.");
+        bindLimit(teamAnswerTokens, ResearchRuntimeSettings.KEY_TEAM_ANSWER_TOKENS,
+                ResearchRuntimeSettings.DEFAULT_TEAM_ANSWER_TOKENS,
+                "The longest answer of one page worker turn (tokens): its summary, verdict, links and messages.");
         bindLimit(workerProcesses, ResearchRuntimeSettings.KEY_WORKER_BROWSER_PROCESSES,
                 ResearchRuntimeSettings.DEFAULT_WORKER_BROWSER_PROCESSES,
                 "Worker browser processes for parallel research workers, over all chats. This is also how many "

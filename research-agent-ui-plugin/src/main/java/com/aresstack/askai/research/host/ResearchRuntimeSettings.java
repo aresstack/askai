@@ -499,6 +499,70 @@ public final class ResearchRuntimeSettings {
         }
     }
 
+    /**
+     * The research team of the Sources phase (plan T5): the planned queries run side by side, each with a page
+     * worker in a worker browser of its own; the searches still go one after another through the one web search
+     * tool. Default ON: one tab and one model call at a time leave the GPU idle most of the time.
+     */
+    public static final String KEY_TEAM_ENABLED = "research.team.enabled";
+    /**
+     * How many page workers run at the same time, one tab each in the team's page browser. Default 4: the worker
+     * browsers' default tabs per user context; the 2026-10-30 benchmark scales {@code gemma4:e2b} up to about 20.
+     */
+    public static final String KEY_TEAM_WORKERS = "research.team.workers";
+    public static final int DEFAULT_TEAM_WORKERS = 4;
+
+    /** Plan T4: how many of a page's candidate links a page worker may pick to open (depth 1). */
+    public static final String KEY_TEAM_FOLLOW_LINKS = "research.team.followLinks";
+    public static final int DEFAULT_TEAM_FOLLOW_LINKS = 2;
+    /**
+     * Plan T4: how much page text one page worker reads (characters). Default 12000: about 3000 tokens, a page
+     * turn of {@code gemma4:e2b} stays far inside its 32768-token context also with 20 parallel workers.
+     */
+    public static final String KEY_TEAM_PAGE_CHARACTERS = "research.team.pageCharacters";
+    public static final int DEFAULT_TEAM_PAGE_CHARACTERS = 12_000;
+
+    /**
+     * Plan T4: the longest answer of one page worker turn (tokens). Default 512: the labelled lines (a summary of
+     * two to five sentences, the verdict, the links and an optional message) fit with room to spare.
+     */
+    public static final String KEY_TEAM_ANSWER_TOKENS = "research.team.answerTokens";
+    public static final int DEFAULT_TEAM_ANSWER_TOKENS = 512;
+
+    public static int loadTeamAnswerTokens(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_ANSWER_TOKENS, DEFAULT_TEAM_ANSWER_TOKENS);
+    }
+
+    public static int loadTeamFollowLinks(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_TEAM_FOLLOW_LINKS, DEFAULT_TEAM_FOLLOW_LINKS);
+    }
+
+    public static int loadTeamPageCharacters(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_PAGE_CHARACTERS, DEFAULT_TEAM_PAGE_CHARACTERS);
+    }
+
+    public static boolean loadTeamEnabled(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_TEAM_ENABLED, true);
+    }
+
+    public static void saveTeamEnabled(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_TEAM_ENABLED, enabled);
+        }
+    }
+
+    /**
+     * The page workers that may run at once, 0 when the research team is switched off. Each worker has its own tab
+     * in the team's one user context, so the "Tabs/user context" setting of the worker browsers bounds the count.
+     */
+    public static int loadTeamWorkers(WorkspaceStateStore store) {
+        if (!loadTeamEnabled(store)) {
+            return 0;
+        }
+        return Math.min(loadPositiveInt(store, KEY_TEAM_WORKERS, DEFAULT_TEAM_WORKERS),
+                loadPositiveInt(store, KEY_WORKER_TABS_PER_USER_CONTEXT, DEFAULT_WORKER_TABS_PER_USER_CONTEXT));
+    }
+
     /** The caps of the search plan, read at each queue start. */
     public static com.aresstack.askai.research.plan.SearchPlanCoverage.Caps loadSearchPlanCaps(
             WorkspaceStateStore store) {

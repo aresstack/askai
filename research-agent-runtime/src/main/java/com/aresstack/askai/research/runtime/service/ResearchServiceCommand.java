@@ -77,6 +77,18 @@ public final class ResearchServiceCommand {
     private final String ranking;
     private final int visitLimit;
     private final int sourceCap;
+    /** Plan T5: a planned query of the research team (its pages are read in a worker browser of their own). */
+    private final boolean team;
+    /** Plan T5: the concept node of a team query; empty otherwise. */
+    private final String teamNode;
+    /** Plan T5: the book title of a team query; empty otherwise. */
+    private final String teamBook;
+    /** Plan T4: at most this many links a page worker may pick per page (0 = none). */
+    private final int teamFollow;
+    /** Plan T4: at most this much page text goes into a page worker's prompt; 0 = the runtime's default. */
+    private final int teamPageCharacters;
+    /** Plan T4: the longest answer of one page worker turn (tokens); 0 = the runtime's default. */
+    private final int teamAnswerTokens;
     private final String type;
     private final String requestId;
     private final String query;
@@ -120,6 +132,20 @@ public final class ResearchServiceCommand {
     public ResearchServiceCommand(String type, String requestId, String query, String language,
                                   String scope, long capturedThrough, String request, String ranking,
                                   int visitLimit, int sourceCap) {
+        this(type, requestId, query, language, scope, capturedThrough, request, ranking, visitLimit, sourceCap,
+                false, "", "", 0, 0, 0);
+    }
+
+    private ResearchServiceCommand(String type, String requestId, String query, String language,
+                                   String scope, long capturedThrough, String request, String ranking,
+                                   int visitLimit, int sourceCap, boolean team, String teamNode, String teamBook,
+                                   int teamFollow, int teamPageCharacters, int teamAnswerTokens) {
+        this.team = team;
+        this.teamAnswerTokens = Math.max(0, teamAnswerTokens);
+        this.teamFollow = Math.max(0, teamFollow);
+        this.teamPageCharacters = Math.max(0, teamPageCharacters);
+        this.teamNode = teamNode == null ? "" : teamNode.trim();
+        this.teamBook = teamBook == null ? "" : teamBook.trim();
         String r = ranking == null ? "" : ranking.trim().toLowerCase(java.util.Locale.ROOT);
         this.ranking = RANKING_RERANKER.equals(r) || RANKING_BM25.equals(r) ? r : "";
         this.visitLimit = Math.max(0, visitLimit);
@@ -131,6 +157,43 @@ public final class ResearchServiceCommand {
         this.query = query == null ? "" : query;
         this.language = language == null ? "" : language;
         this.scope = scope == null ? "" : scope;
+    }
+
+    /** Plan T5: this command as research-team work with the page worker's brief (node and book). */
+    public ResearchServiceCommand withTeam(boolean team, String node, String book, int follow, int pageCharacters,
+                                           int answerTokens) {
+        return new ResearchServiceCommand(type, requestId, query, language, scope, capturedThrough, request,
+                ranking, visitLimit, sourceCap, team, node, book, follow, pageCharacters, answerTokens);
+    }
+
+    /** Plan T4: the longest answer of one page worker turn (tokens); 0 = the runtime's default. */
+    public int getTeamAnswerTokens() {
+        return teamAnswerTokens;
+    }
+
+    /** Plan T4: how many links a page worker may pick per page (0 = none). */
+    public int getTeamFollow() {
+        return teamFollow;
+    }
+
+    /** Plan T4: how much page text a page worker reads; 0 = the runtime's default. */
+    public int getTeamPageCharacters() {
+        return teamPageCharacters;
+    }
+
+    /** Plan T5: whether a planned query runs as research-team work. */
+    public boolean isTeam() {
+        return team;
+    }
+
+    /** Plan T5: the concept node of a team query; empty otherwise. */
+    public String getTeamNode() {
+        return teamNode;
+    }
+
+    /** Plan T5: the book title of a team query; empty otherwise. */
+    public String getTeamBook() {
+        return teamBook;
     }
 
     /** The ranking choice of a planned query ({@link #RANKING_BM25}, {@link #RANKING_RERANKER}); empty otherwise. */

@@ -152,6 +152,7 @@ public final class ResearchAgentEventMapper {
         }
         if (ResearchRunWire.TYPE_MANUAL_SEARCH_STARTED.equals(type)
                 || ResearchRunWire.TYPE_MANUAL_SEARCH_PROGRESS.equals(type)
+                || ResearchRunWire.TYPE_MANUAL_SEARCH_TEAM_NOTE.equals(type)
                 || ResearchRunWire.TYPE_MANUAL_SEARCH_COMPLETED.equals(type)
                 || ResearchRunWire.TYPE_MANUAL_SEARCH_REVIEW.equals(type)
                 || ResearchRunWire.TYPE_MANUAL_SEARCH_FAILED.equals(type)) {
@@ -180,6 +181,9 @@ public final class ResearchAgentEventMapper {
             message = query.isEmpty() ? "Websuche läuft…" : "Websuche: " + query;
         } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_PROGRESS.equals(type)) {
             subKind = "progress";
+            message = ResearchRunWire.decodedField(f, "note");
+        } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_TEAM_NOTE.equals(type)) {
+            subKind = "team_note";
             message = ResearchRunWire.decodedField(f, "note");
         } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_COMPLETED.equals(type)) {
             subKind = "completed";
