@@ -26,7 +26,11 @@ public final class BrowserSearchEngineSelection {
         /** Result pages fetched per engine when the configuration names none — a SETTING's fallback. */
         public static final int DEFAULT_RESULT_PAGES = 3;
 
-        /** No extra pause between requests to the same engine unless the user asks for one. */
+        /**
+         * No extra pause between requests to the same engine unless the user asks for one — or the catalog names
+         * one for the engine ({@link SearchEngineCatalog#defaultDelayMillis}), which a row without a delay of its
+         * own starts with.
+         */
         public static final int DEFAULT_DELAY_MILLIS = 0;
 
         /**
@@ -44,12 +48,14 @@ public final class BrowserSearchEngineSelection {
         private final boolean furtherLanguagesEnabled;
         private final List<String> furtherLanguages;
 
+        /** A row with the catalog's result pages and delay for the engine. */
         public Entry(String engineId, boolean enabled) {
-            this(engineId, enabled, DEFAULT_RESULT_PAGES, DEFAULT_DELAY_MILLIS);
+            this(engineId, enabled, DEFAULT_RESULT_PAGES, SearchEngineCatalog.defaultDelayMillis(engineId));
         }
 
+        /** A row with the catalog's delay for the engine. */
         public Entry(String engineId, boolean enabled, int resultPages) {
-            this(engineId, enabled, resultPages, DEFAULT_DELAY_MILLIS);
+            this(engineId, enabled, resultPages, SearchEngineCatalog.defaultDelayMillis(engineId));
         }
 
         /** A row without priority and languages: priority from its list position, languages from the catalog. */
@@ -256,7 +262,10 @@ public final class BrowserSearchEngineSelection {
      * A stored engine list in the current form. A list from before priorities ({@code id:on:pages[:delay]}) is
      * migrated so that it searches as before: under {@link EngineAcquisitionMode#ALL_ENABLED} every row gets
      * priority 0 (one group, all merged), otherwise each row its list position (tried in order). Languages of
-     * migrated rows come from the catalog. A list already in the current form is only normalised.
+     * migrated rows come from the catalog, and so does the delay of a row from before delays existed
+     * ({@code id:on:pages}): a Google row that never had one gets {@link SearchEngineCatalog#GOOGLE_REQUEST_DELAY_MILLIS}
+     * — the old form could not express a pause, so the stored list carries no choice to keep. A list already in
+     * the current form is only normalised.
      */
     public static String migrate(String encoded, EngineAcquisitionMode mode) {
         List<Entry> parsed = parseEntries(encoded);
@@ -311,7 +320,8 @@ public final class BrowserSearchEngineSelection {
     /**
      * Parse the flat form; unreadable pieces are skipped rather than failing the whole configuration. Older, shorter
      * rows ({@code "id"}, {@code "id:on"}, {@code "id:on:3"}, {@code "id:on:3:1.5"}) keep the documented defaults for
-     * the parts they do not carry: no priority yet ({@link Entry#UNSET_PRIORITY}) and the catalog's languages.
+     * the parts they do not carry: no priority yet ({@link Entry#UNSET_PRIORITY}), the catalog's languages and,
+     * for a row without a delay field, the catalog's delay for the engine.
      */
     public static List<Entry> parseEntries(String encoded) {
         List<Entry> entries = new ArrayList<Entry>();
@@ -338,7 +348,7 @@ public final class BrowserSearchEngineSelection {
                 }
             }
             int delayMillis = parts.length >= 4 ? parseDelayMillis(parts[3])
-                    : Entry.DEFAULT_DELAY_MILLIS;
+                    : SearchEngineCatalog.defaultDelayMillis(id);
             int priority = Entry.UNSET_PRIORITY;
             if (parts.length >= 5) {
                 try {

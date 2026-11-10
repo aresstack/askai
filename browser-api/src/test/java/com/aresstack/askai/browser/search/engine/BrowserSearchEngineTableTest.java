@@ -85,6 +85,23 @@ public class BrowserSearchEngineTableTest {
     }
 
     @Test
+    public void aGoogleRowWithoutADelayFieldGetsTheCatalogDelayAndAStoredDelayStays() {
+        BrowserSearchEngineSelection fromBefore = new BrowserSearchEngineSelection(
+                BrowserSearchEngineSelection.parseEntries("google:on:3,duckduckgo:on:3"),
+                EngineAcquisitionMode.FIRST_USABLE);
+        assertEquals("the old form could not express a pause, so Google starts with the catalog's",
+                SearchEngineCatalog.GOOGLE_REQUEST_DELAY_MILLIS, fromBefore.delayMillisFor("google"));
+        assertEquals("DuckDuckGo takes requests as they come", 0, fromBefore.delayMillisFor("duckduckgo"));
+        BrowserSearchEngineSelection stored = new BrowserSearchEngineSelection(
+                BrowserSearchEngineSelection.parseEntries("google:on:3:0:0:de+en:off:"),
+                EngineAcquisitionMode.FIRST_USABLE);
+        assertEquals("a delay the table wrote, 0 included, is the user's choice", 0, stored.delayMillisFor("google"));
+        assertEquals("a row made without a delay starts with the catalog's too",
+                SearchEngineCatalog.GOOGLE_REQUEST_DELAY_MILLIS,
+                new BrowserSearchEngineSelection.Entry("google", true).getDelayMillis());
+    }
+
+    @Test
     public void anOldAllEnabledListBecomesOneGroup() {
         String migrated = BrowserSearchEngineSelection.migrate("duckduckgo:on:3,bing:on:3:1.5",
                 EngineAcquisitionMode.ALL_ENABLED);
@@ -101,8 +118,9 @@ public class BrowserSearchEngineTableTest {
         stored.put("navigation.engines", "duckduckgo:off:3,bing:off:3,google:on:3");
         stored.put("navigation.engineAcquisitionMode", "FIRST_USABLE");
         Map<String, String> migrated = LegacyBrowserSearchSettingsCodec.migrateEngineList(stored);
-        assertEquals("duckduckgo:off:3:0:0:de+en:off:,bing:off:3:0:1:de+en+fr+es:off:,"
-                + "google:on:3:0:2:de+en+fr+es+it:off:", migrated.get("navigation.engines"));
+        assertEquals("a Google row from before delays existed starts with the catalog's Google delay",
+                "duckduckgo:off:3:0:0:de+en:off:,bing:off:3:0:1:de+en+fr+es:off:,"
+                + "google:on:3:15:2:de+en+fr+es+it:off:", migrated.get("navigation.engines"));
         BrowserSearchEngineSelection decoded = LegacyBrowserSearchSettingsCodec.fromValues(stored)
                 .settings.navigation.engineSelection;
         assertEquals(Arrays.asList("duckduckgo@0", "bing@1", "google@2"), ids(decoded));
