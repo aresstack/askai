@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.runtime.writer;
 
 /**
- * One finding of the citation check (plan D8, stage 1). Findings are flags on the stored revision; the text they
+ * One finding of the citation check (plan D8, stages 1 and 2). Findings are flags on the stored revision; the text they
  * point to is never removed. Immutable.
  */
 public final class ClaimFlag {
@@ -14,7 +14,9 @@ public final class ClaimFlag {
         /** A number, year or percentage that no passage cited by the sentence or its paragraph contains. */
         UNSUPPORTED_NUMBER("unsupported number"),
         /** A quotation that no passage cited by the sentence or its paragraph contains. */
-        UNSUPPORTED_QUOTE("unsupported quote");
+        UNSUPPORTED_QUOTE("unsupported quote"),
+        /** A sentence no cited passage carries: the passage is no prose or shares too few of its words (stage 2). */
+        UNCARRIED_CLAIM("citation does not carry the claim");
 
         private final String label;
 
@@ -68,6 +70,9 @@ public final class ClaimFlag {
      * sentence for uncited findings ({@code uncited sentence: <sentence>}).
      */
     public String revisionLine() {
+        if (kind == Kind.UNCARRIED_CLAIM) {
+            return kind.label() + ": " + sentence + " (" + detail + ")";
+        }
         return kind.label() + ": " + (detail.isEmpty() ? sentence : detail);
     }
 
