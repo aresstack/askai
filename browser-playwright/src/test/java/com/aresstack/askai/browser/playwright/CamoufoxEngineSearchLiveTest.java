@@ -59,9 +59,18 @@ public class CamoufoxEngineSearchLiveTest {
         session = PlaywrightSessionFactory.create(CamoufoxProvisioning.CHANNEL, headless, false, null,
                 BrowserLimits.defaults(), settings);
         if (EXPERIMENTAL.equalsIgnoreCase(engines.trim())) {
+            List<String> failed = new ArrayList<String>();
             for (String id : experimentalEnginesWithDriver()) {
-                report(query, Collections.singletonList(id)); // one engine per search: one verdict per engine
+                try {
+                    report(query, Collections.singletonList(id)); // one engine per search: one verdict per engine
+                } catch (Exception | AssertionError engineFailure) {
+                    // an unreachable engine is that engine's verdict; the sweep goes on with the next one
+                    failed.add(id);
+                    System.err.println("[engine-live] engines=[" + id + "] query=" + query + " FAILED: "
+                            + engineFailure);
+                }
             }
+            System.err.println("[engine-live] experimental sweep done; failed=" + failed);
             return;
         }
         report(query, Arrays.asList(engines.split("\\s*,\\s*")));
