@@ -50,11 +50,35 @@ public final class ResearchSourcesView extends JPanel {
             if (viewRow < 0) {
                 return null;
             }
-            ResearchSourceRecord record = tableModel.rowAt(convertRowIndexToModel(viewRow));
+            int modelRow = convertRowIndexToModel(viewRow);
+            ResearchSourceRecord record = tableModel.rowAt(modelRow);
             String url = record.getUrl().isEmpty() ? record.getOrigin() : record.getUrl();
-            return "<html><b>" + escape(displayTitle(record)) + "</b><br>" + escape(url) + "</html>";
+            String access = accessNote(tableModel.accessEntryAt(modelRow));
+            return "<html><b>" + escape(displayTitle(record)) + "</b><br>" + escape(url)
+                    + (access.isEmpty() ? "" : "<br><i>" + escape(access) + "</i>") + "</html>";
+        }
+
+        @Override
+        public java.awt.Component prepareRenderer(javax.swing.table.TableCellRenderer renderer, int row,
+                                                  int column) {
+            java.awt.Component component = super.prepareRenderer(renderer, row, column);
+            if (!isRowSelected(row)) {
+                java.awt.Color tint = accessTint(tableModel.accessStateAt(convertRowIndexToModel(row)));
+                // Renderers are reused: an unmarked row must get the normal background back explicitly.
+                component.setBackground(tint != null ? tint : getBackground());
+            }
+            return component;
         }
     };
+    /** How strongly the red / yellow access mark is mixed into the field background (0 = none, 1 = full). */
+    private static final float ACCESS_TINT_STRENGTH = 0.35f;
+    /** Websites that demanded a manual security check (wired by the contribution; empty by default). */
+    private java.util.function.Supplier<SourceAccessLog> accessLog =
+            new java.util.function.Supplier<SourceAccessLog>() {
+                public SourceAccessLog get() {
+                    return SourceAccessLog.EMPTY;
+                }
+            };
     /** The navigation-blue comic search bar replaces the plain "Filter:" field (issue #36 line). */
     private final com.aresstack.comiccontrols.control.ComicSearchBar filterField =
             new com.aresstack.comiccontrols.control.ComicSearchBar(
@@ -421,7 +445,7 @@ public final class ResearchSourcesView extends JPanel {
     public void refresh() {
         String keep = selectedId;
         List<ResearchSourceRecord> rows = repository.find(new SourceQuery(filterField.getText(), null));
-        tableModel.setRows(rows);
+        tableModel.setRows(rows, currentAccessLog());
         int keepRow = -1;
         for (int i = 0; i < rows.size(); i++) {
             if (rows.get(i).getSourceId().equals(keep)) {
@@ -440,12 +464,52 @@ public final class ResearchSourcesView extends JPanel {
 
     private void reloadTable() {
         List<ResearchSourceRecord> rows = repository.find(new SourceQuery(filterField.getText(), null));
-        tableModel.setRows(rows);
+        tableModel.setRows(rows, currentAccessLog());
         if (!rows.isEmpty()) {
             selectModelRow(0);
         } else {
             clearDetail();
         }
+    }
+
+    /**
+     * Wire the access log: rows of a website that demanded a security check are marked RED (never solved —
+     * pages may be missing) or YELLOW (solved — worth a second look), so a protected source is never lost.
+     */
+    public void setAccessLogSupplier(java.util.function.Supplier<SourceAccessLog> supplier) {
+        if (supplier != null) {
+            this.accessLog = supplier;
+            refresh();
+        }
+    }
+
+    private SourceAccessLog currentAccessLog() {
+        try {
+            SourceAccessLog log = accessLog.get();
+            return log == null ? SourceAccessLog.EMPTY : log;
+        } catch (RuntimeException ex) {
+            return SourceAccessLog.EMPTY;
+        }
+    }
+
+    private java.awt.Color accessTint(SourceAccessState state) {
+        java.awt.Color mark = state == SourceAccessState.BLOCKED ? palette.getAccentRed()
+                : state == SourceAccessState.RESOLVED ? palette.getAccentYellow() : null;
+        return mark == null ? null : com.aresstack.comiccontrols.theme.ResearchUiPainter.mix(
+                ThemeColor.of("comic.fieldBg"), mark, ACCESS_TINT_STRENGTH);
+    }
+
+    /** The tooltip line for a marked row ("" when unmarked). */
+    static String accessNote(SourceAccessLog.Entry entry) {
+        if (entry == null || entry.getState() == SourceAccessState.NONE) {
+            return "";
+        }
+        String page = entry.getUrl().isEmpty() ? "" : " (" + entry.getUrl() + ")";
+        return entry.getState() == SourceAccessState.BLOCKED
+                ? "Security check on " + entry.getFamily() + " not solved" + page
+                        + " — pages of this website may be missing. Check it manually."
+                : "Security check on " + entry.getFamily() + " was solved" + page
+                        + " — verify the source was considered.";
     }
 
     /** #28/#39.7: supplies the derived passages of one source (wired by the contribution). */
@@ -891,10 +955,22 @@ public final class ResearchSourcesView extends JPanel {
 
         private final String[] columns = {"⭐", "Titel", "Website", "Status", "Score", "Text"};
         private List<ResearchSourceRecord> rows = new ArrayList<ResearchSourceRecord>();
+        private SourceAccessLog access = SourceAccessLog.EMPTY;
 
-        void setRows(List<ResearchSourceRecord> rows) {
+        void setRows(List<ResearchSourceRecord> rows, SourceAccessLog access) {
             this.rows = new ArrayList<ResearchSourceRecord>(rows);
+            this.access = access == null ? SourceAccessLog.EMPTY : access;
             fireTableDataChanged();
+        }
+
+        SourceAccessLog.Entry accessEntryAt(int row) {
+            ResearchSourceRecord r = rows.get(row);
+            return access.lookup(r.getUrl().isEmpty() ? r.getOrigin() : r.getUrl());
+        }
+
+        SourceAccessState accessStateAt(int row) {
+            SourceAccessLog.Entry e = accessEntryAt(row);
+            return e == null ? SourceAccessState.NONE : e.getState();
         }
 
         ResearchSourceRecord rowAt(int row) {

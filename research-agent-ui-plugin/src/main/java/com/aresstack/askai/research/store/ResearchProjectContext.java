@@ -83,4 +83,9 @@ public final class ResearchProjectContext {
     public FileResearchTaskStore getTaskStore() {
         return store.tasks();
     }
+
+    /** Websites that demanded a manual security check during the research (Sources list red/yellow marks). */
+    public FileSourceAccessStore getSourceAccessStore() {
+        return store.sourceAccess();
+    }
 }
