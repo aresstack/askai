@@ -33,15 +33,18 @@ public final class TopicProfile {
     private final String conceptAnchorId;
     private final double conceptSimilarity;
     private final boolean conceptAligned;
-    private final boolean significant;
+    private final boolean materialCovered;
+    private final boolean sourceConfirmed;
     private final double evidenceShare;
     private final boolean major;
+    private final ScopeAlignment scopeAlignment;
 
     public TopicProfile(String topicId, String title, List<String> passageIds, List<String> representativePassageIds,
                         int distinctPassageCount, int sourceCount, int domainCount, long materialChars,
                         double dispersion, List<Subtopic> subtopics, String groupId, List<TopicRelation> related,
                         String conceptAnchorId, double conceptSimilarity, boolean conceptAligned,
-                        boolean significant, double evidenceShare, boolean major) {
+                        boolean materialCovered, boolean sourceConfirmed, double evidenceShare, boolean major,
+                        ScopeAlignment scopeAlignment) {
         this.topicId = topicId == null ? "" : topicId;
         this.title = title == null ? "" : title;
         this.passageIds = copy(passageIds);
@@ -59,7 +62,9 @@ public final class TopicProfile {
         this.conceptAnchorId = conceptAnchorId == null ? "" : conceptAnchorId;
         this.conceptSimilarity = conceptSimilarity;
         this.conceptAligned = conceptAligned;
-        this.significant = significant;
+        this.materialCovered = materialCovered;
+        this.sourceConfirmed = sourceConfirmed;
+        this.scopeAlignment = scopeAlignment == null ? ScopeAlignment.UNKNOWN : scopeAlignment;
         this.evidenceShare = evidenceShare;
         this.major = major;
     }
@@ -147,7 +152,22 @@ public final class TopicProfile {
 
     /** Whether the topic meets the passage and source minimums. */
     public boolean isSignificant() {
-        return significant;
+        return materialCovered && sourceConfirmed;
+    }
+
+    /** Enough DISTINCT passages (near duplicates count once). */
+    public boolean isMaterialCovered() {
+        return materialCovered;
+    }
+
+    /** Enough sources from enough domains. */
+    public boolean isSourceConfirmed() {
+        return sourceConfirmed;
+    }
+
+    /** Where the topic lies relative to the search fence; separate from the concept alignment. */
+    public ScopeAlignment getScopeAlignment() {
+        return scopeAlignment;
     }
 
     /** Its share of the distinct material of all significant topics (0 for an insignificant topic). */
@@ -160,8 +180,8 @@ public final class TopicProfile {
         return major;
     }
 
-    /** A significant topic that no concept node covers: new from the research. */
+    /** A significant topic that no concept node covers: new from the research (which says nothing about the fence). */
     public boolean isNovel() {
-        return significant && !conceptAligned;
+        return isSignificant() && !conceptAligned;
     }
 }
