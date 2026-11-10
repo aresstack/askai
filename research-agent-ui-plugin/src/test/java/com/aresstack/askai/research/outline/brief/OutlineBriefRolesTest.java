@@ -42,6 +42,7 @@ public class OutlineBriefRolesTest {
         List<ResearchRole> roles = new ArrayList<ResearchRole>(
                 ResearchRoles.all(PhaseAssistantProfileRegistry.defaults(true, true)));
         roles.addAll(OutlineBriefWorker.roles());
+        roles.add(com.aresstack.askai.research.outline.synthesis.OutlineSynthesizer.ROLE);
         Set<String> ids = new HashSet<String>();
         for (ResearchRole role : roles) {
             assertTrue("duplicate role id " + role.getId(), ids.add(role.getId()));
@@ -53,5 +54,6 @@ public class OutlineBriefRolesTest {
         }
         assertTrue(ids.contains("outline-labels"));
         assertTrue(ids.contains("outline-briefs"));
+        assertTrue(ids.contains("outline-synthesis"));
     }
 }
