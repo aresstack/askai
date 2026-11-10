@@ -66,6 +66,23 @@ public final class LiveOutlineProjectionBuilder {
         // comes deterministically from the sorted member ids.
         List<TopicProposal> proposals = new TopicClusterer(IdSequence.counting(), mergeDistanceCutoff,
                 representativesPerTopic).cluster(sorted, vectors, monitor);
+        return liveTopics(proposals);
+    }
+
+    /**
+     * Phase 3: the same topics as {@link #discoverTopics(List, Map, ClusteringMonitor)} from ONE clustering run
+     * that also keeps the complete merge tree (sub-topics, topic groups) for the topic analysis.
+     */
+    public LiveTopicTree discoverTopicTree(List<Passage> passages,
+                                           Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                           ClusteringMonitor monitor) {
+        List<Passage> sorted = sortedById(passages == null ? Collections.<Passage>emptyList() : passages);
+        TopicClusterer.Tree tree = new TopicClusterer(IdSequence.counting(), mergeDistanceCutoff,
+                representativesPerTopic).clusterTree(sorted, vectors, monitor);
+        return new LiveTopicTree(liveTopics(tree.getTopics()), tree.getDendrogram());
+    }
+
+    private static List<LiveTopicProjection> liveTopics(List<TopicProposal> proposals) {
         List<LiveTopicProjection> topics = new ArrayList<LiveTopicProjection>();
         for (TopicProposal proposal : proposals) {
             topics.add(new LiveTopicProjection(proposal.getMemberPassageIds(),

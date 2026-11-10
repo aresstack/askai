@@ -49,6 +49,64 @@ public final class TopicClusterer {
                                        Map<String, EmbeddingPort.EmbeddingVector> vectors,
                                        ClusteringMonitor monitor) {
         ClusteringMonitor m = monitor == null ? ClusteringMonitor.NONE : monitor;
+        float[][] unit = unitVectors(passages, vectors);
+        return proposals(agglomerate(unit, m, null), passages, vectors);
+    }
+
+    /** Phase 3: the flat topics of {@link #cluster} together with the complete merge tree they were cut from. */
+    public static final class Tree {
+        private final List<TopicProposal> topics;
+        private final TopicDendrogram dendrogram;
+
+        Tree(List<TopicProposal> topics, TopicDendrogram dendrogram) {
+            this.topics = java.util.Collections.unmodifiableList(new ArrayList<TopicProposal>(topics));
+            this.dendrogram = dendrogram;
+        }
+
+        /** The flat topics at the merge cutoff, ordered and built exactly as {@link #cluster} builds them. */
+        public List<TopicProposal> getTopics() {
+            return topics;
+        }
+
+        public TopicDendrogram getDendrogram() {
+            return dendrogram;
+        }
+    }
+
+    /**
+     * Phase 3: one run that keeps merging past the cutoff up to a single root, so the whole merge tree is
+     * available (sub-topics below a topic, topic groups above it). The flat topics are the tree's cut at the
+     * cutoff: average linkage is reducible, so a group whose nearest neighbour lies beyond the cutoff takes part
+     * in no merge at or below it, and the cut equals what {@link #cluster} returns (parity-tested). Same cost
+     * class as {@link #cluster}: O(n²) time and memory.
+     */
+    public Tree clusterTree(List<Passage> passages, Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                            ClusteringMonitor monitor) {
+        ClusteringMonitor m = monitor == null ? ClusteringMonitor.NONE : monitor;
+        float[][] unit = unitVectors(passages, vectors);
+        List<TopicDendrogram.Merge> merges = new ArrayList<TopicDendrogram.Merge>();
+        agglomerate(unit, m, merges);
+        List<String> ids = new ArrayList<String>();
+        for (Passage passage : passages) {
+            ids.add(passage.getPassageId());
+        }
+        TopicDendrogram dendrogram = new TopicDendrogram(ids, merges, mergeDistanceCutoff);
+        Map<String, Integer> index = new java.util.HashMap<String, Integer>();
+        for (int i = 0; i < ids.size(); i++) {
+            index.put(ids.get(i), i);
+        }
+        List<List<Integer>> members = new ArrayList<List<Integer>>();
+        for (List<String> group : dendrogram.cut(mergeDistanceCutoff)) {
+            List<Integer> indexes = new ArrayList<Integer>();
+            for (String id : group) {
+                indexes.add(index.get(id));
+            }
+            members.add(indexes);
+        }
+        return new Tree(proposals(members, passages, vectors), dendrogram);
+    }
+
+    private float[][] unitVectors(List<Passage> passages, Map<String, EmbeddingPort.EmbeddingVector> vectors) {
         int n = passages.size();
         float[][] unit = new float[n][];
         String fingerprint = null;
@@ -68,7 +126,11 @@ public final class TopicClusterer {
             }
             unit[i] = normalised(vector.raw());
         }
-        List<List<Integer>> members = agglomerate(unit, m);
+        return unit;
+    }
+
+    private List<TopicProposal> proposals(List<List<Integer>> members, List<Passage> passages,
+                                          Map<String, EmbeddingPort.EmbeddingVector> vectors) {
         List<TopicProposal> proposals = new ArrayList<TopicProposal>();
         for (List<Integer> cluster : members) {
             List<Passage> clusterPassages = new ArrayList<Passage>();
@@ -80,8 +142,13 @@ public final class TopicClusterer {
         return proposals;
     }
 
-    /** Clusters as lists of input indexes, members ascending, clusters ordered by their lowest member. */
-    private List<List<Integer>> agglomerate(float[][] unit, ClusteringMonitor monitor) {
+    /**
+     * Clusters as lists of input indexes, members ascending, clusters ordered by their lowest member. With
+     * {@code tree} non-null no cluster is retired at the cutoff: the run merges up to one root and records every
+     * merge; the returned clusters are then the single root and the caller cuts the tree itself.
+     */
+    private List<List<Integer>> agglomerate(float[][] unit, ClusteringMonitor monitor,
+                                            List<TopicDendrogram.Merge> tree) {
         final int n = unit.length;
         List<List<Integer>> result = new ArrayList<List<Integer>>();
         if (n == 0) {
@@ -153,7 +220,7 @@ public final class TopicClusterer {
                     best = j;
                 }
             }
-            if (bestDistance > mergeDistanceCutoff) {
+            if (tree == null && bestDistance > mergeDistanceCutoff) {
                 // a can never merge again: retire it; the chain below it stays valid.
                 active[a] = false;
                 activeCount--;
@@ -174,6 +241,9 @@ public final class TopicClusterer {
                     int ik = index(keep, k, n);
                     distance[ik] = (float) ((sizeKeep * (double) distance[ik]
                             + sizeDrop * (double) distance[index(drop, k, n)]) / (sizeKeep + sizeDrop));
+                }
+                if (tree != null) {
+                    tree.add(new TopicDendrogram.Merge(keep, drop, bestDistance));
                 }
                 size[keep] = sizeKeep + sizeDrop;
                 clusterMembers.get(keep).addAll(clusterMembers.get(drop));
@@ -256,14 +326,17 @@ public final class TopicClusterer {
             intra += VectorMath.cosine(vector, centroid);
         }
         double confidence = intra / memberVectors.size();
-        String title = suggestedTitle(byCentroid.get(0));
+        String title = suggestedTitle(byCentroid.get(0).getText());
         return new TopicProposal(ids.next("topic-proposal"), memberIds, representatives, title,
                 byCentroid.get(0).getText(), confidence, Lifecycle.PROPOSED);
     }
 
-    /** Deterministic evidence-bound title: the representative's first sentence, trimmed. */
-    private static String suggestedTitle(Passage representative) {
-        String text = representative.getText();
+    /**
+     * Deterministic evidence-bound title: the representative's first sentence, trimmed. Shared with the topic
+     * analysis, which titles sub-topics the same way.
+     */
+    public static String suggestedTitle(String representativeText) {
+        String text = representativeText == null ? "" : representativeText;
         int end = text.indexOf('.');
         String head = end > 0 ? text.substring(0, end) : text;
         return head.length() <= 80 ? head : head.substring(0, 80);
