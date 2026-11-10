@@ -66,8 +66,8 @@ public final class SearchPlanCycles {
     /**
      * The planner request of the next cycle with the gaps of the evidence analysis: a node the analysis finds
      * thin, redundant or missing is planned again even when its source count covers it (many pages saying the same
-     * are no coverage), and carries the findings; a node the analysis finds well covered is not deepened; the new
-     * topics inside the Weidezaun ride along.
+     * are no coverage), and carries the findings; a covered node without a gap is not deepened; the new topics
+     * inside the Weidezaun ride along. A gap node also counts as uncovered in the plan's outcome.
      */
     public static ConceptQueryPlan.Request nextCycleRequest(SearchPlanRecord record,
                                                             Collection<SearchPlanEntry> entries,
@@ -81,9 +81,8 @@ public final class SearchPlanCycles {
             }
             SearchPlanCoverage.NodeCoverage nc = coverage.get(node.getId());
             List<String> evidence = g.getEvidenceByNode().get(node.getId());
-            if (evidence == null && (g.getCoveredNodes().contains(node.getId())
-                    || nc != null && nc.getState() == SearchPlanCoverage.State.COVERED)) {
-                continue; // well covered by the analysis or by its sources: not deepened for now
+            if (evidence == null && nc != null && nc.getState() == SearchPlanCoverage.State.COVERED) {
+                continue; // covered by its sources and no gap in the analysis: not deepened for now
             }
             uncovered.add(planNode(node, nc, entries, caps, evidence));
         }

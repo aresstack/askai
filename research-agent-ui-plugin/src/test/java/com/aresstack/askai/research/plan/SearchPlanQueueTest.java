@@ -620,6 +620,8 @@ public class SearchPlanQueueTest {
         sources.domains.put("s2", "two.example");
         sources.domains.put("s3", "three.example");
         sources.domains.put("s4", "four.example");
+        sources.domains.put("s5", "five.example");
+        sources.domains.put("s6", "six.example");
         FakeReplanner replanner = new FakeReplanner();
         replanner.answer = answer("a", "Alpha Messwerte Studie");
         SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
@@ -643,8 +645,8 @@ public class SearchPlanQueueTest {
         port.complete(false); // Alpha Query: covered by its source count
         sources.next = Arrays.asList("s3", "s4");
         port.complete(false); // Beta Query: covered
-        sources.next = Collections.emptyList();
-        port.complete(false); // Gamma Query: nothing, but the analysis finds C well covered
+        sources.next = Arrays.asList("s5", "s6");
+        port.complete(false); // Gamma Query: covered, and the analysis finds C well covered
 
         assertEquals(1, asked.size());
         assertEquals(1, replanner.requests.size());
@@ -666,6 +668,16 @@ public class SearchPlanQueueTest {
         assertEquals("Alpha Messwerte Studie", planned.getQuery());
         assertTrue(planned.getNote(), planned.getNote().contains("gap REDUNDANT")
                 && planned.getNote().contains("analysis snap-7"));
+
+        sources.next = Collections.emptyList();
+        port.complete(false); // the last cycle ends: the analysis still finds A redundant
+        assertEquals(1, outcomes.size());
+        SearchPlanQueue.Outcome outcome = outcomes.get(0);
+        assertEquals("ten sources saying the same are no coverage", Collections.singletonList("A"),
+                outcome.getUncovered());
+        assertTrue(outcome.report(), outcome.report().contains("A: uncovered (2 sources from 2 domains"));
+        assertTrue(outcome.report(), outcome.report().contains("; analysis snap-7: REDUNDANT"));
+        assertTrue(outcome.report(), outcome.report().contains("C: covered"));
     }
 
     @Test

@@ -329,6 +329,8 @@ public final class SearchPlanQueue {
     private volatile GapReview gapReview = GapReview.NONE;
     /** The gaps the running re-plan was asked for (the decision of this cycle boundary). */
     private EvidenceGaps.Gaps replanGaps = EvidenceGaps.Gaps.NONE;
+    /** The gaps of the latest cycle boundary: a gap node is not covered, whatever its source count says. */
+    private volatile EvidenceGaps.Gaps lastGaps = EvidenceGaps.Gaps.NONE;
     /** Set when the runtime had no worker browser for a team query: this run goes on one query at a time. */
     private volatile boolean noWorkerBrowser;
 
@@ -816,10 +818,7 @@ public final class SearchPlanQueue {
                     Map<String, SearchPlanEntry> all = store.loadEntries();
                     Map<String, SearchPlanCoverage.NodeCoverage> coverage =
                             SearchPlanCoverage.of(record, all.values(), c, sources);
-                    EvidenceGaps.Gaps gaps = EvidenceGaps.Gaps.NONE;
-                    if (!capReached && replanner != null && record.getCycle() < c.getCycles()) {
-                        gaps = gapReview(record, all.values());
-                    }
+                    EvidenceGaps.Gaps gaps = gapReview(record, all.values());
                     nextCycle = capReached || replanner == null || record.getCycle() >= c.getCycles() ? null
                             : SearchPlanCycles.nextCycleRequest(record, all.values(), coverage, c, gaps);
                     replanGaps = gaps;
@@ -900,6 +899,7 @@ public final class SearchPlanQueue {
             return EvidenceGaps.Gaps.NONE;
         }
         if (gaps == null || gaps.getAnalysisId().isEmpty()) {
+            lastGaps = EvidenceGaps.Gaps.NONE;
             System.err.println("[search-plan] gap review cycle " + record.getCycle()
                     + ": no settled analysis, the next cycle plans from the source counts");
             return EvidenceGaps.Gaps.NONE;
@@ -919,6 +919,7 @@ public final class SearchPlanQueue {
             line.append(" [").append(dropped).append(']');
         }
         System.err.println(line);
+        lastGaps = gaps;
         return gaps;
     }
 
@@ -1051,7 +1052,8 @@ public final class SearchPlanQueue {
             if (nc == null) {
                 continue;
             }
-            boolean covered = nc.getState() == SearchPlanCoverage.State.COVERED;
+            List<String> gap = lastGaps.getEvidenceByNode().get(node.getId());
+            boolean covered = nc.getState() == SearchPlanCoverage.State.COVERED && gap == null;
             if (!covered) {
                 uncovered.add(node.getLabel());
             }
@@ -1061,7 +1063,9 @@ public final class SearchPlanQueue {
                     + (nc.getSources().size() == 1 ? " source" : " sources") + " from " + nc.getDomains().size()
                     + (nc.getDomains().size() == 1 ? " domain" : " domains") + ", " + nc.getQueriesRun()
                     + (nc.getQueriesRun() == 1 ? " query" : " queries") + " run"
-                    + (nc.getDomains().isEmpty() ? "" : ": " + String.join(", ", nc.getDomains())) + ")");
+                    + (nc.getDomains().isEmpty() ? "" : ": " + String.join(", ", nc.getDomains())) + ")"
+                    + (gap == null || gap.isEmpty() ? ""
+                    : "; analysis " + lastGaps.getAnalysisId() + ": " + gap.get(0)));
         }
         int run = 0;
         for (SearchPlanEntry entry : entries.values()) {
