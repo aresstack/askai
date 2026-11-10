@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.outline.synthesis;
 
 import com.aresstack.askai.research.knowledge.topic.ConceptCoverage;
+import com.aresstack.askai.research.knowledge.topic.ScopeAlignment;
 import com.aresstack.askai.research.knowledge.topic.Subtopic;
 import com.aresstack.askai.research.knowledge.topic.TopicAnalysis;
 import com.aresstack.askai.research.knowledge.topic.TopicProfile;
@@ -18,7 +19,9 @@ import java.util.Set;
  * {@code T1, T2, ...} (largest distinct material first), their sub-topics {@code T1.1, T1.2, ...}, topic groups
  * {@code G1, ...} and concept requirements {@code C1, ...} (concept order). The brief resolves every key back to
  * topic ids and passages. Only significant topics are listed, at most the configured number; the significant topics
- * beyond that are {@link #getOmittedTopics() omitted} and placed by code. Immutable.
+ * beyond that are {@link #getOmittedTopics() omitted} and placed by code. Topics the search fence reads as OUT
+ * (clearly on the blacklist side) are {@link #getOutOfScopeTopics() kept out} of the outline and reported; a topic
+ * that is only new to the concept stays in. Immutable.
  */
 public final class SynthesisBrief {
 
@@ -126,6 +129,7 @@ public final class SynthesisBrief {
     private final TopicAnalysis analysis;
     private final List<TopicEntry> topics;
     private final List<TopicProfile> omittedTopics;
+    private final List<TopicProfile> outOfScopeTopics;
     private final List<RequirementEntry> requirements;
     private final Map<String, List<String>> groupTopicKeys;
     private final Map<String, TopicEntry> topicByKey = new LinkedHashMap<String, TopicEntry>();
@@ -133,12 +137,13 @@ public final class SynthesisBrief {
     private final Map<String, RequirementEntry> requirementByKey = new LinkedHashMap<String, RequirementEntry>();
 
     private SynthesisBrief(SynthesisContext context, TopicAnalysis analysis, List<TopicEntry> topics,
-                           List<TopicProfile> omittedTopics, List<RequirementEntry> requirements,
-                           Map<String, List<String>> groupTopicKeys) {
+                           List<TopicProfile> omittedTopics, List<TopicProfile> outOfScopeTopics,
+                           List<RequirementEntry> requirements, Map<String, List<String>> groupTopicKeys) {
         this.context = context;
         this.analysis = analysis;
         this.topics = Collections.unmodifiableList(topics);
         this.omittedTopics = Collections.unmodifiableList(omittedTopics);
+        this.outOfScopeTopics = Collections.unmodifiableList(outOfScopeTopics);
         this.requirements = Collections.unmodifiableList(requirements);
         this.groupTopicKeys = Collections.unmodifiableMap(groupTopicKeys);
         for (TopicEntry topic : topics) {
@@ -179,9 +184,14 @@ public final class SynthesisBrief {
         Map<String, String> groupKeyOf = new LinkedHashMap<String, String>();
         List<TopicEntry> topics = new ArrayList<TopicEntry>();
         List<TopicProfile> omitted = new ArrayList<TopicProfile>();
+        List<TopicProfile> outOfScope = new ArrayList<TopicProfile>();
         Map<String, List<String>> groupTopicKeys = new LinkedHashMap<String, List<String>>();
         int groupCount = 0;
         for (TopicProfile profile : analysis.significantTopics()) {
+            if (profile.getScopeAlignment().getVerdict() == ScopeAlignment.Verdict.OUT) {
+                outOfScope.add(profile);
+                continue;
+            }
             if (topics.size() >= limits.getMaxPromptTopics()) {
                 omitted.add(profile);
                 continue;
@@ -225,7 +235,7 @@ public final class SynthesisBrief {
             }
             topics.add(new TopicEntry(key, profile, groupKey, conceptKey, subtopics, excerpts));
         }
-        return new SynthesisBrief(context, analysis, topics, omitted, requirements, groupTopicKeys);
+        return new SynthesisBrief(context, analysis, topics, omitted, outOfScope, requirements, groupTopicKeys);
     }
 
     /**
@@ -252,7 +262,7 @@ public final class SynthesisBrief {
             }
             members.add(topic.getKey());
         }
-        return new SynthesisBrief(context, analysis, kept, omitted, requirements, groups);
+        return new SynthesisBrief(context, analysis, kept, omitted, outOfScopeTopics, requirements, groups);
     }
 
     static String excerpt(Texts texts, String passageId, int chars) {
@@ -284,6 +294,11 @@ public final class SynthesisBrief {
     /** Significant topics beyond the prompt limit (placed by code, never shown to the model). */
     public List<TopicProfile> getOmittedTopics() {
         return omittedTopics;
+    }
+
+    /** Significant topics the search fence reads as OUT: not in the outline, reported in its quality report. */
+    public List<TopicProfile> getOutOfScopeTopics() {
+        return outOfScopeTopics;
     }
 
     public List<RequirementEntry> getRequirements() {

@@ -84,7 +84,7 @@ final class ChapterPlanContract {
                     text.append("covered: ");
                     break;
                 case THIN:
-                    text.append("thin: ");
+                    text.append("thin (").append(thinReason(coverage)).append("): ");
                     break;
                 default:
                     text.append("gap: no evidence\n");
@@ -93,6 +93,21 @@ final class ChapterPlanContract {
             text.append(coverage.getDistinctPassageCount()).append(" distinct passages from ")
                     .append(coverage.getSourceCount()).append(" sources\n");
         }
+    }
+
+    /** Why a requirement counts as thin, in the words of the analysis (quality, breadth and balance apart). */
+    static String thinReason(ConceptCoverage coverage) {
+        if (!coverage.isMaterialCovered()) {
+            return "too little distinct material";
+        }
+        if (!coverage.isSourceConfirmed()) {
+            return "too few independent sources";
+        }
+        if (!coverage.isBroad()) {
+            return "only " + coverage.getCoveredChildCount() + " of " + coverage.getChildCount()
+                    + " sub-themes covered";
+        }
+        return "one-sided: one sub-theme holds most of the material";
     }
 
     static void appendTopics(StringBuilder text, SynthesisBrief brief) {
