@@ -88,6 +88,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JCheckBox writerGapResearch = ComicControls.checkBox("Research writer gaps after writing", true);
     private final JTextField writerGapMax = ComicControls.textField(3);
     private final JTextField writerGapWords = ComicControls.textField(16);
+    private final JTextField gapWaitSeconds = ComicControls.textField(3);
+    private final JTextField gapNewTopics = ComicControls.textField(3);
+    private final JTextField gapFailedQueries = ComicControls.textField(3);
     // Worker browsers (parallel research workers): separate from the model capacity.
     private final JTextField workerProcesses = ComicControls.textField(3);
     private final JTextField workerUserContexts = ComicControls.textField(3);
@@ -223,6 +226,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         team.row("New searches", group(labelled("Per page", teamSearchesPerPage),
                 labelled("Next search below open pages", teamNextSearchBelow),
                 labelled("Seed queries per node", teamSeedQueries)));
+        team.row("Gap review", group(labelled("Wait for analysis (s)", gapWaitSeconds),
+                labelled("New topics", gapNewTopics), labelled("Failed queries named", gapFailedQueries)));
 
         com.aresstack.comiccontrols.control.ComicForm preference =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Source preference");
@@ -481,6 +486,18 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_TEAM_SEED_QUERIES_PER_NODE,
                 "With the research team, the plan starts with this many queries per concept node (breadth first); "
                         + "the deeper queries come from what the team reads, up to Queries per node.");
+        bindLimit(gapWaitSeconds, ResearchRuntimeSettings.KEY_GAP_WAIT_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_GAP_WAIT_SECONDS,
+                "At the end of a research cycle, wait this long for the evidence analysis to hold every source read "
+                        + "so far; without it the next cycle plans from the source counts.");
+        bindLimit(gapNewTopics, ResearchRuntimeSettings.KEY_GAP_NEW_TOPICS,
+                ResearchRuntimeSettings.DEFAULT_GAP_NEW_TOPICS,
+                "The most new topics of the material, inside the scope, the planner may search for in the next "
+                        + "cycle; 0 = none.");
+        bindLimit(gapFailedQueries, ResearchRuntimeSettings.KEY_GAP_FAILED_QUERIES,
+                ResearchRuntimeSettings.DEFAULT_GAP_FAILED_QUERIES,
+                "The most queries that found nothing the planner sees per thin or missing node, so it changes "
+                        + "the strategy.");
         bindLimit(workerProcesses, ResearchRuntimeSettings.KEY_WORKER_BROWSER_PROCESSES,
                 ResearchRuntimeSettings.DEFAULT_WORKER_BROWSER_PROCESSES,
                 "Worker browser processes for parallel research workers, over all chats. This is also how many "

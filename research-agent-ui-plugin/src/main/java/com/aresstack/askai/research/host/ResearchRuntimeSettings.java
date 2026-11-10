@@ -554,6 +554,34 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_TEAM_SEED_QUERIES_PER_NODE = "research.team.seedQueriesPerNode";
     public static final int DEFAULT_TEAM_SEED_QUERIES_PER_NODE = 1;
 
+    /**
+     * Plan T4 gap review: how long the cycle boundary waits for the shared evidence analysis to hold the material
+     * read so far (no source waiting for processing, the corpus analysed); after it the cycle plans from the source
+     * counts.
+     */
+    public static final String KEY_GAP_WAIT_SECONDS = "research.gaps.waitSeconds";
+    public static final int DEFAULT_GAP_WAIT_SECONDS = 180;
+
+    /** Plan T4 gap review: the most new topics of the material (inside the Weidezaun) handed to the planner. */
+    public static final String KEY_GAP_NEW_TOPICS = "research.gaps.newTopics";
+    public static final int DEFAULT_GAP_NEW_TOPICS = 3;
+
+    /** Plan T4 gap review: the most queries that found nothing named per gap node. */
+    public static final String KEY_GAP_FAILED_QUERIES = "research.gaps.failedQueries";
+    public static final int DEFAULT_GAP_FAILED_QUERIES = 3;
+
+    public static int loadGapWaitSeconds(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_GAP_WAIT_SECONDS, DEFAULT_GAP_WAIT_SECONDS);
+    }
+
+    public static int loadGapNewTopics(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_GAP_NEW_TOPICS, DEFAULT_GAP_NEW_TOPICS);
+    }
+
+    public static int loadGapFailedQueries(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_GAP_FAILED_QUERIES, DEFAULT_GAP_FAILED_QUERIES);
+    }
+
     public static int loadTeamSearchesPerPage(WorkspaceStateStore store) {
         return loadNonNegativeInt(store, KEY_TEAM_SEARCHES_PER_PAGE, DEFAULT_TEAM_SEARCHES_PER_PAGE);
     }
