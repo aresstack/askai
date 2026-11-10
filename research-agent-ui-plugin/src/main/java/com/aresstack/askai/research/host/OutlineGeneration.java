@@ -2,39 +2,45 @@ package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.research.book.FrozenConcept;
 import com.aresstack.askai.research.concept.ConceptIdentity;
-import com.aresstack.askai.research.domain.Passage;
-import com.aresstack.askai.research.domain.scope.TypedBlacklist;
 import com.aresstack.askai.research.knowledge.ClusteringMonitor;
-import com.aresstack.askai.research.knowledge.EmbeddingPort;
-import com.aresstack.askai.research.knowledge.live.LiveOutlineProjectionBuilder;
-import com.aresstack.askai.research.knowledge.live.LiveTopicProjection;
-import com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader;
-import com.aresstack.askai.research.knowledge.processing.live.CorpusLimit;
 import com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery;
+import com.aresstack.askai.research.knowledge.processing.live.TopicAnalysisSnapshot;
 import com.aresstack.askai.research.outline.Outline;
 import com.aresstack.askai.research.outline.OutlineJobGuard;
 import com.aresstack.askai.research.outline.OutlineWorkspace;
 import com.aresstack.askai.research.outline.generate.ConceptOutlineNode;
-import com.aresstack.askai.research.outline.generate.ConceptSeededOutlineBuilder;
-import com.aresstack.askai.research.outline.generate.OutlineGenerationInput;
 import com.aresstack.askai.research.outline.generate.OutlineProvenanceMerge;
-import com.aresstack.askai.research.outline.generate.OutlineSourceRule;
-import com.aresstack.askai.research.sources.ResearchSourceRecord;
+import com.aresstack.askai.research.outline.synthesis.OutlineAssembler;
+import com.aresstack.askai.research.outline.synthesis.OutlineProposer;
+import com.aresstack.askai.research.outline.synthesis.OutlineQualityCheck;
+import com.aresstack.askai.research.outline.synthesis.OutlineSynthesisSettings;
+import com.aresstack.askai.research.outline.synthesis.OutlineSynthesizer;
+import com.aresstack.askai.research.outline.synthesis.SynthesisBrief;
+import com.aresstack.askai.research.outline.synthesis.SynthesisContext;
+import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.store.FileConceptStore;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.Executor;
 
 /**
- * Plan PR 22: "Generate outline" in {@code outline/running}. Off the UI thread, with the progress and Cancel of the
- * drawer's {@link OutlineClusteringRun}, under the session's {@link OutlineJobGuard} (so {@code finish-outline} is
- * refused meanwhile): read the eligible corpus (D4), cluster it (PR 20), build the concept-seeded proposal without a
- * model call and merge it into the stored outline by provenance.
+ * "Generate outline" in {@code outline/running} (Phase 3, D6/D6a). Off the UI thread, with the progress and Cancel
+ * of the drawer's {@link OutlineClusteringRun}, under the session's {@link OutlineJobGuard} (so {@code finish-outline}
+ * is refused meanwhile):
+ * <ol>
+ * <li>take ONE topic-analysis snapshot from the shared analysis ({@link SharedTopicDiscovery#analysisFor}); Phase 3
+ * never segments, embeds or clusters itself;</li>
+ * <li>the compact brief from the snapshot and the approved concept ({@link SynthesisBrief});</li>
+ * <li>the synthesis on {@code phase.outline} with the quality check between the rounds
+ * ({@link OutlineSynthesizer}, {@link OutlineQualityCheck});</li>
+ * <li>the safe fixes, the final review and the outline proposal with word budgets, provenance and the report
+ * ({@link OutlineAssembler});</li>
+ * <li>labels and briefs ({@link Enrichment}), then the merge into the stored outline by passage overlap
+ * ({@link OutlineProvenanceMerge}): edited entries are kept and marked when their research changed.</li>
+ * </ol>
  */
 public final class OutlineGeneration {
 
@@ -45,23 +51,24 @@ public final class OutlineGeneration {
         /** The Phase-1 record, or {@code null} before the first committed {@code SUBMIT_SCOPE}. */
         FrozenConcept frozenConcept() throws Exception;
 
-        FileConceptStore conceptStore();
+        /** The approved book title (or the mission without one). */
+        String bookTitle(FrozenConcept frozen);
 
-        /** The source ids of the approved source set (sources pin); empty before one. */
-        Collection<String> pinnedSourceIds() throws Exception;
+        /** The shared topic analysis, or {@code null} without the knowledge pipeline. */
+        SharedTopicDiscovery discovery();
 
-        Collection<ResearchSourceRecord> sources();
+        OutlineGenerationSettings settings();
+
+        /** The chat on {@code phase.outline}, or {@code null} without a model (the plan then comes from the analysis). */
+        MainModelChat synthesisChat(OutlineSynthesisSettings settings);
 
         long now();
     }
 
     private final Inputs inputs;
-    private final ActiveKnowledgeCorpusReader corpus;
-    private final EmbeddingPort embeddings;
-    private final OutlineGenerationInput.Settings settings;
     private final OutlineClusteringRun run;
     private final Executor executor;
-    /** Plan PR 24: the label and brief pass after the model-free proposal; {@code null} = none. */
+    /** Plan PR 24: the label and brief pass after the proposal; {@code null} = none. */
     private volatile Enrichment enrichment;
 
     /** Plan PR 24: labels and briefs for a fresh proposal (the session binds the model slots). */
@@ -79,12 +86,8 @@ public final class OutlineGeneration {
         this.enrichment = enrichment;
     }
 
-    public OutlineGeneration(Inputs inputs, ActiveKnowledgeCorpusReader corpus, EmbeddingPort embeddings,
-                             OutlineGenerationInput.Settings settings, OutlineClusteringRun run, Executor executor) {
+    public OutlineGeneration(Inputs inputs, OutlineClusteringRun run, Executor executor) {
         this.inputs = inputs;
-        this.corpus = corpus;
-        this.embeddings = embeddings;
-        this.settings = settings;
         this.run = run;
         this.executor = executor;
     }
@@ -139,27 +142,23 @@ public final class OutlineGeneration {
         try {
             long expected = workspace.workingRevision();
             Outline stored = workspace.current();
-            Prepared prepared = prepare(monitor);
-            ConceptSeededOutlineBuilder.Result result =
-                    new ConceptSeededOutlineBuilder(embeddings).build(prepared.input, monitor);
-            if (monitor.isCancelled()) {
-                throw new ClusteringMonitor.ClusteringCancelledException();
-            }
-            Outline proposal = result.outline;
+            Proposal proposal = propose(monitor);
+            Outline outline = proposal.outline;
             Enrichment labelsAndBriefs = enrichment;
             if (labelsAndBriefs != null) {
                 monitor.progress("Writing chapter labels and briefs", 0, 1);
-                proposal = labelsAndBriefs.enrich(proposal, monitor::isCancelled);
-                if (monitor.isCancelled()) {
-                    throw new ClusteringMonitor.ClusteringCancelledException();
-                }
+                outline = labelsAndBriefs.enrich(outline, monitor::isCancelled);
+                checkCancel(monitor);
             }
-            workspace.save(OutlineProvenanceMerge.merge(stored, proposal), expected, inputs.now());
-            System.err.println("[research-outline] generated chapters=" + result.outline.getChapters().size()
-                    + " assigned=" + result.assignedPassages + " unassigned=" + result.unassignedPassages
-                    + " candidates=" + result.outline.getCandidates().size()
-                    + " omitted=" + prepared.omitted);
-            monitor.finished(prepared.omitted);
+            workspace.save(OutlineProvenanceMerge.merge(stored, outline, proposal.settings.getMergeOverlap()),
+                    expected, inputs.now());
+            System.err.println("[research-outline] generated chapters=" + proposal.outline.getChapters().size()
+                    + " snapshot=" + proposal.snapshot.getId() + " gaps="
+                    + proposal.outline.getReport().getGaps().size() + " findings="
+                    + proposal.outline.getReport().getFindings().size() + " fromAnalysisOnly="
+                    + proposal.outline.getReport().isFromAnalysisOnly()
+                    + " omitted=" + proposal.snapshot.getOmittedPassages());
+            monitor.finished(proposal.snapshot.getOmittedPassages());
         } catch (ClusteringMonitor.ClusteringCancelledException cancelled) {
             monitor.cancelled();
         } catch (Exception failed) {
@@ -169,19 +168,65 @@ public final class OutlineGeneration {
         }
     }
 
-    private static final class Prepared {
-        final OutlineGenerationInput input;
-        final int omitted;
+    /** The proposal of one generation, before labels, briefs and the merge. */
+    static final class Proposal {
+        final TopicAnalysisSnapshot snapshot;
+        final OutlineGenerationSettings settings;
+        final Outline outline;
 
-        Prepared(OutlineGenerationInput input, int omitted) {
-            this.input = input;
-            this.omitted = omitted;
+        Proposal(TopicAnalysisSnapshot snapshot, OutlineGenerationSettings settings, Outline outline) {
+            this.snapshot = snapshot;
+            this.settings = settings;
+            this.outline = outline;
+        }
+    }
+
+    Proposal propose(ClusteringMonitor monitor) throws Exception {
+        FrozenConcept frozen = inputs.frozenConcept();
+        if (frozen == null) {
+            throw new IllegalStateException("There is no approved concept to build the outline from.");
+        }
+        SharedTopicDiscovery discovery = inputs.discovery();
+        if (discovery == null) {
+            throw new IllegalStateException("The knowledge pipeline is not available, so there is no topic analysis "
+                    + "to build the outline from.");
+        }
+        monitor.progress("Taking the topic analysis", 0, 1);
+        TopicAnalysisSnapshot snapshot = discovery.analysisFor(monitor);
+        checkCancel(monitor);
+        OutlineGenerationSettings settings = inputs.settings();
+        SynthesisContext context = new SynthesisContext(inputs.bookTitle(frozen), frozen.getMission(),
+                frozen.getDeliverable(), frozen.getLanguage(), frozen.getPin().getBlacklist());
+        final TopicAnalysisSnapshot texts = snapshot;
+        SynthesisBrief brief = SynthesisBrief.of(context, snapshot.analysis(), new SynthesisBrief.Texts() {
+            public String text(String passageId) {
+                return texts.text(passageId);
+            }
+        }, settings.getSynthesis());
+        List<String> notes = new ArrayList<String>();
+        if (!snapshot.isSettled()) {
+            notes.add(snapshot.getPendingSourceIds().size() + " sources were still being processed when the topic "
+                    + "analysis was taken; generate again once they are done to include them.");
+        }
+        Outline outline = new OutlineProposer(inputs.synthesisChat(settings.getSynthesis()), settings.getSynthesis(),
+                settings.getLength(), new OutlineSynthesizer.Telemetry() {
+                    public void call(String step, String model, int budget, int attempt, boolean ok, String detail) {
+                        System.err.println("[outline-synthesis] step=" + step + " model=" + model + " budget="
+                                + budget + " attempt=" + attempt + " ok=" + ok + " " + detail);
+                    }
+                }).propose(brief, snapshot.getId(), notes, monitor);
+        return new Proposal(snapshot, settings, outline);
+    }
+
+    private static void checkCancel(ClusteringMonitor monitor) {
+        if (monitor.isCancelled()) {
+            throw new ClusteringMonitor.ClusteringCancelledException();
         }
     }
 
     /**
      * The approved concept's first-level nodes with their stable ids (the frozen working revision's identity); the
-     * outline generation and the evidence analysis (D6) read the concept through this one method.
+     * topic analysis (D6) reads the concept through this one method.
      */
     public static List<ConceptOutlineNode> conceptNodes(FrozenConcept frozen, FileConceptStore store)
             throws Exception {
@@ -191,45 +236,5 @@ public final class OutlineGeneration {
         ConceptIdentity identity = identityJson == null ? null : ConceptIdentity.parse(identityJson);
         JsonElement identityRoot = workingDocument == null ? null : JsonParser.parseString(workingDocument);
         return ConceptOutlineNode.firstLevel(frozen.getEffectiveDocument(), identity, identityRoot);
-    }
-
-    private Prepared prepare(ClusteringMonitor monitor) throws Exception {
-        FrozenConcept frozen = inputs.frozenConcept();
-        FileConceptStore store = inputs.conceptStore();
-        if (frozen == null || store == null) {
-            throw new IllegalStateException("There is no approved concept to build the outline from.");
-        }
-        List<ConceptOutlineNode> chapters = conceptNodes(frozen, store);
-
-        final Set<String> eligible = OutlineSourceRule.eligible(inputs.pinnedSourceIds(), inputs.sources(),
-                TypedBlacklist.of(frozen.getPin().getBlacklist()));
-        ActiveKnowledgeCorpusReader.Corpus whole = corpus.read(new ActiveKnowledgeCorpusReader.SourceFilter() {
-            public boolean includeSource(String sourceId) {
-                return eligible.contains(sourceId);
-            }
-
-            public boolean isUserRelevant(String sourceId) {
-                return false;
-            }
-        });
-        ActiveKnowledgeCorpusReader.Corpus limited = CorpusLimit.apply(whole,
-                SharedTopicDiscovery.DEFAULT_CORPUS_LIMIT);
-        List<LiveTopicProjection> topics = new LiveOutlineProjectionBuilder()
-                .discoverTopics(limited.getPassages(), limited.getVectors(), monitor);
-        List<OutlineGenerationInput.Cluster> clusters = new ArrayList<OutlineGenerationInput.Cluster>();
-        for (LiveTopicProjection topic : topics) {
-            clusters.add(new OutlineGenerationInput.Cluster(topic.getClusterId(), topic.getTitle(),
-                    topic.getMemberPassageIds(), topic.getRepresentativePassageIds()));
-        }
-        // Assignment covers the whole eligible corpus; only clustering is limited.
-        List<OutlineGenerationInput.CorpusPassage> passages = new ArrayList<OutlineGenerationInput.CorpusPassage>();
-        for (Passage passage : whole.getPassages()) {
-            passages.add(new OutlineGenerationInput.CorpusPassage(passage.getPassageId(),
-                    whole.sourceIdOf(passage.getPassageId()), passage.getText(),
-                    whole.getVectors().get(passage.getPassageId())));
-        }
-        String mission = frozen.getMission();
-        return new Prepared(new OutlineGenerationInput(mission, mission, frozen.getDeliverable(), chapters, passages,
-                clusters, settings), whole.getPassages().size() - limited.getPassages().size());
     }
 }

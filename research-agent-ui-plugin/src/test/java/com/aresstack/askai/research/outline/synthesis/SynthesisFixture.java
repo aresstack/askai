@@ -37,6 +37,8 @@ final class SynthesisFixture {
     final List<ConceptAnchor> anchors = new ArrayList<ConceptAnchor>();
     /** The search fence of the analysis; {@code null} = none. */
     com.aresstack.askai.research.knowledge.topic.ScopeFence fence;
+    /** The deliverable of the book (its length steers the word budgets). */
+    String deliverable = "A practical book";
     private final Random jitter = new Random(11L);
     private int nextDirection;
     private int nextPassage;
@@ -64,6 +66,23 @@ final class SynthesisFixture {
         int base = direction();
         for (int i = 0; i < count; i++) {
             add(topic, topic, i % sources, new int[]{base, direction()}, new double[]{1.0, 0.05});
+        }
+        return base;
+    }
+
+    /**
+     * {@code statements} distinct statements of one topic, each repeated {@code copies} times over the sources: much
+     * material, little of it distinct; returns the base.
+     */
+    int repeated(String topic, int statements, int copies, int sources) {
+        int base = direction();
+        int index = 0;
+        for (int s = 0; s < statements; s++) {
+            int statement = direction();
+            for (int c = 0; c < copies; c++) {
+                add(topic, topic, index++ % sources, new int[]{base, statement, direction()},
+                        new double[]{1.0, 0.35, 0.03});
+            }
         }
         return base;
     }
@@ -98,7 +117,7 @@ final class SynthesisFixture {
 
     SynthesisBrief brief(OutlineSynthesisSettings settings) {
         return SynthesisBrief.of(new SynthesisContext("The Smart Site", "Wearables on construction sites",
-                "A practical book", "en", Collections.<String>emptyList()), analyse(),
+                deliverable, "en", Collections.<String>emptyList()), analyse(),
                 new SynthesisBrief.Texts() {
                     public String text(String passageId) {
                         return texts.get(passageId);

@@ -236,6 +236,8 @@ public final class OutlineEditorView extends JPanel {
     private final ComicButton cancelButton = ComicControls.iconButton(ComposerIcons.stop(), "Stop generating");
     private final ComicButton suggestedButton =
             ComicControls.iconButton(ResearchIcons.lightBulb(), "Add suggested chapter");
+    private final ComicButton reportButton =
+            ComicControls.iconButton(ComposerIcons.info(), "Gaps and findings of the last generation");
     private final ComicButton olderButton =
             ComicControls.iconButton(ComposerIcons.chevronLeft(), "Preview the previous revision");
     private final ComicButton newerButton =
@@ -352,7 +354,7 @@ public final class OutlineEditorView extends JPanel {
         }
         outlineButtons.setOpaque(false);
         for (JButton button : new JButton[] {generateButton, cancelButton, regenerateButton, retryBriefButton,
-                suggestedButton, olderButton, newerButton, saveButton, discardButton}) {
+                suggestedButton, reportButton, olderButton, newerButton, saveButton, discardButton}) {
             outlineButtons.add(button);
         }
         JPanel buttons = new JPanel(new BorderLayout());
@@ -383,7 +385,7 @@ public final class OutlineEditorView extends JPanel {
     JButton[] allButtons() {
         return new JButton[] {addChapterButton, renameButton, addSectionButton, deleteButton, upButton,
                 downButton, indentButton, outdentButton, regenerateButton, retryBriefButton, generateButton,
-                cancelButton, suggestedButton, olderButton, newerButton, saveButton, discardButton};
+                cancelButton, suggestedButton, reportButton, olderButton, newerButton, saveButton, discardButton};
     }
 
     public void setActions(Actions actions) {
@@ -547,6 +549,7 @@ public final class OutlineEditorView extends JPanel {
             }
         });
         suggestedButton.addActionListener(e -> adoptSuggested());
+        reportButton.addActionListener(e -> showReport());
         renameButton.addActionListener(e -> {
             OutlineEntry entry = selectedEntry();
             if (entry == null) {
@@ -643,6 +646,60 @@ public final class OutlineEditorView extends JPanel {
         if (answer == JOptionPane.OK_OPTION) {
             int sections = resplit.isSelected() ? (Integer) count.getValue() : 0;
             runChapterJob(() -> actions.regenerateChapter(chapter.getId(), sections, comment.getText().trim()));
+        }
+    }
+
+    /** Phase 3c: the report of the last generation (snapshot, gaps, findings, notes), read-only. */
+    private void showReport() {
+        String text = reportText(snapshot.outline.getReport());
+        javax.swing.JTextArea area = ComicControls.textArea(text, 18, 60);
+        area.setEditable(false);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setCaretPosition(0);
+        JOptionPane.showMessageDialog(this, new JScrollPane(area), "Gaps and findings",
+                JOptionPane.PLAIN_MESSAGE);
+    }
+
+    /** The report as plain lines: gaps first, then the problems and warnings of the check, then the notes. */
+    static String reportText(com.aresstack.askai.research.outline.OutlineReport report) {
+        StringBuilder text = new StringBuilder();
+        if (report.isEmpty()) {
+            return "The outline has not been generated from the topic analysis yet.";
+        }
+        text.append("Built on topic analysis ").append(report.getAnalysisSnapshotId());
+        if (report.isFromAnalysisOnly()) {
+            text.append(" (chapter plan from the analysis alone, no model plan)");
+        }
+        text.append(".\n\n");
+        if (report.getGaps().isEmpty()) {
+            text.append("Gaps: none. Every concept requirement has evidence.\n");
+        } else {
+            text.append("Gaps (concept requirements without enough evidence):\n");
+            for (com.aresstack.askai.research.outline.OutlineReport.Gap gap : report.getGaps()) {
+                text.append("- ").append(gap.getPath().isEmpty() ? gap.getRequirement() : gap.getPath())
+                        .append(": ").append(gap.getReason()).append('\n');
+            }
+        }
+        java.util.List<String> problems = new java.util.ArrayList<String>();
+        java.util.List<String> warnings = new java.util.ArrayList<String>();
+        for (com.aresstack.askai.research.outline.OutlineReport.Finding finding : report.getFindings()) {
+            (finding.isBlocking() ? problems : warnings).add(finding.getMessage());
+        }
+        appendList(text, "Problems the revisions did not solve:", problems);
+        appendList(text, "Warnings:", warnings);
+        appendList(text, "Kept out of the outline (outside the search fence):", report.getOutOfScopeTopics());
+        appendList(text, "How the outline came about:", report.getNotes());
+        return text.toString().trim();
+    }
+
+    private static void appendList(StringBuilder text, String title, java.util.List<String> lines) {
+        if (lines.isEmpty()) {
+            return;
+        }
+        text.append('\n').append(title).append('\n');
+        for (String line : lines) {
+            text.append("- ").append(line).append('\n');
         }
     }
 
@@ -909,6 +966,7 @@ public final class OutlineEditorView extends JPanel {
         cancelButton.setEnabled(wired && snapshot.running);
         suggestedButton.setEnabled(editable && clean && !chapterJobRunning
                 && !snapshot.outline.getCandidates().isEmpty());
+        reportButton.setEnabled(!snapshot.outline.getReport().isEmpty());
         long shown = preview ? browsingRevision : snapshot.revision;
         olderButton.setEnabled(wired && !dirty && shown > 1);
         newerButton.setEnabled(wired && !dirty && preview);

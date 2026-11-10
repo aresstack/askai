@@ -129,7 +129,7 @@ public final class ChapterRegenerator {
                 Collections.<String>emptyList(), 0), provenance, Collections.singletonList(section));
         OutlineBriefWorker.ChapterBriefs briefs = worker.brief(context, chapter, "");
         List<OutlineChapter> chapters = new ArrayList<OutlineChapter>(stored.getChapters());
-        chapters.add(briefs.getChapter());
+        chapters.add(adopted(briefs.getChapter()));
         List<OutlineCandidate> remaining = new ArrayList<OutlineCandidate>();
         for (OutlineCandidate candidate : stored.getCandidates()) {
             if (!candidate.getClusterId().equals(clusterId)) {
@@ -137,6 +137,15 @@ public final class ChapterRegenerator {
             }
         }
         return new Result(stored.withChapters(chapters).withCandidates(remaining), briefs.getFailure());
+    }
+
+    /** An adopted chapter is the user's choice: a regeneration keeps it like an edited one. */
+    private static OutlineChapter adopted(OutlineChapter chapter) {
+        List<OutlineSection> sections = new ArrayList<OutlineSection>();
+        for (OutlineSection section : chapter.getSections()) {
+            sections.add(section.withUserEdited(true));
+        }
+        return chapter.withSections(sections).withUserEdited(true);
     }
 
     /** Adopts the stored candidate {@code clusterId} (its suggested title, passages and representatives). */

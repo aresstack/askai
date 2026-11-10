@@ -12,7 +12,8 @@ import java.util.List;
 
 /**
  * The outline's file format: {@code {"schema":1,"chapters":[…]}}, the ids inside the records. Order comes from
- * the array position; the stored {@code order} field mirrors it.
+ * the array position; the stored {@code order} field mirrors it. Optional: {@code candidates} and the {@code report}
+ * of the last generation (snapshot id, gaps, findings).
  */
 public final class OutlineJson {
 
@@ -56,6 +57,9 @@ public final class OutlineJson {
                 candidates.add(json);
             }
             root.add("candidates", candidates);
+        }
+        if (!outline.getReport().isEmpty()) {
+            root.add("report", report(outline.getReport()));
         }
         return GSON.toJson(root) + "\n";
     }
@@ -114,7 +118,68 @@ public final class OutlineJson {
         } catch (RuntimeException broken) {
             throw new IllegalArgumentException("The outline candidates are damaged: " + broken.getMessage(), broken);
         }
-        return new Outline(chapters, candidates);
+        OutlineReport report;
+        try {
+            JsonElement element = root.get("report");
+            report = element != null && element.isJsonObject() ? report(element.getAsJsonObject())
+                    : OutlineReport.EMPTY;
+        } catch (RuntimeException broken) {
+            throw new IllegalArgumentException("The outline report is damaged: " + broken.getMessage(), broken);
+        }
+        return new Outline(chapters, candidates, report);
+    }
+
+    private static JsonObject report(OutlineReport report) {
+        JsonObject json = new JsonObject();
+        json.addProperty("analysisSnapshot", report.getAnalysisSnapshotId());
+        if (report.isFromAnalysisOnly()) {
+            json.addProperty("fromAnalysisOnly", true);
+        }
+        JsonArray gaps = new JsonArray();
+        for (OutlineReport.Gap gap : report.getGaps()) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("requirement", gap.getRequirement());
+            entry.addProperty("path", gap.getPath());
+            entry.addProperty("status", gap.getStatus());
+            entry.addProperty("reason", gap.getReason());
+            gaps.add(entry);
+        }
+        json.add("gaps", gaps);
+        JsonArray findings = new JsonArray();
+        for (OutlineReport.Finding finding : report.getFindings()) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("severity", finding.isBlocking() ? "blocking" : "warning");
+            entry.addProperty("code", finding.getCode());
+            entry.addProperty("message", finding.getMessage());
+            findings.add(entry);
+        }
+        json.add("findings", findings);
+        json.add("notes", strings(report.getNotes()));
+        json.add("outOfScope", strings(report.getOutOfScopeTopics()));
+        return json;
+    }
+
+    private static OutlineReport report(JsonObject json) {
+        List<OutlineReport.Gap> gaps = new ArrayList<OutlineReport.Gap>();
+        JsonElement gapArray = json.get("gaps");
+        if (gapArray != null && gapArray.isJsonArray()) {
+            for (JsonElement element : gapArray.getAsJsonArray()) {
+                JsonObject gap = element.getAsJsonObject();
+                gaps.add(new OutlineReport.Gap(string(gap, "requirement"), string(gap, "path"),
+                        string(gap, "status"), string(gap, "reason")));
+            }
+        }
+        List<OutlineReport.Finding> findings = new ArrayList<OutlineReport.Finding>();
+        JsonElement findingArray = json.get("findings");
+        if (findingArray != null && findingArray.isJsonArray()) {
+            for (JsonElement element : findingArray.getAsJsonArray()) {
+                JsonObject finding = element.getAsJsonObject();
+                findings.add(new OutlineReport.Finding("blocking".equals(string(finding, "severity")),
+                        string(finding, "code"), string(finding, "message")));
+            }
+        }
+        return new OutlineReport(string(json, "analysisSnapshot"), bool(json, "fromAnalysisOnly"), gaps, findings,
+                list(json, "notes"), list(json, "outOfScope"));
     }
 
     private static JsonObject entry(OutlineEntry entry) {

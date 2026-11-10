@@ -69,6 +69,31 @@ test {
     useJUnit()
 }
 
+// Phase 3 live acceptance on the owner's machine (local Ollama); skipped in the normal test run.
+tasks.register('outlineLiveAcceptance', Test) {
+    description = 'Runs the live outline acceptance (scenarios A and E) against a local Ollama.'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    filter {
+        includeTestsMatching '*OutlineLiveAcceptanceTest'
+    }
+    systemProperty 'askai.outline.live', 'true'
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
+    }
+    doFirst {
+        System.getProperties().each { key, value ->
+            if (key.toString().startsWith('askai.outline.live.')) {
+                systemProperty key.toString(), value.toString()
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // ADR 0001, work item I: the LangChain4j SPIKE. One worker role (the search planner of lane G) is built a
 // second time with LangChain4j core, through a ChatModel adapter over the host's model port. The spike is its

@@ -2451,13 +2451,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     private synchronized com.aresstack.askai.research.host.OutlineGeneration outlineGeneration() {
         final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
-        if (resources == null || resources.isClosed() || resources.corpusReader() == null
-                || resources.outlineEmbeddings() == null || resources.outlineRun() == null) {
+        if (resources == null || resources.isClosed() || resources.topicDiscovery() == null
+                || resources.outlineRun() == null) {
             return null;
         }
         if (outlineGeneration == null) {
-            com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledge =
-                    resources.outlineKnowledgeSettings();
             outlineGeneration = new com.aresstack.askai.research.host.OutlineGeneration(
                     new com.aresstack.askai.research.host.OutlineGeneration.Inputs() {
                         public com.aresstack.askai.research.outline.OutlineWorkspace workspace() {
@@ -2468,34 +2466,36 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             return ResearchAgentSession.this.frozenConcept();
                         }
 
-                        public com.aresstack.askai.research.store.FileConceptStore conceptStore() {
-                            com.aresstack.askai.research.concept.ConceptBranchService service =
-                                    conceptBranchService();
-                            return service == null ? null : service.store();
+                        public String bookTitle(com.aresstack.askai.research.book.FrozenConcept frozen) {
+                            return ResearchAgentSession.bookTitle(frozen);
                         }
 
-                        public java.util.Collection<String> pinnedSourceIds() throws Exception {
-                            return ResearchAgentSession.this.pinnedSourceIds();
+                        public com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery
+                                discovery() {
+                            return topicDiscovery();
                         }
 
-                        public java.util.Collection<com.aresstack.askai.research.sources.ResearchSourceRecord>
-                                sources() {
-                            return resources.getRepository().find(
-                                    com.aresstack.askai.research.sources.SourceQuery.all());
+                        public com.aresstack.askai.research.host.OutlineGenerationSettings settings() {
+                            return hostStateStore == null
+                                    ? com.aresstack.askai.research.host.OutlineGenerationSettings.defaults()
+                                    : com.aresstack.askai.research.host.OutlineGenerationSettings.load(
+                                            hostStateStore);
+                        }
+
+                        public com.aresstack.askai.research.runtime.team.MainModelChat synthesisChat(
+                                com.aresstack.askai.research.outline.synthesis.OutlineSynthesisSettings settings) {
+                            com.aresstack.askai.agent.model.port.ModelPort port = hostContext == null ? null
+                                    : hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class);
+                            return port == null ? null
+                                    : com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(port,
+                                            com.aresstack.askai.research.outline.synthesis.OutlineSynthesizer.ROLE,
+                                            java.time.Duration.ofSeconds(settings.getCallTimeoutSeconds()));
                         }
 
                         public long now() {
                             return System.currentTimeMillis();
                         }
                     },
-                    resources.corpusReader(), resources.outlineEmbeddings(),
-                    new com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings(
-                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
-                                    .DEFAULT_THRESHOLD,
-                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
-                                    .DEFAULT_MARGIN,
-                            knowledge == null ? 3 : knowledge.minimumPassagesPerTopic,
-                            knowledge == null ? 2 : knowledge.minimumDistinctSourcesPerTopic),
                     resources.outlineRun(), outlineGenerationExecutor);
             outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
                 public String refusal() {
