@@ -1,33 +1,36 @@
 package com.aresstack.askai.research.document;
 
-import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.askai.plugin.api.agent.AgentSession;
 import com.aresstack.askai.plugin.api.agent.artifact.AgentArtifactStore;
-import com.aresstack.askai.plugin.api.agent.artifact.ArtifactContent;
 import com.aresstack.askai.plugin.api.agent.artifact.ArtifactViewContext;
 import com.aresstack.askai.plugin.api.agent.artifact.ArtifactViewContribution;
+import com.aresstack.askai.plugin.api.service.UiExecutor;
 import com.aresstack.askai.research.agent.ResearchAgentSession;
 import com.aresstack.askai.research.agent.ResearchArtifacts;
+import com.aresstack.askai.research.assembly.AssembledBook;
+import com.aresstack.askai.research.assembly.BookExport;
 import com.aresstack.askai.research.manuscript.ManuscriptWorkspace;
+import com.aresstack.askai.research.outline.Outline;
+
 import javax.swing.BorderFactory;
-import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
+import javax.swing.JFileChooser;
+import javax.swing.JOptionPane;
 import javax.swing.JScrollPane;
-import java.awt.BorderLayout;
-import java.awt.CardLayout;
-import java.awt.FlowLayout;
+import java.io.File;
+import java.io.IOException;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
 /**
- * The Document tab (Outline + Document in one): its DRAWER pane is the outline
- * ({@link com.aresstack.askai.research.agent.ResearchOutlineViewContribution} — later also the navigation
- * inside the document), the document itself shows in the workspace's MAIN area (where the chat is) while
- * the Document pane is active.
+ * The Document tab: its sidebar pane is the book's table of contents with the writing state of every
+ * section ({@link DocumentSectionsView}), the book itself shows in the workspace's MAIN area (where the chat
+ * is) while the Document pane is active ({@link DocumentWorkView}).
  *
- * <p>Plan PR 26: the page face shows the generated, read-only {@code document.md}; Edit opens one
- * section of the manuscript at a time ({@link SectionEditPanel}) with its local markers, revisions
- * (view and restore), Skip/Unskip and expected-revision saves that keep the local text on a conflict.
+ * <p>Plan PR 26: the Book face shows the generated, read-only {@code document.md}; selecting a section in
+ * the sidebar opens it in the editor ({@link SectionEditPanel}) with its local markers, revisions (view and
+ * restore), Skip/Unskip and expected-revision saves that keep the local text on a conflict. Plan PR 29: the
+ * writing job is started and stopped from the sidebar; it never changes the phase.
  *
  * <p>Until #41 introduces the real citation registry, {@code [n]} badges render as visibly
  * UNRESOLVED and do not navigate anywhere: a positional guess (n-th repository source) could
@@ -36,6 +39,8 @@ import java.awt.FlowLayout;
  * contract with real citation ids.</p>
  */
 public final class ResearchDocumentViewContribution implements ArtifactViewContribution {
+
+    private static final String EXPORT_FILE_NAME = "book.md";
 
     @Override
     public String getArtifactTypeId() {
@@ -51,158 +56,194 @@ public final class ResearchDocumentViewContribution implements ArtifactViewContr
     public JComponent createView(ArtifactViewContext context) {
         final AgentArtifactStore store = context.getArtifactStore();
         final String artifactId = context.getArtifact().getId();
-        final DocumentPageView page = new DocumentPageView();
-        final JLabel status = new JLabel(" ");
-        final JLabel report = new JLabel(" ");
-        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        toolbar.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         AgentSession session = context.getSession();
         final ResearchAgentSession research = session instanceof ResearchAgentSession
                 ? (ResearchAgentSession) session : null;
-        final JPanel center = new JPanel(new CardLayout());
+        final DocumentSession port = research == null ? null : new SessionPort(research);
+
+        final DocumentSectionsView sidebar = new DocumentSectionsView();
+        final DocumentPageView page = new DocumentPageView();
         JScrollPane pageScroll = new JScrollPane(page);
         pageScroll.setBorder(BorderFactory.createEmptyBorder());
         pageScroll.getViewport().setOpaque(false);
         pageScroll.setOpaque(false);
-        center.setOpaque(false);
-        center.add(pageScroll, "page");
 
-        // the page face: the generated, read-only document.md (plan PR 26)
+        final DocumentWorkView[] workRef = new DocumentWorkView[1];
+        final ManuscriptWorkspace manuscript = port == null ? null : port.manuscript();
+        final SectionEditPanel editor = manuscript == null ? null
+                : new SectionEditPanel(new SectionEditor(manuscript), port, new Consumer<String>() {
+                    public void accept(String line) {
+                        workRef[0].say(line);
+                        sidebar.refresh(); // a save or a skip changes the section's state in the list
+                    }
+                });
+        final DocumentWorkView work = new DocumentWorkView(pageScroll, editor);
+        workRef[0] = work;
+
+        // the Book face: the generated, read-only document.md (plan PR 26)
         final Runnable loadPage = new Runnable() {
             public void run() {
-                if (store == null) {
-                    status.setText("No artifact store available.");
-                    return;
+                if (store != null) {
+                    page.setDocumentMarkdown(store.read(artifactId).getMarkdown());
                 }
-                ArtifactContent content = store.read(artifactId);
-                page.setDocumentMarkdown(content.getMarkdown());
-                com.aresstack.askai.research.assembly.AssembledBook book =
-                        research == null ? null : research.assembledBook();
-                report.setText(book == null ? " " : book.getReport().summary());
-                report.setToolTipText(book == null ? null : "<html><pre>"
-                        + book.getReport().toMarkdown().replace("&", "&amp;").replace("<", "&lt;")
-                        + "</pre></html>");
+                work.setBookState(port == null ? "" : port.bookStatus());
             }
         };
-
-        final ManuscriptWorkspace manuscript = research == null ? null : research.manuscript();
-        final boolean[] editing = {false};
-        if (manuscript != null) {
-            final SectionEditor editor = new SectionEditor(manuscript);
-            final SectionEditPanel panel = new SectionEditPanel(editor, research, status);
-            center.add(panel, "edit");
-            final JButton toggle = new ComicButton("Edit");
-            toggle.addActionListener(new java.awt.event.ActionListener() {
-                public void actionPerformed(java.awt.event.ActionEvent e) {
-                    editing[0] = !editing[0];
-                    if (editing[0]) {
-                        panel.refreshSections(); // the local text of the open section is kept (RA-P008)
-                    } else {
-                        loadPage.run();
-                    }
-                    ((CardLayout) center.getLayout()).show(center, editing[0] ? "edit" : "page");
-                    toggle.setText(editing[0] ? "Page" : "Edit");
-                }
-            });
-            toolbar.add(toggle);
-            // plan PR 29: the writing job (Document tab); the job never changes the phase
-            final JButton writeRemaining = new ComicButton("Write remaining sections");
-            final JButton stopWriting = new ComicButton("Stop writing");
-            final JButton rewriteStale = new ComicButton("Rewrite stale sections");
-            writeRemaining.addActionListener(e -> {
-                String refusal = research.writeRemainingSections();
-                status.setText(refusal == null ? "Writing..." : refusal);
-            });
-            stopWriting.addActionListener(e -> research.stopWriting());
-            rewriteStale.addActionListener(e -> {
-                String refusal = research.rewriteStaleSections();
-                status.setText(refusal == null ? "Rewriting stale sections..." : refusal);
-            });
-            toolbar.add(writeRemaining);
-            toolbar.add(stopWriting);
-            toolbar.add(rewriteStale);
-            final Runnable writingState = new Runnable() {
-                public void run() {
-                    boolean running = research.writingRunning();
-                    writeRemaining.setEnabled(!running && research.approvedOutlineOrNull() != null);
-                    rewriteStale.setEnabled(!running && !research.staleSectionTitles().isEmpty());
-                    stopWriting.setEnabled(running);
-                    String line = research.writingStatus();
-                    if (line != null && !line.isEmpty()) {
-                        status.setText(line);
-                    }
-                }
-            };
-            research.addStateListener(writingState);
-            writingState.run();
-            research.addStateListener(new Runnable() {
-                public void run() {
-                    if (editing[0]) {
-                        panel.refreshState();
-                    } else {
-                        loadPage.run();
-                    }
-                }
-            });
-        } else if (research != null) {
-            research.addStateListener(loadPage);
-        }
-        final JButton export = new ComicButton("Export book...");
-        export.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent e) {
-                if (store == null) {
-                    return;
-                }
-                javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
-                chooser.setSelectedFile(new java.io.File("book.md"));
-                if (chooser.showSaveDialog(export) != javax.swing.JFileChooser.APPROVE_OPTION) {
-                    return;
-                }
-                java.io.File target = com.aresstack.askai.research.assembly.BookExport.resolve(
-                        chooser.getSelectedFile());
-                if (target.exists() && javax.swing.JOptionPane.showConfirmDialog(export,
-                        target.getName() + " already exists. Replace it?", "Export book",
-                        javax.swing.JOptionPane.YES_NO_OPTION) != javax.swing.JOptionPane.YES_OPTION) {
-                    return;
-                }
-                try {
-                    java.io.File written = com.aresstack.askai.research.assembly.BookExport.write(
-                            store.read(artifactId).getMarkdown(), chooser.getSelectedFile());
-                    status.setText("Exported to " + written.getName());
-                } catch (java.io.IOException failed) {
-                    status.setText("Export failed: " + failed.getMessage());
+        work.setCardListener(new IntConsumer() {
+            public void accept(int card) {
+                if (card == DocumentWorkView.CARD_BOOK) {
+                    loadPage.run();
+                } else {
+                    editor.refreshSections(); // the local text of the open section is kept (RA-P008)
+                    work.updateHead();
                 }
             }
         });
-        toolbar.add(export);
-        toolbar.add(report);
-        toolbar.add(status);
-        // plan PR 29: the latest "Request changes" comment; "Rewrite section" in Edit acts on it
-        final JLabel changeRequest = new JLabel(" ");
-        if (research != null) {
-            final Runnable showRequest = new Runnable() {
+
+        sidebar.setSession(port);
+        sidebar.setSelectionListener(new Consumer<SectionEditor.Item>() {
+            public void accept(SectionEditor.Item item) {
+                work.openSection(item);
+            }
+        });
+        if (store != null) {
+            sidebar.setExportAction(new Runnable() {
                 public void run() {
-                    String comment = research.documentChangeRequest();
-                    changeRequest.setText(comment == null || comment.isEmpty() ? " "
-                            : "Requested changes: " + comment + " (use Edit > Rewrite section)");
+                    export(sidebar, store, artifactId);
                 }
-            };
-            research.addStateListener(showRequest);
-            showRequest.run();
+            });
         }
 
-        JPanel root = new JPanel(new BorderLayout(4, 4));
-        root.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
-        JPanel north = new JPanel(new BorderLayout());
-        north.setOpaque(false);
-        north.add(toolbar, BorderLayout.NORTH);
-        north.add(changeRequest, BorderLayout.SOUTH);
-        root.add(north, BorderLayout.NORTH);
-        root.add(center, BorderLayout.CENTER);
+        if (research != null) {
+            final UiExecutor uiExecutor = context.getUiExecutor();
+            final Runnable repaint = new Runnable() {
+                public void run() {
+                    sidebar.refresh();
+                    if (work.shownCard() == DocumentWorkView.CARD_BOOK) {
+                        loadPage.run();
+                    } else {
+                        editor.refreshState();
+                        work.updateHead();
+                    }
+                }
+            };
+            final Runnable refresh = new Runnable() {
+                public void run() {
+                    uiExecutor.execute(repaint);
+                }
+            };
+            sidebar.addAncestorListener(new javax.swing.event.AncestorListener() {
+                public void ancestorAdded(javax.swing.event.AncestorEvent event) {
+                    research.addStateListener(refresh);
+                    repaint.run();
+                }
+
+                public void ancestorMoved(javax.swing.event.AncestorEvent event) {
+                }
+
+                public void ancestorRemoved(javax.swing.event.AncestorEvent event) {
+                    research.removeStateListener(refresh);
+                }
+            });
+            research.addStateListener(refresh);
+        }
         loadPage.run();
-        // the document in the main area, the outline in the drawer
-        context.showMainContent(root);
-        return new com.aresstack.askai.research.agent.ResearchOutlineViewContribution().createView(context);
+        // the book in the main area, its table of contents in the sidebar
+        context.showMainContent(work);
+        return sidebar;
     }
 
+    /** "Export the book": ask for a file, never replace one silently, say where it went. */
+    private static void export(DocumentSectionsView sidebar, AgentArtifactStore store, String artifactId) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setSelectedFile(new File(EXPORT_FILE_NAME));
+        if (chooser.showSaveDialog(sidebar) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        File target = BookExport.resolve(chooser.getSelectedFile());
+        if (target.exists() && JOptionPane.showConfirmDialog(sidebar,
+                target.getName() + " already exists. Replace it?", "Export book",
+                JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) {
+            return;
+        }
+        try {
+            File written = BookExport.write(store.read(artifactId).getMarkdown(), chooser.getSelectedFile());
+            sidebar.say("Exported to " + written.getName());
+        } catch (IOException failed) {
+            sidebar.say("Export failed: " + failed.getMessage());
+        }
+    }
+
+    /** The research session behind the tab's port. */
+    private static final class SessionPort implements DocumentSession {
+        private final ResearchAgentSession research;
+
+        SessionPort(ResearchAgentSession research) {
+            this.research = research;
+        }
+
+        public Outline approvedOutline() {
+            return research.approvedOutlineOrNull();
+        }
+
+        public ManuscriptWorkspace manuscript() {
+            return research.manuscript();
+        }
+
+        public String writeRefusal() {
+            return research.manuscriptWriteRefusal();
+        }
+
+        public boolean writingRunning() {
+            return research.writingRunning();
+        }
+
+        public String writingStatus() {
+            String line = research.writingStatus();
+            return line == null ? "" : line;
+        }
+
+        public boolean hasStaleSections() {
+            return !research.staleSectionTitles().isEmpty();
+        }
+
+        public String changeRequest() {
+            String comment = research.documentChangeRequest();
+            return comment == null ? "" : comment;
+        }
+
+        public String bookStatus() {
+            AssembledBook book = research.assembledBook();
+            return book == null ? "" : book.getReport().getStatus().label();
+        }
+
+        public String bookReport() {
+            AssembledBook book = research.assembledBook();
+            return book == null ? "" : book.getReport().toMarkdown();
+        }
+
+        public String writeRemaining() {
+            return research.writeRemainingSections();
+        }
+
+        public void stopWriting() {
+            research.stopWriting();
+        }
+
+        public String rewriteStale() {
+            return research.rewriteStaleSections();
+        }
+
+        public String rewriteSection(String sectionId, String comment) {
+            return research.rewriteSection(sectionId, comment);
+        }
+
+        public String rewriteChapter(String chapterId, String comment) {
+            return research.rewriteChapter(chapterId, comment);
+        }
+
+        public String researchGap(String sectionId, String sectionTitle, String gap) {
+            return research.researchGap(sectionId, sectionTitle, gap);
+        }
+    }
 }

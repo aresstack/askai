@@ -9,7 +9,6 @@ import com.aresstack.askai.plugin.api.service.MarkdownViewFactory;
 import com.aresstack.askai.plugin.api.service.ThemeService;
 import com.aresstack.askai.plugin.api.service.UiExecutor;
 import com.aresstack.askai.research.agent.ResearchArtifacts;
-import com.aresstack.askai.research.agent.ResearchOutlineView;
 import org.junit.Test;
 
 import javax.swing.JComponent;
@@ -23,11 +22,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Outline + Document are one tab: the outline is the drawer pane, the document goes to the main area. */
-public class DocumentTabWithOutlineDrawerTest {
+/** The Document tab: the book's table of contents is the sidebar pane, the book itself goes to the main area. */
+public class DocumentTabLayoutTest {
 
     @Test
-    public void theOutlineIsTheDrawerAndTheDocumentShowsInTheMainArea() {
+    public void theSectionsAreTheSidebarAndTheBookShowsInTheMainArea() {
         final List<JComponent> mainContent = new ArrayList<JComponent>();
         final AgentArtifact document = artifact("document");
         ArtifactViewContext context = new ArtifactViewContext() {
@@ -60,11 +59,13 @@ public class DocumentTabWithOutlineDrawerTest {
                 mainContent.add(content);
             }
         };
-        JComponent drawer = new ResearchDocumentViewContribution().createView(context);
-        assertTrue("the drawer pane is the outline", drawer instanceof ResearchOutlineView);
+        JComponent sidebar = new ResearchDocumentViewContribution().createView(context);
+        assertTrue("the sidebar pane is the table of contents", sidebar instanceof DocumentSectionsView);
         assertEquals("the document is the main-area content", 1, mainContent.size());
+        assertTrue(mainContent.get(0) instanceof DocumentWorkView);
         assertTrue("the page canvas lives in the main area", contains(mainContent.get(0), DocumentPageView.class));
-        assertFalse("the outline is not in the main area", contains(mainContent.get(0), ResearchOutlineView.class));
+        assertFalse("the list is not in the main area", contains(mainContent.get(0), DocumentSectionsView.class));
+        assertFalse("the pages are not in the sidebar", contains(sidebar, DocumentPageView.class));
     }
 
     @Test

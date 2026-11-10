@@ -67,7 +67,8 @@ public final class ConceptPaperView extends JPanel {
     }
 
     private final javax.swing.JTextField missionField = ComicControls.textField();
-    private final ComicButton missionSaveButton = new ComicButton("Save mission");
+    private final ComicButton missionSaveButton =
+            ComicControls.iconButton(com.aresstack.comiccontrols.paint.ResearchIcons.enter(), "Save mission");
     private final JLabel modeLabel = new JLabel(" ");
     private MissionSaver missionSaver;
     private String shownMission = "";
@@ -158,11 +159,8 @@ public final class ConceptPaperView extends JPanel {
         treeButton.setToolTipText("Show the concept as an editable card tree");
         jsonButton.setToolTipText("Show and edit the raw JSON document");
         searchRow.add(modeToggle, BorderLayout.EAST);
-        JPanel north = new JPanel(new BorderLayout());
-        north.setOpaque(false);
-        north.add(buildMissionRow(), BorderLayout.NORTH);
-        north.add(searchRow, BorderLayout.CENTER);
-        add(north, BorderLayout.NORTH);
+        // The search row is the topmost element, at the same place as the Chats tab's search: nothing above.
+        add(searchRow, BorderLayout.NORTH);
 
         // Editor + the comic error overlay share the center: a rejected save POPS over the text
         // in a comic plate (bigger type, red stripe) and fades out by itself.
@@ -178,12 +176,16 @@ public final class ConceptPaperView extends JPanel {
             }
         });
         add(layers, BorderLayout.CENTER);
-        add(buildFooter(), BorderLayout.SOUTH);
+        JPanel south = new JPanel(new BorderLayout());
+        south.setOpaque(false);
+        south.add(buildMissionRow(), BorderLayout.NORTH);
+        south.add(buildFooter(), BorderLayout.CENTER);
+        add(south, BorderLayout.SOUTH);
         wireActions();
         updateControls();
     }
 
-    /** The mission as one editable row above the tree (PR 07): label left, field, button in the same row. */
+    /** The mission as one editable row below the tree, above the footer (PR 07): label left, field, button in the same row. */
     private JPanel buildMissionRow() {
         JPanel row = new JPanel(new BorderLayout(6, 0));
         row.setOpaque(false);
@@ -192,8 +194,6 @@ public final class ConceptPaperView extends JPanel {
         row.add(new JLabel("Mission"), BorderLayout.WEST);
         row.add(missionField, BorderLayout.CENTER);
         missionField.setToolTipText("What the book is for; your first message becomes the mission");
-        missionSaveButton.setFocusable(false);
-        missionSaveButton.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
         row.add(missionSaveButton, BorderLayout.EAST);
         modeLabel.setVisible(false);
         JPanel block = new JPanel(new BorderLayout());
@@ -243,6 +243,10 @@ public final class ConceptPaperView extends JPanel {
         missionSaveButton.setEnabled(editable && missionSaver != null);
         modeLabel.setText(editable ? " " : modeMessage);
         modeLabel.setVisible(!editable);
+    }
+
+    javax.swing.JComponent missionFieldForTest() {
+        return missionField;
     }
 
     String missionText() {
