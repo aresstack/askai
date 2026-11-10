@@ -236,7 +236,7 @@ public final class TopicAnalyzer {
         }
         draft.centroid = unit(VectorMath.mean(memberVectors));
         if (fence != null) {
-            draft.scope = fence.align(draft.centroid.getValues());
+            draft.scope = fence.align(draft.centroid);
         }
         double similarity = 0;
         for (EmbeddingPort.EmbeddingVector vector : memberVectors) {

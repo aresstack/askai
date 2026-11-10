@@ -301,7 +301,7 @@ public class TopicAnalyzerTest {
                         corpus.query(inside).getValues()),
                 new ScopeFenceEvaluator.AnchorVector("out-1", ScopeAnchor.Membership.OUT,
                         corpus.query(outside).getValues())),
-                labels, new ScopeFenceEvaluator.Thresholds(0.7, 0.05), 4L);
+                labels, new ScopeFenceEvaluator.Thresholds(0.7, 0.05), 4L, "fp");
         TopicAnalysis analysis = analyse(corpus, Collections.singletonList(
                 new ConceptAnchor("c-in", "Inside", "Book > Inside", 1, "", corpus.query(inside))), fence);
 
@@ -324,9 +324,23 @@ public class TopicAnalyzerTest {
         corpus.plain("topic", 6, 3, -1);
         ScopeFence fence = new ScopeFence(Collections.singletonList(new ScopeFenceEvaluator.AnchorVector("in-1",
                 ScopeAnchor.Membership.IN, new float[]{1f, 0f, 0f})), null,
-                new ScopeFenceEvaluator.Thresholds(0.7, 0.05), 1L);
+                new ScopeFenceEvaluator.Thresholds(0.7, 0.05), 1L, "fp");
         TopicProfile topic = topicNamed(corpus, analyse(corpus, Collections.<ConceptAnchor>emptyList(), fence),
                 "topic");
+        assertEquals(ScopeAlignment.Verdict.UNCLASSIFIED, topic.getScopeAlignment().getVerdict());
+        assertEquals(null, topic.getScopeAlignment().getHint());
+    }
+
+    @Test
+    public void anchorsOfAnotherEmbeddingRoleGiveNoReadingEvenWithTheSameDimension() {
+        TopicCorpusFixture corpus = new TopicCorpusFixture();
+        int inside = corpus.plain("inside", 6, 3, -1);
+        // same model and dimension, but embedded raw instead of as documents (a prompted model's other role)
+        ScopeFence fence = new ScopeFence(Collections.singletonList(new ScopeFenceEvaluator.AnchorVector("in-1",
+                ScopeAnchor.Membership.IN, corpus.query(inside).getValues())), null,
+                new ScopeFenceEvaluator.Thresholds(0.7, 0.05), 1L, "fp|raw");
+        TopicProfile topic = topicNamed(corpus, analyse(corpus, Collections.<ConceptAnchor>emptyList(), fence),
+                "inside");
         assertEquals(ScopeAlignment.Verdict.UNCLASSIFIED, topic.getScopeAlignment().getVerdict());
         assertEquals(null, topic.getScopeAlignment().getHint());
     }
