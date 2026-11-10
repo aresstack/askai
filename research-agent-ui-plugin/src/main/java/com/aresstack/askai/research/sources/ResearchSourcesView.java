@@ -1,498 +1,466 @@
 package com.aresstack.askai.research.sources;
 
-import com.aresstack.comiccontrols.control.ComicControls;
+import com.aresstack.askai.research.plan.SearchPlanEntry;
 import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicControls;
+import com.aresstack.comiccontrols.control.ComicScrollPane;
+import com.aresstack.comiccontrols.control.ComicSearchBar;
+import com.aresstack.comiccontrols.control.ComicSectionPanel;
+import com.aresstack.comiccontrols.control.ComicSegmentedToggle;
+import com.aresstack.comiccontrols.control.ComicTableSupport;
+import com.aresstack.comiccontrols.control.WrapLayout;
+import com.aresstack.comiccontrols.paint.ComposerIcons;
+import com.aresstack.comiccontrols.paint.ResearchIcons;
+import com.aresstack.comiccontrols.theme.ComicPalette;
+import com.aresstack.comiccontrols.theme.ResearchUiTypography;
 import com.aresstack.comiccontrols.theme.ThemeColor;
+
 import javax.swing.BorderFactory;
-import javax.swing.JButton;
-import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTabbedPane;
 import javax.swing.JTable;
-import javax.swing.JTextArea;
-import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingConstants;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.TableCellRenderer;
+import javax.swing.table.TableColumnModel;
 import java.awt.BorderLayout;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
+import java.awt.CardLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.FlowLayout;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 
 /**
- * Structured, writing sources view for the shared artifact area. All persistence goes through
- * {@link ResearchSourceRepository} with optimistic locking — never through the {@code TableModel} directly. A
- * conflict reloads the current record and keeps the user informed instead of silently overwriting. Section
- * links that are no longer in the outline are shown as orphans, never auto-removed.
+ * The Sources tab of the sidebar: a list, nothing else. The search bar is the topmost element (as in the
+ * Chats tab), below it ONE table at full height, and at the bottom a switch between the two things the
+ * research produces:
  *
- * <p>UX contract: the TABLE answers "what did the search collect and what is it worth?" at a glance — few,
- * readable columns (star, title, website, status, score, text state), sortable (score descending first),
- * full title/URL as tooltip. Everything else (ratings, sections, texts, comment) lives in the DETAIL below,
- * whose long texts sit in tabs instead of stacked postage-stamp areas. Raw enum names never reach the user;
- * they are rendered as German labels.</p>
+ * <ul>
+ *   <li><b>Results</b> — the sources that were found. Selecting one opens it in the reader in the main area
+ *       ({@link SourceFullTextView}); everything about a single source (address, author, sections, ratings,
+ *       texts, comment) lives there, not in the sidebar.</li>
+ *   <li><b>Searches</b> — the planned web searches (pending, running, done), with the icon buttons that run,
+ *       stop, edit, drop or repeat them.</li>
+ * </ul>
+ *
+ * Both tables speak one colour code ({@link SourceRowState}): grey = still to do, blue = running, green =
+ * done, yellow = read after a solved security check, red = blocked or failed. Rows are ordered by that state.
+ * All buttons are icon buttons with a tooltip at the bottom; nothing sits above the search bar.
  */
 public final class ResearchSourcesView extends JPanel {
 
+    private static final long serialVersionUID = 1L;
+
+    static final int CARD_RESULTS = 0;
+    static final int CARD_SEARCHES = 1;
+    private static final String[] CARD_NAMES = {"results", "searches"};
+
+    /** How strongly a state colour is mixed into the field background (0 = none, 1 = full). */
+    private static final float STATE_TINT_STRENGTH = 0.35f;
+    /** How far the grey of a pending row sits between the field background (0) and the ink (1). */
+    private static final float PENDING_GREY = 0.5f;
+    /** How far the muted texts step back from the ink (0 = ink, 1 = background). */
+    private static final float MUTED_MIX = 0.35f;
     /** Edge length of the plus glyph, the size of the other line icons. */
-    private static final int ADD_ICON_SIZE = 15;
+    private static final int ICON_SIZE = 15;
+    private static final int STAR_COLUMN_WIDTH = 28;
+    private static final int TITLE_COLUMN_WIDTH = 240;
+    private static final int SITE_COLUMN_WIDTH = 110;
+    private static final int STATUS_COLUMN_WIDTH = 90;
+    private static final int STATUS_COLUMN_MIN_WIDTH = 64;
+    private static final int SCORE_COLUMN_WIDTH = 52;
+    private static final int COUNT_COLUMN_WIDTH = 64;
 
     private final ResearchSourceRepository repository;
     private final Set<String> knownSectionIds;
+    private final ComicPalette palette = ComicPalette.defaultPalette();
 
-    private final SourcesTableModel tableModel = new SourcesTableModel();
-    /** Cell tooltips carry what the columns cannot: the full title and URL of the row under the mouse. */
-    private final JTable table = new JTable(tableModel) {
+    private final ResultsTableModel resultsModel = new ResultsTableModel();
+    /** Cell tooltips carry what the columns cannot: the full title, the address and the security-check note. */
+    private final JTable resultsTable = new JTable(resultsModel) {
+        private static final long serialVersionUID = 1L;
+
         @Override
         public String getToolTipText(java.awt.event.MouseEvent event) {
             int viewRow = rowAtPoint(event.getPoint());
             if (viewRow < 0) {
                 return null;
             }
-            int modelRow = convertRowIndexToModel(viewRow);
-            ResearchSourceRecord record = tableModel.rowAt(modelRow);
-            String url = record.getUrl().isEmpty() ? record.getOrigin() : record.getUrl();
-            String access = accessNote(tableModel.accessEntryAt(modelRow));
-            return "<html><b>" + escape(displayTitle(record)) + "</b><br>" + escape(url)
+            SourceTableRow row = resultsModel.rowAt(convertRowIndexToModel(viewRow));
+            String access = accessNote(row.access());
+            return "<html><b>" + escape(row.title()) + "</b><br>"
+                    + escape(SourceTableRow.addressOf(row.source()))
                     + (access.isEmpty() ? "" : "<br><i>" + escape(access) + "</i>") + "</html>";
         }
 
         @Override
-        public java.awt.Component prepareRenderer(javax.swing.table.TableCellRenderer renderer, int row,
-                                                  int column) {
-            java.awt.Component component = super.prepareRenderer(renderer, row, column);
-            if (!isRowSelected(row)) {
-                java.awt.Color tint = accessTint(tableModel.accessStateAt(convertRowIndexToModel(row)));
-                // Renderers are reused: an unmarked row must get the normal background back explicitly.
-                component.setBackground(tint != null ? tint : getBackground());
-            }
-            return component;
+        public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+            return dressRow(this, super.prepareRenderer(renderer, row, column), isRowSelected(row),
+                    resultsModel.rowAt(convertRowIndexToModel(row)).state(),
+                    convertColumnIndexToModel(column) == ResultsTableModel.COLUMN_STAR);
         }
     };
-    /** How strongly the red / yellow access mark is mixed into the field background (0 = none, 1 = full). */
-    private static final float ACCESS_TINT_STRENGTH = 0.35f;
+
+    private final SearchesTableModel searchesModel = new SearchesTableModel();
+    private final JTable searchesTable = new JTable(searchesModel) {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public String getToolTipText(java.awt.event.MouseEvent event) {
+            int viewRow = rowAtPoint(event.getPoint());
+            if (viewRow < 0) {
+                return null;
+            }
+            SearchPlanEntry entry = searchesModel.rowAt(convertRowIndexToModel(viewRow));
+            return "<html><b>" + escape(entry.getQuery()) + "</b><br>" + escape(entry.getNodeLabel())
+                    + "</html>";
+        }
+
+        @Override
+        public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+            return dressRow(this, super.prepareRenderer(renderer, row, column), isRowSelected(row),
+                    SourceRowState.of(searchesModel.rowAt(convertRowIndexToModel(row)).getStatus()), false);
+        }
+    };
+
+    private final ComicSearchBar filterField = new ComicSearchBar("Filter sources…",
+            "Filter by title or address; in Searches by query or topic (Enter applies)");
+    private final JPanel cards = new JPanel(new CardLayout());
+    private final ComicSegmentedToggle cardSwitch = new ComicSegmentedToggle("Results", "Searches");
+    private final JPanel switchRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+    private final JPanel searchButtons = new JPanel(new WrapLayout(FlowLayout.LEFT, 4, 0));
+    final ComicButton run = ComicControls.iconButton(ComposerIcons.play(), "Run the planned searches");
+    final ComicButton stop = ComicControls.iconButton(ComposerIcons.stop(), "Stop the running search");
+    final ComicButton again = ComicControls.iconButton(ComposerIcons.refresh(), "Run all searches again");
+    final ComicButton edit = ComicControls.iconButton(ComposerIcons.pencil(), "Edit the selected search");
+    /** One button for the selected search: drop it while it waits, run it again once it ended. */
+    final ComicButton dropOrRerun = ComicControls.iconButton(ResearchIcons.trash(), "Drop the selected search");
+    private final JLabel summary = new JLabel(" ");
+    private final JPanel visualizeSlot = new JPanel(new BorderLayout());
+
+    private SourceSearchPlan plan;
+    private int card = CARD_RESULTS;
+    private String selectedSourceId;
+    private Consumer<ResearchSourceRecord> selectionPublisher;
     /** Websites that demanded a manual security check (wired by the contribution; empty by default). */
-    private java.util.function.Supplier<SourceAccessLog> accessLog =
-            new java.util.function.Supplier<SourceAccessLog>() {
-                public SourceAccessLog get() {
-                    return SourceAccessLog.EMPTY;
-                }
-            };
-    /** The navigation-blue comic search bar replaces the plain "Filter:" field (issue #36 line). */
-    private final com.aresstack.comiccontrols.control.ComicSearchBar filterField =
-            new com.aresstack.comiccontrols.control.ComicSearchBar(
-                    "Titel/URL filtern…", "Filtert nach Titel/URL — Enter wendet an");
-
-    private final JTextField titleField = ComicControls.textField();
-    private final JTextField urlField = ComicControls.textField();
-    private final JTextField authorField = ComicControls.textField();
-    private final JTextField sectionsField = ComicControls.textField();
-    private final JTextArea commentArea = ComicControls.textArea(3, 20);
-    // Pipeline-filled, read-only: the reranker score, the search excerpt and the visited page's full text.
-    private final JTextField scoreField = readOnlyField();
-    private final JTextArea excerptArea = readOnlyArea(2);
-    private final JTextArea fullTextArea = readOnlyArea(6);
-    private final JComboBox<SourceStatus> statusCombo = ComicControls.<SourceStatus>comboBox(SourceStatus.values());
-    private final JComboBox<SourceRelevance> relevanceCombo = ComicControls.<SourceRelevance>comboBox(SourceRelevance.values());
-    private final JComboBox<SourceReliability> reliabilityCombo =
-            ComicControls.<SourceReliability>comboBox(SourceReliability.values());
-    /** The user-relevant (⭐) toggle — the same reversible signal the HUD ⭐ sets, editable here for any source. */
-    private final javax.swing.JCheckBox relevantCheck = ComicControls.checkBox("Relevant (⭐)");
-    private final JLabel status = new JLabel(" ");
-
-    private String selectedId;
-    private long loadedRevision;
-
-    private final com.aresstack.comiccontrols.theme.ComicPalette palette =
-            com.aresstack.comiccontrols.theme.ComicPalette.defaultPalette();
-
-    /** Holds the search plan checklist BELOW the source table: nothing may sit above the search bar. */
-    private final JPanel checklistSlot = new JPanel(new BorderLayout());
-
-    /** Plan PR 14: the search plan checklist, shown under the source table (never on top). */
-    public void setPlanChecklist(javax.swing.JComponent checklist) {
-        checklistSlot.removeAll();
-        checklistSlot.add(checklist, BorderLayout.CENTER);
-        checklistSlot.revalidate();
-    }
+    private Supplier<SourceAccessLog> accessLog = new Supplier<SourceAccessLog>() {
+        public SourceAccessLog get() {
+            return SourceAccessLog.EMPTY;
+        }
+    };
 
     public ResearchSourcesView(ResearchSourceRepository repository, Set<String> knownSectionIds) {
-        super(new BorderLayout(6, 8));
+        super(new BorderLayout(0, 6));
         this.repository = repository;
         this.knownSectionIds = knownSectionIds;
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
 
+        // The search bar is the topmost element; the add button sits beside it, never above.
         JPanel top = new JPanel(new BorderLayout(4, 0));
         top.setOpaque(false);
-        // No "Filter:" label — the bar's magnifier + placeholder say it; Enter AND ▶ apply.
         top.add(filterField, BorderLayout.CENTER);
-        filterField.addSearchAction(e -> reloadTable());
-        // #39: the user-import entrance — HTML/text through the canonical acceptance boundary.
-        JButton addSource = ComicControls.iconButton(
-                com.aresstack.comiccontrols.paint.ComposerIcons.plus(ADD_ICON_SIZE),
+        filterField.addSearchAction(e -> refresh());
+        ComicButton addSource = ComicControls.iconButton(ComposerIcons.plus(ICON_SIZE),
                 "Add your own source (raw HTML, plain text or PDF) to the research corpus");
         addSource.addActionListener(e -> openImportDialog());
         top.add(addSource, BorderLayout.EAST);
 
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setAutoCreateRowSorter(true);
-        // Best first: the score column starts sorted descending, so promising parked hits surface.
-        table.getRowSorter().setSortKeys(java.util.Collections.singletonList(
-                new javax.swing.RowSorter.SortKey(SourcesTableModel.COLUMN_SCORE,
-                        javax.swing.SortOrder.DESCENDING)));
-        // The shared comic table dressing (flat header, thin lines, blue selection wash) — the
-        // model, sorter, tooltips and column widths below stay exactly as before.
-        com.aresstack.comiccontrols.control.ComicTableSupport.style(table, palette);
-        configureColumns();
-        table.getSelectionModel().addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                onRowSelected();
+        configureResultsTable();
+        configureSearchesTable();
+        cards.setOpaque(false);
+        cards.add(scroll(resultsTable), CARD_NAMES[CARD_RESULTS]);
+        cards.add(scroll(searchesTable), CARD_NAMES[CARD_SEARCHES]);
+
+        // Search and list sit on ONE quiet plate, like the other sidebar tabs.
+        ComicSectionPanel plate = new ComicSectionPanel(palette);
+        plate.setLayout(new BorderLayout(0, 6));
+        plate.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
+        plate.add(top, BorderLayout.NORTH);
+        plate.add(cards, BorderLayout.CENTER);
+
+        add(plate, BorderLayout.CENTER);
+        add(buildFooter(), BorderLayout.SOUTH);
+        wireSearchButtons();
+        showCard(CARD_RESULTS);
+        refresh();
+    }
+
+    // ------------------------------------------------------------------ layout
+
+    private JScrollPane scroll(JTable table) {
+        JScrollPane scroll = new ComicScrollPane(table, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getViewport().setBackground(ThemeColor.of("comic.fieldBg"));
+        return scroll;
+    }
+
+    /** The bottom of the tab: the Results/Searches switch, the icon buttons, one line of summary. */
+    private JPanel buildFooter() {
+        switchRow.setOpaque(false);
+        switchRow.add(cardSwitch);
+        switchRow.setVisible(false); // shown once a search plan is wired
+        cardSwitch.setSelectionListener(new IntConsumer() {
+            public void accept(int index) {
+                showCard(index);
             }
         });
 
-        JScrollPane tableScroll = new com.aresstack.comiccontrols.control.ComicScrollPane(table,
-                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        tableScroll.getViewport().setBackground(ThemeColor.of("comic.fieldBg"));
-        // The overview sits on ONE quiet plate (like the State tab's sections) — search on top,
-        // table below; no loud extra background panel.
-        com.aresstack.comiccontrols.control.ComicSectionPanel tablePlate =
-                new com.aresstack.comiccontrols.control.ComicSectionPanel(palette);
-        tablePlate.setLayout(new BorderLayout(0, 6));
-        tablePlate.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-        tablePlate.add(top, BorderLayout.NORTH);
-        tablePlate.add(tableScroll, BorderLayout.CENTER);
+        searchButtons.setOpaque(false);
+        for (ComicButton button : new ComicButton[] {run, stop, again, edit, dropOrRerun}) {
+            searchButtons.add(button);
+        }
+        visualizeSlot.setOpaque(false);
+        JPanel actionRow = new JPanel(new BorderLayout(6, 0));
+        actionRow.setOpaque(false);
+        actionRow.add(searchButtons, BorderLayout.CENTER);
+        actionRow.add(visualizeSlot, BorderLayout.EAST);
 
-        checklistSlot.setOpaque(false);
-        JPanel center = new JPanel(new BorderLayout(0, 6));
-        center.setOpaque(false);
-        center.add(tablePlate, BorderLayout.CENTER);
-        center.add(checklistSlot, BorderLayout.SOUTH);
-        add(center, BorderLayout.CENTER);
-        add(buildDetail(), BorderLayout.SOUTH);
-        reloadTable();
+        summary.setFont(ResearchUiTypography.regular(11.5f));
+        summary.setForeground(mutedInk());
+
+        JPanel footer = new JPanel(new BorderLayout(0, 4));
+        footer.setOpaque(false);
+        footer.add(switchRow, BorderLayout.NORTH);
+        footer.add(actionRow, BorderLayout.CENTER);
+        footer.add(summary, BorderLayout.SOUTH);
+        return footer;
     }
 
-    /** Few columns, each wide enough to READ: the star and score stay narrow, the title takes the rest. */
-    private void configureColumns() {
-        javax.swing.table.TableColumnModel columns = table.getColumnModel();
-        columns.getColumn(SourcesTableModel.COLUMN_STAR).setMaxWidth(28);
-        columns.getColumn(SourcesTableModel.COLUMN_TITLE).setPreferredWidth(240);
-        columns.getColumn(SourcesTableModel.COLUMN_SITE).setPreferredWidth(110);
-        columns.getColumn(SourcesTableModel.COLUMN_STATUS).setPreferredWidth(80);
-        columns.getColumn(SourcesTableModel.COLUMN_SCORE).setPreferredWidth(56);
-        columns.getColumn(SourcesTableModel.COLUMN_TEXT).setPreferredWidth(70);
+    private void configureResultsTable() {
+        resultsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        // The model order IS the state order (to do, done, check solved, blocked); a header click re-sorts.
+        resultsTable.setAutoCreateRowSorter(true);
+        ComicTableSupport.style(resultsTable, palette);
+        TableColumnModel columns = resultsTable.getColumnModel();
+        columns.getColumn(ResultsTableModel.COLUMN_STAR).setMaxWidth(STAR_COLUMN_WIDTH);
+        columns.getColumn(ResultsTableModel.COLUMN_TITLE).setPreferredWidth(TITLE_COLUMN_WIDTH);
+        columns.getColumn(ResultsTableModel.COLUMN_SITE).setPreferredWidth(SITE_COLUMN_WIDTH);
+        columns.getColumn(ResultsTableModel.COLUMN_STATUS).setPreferredWidth(STATUS_COLUMN_WIDTH);
+        columns.getColumn(ResultsTableModel.COLUMN_SCORE).setPreferredWidth(SCORE_COLUMN_WIDTH);
+        // Status and score stay readable in a narrow sidebar; title and website give way first.
+        columns.getColumn(ResultsTableModel.COLUMN_STATUS).setMinWidth(STATUS_COLUMN_MIN_WIDTH);
+        columns.getColumn(ResultsTableModel.COLUMN_SCORE).setMinWidth(SCORE_COLUMN_WIDTH);
 
-        // The star speaks in the action accent — the user's own reversible signal, not the score's.
-        DefaultTableCellRenderer starRenderer = new DefaultTableCellRenderer() {
-            @Override
-            public java.awt.Component getTableCellRendererComponent(JTable owner, Object value,
-                    boolean selected, boolean focused, int row, int column) {
-                java.awt.Component component = super.getTableCellRendererComponent(
-                        owner, value, selected, focused, row, column);
-                component.setForeground(palette.getAccentOrange());
-                return component;
-            }
-        };
-        starRenderer.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-        columns.getColumn(SourcesTableModel.COLUMN_STAR).setCellRenderer(starRenderer);
-        columns.getColumn(SourcesTableModel.COLUMN_SCORE).setCellRenderer(new DefaultTableCellRenderer() {
+        DefaultTableCellRenderer starRenderer = new DefaultTableCellRenderer();
+        starRenderer.setHorizontalAlignment(SwingConstants.CENTER);
+        columns.getColumn(ResultsTableModel.COLUMN_STAR).setCellRenderer(starRenderer);
+        columns.getColumn(ResultsTableModel.COLUMN_SCORE).setCellRenderer(new DefaultTableCellRenderer() {
+            private static final long serialVersionUID = 1L;
+
             {
-                setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+                setHorizontalAlignment(SwingConstants.RIGHT);
             }
 
             @Override
             protected void setValue(Object value) {
-                setText(value instanceof Double
-                        ? String.format(java.util.Locale.ROOT, "%.2f", (Double) value) : "—");
+                setText(value instanceof Double ? String.format(Locale.ROOT, "%.2f", (Double) value) : "—");
             }
         });
-        // Text state: read = quiet petrol (the agent did its work), parked = muted (still waiting).
-        columns.getColumn(SourcesTableModel.COLUMN_TEXT).setCellRenderer(new DefaultTableCellRenderer() {
-            @Override
-            public java.awt.Component getTableCellRendererComponent(JTable owner, Object value,
-                    boolean selected, boolean focused, int row, int column) {
-                java.awt.Component component = super.getTableCellRendererComponent(
-                        owner, value, selected, focused, row, column);
-                boolean read = String.valueOf(value).startsWith("✓");
-                component.setForeground(read ? palette.getAgentPetrol()
-                        : com.aresstack.comiccontrols.theme.ResearchUiPainter.mix(
-                                palette.getInk(), ThemeColor.of("comic.fieldBg"), 0.45f));
-                return component;
+        resultsTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                onResultSelected();
             }
         });
-
-        statusCombo.setRenderer(germanEnumRenderer());
-        relevanceCombo.setRenderer(germanEnumRenderer());
-        reliabilityCombo.setRenderer(germanEnumRenderer());
     }
 
-    /**
-     * The detail area: the same quiet plates the State tab speaks in, replacing the old {@code
-     * TitledBorder("Quelle")} form. Hierarchy top-down: identity (title/URL) with the metadata
-     * (author, sections) on ONE plate; the RATING as one coherent block on its own plate (the
-     * read-only pipeline score deliberately quieter than the user-editable values); then the three
-     * text views; actions and feedback at the end. Sections GROUP — no per-field comic cards.
-     */
-    private JPanel buildDetail() {
-        styleField(titleField);
-        styleField(urlField);
-        styleField(authorField);
-        styleField(sectionsField);
+    private void configureSearchesTable() {
+        searchesTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        searchesTable.setAutoCreateRowSorter(true);
+        ComicTableSupport.style(searchesTable, palette);
+        TableColumnModel columns = searchesTable.getColumnModel();
+        columns.getColumn(SearchesTableModel.COLUMN_QUERY).setPreferredWidth(TITLE_COLUMN_WIDTH);
+        columns.getColumn(SearchesTableModel.COLUMN_NODE).setPreferredWidth(SITE_COLUMN_WIDTH);
+        columns.getColumn(SearchesTableModel.COLUMN_STATUS).setPreferredWidth(STATUS_COLUMN_WIDTH);
+        columns.getColumn(SearchesTableModel.COLUMN_SOURCES).setPreferredWidth(COUNT_COLUMN_WIDTH);
+        columns.getColumn(SearchesTableModel.COLUMN_STATUS).setMinWidth(STATUS_COLUMN_MIN_WIDTH);
+        columns.getColumn(SearchesTableModel.COLUMN_SOURCES).setMinWidth(COUNT_COLUMN_WIDTH);
+        searchesTable.getSelectionModel().addListSelectionListener(e -> updateSearchButtons());
+    }
 
-        com.aresstack.comiccontrols.control.ComicSectionPanel identity = detailPlate();
-        identity.setLayout(new GridBagLayout());
-        int row = 0;
-        addRow(identity, row++, "Titel", titleField);
-        JPanel urlRow = new JPanel(new BorderLayout(6, 0));
-        urlRow.setOpaque(false);
-        urlRow.add(urlField, BorderLayout.CENTER);
-        com.aresstack.comiccontrols.control.ComicButton open =
-                new com.aresstack.comiccontrols.control.ComicButton("Öffnen");
-        open.setToolTipText("URL im Browser öffnen");
-        open.addActionListener(e -> openInBrowser());
-        urlRow.add(open, BorderLayout.EAST);
-        addRow(identity, row++, "URL", urlRow);
-        addRow(identity, row++, "Autor", authorField);
-        sectionsField.setToolTipText("Verknüpfte Gliederungs-Abschnitte, kommagetrennt; "
-                + "(orphan) = Abschnitt existiert nicht mehr");
-        addRow(identity, row++, "Abschnitte", sectionsField);
-
-        // Status/Relevanz/Verlässlichkeit/Stern/Score belong together — ONE readable block.
-        // #43: WrapRowLayout instead of plain FlowLayout — a narrow splitter WRAPS the
-        // controls onto further rows (the plate grows vertically) instead of clipping the
-        // right-hand fields out of view.
-        com.aresstack.comiccontrols.control.ComicSectionPanel ratingPlate = detailPlate();
-        ratingPlate.setLayout(new com.aresstack.comiccontrols.control.WrapRowLayout(
-                java.awt.FlowLayout.LEFT, 0, 2));
-        ratingPlate.add(mutedLabel("Status "));
-        ratingPlate.add(statusCombo);
-        ratingPlate.add(javax.swing.Box.createHorizontalStrut(10));
-        ratingPlate.add(mutedLabel("Relevanz "));
-        ratingPlate.add(relevanceCombo);
-        ratingPlate.add(javax.swing.Box.createHorizontalStrut(10));
-        ratingPlate.add(mutedLabel("Verlässlichkeit "));
-        ratingPlate.add(reliabilityCombo);
-        ratingPlate.add(javax.swing.Box.createHorizontalStrut(10));
-        relevantCheck.setOpaque(false);
-        ratingPlate.add(relevantCheck);
-        ratingPlate.add(javax.swing.Box.createHorizontalStrut(10));
-        ratingPlate.add(mutedLabel("Score "));
-        // The pipeline score is read-only and shows it: plain quiet text, no editable-looking box.
-        scoreField.setColumns(6);
-        scoreField.setOpaque(false);
-        scoreField.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-        scoreField.setForeground(mutedInk());
-        ratingPlate.add(scoreField);
-
-        // The long texts share ONE area as tabs instead of three stacked postage stamps. The
-        // JTabbedPane stays (no comic tab control exists yet); it is only dressed to blend in.
-        fullTextArea.setRows(8);
-        styleReadOnlyArea(fullTextArea);
-        styleReadOnlyArea(excerptArea);
-        JTabbedPane texts = ComicControls.tabbedPane();
-        texts.setOpaque(false);
-        texts.addTab("Volltext", quietScroll(fullTextArea));
-        texts.addTab("Suchausschnitt", quietScroll(excerptArea));
-        texts.addTab("Kommentar", quietScroll(commentArea));
-        // #28/#39.7: what did the pipeline actually derive from THIS source? Read-only on
-        // purpose — segmentation quality is assessed before any correction semantics exist.
-        styleReadOnlyArea(passagesArea);
-        texts.addTab("Passages", quietScroll(passagesArea));
-        texts.setToolTipTextAt(0, "Der gelesene Seitentext (leer = geparkt, noch nicht gelesen)");
-        texts.setToolTipTextAt(1, "Der Fundstellenkontext aus der Suche (nur lesbar)");
-        texts.setToolTipTextAt(3, "The passages the knowledge pipeline derived from this "
-                + "source (read-only; empty = not processed yet)");
-        texts.setToolTipTextAt(2, "Eigener Kommentar (editierbar)");
-
-        // Save: a floppy-disk icon (tooltip only); reload: the same ⟳ button as the Concept view.
-        com.aresstack.comiccontrols.control.ComicButton save =
-                new com.aresstack.comiccontrols.control.ComicButton(
-                        com.aresstack.comiccontrols.paint.ComposerIcons.floppyDisk());
-        save.setToolTipText("Save");
-        save.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
-        com.aresstack.comiccontrols.control.ComicButton reload =
-                new com.aresstack.comiccontrols.control.ComicButton("⟳");
-        reload.setToolTipText("Reload source");
-        reload.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
-        com.aresstack.comiccontrols.control.ComicButton exclude =
-                new com.aresstack.comiccontrols.control.ComicButton("Ausschließen",
-                        com.aresstack.comiccontrols.control.ComicButton.Accent.CRITICAL);
-        exclude.setToolTipText(
-                "Setzt den Status auf Ausgeschlossen und speichert (kein Löschen, umkehrbar)");
-        save.addActionListener(e -> save());
-        reload.addActionListener(e -> reloadSelected());
-        exclude.addActionListener(e -> {
-            statusCombo.setSelectedItem(SourceStatus.EXCLUDED);
-            save();
+    private void wireSearchButtons() {
+        run.addActionListener(e -> {
+            plan.run();
+            refresh();
         });
-        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 2));
-        actions.setOpaque(false);
-        actions.add(save);
-        actions.add(reload);
-        actions.add(exclude);
-        status.setFont(status.getFont().deriveFont(java.awt.Font.PLAIN, 11.5f));
-        actions.add(javax.swing.Box.createHorizontalStrut(6));
-        actions.add(status);
-
-        JPanel plates = new JPanel();
-        plates.setLayout(new javax.swing.BoxLayout(plates, javax.swing.BoxLayout.Y_AXIS));
-        plates.setOpaque(false);
-        identity.setAlignmentX(LEFT_ALIGNMENT);
-        ratingPlate.setAlignmentX(LEFT_ALIGNMENT);
-        plates.add(identity);
-        plates.add(javax.swing.Box.createVerticalStrut(6));
-        plates.add(ratingPlate);
-        plates.add(javax.swing.Box.createVerticalStrut(6));
-
-        JPanel detail = new JPanel(new BorderLayout(0, 4));
-        detail.setOpaque(false);
-        detail.setPreferredSize(new java.awt.Dimension(10, 360));
-        detail.add(plates, BorderLayout.NORTH);
-        detail.add(texts, BorderLayout.CENTER);
-        // "Visualize sources" sits right-aligned in the same row.
-        visualizeSlot.setOpaque(false);
-        JPanel actionRow = new JPanel(new BorderLayout());
-        actionRow.setOpaque(false);
-        actionRow.add(actions, BorderLayout.CENTER);
-        actionRow.add(visualizeSlot, BorderLayout.EAST);
-        detail.add(actionRow, BorderLayout.SOUTH);
-        return detail;
+        stop.addActionListener(e -> {
+            plan.stop();
+            refresh();
+        });
+        again.addActionListener(e -> {
+            plan.searchAgain();
+            refresh();
+        });
+        edit.addActionListener(e -> editSelectedSearch());
+        dropOrRerun.addActionListener(e -> {
+            SearchPlanEntry entry = selectedSearch();
+            if (entry == null) {
+                return;
+            }
+            if (entry.getStatus() == SearchPlanEntry.Status.PENDING) {
+                plan.drop(entry.getId());
+            } else {
+                plan.rerun(entry.getId());
+            }
+            refresh();
+        });
     }
 
-    /** One labelled form row: narrow right-aligned muted label, field takes the width. */
-    private void addRow(JPanel form, int row, String label, java.awt.Component field) {
-        GridBagConstraints l = new GridBagConstraints();
-        l.gridx = 0;
-        l.gridy = row;
-        l.anchor = GridBagConstraints.EAST;
-        l.insets = new java.awt.Insets(2, 0, 2, 8);
-        form.add(mutedLabel(label), l);
-        GridBagConstraints f = new GridBagConstraints();
-        f.gridx = 1;
-        f.gridy = row;
-        f.weightx = 1.0;
-        f.fill = GridBagConstraints.HORIZONTAL;
-        f.insets = new java.awt.Insets(2, 0, 2, 0);
-        form.add(field, f);
-    }
-
-    // ------------------------------------------------------------------ quiet detail dressing
-
-    /** A calm white plate for one detail group — grouping only, never per-field cards. */
-    private com.aresstack.comiccontrols.control.ComicSectionPanel detailPlate() {
-        com.aresstack.comiccontrols.control.ComicSectionPanel plate =
-                new com.aresstack.comiccontrols.control.ComicSectionPanel(palette);
-        plate.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 10));
-        return plate;
-    }
-
-    private JLabel mutedLabel(String text) {
-        JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(java.awt.Font.PLAIN, 11.5f));
-        label.setForeground(mutedInk());
-        return label;
-    }
-
-    private java.awt.Color mutedInk() {
-        return ThemeColor.mix(palette.getInk(), ThemeColor.of("comic.fieldBg"), 0.35f);
-    }
-
-    /** Editable fields: a thin derived line + breathing room instead of the LaF bevel. */
-    private void styleField(JTextField field) {
-        field.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(
-                        ThemeColor.mix(palette.getInk(), ThemeColor.of("comic.fieldBg"), 0.75f)),
-                BorderFactory.createEmptyBorder(3, 6, 3, 6)));
-    }
-
-    /** Read-only text sits on the quiet neutral surface — visibly calmer than editable areas. */
-    private void styleReadOnlyArea(JTextArea area) {
-        area.setBackground(palette.getSurface());
-        area.setForeground(palette.getInk());
-        area.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
-    }
-
-    private JScrollPane quietScroll(java.awt.Component view) {
-        JScrollPane scroll = new com.aresstack.comiccontrols.control.ComicScrollPane(view,
-                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        scroll.getViewport().setOpaque(false);
-        scroll.setOpaque(false);
-        return scroll;
-    }
-
-    /** Calm feedback (loaded/saved) — errors and conflicts use {@link #showProblem} instead. */
-    private void showQuiet(String text) {
-        status.setForeground(mutedInk());
-        status.setText(text);
-    }
-
-    /** The State tab's problem red for everything that went wrong (conflicts, failures). */
-    private void showProblem(String text) {
-        status.setForeground(palette.getAccentRed());
-        status.setText(text);
-    }
-
-    private void openInBrowser() {
-        String url = urlField.getText().trim();
-        if (url.isEmpty() || !(url.startsWith("http://") || url.startsWith("https://"))) {
-            showProblem("Keine öffenbare URL.");
+    private void editSelectedSearch() {
+        SearchPlanEntry entry = selectedSearch();
+        if (entry == null) {
             return;
         }
-        try {
-            java.awt.Desktop.getDesktop().browse(java.net.URI.create(url));
-        } catch (Exception cannotOpen) {
-            showProblem("Konnte die URL nicht öffnen: " + cannotOpen.getMessage());
+        Object query = javax.swing.JOptionPane.showInputDialog(this, "Query", "Edit the planned search",
+                javax.swing.JOptionPane.PLAIN_MESSAGE, null, null, entry.getQuery());
+        if (query != null && !query.toString().trim().isEmpty()) {
+            plan.edit(entry.getId(), query.toString().trim());
+            refresh();
         }
+    }
+
+    // ------------------------------------------------------------------ wiring from the contribution
+
+    /** Wire the search plan: the Searches list and its buttons appear, with the switch to reach them. */
+    public void setSearchPlan(SourceSearchPlan plan) {
+        this.plan = plan;
+        switchRow.setVisible(plan != null);
+        if (plan == null) {
+            showCard(CARD_RESULTS);
+        }
+        refresh();
     }
 
     /**
-     * Re-read the table from the repository — e.g. after a research run accepted new sources. Keeps the
-     * current selection (and thereby any in-progress detail edit) when that record still exists.
+     * Wire the access log: sources of a website that demanded a security check are RED (never solved — pages
+     * may be missing) or YELLOW (solved — worth a second look), so a protected source is never lost.
      */
-    public void refresh() {
-        String keep = selectedId;
-        List<ResearchSourceRecord> rows = repository.find(new SourceQuery(filterField.getText(), null));
-        tableModel.setRows(rows, currentAccessLog());
-        int keepRow = -1;
-        for (int i = 0; i < rows.size(); i++) {
-            if (rows.get(i).getSourceId().equals(keep)) {
-                keepRow = i;
-                break;
-            }
-        }
-        if (keepRow >= 0) {
-            selectModelRow(keepRow);
-        } else if (!rows.isEmpty()) {
-            selectModelRow(0);
-        } else {
-            clearDetail();
-        }
-    }
-
-    private void reloadTable() {
-        List<ResearchSourceRecord> rows = repository.find(new SourceQuery(filterField.getText(), null));
-        tableModel.setRows(rows, currentAccessLog());
-        if (!rows.isEmpty()) {
-            selectModelRow(0);
-        } else {
-            clearDetail();
-        }
-    }
-
-    /**
-     * Wire the access log: rows of a website that demanded a security check are marked RED (never solved —
-     * pages may be missing) or YELLOW (solved — worth a second look), so a protected source is never lost.
-     */
-    public void setAccessLogSupplier(java.util.function.Supplier<SourceAccessLog> supplier) {
+    public void setAccessLogSupplier(Supplier<SourceAccessLog> supplier) {
         if (supplier != null) {
             this.accessLog = supplier;
             refresh();
         }
+    }
+
+    /** "Visualize sources" sits right-aligned in the bottom row. */
+    public void setVisualizeButton(javax.swing.JComponent button) {
+        visualizeSlot.removeAll();
+        if (button != null) {
+            visualizeSlot.add(button, BorderLayout.CENTER);
+        }
+        visualizeSlot.revalidate();
+        visualizeSlot.repaint();
+    }
+
+    /**
+     * Receives every selected source ({@code null} when there is none): the contribution shows it in the
+     * reader in the main area.
+     */
+    public void setSelectionPublisher(Consumer<ResearchSourceRecord> publisher) {
+        this.selectionPublisher = publisher;
+        if (publisher != null && selectedSourceId != null) {
+            ResearchSourceRecord current = repository.get(selectedSourceId);
+            if (current != null) {
+                publisher.accept(current); // a row selected while building the view counts too
+            }
+        }
+    }
+
+    /** The outline sections a source may be linked to (the reader marks every other link as orphan). */
+    public Set<String> knownSectionIds() {
+        return knownSectionIds;
+    }
+
+    // ------------------------------------------------------------------ refresh
+
+    /** Re-read the sources and the search plan (a session state change, a filter, a save in the reader). */
+    public void refresh() {
+        refreshResults();
+        refreshSearches();
+        updateSummary();
+    }
+
+    private void refreshResults() {
+        String keep = selectedSourceId;
+        List<SourceTableRow> rows = SourceTableRow.rows(
+                repository.find(new SourceQuery(filterField.getText(), null)), currentAccessLog());
+        resultsModel.setRows(rows);
+        if (rows.isEmpty()) {
+            selectedSourceId = null;
+            publish(null);
+            return;
+        }
+        int select = indexOfSource(keep);
+        if (select < 0) {
+            select = firstReadableRow(rows);
+        }
+        selectResultRow(select);
+    }
+
+    /** The row a fresh list opens with: the first source that was read, else the first row. */
+    private static int firstReadableRow(List<SourceTableRow> rows) {
+        for (int i = 0; i < rows.size(); i++) {
+            if (rows.get(i).state() != SourceRowState.PENDING) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private void refreshSearches() {
+        SearchPlanEntry selected = selectedSearch();
+        String keep = selected == null ? null : selected.getId();
+        List<SearchPlanEntry> entries = filtered(planEntries());
+        searchesModel.setRows(entries);
+        for (int row = 0; keep != null && row < entries.size(); row++) {
+            if (entries.get(row).getId().equals(keep)) {
+                int viewRow = searchesTable.convertRowIndexToView(row);
+                searchesTable.getSelectionModel().setSelectionInterval(viewRow, viewRow);
+            }
+        }
+        updateSearchButtons();
+    }
+
+    private List<SearchPlanEntry> planEntries() {
+        if (plan == null) {
+            return Collections.emptyList();
+        }
+        try {
+            List<SearchPlanEntry> entries = plan.entries();
+            return entries == null ? Collections.<SearchPlanEntry>emptyList() : entries;
+        } catch (RuntimeException unreadable) {
+            return Collections.emptyList();
+        }
+    }
+
+    /** The searches that match the filter, ordered by state (to do, running, done, failed); plan order within. */
+    private List<SearchPlanEntry> filtered(List<SearchPlanEntry> entries) {
+        String needle = filterField.getText() == null ? "" : filterField.getText().trim().toLowerCase(Locale.ROOT);
+        List<SearchPlanEntry> shown = new ArrayList<SearchPlanEntry>();
+        for (SearchPlanEntry entry : entries) {
+            if (needle.isEmpty() || entry.getQuery().toLowerCase(Locale.ROOT).contains(needle)
+                    || entry.getNodeLabel().toLowerCase(Locale.ROOT).contains(needle)) {
+                shown.add(entry);
+            }
+        }
+        Collections.sort(shown, new Comparator<SearchPlanEntry>() {
+            public int compare(SearchPlanEntry a, SearchPlanEntry b) {
+                return SourceRowState.of(a.getStatus()).compareTo(SourceRowState.of(b.getStatus()));
+            }
+        });
+        return shown;
     }
 
     private SourceAccessLog currentAccessLog() {
@@ -504,11 +472,219 @@ public final class ResearchSourcesView extends JPanel {
         }
     }
 
-    private java.awt.Color accessTint(SourceAccessState state) {
-        java.awt.Color mark = state == SourceAccessState.BLOCKED ? palette.getAccentRed()
-                : state == SourceAccessState.RESOLVED ? palette.getAccentYellow() : null;
-        return mark == null ? null : com.aresstack.comiccontrols.theme.ResearchUiPainter.mix(
-                ThemeColor.of("comic.fieldBg"), mark, ACCESS_TINT_STRENGTH);
+    private void updateSummary() {
+        summary.setText(card == CARD_SEARCHES
+                ? searchSummary(planEntries(), plan == null ? null : uncovered())
+                : resultSummary(resultsModel.rows));
+        summary.setToolTipText(summary.getText());
+    }
+
+    private List<String> uncovered() {
+        try {
+            return plan.uncovered();
+        } catch (RuntimeException unreadable) {
+            return Collections.emptyList();
+        }
+    }
+
+    static String resultSummary(List<SourceTableRow> rows) {
+        int pending = 0;
+        int checked = 0;
+        int blocked = 0;
+        for (SourceTableRow row : rows) {
+            switch (row.state()) {
+                case PENDING:
+                    pending++;
+                    break;
+                case CHECK_SOLVED:
+                    checked++;
+                    break;
+                case FAILED:
+                    blocked++;
+                    break;
+                default:
+                    break;
+            }
+        }
+        StringBuilder text = new StringBuilder(rows.size() + (rows.size() == 1 ? " source" : " sources"));
+        if (pending > 0) {
+            text.append(" · ").append(pending).append(" not read yet");
+        }
+        if (checked > 0) {
+            text.append(" · ").append(checked).append(" after a solved check");
+        }
+        if (blocked > 0) {
+            text.append(" · ").append(blocked).append(" blocked");
+        }
+        return text.toString();
+    }
+
+    static String searchSummary(List<SearchPlanEntry> entries, List<String> uncovered) {
+        int done = 0;
+        for (SearchPlanEntry entry : entries) {
+            if (entry.getStatus() == SearchPlanEntry.Status.DONE) {
+                done++;
+            }
+        }
+        StringBuilder text = new StringBuilder(done + " of " + entries.size() + " searches done");
+        if (uncovered != null && !uncovered.isEmpty()) {
+            text.append(" · uncovered: ");
+            for (int i = 0; i < uncovered.size(); i++) {
+                text.append(i > 0 ? ", " : "").append(uncovered.get(i));
+            }
+        }
+        return text.toString();
+    }
+
+    // ------------------------------------------------------------------ cards and buttons
+
+    private void showCard(int index) {
+        card = index;
+        if (cardSwitch.getSelectedIndex() != index) {
+            cardSwitch.setSelectedIndex(index);
+        }
+        ((CardLayout) cards.getLayout()).show(cards, CARD_NAMES[index]);
+        searchButtons.setVisible(index == CARD_SEARCHES);
+        updateSearchButtons();
+        updateSummary();
+        revalidate();
+        repaint();
+    }
+
+    private void updateSearchButtons() {
+        boolean running = false;
+        boolean runnable = false;
+        if (plan != null) {
+            try {
+                running = plan.running();
+                runnable = plan.runnable();
+            } catch (RuntimeException unreadable) {
+                running = false;
+                runnable = false;
+            }
+        }
+        run.setEnabled(runnable && !running);
+        stop.setEnabled(running);
+        again.setEnabled(runnable);
+        SearchPlanEntry entry = selectedSearch();
+        SearchPlanEntry.Status status = entry == null ? null : entry.getStatus();
+        boolean pending = status == SearchPlanEntry.Status.PENDING;
+        boolean ended = status != null && !pending && status != SearchPlanEntry.Status.RUNNING;
+        edit.setEnabled(pending);
+        dropOrRerun.setIcon(ended ? ResearchIcons.undo() : ResearchIcons.trash());
+        String action = ended ? "Run the selected search again" : "Drop the selected search";
+        dropOrRerun.setToolTipText(action);
+        dropOrRerun.getAccessibleContext().setAccessibleName(action);
+        dropOrRerun.setEnabled(pending || (ended && runnable));
+    }
+
+    private SearchPlanEntry selectedSearch() {
+        int viewRow = searchesTable.getSelectedRow();
+        return viewRow < 0 || viewRow >= searchesModel.getRowCount()
+                ? null : searchesModel.rowAt(searchesTable.convertRowIndexToModel(viewRow));
+    }
+
+    // ------------------------------------------------------------------ selection
+
+    /** Reveal a source (a Document [n] badge): switch to the results and select it. */
+    public void focusSource(String sourceId) {
+        if (sourceId == null || sourceId.trim().isEmpty()) {
+            return;
+        }
+        int modelRow = indexOfSource(sourceId);
+        if (modelRow < 0) {
+            return;
+        }
+        showCard(CARD_RESULTS);
+        selectResultRow(modelRow);
+        int viewRow = resultsTable.convertRowIndexToView(modelRow);
+        if (viewRow >= 0) {
+            resultsTable.scrollRectToVisible(resultsTable.getCellRect(viewRow, 0, true));
+        }
+    }
+
+    private int indexOfSource(String sourceId) {
+        for (int i = 0; sourceId != null && i < resultsModel.getRowCount(); i++) {
+            if (sourceId.equals(resultsModel.rowAt(i).source().getSourceId())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void selectResultRow(int modelRow) {
+        int viewRow = resultsTable.convertRowIndexToView(modelRow);
+        if (viewRow >= 0) {
+            resultsTable.setRowSelectionInterval(viewRow, viewRow);
+        }
+    }
+
+    private void onResultSelected() {
+        int viewRow = resultsTable.getSelectedRow();
+        if (viewRow < 0 || viewRow >= resultsModel.getRowCount()) {
+            return;
+        }
+        ResearchSourceRecord record = resultsModel.rowAt(resultsTable.convertRowIndexToModel(viewRow)).source();
+        selectedSourceId = record.getSourceId();
+        publish(record);
+    }
+
+    private void publish(ResearchSourceRecord record) {
+        if (selectionPublisher != null) {
+            selectionPublisher.accept(record);
+        }
+    }
+
+    // ------------------------------------------------------------------ dressing
+
+    /**
+     * Colour one cell of a row: the state colour as background; the selected row is filled with the navigation
+     * blue and light text (the app's "selected" look), so it never reads as one of the state colours. The
+     * relevance star speaks in the action accent — the user's own signal, not the pipeline's. Renderers are
+     * reused, so every colour is set for every cell.
+     */
+    private Component dressRow(JTable table, Component cell, boolean selected, SourceRowState state,
+                               boolean star) {
+        if (selected) {
+            cell.setBackground(palette.getNavigationBlue());
+            cell.setForeground(ThemeColor.of("comic.fieldBg"));
+            return cell;
+        }
+        Color tint = stateTint(state);
+        cell.setBackground(tint != null ? tint : table.getBackground());
+        cell.setForeground(star ? palette.getAccentOrange()
+                : state == SourceRowState.SET_ASIDE ? mutedInk() : table.getForeground());
+        return cell;
+    }
+
+    /** The row colour of a state, or {@code null} for an uncoloured row. */
+    Color stateTint(SourceRowState state) {
+        Color field = ThemeColor.of("comic.fieldBg");
+        Color mark;
+        switch (state) {
+            case PENDING:
+                mark = ThemeColor.mix(field, palette.getInk(), PENDING_GREY);
+                break;
+            case RUNNING:
+                mark = palette.getNavigationBlue();
+                break;
+            case DONE:
+                mark = palette.getAgentPetrol();
+                break;
+            case CHECK_SOLVED:
+                mark = palette.getAccentYellow();
+                break;
+            case FAILED:
+                mark = palette.getAccentRed();
+                break;
+            default:
+                return null;
+        }
+        return ThemeColor.mix(field, mark, STATE_TINT_STRENGTH);
+    }
+
+    private Color mutedInk() {
+        return ThemeColor.mix(palette.getInk(), ThemeColor.of("comic.fieldBg"), MUTED_MIX);
     }
 
     /** The tooltip line for a marked row ("" when unmarked). */
@@ -522,47 +698,6 @@ public final class ResearchSourcesView extends JPanel {
                         + " — pages of this website may be missing. Check it manually."
                 : "Security check on " + entry.getFamily() + " was solved" + page
                         + " — verify the source was considered.";
-    }
-
-    /** #28/#39.7: supplies the derived passages of one source (wired by the contribution). */
-    public interface PassagesProvider {
-        java.util.List<com.aresstack.askai.research.domain.Passage> passagesForSource(
-                String sourceId);
-    }
-
-    private final javax.swing.JTextArea passagesArea = ComicControls.textArea();
-    private PassagesProvider passagesProvider;
-
-    public void setPassagesProvider(PassagesProvider provider) {
-        this.passagesProvider = provider;
-    }
-
-    /** Render the derived passages of the selected source — ordinal, heading path, text. */
-    private void renderPassages(String sourceId) {
-        if (passagesProvider == null) {
-            passagesArea.setText("(no knowledge capability in this session)");
-            return;
-        }
-        java.util.List<com.aresstack.askai.research.domain.Passage> passages =
-                passagesProvider.passagesForSource(sourceId);
-        if (passages.isEmpty()) {
-            passagesArea.setText("(no passages yet — the source has not been processed, "
-                    + "or processing is still running)");
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        int ordinal = 1;
-        for (com.aresstack.askai.research.domain.Passage passage : passages) {
-            sb.append('#').append(ordinal++);
-            String heading = passage.getHeadingPath();
-            if (heading != null && !heading.trim().isEmpty()) {
-                sb.append("  [").append(heading.trim()).append(']');
-            }
-            sb.append('\n').append(passage.getText().trim()).append("\n\n");
-        }
-        sb.append(passages.size()).append(" passage(s)");
-        passagesArea.setText(sb.toString());
-        passagesArea.setCaretPosition(0);
     }
 
     /** #39: the session-side import runner the contribution wires in (returns the outcome). */
@@ -680,312 +815,73 @@ public final class ResearchSourcesView extends JPanel {
         });
     }
 
-    /**
-     * #43 slice 9: focus ONE source by id (a Document [n] badge navigated here) — selects its
-     * row and scrolls it into view; an unknown id changes nothing.
-     */
-    public void focusSource(String sourceId) {
-        if (sourceId == null || sourceId.trim().isEmpty()) {
-            return;
-        }
-        for (int modelRow = 0; modelRow < tableModel.getRowCount(); modelRow++) {
-            if (sourceId.equals(tableModel.rowAt(modelRow).getSourceId())) {
-                selectModelRow(modelRow);
-                int viewRow = table.convertRowIndexToView(modelRow);
-                if (viewRow >= 0) {
-                    table.scrollRectToVisible(table.getCellRect(viewRow, 0, true));
-                }
-                return;
-            }
-        }
-    }
-
-    /** Selection is a VIEW concern: with the sorter active, model row i is not view row i. */
-    private void selectModelRow(int modelRow) {
-        int viewRow = table.convertRowIndexToView(modelRow);
-        if (viewRow >= 0) {
-            table.setRowSelectionInterval(viewRow, viewRow);
-        }
-    }
-
-    private void onRowSelected() {
-        int viewRow = table.getSelectedRow();
-        if (viewRow < 0 || viewRow >= tableModel.getRowCount()) {
-            return;
-        }
-        loadDetail(tableModel.rowAt(table.convertRowIndexToModel(viewRow)));
-    }
-
-    private void reloadSelected() {
-        if (selectedId != null) {
-            ResearchSourceRecord fresh = repository.get(selectedId);
-            if (fresh != null) {
-                loadDetail(fresh);
-            }
-        }
-    }
-
-    private void loadDetail(ResearchSourceRecord record) {
-        if (selectionPublisher != null) {
-            selectionPublisher.accept(record); // e.g. the full text in the main area
-        }
-        renderPassages(record.getSourceId());
-        selectedId = record.getSourceId();
-        loadedRevision = record.getRevision();
-        titleField.setText(record.getTitle());
-        urlField.setText(record.getUrl().isEmpty() ? record.getOrigin() : record.getUrl());
-        authorField.setText(record.getAuthor());
-        sectionsField.setText(joinSections(record.getLinkedSectionIds()));
-        commentArea.setText(record.getComment());
-        scoreField.setText(record.hasRerankScore()
-                ? String.format(java.util.Locale.ROOT, "%.4f", record.getRerankScore()) : "—");
-        excerptArea.setText(record.getExcerpt());
-        excerptArea.setCaretPosition(0);
-        fullTextArea.setText(record.isParked()
-                ? "(geparkt — die Seite wurde noch nicht gelesen)" : record.getFullText());
-        fullTextArea.setCaretPosition(0);
-        statusCombo.setSelectedItem(record.getStatus());
-        relevanceCombo.setSelectedItem(record.getRelevance());
-        reliabilityCombo.setSelectedItem(record.getReliability());
-        relevantCheck.setSelected(record.isUserRelevant());
-        showQuiet("Geladen: " + record.getSourceId() + " (Rev " + loadedRevision + ")."
-                + orphanNote(record.getLinkedSectionIds()));
-    }
-
-    private void clearDetail() {
-        if (selectionPublisher != null) {
-            selectionPublisher.accept(null);
-        }
-        selectedId = null;
-        loadedRevision = 0;
-        titleField.setText("");
-        urlField.setText("");
-        authorField.setText("");
-        sectionsField.setText("");
-        commentArea.setText("");
-        scoreField.setText("");
-        excerptArea.setText("");
-        fullTextArea.setText("");
-        relevantCheck.setSelected(false);
-        showQuiet(" ");
-    }
-
-    private void save() {
-        if (selectedId == null) {
-            return;
-        }
-        ResearchSourceRecord current = repository.get(selectedId);
-        if (current == null) {
-            showProblem("Die Quelle existiert nicht mehr.");
-            reloadTable();
-            return;
-        }
-        SourceUpdate update = SourceUpdate.from(current)
-                .title(titleField.getText())
-                .url(urlField.getText())
-                .author(authorField.getText())
-                .comment(commentArea.getText())
-                .linkedSectionIds(parseSections(sectionsField.getText()))
-                .status((SourceStatus) statusCombo.getSelectedItem())
-                .relevance((SourceRelevance) relevanceCombo.getSelectedItem())
-                .reliability((SourceReliability) reliabilityCombo.getSelectedItem())
-                .userRelevant(relevantCheck.isSelected())
-                .build();
-        SourceUpdateResult result = repository.update(selectedId, loadedRevision, update);
-        switch (result.getStatus()) {
-            case UPDATED:
-                loadedRevision = result.getRecord().getRevision();
-                showQuiet("Gespeichert (Rev " + loadedRevision + ").");
-                reloadTable();
-                selectById(selectedId);
-                break;
-            case CONFLICT:
-                showProblem("Nicht gespeichert: " + result.getReason() + " Neu geladen: Rev "
-                        + result.getRecord().getRevision() + ".");
-                loadDetail(result.getRecord());
-                reloadTable();
-                break;
-            case NOT_FOUND:
-            default:
-                showProblem("Nicht gespeichert: " + result.getReason());
-                reloadTable();
-                break;
-        }
-    }
-
-    private void selectById(String sourceId) {
-        for (int i = 0; i < tableModel.getRowCount(); i++) {
-            if (tableModel.rowAt(i).getSourceId().equals(sourceId)) {
-                selectModelRow(i);
-                return;
-            }
-        }
-    }
-
-    private String joinSections(List<String> ids) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < ids.size(); i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(ids.get(i));
-            if (knownSectionIds != null && !knownSectionIds.contains(ids.get(i))) {
-                sb.append("(orphan)");
-            }
-        }
-        return sb.toString();
-    }
-
-    private String orphanNote(List<String> ids) {
-        if (knownSectionIds == null) {
-            return "";
-        }
-        for (String id : ids) {
-            if (!knownSectionIds.contains(id)) {
-                return "  Einige Abschnitts-Verknüpfungen sind verwaist.";
-            }
-        }
-        return "";
-    }
-
-    private static List<String> parseSections(String text) {
-        List<String> out = new ArrayList<String>();
-        if (text == null) {
-            return out;
-        }
-        for (String part : text.split(",")) {
-            String id = part.replace("(orphan)", "").trim();
-            if (!id.isEmpty() && !out.contains(id)) {
-                out.add(id);
-            }
-        }
-        return out;
-    }
-
-    private static JTextField readOnlyField() {
-        JTextField f = ComicControls.textField();
-        f.setEditable(false);
-        return f;
-    }
-
-    private static JTextArea readOnlyArea(int rows) {
-        JTextArea a = ComicControls.textArea(rows, 20);
-        a.setEditable(false);
-        a.setLineWrap(true);
-        a.setWrapStyleWord(true);
-        return a;
-    }
-
-    // ------------------------------------------------------------------ German labels (no raw enum names)
-
-    /** The user never reads raw enum names — every bounded value has a German label. */
-    static String germanLabel(Object value) {
-        if (value instanceof SourceStatus) {
-            switch ((SourceStatus) value) {
-                case PARKED: return "Geparkt";
-                case NEW: return "Neu";
-                case REVIEWED: return "Ausgewertet";
-                case ACCEPTED: return "Übernommen";
-                case EXCLUDED: return "Ausgeschlossen";
-                case DUPLICATE: return "Duplikat";
-                case SUPERSEDED: return "Ersetzt";
-                default: break;
-            }
-        }
-        if (value instanceof SourceRelevance) {
-            switch ((SourceRelevance) value) {
-                case UNKNOWN: return "Unbewertet";
-                case LOW: return "Niedrig";
-                case MEDIUM: return "Mittel";
-                case HIGH: return "Hoch";
-                default: break;
-            }
-        }
-        if (value instanceof SourceReliability) {
-            switch ((SourceReliability) value) {
-                case UNKNOWN: return "Unbewertet";
-                case LOW: return "Niedrig";
-                case MEDIUM: return "Mittel";
-                case HIGH: return "Hoch";
-                case PRIMARY_SOURCE: return "Primärquelle";
-                default: break;
-            }
-        }
-        return String.valueOf(value);
-    }
-
-    private static javax.swing.ListCellRenderer<Object> germanEnumRenderer() {
-        return new javax.swing.DefaultListCellRenderer() {
-            @Override
-            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value,
-                    int index, boolean isSelected, boolean cellHasFocus) {
-                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                setText(germanLabel(value));
-                return this;
-            }
-        };
-    }
-
-    /** A row's display title: the title, else the URL — never an empty main column. */
-    static String displayTitle(ResearchSourceRecord record) {
-        if (!record.getTitle().trim().isEmpty()) {
-            return record.getTitle();
-        }
-        return record.getUrl().isEmpty() ? record.getOrigin() : record.getUrl();
-    }
-
-    /** The bare website (host) of a record — "de.wikipedia.org", not a full URL. */
-    static String siteOf(ResearchSourceRecord record) {
-        String url = record.getUrl().isEmpty() ? record.getOrigin() : record.getUrl();
-        int schemeEnd = url.indexOf("://");
-        String rest = schemeEnd >= 0 ? url.substring(schemeEnd + 3) : url;
-        int slash = rest.indexOf('/');
-        return slash >= 0 ? rest.substring(0, slash) : rest;
-    }
-
     private static String escape(String value) {
         return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    // Visible for tests.
+    // ------------------------------------------------------------------ tests
+
+    /** Rows of the results table. */
     int rowCount() {
-        return tableModel.getRowCount();
+        return resultsModel.getRowCount();
     }
 
-    // Visible for tests.
+    /** A cell of the results table. */
     Object cellAt(int row, int col) {
-        return tableModel.getValueAt(row, col);
+        return resultsModel.getValueAt(row, col);
     }
 
-    private static final class SourcesTableModel extends AbstractTableModel {
+    SourceRowState stateAt(int row) {
+        return resultsModel.rowAt(row).state();
+    }
+
+    int searchCount() {
+        return searchesModel.getRowCount();
+    }
+
+    Object searchCellAt(int row, int col) {
+        return searchesModel.getValueAt(row, col);
+    }
+
+    void selectSearch(int row) {
+        searchesTable.getSelectionModel().setSelectionInterval(row, row);
+    }
+
+    void selectCard(int index) {
+        showCard(index);
+    }
+
+    int shownCard() {
+        return card;
+    }
+
+    boolean switchShown() {
+        return switchRow.isVisible();
+    }
+
+    String summaryText() {
+        return summary.getText();
+    }
+
+    // ------------------------------------------------------------------ table models
+
+    private static final class ResultsTableModel extends AbstractTableModel {
+        private static final long serialVersionUID = 1L;
         static final int COLUMN_STAR = 0;
         static final int COLUMN_TITLE = 1;
         static final int COLUMN_SITE = 2;
         static final int COLUMN_STATUS = 3;
         static final int COLUMN_SCORE = 4;
-        static final int COLUMN_TEXT = 5;
 
-        private final String[] columns = {"⭐", "Titel", "Website", "Status", "Score", "Text"};
-        private List<ResearchSourceRecord> rows = new ArrayList<ResearchSourceRecord>();
-        private SourceAccessLog access = SourceAccessLog.EMPTY;
+        private final String[] columns = {"", "Title", "Website", "Status", "Score"};
+        private List<SourceTableRow> rows = new ArrayList<SourceTableRow>();
 
-        void setRows(List<ResearchSourceRecord> rows, SourceAccessLog access) {
-            this.rows = new ArrayList<ResearchSourceRecord>(rows);
-            this.access = access == null ? SourceAccessLog.EMPTY : access;
+        void setRows(List<SourceTableRow> rows) {
+            this.rows = new ArrayList<SourceTableRow>(rows);
             fireTableDataChanged();
         }
 
-        SourceAccessLog.Entry accessEntryAt(int row) {
-            ResearchSourceRecord r = rows.get(row);
-            return access.lookup(r.getUrl().isEmpty() ? r.getOrigin() : r.getUrl());
-        }
-
-        SourceAccessState accessStateAt(int row) {
-            SourceAccessLog.Entry e = accessEntryAt(row);
-            return e == null ? SourceAccessState.NONE : e.getState();
-        }
-
-        ResearchSourceRecord rowAt(int row) {
+        SourceTableRow rowAt(int row) {
             return rows.get(row);
         }
 
@@ -997,61 +893,105 @@ public final class ResearchSourcesView extends JPanel {
             return columns.length;
         }
 
+        @Override
         public String getColumnName(int column) {
             return columns[column];
         }
 
         @Override
         public Class<?> getColumnClass(int columnIndex) {
-            // A typed score column sorts numerically under the row sorter (a String "0.07" would not).
             return columnIndex == COLUMN_SCORE ? Double.class : String.class;
         }
 
         public Object getValueAt(int rowIndex, int columnIndex) {
-            ResearchSourceRecord r = rows.get(rowIndex);
+            SourceTableRow row = rows.get(rowIndex);
             switch (columnIndex) {
-                case COLUMN_STAR: return r.isUserRelevant() ? "★" : "";
-                case COLUMN_TITLE: return displayTitle(r);
-                case COLUMN_SITE: return siteOf(r);
-                case COLUMN_STATUS: return germanLabel(r.getStatus());
-                // Score makes gaps visible: a high-scored source with no full text is a promising hit still
-                // waiting to be read (parked). null (rendered "—") when no reranker score exists.
-                case COLUMN_SCORE: return r.hasRerankScore() ? Double.valueOf(r.getRerankScore()) : null;
-                case COLUMN_TEXT: return r.isParked() ? "geparkt" : "✓ gelesen";
+                case COLUMN_STAR: return row.source().isUserRelevant() ? "★" : "";
+                case COLUMN_TITLE: return row.title();
+                case COLUMN_SITE: return row.site();
+                case COLUMN_STATUS: return row.statusText();
+                case COLUMN_SCORE:
+                    return row.source().hasRerankScore() ? Double.valueOf(row.source().getRerankScore()) : null;
                 default: return "";
             }
         }
     }
 
-    /** Default known outline sections used for orphan detection in the clickdummy. */
-    public static Set<String> demoKnownSections() {
-        return new java.util.LinkedHashSet<String>(Arrays.asList("s1", "s2", "s2a", "s3", "s4"));
-    }
+    private static final class SearchesTableModel extends AbstractTableModel {
+        private static final long serialVersionUID = 1L;
+        static final int COLUMN_QUERY = 0;
+        static final int COLUMN_NODE = 1;
+        static final int COLUMN_STATUS = 2;
+        static final int COLUMN_SOURCES = 3;
 
-    /** Holds the "Visualize sources" button, right-aligned in the action row (set by the contribution). */
-    private final JPanel visualizeSlot = new JPanel(new BorderLayout());
+        private final String[] columns = {"Search", "Topic", "Status", "Sources"};
+        private List<SearchPlanEntry> rows = new ArrayList<SearchPlanEntry>();
 
-    /** Places the "Visualize sources" button at the right end of the action row. */
-    public void setVisualizeButton(javax.swing.JComponent button) {
-        visualizeSlot.removeAll();
-        if (button != null) {
-            visualizeSlot.add(button, BorderLayout.CENTER);
+        void setRows(List<SearchPlanEntry> rows) {
+            this.rows = new ArrayList<SearchPlanEntry>(rows);
+            fireTableDataChanged();
         }
-        visualizeSlot.revalidate();
-        visualizeSlot.repaint();
-    }
 
-    /** Notified with the selected source (null when the selection is cleared), e.g. to show its full text. */
-    private java.util.function.Consumer<ResearchSourceRecord> selectionPublisher;
+        SearchPlanEntry rowAt(int row) {
+            return rows.get(row);
+        }
 
-    /** Publishes every loaded/cleared selection (the contribution shows the full text in the main area). */
-    public void setSelectionPublisher(java.util.function.Consumer<ResearchSourceRecord> publisher) {
-        this.selectionPublisher = publisher;
-        if (publisher != null && selectedId != null) {
-            ResearchSourceRecord current = repository.get(selectedId);
-            if (current != null) {
-                publisher.accept(current); // a row selected while building the view counts too
+        public int getRowCount() {
+            return rows.size();
+        }
+
+        public int getColumnCount() {
+            return columns.length;
+        }
+
+        @Override
+        public String getColumnName(int column) {
+            return columns[column];
+        }
+
+        @Override
+        public Class<?> getColumnClass(int columnIndex) {
+            return columnIndex == COLUMN_SOURCES ? Integer.class : String.class;
+        }
+
+        public Object getValueAt(int rowIndex, int columnIndex) {
+            SearchPlanEntry entry = rows.get(rowIndex);
+            switch (columnIndex) {
+                case COLUMN_QUERY: return entry.getQuery();
+                case COLUMN_NODE: return entry.getNodeLabel();
+                case COLUMN_STATUS: return searchStatusText(entry);
+                case COLUMN_SOURCES: return Integer.valueOf(entry.getAcceptedSourceIds().size());
+                default: return "";
             }
         }
+    }
+
+    /** The status of a search in words; a note of the entry (why it failed, what it ranked) follows it. */
+    static String searchStatusText(SearchPlanEntry entry) {
+        String label;
+        switch (entry.getStatus()) {
+            case PENDING:
+                label = "Pending";
+                break;
+            case RUNNING:
+                label = "Running";
+                break;
+            case DONE:
+                label = "Done";
+                break;
+            case FAILED:
+                label = "Failed";
+                break;
+            default:
+                label = "Skipped";
+                break;
+        }
+        String note = entry.getNote();
+        return note == null || note.trim().isEmpty() ? label : label + " (" + note.trim() + ")";
+    }
+
+    /** The section ids of the demo outline (until the outline wires the real ones). */
+    public static Set<String> demoKnownSections() {
+        return new java.util.LinkedHashSet<String>(Arrays.asList("s1", "s2", "s2a", "s3", "s4"));
     }
 }

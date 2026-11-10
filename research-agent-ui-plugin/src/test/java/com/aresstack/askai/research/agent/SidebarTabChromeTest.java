@@ -9,7 +9,6 @@ import org.junit.Test;
 import javax.swing.AbstractButton;
 import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -76,20 +75,35 @@ public class SidebarTabChromeTest {
     }
 
     @Test
-    public void sourcesKeepTheSearchPlanBelowTheSearchBar() throws Exception {
+    public void sourcesStartWithTheSearchBarAndFitTheSidebar() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             ResearchSourcesView view = new ResearchSourcesView(new InMemoryResearchSourceRepository(),
                     ResearchSourcesView.demoKnownSections());
-            JPanel checklist = new JPanel();
-            view.setPlanChecklist(checklist);
             assertNull("nothing sits above the sources search bar",
                     ((BorderLayout) view.getLayout()).getLayoutComponent(BorderLayout.NORTH));
-            assertTrue(SwingUtilities.isDescendingFrom(checklist, view));
             ComicLayoutAudit.overflows(view, WIDTHS[1], HEIGHT);
             ComicSearchBar search = find(view, ComicSearchBar.class);
             assertNotNull(search);
-            assertTrue("the search plan is below the search bar", yIn(view, checklist) > yIn(view, search));
+            javax.swing.JTable table = find(view, javax.swing.JTable.class);
+            assertTrue("the list is below the search bar", yIn(view, table) > yIn(view, search));
+            List<AbstractButton> buttons = new ArrayList<AbstractButton>();
+            collectButtons(view, buttons);
+            assertIconButtons(buttons);
+            assertFits(view);
         });
+    }
+
+    private static void collectButtons(Container container, List<AbstractButton> found) {
+        for (Component child : container.getComponents()) {
+            if (child instanceof ComicSearchBar) {
+                continue;
+            }
+            if (child instanceof JButton) {
+                found.add((AbstractButton) child);
+            } else if (child instanceof Container) {
+                collectButtons((Container) child, found);
+            }
+        }
     }
 
     private static void assertIconButtons(List<AbstractButton> buttons) {
