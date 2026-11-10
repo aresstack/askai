@@ -71,6 +71,16 @@ public final class McpLayoutRepairClient {
     public Result searchWithRepair(String query, CancellationSignal cancellationSignal,
                                    long nowEpochMillis, ToolBudget budget)
             throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
+        return searchWithRepair(query, null, cancellationSignal, nowEpochMillis, budget);
+    }
+
+    /**
+     * @param engineIds one priority group of Search → Engines (all of them are searched and merged), or null for the
+     *                  engines enabled in the browser's settings
+     */
+    public Result searchWithRepair(String query, List<String> engineIds, CancellationSignal cancellationSignal,
+                                   long nowEpochMillis, ToolBudget budget)
+            throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
         List<String> diagnostics = new ArrayList<String>();
         List<String> providerHosts = new ArrayList<String>();
         List<SearchChallengeState> challenges = new ArrayList<SearchChallengeState>();
@@ -80,7 +90,7 @@ public final class McpLayoutRepairClient {
         }
         long prepareStart = System.currentTimeMillis();
         PreparedWebSearchResult prepared = SearchLayoutRepairJson.decodePrepared(
-                browser.call("web_search_prepare", singletonArg("query", query)));
+                browser.call("web_search_prepare", prepareArgs(query, engineIds)));
         diagnostics.addAll(prepared.diagnostics);
         providerHosts.addAll(prepared.providerHosts);
         challenges.addAll(prepared.challenges);
@@ -207,6 +217,16 @@ public final class McpLayoutRepairClient {
 
     private static List<SearchResultCandidate> noCandidates() {
         return new ArrayList<SearchResultCandidate>();
+    }
+
+    private static Map<String, Object> prepareArgs(String query, List<String> engineIds) {
+        if (engineIds == null) {
+            return singletonArg("query", query);
+        }
+        Map<String, Object> args = new java.util.LinkedHashMap<String, Object>();
+        args.put("query", query);
+        args.put("engines", String.join(",", engineIds));
+        return args;
     }
 
     private static Map<String, Object> singletonArg(String key, String value) {

@@ -86,8 +86,9 @@ public final class LegacyBrowserSearchSettingsCatalog {
                 "Navigation commit timeout (ms)",
                 "Timeout for a navigation to commit in the browser.", 1_000, 120_000);
         choice(f, "navigation.engineAcquisitionMode", SECTION_ENGINES, "Search strategy",
-                "FIRST_USABLE stops at the first engine that delivers usable organic results; "
-                        + "ALL_ENABLED visits every enabled engine and merges what they found.",
+                "Only for a web_search that names no engines (the bot's own search tool): FIRST_USABLE stops at "
+                        + "the first engine that delivers, ALL_ENABLED merges all. The research search follows "
+                        + "the priorities of the engine table.",
                 enumNames(com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.values()));
         bool(f, "navigation.redirectResolutionEnabled", SECTION_ENGINES, "Resolve redirect wrappers",
                 "Statically resolve engine redirect wrappers (Bing /ck/, Google /url, DuckDuckGo /l/) "
@@ -97,6 +98,9 @@ public final class LegacyBrowserSearchSettingsCatalog {
                 "Links longer than this never enter redirect resolution or results.", 256, 65_536);
         integer(f, "navigation.searchResultLimit", SECTION_ENGINES, "Search result limit",
                 "Maximum organic results returned per search.", 1, 100);
+        integer(f, "navigation.minimumUsableResults", SECTION_ENGINES, "Enough results",
+                "Usable results (distinct, no shop or search page) after which no further priority group is "
+                        + "searched; fewer, and the next priority's engines are asked.", 1, 100);
         text(f, "navigation.language", SECTION_ENGINES, "Language",
                 "Preferred content language (BCP-47, e.g. de); empty = engine default.");
         text(f, "navigation.country", SECTION_ENGINES, "Country",

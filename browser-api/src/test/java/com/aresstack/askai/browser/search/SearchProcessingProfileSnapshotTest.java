@@ -108,6 +108,19 @@ public class SearchProcessingProfileSnapshotTest {
     }
 
     @Test
+    public void aV7SnapshotWithoutTheEnoughResultsSettingTakesItsDefault() {
+        java.util.Map<String, String> v7Values = new java.util.LinkedHashMap<String, String>(
+                LegacyBrowserSearchSettingsCodec.toValues(LegacyBrowserSearchDefaults.create()));
+        v7Values.remove("navigation.minimumUsableResults");
+        String v7Json = new LegacyBrowserSearchConfigDocument(7, 3L, "digest-without-the-new-key",
+                "frozen-session", 42L, v7Values).toJson();
+        SearchProcessingProfileSnapshot migrated = SearchProcessingProfileSnapshot.parse(v7Json);
+        assertEquals(LegacyBrowserSearchConfigDocument.CURRENT_SCHEMA_VERSION, migrated.schemaVersion);
+        assertEquals(LegacyBrowserSearchDefaults.MINIMUM_USABLE_RESULTS,
+                migrated.settings.navigation.minimumUsableResults);
+    }
+
+    @Test
     public void aV6SnapshotWithAnOldEngineListMigratesToTheTableInItsFrozenOrder() {
         // A session frozen before the engine table: old engine form, ALL_ENABLED, and the digest the old build
         // computed over that form. Restoring it must not reject it as corrupt and must keep the frozen order.

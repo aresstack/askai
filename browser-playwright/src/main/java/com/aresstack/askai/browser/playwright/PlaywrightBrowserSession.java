@@ -120,6 +120,34 @@ final class PlaywrightBrowserSession implements BrowserSession {
     /** The engines named by the running web_search call, or null (then the settings' enabled engines). */
     private java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> callEngines;
 
+    /** The acquisition mode of the running call when it searches one priority group, else null (the settings'). */
+    private com.aresstack.askai.browser.search.engine.EngineAcquisitionMode callMode;
+
+    /** Work that may fail like a browser call. */
+    public interface BrowserCall<T> {
+        T run() throws BrowserException;
+    }
+
+    /**
+     * Runs {@code call} (a web_search_prepare) for ONE priority group of Search → Engines: exactly the named engines,
+     * in the order given, and every one of them ({@code ALL_ENABLED} within the group), whatever the settings' order
+     * and mode. The group's fallback to the next priority is the web search tool's business, not this browser's.
+     */
+    public <T> T withEngineGroup(List<String> engineIds, BrowserCall<T> call) throws BrowserException {
+        if (searchUrlTemplate != null) {
+            throw new BrowserException("This browser runtime searches only its --search-url override; "
+                    + "it does not take the engines " + engineIds + ".");
+        }
+        callEngines = selectEngines(engineIds);
+        callMode = com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED;
+        try {
+            return call.run();
+        } finally {
+            callEngines = null;
+            callMode = null;
+        }
+    }
+
     /**
      * web_search with its optional {@code engines} parameter (as Argos' web_search): exactly the named catalog
      * engines, in the order given, each once, for this call only; without it (null) the engines enabled in the
@@ -492,7 +520,8 @@ final class PlaywrightBrowserSession implements BrowserSession {
             throw new BrowserException("Empty search query.");
         }
         String encoded = encode(query.trim());
-        com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode = settings.navigation.engineSelection.getMode();
+        com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode = callMode != null ? callMode
+                : settings.navigation.engineSelection.getMode();
         // WHICH engines this search is really using, and why. A configured order that silently loses to
         // a leftover override is invisible in the result — the provider hosts only ever show what was
         // actually opened, never what was supposed to be.

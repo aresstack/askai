@@ -50,6 +50,7 @@ public final class LegacyBrowserSearchSettingsCodec {
         m.put("navigation.maximumRedirectUrlLength",
                 String.valueOf(s.navigation.maximumRedirectUrlLength));
         m.put("navigation.searchResultLimit", String.valueOf(s.navigation.searchResultLimit));
+        m.put("navigation.minimumUsableResults", String.valueOf(s.navigation.minimumUsableResults));
         m.put("navigation.language", s.navigation.language);
         m.put("navigation.country", s.navigation.country);
 
@@ -267,6 +268,7 @@ public final class LegacyBrowserSearchSettingsCodec {
                         r.boolValue("navigation.redirectResolutionEnabled"),
                         r.intValue("navigation.maximumRedirectUrlLength"),
                         r.intValue("navigation.searchResultLimit"),
+                        r.intValue("navigation.minimumUsableResults"),
                         r.string("navigation.language"),
                         r.string("navigation.country")),
                 new ConsentHandlingSettings(

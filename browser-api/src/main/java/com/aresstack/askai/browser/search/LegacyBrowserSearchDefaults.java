@@ -56,6 +56,13 @@ public final class LegacyBrowserSearchDefaults {
                 com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
     }
 
+    /**
+     * Usable results after which no further priority group of Search → Engines is searched. One result page of an
+     * engine carries about ten organic hits; after the shop, search-page and duplicate filters a group that still
+     * leaves five has answered the query, while fewer means the query is worth the next group's engines.
+     */
+    public static final int MINIMUM_USABLE_RESULTS = 5;
+
     private static LegacySearchNavigationSettings navigation() {
         return new LegacySearchNavigationSettings(
                 engineSelection(),
@@ -64,6 +71,7 @@ public final class LegacyBrowserSearchDefaults {
                 true,       // redirectResolutionEnabled
                 2_048,      // maximumRedirectUrlLength
                 20,         // searchResultLimit (previously OrganicResultSearchProvider.MAX_RESULTS)
+                MINIMUM_USABLE_RESULTS,
                 "",         // language: engine default
                 "");        // country: engine default
     }
