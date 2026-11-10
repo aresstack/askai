@@ -95,8 +95,8 @@ public class SidebarTabChromeTest {
 
     private static void collectButtons(Container container, List<AbstractButton> found) {
         for (Component child : container.getComponents()) {
-            if (child instanceof ComicSearchBar) {
-                continue;
+            if (child instanceof ComicSearchBar || child instanceof javax.swing.JScrollBar) {
+                continue; // their own inner buttons (search arrow, scroll arrows) are not actions of the tab
             }
             if (child instanceof JButton) {
                 found.add((AbstractButton) child);
