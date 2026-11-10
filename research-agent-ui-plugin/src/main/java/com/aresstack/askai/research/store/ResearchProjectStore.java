@@ -25,6 +25,7 @@ public final class ResearchProjectStore {
     private final SessionStateFileStore sessionStateStore;
     private final FilePostSearchReviewStore reviewStore;
     private final FileResearchTaskStore taskStore;
+    private final FileSourceAccessStore sourceAccessStore;
 
     public ResearchProjectStore(File projectRoot) {
         this.root = projectRoot;
@@ -33,6 +34,7 @@ public final class ResearchProjectStore {
         this.sessionStateStore = new SessionStateFileStore(new File(projectRoot, "state"));
         this.reviewStore = new FilePostSearchReviewStore(new File(projectRoot, "state"));
         this.taskStore = new FileResearchTaskStore(new File(projectRoot, "tasks"));
+        this.sourceAccessStore = new FileSourceAccessStore(new File(projectRoot, "state"));
     }
 
     public File getRoot() {
@@ -59,5 +61,10 @@ public final class ResearchProjectStore {
     /** The persisted task graph of this project: work packages, artifacts, receipts, budgets. */
     public FileResearchTaskStore tasks() {
         return taskStore;
+    }
+
+    /** Websites that demanded a manual security check — persisted, so the Sources list keeps its marks. */
+    public FileSourceAccessStore sourceAccess() {
+        return sourceAccessStore;
     }
 }

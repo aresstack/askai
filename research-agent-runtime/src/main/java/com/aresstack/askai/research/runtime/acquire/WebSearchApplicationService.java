@@ -1374,7 +1374,8 @@ public final class WebSearchApplicationService {
                     return null; // leave parked
                 }
                 listener.attention("CAPTCHA", family, url, false);
-                return waitForUserThenRead(url); // a solvable challenge has no business timeout: cooperative wait
+                // a solvable challenge has no business timeout: cooperative wait
+                return resolvedIfRead("CAPTCHA", family, url, waitForUserThenRead(url));
             case ACCESS_BLOCKED:
                 // TERMINAL block: nothing to solve — never wait for the user, never accept. Skip this URL and
                 // remember the domain so no other candidate on it is re-opened this run.
@@ -1408,7 +1409,18 @@ public final class WebSearchApplicationService {
             return null;
         }
         listener.attention("COOKIE", family, url + " — click: " + candidate, false);
-        return waitForUserThenRead(url);
+        return resolvedIfRead("COOKIE", family, url, waitForUserThenRead(url));
+    }
+
+    /**
+     * A page-level obstruction ends with the page being READ: tell the host it is solved (otherwise the
+     * "manual input required" notice and the Sources mark would stay BLOCKED although the page was read).
+     */
+    private String resolvedIfRead(String reason, String family, String url, String read) {
+        if (read != null) {
+            listener.attention(reason, family, url, true);
+        }
+        return read;
     }
 
     /**
