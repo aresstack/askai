@@ -40,7 +40,7 @@ public class SectionContextAcronymTest {
                         "Ein Natural Language Processing (NLP) Text.")));
 
         SectionContextBuilderTest.Corpus corpus = new SectionContextBuilderTest.Corpus();
-        corpus.add("p-a1", "src-a", "Dabei hilft RAG. Auch LLM und NLP werden genannt.", 0.9);
+        corpus.add("p-a1", "src-a", "Dabei hilft RAG. Auch LLM und NLP werden in diesem Abschnitt genannt.", 0.9);
 
         Map<String, String> accepted = new HashMap<String, String>();
         accepted.put("src-a", "sum-a");
