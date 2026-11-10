@@ -598,6 +598,7 @@ public class ProductiveBookJourneyTest {
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertEquals("research/running", phase(fx));
+        stopSeedPlan(fx); // a running seed plan refuses typed lines; the test is about a running agent turn
         fx.session.submitPrompt("search more");
         assertEquals(com.aresstack.askai.plugin.api.agent.SubmissionAvailability.BUSY,
                 fx.session.getChatTarget().getAvailability());
