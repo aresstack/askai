@@ -69,6 +69,11 @@ final class KnowledgeProcessingSessionFactory {
         final com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery topics;
         /** PR 20: progress, Cancel and outcome of the clustering run, read by the outline drawer. */
         final OutlineClusteringRun outlineRun;
+        /**
+         * D6: the debounced, single-flight runner of the shared topic analysis (Phase 2 steering). Invalidated after
+         * completed processing jobs and at research cycle boundaries; it runs only when the analysis is due.
+         */
+        com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner analysis;
         /** #28/#39.7: read-only per-source passage inspection over the active corpus. */
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader;
         /** Plan PR 22: the session's embedding port (label paths are embedded as queries) and topic minimums. */
@@ -309,6 +314,30 @@ final class KnowledgeProcessingSessionFactory {
                             }
                         }, "knowledge-projection-" + projectId, 1500L);
 
+        // D6: the shared topic analysis runs in the background during the research (Phase 2): a completed job
+        // only marks it stale; the runner coalesces bursts (the projection debounce setting) and runs one analysis
+        // at a time, and SharedTopicDiscovery.analyzeIfDue decides whether the grown corpus is due at all.
+        final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner analysis =
+                new com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner(
+                        new com.aresstack.askai.research.knowledge.processing.live
+                                .LiveKnowledgeProjectionRunner.RebuildStep() {
+                            public void rebuild() {
+                                try {
+                                    sharedTopics.analyzeIfDue();
+                                } catch (com.aresstack.askai.research.knowledge.ClusteringMonitor
+                                        .ClusteringCancelledException cancelled) {
+                                    System.err.println("[topic-analysis] cancelled");
+                                } catch (OutOfMemoryError tooLarge) {
+                                    System.err.println("[topic-analysis] not enough memory for the similarity "
+                                            + "matrix; lower the corpus limit");
+                                } catch (Exception failed) {
+                                    throw new IllegalStateException("topic analysis failed: "
+                                            + failed.getMessage(), failed);
+                                }
+                            }
+                        }, "knowledge-analysis-" + projectId, settings.projectionDebounceMillis);
+        sharedTopics.setAnalysisTrigger(analysis);
+
         // Issue #29: a COMPLETED job no longer rebuilds the projection. It only NOTIFIES (cheap staleness
         // metadata for the open Outline tab); recalculation is an explicit user action. PR 20: the background
         // topic runner of #42 is gone; clustering runs only on request in outline/running.
@@ -320,6 +349,7 @@ final class KnowledgeProcessingSessionFactory {
                         if (knowledgeChangedNotifier != null) {
                             knowledgeChangedNotifier.run();
                         }
+                        analysis.knowledgeChanged();
                     }
                 }));
 
@@ -354,6 +384,7 @@ final class KnowledgeProcessingSessionFactory {
         };
         KnowledgeSession session = new KnowledgeSession(workerRunner, projection, projection, staleness,
                 sharedTopics, corpusReader, outlineRun);
+        session.analysis = analysis;
         session.embeddings = embeddings;
         session.settings = settings;
         session.index = index;

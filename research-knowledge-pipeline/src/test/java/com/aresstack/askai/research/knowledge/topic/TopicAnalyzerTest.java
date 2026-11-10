@@ -344,4 +344,15 @@ public class TopicAnalyzerTest {
         assertEquals(ScopeAlignment.Verdict.UNCLASSIFIED, topic.getScopeAlignment().getVerdict());
         assertEquals(null, topic.getScopeAlignment().getHint());
     }
+
+    @Test
+    public void theRepresentativeSettingReachesTheTopicDiscovery() {
+        TopicCorpusFixture corpus = new TopicCorpusFixture();
+        corpus.diverse("broad", 4, 5, 6);
+        LiveOutlineProjectionBuilder defaults = new LiveOutlineProjectionBuilder();
+        LiveTopicTree tree = defaults.withRepresentatives(4).discoverTopicTree(corpus.passages, corpus.vectors,
+                ClusteringMonitor.NONE);
+        assertEquals(4, tree.getTopics().get(0).getRepresentativePassageIds().size());
+        assertTrue("the default count is the same builder", defaults.withRepresentatives(2) == defaults);
+    }
 }

@@ -933,6 +933,7 @@ public final class ProductiveResearchBackendFactory {
                     acceptance, projectContext, control, bridge,
                     browser, backend, service);
             resources.setSearchProfile(profile);
+            resources.setProcessingQueue(processingQueue);
             // Parallel research workers: isolated browser user contexts of THIS chat, their pages recorded
             // into the SAME capture store as the session browser's (one source process for all workers).
             // The orchestrated run's web research workers browse in them (one user context per search run).
@@ -1020,6 +1021,12 @@ public final class ProductiveResearchBackendFactory {
             knowledge.projection.start();
             resources.setProjectionRunner(knowledge.projection);
             resources.setOutlineStaleness(knowledge.staleness);
+        }
+        if (knowledge.analysis != null) {
+            // D6: the shared topic analysis; one check at session open picks up a corpus that is already due.
+            knowledge.analysis.start();
+            resources.setAnalysisRunner(knowledge.analysis);
+            knowledge.analysis.knowledgeChanged();
         }
     }
 

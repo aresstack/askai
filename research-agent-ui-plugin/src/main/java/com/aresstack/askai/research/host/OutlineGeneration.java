@@ -187,19 +187,27 @@ public final class OutlineGeneration {
         }
     }
 
+    /**
+     * The approved concept's first-level nodes with their stable ids (the frozen working revision's identity); the
+     * outline generation and the evidence analysis (D6) read the concept through this one method.
+     */
+    public static List<ConceptOutlineNode> conceptNodes(FrozenConcept frozen, FileConceptStore store)
+            throws Exception {
+        long workingRevision = frozen.getPin().getWorkingRevision();
+        String identityJson = store.identityHistoryContent(workingRevision);
+        String workingDocument = store.workingHistoryContent(workingRevision);
+        ConceptIdentity identity = identityJson == null ? null : ConceptIdentity.parse(identityJson);
+        JsonElement identityRoot = workingDocument == null ? null : JsonParser.parseString(workingDocument);
+        return ConceptOutlineNode.firstLevel(frozen.getEffectiveDocument(), identity, identityRoot);
+    }
+
     private Prepared prepare(ClusteringMonitor monitor) throws Exception {
         FrozenConcept frozen = inputs.frozenConcept();
         FileConceptStore store = inputs.conceptStore();
         if (frozen == null || store == null) {
             throw new IllegalStateException("There is no approved concept to build the outline from.");
         }
-        long workingRevision = frozen.getPin().getWorkingRevision();
-        String identityJson = store.identityHistoryContent(workingRevision);
-        String workingDocument = store.workingHistoryContent(workingRevision);
-        ConceptIdentity identity = identityJson == null ? null : ConceptIdentity.parse(identityJson);
-        JsonElement identityRoot = workingDocument == null ? null : JsonParser.parseString(workingDocument);
-        List<ConceptOutlineNode> chapters = ConceptOutlineNode.firstLevel(frozen.getEffectiveDocument(), identity,
-                identityRoot);
+        List<ConceptOutlineNode> chapters = conceptNodes(frozen, store);
 
         final Set<String> eligible = OutlineSourceRule.eligible(inputs.pinnedSourceIds(), inputs.sources(),
                 TypedBlacklist.of(frozen.getPin().getBlacklist()));
