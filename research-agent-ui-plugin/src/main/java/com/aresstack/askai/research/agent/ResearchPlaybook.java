@@ -313,6 +313,18 @@ public final class ResearchPlaybook {
                         + "window. The research continues on other websites.";
     }
 
+    /** Persistent notice when a cookie/consent banner could not be dismissed automatically. */
+    public String consentAttentionRequired(String domain) {
+        String site = domain == null || domain.isEmpty() ? (de() ? "Eine Website" : "A website") : domain;
+        return de()
+                ? "**Manuelle Eingabe erforderlich**\n\n" + site + " zeigt ein Cookie-Banner, das nicht "
+                        + "automatisch geschlossen werden konnte. Bitte schließe es im geöffneten Browserfenster. "
+                        + "Die Recherche wird auf anderen Websites fortgesetzt."
+                : "**Manual input required**\n\n" + site + " shows a cookie banner that could not be closed "
+                        + "automatically. Please close it in the open browser window. "
+                        + "The research continues on other websites.";
+    }
+
     /** Visible all-clear once the user solved the manual security check. */
     public String attentionResolved(String domain) {
         String site = domain == null || domain.isEmpty() ? (de() ? "Die Website" : "The website") : domain;

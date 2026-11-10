@@ -7630,14 +7630,59 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         } : sound;
     }
 
+    /** Session-local access log (demo mode / no project context); the productive path persists it. */
+    private volatile com.aresstack.askai.research.sources.SourceAccessLog sourceAccessLog =
+            com.aresstack.askai.research.sources.SourceAccessLog.EMPTY;
+
+    /**
+     * Websites that demanded a manual security check in this project: BLOCKED (never solved) or RESOLVED
+     * (solved, the page was read afterwards). Read by the Sources list to mark rows red / yellow.
+     */
+    public com.aresstack.askai.research.sources.SourceAccessLog getSourceAccessLog() {
+        com.aresstack.askai.research.store.FileSourceAccessStore store = sourceAccessStore();
+        return store == null ? sourceAccessLog : store.load();
+    }
+
+    private com.aresstack.askai.research.store.FileSourceAccessStore sourceAccessStore() {
+        return productiveResources == null || productiveResources.getProjectContext() == null
+                ? null : productiveResources.getProjectContext().getSourceAccessStore();
+    }
+
+    private synchronized void recordSourceAccess(String domain, String url, boolean resolved) {
+        if (domain == null || domain.trim().isEmpty()) {
+            return;
+        }
+        com.aresstack.askai.research.sources.SourceAccessLog current = getSourceAccessLog();
+        com.aresstack.askai.research.sources.SourceAccessLog next = resolved
+                ? current.resolved(domain, url) : current.blocked(domain, url);
+        sourceAccessLog = next;
+        com.aresstack.askai.research.store.FileSourceAccessStore store = sourceAccessStore();
+        if (store != null) {
+            try {
+                store.save(next);
+            } catch (java.io.IOException ex) {
+                System.err.println("[research] could not persist source access log: " + ex.getMessage());
+            }
+        }
+        fireStateChanged();
+    }
+
     /** REQUIRED → persistent visible notice + ONE sound per episode; RESOLVED → visible all-clear. */
     private void applyUserAttention(ResearchBackendEvent event) {
         String domain = event.getPublicMessage() == null ? "" : event.getPublicMessage();
+        String url = event.getTechnicalDetail() == null ? "" : event.getTechnicalDetail();
         boolean resolved = "RESOLVED".equals(event.getText());
+        boolean cookie = "COOKIE".equals(event.getTitle());
+        if (!cookie) {
+            // Only a real security check marks the website in the Sources list; a cookie banner is no block.
+            recordSourceAccess(domain, url, resolved);
+        }
         if (!resolved) {
             if (attentionEpisodes.add(domain)) {
                 attentionSound.run();
-                sink.showProblem(publish("attention-" + domain), playbook.attentionRequired(domain));
+                sink.showProblem(publish("attention-" + domain), cookie
+                        ? playbook.consentAttentionRequired(domain)
+                        : playbook.attentionRequired(domain));
             }
             return;
         }
