@@ -57,6 +57,14 @@ Consequences for the design:
    reported, never stored. The default languages of the catalog are starting values for a new row, not a verified
    filter. No engine has a verified language filter yet, so the language of a search is carried by the wording of the
    query (the planner writes it in that language); `country` stays separate.
+   **Per row (PR F, decided):** a row's languages (Languages plus Further languages when switched on) choose the
+   language of its search: the search's own language when the row lists it, otherwise the row's first language; a
+   row without languages keeps the search's language. Google takes it as the search language of the search browser,
+   so a second Google row with other languages searches again in that language; two rows that end in the same
+   language search once. Page engines are typed into their search form, which takes no language, so a page engine
+   runs once per search whatever its rows say. The fresh-install Google row lists `de` and `en` (the two session
+   languages) among its languages, so a search keeps the language it had before. Translating the query into each row language in the
+   query planner changes the number of queries of a run and waits for the MVP acceptance run.
 4. **Delay is a column** (Angelo, 2026-11-09 22:17). The existing per-engine delay moves into the table unchanged;
    migrated rows keep their delay (Google 15 s from #166).
 5. **Migration of `navigation.engines`.** Old entries (`id:on:pages[:delay]`) get priority = their position in the
