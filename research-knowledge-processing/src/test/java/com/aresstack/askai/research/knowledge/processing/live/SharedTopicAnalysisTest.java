@@ -228,6 +228,36 @@ public class SharedTopicAnalysisTest {
     }
 
     @Test
+    public void aQueueChangeIsANewStateSoPhaseThreeNeverGetsAStaleSettledSnapshot() throws Exception {
+        source("s1", 0, 3);
+        source("s2", 0, 3);
+        SharedTopicDiscovery discovery = discovery(temp.newFolder("p"));
+        TopicAnalysisSnapshot settled = discovery.analyze(null);
+        assertTrue(settled.isSettled());
+
+        pending.add("s9"); // accepted and queued, no passage yet
+        TopicAnalysisSnapshot queued = discovery.analysisFor(null);
+        assertNotEquals("the pending source is part of the state", settled.getId(), queued.getId());
+        assertFalse(queued.isSettled());
+    }
+
+    @Test
+    public void aClosedSessionStopsTheBackgroundRun() throws Exception {
+        source("s1", 0, 3);
+        source("s2", 0, 3);
+        SharedTopicDiscovery discovery = discovery(temp.newFolder("p"));
+        Thread.currentThread().interrupt(); // what shutdownNow does to the runner thread
+        try {
+            discovery.analyzeIfDue();
+            fail("an interrupted background run must stop");
+        } catch (com.aresstack.askai.research.knowledge.ClusteringMonitor.ClusteringCancelledException stopped) {
+            assertNull("nothing was published", discovery.latestAnalysis());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
     public void withoutAnApprovedConceptThereIsNothingToAnalyse() throws Exception {
         source("s1", 0, 3);
         source("s2", 0, 3);

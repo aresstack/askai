@@ -238,6 +238,19 @@ public final class SharedTopicDiscovery {
      * number of passages since the latest snapshot, or at a requested cycle boundary when it changed at all.
      * @return the new snapshot, or {@code null} when no run was due
      */
+    /**
+     * The background run's monitor: a closed session interrupts the runner thread ({@code shutdownNow}), and the
+     * clustering and the analysis stop at their next check instead of running on against torn-down resources.
+     */
+    static final ClusteringMonitor INTERRUPTIBLE = new ClusteringMonitor() {
+        public void progress(String stage, long done, long total) {
+        }
+
+        public boolean isCancelled() {
+            return Thread.currentThread().isInterrupted();
+        }
+    };
+
     public synchronized TopicAnalysisSnapshot analyzeIfDue() throws Exception {
         boolean boundary = cycleBoundaryRequested;
         cycleBoundaryRequested = false;
@@ -255,7 +268,7 @@ public final class SharedTopicDiscovery {
         boolean due = current == null
                 || passages - current.getPassages() >= request.getEveryNewPassages()
                 || (boundary && !current.getId().equals(snapshotId(corpusFingerprintOf(corpus), request)));
-        return due ? run(request, corpus, ClusteringMonitor.NONE) : null;
+        return due ? run(request, corpus, INTERRUPTIBLE) : null;
     }
 
     private TopicAnalysisRequest request() throws Exception {
@@ -300,7 +313,8 @@ public final class SharedTopicDiscovery {
     private TopicAnalysisSnapshot run(TopicAnalysisRequest request, ActiveKnowledgeCorpusReader.Corpus whole,
                                       ClusteringMonitor monitor) {
         ActiveKnowledgeCorpusReader.Corpus limited = CorpusLimit.apply(whole, request.getCorpusLimit());
-        LiveTopicTree tree = builder.discoverTopicTree(limited.getPassages(), limited.getVectors(), monitor);
+        LiveTopicTree tree = builder.withRepresentatives(request.getSettings().getRepresentatives())
+                .discoverTopicTree(limited.getPassages(), limited.getVectors(), monitor);
         List<AnalysisPassage> passages = new ArrayList<AnalysisPassage>();
         Map<String, String> texts = new LinkedHashMap<String, String>();
         for (Passage passage : whole.getPassages()) {

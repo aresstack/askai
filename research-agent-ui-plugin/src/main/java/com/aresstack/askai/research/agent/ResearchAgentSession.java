@@ -1441,7 +1441,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         engine.addHook(new com.aresstack.askai.research.book.EmbeddingRequiredHook(
                 new com.aresstack.askai.research.book.EmbeddingRequiredHook.Readiness() {
                     public boolean ready() {
-                        return resources.ensureEmbeddingDescriptor() != null;
+                        boolean ready = resources.ensureEmbeddingDescriptor() != null;
+                        if (ready) {
+                            topicDiscovery(); // a knowledge pipeline attached late gets this session's inputs too
+                        }
+                        return ready;
                     }
                 }));
         // PR 21: the outline freeze — finish minimum, outline pin, stale marks and the one outline write guard
@@ -2411,6 +2415,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }
                     }, resources.outlineEmbeddings()));
             analysisBoundTo = discovery;
+            resources.analysisInputsChanged(); // the check at attach time ran before the inputs were bound
         }
         return discovery;
     }

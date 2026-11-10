@@ -363,4 +363,15 @@ public class TopicAnalyzerTest {
         assertEquals("without another lineage there is no competitor", Double.NEGATIVE_INFINITY,
                 TopicAnalyzer.nearestOfAnotherLineage(nodes.subList(0, 3), new double[]{0.6, 0.7, 0.65}, 1), 0);
     }
+
+    @Test
+    public void theRepresentativeSettingReachesTheTopicDiscovery() {
+        TopicCorpusFixture corpus = new TopicCorpusFixture();
+        corpus.diverse("broad", 4, 5, 6);
+        LiveOutlineProjectionBuilder defaults = new LiveOutlineProjectionBuilder();
+        LiveTopicTree tree = defaults.withRepresentatives(4).discoverTopicTree(corpus.passages, corpus.vectors,
+                ClusteringMonitor.NONE);
+        assertEquals(4, tree.getTopics().get(0).getRepresentativePassageIds().size());
+        assertTrue("the default count is the same builder", defaults.withRepresentatives(2) == defaults);
+    }
 }
