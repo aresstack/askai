@@ -162,7 +162,9 @@ public final class OutlineGeneration {
                     + " assigned=" + result.assignedPassages + " unassigned=" + result.unassignedPassages
                     + " (below threshold " + result.belowThreshold + ", margin too small " + result.marginTooSmall
                     + ", median best similarity " + String.format(java.util.Locale.ROOT, "%.3f",
-                            result.medianBestSimilarity) + ") title=\"" + prepared.input.getBookTitle() + "\""
+                            result.medianBestSimilarity) + ", median margin " + String.format(
+                            java.util.Locale.ROOT, "%.3f", result.medianMargin) + ") title=\""
+                    + prepared.input.getBookTitle() + "\""
                     + " candidates=" + result.outline.getCandidates().size()
                     + " omitted=" + prepared.omitted);
             monitor.finished(prepared.omitted);

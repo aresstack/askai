@@ -34,7 +34,9 @@ import java.util.regex.Pattern;
  * for that section;</li>
  * <li>every passage goes to the nearest node by cosine against outline anchors (the node's full label path: book
  * title, parent labels, label), embedded once as QUERIES against the stored passage vectors; a passage is
- * assigned only above the threshold and with the margin over the second-best node;</li>
+ * assigned only above the threshold and with the margin over the nearest node of ANOTHER lineage (a node and
+ * its own ancestors or descendants never compete: a passage near a section is near its chapter by construction,
+ * live run 3 lost 1550 of 2068 passages to that false ambiguity);</li>
  * <li>leftover clusters that meet the topic minimums are listed as candidates, never inserted;</li>
  * <li>default briefs: purpose from label path and mission, key points from deeper nodes and the best passages,
  * a word target from the deliverable (a page counts as 300 words, provisional) spread by source count, or 400
@@ -65,15 +67,18 @@ public final class ConceptSeededOutlineBuilder {
         public final int marginTooSmall;
         /** The median of every passage's best anchor similarity ({@code 0} without passages): the calibration aid. */
         public final double medianBestSimilarity;
+        /** The median of every passage's lead over the nearest anchor of another lineage ({@code 0} without). */
+        public final double medianMargin;
 
         Result(Outline outline, int assignedPassages, int unassignedPassages, int belowThreshold,
-               int marginTooSmall, double medianBestSimilarity) {
+               int marginTooSmall, double medianBestSimilarity, double medianMargin) {
             this.outline = outline;
             this.assignedPassages = assignedPassages;
             this.unassignedPassages = unassignedPassages;
             this.belowThreshold = belowThreshold;
             this.marginTooSmall = marginTooSmall;
             this.medianBestSimilarity = medianBestSimilarity;
+            this.medianMargin = medianMargin;
         }
     }
 
@@ -127,6 +132,7 @@ public final class ConceptSeededOutlineBuilder {
         int belowThreshold = 0;
         int marginTooSmall = 0;
         List<Double> bestScores = new ArrayList<Double>();
+        List<Double> margins = new ArrayList<Double>();
         if (!anchors.isEmpty() && !passages.isEmpty()) {
             m.progress("Embedding the outline anchors", 0, passages.size());
             List<String> paths = new ArrayList<String>();
@@ -145,19 +151,17 @@ public final class ConceptSeededOutlineBuilder {
                 }
                 int best = -1;
                 double bestScore = Double.NEGATIVE_INFINITY;
-                double second = Double.NEGATIVE_INFINITY;
+                double[] scores = new double[anchors.size()];
                 for (int i = 0; i < anchors.size(); i++) {
-                    double score = VectorMath.cosine(anchorVectors.get(i), passage.vector);
-                    if (score > bestScore) {
-                        second = bestScore;
-                        bestScore = score;
+                    scores[i] = VectorMath.cosine(anchorVectors.get(i), passage.vector);
+                    if (scores[i] > bestScore) {
+                        bestScore = scores[i];
                         best = i;
-                    } else if (score > second) {
-                        second = score;
                     }
                 }
-                double margin = anchors.size() == 1 ? Double.POSITIVE_INFINITY : bestScore - second;
+                double margin = bestScore - nearestOfAnotherLineage(anchors, scores, best);
                 bestScores.add(bestScore);
+                margins.add(margin);
                 if (best >= 0 && bestScore >= input.settings.threshold && margin >= input.settings.margin) {
                     assignment.put(passage.passageId, anchors.get(best));
                     similarity.put(passage.passageId, bestScore);
@@ -249,7 +253,31 @@ public final class ConceptSeededOutlineBuilder {
         }
         List<OutlineCandidate> candidates = candidates(input, assignment, passages);
         return new Result(new Outline(chapters, candidates), assignment.size(),
-                passages.size() - assignment.size(), belowThreshold, marginTooSmall, median(bestScores));
+                passages.size() - assignment.size(), belowThreshold, marginTooSmall, median(bestScores),
+                median(margins));
+    }
+
+    /**
+     * The best similarity among the anchors that are neither ancestors nor descendants of {@code best}: the
+     * competitors the margin is measured against. {@code -1} (the cosine floor, so the margin is maximal) when no
+     * anchor of another lineage exists, e.g. a concept with one chapter and no sections.
+     */
+    private static double nearestOfAnotherLineage(List<Anchor> anchors, double[] scores, int best) {
+        double nearest = -1;
+        String bestPath = anchors.get(best).path;
+        for (int i = 0; i < anchors.size(); i++) {
+            if (i == best || sameLineage(bestPath, anchors.get(i).path)) {
+                continue;
+            }
+            nearest = Math.max(nearest, scores[i]);
+        }
+        return nearest;
+    }
+
+    /** Whether one label path is the other or a prefix of it (the node is an ancestor or a descendant). */
+    static boolean sameLineage(String path, String other) {
+        return path.equals(other) || path.startsWith(other + PATH_SEPARATOR)
+                || other.startsWith(path + PATH_SEPARATOR);
     }
 
     private static double median(List<Double> values) {
