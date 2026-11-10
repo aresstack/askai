@@ -22,6 +22,7 @@ public enum EngineFamily {
     SEZNAM,
     NAVER,
     COCCOC,
+    BAIDU,
     /** A recognizable general web search engine that is not one of the named families. */
     GENERIC,
     /** Host absent or unrecognizable. */
@@ -74,6 +75,9 @@ public enum EngineFamily {
         }
         if (hasLabel(host, "coccoc")) {
             return COCCOC;
+        }
+        if (hasLabel(host, "baidu")) {
+            return BAIDU;
         }
         return GENERIC;
     }

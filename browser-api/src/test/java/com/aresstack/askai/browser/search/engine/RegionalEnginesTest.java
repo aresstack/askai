@@ -9,10 +9,10 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/** Seznam, Yandex, Naver and Cốc Cốc are page engines with a search form; Baidu waits for lazy link resolution. */
+/** Seznam, Yandex, Naver, Cốc Cốc and Baidu are page engines with a search form, experimental until validated live. */
 public class RegionalEnginesTest {
 
-    private static final String[] IDS = {"seznam", "yandex", "naver", "coccoc"};
+    private static final String[] IDS = {"seznam", "yandex", "naver", "coccoc", "baidu"};
 
     @Test
     public void eachIsAFormEngineOfTheResearchBrowser() {
@@ -29,14 +29,12 @@ public class RegionalEnginesTest {
     }
 
     @Test
-    public void eachIsExperimentalUntilValidatedLiveAndBaiduStaysNotImplemented() {
+    public void eachIsExperimentalUntilValidatedLive() {
         for (String id : IDS) {
             assertEquals(id, SearchEngineImplementationStatus.EXPERIMENTAL, SearchEngineCatalog.byId(id).getStatus());
         }
-        SearchEngineCatalogEntry baidu = SearchEngineCatalog.byId("baidu");
-        assertEquals(SearchEngineImplementationStatus.NOT_IMPLEMENTED, baidu.getStatus());
-        assertTrue(baidu.getStatusNote().contains("baidu.com/link"));
-        assertNull(BrowserSearchEngineCatalog.byId("baidu"));
+        assertTrue("Baidu's note says how its opaque links resolve",
+                SearchEngineCatalog.byId("baidu").getStatusNote().contains("mu attribute"));
     }
 
     @Test
@@ -53,6 +51,10 @@ public class RegionalEnginesTest {
         assertFalse("a Naver blog is a site", SearchEngineHosts.isEngineHost("https://blog.naver.com/someone/1"));
         assertTrue(SearchEngineHosts.isEngineHost("https://coccoc.com/search?query=x"));
         assertFalse(SearchEngineHosts.isEngineHost("https://coccocfan.example/"));
+        assertTrue(SearchEngineHosts.isEngineHost("https://www.baidu.com/s?wd=x"));
+        assertTrue(SearchEngineHosts.isEngineHost("https://www.baidu.com/link?url=abc"));
+        assertTrue(SearchEngineHosts.isEngineHost("https://m.baidu.com/s?word=x"));
+        assertFalse("Baidu Baike is a site", SearchEngineHosts.isEngineHost("https://baike.baidu.com/item/x"));
     }
 
     @Test
@@ -62,5 +64,6 @@ public class RegionalEnginesTest {
         assertEquals(EngineFamily.NAVER, EngineFamily.fromUrlOrHost("https://search.naver.com/"));
         assertEquals(EngineFamily.COCCOC, EngineFamily.fromUrlOrHost("https://coccoc.com/search"));
         assertEquals(EngineFamily.YAHOO, EngineFamily.fromUrlOrHost("https://search.yahoo.co.jp/search"));
+        assertEquals(EngineFamily.BAIDU, EngineFamily.fromUrlOrHost("https://www.baidu.com/s?wd=x"));
     }
 }
