@@ -818,6 +818,65 @@ public final class ResearchRuntimeSettings {
                 overlap, loadWriterProseCriteria(store));
     }
 
+    // ------------------------------------------------------------------ Document: writer preset
+    /** Words the section writer aims for in one call; a longer section is split by its key points. */
+    public static final String KEY_WRITER_WORDS_PER_CALL = "research.writer.wordsPerCall";
+    /** Answer token budget of one writer call. */
+    public static final String KEY_WRITER_ANSWER_TOKENS = "research.writer.answerTokens";
+    /** Passages in one section's evidence pack. */
+    public static final String KEY_WRITER_PASSAGES = "research.writer.passages";
+    /** Tokens each evidence passage may take. */
+    public static final String KEY_WRITER_PASSAGE_TOKENS = "research.writer.passageTokens";
+    /** Passages one source may contribute to a pack. */
+    public static final String KEY_WRITER_PASSAGES_PER_SOURCE = "research.writer.passagesPerSource";
+    /** The writer preset the Document phase used before it became a setting (live run 3: 1,100 words, 3,072). */
+    public static final int DEFAULT_WRITER_WORDS_PER_CALL = 1100;
+    public static final int DEFAULT_WRITER_ANSWER_TOKENS = 3072;
+
+    /**
+     * The section writer's targets (live run 3, fix 4), read for every section: words and answer budget per call,
+     * evidence pack size and per-source cap, prose criteria and claim-check thresholds. The defaults are the values
+     * that were hard-coded before.
+     */
+    public static com.aresstack.askai.research.drafting.EvidenceAssignments.Targets loadWriterTargets(
+            WorkspaceStateStore store) {
+        com.aresstack.askai.research.writer.WriterPackSettings large =
+                com.aresstack.askai.research.writer.WriterPackSettings.LARGE;
+        int passageTokens = loadPositiveInt(store, KEY_WRITER_PASSAGE_TOKENS, large.getPassageTokens());
+        if (passageTokens < com.aresstack.askai.research.writer.WriterPackSettings.MIN_PASSAGE_TOKENS) {
+            passageTokens = large.getPassageTokens();
+        }
+        return new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
+                new com.aresstack.askai.research.writer.WriterPackSettings(
+                        loadPositiveInt(store, KEY_WRITER_PASSAGES, large.getPassageCount()), passageTokens,
+                        loadWriterProseCriteria(store),
+                        loadPositiveInt(store, KEY_WRITER_PASSAGES_PER_SOURCE,
+                                com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE)),
+                loadPositiveInt(store, KEY_WRITER_WORDS_PER_CALL, DEFAULT_WRITER_WORDS_PER_CALL),
+                loadPositiveInt(store, KEY_WRITER_ANSWER_TOKENS, DEFAULT_WRITER_ANSWER_TOKENS),
+                loadWriterCarryCriteria(store));
+    }
+
+    // ------------------------------------------------------------------ Document: topic drift in the book report
+    public static final String KEY_DRIFT_MIN_TERM_LENGTH = "research.book.drift.minTermLength";
+    public static final String KEY_DRIFT_MIN_SENTENCES = "research.book.drift.minSentences";
+    public static final String KEY_DRIFT_NOUNS_ONLY = "research.book.drift.nounsOnly";
+
+    /** The topic-drift thresholds of the book's quality report; the stem is the claim check's. */
+    public static com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria loadTopicDriftCriteria(
+            WorkspaceStateStore store) {
+        boolean nounsOnly = store == null
+                ? com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_NOUNS_ONLY
+                : store.getBoolean(KEY_DRIFT_NOUNS_ONLY,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_NOUNS_ONLY);
+        return new com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria(
+                loadPositiveInt(store, KEY_DRIFT_MIN_TERM_LENGTH,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_TERM_LENGTH),
+                loadPositiveInt(store, KEY_DRIFT_MIN_SENTENCES,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_SENTENCES),
+                loadWriterCarryCriteria(store).getStemLength(), nounsOnly);
+    }
+
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";
     /** How many model↔tool cycles ONE concept turn may make — the WORK budget of the loop. */
     public static final int DEFAULT_CONCEPT_TOOL_ROUNDS = 4;

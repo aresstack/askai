@@ -44,6 +44,45 @@ public class ResearchRuntimeSettingsWriterTest {
                 ResearchRuntimeSettings.loadWriterCarryCriteria(store).getMinOverlap(), 1e-9);
     }
 
+    @Test
+    public void theWriterTargetsDefaultToThePresetThatWasHardCoded() {
+        com.aresstack.askai.research.drafting.EvidenceAssignments.Targets t =
+                ResearchRuntimeSettings.loadWriterTargets(new MemoryStore());
+        assertEquals(1100, t.getWordsPerCall());
+        assertEquals(3072, t.getAnswerTokens());
+        assertEquals(8, t.getPack().getPassageCount());
+        assertEquals(300, t.getPack().getPassageTokens());
+        assertEquals(2, t.getPack().getPassagesPerSource());
+    }
+
+    @Test
+    public void storedWriterTargetsWin() {
+        MemoryStore store = new MemoryStore();
+        store.put(ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL, "900");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_ANSWER_TOKENS, "2500");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_PASSAGES, "14");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_PASSAGE_TOKENS, "5");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_PASSAGES_PER_SOURCE, "3");
+        com.aresstack.askai.research.drafting.EvidenceAssignments.Targets t =
+                ResearchRuntimeSettings.loadWriterTargets(store);
+        assertEquals(900, t.getWordsPerCall());
+        assertEquals(2500, t.getAnswerTokens());
+        assertEquals(14, t.getPack().getPassageCount());
+        assertEquals("below the minimum: the default", 300, t.getPack().getPassageTokens());
+        assertEquals(3, t.getPack().getPassagesPerSource());
+    }
+
+    @Test
+    public void theTopicDriftCriteriaDefaultAndFollowTheStore() {
+        assertEquals(com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.defaults(),
+                ResearchRuntimeSettings.loadTopicDriftCriteria(new MemoryStore()));
+        MemoryStore store = new MemoryStore();
+        store.put(ResearchRuntimeSettings.KEY_DRIFT_MIN_SENTENCES, "3");
+        store.putBoolean(ResearchRuntimeSettings.KEY_DRIFT_NOUNS_ONLY, false);
+        assertEquals(new com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria(10, 3, 5, false),
+                ResearchRuntimeSettings.loadTopicDriftCriteria(store));
+    }
+
     static final class MemoryStore implements WorkspaceStateStore {
         final Map<String, String> values = new HashMap<String, String>();
 
