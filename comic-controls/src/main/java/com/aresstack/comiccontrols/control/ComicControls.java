@@ -40,6 +40,8 @@ public final class ComicControls {
     /**
      * An icon-only {@link ComicButton}: the glyph on the comic plate, the tooltip says what it does (also as
      * the accessible name). For actions in narrow places (sidebar tabs), where a text button would not fit.
+     * The button stays in the keyboard focus order: without a label the Tab key and the focus ring are the
+     * only way to reach it without a mouse.
      */
     public static ComicButton iconButton(Icon icon, String tooltip) {
         if (icon == null || tooltip == null || tooltip.trim().isEmpty()) {
@@ -48,7 +50,6 @@ public final class ComicControls {
         ComicButton button = new ComicButton(icon);
         button.setToolTipText(tooltip);
         button.getAccessibleContext().setAccessibleName(tooltip);
-        button.setFocusable(false);
         button.setBorder(javax.swing.BorderFactory.createEmptyBorder(ICON_BUTTON_PADDING_V,
                 ICON_BUTTON_PADDING_H, ICON_BUTTON_PADDING_V, ICON_BUTTON_PADDING_H));
         return button;
