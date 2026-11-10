@@ -110,10 +110,6 @@ public final class QueryPlanner {
         if (!brief.isEmpty()) {
             sb.append("BRIEF\n").append(brief).append("\n\n");
         }
-        if (!request.getPreferredSources().isEmpty()) {
-            appendList(sb, "PREFERRED SOURCES", request.getPreferredSources(), "(none)");
-            sb.append('\n');
-        }
         appendList(sb, "ALREADY SEARCHED", searched, "(nothing yet)");
         return sb.append("\nTASK: write the search queries for the aspect.").toString();
     }
@@ -320,6 +316,10 @@ public final class QueryPlanner {
         }
         if (!request.getNewTopics().isEmpty()) {
             appendList(sb, "NEW TOPICS IN THE MATERIAL", request.getNewTopics(), "(none)");
+            sb.append('\n');
+        }
+        if (!request.getPreferredSources().isEmpty()) {
+            appendList(sb, "PREFERRED SOURCES", request.getPreferredSources(), "(none)");
             sb.append('\n');
         }
         appendList(sb, "ALREADY SEARCHED", searched, "(nothing yet)");
