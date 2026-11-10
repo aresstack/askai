@@ -26,6 +26,7 @@ public final class SectionAssignment {
     private final int answerTokens;
     private final String rewriteComment;
     private final String currentText;
+    private final ClaimCarryCheck.Criteria carry;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -42,6 +43,7 @@ public final class SectionAssignment {
         this.answerTokens = Math.max(0, b.answerTokens);
         this.rewriteComment = b.rewriteComment;
         this.currentText = b.currentText;
+        this.carry = b.carry;
     }
 
     public static Builder builder(String sectionId) {
@@ -110,6 +112,11 @@ public final class SectionAssignment {
     }
 
     /** True for "Rewrite section" or "Rewrite chapter" (a comment or a current text is set). */
+    /** The thresholds of claim-check stage 2 for this section. */
+    public ClaimCarryCheck.Criteria getCarry() {
+        return carry;
+    }
+
     public boolean isRewrite() {
         return !rewriteComment.isEmpty() || !currentText.isEmpty();
     }
@@ -130,6 +137,7 @@ public final class SectionAssignment {
         b.answerTokens = answerTokens;
         b.rewriteComment = rewriteComment;
         b.currentText = currentText;
+        b.carry = carry;
         return new SectionAssignment(b);
     }
 
@@ -148,6 +156,7 @@ public final class SectionAssignment {
         private int answerTokens = 1200;
         private String rewriteComment = "";
         private String currentText = "";
+        private ClaimCarryCheck.Criteria carry = ClaimCarryCheck.Criteria.defaults();
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -218,6 +227,12 @@ public final class SectionAssignment {
 
         public Builder currentText(String value) {
             this.currentText = value == null ? "" : value.trim();
+            return this;
+        }
+
+        /** Claim-check stage 2 thresholds (settings); the defaults when {@code null}. */
+        public Builder carry(ClaimCarryCheck.Criteria value) {
+            this.carry = value == null ? ClaimCarryCheck.Criteria.defaults() : value;
             return this;
         }
 

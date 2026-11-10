@@ -18,7 +18,8 @@ import java.util.function.Consumer;
  * The section writer of the Document phase (plan D8, PR 28). It runs on the {@code phase.draft.writer} slot (which
  * inherits the model of {@code phase.draft}), asks for plain text with {@code [n]} markers and checks the answer in
  * code: {@link CitationValidator} strips unknown markers, flags uncited sentences and paragraphs and parses gaps;
- * {@link ClaimSupportCheck} flags numbers and quotations the cited passages do not contain.
+ * {@link ClaimSupportCheck} flags numbers and quotations the cited passages do not contain; {@link ClaimCarryCheck}
+ * (stage 2) flags sentences whose cited passages are no prose or share too few of their words.
  *
  * <p>A cut-off answer gets exactly one continuation from its last full sentence; an answer with uncited sentences or
  * unsupported numbers or quotes gets exactly one repair, which sends the error list and never the failed answer. The
@@ -241,7 +242,9 @@ public final class SectionWriter {
 
     private Checked check(String answer, SectionAssignment a) {
         CitationValidator.Result result = validator.validate(answer, a.getPassages().size());
-        return new Checked(result, claims.check(result, a.getPassages()));
+        List<ClaimFlag> unsupported = new ArrayList<ClaimFlag>(claims.check(result, a.getPassages()));
+        unsupported.addAll(new ClaimCarryCheck(a.getCarry()).check(result, a.getPassages()));
+        return new Checked(result, unsupported);
     }
 
     private static EvidencePassage byNumber(SectionAssignment a, int n) {

@@ -94,21 +94,19 @@ public class BookAssemblerTest {
                 .source(source("c", "Storage basics", TEXT_C, false))
                 .glossaryTerms(Arrays.asList("energy"))
                 .section(written("s11", "c1"), revision(
-                        "Photovoltaic modules turn light into current [1]. Hot modules lose output [1].",
-                        cite("1", "a", "Solar panels convert sunlight into electricity.", "p-a-1")))
+                        "Solar panels convert sunlight into electricity [1]. Hot modules lose efficiency [1].",
+                        cite("1", "a", TEXT_A, "p-a-1")))
                 .section(written("s12", "c1"), revision(
-                        "Turbines use moving air [1]. Panels and rotors complement each other [2].",
-                        cite("1", "b", "Wind turbines turn the kinetic energy of moving air into electrical power.",
-                                "p-b-1"),
-                        cite("2", "a", "Solar panels convert sunlight into electricity.", "p-a-1")))
+                        "Turbines turn moving air into power [1]. Solar panels convert sunlight beside them [2].",
+                        cite("1", "b", TEXT_B, "p-b-1"),
+                        cite("2", "a", TEXT_A, "p-a-1")))
                 .section(written("s21", "c2"), revision(
-                        "Storage moves daytime energy into the evening [1].",
-                        cite("1", "c", "Battery storage shifts surplus energy from sunny hours into the evening.",
-                                "p-c-1")))
+                        "Battery storage shifts surplus energy into the evening [1].",
+                        cite("1", "c", TEXT_C, "p-c-1")))
                 .section(written("s22", "c2"), revision(
-                        "Cheaper cells and larger rotors keep costs falling [1, 2].",
-                        cite("1", "c", "Lithium cells dominate new installations today.", "p-c-2"),
-                        cite("2", "b", "Larger rotors capture more energy at lower wind speeds.", "p-b-2")));
+                        "Lithium cells dominate and larger rotors capture more energy [1, 2].",
+                        cite("1", "c", TEXT_C, "p-c-2"),
+                        cite("2", "b", TEXT_B, "p-b-2")));
     }
 
     private static final String GOLDEN = "# Renewable Energy\n"
@@ -119,7 +117,8 @@ public class BookAssemblerTest {
             + "- Approved concept revision: 3\n"
             + "- Approved outline revision: 2\n"
             + "- Book status: complete\n"
-            + "- Support checked for numbers and quotes only.\n"
+            + "- Support checked for numbers and quotes, and that every cited passage is prose sharing the "
+            + "sentence's content words; meaning is not checked.\n"
             + "\n"
             + "## Contents\n"
             + "\n"
@@ -134,21 +133,21 @@ public class BookAssemblerTest {
             + "\n"
             + "### 1.1 Solar power\n"
             + "\n"
-            + "Photovoltaic modules turn light into current [1]. Hot modules lose output [1].\n"
+            + "Solar panels convert sunlight into electricity [1]. Hot modules lose efficiency [1].\n"
             + "\n"
             + "### 1.2 Wind power\n"
             + "\n"
-            + "Turbines use moving air [2]. Panels and rotors complement each other [1].\n"
+            + "Turbines turn moving air into power [2]. Solar panels convert sunlight beside them [1].\n"
             + "\n"
             + "## 2 Storage\n"
             + "\n"
             + "### 2.1 Batteries\n"
             + "\n"
-            + "Storage moves daytime energy into the evening [3].\n"
+            + "Battery storage shifts surplus energy into the evening [3].\n"
             + "\n"
             + "### 2.2 Outlook\n"
             + "\n"
-            + "Cheaper cells and larger rotors keep costs falling [3][2].\n"
+            + "Lithium cells dominate and larger rotors capture more energy [3][2].\n"
             + "\n"
             + "## References\n"
             + "\n"
@@ -159,10 +158,36 @@ public class BookAssemblerTest {
     @Test
     public void goldenTwoChaptersTwoSectionsRenderExactlyAndComplete() {
         AssembledBook book = new BookAssembler().assemble(clean().build());
+        assertTrue(book.getReport().getFindings().toString(), book.getReport().getFindings().isEmpty());
         assertEquals(GOLDEN, book.getMarkdown());
         assertEquals(BookQualityReport.Status.COMPLETE, book.getReport().getStatus());
         assertTrue(book.getReport().getFindings().toString(), book.getReport().getFindings().isEmpty());
         assertEquals(GOLDEN, new BookAssembler().assemble(clean().build()).getMarkdown());
+    }
+
+    @Test
+    public void liveRun3Section13CitingAFooterIsReportedAsNotCarried() {
+        String footer = "Steigern Sie Ihr Geschäft mit Überwachung Bauwerksüberwachung in Echtzeit "
+                + "Referenzkundenberichte Fangen Sie an Vertriebsteam kontaktieren Alle Produkte durchsuchen Globale "
+                + "Standorte Support erhalten Starten Sie Ihre Karriere Entdecken Sie Hexagon Wer wir sind "
+                + "Führungsteam Nachhaltigkeit Investor Relations Erfahren Sie mehr Im Einsatz bei Kunden Nächste "
+                + "Veranstaltungen Newsroom Ethik und Compliance Rechtliches Datenschutz Nutzungsbedingungen "
+                + "Impressum Problem mit der Website melden Cookie-Einstellungen © 2026 Hexagon AB und/oder seine "
+                + "Tochtergesellschaften. Alle Rechte vorbehalten. Deutsch";
+        // The first paragraph of section 1.3 as llama3.1:8b wrote it in live run 3 (verbatim, marker [6]).
+        String written = "Die rechtlichen Rahmenbedingungen für die Erfassung von Mitarbeiterdaten durch Wearables "
+                + "auf Baustellen sind eng mit dem Datenschutz und den Rechten der Arbeitnehmer verbunden [6]. Die "
+                + "Verarbeitung von Daten, die durch Wearables erfasst werden, unterliegt den Vorschriften der "
+                + "Datenschutz-Grundverordnung (DSGVO) und des Bundesdatenschutzgesetzes (BDSG) [6]. Diese Gesetze "
+                + "legen fest, wie personenbezogene Daten zu erheben, zu speichern und zu verarbeiten sind [6].";
+        AssembledBook book = new BookAssembler().assemble(clean()
+                .source(source("h", "Bauwerksüberwachung | Hexagon", footer, false))
+                .section(written("s21", "c2"), revision(written, cite("6", "h", footer, "cap-12#p101")))
+                .build());
+        assertEquals(3, book.getReport().count(Kind.UNCARRIED_CLAIM));
+        assertTrue(book.getReport().findings(Kind.UNCARRIED_CLAIM).get(0).getDetail(),
+                book.getReport().findings(Kind.UNCARRIED_CLAIM).get(0).getDetail().contains("[6] is no prose"));
+        assertEquals(BookQualityReport.Status.INCOMPLETE_DRAFT, book.getReport().getStatus());
     }
 
     @Test
@@ -253,8 +278,8 @@ public class BookAssemblerTest {
     @Test
     public void citationsResolveAfterReEmbeddingAndMismatchIsReportedNotRepointed() {
         BookAssemblyInput.Builder reembedded = clean().section(written("s21", "c2"), revision(
-                "Storage moves daytime energy into the evening [1].",
-                cite("1", "c", "shifts surplus energy from sunny hours", "bge-m3:seg-v2:c#7")));
+                "Battery storage shifts surplus energy into the evening [1].",
+                cite("1", "c", TEXT_C, "bge-m3:seg-v2:c#7")));
         AssembledBook book = new BookAssembler().assemble(reembedded.build());
         assertTrue(book.getCitations().issues().isEmpty());
         assertEquals(GOLDEN, book.getMarkdown());
@@ -264,7 +289,7 @@ public class BookAssemblerTest {
                         "sha-other", TEXT_C, false)).build());
         assertEquals(2, changed.getReport().count(Kind.UNRESOLVED_CITATION));
         assertEquals(-1, changed.getCitations().numberOf("c"));
-        assertTrue(changed.getMarkdown().contains("Storage moves daytime energy into the evening [?]."));
+        assertTrue(changed.getMarkdown().contains("Battery storage shifts surplus energy into the evening [?]."));
         assertFalse(changed.getReport().isComplete());
     }
 
