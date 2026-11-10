@@ -408,6 +408,33 @@ public final class ProductiveResearchSessionResources {
         }
     }
 
+    /**
+     * Phase 2/3 (D6): notified (worker thread) after a passage job completed, i.e. when the knowledge store got new
+     * ACTIVE passages. The session's evidence analysis listens here; nothing rebuilds the outline from it.
+     */
+    private final java.util.concurrent.CopyOnWriteArrayList<Runnable> knowledgeChangedListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<Runnable>();
+
+    public void addKnowledgeChangedListener(Runnable listener) {
+        if (listener != null) {
+            knowledgeChangedListeners.addIfAbsent(listener);
+        }
+    }
+
+    public void removeKnowledgeChangedListener(Runnable listener) {
+        knowledgeChangedListeners.remove(listener);
+    }
+
+    void fireKnowledgeChanged() {
+        for (Runnable listener : knowledgeChangedListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException never) {
+                // an observer failure must never disturb the knowledge worker
+            }
+        }
+    }
+
     /** The settings snapshot this RUNNING session uses (global changes only affect NEW sessions). */
     public com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot getSearchProfile() {
         return searchProfile;

@@ -1079,9 +1079,11 @@ public final class ProductiveResearchBackendFactory {
                 new Runnable() {
                     public void run() {
                         // A COMPLETED passage job only refreshes an open view (staleness re-check) —
-                        // it never rebuilds topics or the outline (issue #29).
+                        // it never rebuilds topics or the outline (issue #29). The evidence analysis (D6)
+                        // decides itself whether the grown corpus is due for a new background run.
                         if (resourcesRef[0] != null) {
                             resourcesRef[0].fireProjectionUpdated();
+                            resourcesRef[0].fireKnowledgeChanged();
                         }
                     }
                 });
