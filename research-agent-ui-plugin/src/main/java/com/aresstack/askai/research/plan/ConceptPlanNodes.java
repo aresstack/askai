@@ -228,8 +228,11 @@ public final class ConceptPlanNodes {
         return keywords;
     }
 
-    /** The first quoted phrase of the mission with at least two words, or {@code null}. */
-    static String quotedTitle(String mission) {
+    /**
+     * The first quoted phrase of the mission with at least two words, or {@code null}: the book's title in the
+     * author's words, used by the plan queries and as the prefix of the outline anchors.
+     */
+    public static String quotedTitle(String mission) {
         java.util.regex.Matcher m = QUOTED_TITLE.matcher(mission);
         while (m.find()) {
             for (int group = 1; group <= m.groupCount(); group++) {

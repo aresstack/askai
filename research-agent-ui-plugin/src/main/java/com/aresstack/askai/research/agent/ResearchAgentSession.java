@@ -2414,13 +2414,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }
                     },
                     resources.corpusReader(), resources.outlineEmbeddings(),
-                    new com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings(
-                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
-                                    .DEFAULT_THRESHOLD,
-                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
-                                    .DEFAULT_MARGIN,
-                            knowledge == null ? 3 : knowledge.minimumPassagesPerTopic,
-                            knowledge == null ? 2 : knowledge.minimumDistinctSourcesPerTopic),
+                    () -> com.aresstack.askai.research.host.ResearchRuntimeSettings.loadOutlineSettings(
+                            hostStateStore, knowledge),
                     resources.outlineRun(), outlineGenerationExecutor);
             outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
                 public String refusal() {
@@ -6949,6 +6944,15 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if ("generate-outline".equals(cmd)) {
             return renderOutcome(derivedActions.generateOutline());
         }
+        // The Document tab's two job buttons as commands: the same calls, the same refusals.
+        if ("write-sections".equals(cmd)) {
+            return renderWritingStart(writeRemainingSections(),
+                    "writing the remaining sections started (progress on the Document tab)");
+        }
+        if ("rewrite-stale".equals(cmd)) {
+            return renderWritingStart(rewriteStaleSections(),
+                    "rewriting the stale sections started (progress on the Document tab)");
+        }
         if ("check-scope".equals(cmd)) {
             return renderOutcome(derivedActions.checkScope());
         }
@@ -7138,8 +7142,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     /** The commands a bot may run right now: the service commands and the bot-runnable offers. */
     private String validBotCommandNames() {
         StringBuilder sb = new StringBuilder(
-                "search <query>, generate-visualization, generate-outline, review-sources, "
-                        + "check-scope");
+                "search <query>, generate-visualization, generate-outline, write-sections, rewrite-stale, "
+                        + "review-sources, check-scope");
         if (topicDiscoveryOffered()) {
             sb.append(", discover-topics");
         }
@@ -7153,6 +7157,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     private static String renderOutcome(ResearchDerivedActions.ActionOutcome outcome) {
         return (outcome.isAccepted() ? "handled: " : "rejected: ") + outcome.getDetail();
+    }
+
+    /** A writing job start: {@code null} from {@link #startWriting} means started, anything else is the refusal. */
+    private static String renderWritingStart(String refusal, String started) {
+        return refusal == null ? "handled: " + started : "rejected: " + refusal;
     }
 
     /** The SEMANTIC state-command names — the whole user/bot vocabulary beside the service commands. */
@@ -7180,8 +7189,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     /** Every command valid RIGHT NOW: the always-on service commands + the resolvable semantic commands. */
     private String validCommandNames() {
         StringBuilder sb = new StringBuilder(
-                "search <query>, generate-visualization, generate-outline, review-sources, "
-                        + "check-scope");
+                "search <query>, generate-visualization, generate-outline, write-sections, rewrite-stale, "
+                        + "review-sources, check-scope");
         if (topicDiscoveryOffered()) {
             sb.append(", discover-topics");
         }

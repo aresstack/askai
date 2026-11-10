@@ -42,6 +42,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     // Konzeptpapier tool-round loop: work budget and error tolerance, deliberately separate.
     private final JTextField conceptToolRounds = ComicControls.textField(4);
     private final JTextField conceptRepairAttempts = ComicControls.textField(4);
+    private final JTextField outlineAssignmentThreshold = ComicControls.textField(4);
+    private final JTextField outlineAssignmentMargin = ComicControls.textField(4);
     // Search-run limits: the completion target + the safety limits. Every bound is a setting.
     private final JTextField searchTargetSources = ComicControls.textField(4);
     private final JTextField searchMaxPages = ComicControls.textField(4);
@@ -168,6 +170,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Chars/source", reviewMaxChars)));
         limits.row("Concept loop", group(labelled("Tool rounds", conceptToolRounds),
                 labelled("Repairs", conceptRepairAttempts)));
+        limits.row("Outline anchors", group(labelled("Similarity ≥", outlineAssignmentThreshold),
+                labelled("Lead ≥", outlineAssignmentMargin)));
 
         // Plan T5: the research team of the Sources phase and the worker browsers its page workers read in.
         com.aresstack.comiccontrols.control.ComicForm team =
@@ -456,6 +460,15 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_CONCEPT_REPAIR_ATTEMPTS,
                 "How many rejected concept steps may be corrected per turn "
                         + "(error tolerance, separate from the work budget).");
+        bindDecimal(outlineAssignmentThreshold, ResearchRuntimeSettings.KEY_OUTLINE_ASSIGNMENT_THRESHOLD,
+                com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings.DEFAULT_THRESHOLD,
+                "Generate outline: a passage joins the nearest outline anchor (book title > chapter > section) only "
+                        + "when their cosine similarity reaches this value. The log line [research-outline] "
+                        + "reports the median similarity of a generation.");
+        bindDecimal(outlineAssignmentMargin, ResearchRuntimeSettings.KEY_OUTLINE_ASSIGNMENT_MARGIN,
+                com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings.DEFAULT_MARGIN,
+                "Generate outline: the nearest anchor must lead the second-nearest by at least this much, "
+                        + "otherwise the passage stays unassigned (a candidate topic instead of a chapter).");
         refreshBackendStatus();
         // The "Browser" tab changes the channel: the status follows whenever this tab is shown again.
         addHierarchyListener(new java.awt.event.HierarchyListener() {
