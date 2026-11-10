@@ -108,7 +108,7 @@ benchmark of PR 04.
 |---|---|---|
 | Q2 | Blacklist frozen with the concept, or editable in every phase? | Editable in every phase: later entries can be corrected and filter future searches only; accepted sources that match a later entry are listed but never removed by the entry itself; the blacklist recorded with the concept stays frozen |
 | Q4 | Start the search and the writing automatically after the user's approval, or wait for an extra "Start"? | Start automatically; Stop is always available and never changes the phase |
-| Q6 | Outline from concept chapters plus clustered sources, or purely from clusters? | Concept chapters plus clusters; pure clustering ignores the Phase-1 intent |
+| Q6 | Outline from concept chapters plus clustered sources, or purely from clusters? | Concept plus clusters, synthesised into a new hierarchy (D6, revised 2026-11-10); pure clustering ignores the Phase-1 intent, copying the concept ignores the research |
 | Q10 | Document model before the A/B: `llama3.1:8b` or `gemma4:e2b`? | `llama3.1:8b` where it is installed, until the writer A/B of PR 31 decides |
 | Q12 | Is an embedding model mandatory? | Yes, like the reranker today; the retrieval benchmark of PR 04 picks the model |
 | Q13 | May a connected bot change phases? | No; a bot reads the state and may suggest a step, which the user takes |
@@ -488,34 +488,73 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   reopening Sources and without changing approved results.
 - The opt-in orchestrated mode is hidden and later removed (Q5); its planner and writer logic are extracted and reused.
 
-### D6. The outline belongs to the user; code proposes, the model only names
+### D6. The outline belongs to the user; evidence and concept propose it together, the model structures it
 
-- A new `FileOutlineStore` follows the `FileConceptStore` V3 pattern: chapters and sections with store-owned stable
-  ids inside the records, title, brief (purpose, key points, word target), provenance (concept node, clusters,
-  passages), a user-edited flag, working revisions, history and approved revisions.
-- **"Generate outline"** (in `outline/running`, off the UI thread, with progress and cancel) builds the proposal
-  without any model call. Chapters are the effective first-level concept nodes of the Phase-1 record, in concept
-  order. Sections are their second-level nodes or, for leaf chapters, sub-clusters of the chapter's passages
-  (`TopicClusterer`), titled "<chapter title>, part n" and flagged untitled until the user or the label call names
-  them. Nodes below the second level are kept: their labels become key points of their section's default brief, in
-  concept order, and passages assigned to them count for that section. Every passage of the approved source set and of
-  sources accepted later is assigned to the nearest concept node by embedding similarity against the node's full label
-  path (concept cards have names only, no description), above a calibrated threshold and with a margin over the
-  second-best node. Leftover clusters that are large enough are listed as candidate chapters for the user to adopt.
-  Sections with fewer than two sources are flagged thin; the flag pre-fills the manual search with the section title,
-  and the focused plan follows in PR 34. Generation uses the blacklist recorded at `SUBMIT_SCOPE`. Regenerating merges
-  by provenance and never overwrites titles the user edited.
-- The owner chose concept chapters plus clusters (Q6). Pure clustering would change only the proposal that "Generate
-  outline" builds; store, editor, freeze and writer would stay the same.
-- **The model's part** (`gemma4:e2b`, one short call per chapter, with a deterministic fallback): names candidate
-  clusters and untitled sections, and writes the section briefs. **"Regenerate chapter"** takes an optional comment
-  and, for a chapter built from sub-clusters, a number of sections (2 to 6): code re-clusters that chapter's passages
-  into that many sections, and the comment steers labels and briefs. It keeps the chapter id; every other chapter stays
-  byte-identical. Splits and merges of sections that come from concept nodes are made in the editor.
+Revised on 2026-11-10 on the owner's order "Phase 3 – evidence-based, AI-supported outline". The first version of
+D6 let code copy the concept's first level into chapters and its second level into sections, and let the model only
+name sections and write briefs (PR 22, PR 24). That copied the concept instead of building an outline from the
+research: a single concept root became one chapter, and the clusters only sorted passages into the copied nodes.
+**The concept says what we want to examine; the research shows what there is to examine; the outline joins both.**
+
+- **Store, editor and user ownership stay as they are.** `FileOutlineStore` keeps chapters and sections with
+  store-owned stable ids inside the records, title, brief (purpose, key points, word target), provenance (concept node,
+  clusters, passages), a user-edited flag, working revisions, history and approved revisions. Editing, restore,
+  freeze, approval at `finish-outline`, single-chapter regeneration and the hand-over to the Document phase do not
+  change. Generation runs in `outline/running`, off the UI thread, with progress and cancel.
+- **The pipeline is reused, never duplicated.** Passages (`PassageSegmentation`), stored embeddings,
+  `TopicClusterer`, `LiveOutlineProjectionBuilder` and `ActiveKnowledgeCorpusReader` feed the outline. The eligible
+  corpus follows D4 (approved source set plus sources accepted later, minus excluded sources and sources hit by the
+  blacklist recorded at `SUBMIT_SCOPE`). Generating an outline never downloads or embeds a source again; only the
+  concept label paths are embedded, as queries.
+- **3a Topic analysis (code, no model).** One clustering run keeps the complete merge tree (`TopicClusterer.clusterTree`;
+  its cut at the cutoff equals the flat topics). Cuts of that one tree give near-duplicate groups, sub-topics inside a
+  topic and topic groups above it. Per topic the analysis measures passages and **distinct** passages (near duplicates
+  count once), sources and domains, material, **diversity** (sub-topics, dispersion), related topics (cophenetic
+  distance), concept alignment, and whether the topic is significant, major or new from the research. Per concept node
+  it reports covered, thin or gap. Material and diversity are measured apart: twenty copies of one statement are
+  confirmation, not twenty sections; a broad area with several aspects may earn several sections or chapters.
+- **The concept frame.** When the approved concept has a single first-level node, that node is the book frame (the
+  title or overall subject), not a chapter; its children are the main themes. Concept requirements are the nodes down
+  to a configurable depth below the frame; deeper nodes are detail.
+- **3b Outline synthesis (model on `phase.outline`, thinking off, JSON constrained by a schema).** The model receives a
+  compact analysis, never the raw sources: mission, deliverable, language, concept requirements with their coverage,
+  topic profiles (title, material, distinct passages, sources, sub-topics, group, concept alignment, one or two short
+  excerpts) and the gaps. It works in bounded steps: (1) the chapter hierarchy, each chapter naming the topics and
+  concept requirements it covers; (2) per chapter its sections, each naming the topics or sub-topics it draws on, with
+  a title and purpose; (3) the deterministic review of 3c; (4) on blocking findings a revised chapter hierarchy with the
+  finding list, then the sections of the changed chapters again. The number of revision rounds is a setting; the run
+  stops when the review has no blocking finding or the rounds are spent. Each answer is validated in code (known ids,
+  titles, every chapter with a section); an invalid answer gets one repair with the error list and is never stored.
+  The model may merge or split concept themes, promote a sub-topic to a chapter, add research topics the concept did
+  not name and group chapters sensibly. It may not drop a concept requirement silently: a requirement without evidence
+  stays visible as a gap and is never filled with invented content. When no valid plan comes back at all, a plan from
+  the analysis alone (topic groups as chapters, topics or sub-topics as sections, titled by the label call) is used and
+  the quality report says so.
+- **3c Quality check and assembly (code).** Before saving, the plan is checked: every significant topic is in the
+  outline; every concept requirement is covered or listed as a gap; a major, diverse topic gets more than one section
+  or a chapter of its own; independent major areas (different topic groups) do not share one chapter; sections do not
+  share material; no section is without evidence; chapters that mix unrelated groups and thin chapters are reported;
+  the number of sections fits the deliverable's length. Findings left after the last round are fixed where code can do
+  it safely (an uncovered significant topic becomes an untitled section of its nearest chapter; shared material stays
+  with the first section; a section without evidence is dropped and its concept requirement listed as a gap); the rest
+  is stored as the outline's quality report and shown with the outline. Code assembles chapters and sections with
+  provenance (topics, passages, concept nodes), default key points from the best passages, thin flags and word targets:
+  the deliverable's length (a page counts as 300 words, provisional) is spread by **distinct material**, not by the
+  number of sources; without a target length the section targets lie between the configured minimum and maximum.
+- **Labels and briefs** stay on `phase.outline.labels` and `phase.outline.briefs` (PR 24): untitled sections get a
+  label call, every chapter a brief call, with the deterministic fallback.
+- **Regeneration never overwrites the user's work unnoticed.** A new generation matches stored generated entries by
+  their share of common passages; a match keeps its id, and an entry the user edited keeps its title and brief. Entries
+  the user added and edited entries the new proposal no longer produces stay, after the generated ones. Every save is a
+  new working revision, so the previous outline can be restored.
+- **Every threshold is a setting** (Settings → Research Agent → Outline) with a sensible default: the duplicate,
+  sub-topic and topic-group distances, concept threshold and margin, topic minimums, major-topic share, requirement
+  depth, revision rounds, topics and excerpt length in the prompt, section word range, the overlap that identifies a
+  regenerated entry and the model call timeout. Model defaults are not changed by this decision.
 - **Direct editing like in the Concept tab**: rename, add, delete, move, indent and outdent, plus a raw JSON editor.
-  The outline gets its own tab, so the tabs mirror the phases: Concept, Sources, Outline, Document, Workflow.
-- `outline_save` (whole-artifact overwrite) is removed; the live projection stays an analysis view and never writes
-  into the stored outline.
+  `outline_save` stays removed; the live projection stays an analysis view and never writes into the stored outline.
+- The owner's decision Q6 stands: concept and research clusters are used together. This revision makes the outline an
+  actual synthesis of both instead of a copy of the concept.
 
 ### D7. Phase-scoped chat context; every message stays stored
 
@@ -1520,9 +1559,27 @@ English sources found and the open live checks of roadmap AP 5.
 - Done when: an Outline turn contains no concept tools; a proposed change or regenerated chapter is applied only after
   the user accepts it.
 
+**Phase 3 completion (owner's order of 2026-11-10; replaces the proposal of PR 22, keeps PR 21, 23 and 24)**
+- **PR 22a Topic analysis and the clustering merge tree** (M): `TopicClusterer.clusterTree` and `TopicDendrogram`;
+  package `knowledge.topic` with `TopicAnalyzer`, topic profiles, sub-topics, topic groups, relations and concept
+  coverage (D6, 3a). Done when the tree's cut equals the flat topics on seeded corpora and the analysis separates
+  repeated material from diverse material.
+- **PR 22b Outline synthesis on `phase.outline`** (L): the role `outline-synthesis`, prompt and answer contracts for the
+  chapter hierarchy and the sections, validation with one repair, bounded revision rounds behind a review interface,
+  cancel and telemetry (D6, 3b). Done when a scripted fake model shows the steps, an invalid answer is never accepted,
+  and the rounds stop at the limit.
+- **PR 22c Quality check, integration and acceptance** (L): the deterministic quality check and safe fixes, the
+  assembly into the outline model with word targets by distinct material, gaps and quality report in the store,
+  merge by passage overlap, the Outline settings, "Generate outline" running analysis, synthesis, check, labels and
+  briefs; `ConceptSeededOutlineBuilder` is removed. Done when tests A to F pass without a live model: one concept root
+  with four large research areas gives several chapters; a large area with sub-topics gets several sections or
+  chapters; redundant sources do not inflate the outline; large new research topics become chapters or sections;
+  requirements without evidence are listed as gaps; edited entries survive a regeneration. A separate live
+  acceptance run (not part of the CI) generates the outline on a real corpus with the configured model.
+
 Checkpoint after M3 (no PR): generate the outline on the corpus of the M2 checkpoint with the embedding model chosen
-by PR 04; record the clustering time, the calibrated threshold and margin and the share of assigned passages, and
-regenerate one chapter.
+by PR 04; record the clustering time, the calibrated threshold and margin, the share of assigned passages, the
+synthesis rounds and the remaining quality findings, and regenerate one chapter.
 
 ### 6.6 M4 First book
 
@@ -1890,7 +1947,7 @@ other question the plan follows the recommendation until the owner decides other
 | Q3 | May later phases add sources (manual search, gap research)? | Yes, additively and tagged with the phase. `APPROVE_EVIDENCE` records the approved source set; removing or downgrading one of those sources needs Sources reopened, while a source found later can be excluded in the phase that found it |
 | **Q4** | Start the search right after `submit-scope` and the writing right after the outline approval, or wait for an extra "Start"? | Decided: start automatically, because the approval is the user's decision. The plan is visible as a checklist; Stop is always available and never changes the phase, so Finish stays available |
 | Q5 | Phase-2 engine: the deterministic queue or the opt-in orchestrated mode? | The queue. Hide the orchestrated mode now (PR 15) and delete it after the owner confirms (PR 37); `FileResearchTaskStore` stays for the plan and the writing job |
-| **Q6** | Outline from concept chapters plus clustered sources, or purely from clusters? | Decided: concept chapters plus clusters; pure clustering ignores the intent of Phase 1. Store and editor do not depend on this choice |
+| **Q6** | Outline from concept chapters plus clustered sources, or purely from clusters? | Decided: concept chapters plus clusters; pure clustering ignores the intent of Phase 1. Refined on 2026-11-10: the concept is the frame and the requirements, the clusters give the actual topic structure and its weight, and the model synthesises a new chapter hierarchy from both, checked in code (D6). Store and editor do not depend on this choice |
 | Q7 | Size of the first book? | The deliverable's target length if Phase 1 recorded one (a page counts as 300 words, provisional); otherwise 6 to 8 chapters with 3 to 4 sections of 400 to 1,100 words (about 7k to 35k words) from 20 to 40 sources |
 | Q8 | Keep the two-step gates (finish, review, approve) of Sources, Outline and Document, including the Sources review before the outline? | Yes, as in the graph; Concept keeps its single step `submit-scope`. The review state is where the user checks the result, and "Request changes" returns to the phase with a comment |
 | Q9 | In Phase 4 the agent writes into the manuscript by itself. Is that the accepted exception to "the user owns every write"? | Yes; the user controls it through section revisions, rewrites and the final gate |
