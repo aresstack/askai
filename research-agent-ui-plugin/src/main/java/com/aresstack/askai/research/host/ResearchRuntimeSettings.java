@@ -562,6 +562,14 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_GAP_WAIT_SECONDS = "research.gaps.waitSeconds";
     public static final int DEFAULT_GAP_WAIT_SECONDS = 180;
 
+    /** Plan T4 gap review: how often the waiting review looks again at the analysis (seconds). */
+    public static final String KEY_GAP_RECHECK_SECONDS = "research.gaps.recheckSeconds";
+    public static final int DEFAULT_GAP_RECHECK_SECONDS = 5;
+
+    public static int loadGapRecheckSeconds(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_GAP_RECHECK_SECONDS, DEFAULT_GAP_RECHECK_SECONDS);
+    }
+
     /** Plan T4 gap review: the most new topics of the material (inside the Weidezaun) handed to the planner. */
     public static final String KEY_GAP_NEW_TOPICS = "research.gaps.newTopics";
     public static final int DEFAULT_GAP_NEW_TOPICS = 3;

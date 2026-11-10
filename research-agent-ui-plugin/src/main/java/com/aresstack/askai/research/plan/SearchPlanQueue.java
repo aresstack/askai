@@ -332,6 +332,7 @@ public final class SearchPlanQueue {
     /** The mission's source preference: its publisher queries join every later research cycle. */
     private volatile SourcePreference preference = SourcePreference.NONE;
     private volatile GapReview gapReview = GapReview.NONE;
+    private volatile Executor reviewer;
     /** The gaps the running re-plan was asked for (the decision of this cycle boundary). */
     private EvidenceGaps.Gaps replanGaps = EvidenceGaps.Gaps.NONE;
     /** The gaps of the latest cycle boundary: a gap node is not covered, whatever its source count says. */
@@ -396,7 +397,17 @@ public final class SearchPlanQueue {
 
     /** Plan T4: the gap review of the shared evidence analysis at every cycle boundary. */
     public void setGapReview(GapReview review) {
+        setGapReview(review, null);
+    }
+
+    /**
+     * @param reviewer where the review runs: it may wait for the analysis and must never block the queue's executor
+     *                 (the UI thread in the app); {@code null} runs it on a thread of its own. The result goes back to
+     *                 the queue's executor.
+     */
+    public void setGapReview(GapReview review, Executor reviewer) {
         this.gapReview = review == null ? GapReview.NONE : review;
+        this.reviewer = reviewer;
     }
 
     /** How many entries may run at once: the team's workers, at least one. */
@@ -866,8 +877,8 @@ public final class SearchPlanQueue {
     }
 
     /**
-     * The end of a research cycle: the gap review reads the shared evidence analysis (it may wait until the analysis
-     * holds the material read so far), then the queue plans the next cycle from the coverage and the gaps, or ends
+     * The end of a research cycle: the gap review reads the shared evidence analysis off the queue's executor (it may
+     * wait until the analysis holds the material read so far), then the queue plans the next cycle from the coverage and the gaps, or ends
      * the plan with its honest outcome. A stop meanwhile drops the boundary.
      */
     private void cycleBoundary(int generation, boolean capReached) {
@@ -892,7 +903,38 @@ public final class SearchPlanQueue {
                 return;
             }
         }
-        EvidenceGaps.Gaps gaps = gapReview(record, all.values());
+        if (gapReview == GapReview.NONE) {
+            planNextCycle(generation, capReached, EvidenceGaps.Gaps.NONE);
+            return;
+        }
+        final SearchPlanRecord reviewed = record;
+        final Map<String, SearchPlanEntry> reviewedEntries = all;
+        final int gen = generation;
+        final boolean cap = capReached;
+        Runnable review = new Runnable() {
+            public void run() {
+                final EvidenceGaps.Gaps gaps = gapReview(reviewed, reviewedEntries.values());
+                executor.execute(new Runnable() {
+                    public void run() {
+                        planNextCycle(gen, cap, gaps);
+                    }
+                });
+            }
+        };
+        Executor runOn = reviewer;
+        if (runOn != null) {
+            runOn.execute(review);
+        } else {
+            Thread thread = new Thread(review, "search-plan-gap-review");
+            thread.setDaemon(true);
+            thread.start();
+        }
+    }
+
+    /** The second half of a cycle boundary, on the queue's executor: the next cycle or the plan's outcome. */
+    private void planNextCycle(int generation, boolean capReached, EvidenceGaps.Gaps gaps) {
+        SearchPlanRecord record;
+        Map<String, SearchPlanEntry> all;
         ConceptQueryPlan.Request nextCycle = null;
         Outcome outcome = null;
         synchronized (this) {

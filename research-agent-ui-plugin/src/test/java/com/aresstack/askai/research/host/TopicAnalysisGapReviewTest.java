@@ -42,6 +42,10 @@ public class TopicAnalysisGapReviewTest {
                 return 0L;
             }
 
+            public long recheckMillis() {
+                return 0L;
+            }
+
             public int maxNewTopics() {
                 return 3;
             }

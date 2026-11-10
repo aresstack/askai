@@ -35,6 +35,9 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
 
         long waitMillis();
 
+        /** How often the review looks again while sources are in processing (also without a new snapshot). */
+        long recheckMillis();
+
         int maxNewTopics();
 
         int maxFailedQueries();
@@ -51,13 +54,18 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
         if (discovery == null) {
             return EvidenceGaps.Gaps.NONE;
         }
-        TopicAnalysisSnapshot snapshot = settledSnapshot(discovery, System.currentTimeMillis() + inputs.waitMillis());
+        TopicAnalysisSnapshot snapshot = settledSnapshot(discovery, System.currentTimeMillis() + inputs.waitMillis(),
+                inputs.recheckMillis());
         return EvidenceGaps.of(view(snapshot), activeNodes, entries, inputs.blacklist(), inputs.maxNewTopics(),
                 inputs.maxFailedQueries());
     }
 
-    /** The snapshot of the current material; waits for a settled one until {@code deadline}. */
-    static TopicAnalysisSnapshot settledSnapshot(SharedTopicDiscovery discovery, long deadline) {
+    /**
+     * The snapshot of the current material; waits for a settled one until {@code deadline}. It looks again at every
+     * new snapshot and at least every {@code recheck} ms: a processed source that adds few passages publishes no
+     * snapshot by itself, but {@link SharedTopicDiscovery#analysisFor} then runs once on the changed corpus.
+     */
+    static TopicAnalysisSnapshot settledSnapshot(SharedTopicDiscovery discovery, long deadline, long recheck) {
         final Object signal = new Object();
         Consumer<TopicAnalysisSnapshot> wake = new Consumer<TopicAnalysisSnapshot>() {
             public void accept(TopicAnalysisSnapshot published) {
@@ -85,7 +93,7 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
                 discovery.requestAtCycleBoundary(); // the runner analyses again once the processed sources land
                 synchronized (signal) {
                     try {
-                        signal.wait(left);
+                        signal.wait(Math.max(1L, Math.min(left, recheck <= 0 ? left : recheck)));
                     } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
                         return snapshot;
@@ -156,6 +164,10 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
 
             public long waitMillis() {
                 return 1000L * ResearchRuntimeSettings.loadGapWaitSeconds(store);
+            }
+
+            public long recheckMillis() {
+                return 1000L * ResearchRuntimeSettings.loadGapRecheckSeconds(store);
             }
 
             public int maxNewTopics() {
