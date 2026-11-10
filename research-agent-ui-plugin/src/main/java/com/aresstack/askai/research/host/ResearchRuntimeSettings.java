@@ -631,6 +631,33 @@ public final class ResearchRuntimeSettings {
                                 .DEFAULT_MAX_UNPUNCTUATED_RUN));
     }
 
+    /** Claim check stage 2: fewest letters of a content word. */
+    public static final String KEY_WRITER_CARRY_MIN_WORD_LENGTH = "research.writer.carry.minWordLength";
+    /** Claim check stage 2: letters two words must share to count as the same word. */
+    public static final String KEY_WRITER_CARRY_STEM_LENGTH = "research.writer.carry.stemLength";
+    /** Claim check stage 2: share of a sentence's content words a cited passage must contain. */
+    public static final String KEY_WRITER_CARRY_MIN_OVERLAP = "research.writer.carry.minOverlap";
+
+    /**
+     * The thresholds of claim check stage 2 (live run 3, fix 3) for the section writer and the book's quality
+     * report; the prose criteria are the evidence pack's.
+     */
+    public static com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria loadWriterCarryCriteria(
+            WorkspaceStateStore store) {
+        double overlap = loadDouble(store, KEY_WRITER_CARRY_MIN_OVERLAP,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_OVERLAP);
+        if (overlap < 0 || overlap > 1) {
+            overlap = com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_OVERLAP;
+        }
+        return new com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria(
+                loadPositiveInt(store, KEY_WRITER_CARRY_MIN_WORD_LENGTH,
+                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria
+                                .DEFAULT_MIN_WORD_LENGTH),
+                loadPositiveInt(store, KEY_WRITER_CARRY_STEM_LENGTH,
+                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH),
+                overlap, loadWriterProseCriteria(store));
+    }
+
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";
     /** How many model↔tool cycles ONE concept turn may make — the WORK budget of the loop. */
     public static final int DEFAULT_CONCEPT_TOOL_ROUNDS = 4;

@@ -22,9 +22,11 @@ public final class SectionWriterInputs {
      * @param sectionWords  words the whole section aims for (0 = one call's target)
      * @param wordsPerCall  word target per call (about 1,100 or 450)
      * @param answerTokens  answer budget per call (3,072 / 1,200, plus reasoning on gpt-oss)
+     * @param carry         claim-check stage 2 thresholds (settings); {@code null} for the defaults
      */
     public static SectionAssignment of(EvidencePack pack, String title, String brief, List<String> keyPoints,
-                                       int sectionWords, int wordsPerCall, int answerTokens) {
+                                       int sectionWords, int wordsPerCall, int answerTokens,
+                                       com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry) {
         List<com.aresstack.askai.research.runtime.writer.EvidencePassage> passages =
                 new ArrayList<com.aresstack.askai.research.runtime.writer.EvidencePassage>();
         for (EvidencePassage p : pack.getPassages()) {
@@ -34,6 +36,6 @@ public final class SectionWriterInputs {
         return SectionAssignment.builder(pack.getSectionId()).title(title).brief(brief).keyPoints(keyPoints)
                 .passages(passages).synopsis(pack.getSynopsis()).previousDigest(pack.getPreviousSectionDigest())
                 .glossary(pack.getGlossary()).bookLanguage(pack.getBookLanguage()).sectionWords(sectionWords)
-                .wordsPerCall(wordsPerCall).answerTokens(answerTokens).build();
+                .wordsPerCall(wordsPerCall).answerTokens(answerTokens).carry(carry).build();
     }
 }

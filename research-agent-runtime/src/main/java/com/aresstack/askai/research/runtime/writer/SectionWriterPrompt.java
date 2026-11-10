@@ -78,8 +78,9 @@ public final class SectionWriterPrompt {
             }
             sb.append("- ").append(clip(flag.describe(), 300)).append('\n');
         }
-        sb.append("Write the section again. Cite a passage [n] after every claim, and use only numbers and "
-                + "quotations that the cited passage contains; leave out what no passage supports. Write in ")
+        sb.append("Write the section again. Cite a passage [n] after every claim, cite only a passage that "
+                + "states that claim, and use only numbers and quotations that the cited passage contains; leave out "
+                + "what no passage supports. Write in ")
                 .append(a.getBookLanguage()).append('.');
         messages.add(ChatMessage.user(sb.toString()));
         return messages;

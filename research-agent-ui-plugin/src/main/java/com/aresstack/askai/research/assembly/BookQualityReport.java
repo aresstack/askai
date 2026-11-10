@@ -9,8 +9,8 @@ import java.util.Map;
 
 /**
  * The deterministic quality report of one assembly (plan PR 30, D8). The book is {@link Status#COMPLETE} when no
- * section is missing, skipped or stale, every paragraph cites a passage, every citation resolves, and no unsupported
- * number or quote, near-copy or open gap remains; otherwise it is an {@link Status#INCOMPLETE_DRAFT} with the counts.
+ * section is missing, skipped or stale, every paragraph cites a passage, every citation resolves, every cited passage
+ * carries its sentence (claim check stage 2), and no unsupported number or quote, near-copy or open gap remains; otherwise it is an {@link Status#INCOMPLETE_DRAFT} with the counts.
  * A book without any written word (no outline, no sections or nothing written yet) is {@link Status#NOT_STARTED}.
  * The report only informs: the user may approve the book either way (Q27).
  */
@@ -43,6 +43,7 @@ public final class BookQualityReport {
         UNCITED_PARAGRAPH("uncited paragraph", true),
         UNSUPPORTED_NUMBER("unsupported number", true),
         UNSUPPORTED_QUOTE("unsupported quote", true),
+        UNCARRIED_CLAIM("citation does not carry the claim", true),
         UNRESOLVED_CITATION("unresolved citation", true),
         OPEN_GAP("open gap", true),
         UNCOVERED_CONCEPT_NODE("concept node uncovered at the Sources approval", false),
