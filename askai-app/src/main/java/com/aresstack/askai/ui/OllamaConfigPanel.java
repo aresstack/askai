@@ -30,6 +30,7 @@ public final class OllamaConfigPanel extends JPanel {
     private final JTextField baseUrlField;
     private final JTextField modelRootField;
     private final ComicDurationField mainModelTimeoutField;
+    private final ComicDurationField rerankerTimeoutField;
     private final JTextArea logArea;
 
     public OllamaConfigPanel(AskAiModel model, OllamaService ollamaService) {
@@ -39,6 +40,8 @@ public final class OllamaConfigPanel extends JPanel {
         this.modelRootField = ComicControls.textField(model.getModelRoot().toString(), 30);
         this.mainModelTimeoutField = new ComicDurationField(24 * 3600);
         this.mainModelTimeoutField.setSeconds(model.getAiModelSelections().getMainModelTimeoutSeconds());
+        this.rerankerTimeoutField = new ComicDurationField(24 * 3600);
+        this.rerankerTimeoutField.setSeconds(model.getAiModelSelections().getRerankerTimeoutSeconds());
         this.logArea = ComicControls.textArea(6, 20);
         buildUserInterface();
         append("Config loaded.");
@@ -57,6 +60,10 @@ public final class OllamaConfigPanel extends JPanel {
         mainModelTimeoutField.setToolTipText("How long ONE call of the main (chat) model may take before"
                 + " AskAI gives up. Long answers on small local models can take several minutes.");
         endpoint.row("Main model timeout", mainModelTimeoutField);
+        rerankerTimeoutField.setToolTipText("How long ONE call of the reranker (the local cross-encoder scoring"
+                + " search results and visited pages) may take. On a CPU backend a full page needs well over the"
+                + " former 15 s; a call that runs out falls back to keyword ranking.");
+        endpoint.row("Reranker timeout", rerankerTimeoutField);
         endpoint.note("How long models stay loaded after a request (keep-alive) is set under Settings > AI models.");
 
         endpoint.note("Dictation (speech-to-text) is set up under Settings > Speech.");
@@ -87,6 +94,7 @@ public final class OllamaConfigPanel extends JPanel {
         baseUrlField.setText(model.getOllamaBaseUrl());
         modelRootField.setText(model.getModelRoot().toString());
         mainModelTimeoutField.setSeconds(model.getAiModelSelections().getMainModelTimeoutSeconds());
+        rerankerTimeoutField.setSeconds(model.getAiModelSelections().getRerankerTimeoutSeconds());
     }
 
     /** Puts the keyboard focus on the Base URL field and selects its text, ready to overwrite. */
@@ -104,7 +112,10 @@ public final class OllamaConfigPanel extends JPanel {
         model.setModelRoot(Paths.get(modelRootField.getText().trim()));
         model.setAiModelSelections(model.getAiModelSelections().withMainModelTimeoutSeconds(
                 positive((int) Math.min(Integer.MAX_VALUE, mainModelTimeoutField.getSeconds()),
-                        com.aresstack.askai.config.AiModelSelections.DEFAULT_MAIN_MODEL_TIMEOUT_SECONDS)));
+                        com.aresstack.askai.config.AiModelSelections.DEFAULT_MAIN_MODEL_TIMEOUT_SECONDS))
+                .withRerankerTimeoutSeconds(
+                        positive((int) Math.min(Integer.MAX_VALUE, rerankerTimeoutField.getSeconds()),
+                                com.aresstack.askai.config.AiModelSelections.DEFAULT_RERANKER_TIMEOUT_SECONDS)));
         model.saveSettings();
         append("Saved settings. Ollama: " + model.getOllamaBaseUrl());
     }
