@@ -1,9 +1,9 @@
 package com.aresstack.askai.research.sources;
 
 import com.aresstack.askai.research.plan.SearchPlanEntry;
+import com.aresstack.askai.research.tabs.TabLists;
 import com.aresstack.comiccontrols.control.ComicButton;
 import com.aresstack.comiccontrols.control.ComicControls;
-import com.aresstack.comiccontrols.control.ComicScrollPane;
 import com.aresstack.comiccontrols.control.ComicSearchBar;
 import com.aresstack.comiccontrols.control.ComicSectionPanel;
 import com.aresstack.comiccontrols.control.ComicSegmentedToggle;
@@ -13,7 +13,6 @@ import com.aresstack.comiccontrols.paint.ComposerIcons;
 import com.aresstack.comiccontrols.paint.ResearchIcons;
 import com.aresstack.comiccontrols.theme.ComicPalette;
 import com.aresstack.comiccontrols.theme.ResearchUiTypography;
-import com.aresstack.comiccontrols.theme.ThemeColor;
 
 import javax.swing.BorderFactory;
 import javax.swing.JLabel;
@@ -28,7 +27,6 @@ import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumnModel;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.FlowLayout;
 import java.util.ArrayList;
@@ -67,12 +65,6 @@ public final class ResearchSourcesView extends JPanel {
     static final int CARD_SEARCHES = 1;
     private static final String[] CARD_NAMES = {"results", "searches"};
 
-    /** How strongly a state colour is mixed into the field background (0 = none, 1 = full). */
-    private static final float STATE_TINT_STRENGTH = 0.35f;
-    /** How far the grey of a pending row sits between the field background (0) and the ink (1). */
-    private static final float PENDING_GREY = 0.5f;
-    /** How far the muted texts step back from the ink (0 = ink, 1 = background). */
-    private static final float MUTED_MIX = 0.35f;
     /** Edge length of the plus glyph, the size of the other line icons. */
     private static final int ICON_SIZE = 15;
     private static final int STAR_COLUMN_WIDTH = 28;
@@ -86,6 +78,7 @@ public final class ResearchSourcesView extends JPanel {
     private final ResearchSourceRepository repository;
     private final Set<String> knownSectionIds;
     private final ComicPalette palette = ComicPalette.defaultPalette();
+    private final TabLists lists = new TabLists(palette);
 
     private final ResultsTableModel resultsModel = new ResultsTableModel();
     /** Cell tooltips carry what the columns cannot: the full title, the address and the security-check note. */
@@ -181,15 +174,11 @@ public final class ResearchSourcesView extends JPanel {
         configureResultsTable();
         configureSearchesTable();
         cards.setOpaque(false);
-        cards.add(scroll(resultsTable), CARD_NAMES[CARD_RESULTS]);
-        cards.add(scroll(searchesTable), CARD_NAMES[CARD_SEARCHES]);
+        cards.add(lists.scroll(resultsTable), CARD_NAMES[CARD_RESULTS]);
+        cards.add(lists.scroll(searchesTable), CARD_NAMES[CARD_SEARCHES]);
 
         // Search and list sit on ONE quiet plate, like the other sidebar tabs.
-        ComicSectionPanel plate = new ComicSectionPanel(palette);
-        plate.setLayout(new BorderLayout(0, 6));
-        plate.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-        plate.add(top, BorderLayout.NORTH);
-        plate.add(cards, BorderLayout.CENTER);
+        ComicSectionPanel plate = lists.plate(top, cards);
 
         add(plate, BorderLayout.CENTER);
         add(buildFooter(), BorderLayout.SOUTH);
@@ -199,13 +188,6 @@ public final class ResearchSourcesView extends JPanel {
     }
 
     // ------------------------------------------------------------------ layout
-
-    private JScrollPane scroll(JTable table) {
-        JScrollPane scroll = new ComicScrollPane(table, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
-                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        scroll.getViewport().setBackground(ThemeColor.of("comic.fieldBg"));
-        return scroll;
-    }
 
     /** The bottom of the tab: the Results/Searches switch, the icon buttons, one line of summary. */
     private JPanel buildFooter() {
@@ -229,7 +211,7 @@ public final class ResearchSourcesView extends JPanel {
         actionRow.add(visualizeSlot, BorderLayout.EAST);
 
         summary.setFont(ResearchUiTypography.regular(11.5f));
-        summary.setForeground(mutedInk());
+        summary.setForeground(lists.mutedInk());
 
         JPanel footer = new JPanel(new BorderLayout(0, 4));
         footer.setOpaque(false);
@@ -637,54 +619,10 @@ public final class ResearchSourcesView extends JPanel {
 
     // ------------------------------------------------------------------ dressing
 
-    /**
-     * Colour one cell of a row: the state colour as background; the selected row is filled with the navigation
-     * blue and light text (the app's "selected" look), so it never reads as one of the state colours. The
-     * relevance star speaks in the action accent — the user's own signal, not the pipeline's. Renderers are
-     * reused, so every colour is set for every cell.
-     */
+    /** Colour one cell of a row by its state; the relevance star speaks in the action accent. */
     private Component dressRow(JTable table, Component cell, boolean selected, SourceRowState state,
                                boolean star) {
-        if (selected) {
-            cell.setBackground(palette.getNavigationBlue());
-            cell.setForeground(ThemeColor.of("comic.fieldBg"));
-            return cell;
-        }
-        Color tint = stateTint(state);
-        cell.setBackground(tint != null ? tint : table.getBackground());
-        cell.setForeground(star ? palette.getAccentOrange()
-                : state == SourceRowState.SET_ASIDE ? mutedInk() : table.getForeground());
-        return cell;
-    }
-
-    /** The row colour of a state, or {@code null} for an uncoloured row. */
-    Color stateTint(SourceRowState state) {
-        Color field = ThemeColor.of("comic.fieldBg");
-        Color mark;
-        switch (state) {
-            case PENDING:
-                mark = ThemeColor.mix(field, palette.getInk(), PENDING_GREY);
-                break;
-            case RUNNING:
-                mark = palette.getNavigationBlue();
-                break;
-            case DONE:
-                mark = palette.getAgentPetrol();
-                break;
-            case CHECK_SOLVED:
-                mark = palette.getAccentYellow();
-                break;
-            case FAILED:
-                mark = palette.getAccentRed();
-                break;
-            default:
-                return null;
-        }
-        return ThemeColor.mix(field, mark, STATE_TINT_STRENGTH);
-    }
-
-    private Color mutedInk() {
-        return ThemeColor.mix(palette.getInk(), ThemeColor.of("comic.fieldBg"), MUTED_MIX);
+        return lists.dress(table, cell, selected, state.signal(), state == SourceRowState.SET_ASIDE, star);
     }
 
     /** The tooltip line for a marked row ("" when unmarked). */
@@ -816,7 +754,7 @@ public final class ResearchSourcesView extends JPanel {
     }
 
     private static String escape(String value) {
-        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return TabLists.escape(value);
     }
 
     // ------------------------------------------------------------------ tests

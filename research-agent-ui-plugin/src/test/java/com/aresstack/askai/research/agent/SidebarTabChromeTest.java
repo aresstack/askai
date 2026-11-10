@@ -23,7 +23,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * The sidebar tabs (Concept, Sources, Outline) keep the Chats tab's shape: nothing sits above the search
+ * The sidebar tabs (Concept, Sources, Outline, Document) keep the Chats tab's shape: nothing sits above the search
  * bar, the buttons live at the bottom as icon buttons with tooltips, and the tabs fit a narrow sidebar.
  */
 public class SidebarTabChromeTest {
@@ -48,29 +48,43 @@ public class SidebarTabChromeTest {
     }
 
     @Test
-    public void outlineHasNothingOnTopAndOnlyIconButtons() throws Exception {
+    public void outlineStartsWithTheSearchBarAndHasOnlyIconButtons() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             OutlineEditorView view = new OutlineEditorView();
-            assertNull("nothing sits above the outline",
+            assertNull("nothing sits above the outline's search bar",
                     ((BorderLayout) view.getLayout()).getLayoutComponent(BorderLayout.NORTH));
+            ComicLayoutAudit.overflows(view, WIDTHS[1], HEIGHT);
+            ComicSearchBar search = find(view, ComicSearchBar.class);
+            assertNotNull(search);
+            javax.swing.JTable table = find(view, javax.swing.JTable.class);
+            assertTrue("the list is below the search bar", yIn(view, table) > yIn(view, search));
             List<AbstractButton> buttons = new ArrayList<AbstractButton>();
-            for (JButton button : view.allButtons()) {
-                buttons.add(button);
-            }
+            collectButtons(view, buttons);
             assertIconButtons(buttons);
+            for (JButton button : view.allButtons()) {
+                assertTrue(button.getAccessibleContext().getAccessibleName() + " is laid out in the tab",
+                        buttons.contains(button));
+            }
             assertFits(view);
         });
     }
 
     @Test
-    public void theModeToggleStaysReachableInJsonMode() throws Exception {
+    public void theOutlineSwitchStaysReachableOnEveryCard() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             OutlineEditorView view = new OutlineEditorView();
-            JButton toggle = view.button("Show the raw JSON");
-            toggle.doClick();
-            ComicLayoutAudit.overflows(view, WIDTHS[0], HEIGHT);
-            assertTrue("the toggle is laid out outside the hidden tree card", toggle.getWidth() > 0);
-            assertTrue(toggle.getParent().isVisible());
+            com.aresstack.comiccontrols.control.ComicSegmentedToggle toggle =
+                    find(view, com.aresstack.comiccontrols.control.ComicSegmentedToggle.class);
+            assertNotNull(toggle);
+            for (int card : new int[] {OutlineEditorView.CARD_TEXT, OutlineEditorView.CARD_JSON,
+                    OutlineEditorView.CARD_OUTLINE}) {
+                view.selectCard(card);
+                assertTrue(ComicLayoutAudit.overflows(view, WIDTHS[0], HEIGHT).isEmpty());
+                assertEquals(card, view.shownCard());
+                assertTrue("the switch is laid out on every card", toggle.getWidth() > 0);
+                assertTrue("the switch sits below the search bar",
+                        yIn(view, toggle) > yIn(view, find(view, ComicSearchBar.class)));
+            }
         });
     }
 

@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.sources;
 
 import com.aresstack.askai.research.plan.SearchPlanEntry;
+import com.aresstack.askai.research.tabs.RowSignal;
 
 /**
  * Where a row of the Sources tab stands — a found source or a planned search — in the order its table shows
@@ -20,6 +21,24 @@ public enum SourceRowState {
     FAILED,
     /** Out of the work: a skipped search, or an excluded, duplicate or superseded source. No colour. */
     SET_ASIDE;
+
+    /** The colour this state shows in a list. */
+    public RowSignal signal() {
+        switch (this) {
+            case PENDING:
+                return RowSignal.PENDING;
+            case RUNNING:
+                return RowSignal.RUNNING;
+            case DONE:
+                return RowSignal.DONE;
+            case CHECK_SOLVED:
+                return RowSignal.CAUTION;
+            case FAILED:
+                return RowSignal.FAILED;
+            default:
+                return RowSignal.NONE;
+        }
+    }
 
     /** The state of a planned search. */
     public static SourceRowState of(SearchPlanEntry.Status status) {

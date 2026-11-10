@@ -14,7 +14,8 @@ import javax.swing.JComponent;
 /**
  * The Outline tab between Sources and Document (plan PR 23): the editor of the stored outline. Every write goes
  * through the session's {@link OutlineWorkspace} and its one write guard; the tab's mode is that guard's answer
- * (the D4 table). "Generate outline" lives here, not in the Document tab's analysis drawer.
+ * (the D4 table). Everything about making the outline lives here: "Generate outline", the progress and the
+ * stop of the topic clustering it starts, and the outline to read (before one exists: the topics found so far).
  */
 public final class ResearchOutlineEditorViewContribution implements ArtifactViewContribution {
 
@@ -38,6 +39,15 @@ public final class ResearchOutlineEditorViewContribution implements ArtifactView
         final ResearchAgentSession research = (ResearchAgentSession) session;
         final UiExecutor uiExecutor = context.getUiExecutor();
         view.setActions(actions(research));
+        if (context.getMarkdownViewFactory() != null) {
+            final com.aresstack.askai.plugin.api.service.MarkdownView text = context.getMarkdownViewFactory().create(
+                    com.aresstack.askai.plugin.api.service.MarkdownViewOptions.builder().selectable(true).build());
+            view.setTextView(text.getComponent(), new java.util.function.Consumer<String>() {
+                public void accept(String markdown) {
+                    text.setMarkdown(markdown);
+                }
+            });
+        }
         final Runnable refresh = new Runnable() {
             public void run() {
                 final OutlineEditorView.Snapshot snapshot = snapshot(research);
@@ -73,8 +83,15 @@ public final class ResearchOutlineEditorViewContribution implements ArtifactView
             return new OutlineEditorView.Snapshot(Outline.EMPTY, 0, "This session has no outline store.", "");
         }
         try {
+            com.aresstack.askai.research.host.OutlineClusteringRun.Status run = research.outlineRunStatus();
             return new OutlineEditorView.Snapshot(workspace.current(), workspace.workingRevision(),
-                    workspace.writeRefusal(), research.outlineChangeRequest());
+                    workspace.writeRefusal(), research.outlineChangeRequest())
+                    .withText(research.outlineDrawerMarkdown())
+                    .withRun(run == null ? "" : run.describe(),
+                            run != null && run.state
+                                    == com.aresstack.askai.research.host.OutlineClusteringRun.State.RUNNING,
+                            run != null && run.state
+                                    == com.aresstack.askai.research.host.OutlineClusteringRun.State.FAILED);
         } catch (FileOutlineStore.CorruptOutlineException corrupt) {
             return new OutlineEditorView.Snapshot(Outline.EMPTY, 0, corrupt.getMessage(), "");
         }
@@ -128,6 +145,10 @@ public final class ResearchOutlineEditorViewContribution implements ArtifactView
 
             public void generate() {
                 research.derivedActions().generateOutline();
+            }
+
+            public void cancelGenerate() {
+                research.cancelOutlineClustering();
             }
 
             public OutlineEditorView.JobOutcome regenerateChapter(String chapterId, int sections, String comment) {
