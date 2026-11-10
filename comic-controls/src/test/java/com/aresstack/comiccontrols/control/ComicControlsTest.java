@@ -148,6 +148,21 @@ public class ComicControlsTest {
         ComicFormControlsTest.paint(panel);
     }
 
+    @Test
+    public void iconButtonSaysWhatItDoesAndStaysReachableByKeyboard() {
+        ComicButton button = ComicControls.iconButton(
+                com.aresstack.comiccontrols.paint.ResearchIcons.copy(), "Copy the address");
+        assertEquals("Copy the address", button.getToolTipText());
+        assertEquals("Copy the address", button.getAccessibleContext().getAccessibleName());
+        assertTrue("without a label the Tab key is the only way to it without a mouse", button.isFocusable());
+        assertTrue(button.getText() == null || button.getText().isEmpty());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void iconButtonWithoutATooltipIsRefused() {
+        ComicControls.iconButton(com.aresstack.comiccontrols.paint.ResearchIcons.copy(), " ");
+    }
+
     private static void refresh(JComponent c) {
         JPanel host = new JPanel();
         host.add(c);

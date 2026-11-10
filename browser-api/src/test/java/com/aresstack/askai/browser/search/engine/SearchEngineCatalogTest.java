@@ -94,4 +94,18 @@ public class SearchEngineCatalogTest {
         assertTrue(SearchEngineCatalog.byId("searxng").getStatusNote().contains("instance"));
         assertTrue(SearchEngineCatalog.byId("kagi").getStatusNote().contains("account"));
     }
+
+    @Test
+    public void onlyGoogleStartsWithARequestDelay() {
+        assertEquals("the Google delay the migration and new rows start with",
+                15_000, SearchEngineCatalog.GOOGLE_REQUEST_DELAY_MILLIS);
+        for (SearchEngineCatalogEntry entry : SearchEngineCatalog.entries()) {
+            int expected = SearchEngineCatalog.GOOGLE.equals(entry.getId())
+                    ? SearchEngineCatalog.GOOGLE_REQUEST_DELAY_MILLIS : 0;
+            assertEquals(entry.getId() + " default delay", expected, entry.getDefaultDelayMillis());
+            assertEquals(entry.getId() + " default delay by id", expected,
+                    SearchEngineCatalog.defaultDelayMillis(entry.getId()));
+        }
+        assertEquals("an unknown engine has no delay", 0, SearchEngineCatalog.defaultDelayMillis("nope"));
+    }
 }

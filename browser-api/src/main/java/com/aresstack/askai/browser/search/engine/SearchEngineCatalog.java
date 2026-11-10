@@ -54,16 +54,29 @@ public final class SearchEngineCatalog {
     public static final String MARGINALIA = "marginalia";
     public static final String YACY = "yacy";
 
+    /**
+     * The pause before each further Google request, in milliseconds: the "Delay (s)" a Google row starts with under
+     * Search → Engines. The search browser keeps it between EVERY Google request (searches, result pages, redirect
+     * hops, across all chats). Live run 2026-11-09: 13 searches and about 40 redirect hops in 16 minutes with no
+     * pause ended in a challenge that blocked the search browser for the rest of the run; 15 s caps the rate at
+     * four requests a minute and spreads the bursts of hops that follow a result page.
+     */
+    public static final int GOOGLE_REQUEST_DELAY_MILLIS = 15_000;
+
+    /** Engines other than Google take requests as they come; the user adds a pause in the table when wanted. */
+    private static final int NO_DELAY = 0;
+
     private static final String NO_ADAPTER = "No browser adapter yet.";
     private static final String ADAPTER_NOT_VALIDATED = "Search form adapter in the research browser; selectors follow "
             + "the engine's public page structure. Not validated against the live engine yet.";
 
     private static final List<SearchEngineCatalogEntry> ENTRIES = Collections.unmodifiableList(
             new ArrayList<SearchEngineCatalogEntry>(Arrays.asList(
-                    entry(GOOGLE, "Google", "USA", "https://www.google.com/", "Own index",
+                    new SearchEngineCatalogEntry(GOOGLE, "Google", "USA", "https://www.google.com/", "Own index",
                             langs("de", "en", "fr", "es", "it"), SUPPORTED,
                             "Searched in AskAI's separate search browser (Serp4J); result links are Google redirect "
-                                    + "wrappers that are resolved one at a time when a hit is opened."),
+                                    + "wrappers that are resolved one at a time when a hit is opened.", false,
+                            GOOGLE_REQUEST_DELAY_MILLIS),
                     entry(BING, "Bing", "USA", "https://www.bing.com/", "Own index",
                             langs("de", "en", "fr", "es"), EXPERIMENTAL,
                             "Search form adapter in the research browser; not validated live recently."),
@@ -171,10 +184,20 @@ public final class SearchEngineCatalog {
         return entry != null ? entry.getDefaultLanguages() : Collections.<String>emptyList();
     }
 
+    /**
+     * The delay a row of this engine starts with when its configuration names none
+     * ({@link SearchEngineCatalogEntry#getDefaultDelayMillis()}); 0 for an engine the catalog does not know.
+     */
+    public static int defaultDelayMillis(String id) {
+        SearchEngineCatalogEntry entry = byId(id);
+        return entry != null ? entry.getDefaultDelayMillis() : 0;
+    }
+
     private static SearchEngineCatalogEntry entry(String id, String name, String origin, String homeUrl,
                                                   String index, List<String> languages,
                                                   SearchEngineImplementationStatus status, String note) {
-        return new SearchEngineCatalogEntry(id, name, origin, homeUrl, index, languages, status, note, false);
+        return new SearchEngineCatalogEntry(id, name, origin, homeUrl, index, languages, status, note, false,
+                NO_DELAY);
     }
 
     private static List<String> langs(String... codes) {

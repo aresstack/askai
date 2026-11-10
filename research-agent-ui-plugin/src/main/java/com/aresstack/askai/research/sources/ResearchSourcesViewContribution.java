@@ -36,7 +36,13 @@ public final class ResearchSourcesViewContribution implements ArtifactViewContri
                     com.aresstack.askai.research.agent.ResearchVisualizeButtons.sources(research, context));
             // Selecting a source shows its FULL TEXT in the main area (where the chat is) while the
             // Sources pane is active; clearing the selection brings the chat back.
-            final SourceFullTextView fullText = new SourceFullTextView();
+            final SourceFullTextView fullText = new SourceFullTextView(repository, view.knownSectionIds());
+            // A save in the reader (relevant, exclude, details, comment) shows in the list at once.
+            fullText.setChangeListener(new Runnable() {
+                public void run() {
+                    view.refresh();
+                }
+            });
             view.setSelectionPublisher(new java.util.function.Consumer<ResearchSourceRecord>() {
                 public void accept(ResearchSourceRecord record) {
                     if (record == null) {
@@ -53,14 +59,8 @@ public final class ResearchSourcesViewContribution implements ArtifactViewContri
                     return research.getSourceAccessLog();
                 }
             });
-            // Plan PR 14: the search plan checklist (shown once a plan exists)
-            final SearchPlanChecklistPanel checklist = new SearchPlanChecklistPanel(new SessionPlan(research));
-            view.setPlanChecklist(checklist);
-            research.addStateListener(new Runnable() {
-                public void run() {
-                    checklist.refresh();
-                }
-            });
+            // Plan PR 14: the planned searches, reached through the Results/Searches switch.
+            view.setSearchPlan(new SessionPlan(research));
             // Keep the table live: every session state change (run finished, approval, continuation)
             // re-reads the repository, so freshly accepted sources appear without manual filtering.
             research.addStateListener(new Runnable() {
@@ -74,8 +74,8 @@ public final class ResearchSourcesViewContribution implements ArtifactViewContri
                     view.focusSource(sourceId);
                 }
             });
-            // #28/#39.7: the Passages tab reads the derived generation for the selected source.
-            view.setPassagesProvider(new ResearchSourcesView.PassagesProvider() {
+            // #28/#39.7: the reader's Passages view reads the derived generation for the shown source.
+            fullText.setPassagesProvider(new SourceFullTextView.PassagesProvider() {
                 public java.util.List<com.aresstack.askai.research.domain.Passage>
                         passagesForSource(String sourceId) {
                     return research.passagesForSource(sourceId);
@@ -95,8 +95,8 @@ public final class ResearchSourcesViewContribution implements ArtifactViewContri
         return placeholder;
     }
 
-    /** The checklist over the session's search plan queue; every failure is logged and leaves the plan as it is. */
-    static final class SessionPlan implements SearchPlanChecklistPanel.Plan {
+    /** The Sources tab's view of the session's search plan queue; every failure is logged and leaves the plan as it is. */
+    static final class SessionPlan implements SourceSearchPlan {
         private final ResearchAgentSession research;
 
         SessionPlan(ResearchAgentSession research) {

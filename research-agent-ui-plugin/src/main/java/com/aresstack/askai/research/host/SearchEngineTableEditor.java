@@ -197,7 +197,7 @@ final class SearchEngineTableEditor extends JPanel {
         }
         Row row = new Row(new BrowserSearchEngineSelection.Entry(engineId, true,
                 BrowserSearchEngineSelection.Entry.DEFAULT_RESULT_PAGES,
-                BrowserSearchEngineSelection.Entry.DEFAULT_DELAY_MILLIS, priority,
+                SearchEngineCatalog.defaultDelayMillis(engineId), priority,
                 SearchEngineCatalog.defaultLanguages(engineId), false, Collections.<String>emptyList()));
         rows.add(row);
         resortKeeping(row);

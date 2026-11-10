@@ -43,18 +43,10 @@ public class ResearchSourcesViewTest {
         assertEquals("an untitled source shows its URL, never an empty main column",
                 "https://de.wikipedia.org/wiki/Hasenfleisch", view.cellAt(0, 1));
         assertEquals("the site column is the bare host", "de.wikipedia.org", view.cellAt(0, 2));
-        assertEquals("status is a German label, not a raw enum name", "Geparkt", view.cellAt(0, 3));
+        assertEquals("status is a readable label, not a raw enum name", "Unread", view.cellAt(0, 3));
         assertEquals("the score is TYPED so the sorter orders it numerically",
                 Double.valueOf(0.07), view.cellAt(0, 4));
-        assertEquals("the text state is readable", "geparkt", view.cellAt(0, 5));
-    }
-
-    @Test
-    public void everyBoundedValueHasAGermanLabel() {
-        assertEquals("Geparkt", ResearchSourcesView.germanLabel(SourceStatus.PARKED));
-        assertEquals("Ausgeschlossen", ResearchSourcesView.germanLabel(SourceStatus.EXCLUDED));
-        assertEquals("Unbewertet", ResearchSourcesView.germanLabel(SourceRelevance.UNKNOWN));
-        assertEquals("Primärquelle", ResearchSourcesView.germanLabel(SourceReliability.PRIMARY_SOURCE));
+        assertEquals("a source that was not read yet is pending (grey)", SourceRowState.PENDING, view.stateAt(0));
     }
 
     @Test
