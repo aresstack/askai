@@ -21,7 +21,7 @@ import java.util.Locale;
  * <li>Baidu: {@code www.baidu.com/link?url=<opaque token>}: the token is never decoded, but Baidu prints the target
  * itself on the result block ({@link #BAIDU_TARGET_ATTRIBUTE}); the capture hands that value in as the link's
  * target hint, so the wrapper resolves offline without any request to Baidu. Without a hint it is
- * {@code UNRESOLVED}.</li>
+ * {@code DISCARDED}: nothing resolves it later, so it is never a result.</li>
  * <li>Google: {@code /goto?url=CAES...} — an opaque token, never decoded: always {@code UNRESOLVED}
  * (issue #41). Its HTTP resolution happens in Serp4J for API providers, not in the browser capture.</li>
  * </ul>
@@ -43,7 +43,9 @@ final class SearchRedirectResolver {
         /** The wrapper's target was extracted; {@link Resolution#getTargetUrl()} carries it. */
         RESOLVED,
         /** A known wrapper whose target could not be extracted — discard, never classify by wrapper host. */
-        UNRESOLVED
+        UNRESOLVED,
+        /** A known wrapper that nothing resolves, now or later (Baidu without its block's target): never a result. */
+        DISCARDED
     }
 
     static final class Resolution {
@@ -131,7 +133,7 @@ final class SearchRedirectResolver {
             return (lowerTarget.startsWith("http://") || lowerTarget.startsWith("https://"))
                     && !isOpaqueWrapper(target)
                     && !com.aresstack.askai.browser.search.engine.SearchEngineHosts.isEngineHost(target)
-                    ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
+                    ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.DISCARDED, "");
         }
         return new Resolution(Status.NOT_A_REDIRECT, url);
     }

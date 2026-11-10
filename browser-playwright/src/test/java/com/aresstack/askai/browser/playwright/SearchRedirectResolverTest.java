@@ -123,11 +123,11 @@ public class SearchRedirectResolverTest {
                 SearchRedirectResolver.resolve(wrapper, "https://www.baua.de/DE/Themen/Arbeitsgestaltung");
         assertEquals(SearchRedirectResolver.Status.RESOLVED, resolved.getStatus());
         assertEquals("https://www.baua.de/DE/Themen/Arbeitsgestaltung", resolved.getTargetUrl());
-        assertEquals("no hint: never decoded, never fetched", SearchRedirectResolver.Status.UNRESOLVED,
+        assertEquals("no hint: never decoded, never fetched, never a result", SearchRedirectResolver.Status.DISCARDED,
                 SearchRedirectResolver.resolve(wrapper).getStatus());
-        assertEquals(SearchRedirectResolver.Status.UNRESOLVED,
+        assertEquals(SearchRedirectResolver.Status.DISCARDED,
                 SearchRedirectResolver.resolve(wrapper, "javascript:alert(1)").getStatus());
-        assertEquals("a hint pointing back at Baidu is no target", SearchRedirectResolver.Status.UNRESOLVED,
+        assertEquals("a hint pointing back at Baidu is no target", SearchRedirectResolver.Status.DISCARDED,
                 SearchRedirectResolver.resolve(wrapper, "https://www.baidu.com/s?wd=x").getStatus());
         assertEquals("a hint on an ordinary link changes nothing", SearchRedirectResolver.Status.NOT_A_REDIRECT,
                 SearchRedirectResolver.resolve("https://baike.baidu.com/item/x", "https://other.example/")

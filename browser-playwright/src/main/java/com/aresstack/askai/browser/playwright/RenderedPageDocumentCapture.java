@@ -197,7 +197,8 @@ final class RenderedPageDocumentCapture {
             String rawHref = str(l.get("href"));
             SearchRedirectResolver.Resolution resolution =
                     SearchRedirectResolver.resolve(rawHref, str(l.get("targetHint")));
-            if (resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED
+            if ((resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED
+                    || resolution.getStatus() == SearchRedirectResolver.Status.DISCARDED)
                     && SearchRedirectResolver.isOpaqueWrapper(rawHref)) {
                 opaqueWrappers++;
             }
@@ -210,6 +211,10 @@ final class RenderedPageDocumentCapture {
                     break;
                 case UNRESOLVED:
                     status = LinkRedirectResolution.UNRESOLVED;
+                    target = "";
+                    break;
+                case DISCARDED:
+                    status = LinkRedirectResolution.DISCARDED;
                     target = "";
                     break;
                 default:

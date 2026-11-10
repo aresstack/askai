@@ -102,7 +102,8 @@ public class RenderedPageDocumentCaptureTest {
         assertEquals("https://docs.example.org/manual", resolved.resolvedTargetUrl);
         assertEquals(DomainClassification.EXTERNAL_DOMAIN, resolved.domainClassification);
         RenderedLinkDescriptor opaque = document.links.get(1);
-        assertEquals(LinkRedirectResolution.UNRESOLVED, opaque.redirectResolutionStatus);
+        assertEquals("nothing resolves it later: never a result", LinkRedirectResolution.DISCARDED,
+                opaque.redirectResolutionStatus);
         assertEquals("", opaque.resolvedTargetUrl);
         assertTrue(document.captureWarnings.toString().contains("OPAQUE_REDIRECTS: 1 links"));
     }
