@@ -55,12 +55,13 @@ public final class SearchPlanChecklistPanel extends JPanel {
     private final Plan plan;
     private final EntryModel model = new EntryModel();
     private final JTable table = new JTable(model);
-    final JButton run = new ComicButton("Run search plan");
-    final JButton stop = new ComicButton("Stop search plan");
-    final JButton again = new ComicButton("Search everything again");
-    final JButton edit = new ComicButton("Edit…");
-    final JButton drop = new ComicButton("Drop");
-    final JButton rerun = new ComicButton("Re-run");
+    // Icon buttons with tooltips (Angelo 10.11.): text buttons do not fit the sidebar width.
+    final JButton run = iconButton("▶", "Run search plan");
+    final JButton stop = iconButton("■", "Stop search plan");
+    final JButton again = iconButton("⟲", "Search everything again");
+    final JButton edit = iconButton("✎", "Edit the selected planned query");
+    final JButton drop = iconButton("✕", "Drop the selected planned query");
+    final JButton rerun = iconButton("↻", "Re-run the selected query");
     final JLabel summary = new JLabel(" ");
 
     public SearchPlanChecklistPanel(Plan plan) {
@@ -73,12 +74,6 @@ public final class SearchPlanChecklistPanel extends JPanel {
         header.setOpaque(false);
         header.add(new JLabel("Search plan"), BorderLayout.WEST);
         header.add(summary, BorderLayout.CENTER);
-        JPanel planButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
-        planButtons.setOpaque(false);
-        planButtons.add(run);
-        planButtons.add(stop);
-        planButtons.add(again);
-        header.add(planButtons, BorderLayout.EAST);
 
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.getSelectionModel().addListSelectionListener(e -> updateButtons());
@@ -86,8 +81,12 @@ public final class SearchPlanChecklistPanel extends JPanel {
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setPreferredSize(new Dimension(200, 120));
 
-        JPanel entryButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        // All buttons live in ONE row at the bottom — nothing sits above the panel.
+        JPanel entryButtons = new JPanel(new com.aresstack.comiccontrols.control.WrapLayout(FlowLayout.LEFT, 4, 0));
         entryButtons.setOpaque(false);
+        entryButtons.add(run);
+        entryButtons.add(stop);
+        entryButtons.add(again);
         entryButtons.add(edit);
         entryButtons.add(drop);
         entryButtons.add(rerun);
@@ -135,6 +134,14 @@ public final class SearchPlanChecklistPanel extends JPanel {
             }
         });
         refresh();
+    }
+
+    private static JButton iconButton(String glyph, String tooltip) {
+        ComicButton button = new ComicButton(glyph);
+        button.setToolTipText(tooltip);
+        button.getAccessibleContext().setAccessibleName(tooltip);
+        button.setFocusable(false);
+        return button;
     }
 
     /** Re-read the plan (on every session state change). */

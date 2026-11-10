@@ -31,6 +31,11 @@ public class SearchPlanChecklistPanelTest {
             public void searchAgain() { }
         });
         assertFalse(panel.isVisible());
+        for (javax.swing.JButton button : new javax.swing.JButton[] {panel.run, panel.stop, panel.again,
+                panel.edit, panel.drop, panel.rerun}) {
+            assertEquals("icon buttons only, the tooltip names the action", 1, button.getText().length());
+            assertFalse(button.getToolTipText().isEmpty());
+        }
         assertTrue(panel.run.isEnabled());
         assertFalse(panel.stop.isEnabled());
         assertFalse(panel.edit.isEnabled());

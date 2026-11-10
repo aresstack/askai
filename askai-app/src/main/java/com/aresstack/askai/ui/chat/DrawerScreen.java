@@ -32,7 +32,8 @@ public final class DrawerScreen extends JPanel {
 
     private static final long serialVersionUID = 1L;
     private static final int DRAWER_MIN = 200;
-    private static final int DRAWER_MAX = 460;
+    /** No upper bound: the sidebar can be dragged as wide as the window (only the minimum stays). */
+    private static final int DRAWER_MAX = Integer.MAX_VALUE;
     private static final int DRAWER_DEFAULT = 260;
 
     /** One page: its content (pages may share one component) and what to do when it is shown. */

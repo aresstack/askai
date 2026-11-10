@@ -53,6 +53,8 @@ public class ComicSplitPane extends JSplitPane {
         this.palette = palette;
         this.preferredLeftWidth = minLeftWidth;
         left.setMinimumSize(new Dimension(0, 0));
+        // The right side's own minimum must not cap how far the left side can be dragged open.
+        right.setMinimumSize(new Dimension(0, 0));
         setBorder(null);
         setResizeWeight(0); // window resizes go to the right (content) side
         setOneTouchExpandable(false);
@@ -145,7 +147,12 @@ public class ComicSplitPane extends JSplitPane {
     }
 
     private int clampLeftWidth(int width) {
-        return Math.max(minLeftWidth, Math.min(maxLeftWidth, width));
+        int upper = maxLeftWidth;
+        int available = getWidth() - getDividerSize();
+        if (available > minLeftWidth) {
+            upper = Math.min(upper, available); // never push the divider out of the pane
+        }
+        return Math.max(minLeftWidth, Math.min(upper, width));
     }
 
     private void installComicDivider() {

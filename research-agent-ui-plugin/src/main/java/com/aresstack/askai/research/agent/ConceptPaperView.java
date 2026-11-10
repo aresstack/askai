@@ -67,7 +67,7 @@ public final class ConceptPaperView extends JPanel {
     }
 
     private final javax.swing.JTextField missionField = ComicControls.textField();
-    private final ComicButton missionSaveButton = new ComicButton("Save mission");
+    private final ComicButton missionSaveButton = new ComicButton("↵");
     private final JLabel modeLabel = new JLabel(" ");
     private MissionSaver missionSaver;
     private String shownMission = "";
@@ -79,13 +79,13 @@ public final class ConceptPaperView extends JPanel {
 
     private final JTextArea editor = ComicControls.textArea();
     private final JLabel statusLabel = new JLabel(" ");
-    private final ComicButton saveButton = new ComicButton("Save");
-    private final ComicButton discardButton = new ComicButton("Discard");
+    private final ComicButton saveButton = new ComicButton("✔");
+    private final ComicButton discardButton = new ComicButton("✖");
     private final ComicButton olderButton = new ComicButton("◀");
     private final ComicButton newerButton = new ComicButton("▶");
     private final ComicButton refreshButton = new ComicButton("⟳");
-    private final ComicButton treeButton = new ComicButton("Tree");
-    private final ComicButton jsonButton = new ComicButton("JSON");
+    private final ComicButton treeButton = new ComicButton("☷");
+    private final ComicButton jsonButton = new ComicButton("{ }");
     private final ConceptTreeView treeView = new ConceptTreeView();
     private final JScrollPane treeScroll = new JScrollPane(treeView);
     /** Tree first — the pretty surface; JSON stays the power/recovery mode. */
@@ -148,21 +148,15 @@ public final class ConceptPaperView extends JPanel {
                 ResearchUiMetrics.FOOTER_PADDING_V, ResearchUiMetrics.FOOTER_PADDING_H,
                 ResearchUiMetrics.FOOTER_PADDING_V, ResearchUiMetrics.FOOTER_PADDING_H));
         searchRow.add(searchBar, BorderLayout.CENTER);
-        JPanel modeToggle = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
-        modeToggle.setOpaque(false);
+        // Nothing above or beside the search: the Tree/JSON toggle lives in the footer (buttons below).
         for (ComicButton button : new ComicButton[] {treeButton, jsonButton}) {
             button.setFocusable(false);
             button.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
-            modeToggle.add(button);
         }
         treeButton.setToolTipText("Show the concept as an editable card tree");
         jsonButton.setToolTipText("Show and edit the raw JSON document");
-        searchRow.add(modeToggle, BorderLayout.EAST);
-        JPanel north = new JPanel(new BorderLayout());
-        north.setOpaque(false);
-        north.add(buildMissionRow(), BorderLayout.NORTH);
-        north.add(searchRow, BorderLayout.CENTER);
-        add(north, BorderLayout.NORTH);
+        // The search bar is the topmost element, at the same place as the Chats tab's search.
+        add(searchRow, BorderLayout.NORTH);
 
         // Editor + the comic error overlay share the center: a rejected save POPS over the text
         // in a comic plate (bigger type, red stripe) and fades out by itself.
@@ -178,12 +172,16 @@ public final class ConceptPaperView extends JPanel {
             }
         });
         add(layers, BorderLayout.CENTER);
-        add(buildFooter(), BorderLayout.SOUTH);
+        JPanel south = new JPanel(new BorderLayout());
+        south.setOpaque(false);
+        south.add(buildMissionRow(), BorderLayout.NORTH);
+        south.add(buildFooter(), BorderLayout.CENTER);
+        add(south, BorderLayout.SOUTH);
         wireActions();
         updateControls();
     }
 
-    /** The mission as one editable row above the tree (PR 07): label left, field, button in the same row. */
+    /** The mission as one editable row below the tree, above the footer (PR 07): label left, field, button in the same row. */
     private JPanel buildMissionRow() {
         JPanel row = new JPanel(new BorderLayout(6, 0));
         row.setOpaque(false);
@@ -192,6 +190,8 @@ public final class ConceptPaperView extends JPanel {
         row.add(new JLabel("Mission"), BorderLayout.WEST);
         row.add(missionField, BorderLayout.CENTER);
         missionField.setToolTipText("What the book is for; your first message becomes the mission");
+        missionSaveButton.setToolTipText("Save mission");
+        missionSaveButton.getAccessibleContext().setAccessibleName("Save mission");
         missionSaveButton.setFocusable(false);
         missionSaveButton.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
         row.add(missionSaveButton, BorderLayout.EAST);
@@ -411,6 +411,8 @@ public final class ConceptPaperView extends JPanel {
         refreshButton.setToolTipText("Reload view");
         refreshButton.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
         left.add(refreshButton);
+        left.add(treeButton);
+        left.add(jsonButton);
         footer.add(left, BorderLayout.WEST);
         footer.add(saveActions, BorderLayout.CENTER);
 

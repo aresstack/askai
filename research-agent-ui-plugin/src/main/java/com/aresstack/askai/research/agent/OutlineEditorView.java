@@ -99,31 +99,31 @@ public final class OutlineEditorView extends JPanel {
     private final JLabel modeLabel = new JLabel();
     private final JTextArea changeRequest = com.aresstack.comiccontrols.control.ComicControls.textArea();
     private final JLabel status = new JLabel(" ");
-    private final JButton generateButton = new ComicButton("Generate outline");
-    private final JButton modeToggle = new ComicButton("JSON");
+    private final JButton generateButton = iconButton("✦", "Generate outline");
+    private final JButton modeToggle = iconButton("{ }", "Show the raw JSON");
     private final DefaultTreeModel treeModel = new DefaultTreeModel(new DefaultMutableTreeNode("Outline"));
     private final JTree tree = new JTree(treeModel);
-    private final JButton renameButton = new ComicButton("Rename");
-    private final JButton addChapterButton = new ComicButton("Add chapter");
-    private final JButton addSectionButton = new ComicButton("Add section");
-    private final JButton deleteButton = new ComicButton("Delete");
-    private final JButton upButton = new ComicButton("Up");
-    private final JButton downButton = new ComicButton("Down");
-    private final JButton indentButton = new ComicButton("Indent");
-    private final JButton outdentButton = new ComicButton("Outdent");
-    private final JButton regenerateButton = new ComicButton("Regenerate chapter");
-    private final JButton retryBriefButton = new ComicButton("Retry brief");
-    private final JButton suggestedButton = new ComicButton("Add suggested chapter");
+    private final JButton renameButton = iconButton("✎", "Rename");
+    private final JButton addChapterButton = iconButton("＋", "Add chapter");
+    private final JButton addSectionButton = iconButton("⊕", "Add section");
+    private final JButton deleteButton = iconButton("✕", "Delete");
+    private final JButton upButton = iconButton("▲", "Move up");
+    private final JButton downButton = iconButton("▼", "Move down");
+    private final JButton indentButton = iconButton("⇥", "Indent");
+    private final JButton outdentButton = iconButton("⇤", "Outdent");
+    private final JButton regenerateButton = iconButton("↻", "Regenerate chapter");
+    private final JButton retryBriefButton = iconButton("⟲", "Retry brief");
+    private final JButton suggestedButton = iconButton("★", "Add suggested chapter");
     /** Chapter ids whose last brief call failed ("Brief not generated"); cleared on a successful retry. */
     private final java.util.Set<String> briefFailures = new java.util.HashSet<String>();
     private boolean chapterJobRunning;
     private final JTextArea jsonArea = com.aresstack.comiccontrols.control.ComicControls.textArea();
-    private final JButton saveButton = new ComicButton("Save");
-    private final JButton discardButton = new ComicButton("Discard");
+    private final JButton saveButton = iconButton("✔", "Save");
+    private final JButton discardButton = iconButton("✖", "Discard");
     private final DefaultListModel<Long> revisionModel = new DefaultListModel<Long>();
     private final JList<Long> revisions = com.aresstack.comiccontrols.control.ComicControls.list(revisionModel);
-    private final JButton viewButton = new ComicButton("View");
-    private final JButton restoreButton = new ComicButton("Restore");
+    private final JButton viewButton = iconButton("◉", "View revision");
+    private final JButton restoreButton = iconButton("⎌", "Restore revision");
     private final JPanel center = new JPanel(new CardLayout());
 
     private Actions actions;
@@ -138,20 +138,16 @@ public final class OutlineEditorView extends JPanel {
     public OutlineEditorView() {
         super(new BorderLayout(4, 4));
         setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
+        // Nothing sits on top (Angelo 10.11.): status and change request go below the tree, all buttons
+        // are compact icon buttons with tooltips in the bottom bar.
         JPanel north = new JPanel(new BorderLayout(4, 2));
-        JPanel head = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 4));
-        head.add(generateButton);
-        head.add(suggestedButton);
-        head.add(modeToggle);
-        head.add(modeLabel);
-        north.add(head, BorderLayout.NORTH);
+        north.add(modeLabel, BorderLayout.NORTH);
         changeRequest.setEditable(false);
         changeRequest.setLineWrap(true);
         changeRequest.setWrapStyleWord(true);
         changeRequest.setOpaque(false);
         changeRequest.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         north.add(changeRequest, BorderLayout.CENTER);
-        add(north, BorderLayout.NORTH);
 
         tree.setRootVisible(false);
         tree.setShowsRootHandles(true);
@@ -202,12 +198,34 @@ public final class OutlineEditorView extends JPanel {
         revisionButtons.add(viewButton);
         revisionButtons.add(restoreButton);
         revisionRow.add(revisionButtons, BorderLayout.EAST);
+        // Shared by both cards (tree and JSON), so the mode can always be switched back.
+        JPanel commonButtons = new JPanel(new WrapLayout(FlowLayout.LEFT, 6, 4));
+        commonButtons.add(generateButton);
+        commonButtons.add(suggestedButton);
+        commonButtons.add(modeToggle);
+        north.add(commonButtons, BorderLayout.SOUTH);
+        south.add(north, BorderLayout.NORTH);
         south.add(revisionRow, BorderLayout.CENTER);
         south.add(status, BorderLayout.SOUTH);
         add(south, BorderLayout.SOUTH);
 
         wire();
         render(snapshot);
+    }
+
+    private static JButton iconButton(String glyph, String tooltip) {
+        JButton button = new ComicButton(glyph);
+        button.setToolTipText(tooltip);
+        button.getAccessibleContext().setAccessibleName(tooltip);
+        button.setFocusable(false);
+        return button;
+    }
+
+    /** Every button of the view (tests: icon-only, each with a tooltip). */
+    JButton[] allButtons() {
+        return new JButton[]{renameButton, addChapterButton, addSectionButton, deleteButton, upButton,
+                downButton, indentButton, outdentButton, saveButton, discardButton, viewButton, restoreButton,
+                generateButton, modeToggle, regenerateButton, retryBriefButton, suggestedButton};
     }
 
     public void setActions(Actions actions) {
@@ -273,11 +291,10 @@ public final class OutlineEditorView extends JPanel {
         }
     }
 
+    /** A button by its accessible name (the buttons show icons; the name is what the old label said). */
     JButton button(String text) {
-        for (JButton b : new JButton[]{renameButton, addChapterButton, addSectionButton, deleteButton, upButton,
-                downButton, indentButton, outdentButton, saveButton, discardButton, viewButton, restoreButton,
-                generateButton, modeToggle, regenerateButton, retryBriefButton, suggestedButton}) {
-            if (b.getText().equals(text)) {
+        for (JButton b : allButtons()) {
+            if (text.equals(b.getAccessibleContext().getAccessibleName())) {
                 return b;
             }
         }
@@ -535,7 +552,8 @@ public final class OutlineEditorView extends JPanel {
     private void toggleMode() {
         treeMode = !treeMode;
         ((CardLayout) center.getLayout()).show(center, treeMode ? "tree" : "json");
-        modeToggle.setText(treeMode ? "JSON" : "Tree");
+        modeToggle.setText(treeMode ? "{ }" : "☷");
+        modeToggle.setToolTipText(treeMode ? "Show the raw JSON" : "Show the outline tree");
         updateButtons();
     }
 

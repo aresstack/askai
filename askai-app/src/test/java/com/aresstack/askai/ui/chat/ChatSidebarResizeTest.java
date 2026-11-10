@@ -38,7 +38,7 @@ public class ChatSidebarResizeTest {
     }
 
     @Test
-    public void sidebarWidthRespectsMinAndMaxBounds() throws Exception {
+    public void sidebarKeepsItsMinimumButHasNoMaximum() throws Exception {
         onEdt(new Runnable() {
             public void run() {
                 ChatWorkspacePanel workspace = build();
@@ -48,8 +48,14 @@ public class ChatSidebarResizeTest {
                 split.setDividerLocation(50);
                 assertEquals(split.getMinLeftWidth(), split.getDividerLocation());
 
+                // No cap: an unsized pane accepts any width; a sized one stops only at its own edge.
                 split.setDividerLocation(5000);
-                assertEquals(split.getMaxLeftWidth(), split.getDividerLocation());
+                assertEquals(5000, split.getDividerLocation());
+                split.setSize(1600, 800);
+                split.setDividerLocation(1400);
+                assertEquals(1400, split.getDividerLocation());
+                split.setDividerLocation(5000);
+                assertEquals(1600 - split.getDividerSize(), split.getDividerLocation());
             }
         });
     }

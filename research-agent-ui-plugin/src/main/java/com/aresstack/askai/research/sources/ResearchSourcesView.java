@@ -83,10 +83,14 @@ public final class ResearchSourcesView extends JPanel {
     private final com.aresstack.comiccontrols.theme.ComicPalette palette =
             com.aresstack.comiccontrols.theme.ComicPalette.defaultPalette();
 
-    /** Plan PR 14: the search plan checklist above the source table. */
+    /** Holds the search plan checklist BELOW the source table: nothing may sit above the search bar. */
+    private final JPanel checklistSlot = new JPanel(new BorderLayout());
+
+    /** Plan PR 14: the search plan checklist, shown under the source table (never on top). */
     public void setPlanChecklist(javax.swing.JComponent checklist) {
-        add(checklist, BorderLayout.NORTH);
-        revalidate();
+        checklistSlot.removeAll();
+        checklistSlot.add(checklist, BorderLayout.CENTER);
+        checklistSlot.revalidate();
     }
 
     public ResearchSourcesView(ResearchSourceRepository repository, Set<String> knownSectionIds) {
@@ -102,7 +106,8 @@ public final class ResearchSourcesView extends JPanel {
         top.add(filterField, BorderLayout.CENTER);
         filterField.addSearchAction(e -> reloadTable());
         // #39: the user-import entrance — HTML/text through the canonical acceptance boundary.
-        JButton addSource = new ComicButton("Add source");
+        JButton addSource = new ComicButton("＋");
+        addSource.getAccessibleContext().setAccessibleName("Add source");
         addSource.setToolTipText(
                 "Add your own source (raw HTML or plain text) to the research corpus");
         addSource.addActionListener(e -> openImportDialog());
@@ -136,7 +141,12 @@ public final class ResearchSourcesView extends JPanel {
         tablePlate.add(top, BorderLayout.NORTH);
         tablePlate.add(tableScroll, BorderLayout.CENTER);
 
-        add(tablePlate, BorderLayout.CENTER);
+        checklistSlot.setOpaque(false);
+        JPanel center = new JPanel(new BorderLayout(0, 6));
+        center.setOpaque(false);
+        center.add(tablePlate, BorderLayout.CENTER);
+        center.add(checklistSlot, BorderLayout.SOUTH);
+        add(center, BorderLayout.CENTER);
         add(buildDetail(), BorderLayout.SOUTH);
         reloadTable();
     }
