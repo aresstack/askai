@@ -6,7 +6,9 @@ import com.aresstack.askai.research.outline.OutlineEdits;
 import com.aresstack.askai.research.outline.OutlineEntry;
 import com.aresstack.askai.research.outline.OutlineJson;
 import com.aresstack.askai.research.outline.OutlineSection;
-import com.aresstack.comiccontrols.control.ComicButton;
+import com.aresstack.comiccontrols.control.ComicControls;
+import com.aresstack.comiccontrols.paint.ComposerIcons;
+import com.aresstack.comiccontrols.paint.ResearchIcons;
 import com.aresstack.comiccontrols.control.WrapLayout;
 
 import javax.swing.BorderFactory;
@@ -96,34 +98,37 @@ public final class OutlineEditorView extends JPanel {
         }
     }
 
+    /** Edge length of the plus glyph, the size of the other line icons. */
+    private static final int ICON_SIZE = 15;
+
     private final JLabel modeLabel = new JLabel();
     private final JTextArea changeRequest = com.aresstack.comiccontrols.control.ComicControls.textArea();
     private final JLabel status = new JLabel(" ");
-    private final JButton generateButton = iconButton("✦", "Generate outline");
-    private final JButton modeToggle = iconButton("{ }", "Show the raw JSON");
+    private final JButton generateButton = ComicControls.iconButton(ResearchIcons.sparkle(), "Generate outline");
+    private final JButton modeToggle = ComicControls.iconButton(ResearchIcons.braces(), "Show the raw JSON");
     private final DefaultTreeModel treeModel = new DefaultTreeModel(new DefaultMutableTreeNode("Outline"));
     private final JTree tree = new JTree(treeModel);
-    private final JButton renameButton = iconButton("✎", "Rename");
-    private final JButton addChapterButton = iconButton("＋", "Add chapter");
-    private final JButton addSectionButton = iconButton("⊕", "Add section");
-    private final JButton deleteButton = iconButton("✕", "Delete");
-    private final JButton upButton = iconButton("▲", "Move up");
-    private final JButton downButton = iconButton("▼", "Move down");
-    private final JButton indentButton = iconButton("⇥", "Indent");
-    private final JButton outdentButton = iconButton("⇤", "Outdent");
-    private final JButton regenerateButton = iconButton("↻", "Regenerate chapter");
-    private final JButton retryBriefButton = iconButton("⟲", "Retry brief");
-    private final JButton suggestedButton = iconButton("★", "Add suggested chapter");
+    private final JButton renameButton = ComicControls.iconButton(ComposerIcons.pencil(), "Rename");
+    private final JButton addChapterButton = ComicControls.iconButton(ComposerIcons.plus(ICON_SIZE), "Add chapter");
+    private final JButton addSectionButton = ComicControls.iconButton(ResearchIcons.addIndented(), "Add section");
+    private final JButton deleteButton = ComicControls.iconButton(ResearchIcons.trash(), "Delete");
+    private final JButton upButton = ComicControls.iconButton(ResearchIcons.arrowUp(), "Move up");
+    private final JButton downButton = ComicControls.iconButton(ResearchIcons.arrowDown(), "Move down");
+    private final JButton indentButton = ComicControls.iconButton(ResearchIcons.indent(), "Indent");
+    private final JButton outdentButton = ComicControls.iconButton(ResearchIcons.outdent(), "Outdent");
+    private final JButton regenerateButton = ComicControls.iconButton(ComposerIcons.refresh(), "Regenerate chapter");
+    private final JButton retryBriefButton = ComicControls.iconButton(ResearchIcons.undo(), "Retry brief");
+    private final JButton suggestedButton = ComicControls.iconButton(ResearchIcons.lightBulb(), "Add suggested chapter");
     /** Chapter ids whose last brief call failed ("Brief not generated"); cleared on a successful retry. */
     private final java.util.Set<String> briefFailures = new java.util.HashSet<String>();
     private boolean chapterJobRunning;
     private final JTextArea jsonArea = com.aresstack.comiccontrols.control.ComicControls.textArea();
-    private final JButton saveButton = iconButton("✔", "Save");
-    private final JButton discardButton = iconButton("✖", "Discard");
+    private final JButton saveButton = ComicControls.iconButton(ComposerIcons.floppyDisk(), "Save");
+    private final JButton discardButton = ComicControls.iconButton(ComposerIcons.close(), "Discard");
     private final DefaultListModel<Long> revisionModel = new DefaultListModel<Long>();
     private final JList<Long> revisions = com.aresstack.comiccontrols.control.ComicControls.list(revisionModel);
-    private final JButton viewButton = iconButton("◉", "View revision");
-    private final JButton restoreButton = iconButton("⎌", "Restore revision");
+    private final JButton viewButton = ComicControls.iconButton(ResearchIcons.eye(), "View revision");
+    private final JButton restoreButton = ComicControls.iconButton(ResearchIcons.undo(), "Restore revision");
     private final JPanel center = new JPanel(new CardLayout());
 
     private Actions actions;
@@ -211,14 +216,6 @@ public final class OutlineEditorView extends JPanel {
 
         wire();
         render(snapshot);
-    }
-
-    private static JButton iconButton(String glyph, String tooltip) {
-        JButton button = new ComicButton(glyph);
-        button.setToolTipText(tooltip);
-        button.getAccessibleContext().setAccessibleName(tooltip);
-        button.setFocusable(false);
-        return button;
     }
 
     /** Every button of the view (tests: icon-only, each with a tooltip). */
@@ -552,7 +549,7 @@ public final class OutlineEditorView extends JPanel {
     private void toggleMode() {
         treeMode = !treeMode;
         ((CardLayout) center.getLayout()).show(center, treeMode ? "tree" : "json");
-        modeToggle.setText(treeMode ? "{ }" : "☷");
+        modeToggle.setIcon(treeMode ? ResearchIcons.braces() : ResearchIcons.tree());
         modeToggle.setToolTipText(treeMode ? "Show the raw JSON" : "Show the outline tree");
         updateButtons();
     }

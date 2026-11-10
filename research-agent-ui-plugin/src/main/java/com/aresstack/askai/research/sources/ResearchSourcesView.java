@@ -38,6 +38,9 @@ import java.util.Set;
  */
 public final class ResearchSourcesView extends JPanel {
 
+    /** Edge length of the plus glyph, the size of the other line icons. */
+    private static final int ADD_ICON_SIZE = 15;
+
     private final ResearchSourceRepository repository;
     private final Set<String> knownSectionIds;
 
@@ -106,10 +109,9 @@ public final class ResearchSourcesView extends JPanel {
         top.add(filterField, BorderLayout.CENTER);
         filterField.addSearchAction(e -> reloadTable());
         // #39: the user-import entrance — HTML/text through the canonical acceptance boundary.
-        JButton addSource = new ComicButton("＋");
-        addSource.getAccessibleContext().setAccessibleName("Add source");
-        addSource.setToolTipText(
-                "Add your own source (raw HTML or plain text) to the research corpus");
+        JButton addSource = ComicControls.iconButton(
+                com.aresstack.comiccontrols.paint.ComposerIcons.plus(ADD_ICON_SIZE),
+                "Add your own source (raw HTML, plain text or PDF) to the research corpus");
         addSource.addActionListener(e -> openImportDialog());
         top.add(addSource, BorderLayout.EAST);
 

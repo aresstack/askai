@@ -32,8 +32,6 @@ public class SidebarTabChromeTest {
     /** The sidebar's minimum width (ChatWorkspacePanel) and the widest window the fit tests use. */
     private static final int[] WIDTHS = {280, 540, 1600};
     private static final int HEIGHT = 900;
-    /** An icon button shows a glyph, not a word. */
-    private static final int MAX_GLYPH_LENGTH = 3;
 
     @Test
     public void conceptStartsWithTheSearchRowAndTheMissionSitsBelow() throws Exception {
@@ -97,9 +95,10 @@ public class SidebarTabChromeTest {
     private static void assertIconButtons(List<AbstractButton> buttons) {
         assertFalse(buttons.isEmpty());
         for (AbstractButton button : buttons) {
-            String text = button.getText() == null ? "" : button.getText();
-            assertTrue("\"" + text + "\" is a text button", text.length() <= MAX_GLYPH_LENGTH);
-            assertTrue("\"" + text + "\" has no tooltip",
+            String name = button.getAccessibleContext().getAccessibleName();
+            assertNotNull(name + " shows an icon", button.getIcon());
+            assertTrue(name + " shows no text", button.getText() == null || button.getText().isEmpty());
+            assertTrue(name + " has a tooltip",
                     button.getToolTipText() != null && !button.getToolTipText().isEmpty());
         }
     }

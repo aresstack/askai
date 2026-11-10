@@ -67,7 +67,8 @@ public final class ConceptPaperView extends JPanel {
     }
 
     private final javax.swing.JTextField missionField = ComicControls.textField();
-    private final ComicButton missionSaveButton = new ComicButton("↵");
+    private final ComicButton missionSaveButton =
+            ComicControls.iconButton(com.aresstack.comiccontrols.paint.ResearchIcons.enter(), "Save mission");
     private final JLabel modeLabel = new JLabel(" ");
     private MissionSaver missionSaver;
     private String shownMission = "";
@@ -193,10 +194,6 @@ public final class ConceptPaperView extends JPanel {
         row.add(new JLabel("Mission"), BorderLayout.WEST);
         row.add(missionField, BorderLayout.CENTER);
         missionField.setToolTipText("What the book is for; your first message becomes the mission");
-        missionSaveButton.setToolTipText("Save mission");
-        missionSaveButton.getAccessibleContext().setAccessibleName("Save mission");
-        missionSaveButton.setFocusable(false);
-        missionSaveButton.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
         row.add(missionSaveButton, BorderLayout.EAST);
         modeLabel.setVisible(false);
         JPanel block = new JPanel(new BorderLayout());

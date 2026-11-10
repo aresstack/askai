@@ -35,6 +35,28 @@ public final class ComicControls {
     private ComicControls() {
     }
 
+    // ------------------------------------------------------------------ icon button
+
+    /**
+     * An icon-only {@link ComicButton}: the glyph on the comic plate, the tooltip says what it does (also as
+     * the accessible name). For actions in narrow places (sidebar tabs), where a text button would not fit.
+     */
+    public static ComicButton iconButton(Icon icon, String tooltip) {
+        if (icon == null || tooltip == null || tooltip.trim().isEmpty()) {
+            throw new IllegalArgumentException("an icon button needs an icon and a tooltip");
+        }
+        ComicButton button = new ComicButton(icon);
+        button.setToolTipText(tooltip);
+        button.getAccessibleContext().setAccessibleName(tooltip);
+        button.setFocusable(false);
+        button.setBorder(javax.swing.BorderFactory.createEmptyBorder(ICON_BUTTON_PADDING_V,
+                ICON_BUTTON_PADDING_H, ICON_BUTTON_PADDING_V, ICON_BUTTON_PADDING_H));
+        return button;
+    }
+
+    private static final int ICON_BUTTON_PADDING_V = 4;
+    private static final int ICON_BUTTON_PADDING_H = 8;
+
     // ------------------------------------------------------------------ check box
 
     public static JCheckBox checkBox() {
