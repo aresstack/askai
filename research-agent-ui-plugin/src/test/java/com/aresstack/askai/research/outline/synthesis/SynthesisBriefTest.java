@@ -38,7 +38,7 @@ public class SynthesisBriefTest {
                 new ScopeFenceEvaluator.AnchorVector("out-1", ScopeAnchor.Membership.OUT, axis(fitness)),
                 new ScopeFenceEvaluator.AnchorVector("in-1", ScopeAnchor.Membership.IN, axis(inside))),
                 Collections.singletonMap("out-1", "Consumer fitness"), new ScopeFenceEvaluator.Thresholds(0.7, 0.05),
-                3L);
+                3L, "fp");
         corpus.fence = fence;
 
         SynthesisBrief brief = corpus.brief();
