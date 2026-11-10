@@ -69,6 +69,12 @@ public final class LiveOutlineProjectionBuilder {
         return liveTopics(proposals);
     }
 
+    /** The same builder with another number of representative passages per topic (the analysis setting). */
+    public LiveOutlineProjectionBuilder withRepresentatives(int representatives) {
+        return representatives == representativesPerTopic ? this
+                : new LiveOutlineProjectionBuilder(mergeDistanceCutoff, representatives);
+    }
+
     /**
      * Phase 3: the same topics as {@link #discoverTopics(List, Map, ClusteringMonitor)} from ONE clustering run
      * that also keeps the complete merge tree (sub-topics, topic groups) for the topic analysis.
