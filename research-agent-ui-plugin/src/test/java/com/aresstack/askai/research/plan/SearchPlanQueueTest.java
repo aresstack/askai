@@ -639,7 +639,7 @@ public class SearchPlanQueueTest {
                                 EvidenceGaps.Scope.IN, ""))),
                         active, entries, Collections.<String>emptyList(), 3, 3);
             }
-        });
+        }, DIRECT_REVIEW);
         sources.next = Arrays.asList("s1", "s2");
         queue.run();
         port.complete(false); // Alpha Query: covered by its source count
@@ -696,7 +696,7 @@ public class SearchPlanQueueTest {
                         Collections.<EvidenceGaps.NewTopic>emptyList()),
                         active, entries, Collections.<String>emptyList(), 3, 3);
             }
-        });
+        }, DIRECT_REVIEW);
         sources.next = Collections.emptyList();
         queue.run();
         port.complete(false); // Alpha Query: nothing
@@ -709,6 +709,13 @@ public class SearchPlanQueueTest {
         assertTrue(request.getNodes().get(0).getEvidence().isEmpty());
         assertTrue(request.getNewTopics().isEmpty());
     }
+
+    /** The gap review runs at once in tests (the app runs it off the UI thread). */
+    static final java.util.concurrent.Executor DIRECT_REVIEW = new java.util.concurrent.Executor() {
+        public void execute(Runnable command) {
+            command.run();
+        }
+    };
 
     static EvidenceGaps.Analysis analysis(final String id, final boolean settled,
                                           final List<EvidenceGaps.NodeEvidence> nodes,

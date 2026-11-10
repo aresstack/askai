@@ -1956,6 +1956,28 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         .loadTeamNextSearchBelow(hostStateStore);
             }
         });
+        // plan T4 gap review: at every cycle boundary the shared topic analysis of the material read so far
+        // decides which nodes are thin, redundant or missing and which new topics lie inside the Weidezaun
+        searchPlanQueue.setGapReview(new com.aresstack.askai.research.host.TopicAnalysisGapReview(
+                com.aresstack.askai.research.host.TopicAnalysisGapReview.inputs(
+                        new java.util.function.Supplier<
+                                com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery>() {
+                            public com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery get() {
+                                return topicDiscovery();
+                            }
+                        },
+                        new java.util.function.Supplier<java.util.List<String>>() {
+                            public java.util.List<String> get() {
+                                try {
+                                    com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+                                    return frozen == null ? java.util.Collections.<String>emptyList()
+                                            : frozen.getPin().getBlacklist();
+                                } catch (com.aresstack.askai.research.transition.CorruptProjectFileException
+                                        corrupt) {
+                                    return java.util.Collections.<String>emptyList();
+                                }
+                            }
+                        }, hostStateStore)));
         // every source carries the phase and the plan entry of the search that found it
         final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
         com.aresstack.askai.research.capture.SourceAcceptanceService acceptance = resources.acceptance();
