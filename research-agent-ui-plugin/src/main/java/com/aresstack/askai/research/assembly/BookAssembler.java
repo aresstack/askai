@@ -15,6 +15,7 @@ import com.aresstack.askai.research.manuscript.SectionRevision;
 import com.aresstack.askai.research.manuscript.SectionStatus;
 import com.aresstack.askai.research.outline.OutlineChapter;
 import com.aresstack.askai.research.outline.OutlineSection;
+import com.aresstack.askai.research.runtime.writer.ClaimCarryCheck;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -51,18 +52,30 @@ public final class BookAssembler {
     private static final Pattern PARAGRAPH_BREAK = Pattern.compile("\\n\\s*\\n");
     private static final Pattern WORD = Pattern.compile("[\\p{L}\\p{N}]+(?:[.,'’-][\\p{L}\\p{N}]+)*");
     private static final Pattern QUOTED = Pattern.compile("\"[^\"]*\"|„[^“”]*[“”]|“[^”]*”|«[^»]*»|»[^«]*«|‚[^‘’]*[‘’]");
-    private static final String SUPPORT_NOTE = "Support checked for numbers and quotes only.";
+    private static final String SUPPORT_NOTE = "Support checked for numbers and quotes, and that every cited "
+            + "passage is prose sharing the sentence's content words; meaning is not checked.";
 
     private final SentenceSegmenter sentences;
     private final AcronymExtractor acronymExtractor;
+    private final ClaimCarryCheck carry;
 
     public BookAssembler() {
-        this(SentenceSegmenter.splitter());
+        this(SentenceSegmenter.splitter(), ClaimCarryCheck.Criteria.defaults());
+    }
+
+    /** With the claim-check stage 2 thresholds of the settings. */
+    public BookAssembler(ClaimCarryCheck.Criteria carry) {
+        this(SentenceSegmenter.splitter(), carry);
     }
 
     public BookAssembler(SentenceSegmenter sentences) {
+        this(sentences, ClaimCarryCheck.Criteria.defaults());
+    }
+
+    public BookAssembler(SentenceSegmenter sentences, ClaimCarryCheck.Criteria carry) {
         this.sentences = sentences;
         this.acronymExtractor = new AcronymExtractor(sentences);
+        this.carry = new ClaimCarryCheck(carry);
     }
 
     public AssembledBook assemble(BookAssemblyInput input) {
@@ -260,6 +273,12 @@ public final class BookAssembler {
                 List<ManuscriptCitation> own = citationsIn(sentence, byMarker);
                 if (own.isEmpty()) {
                     findings.add(new Finding(Kind.UNCITED_SENTENCE, id, label + ": " + sentence.trim()));
+                } else {
+                    String why = uncarried(sentence, own);
+                    if (!why.isEmpty()) {
+                        findings.add(new Finding(Kind.UNCARRIED_CLAIM, id, label + ": "
+                                + stripMarkers(sentence).trim() + " (" + why + ")"));
+                    }
                 }
                 cited.addAll(own);
             }
@@ -297,6 +316,20 @@ public final class BookAssembler {
         if (target > 0 && (written * 2 < target || written * 2 > target * 3)) {
             findings.add(new Finding(Kind.WORDS_OFF_TARGET, id, label + ": " + written + " of " + target + " words"));
         }
+    }
+
+    /**
+     * Stage 2 at assembly, on the stored cited text, so a revision written before stage 2 existed (live run 3) is
+     * judged by the same rule; the writer's own stage-2 flags are therefore not counted again.
+     */
+    private String uncarried(String sentence, List<ManuscriptCitation> own) {
+        List<String> markers = new ArrayList<String>();
+        List<String> texts = new ArrayList<String>();
+        for (ManuscriptCitation citation : new LinkedHashSet<ManuscriptCitation>(own)) {
+            markers.add(citation.getMarker());
+            texts.add(citation.getCitedText());
+        }
+        return carry.uncarried(stripMarkers(sentence), markers, texts);
     }
 
     private static String detail(String flag) {

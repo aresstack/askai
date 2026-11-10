@@ -42,10 +42,12 @@ public final class TopicAnalyzer {
      * @param vectors  their stored document vectors
      * @param tree     the clustering run of these passages (possibly of a limited subset)
      * @param anchors  the concept nodes below the book frame, in concept order, with their query vectors
+     * @param fence    the pinned search fence (the search scope gate's anchors and thresholds); {@code null} = none
      * @throws ClusteringMonitor.ClusteringCancelledException when the monitor cancels
      */
     public TopicAnalysis analyze(List<AnalysisPassage> passages, Map<String, EmbeddingPort.EmbeddingVector> vectors,
-                                 LiveTopicTree tree, List<ConceptAnchor> anchors, ClusteringMonitor monitor) {
+                                 LiveTopicTree tree, List<ConceptAnchor> anchors, ScopeFence fence,
+                                 ClusteringMonitor monitor) {
         ClusteringMonitor m = monitor == null ? ClusteringMonitor.NONE : monitor;
         Map<String, AnalysisPassage> byId = new LinkedHashMap<String, AnalysisPassage>();
         Map<String, String> sourceOf = new LinkedHashMap<String, String>();
@@ -109,7 +111,7 @@ public final class TopicAnalyzer {
             if (m.isCancelled()) {
                 throw new ClusteringMonitor.ClusteringCancelledException();
             }
-            drafts.add(draft(topic, byId, vectors, duplicateGroupOf, subtopicCut, groupRootOf, nodes));
+            drafts.add(draft(topic, byId, vectors, duplicateGroupOf, subtopicCut, groupRootOf, nodes, fence));
         }
         int significantDistinct = 0;
         for (Draft draft : drafts) {
@@ -151,8 +153,8 @@ public final class TopicAnalyzer {
                     draft.topic.getMemberPassageIds(), representatives(draft.topic), draft.distinct, draft.sources,
                     draft.domains, draft.materialChars, draft.dispersion, draft.subtopics,
                     groupId(draft.groupRoot, drafts), related, draft.anchorId, draft.anchorSimilarity,
-                    draft.aligned, draft.significant, share,
-                    draft.significant && share >= settings.getMajorTopicShare()));
+                    draft.aligned, draft.materialCovered, draft.sourceConfirmed, share,
+                    draft.significant && share >= settings.getMajorTopicShare(), draft.scope));
         }
         Collections.sort(profiles, new Comparator<TopicProfile>() {
             public int compare(TopicProfile a, TopicProfile b) {
@@ -184,12 +186,16 @@ public final class TopicAnalyzer {
         String anchorId = "";
         double anchorSimilarity;
         boolean aligned;
+        boolean materialCovered;
+        boolean sourceConfirmed;
         boolean significant;
+        ScopeAlignment scope = ScopeAlignment.UNKNOWN;
     }
 
     private Draft draft(LiveTopicProjection topic, Map<String, AnalysisPassage> byId,
                         Map<String, EmbeddingPort.EmbeddingVector> vectors, Map<String, String> duplicateGroupOf,
-                        List<List<String>> subtopicCut, Map<String, String> groupRootOf, List<ConceptAnchor> nodes) {
+                        List<List<String>> subtopicCut, Map<String, String> groupRootOf, List<ConceptAnchor> nodes,
+                        ScopeFence fence) {
         Draft draft = new Draft();
         draft.topic = topic;
         List<String> members = topic.getMemberPassageIds();
@@ -221,12 +227,17 @@ public final class TopicAnalyzer {
         draft.sources = sources.size();
         draft.domains = domains.size();
         draft.materialChars = chars;
-        draft.significant = members.size() >= settings.getMinimumPassages()
-                && sources.size() >= settings.getMinimumSources();
+        // Material counts DISTINCT passages; confirmation counts sources and domains (D6, separate criteria).
+        draft.materialCovered = settings.isMaterialCovered(draft.distinct);
+        draft.sourceConfirmed = settings.isSourceConfirmed(draft.sources, draft.domains);
+        draft.significant = draft.materialCovered && draft.sourceConfirmed;
         if (memberVectors.isEmpty()) {
             throw new IllegalArgumentException("topic " + topic.getClusterId() + " has no stored vectors");
         }
         draft.centroid = unit(VectorMath.mean(memberVectors));
+        if (fence != null) {
+            draft.scope = fence.align(draft.centroid);
+        }
         double similarity = 0;
         for (EmbeddingPort.EmbeddingVector vector : memberVectors) {
             similarity += VectorMath.cosine(vector, draft.centroid);
@@ -263,7 +274,7 @@ public final class TopicAnalyzer {
         Set<String> inside = new HashSet<String>(members);
         List<Subtopic> result = new ArrayList<Subtopic>();
         for (List<String> group : subtopicCut) {
-            if (group.isEmpty() || !inside.contains(group.get(0)) || group.size() < settings.getMinimumPassages()) {
+            if (group.isEmpty() || !inside.contains(group.get(0))) {
                 continue;
             }
             Set<String> groupsSeen = new HashSet<String>();
@@ -277,6 +288,9 @@ public final class TopicAnalyzer {
                     sources.add(passage.getSourceId());
                 }
                 unitVectors.add(unit(vectors.get(id)));
+            }
+            if (!settings.isMaterialCovered(groupsSeen.size())) {
+                continue; // a sub-topic needs distinct material too, repeated copies are no aspect
             }
             EmbeddingPort.EmbeddingVector centre = VectorMath.mean(unitVectors);
             String representative = group.get(0);
@@ -380,26 +394,82 @@ public final class TopicAnalyzer {
                 node = indexOfId.get(nodes.get(node).getParentId());
             }
         }
-        List<ConceptCoverage> coverage = new ArrayList<ConceptCoverage>();
+        Map<String, String> topicOfPassage = new HashMap<String, String>();
+        for (TopicProfile profile : profiles) {
+            for (String id : profile.getPassageIds()) {
+                topicOfPassage.put(id, profile.getTopicId());
+            }
+        }
+        List<List<Integer>> childrenOf = new ArrayList<List<Integer>>();
         for (int i = 0; i < nodes.size(); i++) {
+            childrenOf.add(new ArrayList<Integer>());
+        }
+        for (int i = 0; i < nodes.size(); i++) {
+            Integer parent = indexOfId.get(nodes.get(i).getParentId());
+            if (parent != null && parent != i) {
+                childrenOf.get(parent).add(i);
+            }
+        }
+        // Children first: a parent's breadth needs its children's status.
+        ConceptCoverage[] result = new ConceptCoverage[nodes.size()];
+        int[] distinctCount = new int[nodes.size()];
+        for (int i = nodes.size() - 1; i >= 0; i--) {
             ConceptAnchor node = nodes.get(i);
             List<String> ids = passagesOf.get(i);
             Set<String> distinct = new HashSet<String>();
             Set<String> sources = new TreeSet<String>();
+            Set<String> domains = new TreeSet<String>();
+            Map<String, Set<String>> distinctByTopic = new HashMap<String, Set<String>>();
             for (String id : ids) {
                 String group = duplicateGroupOf.get(id);
-                distinct.add(group == null ? id : group);
-                String source = byId.get(id).getSourceId();
-                if (!source.isEmpty()) {
-                    sources.add(source);
+                String key = group == null ? id : group;
+                distinct.add(key);
+                AnalysisPassage passage = byId.get(id);
+                if (!passage.getSourceId().isEmpty()) {
+                    sources.add(passage.getSourceId());
+                }
+                if (!passage.getDomain().isEmpty()) {
+                    domains.add(passage.getDomain());
+                }
+                String topic = topicOfPassage.get(id);
+                if (topic != null) {
+                    Set<String> inTopic = distinctByTopic.get(topic);
+                    if (inTopic == null) {
+                        inTopic = new HashSet<String>();
+                        distinctByTopic.put(topic, inTopic);
+                    }
+                    inTopic.add(key);
                 }
             }
-            ConceptCoverage.Status status = ids.isEmpty() ? ConceptCoverage.Status.GAP
-                    : ids.size() < settings.getMinimumPassages() || sources.size() < settings.getMinimumSources()
-                    ? ConceptCoverage.Status.THIN : ConceptCoverage.Status.COVERED;
-            coverage.add(new ConceptCoverage(node.getId(), node.getLabel(), node.getPath(), node.getDepth(),
-                    node.getParentId(), ids, distinct.size(), sources.size(), topicsOf.get(i), status));
+            distinctCount[i] = distinct.size();
+            int largestTopic = 0;
+            for (Set<String> inTopic : distinctByTopic.values()) {
+                largestTopic = Math.max(largestTopic, inTopic.size());
+            }
+            List<Integer> children = childrenOf.get(i);
+            int covered = 0;
+            int largestChild = 0;
+            for (Integer child : children) {
+                if (result[child].getStatus() == ConceptCoverage.Status.COVERED) {
+                    covered++;
+                }
+                largestChild = Math.max(largestChild, distinctCount[child]);
+            }
+            double dominantChild = children.isEmpty() || distinct.isEmpty() ? 0
+                    : (double) largestChild / distinct.size();
+            boolean broad = children.isEmpty()
+                    || (double) covered / children.size() >= settings.getMinimumChildCoverage();
+            boolean balanced = children.isEmpty() || children.size() == 1
+                    || dominantChild <= settings.getMaximumDominantShare();
+            result[i] = new ConceptCoverage(node.getId(), node.getLabel(), node.getPath(), node.getDepth(),
+                    node.getParentId(), ids, distinct.size(), sources.size(), domains.size(), topicsOf.get(i),
+                    settings.isMaterialCovered(distinct.size()),
+                    settings.isSourceConfirmed(sources.size(), domains.size()), children.size(), covered,
+                    dominantChild, broad, balanced, distinctByTopic.size(),
+                    distinct.isEmpty() ? 0 : (double) largestTopic / distinct.size());
         }
+        List<ConceptCoverage> coverage = new ArrayList<ConceptCoverage>();
+        Collections.addAll(coverage, result);
         return coverage;
     }
 

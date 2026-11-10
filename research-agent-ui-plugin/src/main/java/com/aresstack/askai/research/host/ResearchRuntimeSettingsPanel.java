@@ -44,6 +44,13 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField conceptRepairAttempts = ComicControls.textField(4);
     private final JTextField outlineAssignmentThreshold = ComicControls.textField(4);
     private final JTextField outlineAssignmentMargin = ComicControls.textField(4);
+    // Document phase: what a passage needs to enter a writer's evidence pack.
+    private final JTextField writerProseMinWords = ComicControls.textField(4);
+    private final JTextField writerProseMinSentences = ComicControls.textField(4);
+    private final JTextField writerProseMaxRun = ComicControls.textField(4);
+    private final JTextField writerCarryMinWordLength = ComicControls.textField(4);
+    private final JTextField writerCarryStemLength = ComicControls.textField(4);
+    private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
     // Search-run limits: the completion target + the safety limits. Every bound is a setting.
     private final JTextField searchTargetSources = ComicControls.textField(4);
     private final JTextField searchMaxPages = ComicControls.textField(4);
@@ -185,6 +192,15 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         limits.row("Outline anchors", group(labelled("Similarity ≥", outlineAssignmentThreshold),
                 labelled("Lead ≥", outlineAssignmentMargin)));
 
+        // Document phase: the section writer's evidence and checks.
+        com.aresstack.comiccontrols.control.ComicForm writer =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Document writer");
+        writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
+                labelled("Sentences ≥", writerProseMinSentences),
+                labelled("Unpunctuated run ≤", writerProseMaxRun)));
+        writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
+                labelled("Stem letters", writerCarryStemLength), labelled("Overlap ≥", writerCarryMinOverlap)));
+
         // Plan T5: the research team of the Sources phase and the worker browsers its page workers read in.
         com.aresstack.comiccontrols.control.ComicForm team =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Research team");
@@ -278,10 +294,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
         com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
         actions.actions(save, check, busy);
+<<<<<<< HEAD
         com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, team, preference, orchestrator, scope,
                 scopeAdvanced);
         add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, team, preference, orchestrator, scope,
                 scopeAdvanced, actions),
+=======
+        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, writer, team, orchestrator, scope,
+                scopeAdvanced);
+        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, writer, team, orchestrator, scope, scopeAdvanced,
+                actions),
+>>>>>>> origin/develop
                 BorderLayout.NORTH);
 
         results.setEditable(false);
@@ -493,6 +516,30 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings.DEFAULT_MARGIN,
                 "Generate outline: the nearest anchor must lead the second-nearest by at least this much, "
                         + "otherwise the passage stays unassigned (a candidate topic instead of a chapter).");
+        bindNonNegativeLimit(writerProseMinWords, ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_WORDS,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_WORDS,
+                "Evidence pack: a passage with fewer words (a heading, a label) never reaches the section writer.");
+        bindNonNegativeLimit(writerProseMinSentences, ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_SENTENCES,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_SENTENCES,
+                "Evidence pack: a passage needs this many finished sentences (. ! ?); breadcrumbs and titles "
+                        + "have none.");
+        bindLimit(writerProseMaxRun, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_RUN,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                        .DEFAULT_MAX_UNPUNCTUATED_RUN,
+                "Evidence pack: navigation menus and footers run on for dozens of words without a comma or full "
+                        + "stop; a passage with a longer run is left out.");
+        bindLimit(writerCarryMinWordLength, ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_WORD_LENGTH,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_WORD_LENGTH,
+                "Claim check: words with fewer letters (und, der, ist) are ignored when a sentence is compared "
+                        + "with the passage it cites.");
+        bindLimit(writerCarryStemLength, ResearchRuntimeSettings.KEY_WRITER_CARRY_STEM_LENGTH,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH,
+                "Claim check: two words that share this many leading letters count as one (erhöht ~ Erhöhung).");
+        bindDecimal(writerCarryMinOverlap, ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_OVERLAP,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_OVERLAP,
+                "Claim check: a cited passage must contain at least this share (0..1) of the sentence's words, "
+                        + "otherwise the sentence is flagged \"citation does not carry the claim\" and the "
+                        + "writer gets one repair. A menu, footer or heading never carries a claim.");
         refreshBackendStatus();
         // The "Browser" tab changes the channel: the status follows whenever this tab is shown again.
         addHierarchyListener(new java.awt.event.HierarchyListener() {

@@ -766,6 +766,58 @@ public final class ResearchRuntimeSettings {
                 minimums.minimumPassagesPerTopic, minimums.minimumDistinctSourcesPerTopic);
     }
 
+    // ------------------------------------------------------------------ Document: evidence pack
+    /** Fewest words a passage needs to enter a writer's evidence pack. */
+    public static final String KEY_WRITER_PROSE_MIN_WORDS = "research.writer.prose.minWords";
+    /** Fewest finished sentences a passage needs to enter a writer's evidence pack. */
+    public static final String KEY_WRITER_PROSE_MIN_SENTENCES = "research.writer.prose.minSentences";
+    /** Longest run of words without punctuation a passage may contain (menus and footers exceed it). */
+    public static final String KEY_WRITER_PROSE_MAX_RUN = "research.writer.prose.maxUnpunctuatedRun";
+
+    /**
+     * The prose criteria of the evidence pack (live run 3, fix 2), read for every section: navigation, footer and
+     * heading passages fail them and never reach the writer.
+     */
+    public static com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria loadWriterProseCriteria(
+            WorkspaceStateStore store) {
+        return new com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria(
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_MIN_WORDS,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_WORDS),
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_MIN_SENTENCES,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MIN_SENTENCES),
+                loadPositiveInt(store, KEY_WRITER_PROSE_MAX_RUN,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MAX_UNPUNCTUATED_RUN));
+    }
+
+    /** Claim check stage 2: fewest letters of a content word. */
+    public static final String KEY_WRITER_CARRY_MIN_WORD_LENGTH = "research.writer.carry.minWordLength";
+    /** Claim check stage 2: letters two words must share to count as the same word. */
+    public static final String KEY_WRITER_CARRY_STEM_LENGTH = "research.writer.carry.stemLength";
+    /** Claim check stage 2: share of a sentence's content words a cited passage must contain. */
+    public static final String KEY_WRITER_CARRY_MIN_OVERLAP = "research.writer.carry.minOverlap";
+
+    /**
+     * The thresholds of claim check stage 2 (live run 3, fix 3) for the section writer and the book's quality
+     * report; the prose criteria are the evidence pack's.
+     */
+    public static com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria loadWriterCarryCriteria(
+            WorkspaceStateStore store) {
+        double overlap = loadDouble(store, KEY_WRITER_CARRY_MIN_OVERLAP,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_OVERLAP);
+        if (overlap < 0 || overlap > 1) {
+            overlap = com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_OVERLAP;
+        }
+        return new com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria(
+                loadPositiveInt(store, KEY_WRITER_CARRY_MIN_WORD_LENGTH,
+                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria
+                                .DEFAULT_MIN_WORD_LENGTH),
+                loadPositiveInt(store, KEY_WRITER_CARRY_STEM_LENGTH,
+                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH),
+                overlap, loadWriterProseCriteria(store));
+    }
+
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";
     /** How many model↔tool cycles ONE concept turn may make — the WORK budget of the loop. */
     public static final int DEFAULT_CONCEPT_TOOL_ROUNDS = 4;

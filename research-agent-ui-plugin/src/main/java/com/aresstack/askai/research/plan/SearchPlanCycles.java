@@ -60,20 +60,31 @@ public final class SearchPlanCycles {
                                                             Collection<SearchPlanEntry> entries,
                                                             Map<String, SearchPlanCoverage.NodeCoverage> coverage,
                                                             SearchPlanCoverage.Caps caps) {
+        return nextCycleRequest(record, entries, coverage, caps, EvidenceGaps.Gaps.NONE);
+    }
+
+    /**
+     * The planner request of the next cycle with the gaps of the evidence analysis: a node the analysis finds
+     * thin, redundant or missing is planned again even when its source count covers it (many pages saying the same
+     * are no coverage), and carries the findings; a covered node without a gap is not deepened; the new topics
+     * inside the Weidezaun ride along. A gap node also counts as uncovered in the plan's outcome.
+     */
+    public static ConceptQueryPlan.Request nextCycleRequest(SearchPlanRecord record,
+                                                            Collection<SearchPlanEntry> entries,
+                                                            Map<String, SearchPlanCoverage.NodeCoverage> coverage,
+                                                            SearchPlanCoverage.Caps caps, EvidenceGaps.Gaps gaps) {
+        EvidenceGaps.Gaps g = gaps == null ? EvidenceGaps.Gaps.NONE : gaps;
         List<ConceptQueryPlan.Node> uncovered = new ArrayList<ConceptQueryPlan.Node>();
         for (SearchPlanRecord.Node node : record.getNodes()) {
             if (!node.isActive()) {
                 continue;
             }
             SearchPlanCoverage.NodeCoverage nc = coverage.get(node.getId());
-            if (nc != null && nc.getState() == SearchPlanCoverage.State.COVERED) {
-                continue;
+            List<String> evidence = g.getEvidenceByNode().get(node.getId());
+            if (evidence == null && nc != null && nc.getState() == SearchPlanCoverage.State.COVERED) {
+                continue; // covered by its sources and no gap in the analysis: not deepened for now
             }
-            ConceptQueryPlan.Node concept = node.node();
-            uncovered.add(new ConceptQueryPlan.Node(concept.getId(), concept.getLabel(), concept.getPath(),
-                    concept.getParentId(), concept.getBaseQuery(),
-                    nc == null ? null : new ArrayList<String>(nc.getDomains()),
-                    teamNotes(entries, node.getId(), 2 * Math.max(1, caps.getQueriesPerNode()))));
+            uncovered.add(planNode(node, nc, entries, caps, evidence));
         }
         if (uncovered.isEmpty()) {
             return null;
@@ -86,7 +97,18 @@ public final class SearchPlanCycles {
         }
         int perNode = Math.max(1, Math.min(MAX_QUERIES_PER_NODE_AND_CYCLE, caps.getQueriesPerNode()));
         return new ConceptQueryPlan.Request(record.getLanguage(), "", uncovered, new ArrayList<String>(run),
-                java.util.Collections.<String>emptyList(), perNode, record.getCycle() + 1);
+                java.util.Collections.<String>emptyList(), perNode, record.getCycle() + 1)
+                .withNewTopics(g.getNewTopics());
+    }
+
+    private static ConceptQueryPlan.Node planNode(SearchPlanRecord.Node node, SearchPlanCoverage.NodeCoverage nc,
+                                                  Collection<SearchPlanEntry> entries, SearchPlanCoverage.Caps caps,
+                                                  List<String> evidence) {
+        ConceptQueryPlan.Node concept = node.node();
+        return new ConceptQueryPlan.Node(concept.getId(), concept.getLabel(), concept.getPath(),
+                concept.getParentId(), concept.getBaseQuery(),
+                nc == null ? null : new ArrayList<String>(nc.getDomains()),
+                teamNotes(entries, node.getId(), 2 * Math.max(1, caps.getQueriesPerNode())), evidence);
     }
 
     /**

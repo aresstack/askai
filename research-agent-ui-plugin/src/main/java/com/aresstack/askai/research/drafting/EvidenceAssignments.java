@@ -24,29 +24,36 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         final WriterPackSettings pack;
         final int wordsPerCall;
         final int answerTokens;
+        final com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry;
 
-        public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens) {
+        public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens,
+                       com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry) {
             this.pack = pack;
             this.wordsPerCall = wordsPerCall;
             this.answerTokens = answerTokens;
+            this.carry = carry;
         }
     }
 
     private final SectionContextBuilder packs;
     private final Contexts contexts;
-    private final Targets targets;
+    private final java.util.function.Supplier<Targets> targetSettings;
 
-    public EvidenceAssignments(SectionContextBuilder packs, Contexts contexts, Targets targets) {
+    /** @param targets read for every section, so a changed setting applies to the next section written */
+    public EvidenceAssignments(SectionContextBuilder packs, Contexts contexts,
+                               java.util.function.Supplier<Targets> targets) {
         this.packs = packs;
         this.contexts = contexts;
-        this.targets = targets;
+        this.targetSettings = targets;
     }
 
     public SectionAssignment assignmentFor(SectionWriteRequest request) throws Exception {
+        Targets targets = targetSettings.get();
         EvidencePack pack = packs.build(contexts.requestFor(request), targets.pack);
         SectionAssignment base = SectionWriterInputs.of(pack, request.getSection().getTitle(),
                 request.getSection().getBrief().getPurpose(), request.getSection().getBrief().getKeyPoints(),
-                request.getSection().getBrief().getWordTarget(), targets.wordsPerCall, targets.answerTokens);
+                request.getSection().getBrief().getWordTarget(), targets.wordsPerCall, targets.answerTokens,
+                targets.carry);
         if (!request.isRewrite()) {
             return base;
         }
@@ -54,7 +61,7 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
                 .keyPoints(base.getKeyPoints()).passages(base.getPassages()).synopsis(base.getSynopsis())
                 .previousDigest(base.getPreviousDigest()).glossary(base.getGlossary())
                 .bookLanguage(base.getBookLanguage()).sectionWords(base.getSectionWords())
-                .wordsPerCall(base.getWordsPerCall()).answerTokens(base.getAnswerTokens())
+                .wordsPerCall(base.getWordsPerCall()).answerTokens(base.getAnswerTokens()).carry(base.getCarry())
                 .rewriteComment(request.getComment()).currentText(request.getCurrentText()).build();
     }
 }

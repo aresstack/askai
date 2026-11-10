@@ -56,7 +56,8 @@ public class SectionWriterTest {
         List<EvidencePassage> passages = new ArrayList<EvidencePassage>();
         for (int i = 1; i <= k; i++) {
             passages.add(new EvidencePassage(i, "src-" + i, "sha-" + i, "p-" + i,
-                    "Passage " + i + " says the rate rose to 15.5 percent in 2020."));
+                    "Passage " + i + " sagt: Die Rate stieg auf 15,5 % im Jahr 2020 weiter, danach kam ein "
+                            + "Rückgang (Teil eins und Teil zwei)."));
         }
         return passages;
     }
