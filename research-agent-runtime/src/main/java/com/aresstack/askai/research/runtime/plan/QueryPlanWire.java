@@ -50,6 +50,7 @@ public final class QueryPlanWire {
     static final String AREA = "area";
     static final String EVIDENCE = "evidence";
     static final String NEW_TOPICS = "new_topics";
+    static final String PREFERRED_SOURCES = "preferred_sources";
 
     private static JsonArray array(List<String> values) {
         JsonArray array = new JsonArray();
@@ -95,6 +96,7 @@ public final class QueryPlanWire {
         root.add(BLACKLIST, array(request.getBlacklist()));
         root.addProperty(AREA, request.getArea());
         root.add(NEW_TOPICS, array(request.getNewTopics()));
+        root.add(PREFERRED_SOURCES, array(request.getPreferredSources()));
         JsonArray nodes = new JsonArray();
         for (ConceptQueryPlan.Node node : request.getNodes()) {
             JsonObject n = new JsonObject();
@@ -132,7 +134,7 @@ public final class QueryPlanWire {
                     strings(root, QUERIES_RUN), strings(root, BLACKLIST),
                     max == null || !max.isJsonPrimitive() ? 0 : max.getAsInt(),
                     cycle == null || !cycle.isJsonPrimitive() ? 1 : cycle.getAsInt(), text(root, AREA),
-                    strings(root, NEW_TOPICS));
+                    strings(root, NEW_TOPICS), strings(root, PREFERRED_SOURCES));
         } catch (RuntimeException malformed) {
             throw malformed instanceof IllegalArgumentException ? (IllegalArgumentException) malformed
                     : new IllegalArgumentException(malformed.getMessage(), malformed);

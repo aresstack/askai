@@ -121,6 +121,7 @@ public final class ConceptQueryPlan {
         private final int cycle;
         private final String area;
         private final List<String> newTopics;
+        private final List<String> preferredSources;
 
         /**
          * @param language           the language code the queries must be written in ("de", "en")
@@ -161,6 +162,17 @@ public final class ConceptQueryPlan {
         public Request(String language, String bookTitle, List<Node> nodes, List<String> queriesRun,
                        List<String> blacklist, int maxVariantsPerNode, int cycle, String area,
                        List<String> newTopics) {
+            this(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle, area, newTopics, null);
+        }
+
+        /**
+         * @param preferredSources the sources the mission prefers (publishers, domains, kinds of document); the
+         *                         planner aims queries at them first. Empty when the mission names none.
+         */
+        public Request(String language, String bookTitle, List<Node> nodes, List<String> queriesRun,
+                       List<String> blacklist, int maxVariantsPerNode, int cycle, String area,
+                       List<String> newTopics, List<String> preferredSources) {
+            this.preferredSources = copy(preferredSources);
             this.newTopics = copy(newTopics);
             this.area = area == null ? "" : area.trim();
             this.language = text(language);
@@ -176,19 +188,30 @@ public final class ConceptQueryPlan {
         /** The same request with the book title and blacklist of the frozen concept (the host fills them in). */
         public Request withBook(String title, List<String> terms) {
             return new Request(language, title, nodes, queriesRun, terms, maxVariantsPerNode, cycle, area,
-                    newTopics);
+                    newTopics, preferredSources);
         }
 
         /** The same request with the book's Weidezaun (the host fills it in before sending). */
         public Request withArea(String renderedScope) {
             return new Request(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle,
-                    renderedScope, newTopics);
+                    renderedScope, newTopics, preferredSources);
         }
 
         /** The same request with the new topics of the evidence analysis. */
         public Request withNewTopics(List<String> topics) {
             return new Request(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle, area,
-                    topics);
+                    topics, preferredSources);
+        }
+
+        /** The same request with the sources the mission prefers (the host fills them in before sending). */
+        public Request withPreferredSources(List<String> sources) {
+            return new Request(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle, area,
+                    newTopics, sources);
+        }
+
+        /** The sources the mission prefers; empty when none. */
+        public List<String> getPreferredSources() {
+            return preferredSources;
         }
 
         /** The topics beyond the concept nodes inside the Weidezaun; empty when none. */

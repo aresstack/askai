@@ -1823,6 +1823,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         return researchArea();
                     }
                 });
+        // the mission's preferred sources reach the planner too, at the seed plan and at every later cycle
+        queryPlanner.setPreferenceSource(
+                new com.aresstack.askai.research.plan.BackendQueryPlanner.PreferenceSource() {
+                    public java.util.List<String> preferredSources() {
+                        return sourcePreference().getTerms();
+                    }
+                });
         final java.util.concurrent.atomic.AtomicReference<com.aresstack.askai.research.search.ManualWebSearchHandle>
                 running = new java.util.concurrent.atomic.AtomicReference<
                         com.aresstack.askai.research.search.ManualWebSearchHandle>();
