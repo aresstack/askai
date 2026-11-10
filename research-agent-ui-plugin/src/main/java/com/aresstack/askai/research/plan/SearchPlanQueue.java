@@ -329,6 +329,8 @@ public final class SearchPlanQueue {
     private final Replanner replanner;
     private volatile SearchPlanCoverage.Caps caps;
     private volatile Team team = Team.OFF;
+    /** The mission's source preference: its publisher queries join every later research cycle. */
+    private volatile SourcePreference preference = SourcePreference.NONE;
     private volatile GapReview gapReview = GapReview.NONE;
     /** The gaps the running re-plan was asked for (the decision of this cycle boundary). */
     private EvidenceGaps.Gaps replanGaps = EvidenceGaps.Gaps.NONE;
@@ -380,6 +382,11 @@ public final class SearchPlanQueue {
         if (caps != null) {
             this.caps = caps;
         }
+    }
+
+    /** The mission's source preference for the later research cycles; {@code null} = none. */
+    public void setSourcePreference(SourcePreference preference) {
+        this.preference = preference == null ? SourcePreference.NONE : preference;
     }
 
     /** The research team (plan T5); {@link Team#OFF} keeps one entry at a time. */
@@ -1021,7 +1028,7 @@ public final class SearchPlanQueue {
                     return;
                 }
                 SearchPlanCycles.Result cycle = SearchPlanCycles.apply(record, all.values(), request, result,
-                        request.getBlacklist(), ids(), clock.now());
+                        request.getBlacklist(), ids(), clock.now(), preference);
                 if (cycle.getAdded().isEmpty()) {
                     running = false;
                     SearchPlanCoverage.Caps c = caps;

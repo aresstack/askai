@@ -144,9 +144,28 @@ public final class SearchPlanCycles {
     public static Result apply(SearchPlanRecord record, Collection<SearchPlanEntry> entries,
                                ConceptQueryPlan.Request request, ConceptQueryPlan.Result answer,
                                List<String> blacklist, SearchPlanMerger.IdSource ids, long nowMillis) {
+        return apply(record, entries, request, answer, blacklist, ids, nowMillis, SourcePreference.NONE);
+    }
+
+    /**
+     * Like {@link #apply(SearchPlanRecord, Collection, ConceptQueryPlan.Request, ConceptQueryPlan.Result, List,
+     * SearchPlanMerger.IdSource, long)}, and every requested node also gets the mission's publisher queries of this
+     * cycle ({@link SourcePreference#queriesFor}), next to the planner's budget: whatever the planner was told (gaps,
+     * worker notes, new topics), the deepening goes to the preferred sources too. With a preference a cycle starts
+     * even when the planner gave no answer.
+     */
+    public static Result apply(SearchPlanRecord record, Collection<SearchPlanEntry> entries,
+                               ConceptQueryPlan.Request request, ConceptQueryPlan.Result answer,
+                               List<String> blacklist, SearchPlanMerger.IdSource ids, long nowMillis,
+                               SourcePreference preference) {
         List<SearchPlanEntry> added = new ArrayList<SearchPlanEntry>();
-        if (answer == null) {
+        SourcePreference prefer = preference == null ? SourcePreference.NONE : preference;
+        if (answer == null && prefer.getTargets().isEmpty()) {
             return new Result(record, added);
+        }
+        List<String> requestedOrder = new ArrayList<String>();
+        for (ConceptQueryPlan.Node node : request.getNodes()) {
+            requestedOrder.add(node.getId());
         }
         Set<String> known = new HashSet<String>();
         for (SearchPlanEntry entry : entries) {
@@ -157,7 +176,9 @@ public final class SearchPlanCycles {
             requested.add(node.getId());
         }
         int perNode = Math.max(1, request.getMaxVariantsPerNode());
-        for (ConceptQueryPlan.NodePlan plan : answer.getNodes()) {
+        List<ConceptQueryPlan.NodePlan> plans = answer == null
+                ? java.util.Collections.<ConceptQueryPlan.NodePlan>emptyList() : answer.getNodes();
+        for (ConceptQueryPlan.NodePlan plan : plans) {
             if (!requested.contains(plan.getNodeId())) {
                 continue; // never a node the cycle did not ask for
             }
@@ -178,6 +199,23 @@ public final class SearchPlanCycles {
                 added.add(SearchPlanEntry.submit(ids.next(), record.getPhase(), node.getId(), node.getLabel(),
                         cleaned, SearchPlanEntry.Origin.CYCLE, nowMillis));
                 count++;
+            }
+        }
+        // The mission's publishers for every node of the cycle, also one the planner left without a query: a
+        // different publisher is a new angle, and it lets a cycle start when the planner is unavailable.
+        for (int i = 0; i < requestedOrder.size(); i++) {
+            SearchPlanRecord.Node node = record.node(requestedOrder.get(i));
+            if (node == null || !node.isActive()) {
+                continue;
+            }
+            for (String query : prefer.queriesFor(node.getBaseQuery(), i, request.getCycle())) {
+                String cleaned = ConceptPlanNodes.removeTerms(query, blacklist);
+                if (cleaned.length() < ConceptQueryPlan.MIN_QUERY_LENGTH
+                        || cleaned.length() > ConceptQueryPlan.MAX_QUERY_LENGTH || !known.add(key(cleaned))) {
+                    continue;
+                }
+                added.add(SearchPlanEntry.submit(ids.next(), record.getPhase(), node.getId(), node.getLabel(),
+                        cleaned, SearchPlanEntry.Origin.CYCLE, nowMillis));
             }
         }
         if (added.isEmpty()) {

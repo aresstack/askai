@@ -93,6 +93,12 @@ public final class ResearchServiceCommand {
     private int teamWorkers;
     /** Plan T4: at most this many new search queries a page worker may suggest per page. */
     private int teamSearches;
+    /** The mission's preferred hosts and host suffixes (the ranking moves them up); empty = none. */
+    private java.util.List<String> preferredHosts = java.util.Collections.emptyList();
+    /** The URL parts of vendor pages (the ranking moves them down); empty = none. */
+    private java.util.List<String> demotedMarkers = java.util.Collections.emptyList();
+    /** The places a preferred hit moves up and a vendor page moves down; 0 = the ranking stays as it is. */
+    private int preferenceShift;
     private final String type;
     private final String requestId;
     private final String query;
@@ -177,6 +183,30 @@ public final class ResearchServiceCommand {
         copy.teamWorkers = Math.max(0, workers);
         copy.teamSearches = Math.max(0, searches);
         return copy;
+    }
+
+    /** This command with the mission's source preference for the ranking of a planned query's hits. */
+    public ResearchServiceCommand withSourcePreference(java.util.List<String> hosts, java.util.List<String> demoted,
+                                                       int shift) {
+        ResearchServiceCommand copy = withTeamLanes(teamWorkers, teamSearches);
+        copy.preferredHosts = hosts == null ? java.util.Collections.<String>emptyList()
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<String>(hosts));
+        copy.demotedMarkers = demoted == null ? java.util.Collections.<String>emptyList()
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<String>(demoted));
+        copy.preferenceShift = Math.max(0, shift);
+        return copy;
+    }
+
+    public java.util.List<String> getPreferredHosts() {
+        return preferredHosts;
+    }
+
+    public java.util.List<String> getDemotedMarkers() {
+        return demotedMarkers;
+    }
+
+    public int getPreferenceShift() {
+        return preferenceShift;
     }
 
     public int getTeamWorkers() {

@@ -58,7 +58,22 @@ public final class ResearchServiceCommandWire {
                         (int) Math.min(Integer.MAX_VALUE, parseLong(fields.get("page_chars"))),
                         (int) Math.min(Integer.MAX_VALUE, parseLong(fields.get("answer_tokens"))))
                 .withTeamLanes((int) Math.min(Integer.MAX_VALUE, parseLong(fields.get("workers"))),
-                        (int) Math.min(Integer.MAX_VALUE, parseLong(fields.get("searches"))));
+                        (int) Math.min(Integer.MAX_VALUE, parseLong(fields.get("searches"))))
+                .withSourcePreference(list(decode(fields.get("prefer"))), list(decode(fields.get("demote"))),
+                        (int) Math.min(Integer.MAX_VALUE, parseLong(fields.get("prefer_shift"))));
+    }
+
+    /** A comma-joined list field; empty when absent. */
+    private static java.util.List<String> list(String joined) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (joined != null) {
+            for (String part : joined.split(",")) {
+                if (!part.trim().isEmpty()) {
+                    out.add(part.trim());
+                }
+            }
+        }
+        return out;
     }
 
     /** An absent or malformed pin means "no bound" — a review still reads, it just reads everything. */

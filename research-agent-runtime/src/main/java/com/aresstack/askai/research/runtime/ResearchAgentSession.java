@@ -415,7 +415,7 @@ public final class ResearchAgentSession {
         if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.RANKING_BM25
                 .equals(command.getRanking())) {
             return com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker.keywords(bm25Reranker,
-                    command.getVisitLimit());
+                    command.getVisitLimit()).withSourcePreference(sourcePreference(command));
         }
         com.aresstack.askai.research.runtime.rerank.CandidateReranker crossEncoder;
         try {
@@ -426,7 +426,14 @@ public final class ResearchAgentSession {
             crossEncoder = null;
         }
         return com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker.ranked(crossEncoder, bm25Reranker,
-                command.getVisitLimit());
+                command.getVisitLimit()).withSourcePreference(sourcePreference(command));
+    }
+
+    /** The mission's source preference a planned query carries ({@code NONE} when it carries none). */
+    private static com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking sourcePreference(
+            com.aresstack.askai.research.runtime.service.ResearchServiceCommand command) {
+        return new com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking(command.getPreferredHosts(),
+                command.getDemotedMarkers(), command.getPreferenceShift());
     }
 
     /** The installed cross-encoder of a language, independent of "Use AI reranker"; {@code null} when none. */

@@ -177,6 +177,28 @@ public final class SectionWritingJob {
         return titles;
     }
 
+    /** What the writer left in each section of the outline, in outline order ({@link WriterGaps}). */
+    public List<WriterGaps.Section> writerSections(Outline approved) {
+        List<WriterGaps.Section> out = new ArrayList<WriterGaps.Section>();
+        for (Target target : targets(approved)) {
+            String id = target.section.getId();
+            ManuscriptSection state = manuscript.store().section(id);
+            if (state == null) {
+                continue;
+            }
+            List<String> gaps = new ArrayList<String>();
+            if (state.hasText()) {
+                SectionRevision revision = manuscript.store().revision(id, state.getRevision());
+                if (revision != null) {
+                    gaps.addAll(revision.getGaps());
+                }
+            }
+            out.add(new WriterGaps.Section(id, target.section.getTitle(),
+                    !state.hasText() && state.getStatus() == SectionStatus.FAILED, state.getReason(), gaps));
+        }
+        return out;
+    }
+
     // ------------------------------------------------------------------ the run
 
     private WritingOutcome run(Outline approved, List<Target> targets, String role, String comment) {

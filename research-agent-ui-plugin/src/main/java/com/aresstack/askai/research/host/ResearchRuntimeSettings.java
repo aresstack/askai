@@ -603,7 +603,140 @@ public final class ResearchRuntimeSettings {
                 loadPositiveInt(store, KEY_PLAN_SOURCES_PER_NODE, DEFAULT_PLAN_SOURCES_PER_NODE),
                 loadPositiveInt(store, KEY_PLAN_QUERIES_PER_NODE, DEFAULT_PLAN_QUERIES_PER_NODE),
                 loadPositiveInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES),
-                loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES));
+                loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES))
+                .withPreferenceQueries(loadSourcePreferenceEnabled(store)
+                        ? loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_QUERIES, DEFAULT_SOURCE_PREFERENCE_QUERIES)
+                        : 0);
+    }
+
+    // ------------------------------------------------------------------ Sources: the mission's source preference
+    /**
+     * Whether the mission's source preference ("Bevorzuge … (DGUV, BAuA, EU-OSHA, Gesetze, Studien)") steers the
+     * search plan: publisher queries per node and cycle and a ranking that moves preferred hosts up and vendor pages
+     * down. Default ON: the 2026-11-10 live run cited no single preferred source although the mission named five.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_ENABLED = "research.sources.preferMissionSources";
+    /** The words that open the preference clause of a mission. */
+    public static final String KEY_SOURCE_PREFERENCE_CUES = "research.sources.preferenceCues";
+    public static final String DEFAULT_SOURCE_PREFERENCE_CUES =
+            "bevorzuge, bevorzugt, vorzugsweise, vorrangig, prefer, preferably, favour, favor";
+    /**
+     * Publisher name → domain, for the {@code site:} queries and the ranking. The defaults are the German and
+     * European authorities, insurers and standards bodies a German non-fiction book cites most; the user edits the
+     * list for other fields. A domain written in the mission itself needs no entry.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_PUBLISHERS = "research.sources.publisherDomains";
+    public static final String DEFAULT_SOURCE_PREFERENCE_PUBLISHERS = "DGUV=dguv.de, BAuA=baua.de, "
+            + "EU-OSHA=osha.europa.eu, Gesetze=gesetze-im-internet.de, Gesetz=gesetze-im-internet.de, "
+            + "EUR-Lex=eur-lex.europa.eu, DIN=din.de, ISO=iso.org, BSI=bsi.bund.de, Destatis=destatis.de, "
+            + "Eurostat=ec.europa.eu, RKI=rki.de, BfDI=bfdi.bund.de, EDPB=edpb.europa.eu";
+    /** Host suffixes of authorities that move up in the ranking whatever the mission says. */
+    public static final String KEY_SOURCE_PREFERENCE_AUTHORITY_HOSTS = "research.sources.authorityHosts";
+    public static final String DEFAULT_SOURCE_PREFERENCE_AUTHORITY_HOSTS =
+            ".bund.de, .europa.eu, .gv.at, .admin.ch, .gov, .gov.uk, .edu";
+    /** URL parts of vendor pages (blog, product, solution, shop) that move down in the ranking, never out. */
+    public static final String KEY_SOURCE_PREFERENCE_DEMOTED = "research.sources.demotedUrlParts";
+    public static final String DEFAULT_SOURCE_PREFERENCE_DEMOTED = "/blog, /news/, /produkt, /product, /loesung, "
+            + "/lösung, /solution, /shop, /kontakt, /contact, /demo";
+    /**
+     * The publisher queries per node and research cycle, on top of "Queries per node". Default 1: each cycle asks
+     * the next preferred publisher for every node, so three cycles reach three publishers without doubling the plan.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_QUERIES = "research.sources.preferenceQueriesPerNode";
+    public static final int DEFAULT_SOURCE_PREFERENCE_QUERIES = 1;
+    /**
+     * The places a preferred hit moves up and a vendor page moves down among the selected hits of a planned query.
+     * Default 3: a guideline ranked fifth opens before a vendor blog ranked second, the clearly best hit stays first.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_RANK_SHIFT = "research.sources.preferenceRankShift";
+    public static final int DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT = 3;
+
+    public static boolean loadSourcePreferenceEnabled(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_SOURCE_PREFERENCE_ENABLED, true);
+    }
+
+    public static void saveSourcePreferenceEnabled(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_SOURCE_PREFERENCE_ENABLED, enabled);
+        }
+    }
+
+    /** A comma-separated list setting; the default when unset. */
+    public static String loadText(WorkspaceStateStore store, String key, String fallback) {
+        if (store == null) {
+            return fallback;
+        }
+        String value = store.get(key, null);
+        return value == null ? fallback : value;
+    }
+
+    public static void saveText(WorkspaceStateStore store, String key, String value) {
+        if (store != null) {
+            store.put(key, value == null ? "" : value.trim());
+        }
+    }
+
+    /** The items of a comma-separated list. */
+    public static java.util.List<String> items(String text) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (text != null) {
+            for (String part : text.split(",")) {
+                if (!part.trim().isEmpty()) {
+                    out.add(part.trim());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The settings of the mission's source preference. */
+    public static com.aresstack.askai.research.plan.SourcePreference.Settings loadSourcePreference(
+            WorkspaceStateStore store) {
+        java.util.Map<String, String> publishers = new java.util.LinkedHashMap<String, String>();
+        for (String pair : items(loadText(store, KEY_SOURCE_PREFERENCE_PUBLISHERS,
+                DEFAULT_SOURCE_PREFERENCE_PUBLISHERS))) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                publishers.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+            }
+        }
+        return new com.aresstack.askai.research.plan.SourcePreference.Settings(
+                loadSourcePreferenceEnabled(store),
+                items(loadText(store, KEY_SOURCE_PREFERENCE_CUES, DEFAULT_SOURCE_PREFERENCE_CUES)),
+                publishers,
+                items(loadText(store, KEY_SOURCE_PREFERENCE_AUTHORITY_HOSTS, DEFAULT_SOURCE_PREFERENCE_AUTHORITY_HOSTS)),
+                items(loadText(store, KEY_SOURCE_PREFERENCE_DEMOTED, DEFAULT_SOURCE_PREFERENCE_DEMOTED)),
+                loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_QUERIES, DEFAULT_SOURCE_PREFERENCE_QUERIES),
+                loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_RANK_SHIFT, DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT));
+    }
+
+    // ------------------------------------------------------------------ Document: writer gaps → research
+    /**
+     * Whether the gaps the writer left (its {@code GAP:} lines, sections it could not write for lack of evidence)
+     * are researched on their own after a writing job, as "Research this gap" entries of the search plan. Default
+     * ON: M2 asks the app to research its own gaps without a human; live run 3 ended with four open points nobody
+     * searched for.
+     */
+    public static final String KEY_WRITER_GAP_RESEARCH = "research.document.researchWriterGaps";
+    /**
+     * The most gaps one writing job sends to research. Default 6: one or two per section of a short book, few enough
+     * that the search plan's phase budget is not spent on a single job's open points.
+     */
+    public static final String KEY_WRITER_GAP_MAX = "research.document.writerGapsPerJob";
+    public static final int DEFAULT_WRITER_GAP_MAX = 6;
+    /** Words in a writer failure that mean "not enough evidence" (the failed section becomes a gap). */
+    public static final String KEY_WRITER_GAP_EVIDENCE_WORDS = "research.document.evidenceFailureWords";
+    public static final String DEFAULT_WRITER_GAP_EVIDENCE_WORDS =
+            "evidence, passage, source, beleg, quelle, citation";
+
+    public static boolean loadWriterGapResearch(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_WRITER_GAP_RESEARCH, true);
+    }
+
+    public static void saveWriterGapResearch(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_WRITER_GAP_RESEARCH, enabled);
+        }
     }
 
     // ------------------------------------------------------------------ Outline: passage assignment

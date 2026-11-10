@@ -19,9 +19,16 @@ public final class GapResearch {
     static final int MAX_QUERY_CHARS = 160;
 
     private final Queue queue;
+    private final com.aresstack.askai.research.plan.SourcePreference preference;
 
     public GapResearch(Queue queue) {
+        this(queue, com.aresstack.askai.research.plan.SourcePreference.NONE);
+    }
+
+    /** @param preference the mission's source preference: its publisher queries join the gap's query */
+    public GapResearch(Queue queue, com.aresstack.askai.research.plan.SourcePreference preference) {
         this.queue = queue;
+        this.preference = preference == null ? com.aresstack.askai.research.plan.SourcePreference.NONE : preference;
     }
 
     /** @return the plan entry id, or a refusal starting with "Not" */
@@ -34,6 +41,11 @@ public final class GapResearch {
         String added = queue.addPriority(id, SectionWritingJob.PHASE, query, "Section: " + sectionTitle);
         if (added == null) {
             return "Not possible: there is no search plan yet.";
+        }
+        String base = query(sectionTitle, gap);
+        for (String variant : preference.queriesFor(base, id.hashCode() & 0x7fff, 1)) {
+            queue.addPriority(id + "-" + Integer.toHexString(variant.hashCode()), SectionWritingJob.PHASE, variant,
+                    "Section: " + sectionTitle);
         }
         queue.run();
         return added;

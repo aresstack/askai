@@ -22,6 +22,7 @@ public final class PlannedQueryReranker implements CandidateReranker {
     private final int visitLimit;
     private final boolean keywordsChosen;
     private final AtomicBoolean fellBack = new AtomicBoolean();
+    private volatile SourcePreferenceRanking preference = SourcePreferenceRanking.NONE;
 
     /**
      * @param primary    the chosen ranking, {@code null} when it could not be built
@@ -51,6 +52,15 @@ public final class PlannedQueryReranker implements CandidateReranker {
         this.keywords = keywords;
         this.visitLimit = Math.max(0, visitLimit);
         this.keywordsChosen = keywordsChosen;
+    }
+
+    /**
+     * The mission's source preference: it weighs the selected hits before the top N are kept, so a preferred
+     * publisher just below the cut is visited instead of a vendor page above it.
+     */
+    public PlannedQueryReranker withSourcePreference(SourcePreferenceRanking ranking) {
+        this.preference = ranking == null ? SourcePreferenceRanking.NONE : ranking;
+        return this;
     }
 
     /** Whether a call of this search was ranked by BM25 because the chosen ranking was unavailable. */
@@ -105,6 +115,12 @@ public final class PlannedQueryReranker implements CandidateReranker {
     }
 
     private SearchResultRerankingResult limited(SearchResultRerankingResult result) {
+        SourcePreferenceRanking p = preference;
+        if (!p.isNone() && result.selected.size() > 1) {
+            result = new SearchResultRerankingResult(result.outcome, result.reranked, p.apply(result.selected),
+                    result.modelName, result.scoreSemantics, result.diagnostics + " (weighed by source preference)",
+                    result.totalDurationNanos, result.loadDurationNanos);
+        }
         if (visitLimit <= 0 || result.selected.size() <= visitLimit) {
             return result;
         }
