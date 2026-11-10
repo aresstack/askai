@@ -107,6 +107,25 @@ public class SidebarTabChromeTest {
         });
     }
 
+    @Test
+    public void documentStartsWithTheSearchBarAndFitsTheSidebar() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            com.aresstack.askai.research.document.DocumentSectionsView view =
+                    new com.aresstack.askai.research.document.DocumentSectionsView();
+            assertNull("nothing sits above the document's search bar",
+                    ((BorderLayout) view.getLayout()).getLayoutComponent(BorderLayout.NORTH));
+            ComicLayoutAudit.overflows(view, WIDTHS[1], HEIGHT);
+            ComicSearchBar search = find(view, ComicSearchBar.class);
+            assertNotNull(search);
+            javax.swing.JTable table = find(view, javax.swing.JTable.class);
+            assertTrue("the list is below the search bar", yIn(view, table) > yIn(view, search));
+            List<AbstractButton> buttons = new ArrayList<AbstractButton>();
+            collectButtons(view, buttons);
+            assertIconButtons(buttons);
+            assertFits(view);
+        });
+    }
+
     private static void collectButtons(Container container, List<AbstractButton> found) {
         for (Component child : container.getComponents()) {
             if (child instanceof ComicSearchBar || child instanceof javax.swing.JScrollBar) {
