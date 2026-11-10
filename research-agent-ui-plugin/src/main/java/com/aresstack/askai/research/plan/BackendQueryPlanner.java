@@ -31,6 +31,17 @@ public final class BackendQueryPlanner implements SearchPlanBuilder.VariantPlann
 
     private volatile AreaSource areaSource;
 
+    /** The sources the mission prefers ({@link SourcePreference#getTerms()}), read at each planner call. */
+    public interface PreferenceSource {
+        java.util.List<String> preferredSources();
+    }
+
+    private volatile PreferenceSource preferenceSource;
+
+    public void setPreferenceSource(PreferenceSource source) {
+        this.preferenceSource = source;
+    }
+
     /** Every request from now on carries the current Weidezaun, at the seed plan and at every later cycle. */
     public void setAreaSource(AreaSource source) {
         this.areaSource = source;
@@ -53,6 +64,11 @@ public final class BackendQueryPlanner implements SearchPlanBuilder.VariantPlann
             String area = source == null ? "" : source.area();
             ConceptQueryPlan.Request fenced = request.getArea().isEmpty() && area != null && !area.trim().isEmpty()
                     ? request.withArea(area) : request;
+            PreferenceSource prefer = preferenceSource;
+            java.util.List<String> preferred = prefer == null ? null : prefer.preferredSources();
+            if (fenced.getPreferredSources().isEmpty() && preferred != null && !preferred.isEmpty()) {
+                fenced = fenced.withPreferredSources(preferred);
+            }
             if (!submitter.submit(ResearchServiceCommandWire.planQueries(requestId,
                     QueryPlanWireCodec.encodeRequest(fenced)))) {
                 return null;

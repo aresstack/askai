@@ -244,4 +244,22 @@ public class QueryPlannerTest {
         assertTrue(!QueryPlanner.conceptPrompt(request.withNewTopics(null), plain, "Kosten",
                 request.getQueriesRun()).contains("WHAT THE MATERIAL SHOWS"));
     }
+
+    @Test
+    public void theMissionsPreferredSourcesReachThePromptAndCrossTheWire() {
+        ConceptQueryPlan.Node node = new ConceptQueryPlan.Node("n1", "Hitze", Arrays.asList("Hitze"), "", "Hitze Bau");
+        ConceptQueryPlan.Request request = new ConceptQueryPlan.Request("de", "Wearables am Bau",
+                Collections.singletonList(node), Collections.<String>emptyList(), Collections.<String>emptyList(), 2, 2)
+                .withPreferredSources(Arrays.asList("DGUV", "BAuA", "wissenschaftliche Studien"))
+                .withArea("IN: Arbeitsschutz");
+        String prompt = QueryPlanner.conceptPrompt(request, node, "Hitze Bau", request.getQueriesRun());
+        assertTrue(prompt, prompt.contains("PREFERRED SOURCES\n- DGUV\n- BAuA\n- wissenschaftliche Studien"));
+        assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("PREFERRED SOURCES"));
+        ConceptQueryPlan.Request crossed = com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(
+                com.aresstack.askai.research.plan.QueryPlanWireCodec.encodeRequest(request));
+        assertEquals(request.getPreferredSources(), crossed.getPreferredSources());
+        assertEquals(request.getPreferredSources(), crossed.withNewTopics(null).getPreferredSources());
+        assertTrue(!QueryPlanner.conceptPrompt(request.withPreferredSources(null), node, "Hitze Bau",
+                request.getQueriesRun()).contains("PREFERRED SOURCES\n"));
+    }
 }

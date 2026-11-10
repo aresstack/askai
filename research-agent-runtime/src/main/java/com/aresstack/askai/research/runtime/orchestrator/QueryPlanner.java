@@ -77,7 +77,11 @@ public final class QueryPlanner {
                     + "nothing yet. Aim the queries at what the material lacks, not at its key terms again, and "
                     + "never repeat a strategy listed as having found nothing.\n"
                     + "- NEW TOPICS IN THE MATERIAL are topics the sources show beyond the concept, inside the area. "
-                    + "Write a query for one only when it belongs to this node.";
+                    + "Write a query for one only when it belongs to this node.\n"
+                    + "- PREFERRED SOURCES, when given, are the publishers, domains and kinds of document the mission "
+                    + "prefers. Aim at least one query at one of them (its name, its domain with site:, or its kind "
+                    + "of document), a different one than the queries already searched; vendor and product pages "
+                    + "are no preferred source.";
 
     /** The answer budget of one concept planner call. */
     public static final int CONCEPT_ANSWER_TOKENS = 256;
@@ -105,6 +109,10 @@ public final class QueryPlanner {
         StringBuilder sb = new StringBuilder("ASPECT\n").append(aspect).append("\n\n");
         if (!brief.isEmpty()) {
             sb.append("BRIEF\n").append(brief).append("\n\n");
+        }
+        if (!request.getPreferredSources().isEmpty()) {
+            appendList(sb, "PREFERRED SOURCES", request.getPreferredSources(), "(none)");
+            sb.append('\n');
         }
         appendList(sb, "ALREADY SEARCHED", searched, "(nothing yet)");
         return sb.append("\nTASK: write the search queries for the aspect.").toString();
