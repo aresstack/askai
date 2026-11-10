@@ -275,6 +275,26 @@ public final class ProductiveResearchSessionResources {
         return topicDiscovery;
     }
 
+    /** D6: the runner of the shared topic analysis; stopped on close. */
+    private volatile com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
+            analysisRunner;
+
+    void setAnalysisRunner(
+            com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
+        this.analysisRunner = runner;
+    }
+
+    /** D6: the processing queue (which accepted sources are still being processed). */
+    private volatile com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue processingQueue;
+
+    void setProcessingQueue(com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue queue) {
+        this.processingQueue = queue;
+    }
+
+    public com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue processingQueue() {
+        return processingQueue;
+    }
+
     void setProjectionRunner(
             com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
         this.projectionRunner = runner;
@@ -840,6 +860,9 @@ public final class ProductiveResearchSessionResources {
         transitions.close();
         // Stop the knowledge worker FIRST (graceful: lets the current job finish). The persistent FIFO and the
         // canonical corpus outlive the session, so a mid-flight job is simply recovered on the next open.
+        if (analysisRunner != null) {
+            analysisRunner.stop();
+        }
         if (projectionRunner != null) {
             projectionRunner.stop();
         }

@@ -1,0 +1,138 @@
+package com.aresstack.askai.research.host;
+
+import com.aresstack.askai.research.book.FrozenConcept;
+import com.aresstack.askai.research.domain.scope.TypedBlacklist;
+import com.aresstack.askai.research.knowledge.EmbeddingPort;
+import com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery;
+import com.aresstack.askai.research.knowledge.processing.live.TopicAnalysisRequest;
+import com.aresstack.askai.research.knowledge.topic.ConceptAnchor;
+import com.aresstack.askai.research.knowledge.topic.ScopeFence;
+import com.aresstack.askai.research.outline.generate.ConceptFrame;
+import com.aresstack.askai.research.outline.generate.OutlineSourceRule;
+import com.aresstack.askai.research.sources.ResearchSourceRecord;
+import com.aresstack.askai.research.store.FileConceptStore;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * D6: the session's side of the shared topic analysis. It reads what the session owns (the approved concept below its
+ * book frame, the eligible sources, the pinned search fence, the sources still being processed and the
+ * {@code research.evidence.*} settings) and hands one {@link TopicAnalysisRequest} to {@link SharedTopicDiscovery};
+ * corpus, clustering, measuring and snapshots stay there. The concept label paths are the only thing embedded (as
+ * queries), once per path and vector world.
+ */
+public final class TopicAnalysisInputs implements SharedTopicDiscovery.AnalysisInputs {
+
+    /** What the inputs read from the session. */
+    public interface Source {
+        /** The Phase-1 record, or {@code null} before the first committed {@code SUBMIT_SCOPE}. */
+        FrozenConcept frozenConcept() throws Exception;
+
+        FileConceptStore conceptStore();
+
+        /** The approved title, "" when the concept has none (the mission is used then). */
+        String approvedTitle(FrozenConcept frozen);
+
+        /** The approved source set (sources pin); empty before one. */
+        Collection<String> pinnedSourceIds() throws Exception;
+
+        Collection<ResearchSourceRecord> sources();
+
+        /** The pinned search fence, or {@code null} without one (the topics are then UNCLASSIFIED). */
+        ScopeFence fence();
+
+        /** Accepted sources still in the processing queue. */
+        Set<String> pendingSourceIds();
+
+        EvidenceAnalysisSettings settings();
+
+        /** The embedding world of the stored passage vectors (the query cache key). */
+        String embeddingFingerprint();
+    }
+
+    private final Source source;
+    private final EmbeddingPort embeddings;
+    private final Map<String, EmbeddingPort.EmbeddingVector> queryCache =
+            new HashMap<String, EmbeddingPort.EmbeddingVector>();
+
+    public TopicAnalysisInputs(Source source, EmbeddingPort embeddings) {
+        this.source = source;
+        this.embeddings = embeddings;
+    }
+
+    public TopicAnalysisRequest request() throws Exception {
+        FrozenConcept frozen = source.frozenConcept();
+        FileConceptStore store = source.conceptStore();
+        if (frozen == null || store == null) {
+            return null;
+        }
+        String title = source.approvedTitle(frozen);
+        if (title == null || title.trim().isEmpty()) {
+            title = frozen.getMission();
+        }
+        ConceptFrame frame = ConceptFrame.of(title, OutlineGeneration.conceptNodes(frozen, store));
+        Collection<ResearchSourceRecord> records = source.sources();
+        Set<String> eligible = OutlineSourceRule.eligible(source.pinnedSourceIds(), records,
+                TypedBlacklist.of(frozen.getPin().getBlacklist()));
+        Map<String, String> domains = new LinkedHashMap<String, String>();
+        for (ResearchSourceRecord record : records) {
+            domains.put(record.getSourceId(), host(record.getUrl()));
+        }
+        EvidenceAnalysisSettings settings = source.settings();
+        return new TopicAnalysisRequest(title, frame.hasFrame(), anchors(frame),
+                frozen.getPin().getWorkingRevision(), source.fence(), eligible, domains, source.pendingSourceIds(),
+                settings.getAnalysis(), settings.getKeyTerms(), settings.getMinimumCorpusPassages(),
+                settings.getEveryNewPassages(), settings.getCorpusLimit());
+    }
+
+    /** The concept nodes below the frame with their query vectors; each label path is embedded once. */
+    private synchronized List<ConceptAnchor> anchors(ConceptFrame frame) {
+        String world = source.embeddingFingerprint();
+        List<String> missing = new ArrayList<String>();
+        for (ConceptFrame.Node node : frame.nodes()) {
+            if (!queryCache.containsKey(world + "\n" + node.getPath()) && !missing.contains(node.getPath())) {
+                missing.add(node.getPath());
+            }
+        }
+        if (!missing.isEmpty()) {
+            List<EmbeddingPort.EmbeddingVector> vectors = embeddings.embedQueries(missing);
+            if (vectors == null || vectors.size() != missing.size()) {
+                throw new IllegalStateException("The embedding model returned "
+                        + (vectors == null ? 0 : vectors.size()) + " vectors for " + missing.size()
+                        + " concept label paths.");
+            }
+            for (int i = 0; i < missing.size(); i++) {
+                queryCache.put(world + "\n" + missing.get(i), vectors.get(i));
+            }
+        }
+        List<ConceptAnchor> anchors = new ArrayList<ConceptAnchor>();
+        for (ConceptFrame.Node node : frame.nodes()) {
+            anchors.add(new ConceptAnchor(node.getId(), node.getLabel(), node.getPath(), node.getDepth(),
+                    node.getParentId(), queryCache.get(world + "\n" + node.getPath())));
+        }
+        return anchors;
+    }
+
+    /** The host of a URL, without "www."; "" when it has none. */
+    static String host(String url) {
+        if (url == null || url.trim().isEmpty()) {
+            return "";
+        }
+        try {
+            String host = new java.net.URI(url.trim()).getHost();
+            if (host == null) {
+                return "";
+            }
+            host = host.toLowerCase(java.util.Locale.ROOT);
+            return host.startsWith("www.") ? host.substring(4) : host;
+        } catch (java.net.URISyntaxException invalid) {
+            return "";
+        }
+    }
+}

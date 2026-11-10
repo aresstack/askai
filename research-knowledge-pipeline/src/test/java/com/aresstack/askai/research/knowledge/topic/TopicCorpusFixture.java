@@ -41,12 +41,13 @@ final class TopicCorpusFixture {
         return nextDirection++;
     }
 
-    /** {@code count} passages repeating one statement, spread over {@code sources} sources. */
-    void redundant(String topic, int count, int sources) {
+    /** {@code count} passages repeating one statement, spread over {@code sources} sources. Returns the base. */
+    int redundant(String topic, int count, int sources) {
         int base = direction();
         for (int i = 0; i < count; i++) {
             add(topic, i % sources, new int[]{base, direction()}, new double[]{1.0, 0.05});
         }
+        return base;
     }
 
     /** {@code aspects} sub-topics of {@code perAspect} distinct passages each. */

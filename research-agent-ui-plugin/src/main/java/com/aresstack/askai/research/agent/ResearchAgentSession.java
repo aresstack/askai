@@ -253,6 +253,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     });
                 }
             });
+            topicDiscovery(); // D6: bind the shared topic analysis to this session's concept, fence and settings
         }
     }
 
@@ -2282,6 +2283,147 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 });
     }
 
+    /**
+     * D6: the session's shared topic discovery with its topic analysis bound to this session's concept, search
+     * fence, eligible sources, pending sources and settings; {@code null} without the knowledge capability. Phase 2
+     * reads {@code latestAnalysis()} and calls {@code requestAtCycleBoundary()} at the end of a research cycle;
+     * the outline generation takes {@code analysisFor(monitor)}.
+     */
+    public synchronized com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery topicDiscovery() {
+        final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
+        if (resources == null || resources.isClosed() || resources.topicDiscovery() == null
+                || resources.outlineEmbeddings() == null) {
+            return null;
+        }
+        com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery discovery =
+                resources.topicDiscovery();
+        if (analysisBoundTo != discovery) {
+            discovery.setAnalysisInputs(new com.aresstack.askai.research.host.TopicAnalysisInputs(
+                    new com.aresstack.askai.research.host.TopicAnalysisInputs.Source() {
+                        public com.aresstack.askai.research.book.FrozenConcept frozenConcept() throws Exception {
+                            return ResearchAgentSession.this.frozenConcept();
+                        }
+
+                        public com.aresstack.askai.research.store.FileConceptStore conceptStore() {
+                            com.aresstack.askai.research.concept.ConceptBranchService service =
+                                    conceptBranchService();
+                            return service == null ? null : service.store();
+                        }
+
+                        public String approvedTitle(com.aresstack.askai.research.book.FrozenConcept frozen) {
+                            return ResearchAgentSession.bookTitle(frozen);
+                        }
+
+                        public java.util.Collection<String> pinnedSourceIds() throws Exception {
+                            return ResearchAgentSession.this.pinnedSourceIds();
+                        }
+
+                        public java.util.Collection<com.aresstack.askai.research.sources.ResearchSourceRecord>
+                                sources() {
+                            return resources.getRepository().find(
+                                    com.aresstack.askai.research.sources.SourceQuery.all());
+                        }
+
+                        public com.aresstack.askai.research.knowledge.topic.ScopeFence fence() {
+                            return currentScopeFence();
+                        }
+
+                        public java.util.Set<String> pendingSourceIds() {
+                            com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue queue =
+                                    resources.processingQueue();
+                            return queue == null ? java.util.Collections.<String>emptySet()
+                                    : queue.pendingSourceIds();
+                        }
+
+                        public com.aresstack.askai.research.host.EvidenceAnalysisSettings settings() {
+                            return hostStateStore == null
+                                    ? com.aresstack.askai.research.host.EvidenceAnalysisSettings.defaults()
+                                    : com.aresstack.askai.research.host.EvidenceAnalysisSettings.load(
+                                            hostStateStore);
+                        }
+
+                        public String embeddingFingerprint() {
+                            String fingerprint = resources.writerEmbeddingFingerprint();
+                            return fingerprint == null ? "" : fingerprint;
+                        }
+                    }, resources.outlineEmbeddings()));
+            analysisBoundTo = discovery;
+        }
+        return discovery;
+    }
+
+    /** The discovery the session's analysis inputs are bound to (a re-attached knowledge pipeline is bound again). */
+    private com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery analysisBoundTo;
+
+    /**
+     * D6: the search fence for the topic analysis: the SAME anchors (concept as IN, blacklist as OUT via
+     * {@code ConceptAnchorProjection}), anchor vector index, embedder and thresholds as the search scope gate
+     * ({@link #searchScopeBeginLine()}); {@code null} without anchors or when they cannot be read (topics are then
+     * UNCLASSIFIED, never guessed).
+     */
+    private com.aresstack.askai.research.knowledge.topic.ScopeFence currentScopeFence() {
+        com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();
+        com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
+        if (coordinator == null || !coordinator.isUsable() || resources == null || resources.isClosed()
+                || resources.getEmbeddingDescriptor() == null) {
+            return null;
+        }
+        com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = coordinator.current();
+        com.aresstack.askai.research.concept.ConceptBranchService conceptService = conceptBranchService();
+        java.util.List<com.aresstack.askai.research.domain.scope.ScopeAnchor> fenceAnchors =
+                com.aresstack.askai.research.scope.ScopeSweepPlanAssembler.combinedAnchors(draft,
+                        com.aresstack.askai.research.scope.ConceptAnchorProjection.anchorsOf(
+                                conceptService == null ? null : conceptService.snapshot().getDocumentJson(),
+                                draft));
+        if (fenceAnchors.isEmpty()) {
+            return null;
+        }
+        java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+        for (com.aresstack.askai.research.domain.scope.ScopeAnchor anchor : fenceAnchors) {
+            labels.put(anchor.getAnchorId(), anchor.getSemanticText());
+        }
+        com.aresstack.askai.research.scope.EmbeddingSnapshotSweepEmbedder embedder =
+                new com.aresstack.askai.research.scope.EmbeddingSnapshotSweepEmbedder(
+                        resources.getEmbeddingDescriptor());
+        try {
+            return new com.aresstack.askai.research.knowledge.topic.ScopeFence(
+                    new com.aresstack.askai.research.store.ScopeAnchorVectorIndex(new java.io.File(
+                            resources.getProjectContext().getProjectDirectory(), "scope-anchor-vectors.json"))
+                            .vectorsFor(fenceAnchors, embedder.modelFingerprint(), embedder),
+                    labels,
+                    com.aresstack.askai.research.host.ResearchRuntimeSettings
+                            .loadScopeSweepConfiguration(getHostStateStore()).fenceThresholds,
+                    draft.getRevision());
+        } catch (java.io.IOException | RuntimeException unreadable) {
+            technicalLog("topic-analysis fence unavailable: " + unreadable.getMessage());
+            return null;
+        }
+    }
+
+    /** The source ids of the approved source set (sources pin); empty before one. */
+    private java.util.List<String> pinnedSourceIds()
+            throws com.aresstack.askai.research.transition.CorruptProjectFileException {
+        java.util.List<String> ids = new java.util.ArrayList<String>();
+        com.aresstack.askai.research.book.BookManifest manifest = bookManifest;
+        com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
+        if (manifest == null || resources == null) {
+            return ids;
+        }
+        final com.aresstack.askai.research.transition.TransitionEngine engine = resources.transitions();
+        com.aresstack.askai.research.book.SourcesPin pin = manifest.validSourcesPin(
+                new com.aresstack.askai.research.book.BookManifest.CommitCheck() {
+                    public boolean isCommitted(String transitionId) {
+                        return engine.isCommitted(transitionId);
+                    }
+                });
+        if (pin != null) {
+            for (com.aresstack.askai.research.book.SourcesPin.Entry entry : pin.getSources()) {
+                ids.add(entry.getSourceId());
+            }
+        }
+        return ids;
+    }
+
     /** Plan PR 22: the outline generation of this session, built on first use; {@code null} without knowledge. */
     private com.aresstack.askai.research.host.OutlineGeneration outlineGeneration;
     private final java.util.concurrent.ExecutorService outlineGenerationExecutor =
@@ -2319,25 +2461,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }
 
                         public java.util.Collection<String> pinnedSourceIds() throws Exception {
-                            java.util.List<String> ids = new java.util.ArrayList<String>();
-                            com.aresstack.askai.research.book.BookManifest manifest = bookManifest;
-                            if (manifest == null) {
-                                return ids;
-                            }
-                            final com.aresstack.askai.research.transition.TransitionEngine engine =
-                                    resources.transitions();
-                            com.aresstack.askai.research.book.SourcesPin pin = manifest.validSourcesPin(
-                                    new com.aresstack.askai.research.book.BookManifest.CommitCheck() {
-                                        public boolean isCommitted(String transitionId) {
-                                            return engine.isCommitted(transitionId);
-                                        }
-                                    });
-                            if (pin != null) {
-                                for (com.aresstack.askai.research.book.SourcesPin.Entry entry : pin.getSources()) {
-                                    ids.add(entry.getSourceId());
-                                }
-                            }
-                            return ids;
+                            return ResearchAgentSession.this.pinnedSourceIds();
                         }
 
                         public java.util.Collection<com.aresstack.askai.research.sources.ResearchSourceRecord>

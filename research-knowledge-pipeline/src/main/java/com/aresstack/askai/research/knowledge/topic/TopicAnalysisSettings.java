@@ -18,10 +18,16 @@ public final class TopicAnalysisSettings {
     public static final double DEFAULT_CONCEPT_THRESHOLD = 0.35;
     /** ... and only with this lead over the second-best node (plan PR 22's provisional value). */
     public static final double DEFAULT_CONCEPT_MARGIN = 0.02;
-    /** A topic or sub-topic needs this many passages to count. */
+    /** Material: a topic, sub-topic or concept node needs this many DISTINCT passages (near duplicates count once). */
     public static final int DEFAULT_MINIMUM_PASSAGES = 3;
-    /** A topic needs this many distinct sources to count. */
+    /** Confirmation: a topic or concept node needs this many distinct sources ... */
     public static final int DEFAULT_MINIMUM_SOURCES = 2;
+    /** ... from this many distinct domains (pages of one site confirm each other only once). */
+    public static final int DEFAULT_MINIMUM_DOMAINS = 2;
+    /** Breadth: a concept node with children needs at least this share of its children covered ... */
+    public static final double DEFAULT_MINIMUM_CHILD_COVERAGE = 0.5;
+    /** ... and no single child may hold more than this share of its distinct material (one-sided evidence). */
+    public static final double DEFAULT_MAXIMUM_DOMINANT_SHARE = 0.75;
     /** A significant topic holding at least this share of the distinct material is a major topic. */
     public static final double DEFAULT_MAJOR_TOPIC_SHARE = 0.15;
     /** Representative passages listed per topic. */
@@ -34,12 +40,16 @@ public final class TopicAnalysisSettings {
     private final double conceptMargin;
     private final int minimumPassages;
     private final int minimumSources;
+    private final int minimumDomains;
+    private final double minimumChildCoverage;
+    private final double maximumDominantShare;
     private final double majorTopicShare;
     private final int representatives;
 
     public TopicAnalysisSettings(double duplicateDistance, double subtopicDistance, double topicGroupDistance,
                                  double conceptThreshold, double conceptMargin, int minimumPassages,
-                                 int minimumSources, double majorTopicShare, int representatives) {
+                                 int minimumSources, int minimumDomains, double minimumChildCoverage,
+                                 double maximumDominantShare, double majorTopicShare, int representatives) {
         if (!(duplicateDistance >= 0 && duplicateDistance < subtopicDistance && subtopicDistance < topicGroupDistance)) {
             throw new IllegalArgumentException("The distances must grow: duplicates " + duplicateDistance
                     + " < sub-topics " + subtopicDistance + " < topic groups " + topicGroupDistance + ".");
@@ -54,6 +64,17 @@ public final class TopicAnalysisSettings {
         this.conceptMargin = Math.max(0, conceptMargin);
         this.minimumPassages = Math.max(1, minimumPassages);
         this.minimumSources = Math.max(1, minimumSources);
+        this.minimumDomains = Math.max(1, minimumDomains);
+        if (!(minimumChildCoverage >= 0 && minimumChildCoverage <= 1)) {
+            throw new IllegalArgumentException("The minimum child coverage must lie in [0, 1]: "
+                    + minimumChildCoverage);
+        }
+        if (!(maximumDominantShare > 0 && maximumDominantShare <= 1)) {
+            throw new IllegalArgumentException("The maximum dominant share must lie in (0, 1]: "
+                    + maximumDominantShare);
+        }
+        this.minimumChildCoverage = minimumChildCoverage;
+        this.maximumDominantShare = maximumDominantShare;
         this.majorTopicShare = majorTopicShare;
         this.representatives = Math.max(1, representatives);
     }
@@ -62,7 +83,8 @@ public final class TopicAnalysisSettings {
     public static TopicAnalysisSettings defaults() {
         return new TopicAnalysisSettings(DEFAULT_DUPLICATE_DISTANCE, DEFAULT_SUBTOPIC_DISTANCE,
                 DEFAULT_TOPIC_GROUP_DISTANCE, DEFAULT_CONCEPT_THRESHOLD, DEFAULT_CONCEPT_MARGIN,
-                DEFAULT_MINIMUM_PASSAGES, DEFAULT_MINIMUM_SOURCES, DEFAULT_MAJOR_TOPIC_SHARE,
+                DEFAULT_MINIMUM_PASSAGES, DEFAULT_MINIMUM_SOURCES, DEFAULT_MINIMUM_DOMAINS,
+                DEFAULT_MINIMUM_CHILD_COVERAGE, DEFAULT_MAXIMUM_DOMINANT_SHARE, DEFAULT_MAJOR_TOPIC_SHARE,
                 DEFAULT_REPRESENTATIVES);
     }
 
@@ -92,6 +114,28 @@ public final class TopicAnalysisSettings {
 
     public int getMinimumSources() {
         return minimumSources;
+    }
+
+    public int getMinimumDomains() {
+        return minimumDomains;
+    }
+
+    /** Material coverage: enough DISTINCT passages. */
+    public boolean isMaterialCovered(int distinctPassages) {
+        return distinctPassages >= minimumPassages;
+    }
+
+    /** Source confirmation: enough distinct sources from enough distinct domains. */
+    public boolean isSourceConfirmed(int sources, int domains) {
+        return sources >= minimumSources && domains >= minimumDomains;
+    }
+
+    public double getMinimumChildCoverage() {
+        return minimumChildCoverage;
+    }
+
+    public double getMaximumDominantShare() {
+        return maximumDominantShare;
     }
 
     public double getMajorTopicShare() {

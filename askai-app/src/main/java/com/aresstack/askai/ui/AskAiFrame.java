@@ -1483,9 +1483,10 @@ public final class AskAiFrame extends JFrame {
                 (VirtualOllamaContainerService) ollamaService);
         // The read-aloud voices (Piper) are installed under Models > Setup > Voices (one section for the whole
         // application); every chat's voice selector follows installs/removals there.
-        // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
+        // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5). A slot's
+        // model is picked from the installed chat-capable models (the same catalog as the chat's model list).
         aiModelsPanel.addSection(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
-                .inConfigurationDirectory()));
+                .inConfigurationDirectory(), ((VirtualOllamaContainerService) ollamaService)::loadChatModelNamesNow));
         chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsPanel));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
         chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,
