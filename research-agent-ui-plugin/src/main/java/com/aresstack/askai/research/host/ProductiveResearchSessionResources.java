@@ -284,6 +284,14 @@ public final class ProductiveResearchSessionResources {
         this.analysisRunner = runner;
     }
 
+    /** D6: ask the analysis runner for one check (after the session bound its inputs); no-op without a runner. */
+    public void analysisInputsChanged() {
+        com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner = analysisRunner;
+        if (runner != null) {
+            runner.knowledgeChanged();
+        }
+    }
+
     /** D6: the processing queue (which accepted sources are still being processed). */
     private volatile com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue processingQueue;
 
