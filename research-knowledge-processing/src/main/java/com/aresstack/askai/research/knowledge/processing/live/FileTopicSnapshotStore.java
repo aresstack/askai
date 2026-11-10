@@ -107,6 +107,167 @@ public final class FileTopicSnapshotStore {
         }
     }
 
+    // ------------------------------------------------------------------ D6: the analysis history
+
+    /** The directory of the analysis history, next to the topic snapshot. */
+    private static final String ANALYSIS_DIR = "topic-analysis";
+
+    /** One persisted analysis as the history shows it: identity, revisions and per-node / per-topic results. */
+    public static final class AnalysisRecord {
+        public final String id;
+        public final int analysisVersion;
+        public final long createdAt;
+        public final String corpusFingerprint;
+        public final String embeddingFingerprint;
+        public final long conceptRevision;
+        public final long scopeRevision;
+        public final int passages;
+        public final int omittedPassages;
+        public final List<String> pendingSourceIds;
+        /** Concept node id to its evidence status name (MISSING, REDUNDANT, THIN, UNCONFIRMED, ONE_SIDED, OK). */
+        public final java.util.Map<String, String> nodeStatus;
+        public final int topicCount;
+        public final int novelAreaCount;
+
+        AnalysisRecord(String id, int analysisVersion, long createdAt, String corpusFingerprint,
+                       String embeddingFingerprint, long conceptRevision, long scopeRevision, int passages,
+                       int omittedPassages, List<String> pendingSourceIds, java.util.Map<String, String> nodeStatus,
+                       int topicCount, int novelAreaCount) {
+            this.id = id;
+            this.analysisVersion = analysisVersion;
+            this.createdAt = createdAt;
+            this.corpusFingerprint = corpusFingerprint;
+            this.embeddingFingerprint = embeddingFingerprint;
+            this.conceptRevision = conceptRevision;
+            this.scopeRevision = scopeRevision;
+            this.passages = passages;
+            this.omittedPassages = omittedPassages;
+            this.pendingSourceIds = java.util.Collections.unmodifiableList(pendingSourceIds);
+            this.nodeStatus = java.util.Collections.unmodifiableMap(nodeStatus);
+            this.topicCount = topicCount;
+            this.novelAreaCount = novelAreaCount;
+        }
+    }
+
+    /**
+     * Persists one analysis under its id. A snapshot is immutable: an existing file is never overwritten (the same
+     * id is the same state), so the history shows every state the research went through.
+     */
+    public synchronized void saveAnalysis(TopicAnalysisSnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        File dir = new File(file.getParentFile(), ANALYSIS_DIR);
+        File target = new File(dir, snapshot.getId() + ".properties");
+        if (target.isFile()) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        line(sb, "schemaVersion", Integer.toString(SCHEMA_VERSION));
+        line(sb, "id", snapshot.getId());
+        line(sb, "analysisVersion", Integer.toString(snapshot.getAnalysisVersion()));
+        line(sb, "createdAt", Long.toString(snapshot.getCreatedAt()));
+        line(sb, "corpusFingerprint", snapshot.getCorpusFingerprint());
+        line(sb, "embeddingFingerprint", snapshot.getEmbeddingFingerprint());
+        line(sb, "conceptRevision", Long.toString(snapshot.getConceptRevision()));
+        line(sb, "scopeRevision", Long.toString(snapshot.getScopeRevision()));
+        line(sb, "bookTitle", snapshot.getBookTitle());
+        line(sb, "bookFrame", Boolean.toString(snapshot.hasBookFrame()));
+        line(sb, "passages", Integer.toString(snapshot.getPassages()));
+        line(sb, "omittedPassages", Integer.toString(snapshot.getOmittedPassages()));
+        line(sb, "pendingSources", join(new ArrayList<String>(snapshot.getPendingSourceIds())));
+        List<com.aresstack.askai.research.knowledge.topic.EvidenceReport.NodeEvidence> nodes = snapshot.nodes();
+        line(sb, "nodeCount", Integer.toString(nodes.size()));
+        for (int i = 0; i < nodes.size(); i++) {
+            com.aresstack.askai.research.knowledge.topic.EvidenceReport.NodeEvidence node = nodes.get(i);
+            line(sb, "n." + i + ".id", node.getAnchorId());
+            line(sb, "n." + i + ".path", node.getPath());
+            line(sb, "n." + i + ".status", node.getStatus().name());
+            line(sb, "n." + i + ".passages", Integer.toString(node.getPassages()));
+            line(sb, "n." + i + ".distinct", Integer.toString(node.getDistinctPassages()));
+            line(sb, "n." + i + ".sources", Integer.toString(node.getSources()));
+            line(sb, "n." + i + ".domains", Integer.toString(node.getDomains()));
+            line(sb, "n." + i + ".keyTerms", join(node.getKeyTerms()));
+        }
+        List<com.aresstack.askai.research.knowledge.topic.TopicProfile> topics = snapshot.analysis().getTopics();
+        line(sb, "topicCount", Integer.toString(topics.size()));
+        for (int i = 0; i < topics.size(); i++) {
+            com.aresstack.askai.research.knowledge.topic.TopicProfile topic = topics.get(i);
+            line(sb, "t." + i + ".id", topic.getTopicId());
+            line(sb, "t." + i + ".title", topic.getTitle());
+            line(sb, "t." + i + ".passages", Integer.toString(topic.getPassageCount()));
+            line(sb, "t." + i + ".distinct", Integer.toString(topic.getDistinctPassageCount()));
+            line(sb, "t." + i + ".sources", Integer.toString(topic.getSourceCount()));
+            line(sb, "t." + i + ".domains", Integer.toString(topic.getDomainCount()));
+            line(sb, "t." + i + ".subtopics", Integer.toString(topic.getSubtopics().size()));
+            line(sb, "t." + i + ".group", topic.getGroupId());
+            line(sb, "t." + i + ".concept", topic.isConceptAligned() ? topic.getConceptAnchorId() : "");
+            line(sb, "t." + i + ".significant", Boolean.toString(topic.isSignificant()));
+            line(sb, "t." + i + ".novel", Boolean.toString(topic.isNovel()));
+            line(sb, "t." + i + ".scope", topic.getScopeAlignment().getVerdict().name());
+            line(sb, "t." + i + ".members", join(topic.getPassageIds()));
+        }
+        line(sb, "novelAreaCount", Integer.toString(snapshot.novelAreas().size()));
+        try {
+            if (!dir.isDirectory() && !dir.mkdirs()) {
+                return;
+            }
+            File tmp = new File(dir, snapshot.getId() + ".properties.tmp");
+            OutputStream out = new FileOutputStream(tmp);
+            try {
+                out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+            } finally {
+                out.close();
+            }
+            Files.move(tmp.toPath(), target.toPath());
+        } catch (Exception writeFailed) {
+            System.err.println("[topic-analysis] history not written: " + writeFailed.getMessage());
+        }
+    }
+
+    /** Every persisted analysis, oldest first; unreadable files are skipped. */
+    public synchronized List<AnalysisRecord> analysisHistory() {
+        List<AnalysisRecord> records = new ArrayList<AnalysisRecord>();
+        File[] files = new File(file.getParentFile(), ANALYSIS_DIR).listFiles();
+        if (files == null) {
+            return records;
+        }
+        for (File f : files) {
+            if (!f.getName().endsWith(".properties")) {
+                continue;
+            }
+            try {
+                Properties p = new Properties();
+                p.putAll(Utf8Properties.load(f));
+                java.util.Map<String, String> statuses = new java.util.LinkedHashMap<String, String>();
+                int nodes = Integer.parseInt(p.getProperty("nodeCount", "0"));
+                for (int i = 0; i < nodes; i++) {
+                    statuses.put(p.getProperty("n." + i + ".id", ""), p.getProperty("n." + i + ".status", ""));
+                }
+                records.add(new AnalysisRecord(p.getProperty("id", ""),
+                        Integer.parseInt(p.getProperty("analysisVersion", "0")),
+                        Long.parseLong(p.getProperty("createdAt", "0")), p.getProperty("corpusFingerprint", ""),
+                        p.getProperty("embeddingFingerprint", ""),
+                        Long.parseLong(p.getProperty("conceptRevision", "0")),
+                        Long.parseLong(p.getProperty("scopeRevision", "-1")),
+                        Integer.parseInt(p.getProperty("passages", "0")),
+                        Integer.parseInt(p.getProperty("omittedPassages", "0")),
+                        split(p.getProperty("pendingSources", "")), statuses,
+                        Integer.parseInt(p.getProperty("topicCount", "0")),
+                        Integer.parseInt(p.getProperty("novelAreaCount", "0"))));
+            } catch (Exception unreadable) {
+                // one broken history file never hides the others
+            }
+        }
+        java.util.Collections.sort(records, new java.util.Comparator<AnalysisRecord>() {
+            public int compare(AnalysisRecord a, AnalysisRecord b) {
+                int byTime = Long.compare(a.createdAt, b.createdAt);
+                return byTime != 0 ? byTime : a.id.compareTo(b.id);
+            }
+        });
+        return records;
+    }
+
     private static void line(StringBuilder sb, String key, String value) {
         sb.append(key).append('=')
                 .append(value == null ? "" : value.replace("\\", "\\\\").replace("\n", "\\n"))

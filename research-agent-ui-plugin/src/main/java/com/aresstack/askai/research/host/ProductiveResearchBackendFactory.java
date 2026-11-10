@@ -933,6 +933,7 @@ public final class ProductiveResearchBackendFactory {
                     acceptance, projectContext, control, bridge,
                     browser, backend, service);
             resources.setSearchProfile(profile);
+            resources.setProcessingQueue(processingQueue);
             // Parallel research workers: isolated browser user contexts of THIS chat, their pages recorded
             // into the SAME capture store as the session browser's (one source process for all workers).
             // The orchestrated run's web research workers browse in them (one user context per search run).
@@ -1021,6 +1022,12 @@ public final class ProductiveResearchBackendFactory {
             resources.setProjectionRunner(knowledge.projection);
             resources.setOutlineStaleness(knowledge.staleness);
         }
+        if (knowledge.analysis != null) {
+            // D6: the shared topic analysis; one check at session open picks up a corpus that is already due.
+            knowledge.analysis.start();
+            resources.setAnalysisRunner(knowledge.analysis);
+            knowledge.analysis.knowledgeChanged();
+        }
     }
 
     /**
@@ -1079,11 +1086,9 @@ public final class ProductiveResearchBackendFactory {
                 new Runnable() {
                     public void run() {
                         // A COMPLETED passage job only refreshes an open view (staleness re-check) —
-                        // it never rebuilds topics or the outline (issue #29). The evidence analysis (D6)
-                        // decides itself whether the grown corpus is due for a new background run.
+                        // it never rebuilds topics or the outline (issue #29).
                         if (resourcesRef[0] != null) {
                             resourcesRef[0].fireProjectionUpdated();
-                            resourcesRef[0].fireKnowledgeChanged();
                         }
                     }
                 });

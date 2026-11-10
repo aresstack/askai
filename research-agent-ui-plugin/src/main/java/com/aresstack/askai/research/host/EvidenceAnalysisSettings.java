@@ -5,8 +5,9 @@ import com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscove
 import com.aresstack.askai.research.knowledge.topic.TopicAnalysisSettings;
 
 /**
- * Phase 2/3: the settings of the one evidence analysis (D6): the topic-analysis knobs, the key terms per node or
- * area, and when the Sources phase runs it again (a minimum corpus, then every n new passages). Each value is read
+ * Phase 2/3: the settings of the shared topic analysis (D6): the topic-analysis knobs, the key terms per node or
+ * area, and when the background run repeats during the research (a minimum corpus, then every n new passages; the
+ * debounce is the knowledge projection's). Each value is read
  * from the session's state store under {@code research.evidence.*} with the default of its owner; the Outline
  * settings group edits them. Immutable.
  */
@@ -19,6 +20,9 @@ public final class EvidenceAnalysisSettings {
     public static final String KEY_CONCEPT_MARGIN = "research.evidence.conceptMargin";
     public static final String KEY_MINIMUM_PASSAGES = "research.evidence.minimumPassages";
     public static final String KEY_MINIMUM_SOURCES = "research.evidence.minimumSources";
+    public static final String KEY_MINIMUM_DOMAINS = "research.evidence.minimumDomains";
+    public static final String KEY_MINIMUM_CHILD_COVERAGE = "research.evidence.minimumChildCoverage";
+    public static final String KEY_MAXIMUM_DOMINANT_SHARE = "research.evidence.maximumDominantShare";
     public static final String KEY_MAJOR_TOPIC_SHARE = "research.evidence.majorTopicShare";
     public static final String KEY_REPRESENTATIVES = "research.evidence.representatives";
     public static final String KEY_KEY_TERMS = "research.evidence.keyTerms";
@@ -71,6 +75,12 @@ public final class EvidenceAnalysisSettings {
                             TopicAnalysisSettings.DEFAULT_MINIMUM_PASSAGES),
                     ResearchRuntimeSettings.loadPositiveInt(store, KEY_MINIMUM_SOURCES,
                             TopicAnalysisSettings.DEFAULT_MINIMUM_SOURCES),
+                    ResearchRuntimeSettings.loadPositiveInt(store, KEY_MINIMUM_DOMAINS,
+                            TopicAnalysisSettings.DEFAULT_MINIMUM_DOMAINS),
+                    ResearchRuntimeSettings.loadDouble(store, KEY_MINIMUM_CHILD_COVERAGE,
+                            TopicAnalysisSettings.DEFAULT_MINIMUM_CHILD_COVERAGE),
+                    ResearchRuntimeSettings.loadDouble(store, KEY_MAXIMUM_DOMINANT_SHARE,
+                            TopicAnalysisSettings.DEFAULT_MAXIMUM_DOMINANT_SHARE),
                     ResearchRuntimeSettings.loadDouble(store, KEY_MAJOR_TOPIC_SHARE,
                             TopicAnalysisSettings.DEFAULT_MAJOR_TOPIC_SHARE),
                     ResearchRuntimeSettings.loadPositiveInt(store, KEY_REPRESENTATIVES,
@@ -106,12 +116,4 @@ public final class EvidenceAnalysisSettings {
         return corpusLimit;
     }
 
-    /** Every value that changes the analysis, for the snapshot id. */
-    String fingerprint() {
-        return analysis.getDuplicateDistance() + "/" + analysis.getSubtopicDistance() + "/"
-                + analysis.getTopicGroupDistance() + "/" + analysis.getConceptThreshold() + "/"
-                + analysis.getConceptMargin() + "/" + analysis.getMinimumPassages() + "/"
-                + analysis.getMinimumSources() + "/" + analysis.getMajorTopicShare() + "/"
-                + analysis.getRepresentatives() + "/" + keyTerms + "/" + corpusLimit;
-    }
 }

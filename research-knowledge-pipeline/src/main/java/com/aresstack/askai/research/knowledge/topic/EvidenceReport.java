@@ -6,54 +6,51 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Phase 2: what the research should do next, read off one {@link TopicAnalysis}: per concept node whether its
- * evidence is OK, THIN (below the topic minimums), REDUNDANT (enough passages, but too little distinct material:
- * the sources repeat each other) or MISSING, and the significant research areas no concept node covers. Each comes
- * with a few key terms for follow-up queries. Pure code; the same analysis gives the same report. Immutable.
+ * Phase 2: what the research should do next, read off one {@link TopicAnalysis}: per concept node a {@link Status}
+ * (evidence quality, breadth and balance judged apart, see {@link ConceptCoverage}) and the significant research
+ * areas no concept node covers, each with its search-fence reading. Each comes with a few key terms for follow-up
+ * queries. Pure code; the same analysis gives the same report. Immutable.
  */
 public final class EvidenceReport {
 
-    public enum Status { OK, THIN, REDUNDANT, MISSING }
+    /**
+     * What a concept node needs next, most urgent first: MISSING (no material), REDUNDANT (many passages but too few
+     * distinct ones), THIN (too few passages), UNCONFIRMED (enough distinct material, too few sources or domains),
+     * ONE_SIDED (good evidence, but too few children covered or one child holds most of it), OK.
+     */
+    public enum Status { MISSING, REDUNDANT, THIN, UNCONFIRMED, ONE_SIDED, OK }
 
     /** The evidence of one concept node. */
     public static final class NodeEvidence {
-        private final String anchorId;
-        private final String label;
-        private final String path;
-        private final int depth;
+        private final ConceptCoverage coverage;
         private final Status status;
-        private final int passages;
-        private final int distinctPassages;
-        private final int sources;
         private final List<String> keyTerms;
 
-        NodeEvidence(String anchorId, String label, String path, int depth, Status status, int passages,
-                     int distinctPassages, int sources, List<String> keyTerms) {
-            this.anchorId = anchorId;
-            this.label = label;
-            this.path = path;
-            this.depth = depth;
+        NodeEvidence(ConceptCoverage coverage, Status status, List<String> keyTerms) {
+            this.coverage = coverage;
             this.status = status;
-            this.passages = passages;
-            this.distinctPassages = distinctPassages;
-            this.sources = sources;
             this.keyTerms = Collections.unmodifiableList(new ArrayList<String>(keyTerms));
         }
 
+        /** The concept node id (ConceptOutlineNode id, the same the outline generation uses). */
         public String getAnchorId() {
-            return anchorId;
+            return coverage.getAnchorId();
         }
 
         public String getLabel() {
-            return label;
+            return coverage.getLabel();
         }
 
         public String getPath() {
-            return path;
+            return coverage.getPath();
         }
 
         public int getDepth() {
-            return depth;
+            return coverage.getDepth();
+        }
+
+        public String getParentId() {
+            return coverage.getParentId();
         }
 
         public Status getStatus() {
@@ -61,60 +58,73 @@ public final class EvidenceReport {
         }
 
         public int getPassages() {
-            return passages;
+            return coverage.getPassageIds().size();
         }
 
         public int getDistinctPassages() {
-            return distinctPassages;
+            return coverage.getDistinctPassageCount();
         }
 
         public int getSources() {
-            return sources;
+            return coverage.getSourceCount();
         }
 
-        /** Terms of its evidence; for a MISSING node the words of its label path. */
+        public int getDomains() {
+            return coverage.getDomainCount();
+        }
+
+        /** The measurements behind the status (quality, breadth and balance apart). */
+        public ConceptCoverage getCoverage() {
+            return coverage;
+        }
+
+        /** Characteristic terms of its material, or the label words when it has none (seeds for follow-up queries). */
         public List<String> getKeyTerms() {
             return keyTerms;
         }
     }
 
-    /** A significant research area without a concept node. */
+    /** A significant research topic without a concept node. */
     public static final class ResearchArea {
-        private final String topicId;
-        private final String title;
-        private final int passages;
-        private final int distinctPassages;
-        private final int sources;
+        private final TopicProfile topic;
         private final List<String> keyTerms;
 
-        ResearchArea(String topicId, String title, int passages, int distinctPassages, int sources,
-                     List<String> keyTerms) {
-            this.topicId = topicId;
-            this.title = title;
-            this.passages = passages;
-            this.distinctPassages = distinctPassages;
-            this.sources = sources;
+        ResearchArea(TopicProfile topic, List<String> keyTerms) {
+            this.topic = topic;
             this.keyTerms = Collections.unmodifiableList(new ArrayList<String>(keyTerms));
         }
 
         public String getTopicId() {
-            return topicId;
+            return topic.getTopicId();
         }
 
         public String getTitle() {
-            return title;
+            return topic.getTitle();
         }
 
         public int getPassages() {
-            return passages;
+            return topic.getPassageCount();
         }
 
         public int getDistinctPassages() {
-            return distinctPassages;
+            return topic.getDistinctPassageCount();
         }
 
         public int getSources() {
-            return sources;
+            return topic.getSourceCount();
+        }
+
+        public int getDomains() {
+            return topic.getDomainCount();
+        }
+
+        /** Where it lies relative to the search fence (IN / OUT / UNCLASSIFIED): new to the concept is not OUT. */
+        public ScopeAlignment getScopeAlignment() {
+            return topic.getScopeAlignment();
+        }
+
+        public TopicProfile getTopic() {
+            return topic;
         }
 
         public List<String> getKeyTerms() {
@@ -131,40 +141,42 @@ public final class EvidenceReport {
     }
 
     /**
-     * @param texts         passage id to text, over the analysed corpus (the key terms' corpus)
-     * @param keyTermCount  key terms per node and area
+     * @param texts        the passage texts of the corpus (the key-term document frequencies)
+     * @param keyTermCount key terms per node or area
      */
     public static EvidenceReport of(TopicAnalysis analysis, Map<String, String> texts, int keyTermCount) {
         KeyTerms terms = new KeyTerms(texts.values());
-        int minimum = analysis.getSettings().getMinimumPassages();
+        TopicAnalysisSettings settings = analysis.getSettings();
         List<NodeEvidence> nodes = new ArrayList<NodeEvidence>();
         for (ConceptCoverage coverage : analysis.getCoverage()) {
-            Status status;
-            switch (coverage.getStatus()) {
-                case GAP:
-                    status = Status.MISSING;
-                    break;
-                case THIN:
-                    status = Status.THIN;
-                    break;
-                default:
-                    status = coverage.getDistinctPassageCount() < minimum ? Status.REDUNDANT : Status.OK;
-            }
+            Status status = statusOf(coverage, settings);
             List<String> keyTerms = status == Status.MISSING ? KeyTerms.labelWords(coverage.getPath())
                     : terms.of(textsOf(coverage.getPassageIds(), texts), keyTermCount);
-            nodes.add(new NodeEvidence(coverage.getAnchorId(), coverage.getLabel(), coverage.getPath(),
-                    coverage.getDepth(), status, coverage.getPassageIds().size(),
-                    coverage.getDistinctPassageCount(), coverage.getSourceCount(), keyTerms));
+            nodes.add(new NodeEvidence(coverage, status, keyTerms));
         }
         List<ResearchArea> areas = new ArrayList<ResearchArea>();
         for (TopicProfile topic : analysis.getTopics()) {
             if (topic.isNovel()) {
-                areas.add(new ResearchArea(topic.getTopicId(), topic.getTitle(), topic.getPassageCount(),
-                        topic.getDistinctPassageCount(), topic.getSourceCount(),
-                        terms.of(textsOf(topic.getPassageIds(), texts), keyTermCount)));
+                areas.add(new ResearchArea(topic, terms.of(textsOf(topic.getPassageIds(), texts), keyTermCount)));
             }
         }
         return new EvidenceReport(nodes, areas);
+    }
+
+    static Status statusOf(ConceptCoverage coverage, TopicAnalysisSettings settings) {
+        if (coverage.getStatus() == ConceptCoverage.Status.GAP) {
+            return Status.MISSING;
+        }
+        if (!coverage.isMaterialCovered()) {
+            return coverage.getPassageIds().size() >= settings.getMinimumPassages() ? Status.REDUNDANT : Status.THIN;
+        }
+        if (!coverage.isSourceConfirmed()) {
+            return Status.UNCONFIRMED;
+        }
+        if (!coverage.isBroad() || !coverage.isBalanced()) {
+            return Status.ONE_SIDED;
+        }
+        return Status.OK;
     }
 
     private static List<String> textsOf(List<String> ids, Map<String, String> texts) {
@@ -178,12 +190,12 @@ public final class EvidenceReport {
         return result;
     }
 
-    /** One entry per concept node, in concept order. */
+    /** Every concept node below the frame, in concept order. */
     public List<NodeEvidence> getNodes() {
         return nodes;
     }
 
-    /** Significant research areas without a concept node, largest distinct material first. */
+    /** Significant research topics without a concept node, largest distinct material first. */
     public List<ResearchArea> getNovelAreas() {
         return novelAreas;
     }

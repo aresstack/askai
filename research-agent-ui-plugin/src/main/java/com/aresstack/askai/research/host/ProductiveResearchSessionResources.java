@@ -275,6 +275,26 @@ public final class ProductiveResearchSessionResources {
         return topicDiscovery;
     }
 
+    /** D6: the runner of the shared topic analysis; stopped on close. */
+    private volatile com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
+            analysisRunner;
+
+    void setAnalysisRunner(
+            com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
+        this.analysisRunner = runner;
+    }
+
+    /** D6: the processing queue (which accepted sources are still being processed). */
+    private volatile com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue processingQueue;
+
+    void setProcessingQueue(com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue queue) {
+        this.processingQueue = queue;
+    }
+
+    public com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue processingQueue() {
+        return processingQueue;
+    }
+
     void setProjectionRunner(
             com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
         this.projectionRunner = runner;
@@ -404,33 +424,6 @@ public final class ProductiveResearchSessionResources {
                 listener.run();
             } catch (RuntimeException never) {
                 // a UI refresh failure must never disturb the projection worker
-            }
-        }
-    }
-
-    /**
-     * Phase 2/3 (D6): notified (worker thread) after a passage job completed, i.e. when the knowledge store got new
-     * ACTIVE passages. The session's evidence analysis listens here; nothing rebuilds the outline from it.
-     */
-    private final java.util.concurrent.CopyOnWriteArrayList<Runnable> knowledgeChangedListeners =
-            new java.util.concurrent.CopyOnWriteArrayList<Runnable>();
-
-    public void addKnowledgeChangedListener(Runnable listener) {
-        if (listener != null) {
-            knowledgeChangedListeners.addIfAbsent(listener);
-        }
-    }
-
-    public void removeKnowledgeChangedListener(Runnable listener) {
-        knowledgeChangedListeners.remove(listener);
-    }
-
-    void fireKnowledgeChanged() {
-        for (Runnable listener : knowledgeChangedListeners) {
-            try {
-                listener.run();
-            } catch (RuntimeException never) {
-                // an observer failure must never disturb the knowledge worker
             }
         }
     }
@@ -867,6 +860,9 @@ public final class ProductiveResearchSessionResources {
         transitions.close();
         // Stop the knowledge worker FIRST (graceful: lets the current job finish). The persistent FIFO and the
         // canonical corpus outlive the session, so a mid-flight job is simply recovered on the next open.
+        if (analysisRunner != null) {
+            analysisRunner.stop();
+        }
         if (projectionRunner != null) {
             projectionRunner.stop();
         }

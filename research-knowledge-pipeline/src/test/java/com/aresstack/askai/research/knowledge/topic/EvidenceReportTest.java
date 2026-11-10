@@ -22,6 +22,7 @@ public class EvidenceReportTest {
         int helmets = corpus.plain("helmets", 8, 4, -1);
         int gloves = corpus.redundant("gloves", 12, 6);
         int boots = corpus.plain("boots", 2, 1, -1);
+        int vests = corpus.plain("vests", 5, 1, -1);
         int missing = corpus.direction();
         corpus.plain("drones", 9, 3, -1);
 
@@ -29,11 +30,12 @@ public class EvidenceReportTest {
                 new ConceptAnchor("n-helmets", "Helmets", "Book > Helmets", 1, "", corpus.query(helmets)),
                 new ConceptAnchor("n-gloves", "Gloves", "Book > Gloves", 1, "", corpus.query(gloves)),
                 new ConceptAnchor("n-boots", "Boots", "Book > Boots", 1, "", corpus.query(boots)),
+                new ConceptAnchor("n-vests", "Vests", "Book > Vests", 1, "", corpus.query(vests)),
                 new ConceptAnchor("n-exo", "Exoskeletons", "Book > Exoskeletons", 1, "", corpus.query(missing)));
         LiveTopicTree tree = new LiveOutlineProjectionBuilder().discoverTopicTree(corpus.passages, corpus.vectors,
                 ClusteringMonitor.NONE);
         TopicAnalysis analysis = new TopicAnalyzer(TopicAnalysisSettings.defaults()).analyze(
-                corpus.analysisPassages, corpus.vectors, tree, anchors, ClusteringMonitor.NONE);
+                corpus.analysisPassages, corpus.vectors, tree, anchors, null, ClusteringMonitor.NONE);
         Map<String, String> texts = new LinkedHashMap<String, String>();
         for (AnalysisPassage passage : corpus.analysisPassages) {
             texts.put(passage.getPassageId(), passage.getText());
@@ -41,7 +43,7 @@ public class EvidenceReportTest {
 
         EvidenceReport report = EvidenceReport.of(analysis, texts, 3);
 
-        assertEquals(4, report.getNodes().size());
+        assertEquals(5, report.getNodes().size());
         EvidenceReport.NodeEvidence helmetNode = node(report, "n-helmets");
         assertEquals(EvidenceReport.Status.OK, helmetNode.getStatus());
         assertEquals(8, helmetNode.getDistinctPassages());
@@ -56,6 +58,10 @@ public class EvidenceReportTest {
         assertEquals(1, gloveNode.getDistinctPassages());
 
         assertEquals("two passages of one source", EvidenceReport.Status.THIN, node(report, "n-boots").getStatus());
+        EvidenceReport.NodeEvidence vestNode = node(report, "n-vests");
+        assertEquals("five distinct passages from one site", EvidenceReport.Status.UNCONFIRMED,
+                vestNode.getStatus());
+        assertEquals(1, vestNode.getDomains());
 
         EvidenceReport.NodeEvidence exo = node(report, "n-exo");
         assertEquals(EvidenceReport.Status.MISSING, exo.getStatus());
@@ -67,6 +73,8 @@ public class EvidenceReportTest {
         assertEquals(9, area.getDistinctPassages());
         assertEquals(3, area.getSources());
         assertEquals("drones", area.getKeyTerms().get(0));
+        assertEquals("no fence: unclassified, never OUT", ScopeAlignment.Verdict.UNCLASSIFIED,
+                area.getScopeAlignment().getVerdict());
     }
 
     @Test

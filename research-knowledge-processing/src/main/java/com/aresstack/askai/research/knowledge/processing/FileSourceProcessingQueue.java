@@ -143,6 +143,21 @@ public final class FileSourceProcessingQueue implements SourceProcessingQueue {
         return sourceIds;
     }
 
+    @Override
+    public synchronized java.util.Set<String> pendingSourceIds() {
+        java.util.Set<String> sourceIds = new java.util.TreeSet<String>();
+        for (SourceProcessingJob job : loadAll()) {
+            SourceProcessingJob.State state = job.getState();
+            String sourceId = job.getRequest().getSourceId();
+            if (sourceId != null && !sourceId.trim().isEmpty() && (state == SourceProcessingJob.State.QUEUED
+                    || state == SourceProcessingJob.State.PROCESSING
+                    || state == SourceProcessingJob.State.FAILED_RETRYABLE)) {
+                sourceIds.add(sourceId);
+            }
+        }
+        return sourceIds;
+    }
+
     /**
      * Capture ids with a non-superseded job in ONE vector world (PR 04: a changed prompt scheme moves the world, so
      * captures processed in the old one are re-derived unless the new world already knows them).

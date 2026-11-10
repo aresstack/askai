@@ -253,14 +253,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     });
                 }
             });
-            resources.addKnowledgeChangedListener(new Runnable() {
-                public void run() {
-                    com.aresstack.askai.research.host.EvidenceAnalysis analysis = evidenceAnalysis();
-                    if (analysis != null) {
-                        analysis.knowledgeChanged();
-                    }
-                }
-            });
+            topicDiscovery(); // D6: bind the shared topic analysis to this session's concept, fence and settings
         }
     }
 
@@ -780,7 +773,6 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         scopeCheckExecutor.shutdownNow();
         outlineGenerationExecutor.shutdownNow();
-        evidenceAnalysisExecutor.shutdownNow();
         com.aresstack.askai.research.scope.BackendScopeProbeGenerator waitingGenerator =
                 activeProbeGenerator;
         if (waitingGenerator != null) {
@@ -2292,72 +2284,38 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * Phase 2/3 (D6): the ONE evidence analysis of this session, built on first use; {@code null} without the
-     * knowledge capability. The Sources phase reads its latest snapshot to steer the research (the research team's
-     * gap check); the outline generation takes one consistent snapshot from it.
+     * D6: the session's shared topic discovery with its topic analysis bound to this session's concept, search
+     * fence, eligible sources, pending sources and settings; {@code null} without the knowledge capability. Phase 2
+     * reads {@code latestAnalysis()} and calls {@code requestAtCycleBoundary()} at the end of a research cycle;
+     * the outline generation takes {@code analysisFor(monitor)}.
      */
-    private com.aresstack.askai.research.host.EvidenceAnalysis evidenceAnalysis;
-    private final java.util.concurrent.ExecutorService evidenceAnalysisExecutor =
-            java.util.concurrent.Executors.newSingleThreadExecutor(new java.util.concurrent.ThreadFactory() {
-                public Thread newThread(Runnable runnable) {
-                    Thread thread = new Thread(runnable, "research-evidence-analysis");
-                    thread.setDaemon(true);
-                    thread.setPriority(Thread.MIN_PRIORITY);
-                    return thread;
-                }
-            });
-
-    public synchronized com.aresstack.askai.research.host.EvidenceAnalysis evidenceAnalysis() {
+    public synchronized com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery topicDiscovery() {
         final com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
-        if (resources == null || resources.isClosed() || resources.corpusReader() == null
+        if (resources == null || resources.isClosed() || resources.topicDiscovery() == null
                 || resources.outlineEmbeddings() == null) {
             return null;
         }
-        if (evidenceAnalysis == null) {
-            evidenceAnalysis = new com.aresstack.askai.research.host.EvidenceAnalysis(
-                    new com.aresstack.askai.research.host.EvidenceAnalysis.Inputs() {
-                        public String bookTitle() {
-                            try {
-                                com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
-                                if (frozen == null) {
-                                    return "";
-                                }
-                                String title = ResearchAgentSession.bookTitle(frozen);
-                                return title.trim().isEmpty() ? frozen.getMission() : title;
-                            } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
-                                return "";
-                            }
+        com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery discovery =
+                resources.topicDiscovery();
+        if (analysisBoundTo != discovery) {
+            discovery.setAnalysisInputs(new com.aresstack.askai.research.host.TopicAnalysisInputs(
+                    new com.aresstack.askai.research.host.TopicAnalysisInputs.Source() {
+                        public com.aresstack.askai.research.book.FrozenConcept frozenConcept() throws Exception {
+                            return ResearchAgentSession.this.frozenConcept();
                         }
 
-                        public java.util.List<com.aresstack.askai.research.outline.generate.ConceptOutlineNode>
-                                conceptNodes() throws Exception {
-                            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+                        public com.aresstack.askai.research.store.FileConceptStore conceptStore() {
                             com.aresstack.askai.research.concept.ConceptBranchService service =
                                     conceptBranchService();
-                            if (frozen == null || service == null) {
-                                return java.util.Collections.emptyList();
-                            }
-                            return com.aresstack.askai.research.host.OutlineGeneration.conceptNodes(frozen,
-                                    service.store());
+                            return service == null ? null : service.store();
                         }
 
-                        public long conceptRevision() {
-                            try {
-                                com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
-                                return frozen == null ? 0L : frozen.getPin().getWorkingRevision();
-                            } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
-                                return 0L;
-                            }
+                        public String approvedTitle(com.aresstack.askai.research.book.FrozenConcept frozen) {
+                            return ResearchAgentSession.bookTitle(frozen);
                         }
 
-                        public java.util.Set<String> eligibleSourceIds() throws Exception {
-                            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
-                            return com.aresstack.askai.research.outline.generate.OutlineSourceRule.eligible(
-                                    pinnedSourceIds(),
-                                    sources(),
-                                    com.aresstack.askai.research.domain.scope.TypedBlacklist.of(
-                                            frozen == null ? java.util.Collections.<String>emptyList()
-                                                    : frozen.getPin().getBlacklist()));
+                        public java.util.Collection<String> pinnedSourceIds() throws Exception {
+                            return ResearchAgentSession.this.pinnedSourceIds();
                         }
 
                         public java.util.Collection<com.aresstack.askai.research.sources.ResearchSourceRecord>
@@ -2366,27 +2324,80 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     com.aresstack.askai.research.sources.SourceQuery.all());
                         }
 
-                        public String embeddingFingerprint() {
-                            String fingerprint = resources.writerEmbeddingFingerprint();
-                            return fingerprint == null ? "" : fingerprint;
+                        public com.aresstack.askai.research.knowledge.topic.ScopeFence fence() {
+                            return currentScopeFence();
                         }
 
-                        public long now() {
-                            return System.currentTimeMillis();
+                        public java.util.Set<String> pendingSourceIds() {
+                            com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue queue =
+                                    resources.processingQueue();
+                            return queue == null ? java.util.Collections.<String>emptySet()
+                                    : queue.pendingSourceIds();
                         }
-                    },
-                    resources.corpusReader(), resources.outlineEmbeddings(),
-                    new java.util.function.Supplier<com.aresstack.askai.research.host.EvidenceAnalysisSettings>() {
-                        public com.aresstack.askai.research.host.EvidenceAnalysisSettings get() {
+
+                        public com.aresstack.askai.research.host.EvidenceAnalysisSettings settings() {
                             return hostStateStore == null
                                     ? com.aresstack.askai.research.host.EvidenceAnalysisSettings.defaults()
                                     : com.aresstack.askai.research.host.EvidenceAnalysisSettings.load(
                                             hostStateStore);
                         }
-                    },
-                    evidenceAnalysisExecutor);
+
+                        public String embeddingFingerprint() {
+                            String fingerprint = resources.writerEmbeddingFingerprint();
+                            return fingerprint == null ? "" : fingerprint;
+                        }
+                    }, resources.outlineEmbeddings()));
+            analysisBoundTo = discovery;
         }
-        return evidenceAnalysis;
+        return discovery;
+    }
+
+    /** The discovery the session's analysis inputs are bound to (a re-attached knowledge pipeline is bound again). */
+    private com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery analysisBoundTo;
+
+    /**
+     * D6: the search fence for the topic analysis: the SAME anchors (concept as IN, blacklist as OUT via
+     * {@code ConceptAnchorProjection}), anchor vector index, embedder and thresholds as the search scope gate
+     * ({@link #searchScopeBeginLine()}); {@code null} without anchors or when they cannot be read (topics are then
+     * UNCLASSIFIED, never guessed).
+     */
+    private com.aresstack.askai.research.knowledge.topic.ScopeFence currentScopeFence() {
+        com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();
+        com.aresstack.askai.research.host.ProductiveResearchSessionResources resources = productiveResources;
+        if (coordinator == null || !coordinator.isUsable() || resources == null || resources.isClosed()
+                || resources.getEmbeddingDescriptor() == null) {
+            return null;
+        }
+        com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = coordinator.current();
+        com.aresstack.askai.research.concept.ConceptBranchService conceptService = conceptBranchService();
+        java.util.List<com.aresstack.askai.research.domain.scope.ScopeAnchor> fenceAnchors =
+                com.aresstack.askai.research.scope.ScopeSweepPlanAssembler.combinedAnchors(draft,
+                        com.aresstack.askai.research.scope.ConceptAnchorProjection.anchorsOf(
+                                conceptService == null ? null : conceptService.snapshot().getDocumentJson(),
+                                draft));
+        if (fenceAnchors.isEmpty()) {
+            return null;
+        }
+        java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+        for (com.aresstack.askai.research.domain.scope.ScopeAnchor anchor : fenceAnchors) {
+            labels.put(anchor.getAnchorId(), anchor.getSemanticText());
+        }
+        com.aresstack.askai.research.scope.EmbeddingSnapshotSweepEmbedder embedder =
+                new com.aresstack.askai.research.scope.EmbeddingSnapshotSweepEmbedder(
+                        resources.getEmbeddingDescriptor());
+        try {
+            return new com.aresstack.askai.research.knowledge.topic.ScopeFence(
+                    new com.aresstack.askai.research.store.ScopeAnchorVectorIndex(new java.io.File(
+                            resources.getProjectContext().getProjectDirectory(), "scope-anchor-vectors.json"))
+                            .vectorsFor(fenceAnchors, embedder.modelFingerprint(), embedder),
+                    labels,
+                    com.aresstack.askai.research.host.ResearchRuntimeSettings
+                            .loadScopeSweepConfiguration(getHostStateStore()).fenceThresholds,
+                    draft.getRevision());
+        } catch (java.io.IOException | RuntimeException unreadable) {
+            technicalLog("topic-analysis fence unavailable: " + unreadable.getMessage());
+            return null;
+        }
     }
 
     /** The source ids of the approved source set (sources pin); empty before one. */
