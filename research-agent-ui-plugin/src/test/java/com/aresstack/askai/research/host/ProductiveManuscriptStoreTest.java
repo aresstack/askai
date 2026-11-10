@@ -115,6 +115,23 @@ public class ProductiveManuscriptStoreTest {
         assertEquals(SectionStatus.PENDING, manuscript.store().section(id).getStatus());
     }
 
+    /**
+     * The Document tab's two job buttons are commands on every surface (live run 3, 2026-11-10: a session
+     * driven by typed lines had no way to rewrite the sections the reopened outline had made stale).
+     */
+    @Test
+    public void theDocumentJobButtonsAreCommandsWithTheSameRefusals() {
+        Fx fx = new Fx();
+        firstMessage(fx, "A book");
+        String early = fx.session.executeCommand("write-sections", "");
+        assertTrue(early, early.startsWith("rejected") && !early.contains("unknown command"));
+        String unknown = fx.session.executeCommand("nonsense", "");
+        assertTrue(unknown, unknown.contains("write-sections") && unknown.contains("rewrite-stale"));
+        toDocumentFromScoping(fx);
+        String rewrite = fx.session.executeCommand("rewrite-stale", "");
+        assertTrue(rewrite, !rewrite.contains("unknown command"));
+    }
+
     private static Outline toDocumentFromScoping(Fx fx) {
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
