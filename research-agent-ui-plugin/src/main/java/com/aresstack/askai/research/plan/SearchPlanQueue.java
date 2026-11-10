@@ -134,7 +134,10 @@ public final class SearchPlanQueue {
             }
         };
 
-        /** The gaps of the current analysis; {@link EvidenceGaps.Gaps#NONE} when none is settled. Fast: no analysis. */
+        /**
+         * The gaps of the analysis of the material read so far; {@link EvidenceGaps.Gaps#NONE} when none is settled.
+         * Called outside the queue's lock on its executor: it may wait (bounded) for the shared analysis to catch up.
+         */
         EvidenceGaps.Gaps atCycleBoundary(Collection<String> activeNodes, Collection<SearchPlanEntry> entries);
     }
 
@@ -752,7 +755,8 @@ public final class SearchPlanQueue {
             return; // the released acquisition runs first; its end kicks the queue again
         }
         Outcome outcome = null;
-        ConceptQueryPlan.Request nextCycle = null;
+        Boolean boundary = null;
+        int boundaryGeneration = 0;
         boolean fillMore = false;
         synchronized (this) {
             if (!running || replanning || busy.busy() || !deferred.isEmpty()
@@ -815,19 +819,11 @@ public final class SearchPlanQueue {
                 if (next == null && !runningEntries.isEmpty()) {
                     // nothing more to start now: the running entries end first, then the plan decides how it goes on
                 } else if (next == null) {
-                    Map<String, SearchPlanEntry> all = store.loadEntries();
-                    Map<String, SearchPlanCoverage.NodeCoverage> coverage =
-                            SearchPlanCoverage.of(record, all.values(), c, sources);
-                    EvidenceGaps.Gaps gaps = gapReview(record, all.values());
-                    nextCycle = capReached || replanner == null || record.getCycle() >= c.getCycles() ? null
-                            : SearchPlanCycles.nextCycleRequest(record, all.values(), coverage, c, gaps);
-                    replanGaps = gaps;
-                    if (nextCycle != null) {
-                        replanning = true; // the queue stays running without an entry
-                    } else {
-                        running = false;
-                        outcome = outcome(record, all, c, coverage, capReached ? Reason.PHASE_CAP : null);
-                    }
+                    // the cycle boundary: the gap review may wait for the shared analysis, so it runs outside the
+                    // lock; the queue stays running without an entry meanwhile
+                    replanning = true;
+                    boundary = Boolean.valueOf(capReached);
+                    boundaryGeneration = replanGeneration;
                 } else {
                     String requestId = teamOn()
                             ? port.searchAsTeam(next.getQuery(), record.getLanguage(), PLANNED_RANKING,
@@ -851,14 +847,77 @@ public final class SearchPlanQueue {
             }
         }
         listener.changed();
-        if (nextCycle != null) {
-            startReplan(nextCycle);
+        if (boundary != null) {
+            cycleBoundary(boundaryGeneration, boundary.booleanValue());
         }
         if (outcome != null) {
             finish(outcome);
         }
         if (fillMore) {
             scheduleNext(); // the team has a free worker: start the next planned query beside the running ones
+        }
+    }
+
+    /**
+     * The end of a research cycle: the gap review reads the shared evidence analysis (it may wait until the analysis
+     * holds the material read so far), then the queue plans the next cycle from the coverage and the gaps, or ends
+     * the plan with its honest outcome. A stop meanwhile drops the boundary.
+     */
+    private void cycleBoundary(int generation, boolean capReached) {
+        SearchPlanRecord record;
+        Map<String, SearchPlanEntry> all;
+        synchronized (this) {
+            if (generation != replanGeneration || !replanning || !running) {
+                return;
+            }
+            try {
+                record = store.loadRecord();
+                all = store.loadEntries();
+            } catch (CorruptProjectFileException corrupt) {
+                running = false;
+                replanning = false;
+                System.err.println("[search-plan] " + corrupt.getMessage());
+                return;
+            }
+            if (record == null) {
+                running = false;
+                replanning = false;
+                return;
+            }
+        }
+        EvidenceGaps.Gaps gaps = gapReview(record, all.values());
+        ConceptQueryPlan.Request nextCycle = null;
+        Outcome outcome = null;
+        synchronized (this) {
+            if (generation != replanGeneration || !replanning || !running) {
+                return; // stopped while the review waited
+            }
+            try {
+                record = store.loadRecord();
+                all = store.loadEntries();
+                SearchPlanCoverage.Caps c = caps;
+                Map<String, SearchPlanCoverage.NodeCoverage> coverage =
+                        SearchPlanCoverage.of(record, all.values(), c, sources);
+                nextCycle = capReached || replanner == null || record.getCycle() >= c.getCycles() ? null
+                        : SearchPlanCycles.nextCycleRequest(record, all.values(), coverage, c, gaps);
+                replanGaps = gaps;
+                if (nextCycle == null) {
+                    replanning = false;
+                    running = false;
+                    outcome = outcome(record, all, c, coverage, capReached ? Reason.PHASE_CAP : null);
+                }
+            } catch (CorruptProjectFileException | RuntimeException failed) {
+                replanning = false;
+                running = false;
+                System.err.println("[search-plan] the cycle boundary failed: " + failed.getMessage());
+            }
+        }
+        listener.changed();
+        if (nextCycle != null) {
+            startReplan(nextCycle);
+        }
+        if (outcome != null) {
+            finish(outcome);
         }
     }
 
