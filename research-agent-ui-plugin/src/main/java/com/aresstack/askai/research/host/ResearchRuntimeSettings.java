@@ -499,6 +499,103 @@ public final class ResearchRuntimeSettings {
         }
     }
 
+    /**
+     * The research team of the Sources phase (plan T5): the planned queries run side by side, each with a page
+     * worker in a worker browser of its own; the searches still go one after another through the one web search
+     * tool. Default ON: one tab and one model call at a time leave the GPU idle most of the time.
+     */
+    public static final String KEY_TEAM_ENABLED = "research.team.enabled";
+    /**
+     * How many page workers run at the same time, one tab each in the team's page browser. Default 4: the worker
+     * browsers' default tabs per user context; the 2026-10-30 benchmark scales {@code gemma4:e2b} up to about 20.
+     */
+    public static final String KEY_TEAM_WORKERS = "research.team.workers";
+    public static final int DEFAULT_TEAM_WORKERS = 4;
+
+    /** Plan T4: how many of a page's candidate links a page worker may pick to open (depth 1). */
+    public static final String KEY_TEAM_FOLLOW_LINKS = "research.team.followLinks";
+    public static final int DEFAULT_TEAM_FOLLOW_LINKS = 2;
+    /**
+     * Plan T4: how much page text one page worker reads (characters). Default 12000: about 3000 tokens, a page
+     * turn of {@code gemma4:e2b} stays far inside its 32768-token context also with 20 parallel workers.
+     */
+    public static final String KEY_TEAM_PAGE_CHARACTERS = "research.team.pageCharacters";
+    public static final int DEFAULT_TEAM_PAGE_CHARACTERS = 12_000;
+
+    /**
+     * Plan T4: the longest answer of one page worker turn (tokens). Default 512: the labelled lines (a summary of
+     * two to five sentences, the verdict, the links and an optional message) fit with room to spare.
+     */
+    public static final String KEY_TEAM_ANSWER_TOKENS = "research.team.answerTokens";
+    public static final int DEFAULT_TEAM_ANSWER_TOKENS = 512;
+
+    public static int loadTeamAnswerTokens(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_ANSWER_TOKENS, DEFAULT_TEAM_ANSWER_TOKENS);
+    }
+
+    /**
+     * Plan T4: how many new search queries a page worker may suggest per page it reads. Default 2: enough to follow
+     * a named standard or study, few enough that one search does not flood the plan.
+     */
+    public static final String KEY_TEAM_SEARCHES_PER_PAGE = "research.team.searchesPerPage";
+    public static final int DEFAULT_TEAM_SEARCHES_PER_PAGE = 2;
+
+    /**
+     * Plan T4: the next search starts when fewer pages than this are still open in the running one, so the team
+     * never runs dry. Default: the worker count.
+     */
+    public static final String KEY_TEAM_NEXT_SEARCH_BELOW = "research.team.nextSearchBelow";
+
+    /**
+     * Plan T4: the queries per concept node the seed plan starts with when the research team runs (the base query
+     * and the planner's variants). Default 1: the concept's breadth first, one query per node; the deeper queries
+     * come from what the team reads.
+     */
+    public static final String KEY_TEAM_SEED_QUERIES_PER_NODE = "research.team.seedQueriesPerNode";
+    public static final int DEFAULT_TEAM_SEED_QUERIES_PER_NODE = 1;
+
+    public static int loadTeamSearchesPerPage(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_TEAM_SEARCHES_PER_PAGE, DEFAULT_TEAM_SEARCHES_PER_PAGE);
+    }
+
+    public static int loadTeamNextSearchBelow(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_NEXT_SEARCH_BELOW, Math.max(1, loadTeamWorkers(store)));
+    }
+
+    public static int loadTeamSeedQueriesPerNode(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_SEED_QUERIES_PER_NODE, DEFAULT_TEAM_SEED_QUERIES_PER_NODE);
+    }
+
+    public static int loadTeamFollowLinks(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_TEAM_FOLLOW_LINKS, DEFAULT_TEAM_FOLLOW_LINKS);
+    }
+
+    public static int loadTeamPageCharacters(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_PAGE_CHARACTERS, DEFAULT_TEAM_PAGE_CHARACTERS);
+    }
+
+    public static boolean loadTeamEnabled(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_TEAM_ENABLED, true);
+    }
+
+    public static void saveTeamEnabled(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_TEAM_ENABLED, enabled);
+        }
+    }
+
+    /**
+     * The page workers that may run at once, 0 when the research team is switched off. Each worker has its own tab
+     * in the team's one user context, so the "Tabs/user context" setting of the worker browsers bounds the count.
+     */
+    public static int loadTeamWorkers(WorkspaceStateStore store) {
+        if (!loadTeamEnabled(store)) {
+            return 0;
+        }
+        return Math.min(loadPositiveInt(store, KEY_TEAM_WORKERS, DEFAULT_TEAM_WORKERS),
+                loadPositiveInt(store, KEY_WORKER_TABS_PER_USER_CONTEXT, DEFAULT_WORKER_TABS_PER_USER_CONTEXT));
+    }
+
     /** The caps of the search plan, read at each queue start. */
     public static com.aresstack.askai.research.plan.SearchPlanCoverage.Caps loadSearchPlanCaps(
             WorkspaceStateStore store) {
@@ -507,6 +604,58 @@ public final class ResearchRuntimeSettings {
                 loadPositiveInt(store, KEY_PLAN_QUERIES_PER_NODE, DEFAULT_PLAN_QUERIES_PER_NODE),
                 loadPositiveInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES),
                 loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES));
+    }
+
+    // ------------------------------------------------------------------ Outline: passage assignment
+    /** Minimum cosine between a passage and its nearest outline anchor for the passage to be assigned. */
+    public static final String KEY_OUTLINE_ASSIGNMENT_THRESHOLD = "research.outline.assignmentThreshold";
+    /** Minimum lead of the nearest anchor over the second-nearest; below it the passage stays unassigned. */
+    public static final String KEY_OUTLINE_ASSIGNMENT_MARGIN = "research.outline.assignmentMargin";
+
+    /**
+     * The calibration of the outline generation, read at each start: threshold and margin from this store (the
+     * provisional defaults of {@link OutlineGenerationInput.Settings} until a live calibration replaces them), the
+     * topic minimums from the knowledge settings of the session.
+     */
+    public static com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings loadOutlineSettings(
+            WorkspaceStateStore store,
+            com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledge) {
+        com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings minimums =
+                knowledge == null ? com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings
+                        .defaults() : knowledge;
+        return new com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings(
+                loadDouble(store, KEY_OUTLINE_ASSIGNMENT_THRESHOLD,
+                        com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
+                                .DEFAULT_THRESHOLD),
+                loadDouble(store, KEY_OUTLINE_ASSIGNMENT_MARGIN,
+                        com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
+                                .DEFAULT_MARGIN),
+                minimums.minimumPassagesPerTopic, minimums.minimumDistinctSourcesPerTopic);
+    }
+
+    // ------------------------------------------------------------------ Document: evidence pack
+    /** Fewest words a passage needs to enter a writer's evidence pack. */
+    public static final String KEY_WRITER_PROSE_MIN_WORDS = "research.writer.prose.minWords";
+    /** Fewest finished sentences a passage needs to enter a writer's evidence pack. */
+    public static final String KEY_WRITER_PROSE_MIN_SENTENCES = "research.writer.prose.minSentences";
+    /** Longest run of words without punctuation a passage may contain (menus and footers exceed it). */
+    public static final String KEY_WRITER_PROSE_MAX_RUN = "research.writer.prose.maxUnpunctuatedRun";
+
+    /**
+     * The prose criteria of the evidence pack (live run 3, fix 2), read for every section: navigation, footer and
+     * heading passages fail them and never reach the writer.
+     */
+    public static com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria loadWriterProseCriteria(
+            WorkspaceStateStore store) {
+        return new com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria(
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_MIN_WORDS,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_WORDS),
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_MIN_SENTENCES,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MIN_SENTENCES),
+                loadPositiveInt(store, KEY_WRITER_PROSE_MAX_RUN,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MAX_UNPUNCTUATED_RUN));
     }
 
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";

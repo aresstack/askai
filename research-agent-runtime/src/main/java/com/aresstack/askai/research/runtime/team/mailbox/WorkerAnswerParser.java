@@ -25,7 +25,8 @@ public final class WorkerAnswerParser {
     /** The line sent with the one repair. */
     public static final String REPAIR_INSTRUCTION = "Your answer had no SUMMARY line. Answer again with these lines "
             + "only:\nSUMMARY: what the page states that matters (2-5 sentences)\nUSEFUL: yes | partly | no - reason\n"
-            + "FOLLOW: numbers of links worth opening, or none\nTO ORCHESTRATOR: a message, or omit the line";
+            + "FOLLOW: numbers of links worth opening, or none\nSEARCH: a new search query this page suggests, or none\n"
+            + "TO ORCHESTRATOR: a message, or omit the line";
 
     /** Parse outcome: an answer, or a typed failure. */
     public static final class Result {
@@ -58,7 +59,7 @@ public final class WorkerAnswerParser {
     }
 
     private static final Pattern LABEL = Pattern.compile(
-            "^[\\s>*_#`-]*(summary|useful|follow|to\\s+orchestrator|to\\s+the\\s+orchestrator|to\\s+coordinator"
+            "^[\\s>*_#`-]*(summary|useful|follow|search|to\\s+orchestrator|to\\s+the\\s+orchestrator|to\\s+coordinator"
                     + "|to\\s+worker\\s*#?\\s*\\d{1,4})[\\s*_`]*[:=\\-–—][\\s*_`]*(.*)$",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern VERDICT = Pattern.compile("^(yes|partly|partially|partial|no)\\b[\\s,.;:\\-–—]*(.*)$",
@@ -67,14 +68,21 @@ public final class WorkerAnswerParser {
 
     private final int maxFollow;
     private final int linkCount;
+    private final int maxSearch;
 
     /**
      * @param maxFollow at most this many {@code FOLLOW} links are kept (plan: k, default 2)
      * @param linkCount numbers outside 1..linkCount are dropped
      */
     public WorkerAnswerParser(int maxFollow, int linkCount) {
+        this(maxFollow, linkCount, 0);
+    }
+
+    /** @param maxSearch at most this many {@code SEARCH} queries are kept per page (0 = none) */
+    public WorkerAnswerParser(int maxFollow, int linkCount, int maxSearch) {
         this.maxFollow = Math.max(0, maxFollow);
         this.linkCount = Math.max(0, linkCount);
+        this.maxSearch = Math.max(0, maxSearch);
     }
 
     /** Parses without a repair round. */
@@ -102,6 +110,7 @@ public final class WorkerAnswerParser {
         String summary = null;
         String useful = null;
         String follow = null;
+        List<String> searches = new ArrayList<String>();
         List<String[]> outgoing = new ArrayList<String[]>();
         StringBuilder current = null;
         String currentKey;
@@ -130,6 +139,15 @@ public final class WorkerAnswerParser {
             } else if (key.equals("follow")) {
                 if (follow == null) {
                     follow = value;
+                }
+            } else if (key.equals("search")) {
+                // one query per line, or several on one line separated by ";" or " | "
+                for (String query : value.split("\\s*[;|]\\s*")) {
+                    String q = query.replaceAll("^[\"'“„]+|[\"'”“]+$", "").trim();
+                    if (!q.isEmpty() && !isOmit(q) && searches.size() < maxSearch
+                            && !containsIgnoreCase(searches, q)) {
+                        searches.add(q);
+                    }
                 }
             } else if (!value.isEmpty() && !isOmit(value)) {
                 String recipient = key.startsWith("to worker") ? key.substring(3) : "orchestrator";
@@ -169,7 +187,16 @@ public final class WorkerAnswerParser {
         for (String[] o : outgoing) {
             messages.add(new WorkerAnswer.Outgoing(o[0], o[1]));
         }
-        return new Result(new WorkerAnswer(summary, verdict, reason, links, messages), null, repaired);
+        return new Result(new WorkerAnswer(summary, verdict, reason, links, messages, searches), null, repaired);
+    }
+
+    private static boolean containsIgnoreCase(List<String> values, String value) {
+        for (String v : values) {
+            if (v.equalsIgnoreCase(value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isOmit(String value) {

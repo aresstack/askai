@@ -30,6 +30,12 @@ public class ResearchChatCommandsTest {
             assertTrue("missing slash twin for red decision tag: " + command,
                     names.contains(command));
         }
+        // The way back is a user control on every surface: a bot-driven or typed session can reopen
+        // an earlier phase without a click on the phase pill (live run 3, 2026-11-10).
+        for (String reopen : new String[]{"reopen-concept", "reopen-sources", "reopen-outline"}) {
+            assertTrue("missing slash twin for the reopen click: " + reopen, names.contains(reopen));
+            assertTrue(ResearchSemanticCommands.isSemantic(reopen));
+        }
         // The interruption machinery is DOMAIN state, not user furniture: no slash surface for it.
         for (String machinery : new String[]{"pause", "resume", "retry", "cancel"}) {
             assertTrue("interrupt machinery must not be a slash command: " + machinery,

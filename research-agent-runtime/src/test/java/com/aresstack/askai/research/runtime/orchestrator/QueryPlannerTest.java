@@ -185,4 +185,63 @@ public class QueryPlannerTest {
         assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("RESEARCH CYCLE is above 1"));
         assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("DOMAINS FOUND SO FAR"));
     }
+
+    @Test
+    public void theWeidezaunReachesThePlannerPromptAndCrossesTheWire() {
+        ConceptQueryPlan.Node node = new ConceptQueryPlan.Node("n1", "Hitze", Arrays.asList("Hitze"), "", "Hitze Bau");
+        ConceptQueryPlan.Request request = new ConceptQueryPlan.Request("de", "Wearables am Bau",
+                Collections.singletonList(node), Collections.<String>emptyList(), Collections.<String>emptyList(), 2)
+                .withArea("IN: Hitzeschutz am Bau\nOUT: Freizeitsport");
+        String prompt = QueryPlanner.conceptPrompt(request, node, "Hitze Bau", request.getQueriesRun());
+        assertTrue(prompt, prompt.contains("AREA OF THE BOOK\nIN: Hitzeschutz am Bau\nOUT: Freizeitsport"));
+        assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("AREA OF THE BOOK"));
+        assertEquals(request.getArea(), com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(
+                com.aresstack.askai.research.plan.QueryPlanWireCodec.encodeRequest(request)).getArea());
+        assertTrue(!QueryPlanner.conceptPrompt(request.withArea(""), node, "Hitze Bau", request.getQueriesRun())
+                .contains("AREA OF THE BOOK"));
+    }
+
+    @Test
+    public void aLaterCyclePromptCarriesWhatThePageWorkersReported() {
+        ConceptQueryPlan.Node node = new ConceptQueryPlan.Node("n1", "Hitze", Arrays.asList("Wearables", "Hitze"),
+                "root", "Hitze Wearables Baustelle", Arrays.asList("a.example"),
+                Arrays.asList("worker 1: search for DGUV heat guidelines"));
+        ConceptQueryPlan.Request request = new ConceptQueryPlan.Request("de", "Wearables am Bau",
+                Collections.singletonList(node), Collections.singletonList("Hitze Wearables Baustelle"),
+                Collections.<String>emptyList(), 3, 2);
+        String prompt = QueryPlanner.conceptPrompt(request, node, "Hitze Wearables Baustelle",
+                request.getQueriesRun());
+        assertTrue(prompt, prompt.contains("WHAT THE PAGE WORKERS REPORTED\n- worker 1: search for DGUV heat guidelines"));
+        assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("WHAT THE PAGE WORKERS REPORTED"));
+        ConceptQueryPlan.Node without = new ConceptQueryPlan.Node("n2", "Kosten", Arrays.asList("Kosten"), "root",
+                "Kosten", null);
+        assertTrue(!QueryPlanner.conceptPrompt(request, without, "Kosten", request.getQueriesRun())
+                .contains("WHAT THE PAGE WORKERS REPORTED"));
+        assertEquals(node.getWorkerNotes(), com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(
+                com.aresstack.askai.research.runtime.plan.QueryPlanWire.renderRequest(request)).getNodes().get(0)
+                .getWorkerNotes());
+    }
+
+    @Test
+    public void theGapsOfTheEvidenceAnalysisReachThePromptAndCrossTheWire() {
+        ConceptQueryPlan.Node node = new ConceptQueryPlan.Node("n1", "Hitze", Arrays.asList("Hitze"), "", "Hitze Bau")
+                .withEvidence(Arrays.asList("THIN: 2 distinct passages from 1 sources", "found nothing: Hitze Norm"));
+        ConceptQueryPlan.Request request = new ConceptQueryPlan.Request("de", "Wearables am Bau",
+                Collections.singletonList(node), Collections.<String>emptyList(), Collections.<String>emptyList(), 2, 2)
+                .withNewTopics(Collections.singletonList("Exoskelette: Heben, Rücken"))
+                .withArea("IN: Arbeitsschutz");
+        String prompt = QueryPlanner.conceptPrompt(request, node, "Hitze Bau", request.getQueriesRun());
+        assertTrue(prompt, prompt.contains("WHAT THE MATERIAL SHOWS\n- THIN: 2 distinct passages from 1 sources\n"
+                + "- found nothing: Hitze Norm"));
+        assertTrue(prompt, prompt.contains("NEW TOPICS IN THE MATERIAL\n- Exoskelette: Heben, Rücken"));
+        assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("WHAT THE MATERIAL SHOWS"));
+        ConceptQueryPlan.Request crossed = com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(
+                com.aresstack.askai.research.plan.QueryPlanWireCodec.encodeRequest(request));
+        assertEquals(node.getEvidence(), crossed.getNodes().get(0).getEvidence());
+        assertEquals(request.getNewTopics(), crossed.getNewTopics());
+        assertEquals("IN: Arbeitsschutz", crossed.getArea());
+        ConceptQueryPlan.Node plain = new ConceptQueryPlan.Node("n2", "Kosten", Arrays.asList("Kosten"), "", "Kosten");
+        assertTrue(!QueryPlanner.conceptPrompt(request.withNewTopics(null), plain, "Kosten",
+                request.getQueriesRun()).contains("WHAT THE MATERIAL SHOWS"));
+    }
 }

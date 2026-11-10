@@ -232,6 +232,38 @@ public final class ResearchRunWire {
         return sb.toString();
     }
 
+    /**
+     * Plan T4: a page worker's message to the orchestrator (a finding, a gap, its final summary), URL-encoded and
+     * correlated by the requestId of the planned query the worker visits.
+     */
+    public static String manualSearchTeamNote(String requestId, String note) {
+        StringBuilder sb = new StringBuilder(MARKER).append("manual_search_team_note")
+                .append(" request_id=").append(requestId == null ? "" : requestId);
+        appendEncoded(sb, "note", note);
+        return sb.toString();
+    }
+
+    /** Plan T4: how many pages of a team search are still open (queued or being read). */
+    public static String manualSearchOpenPages(String requestId, int open) {
+        return MARKER + "manual_search_open_pages request_id=" + (requestId == null ? "" : requestId)
+                + " open=" + Math.max(0, open);
+    }
+
+    /**
+     * Plan T4: a new search query a page worker suggested while reading a hit of this search; {@code rejected} is
+     * empty when the Weidezaun and the blacklist let it through, otherwise why it was dropped.
+     */
+    public static String manualSearchTeamQuery(String requestId, String query, String pageUrl, String rejected) {
+        StringBuilder sb = new StringBuilder(MARKER).append("manual_search_team_query")
+                .append(" request_id=").append(requestId == null ? "" : requestId);
+        appendEncoded(sb, "query", query);
+        appendEncoded(sb, "page", pageUrl);
+        if (rejected != null && !rejected.isEmpty()) {
+            appendEncoded(sb, "rejected", rejected);
+        }
+        return sb.toString();
+    }
+
     /** A manual search finished: the result count and the strategy status (RESULTS|NO_RESULTS|…). */
     /**
      * Plan PR 14: as {@link #manualSearchCompleted(String, int, String)}; {@code keywordFallback} marks a planned

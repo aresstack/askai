@@ -1810,6 +1810,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         return true;
                     }
                 }, QUERY_PLAN_TIMEOUT_MILLIS);
+        // the Weidezaun limits every planned query, at the seed plan and at every later cycle
+        queryPlanner.setAreaSource(
+                new com.aresstack.askai.research.plan.BackendQueryPlanner.AreaSource() {
+                    public String area() {
+                        return researchArea();
+                    }
+                });
         final java.util.concurrent.atomic.AtomicReference<com.aresstack.askai.research.search.ManualWebSearchHandle>
                 running = new java.util.concurrent.atomic.AtomicReference<
                         com.aresstack.askai.research.search.ManualWebSearchHandle>();
@@ -1821,6 +1828,29 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         com.aresstack.askai.research.search.ManualWebSearchHandle h = manualWebSearchPort.search(
                                 new com.aresstack.askai.research.search.ManualWebSearchRequest(query,
                                         ResearchLanguage.fromCode(language), ranking, visitLimit, sourceCap));
+                        running.set(h);
+                        return h.getRequestId();
+                    }
+
+                    public String searchAsTeam(String query, String language, String ranking, int visitLimit,
+                                               int sourceCap, String nodeLabel) {
+                        // plan T5: the same search through the one web search tool; the runtime reads its pages
+                        // in a worker browser of their own, beside the other planned queries
+                        com.aresstack.askai.research.search.ManualWebSearchHandle h = manualWebSearchPort.search(
+                                new com.aresstack.askai.research.search.ManualWebSearchRequest(query,
+                                        ResearchLanguage.fromCode(language), ranking, visitLimit, sourceCap)
+                                        .asTeam(nodeLabel, bookTitleForTeam(),
+                                                com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamFollowLinks(hostStateStore),
+                                                com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamPageCharacters(hostStateStore),
+                                                com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamAnswerTokens(hostStateStore))
+                                        .withTeamLanes(com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamWorkers(hostStateStore),
+                                                com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamSearchesPerPage(hostStateStore),
+                                                researchArea()));
                         running.set(h);
                         return h.getRequestId();
                     }
@@ -1907,6 +1937,17 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         planning.start();
                     }
                 });
+        // plan T5: the research team runs several planned queries at once (read at every dispatch)
+        searchPlanQueue.setTeam(new com.aresstack.askai.research.plan.SearchPlanQueue.Team() {
+            public int workers() {
+                return com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTeamWorkers(hostStateStore);
+            }
+
+            public int nextSearchBelow() {
+                return com.aresstack.askai.research.host.ResearchRuntimeSettings
+                        .loadTeamNextSearchBelow(hostStateStore);
+            }
+        });
         // every source carries the phase and the plan entry of the search that found it
         final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
         com.aresstack.askai.research.capture.SourceAcceptanceService acceptance = resources.acceptance();
@@ -2156,7 +2197,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             new com.aresstack.askai.research.plan.SearchPlanBuilder.Input(
                                     com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
                                     frozen.getRevision(), frozen.getLanguage(), bookTitle(frozen), nodes, blacklist),
-                            queryPlanner, caps.getQueriesPerNode(), System.currentTimeMillis());
+                            queryPlanner, seedQueriesPerNode(caps), System.currentTimeMillis());
             store.clearBuildPending();
             System.err.println("[search-plan] plan built: nodes=" + nodes.size() + " added=" + result.getAdded());
         } catch (java.io.IOException | com.aresstack.askai.research.transition.CorruptProjectFileException failed) {
@@ -2165,6 +2206,28 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         // Q4: the plan starts after the approval (it waits for a running turn), and never before activation
         startSearchPlanWhenActive("search-plan started after the build");
+    }
+
+    /**
+     * The queries per node the seed plan starts with: with the research team only the concept's breadth (setting
+     * "Seed queries per node"), the deeper queries come from what the team reads; without it the whole budget.
+     */
+    private int seedQueriesPerNode(com.aresstack.askai.research.plan.SearchPlanCoverage.Caps caps) {
+        if (com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTeamWorkers(hostStateStore) <= 0) {
+            return caps.getQueriesPerNode();
+        }
+        return Math.min(caps.getQueriesPerNode(),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTeamSeedQueriesPerNode(hostStateStore));
+    }
+
+    /** Plan T5: the book title of the frozen concept for the page workers' brief; empty when none is frozen. */
+    private String bookTitleForTeam() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            return frozen == null ? "" : bookTitle(frozen);
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return "";
+        }
     }
 
     /**
@@ -2351,13 +2414,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }
                     },
                     resources.corpusReader(), resources.outlineEmbeddings(),
-                    new com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings(
-                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
-                                    .DEFAULT_THRESHOLD,
-                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
-                                    .DEFAULT_MARGIN,
-                            knowledge == null ? 3 : knowledge.minimumPassagesPerTopic,
-                            knowledge == null ? 2 : knowledge.minimumDistinctSourcesPerTopic),
+                    () -> com.aresstack.askai.research.host.ResearchRuntimeSettings.loadOutlineSettings(
+                            hostStateStore, knowledge),
                     resources.outlineRun(), outlineGenerationExecutor);
             outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
                 public String refusal() {
@@ -2789,8 +2847,15 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             }
                         }),
                 new com.aresstack.askai.research.drafting.EvidenceAssignments(packs, contexts,
-                        new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
-                                com.aresstack.askai.research.writer.WriterPackSettings.LARGE, 1100, 3072)));
+                        () -> new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
+                                new com.aresstack.askai.research.writer.WriterPackSettings(
+                                        com.aresstack.askai.research.writer.WriterPackSettings.LARGE
+                                                .getPassageCount(),
+                                        com.aresstack.askai.research.writer.WriterPackSettings.LARGE
+                                                .getPassageTokens(),
+                                        com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                .loadWriterProseCriteria(hostStateStore)),
+                                1100, 3072)));
     }
 
     private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,
@@ -3719,6 +3784,21 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private void applyManualSearchEvent(ResearchBackendEvent event) {
         com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
         if (planQueue != null && planQueue.owns(event.getTechnicalDetail())) {
+            // Plan T4: the research team's page reports of a running search
+            if ("open_pages".equals(event.getTitle())) {
+                int open;
+                try {
+                    open = Integer.parseInt(event.getText().trim());
+                } catch (NumberFormatException notACount) {
+                    return;
+                }
+                planQueue.onOpenPages(event.getTechnicalDetail(), open);
+                return;
+            }
+            if ("team_query".equals(event.getTitle())) {
+                planQueue.onTeamQuery(event.getTechnicalDetail(), event.getText(), event.getPublicMessage());
+                return;
+            }
             // Plan PR 14: a planned query posts no chat line; the plan checklist shows its status.
             planQueue.onSearchEvent(event.getTechnicalDetail(), event.getTitle(), event.getText(),
                     event.getPublicMessage().trim().endsWith(" keywords"));
@@ -6611,6 +6691,19 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     /** The host-said scope-check question, carried on the fence so the model knows it asked. */
     private volatile String lastScopeCheckQuestion = "";
 
+    /**
+     * The Weidezaun as the query planner and the page workers read it: the rendered scope of the book, without the
+     * conversation blocks the chat assistant gets. "" when there is no usable scope.
+     */
+    private String researchArea() {
+        com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();
+        if (coordinator == null || !coordinator.isUsable()) {
+            return "";
+        }
+        String area = com.aresstack.askai.research.domain.scope.ResearchScopeFenceView.render(coordinator.current());
+        return area == null ? "" : area.trim();
+    }
+
     private void publishScopeFence() {
         com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();
         if (coordinator == null || handle == null || disposed || !coordinator.isUsable()) {
@@ -6858,6 +6951,15 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         if ("generate-outline".equals(cmd)) {
             return renderOutcome(derivedActions.generateOutline());
         }
+        // The Document tab's two job buttons as commands: the same calls, the same refusals.
+        if ("write-sections".equals(cmd)) {
+            return renderWritingStart(writeRemainingSections(),
+                    "writing the remaining sections started (progress on the Document tab)");
+        }
+        if ("rewrite-stale".equals(cmd)) {
+            return renderWritingStart(rewriteStaleSections(),
+                    "rewriting the stale sections started (progress on the Document tab)");
+        }
         if ("check-scope".equals(cmd)) {
             return renderOutcome(derivedActions.checkScope());
         }
@@ -7047,8 +7149,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     /** The commands a bot may run right now: the service commands and the bot-runnable offers. */
     private String validBotCommandNames() {
         StringBuilder sb = new StringBuilder(
-                "search <query>, generate-visualization, generate-outline, review-sources, "
-                        + "check-scope");
+                "search <query>, generate-visualization, generate-outline, write-sections, rewrite-stale, "
+                        + "review-sources, check-scope");
         if (topicDiscoveryOffered()) {
             sb.append(", discover-topics");
         }
@@ -7062,6 +7164,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     private static String renderOutcome(ResearchDerivedActions.ActionOutcome outcome) {
         return (outcome.isAccepted() ? "handled: " : "rejected: ") + outcome.getDetail();
+    }
+
+    /** A writing job start: {@code null} from {@link #startWriting} means started, anything else is the refusal. */
+    private static String renderWritingStart(String refusal, String started) {
+        return refusal == null ? "handled: " + started : "rejected: " + refusal;
     }
 
     /** The SEMANTIC state-command names — the whole user/bot vocabulary beside the service commands. */
@@ -7089,8 +7196,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     /** Every command valid RIGHT NOW: the always-on service commands + the resolvable semantic commands. */
     private String validCommandNames() {
         StringBuilder sb = new StringBuilder(
-                "search <query>, generate-visualization, generate-outline, review-sources, "
-                        + "check-scope");
+                "search <query>, generate-visualization, generate-outline, write-sections, rewrite-stale, "
+                        + "review-sources, check-scope");
         if (topicDiscoveryOffered()) {
             sb.append(", discover-topics");
         }

@@ -45,6 +45,10 @@ public final class QueryPlanWireCodec {
     static final String NODES = "nodes";
     static final String CYCLE = "cycle";
     static final String DOMAINS_FOUND = "domains_found";
+    static final String WORKER_NOTES = "worker_notes";
+    static final String AREA = "area";
+    static final String EVIDENCE = "evidence";
+    static final String NEW_TOPICS = "new_topics";
 
     private static JsonArray array(List<String> values) {
         JsonArray array = new JsonArray();
@@ -88,6 +92,8 @@ public final class QueryPlanWireCodec {
         root.addProperty(CYCLE, request.getCycle());
         root.add(QUERIES_RUN, array(request.getQueriesRun()));
         root.add(BLACKLIST, array(request.getBlacklist()));
+        root.addProperty(AREA, request.getArea());
+        root.add(NEW_TOPICS, array(request.getNewTopics()));
         JsonArray nodes = new JsonArray();
         for (ConceptQueryPlan.Node node : request.getNodes()) {
             JsonObject n = new JsonObject();
@@ -97,6 +103,8 @@ public final class QueryPlanWireCodec {
             n.addProperty("parent_id", node.getParentId());
             n.addProperty("base_query", node.getBaseQuery());
             n.add(DOMAINS_FOUND, array(node.getFoundDomains()));
+            n.add(WORKER_NOTES, array(node.getWorkerNotes()));
+            n.add(EVIDENCE, array(node.getEvidence()));
             nodes.add(n);
         }
         root.add(NODES, nodes);
@@ -114,14 +122,16 @@ public final class QueryPlanWireCodec {
             for (JsonElement item : array.getAsJsonArray()) {
                 JsonObject n = item.getAsJsonObject();
                 nodes.add(new ConceptQueryPlan.Node(text(n, "id"), text(n, "label"), strings(n, "path"),
-                        text(n, "parent_id"), text(n, "base_query"), strings(n, DOMAINS_FOUND)));
+                        text(n, "parent_id"), text(n, "base_query"), strings(n, DOMAINS_FOUND),
+                        strings(n, WORKER_NOTES), strings(n, EVIDENCE)));
             }
             JsonElement max = root.get(MAX);
             JsonElement cycle = root.get(CYCLE);
             return new ConceptQueryPlan.Request(text(root, LANGUAGE), text(root, BOOK_TITLE), nodes,
                     strings(root, QUERIES_RUN), strings(root, BLACKLIST),
                     max == null || !max.isJsonPrimitive() ? 0 : max.getAsInt(),
-                    cycle == null || !cycle.isJsonPrimitive() ? 1 : cycle.getAsInt());
+                    cycle == null || !cycle.isJsonPrimitive() ? 1 : cycle.getAsInt(), text(root, AREA),
+                    strings(root, NEW_TOPICS));
         } catch (RuntimeException malformed) {
             throw malformed instanceof IllegalArgumentException ? (IllegalArgumentException) malformed
                     : new IllegalArgumentException(malformed.getMessage(), malformed);
