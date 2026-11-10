@@ -603,7 +603,140 @@ public final class ResearchRuntimeSettings {
                 loadPositiveInt(store, KEY_PLAN_SOURCES_PER_NODE, DEFAULT_PLAN_SOURCES_PER_NODE),
                 loadPositiveInt(store, KEY_PLAN_QUERIES_PER_NODE, DEFAULT_PLAN_QUERIES_PER_NODE),
                 loadPositiveInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES),
-                loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES));
+                loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES))
+                .withPreferenceQueries(loadSourcePreferenceEnabled(store)
+                        ? loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_QUERIES, DEFAULT_SOURCE_PREFERENCE_QUERIES)
+                        : 0);
+    }
+
+    // ------------------------------------------------------------------ Sources: the mission's source preference
+    /**
+     * Whether the mission's source preference ("Bevorzuge … (DGUV, BAuA, EU-OSHA, Gesetze, Studien)") steers the
+     * search plan: publisher queries per node and cycle and a ranking that moves preferred hosts up and vendor pages
+     * down. Default ON: the 2026-11-10 live run cited no single preferred source although the mission named five.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_ENABLED = "research.sources.preferMissionSources";
+    /** The words that open the preference clause of a mission. */
+    public static final String KEY_SOURCE_PREFERENCE_CUES = "research.sources.preferenceCues";
+    public static final String DEFAULT_SOURCE_PREFERENCE_CUES =
+            "bevorzuge, bevorzugt, vorzugsweise, vorrangig, prefer, preferably, favour, favor";
+    /**
+     * Publisher name → domain, for the {@code site:} queries and the ranking. The defaults are the German and
+     * European authorities, insurers and standards bodies a German non-fiction book cites most; the user edits the
+     * list for other fields. A domain written in the mission itself needs no entry.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_PUBLISHERS = "research.sources.publisherDomains";
+    public static final String DEFAULT_SOURCE_PREFERENCE_PUBLISHERS = "DGUV=dguv.de, BAuA=baua.de, "
+            + "EU-OSHA=osha.europa.eu, Gesetze=gesetze-im-internet.de, Gesetz=gesetze-im-internet.de, "
+            + "EUR-Lex=eur-lex.europa.eu, DIN=din.de, ISO=iso.org, BSI=bsi.bund.de, Destatis=destatis.de, "
+            + "Eurostat=ec.europa.eu, RKI=rki.de, BfDI=bfdi.bund.de, EDPB=edpb.europa.eu";
+    /** Host suffixes of authorities that move up in the ranking whatever the mission says. */
+    public static final String KEY_SOURCE_PREFERENCE_AUTHORITY_HOSTS = "research.sources.authorityHosts";
+    public static final String DEFAULT_SOURCE_PREFERENCE_AUTHORITY_HOSTS =
+            ".bund.de, .europa.eu, .gv.at, .admin.ch, .gov, .gov.uk, .edu";
+    /** URL parts of vendor pages (blog, product, solution, shop) that move down in the ranking, never out. */
+    public static final String KEY_SOURCE_PREFERENCE_DEMOTED = "research.sources.demotedUrlParts";
+    public static final String DEFAULT_SOURCE_PREFERENCE_DEMOTED = "/blog, /news/, /produkt, /product, /loesung, "
+            + "/lösung, /solution, /shop, /kontakt, /contact, /demo";
+    /**
+     * The publisher queries per node and research cycle, on top of "Queries per node". Default 1: each cycle asks
+     * the next preferred publisher for every node, so three cycles reach three publishers without doubling the plan.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_QUERIES = "research.sources.preferenceQueriesPerNode";
+    public static final int DEFAULT_SOURCE_PREFERENCE_QUERIES = 1;
+    /**
+     * The places a preferred hit moves up and a vendor page moves down among the selected hits of a planned query.
+     * Default 3: a guideline ranked fifth opens before a vendor blog ranked second, the clearly best hit stays first.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_RANK_SHIFT = "research.sources.preferenceRankShift";
+    public static final int DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT = 3;
+
+    public static boolean loadSourcePreferenceEnabled(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_SOURCE_PREFERENCE_ENABLED, true);
+    }
+
+    public static void saveSourcePreferenceEnabled(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_SOURCE_PREFERENCE_ENABLED, enabled);
+        }
+    }
+
+    /** A comma-separated list setting; the default when unset. */
+    public static String loadText(WorkspaceStateStore store, String key, String fallback) {
+        if (store == null) {
+            return fallback;
+        }
+        String value = store.get(key, null);
+        return value == null ? fallback : value;
+    }
+
+    public static void saveText(WorkspaceStateStore store, String key, String value) {
+        if (store != null) {
+            store.put(key, value == null ? "" : value.trim());
+        }
+    }
+
+    /** The items of a comma-separated list. */
+    public static java.util.List<String> items(String text) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (text != null) {
+            for (String part : text.split(",")) {
+                if (!part.trim().isEmpty()) {
+                    out.add(part.trim());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The settings of the mission's source preference. */
+    public static com.aresstack.askai.research.plan.SourcePreference.Settings loadSourcePreference(
+            WorkspaceStateStore store) {
+        java.util.Map<String, String> publishers = new java.util.LinkedHashMap<String, String>();
+        for (String pair : items(loadText(store, KEY_SOURCE_PREFERENCE_PUBLISHERS,
+                DEFAULT_SOURCE_PREFERENCE_PUBLISHERS))) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                publishers.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+            }
+        }
+        return new com.aresstack.askai.research.plan.SourcePreference.Settings(
+                loadSourcePreferenceEnabled(store),
+                items(loadText(store, KEY_SOURCE_PREFERENCE_CUES, DEFAULT_SOURCE_PREFERENCE_CUES)),
+                publishers,
+                items(loadText(store, KEY_SOURCE_PREFERENCE_AUTHORITY_HOSTS, DEFAULT_SOURCE_PREFERENCE_AUTHORITY_HOSTS)),
+                items(loadText(store, KEY_SOURCE_PREFERENCE_DEMOTED, DEFAULT_SOURCE_PREFERENCE_DEMOTED)),
+                loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_QUERIES, DEFAULT_SOURCE_PREFERENCE_QUERIES),
+                loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_RANK_SHIFT, DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT));
+    }
+
+    // ------------------------------------------------------------------ Document: writer gaps → research
+    /**
+     * Whether the gaps the writer left (its {@code GAP:} lines, sections it could not write for lack of evidence)
+     * are researched on their own after a writing job, as "Research this gap" entries of the search plan. Default
+     * ON: M2 asks the app to research its own gaps without a human; live run 3 ended with four open points nobody
+     * searched for.
+     */
+    public static final String KEY_WRITER_GAP_RESEARCH = "research.document.researchWriterGaps";
+    /**
+     * The most gaps one writing job sends to research. Default 6: one or two per section of a short book, few enough
+     * that the search plan's phase budget is not spent on a single job's open points.
+     */
+    public static final String KEY_WRITER_GAP_MAX = "research.document.writerGapsPerJob";
+    public static final int DEFAULT_WRITER_GAP_MAX = 6;
+    /** Words in a writer failure that mean "not enough evidence" (the failed section becomes a gap). */
+    public static final String KEY_WRITER_GAP_EVIDENCE_WORDS = "research.document.evidenceFailureWords";
+    public static final String DEFAULT_WRITER_GAP_EVIDENCE_WORDS =
+            "evidence, passage, source, beleg, quelle, citation";
+
+    public static boolean loadWriterGapResearch(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_WRITER_GAP_RESEARCH, true);
+    }
+
+    public static void saveWriterGapResearch(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_WRITER_GAP_RESEARCH, enabled);
+        }
     }
 
     // ------------------------------------------------------------------ Document: evidence pack
@@ -656,6 +789,65 @@ public final class ResearchRuntimeSettings {
                 loadPositiveInt(store, KEY_WRITER_CARRY_STEM_LENGTH,
                         com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH),
                 overlap, loadWriterProseCriteria(store));
+    }
+
+    // ------------------------------------------------------------------ Document: writer preset
+    /** Words the section writer aims for in one call; a longer section is split by its key points. */
+    public static final String KEY_WRITER_WORDS_PER_CALL = "research.writer.wordsPerCall";
+    /** Answer token budget of one writer call. */
+    public static final String KEY_WRITER_ANSWER_TOKENS = "research.writer.answerTokens";
+    /** Passages in one section's evidence pack. */
+    public static final String KEY_WRITER_PASSAGES = "research.writer.passages";
+    /** Tokens each evidence passage may take. */
+    public static final String KEY_WRITER_PASSAGE_TOKENS = "research.writer.passageTokens";
+    /** Passages one source may contribute to a pack. */
+    public static final String KEY_WRITER_PASSAGES_PER_SOURCE = "research.writer.passagesPerSource";
+    /** The writer preset the Document phase used before it became a setting (live run 3: 1,100 words, 3,072). */
+    public static final int DEFAULT_WRITER_WORDS_PER_CALL = 1100;
+    public static final int DEFAULT_WRITER_ANSWER_TOKENS = 3072;
+
+    /**
+     * The section writer's targets (live run 3, fix 4), read for every section: words and answer budget per call,
+     * evidence pack size and per-source cap, prose criteria and claim-check thresholds. The defaults are the values
+     * that were hard-coded before.
+     */
+    public static com.aresstack.askai.research.drafting.EvidenceAssignments.Targets loadWriterTargets(
+            WorkspaceStateStore store) {
+        com.aresstack.askai.research.writer.WriterPackSettings large =
+                com.aresstack.askai.research.writer.WriterPackSettings.LARGE;
+        int passageTokens = loadPositiveInt(store, KEY_WRITER_PASSAGE_TOKENS, large.getPassageTokens());
+        if (passageTokens < com.aresstack.askai.research.writer.WriterPackSettings.MIN_PASSAGE_TOKENS) {
+            passageTokens = large.getPassageTokens();
+        }
+        return new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
+                new com.aresstack.askai.research.writer.WriterPackSettings(
+                        loadPositiveInt(store, KEY_WRITER_PASSAGES, large.getPassageCount()), passageTokens,
+                        loadWriterProseCriteria(store),
+                        loadPositiveInt(store, KEY_WRITER_PASSAGES_PER_SOURCE,
+                                com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE)),
+                loadPositiveInt(store, KEY_WRITER_WORDS_PER_CALL, DEFAULT_WRITER_WORDS_PER_CALL),
+                loadPositiveInt(store, KEY_WRITER_ANSWER_TOKENS, DEFAULT_WRITER_ANSWER_TOKENS),
+                loadWriterCarryCriteria(store));
+    }
+
+    // ------------------------------------------------------------------ Document: topic drift in the book report
+    public static final String KEY_DRIFT_MIN_TERM_LENGTH = "research.book.drift.minTermLength";
+    public static final String KEY_DRIFT_MIN_SENTENCES = "research.book.drift.minSentences";
+    public static final String KEY_DRIFT_NOUNS_ONLY = "research.book.drift.nounsOnly";
+
+    /** The topic-drift thresholds of the book's quality report; the stem is the claim check's. */
+    public static com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria loadTopicDriftCriteria(
+            WorkspaceStateStore store) {
+        boolean nounsOnly = store == null
+                ? com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_NOUNS_ONLY
+                : store.getBoolean(KEY_DRIFT_NOUNS_ONLY,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_NOUNS_ONLY);
+        return new com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria(
+                loadPositiveInt(store, KEY_DRIFT_MIN_TERM_LENGTH,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_TERM_LENGTH),
+                loadPositiveInt(store, KEY_DRIFT_MIN_SENTENCES,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_SENTENCES),
+                loadWriterCarryCriteria(store).getStemLength(), nounsOnly);
     }
 
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";

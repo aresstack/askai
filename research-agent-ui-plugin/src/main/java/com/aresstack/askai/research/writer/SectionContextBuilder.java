@@ -24,13 +24,12 @@ import java.util.Set;
  * section's provenance (in provenance order) followed by the hits of a semantic search on its brief, which is
  * embedded once as a {@link EmbeddingPort.Role#QUERY query}; no passage is embedded again. Only passages of sources
  * the {@link EvidenceSourceSet} admits count, and only prose: navigation, footer and heading passages fail the
- * pack's {@linkplain WriterPackSettings#getProse() prose criteria} and never reach the writer; passages are deduplicated by id and by text, at most two per source,
+ * pack's {@linkplain WriterPackSettings#getProse() prose criteria} and never reach the writer; passages are deduplicated by id and by text, at most {@linkplain WriterPackSettings#getPassagesPerSource() passages per source} each,
  * cut at sentence boundaries to the preset's passage size, and numbered {@code [1]..[k]} in that order. The same
  * store state always gives the same pack.
  */
 public final class SectionContextBuilder {
 
-    static final int MAX_PER_SOURCE = 2;
     static final int SYNOPSIS_TOKENS = 300;
     static final int DIGEST_TOKENS = 300;
     static final int GLOSSARY_TOKENS = 200;
@@ -110,7 +109,7 @@ public final class SectionContextBuilder {
                 continue;
             }
             Integer used = perSource.get(sourceId);
-            if (used != null && used >= MAX_PER_SOURCE) {
+            if (used != null && used >= pack.getPassagesPerSource()) {
                 continue;
             }
             String text = TokenBudget.cutAtSentence(hit.getText(), pack.getPassageTokens());

@@ -19,7 +19,7 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         SectionContextRequest requestFor(SectionWriteRequest request) throws Exception;
     }
 
-    /** Word target per call and answer budget of the writer model (about 1,100/3,072 or 450/1,200). */
+    /** Word target per call, answer budget, evidence pack and claim-check thresholds (settings, read per section). */
     public static final class Targets {
         final WriterPackSettings pack;
         final int wordsPerCall;
@@ -32,6 +32,18 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
             this.wordsPerCall = wordsPerCall;
             this.answerTokens = answerTokens;
             this.carry = carry;
+        }
+
+        public WriterPackSettings getPack() {
+            return pack;
+        }
+
+        public int getWordsPerCall() {
+            return wordsPerCall;
+        }
+
+        public int getAnswerTokens() {
+            return answerTokens;
         }
     }
 

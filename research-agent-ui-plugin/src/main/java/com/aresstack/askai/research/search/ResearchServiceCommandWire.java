@@ -83,6 +83,43 @@ public final class ResearchServiceCommandWire {
     }
 
     /**
+     * The mission's source preference appended to a search envelope: {@code prefer} (preferred hosts and host
+     * suffixes), {@code demote} (URL parts of vendor pages), both comma-joined and URL-encoded, and
+     * {@code prefer_shift} (the places they move). Nothing is appended without a shift or without any host or part.
+     */
+    public static String withSourcePreference(String envelope, java.util.List<String> preferredHosts,
+                                              java.util.List<String> demotedMarkers, int shift) {
+        boolean hosts = preferredHosts != null && !preferredHosts.isEmpty();
+        boolean parts = demotedMarkers != null && !demotedMarkers.isEmpty();
+        if (envelope == null || shift <= 0 || (!hosts && !parts)) {
+            return envelope;
+        }
+        StringBuilder sb = new StringBuilder(envelope);
+        if (hosts) {
+            appendEncoded(sb, "prefer", join(preferredHosts));
+        }
+        if (parts) {
+            appendEncoded(sb, "demote", join(demotedMarkers));
+        }
+        sb.append(" prefer_shift=").append(shift);
+        return sb.toString();
+    }
+
+    private static String join(java.util.List<String> values) {
+        StringBuilder sb = new StringBuilder();
+        for (String value : values) {
+            if (value == null || value.trim().isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(value.trim().replace(",", ""));
+        }
+        return sb.toString();
+    }
+
+    /**
      * Encode a live working-language switch (best-effort sync for the next TeamAgent turn; the language
      * snapshot on operation requests stays authoritative). Codes are single tokens, no encoding needed.
      */

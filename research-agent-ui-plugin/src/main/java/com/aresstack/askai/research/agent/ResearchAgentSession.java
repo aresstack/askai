@@ -1677,6 +1677,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return false;
         }
         queue.setCaps(com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSearchPlanCaps(hostStateStore));
+        queue.setSourcePreference(sourcePreference());
         com.aresstack.askai.research.transition.PhaseJobRegistry.Job job =
                 new com.aresstack.askai.research.transition.PhaseJobRegistry.Job() {
                     public void cancel() {
@@ -1832,7 +1833,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         // the recorded working language, never the toolbar language (D4)
                         com.aresstack.askai.research.search.ManualWebSearchHandle h = manualWebSearchPort.search(
                                 new com.aresstack.askai.research.search.ManualWebSearchRequest(query,
-                                        ResearchLanguage.fromCode(language), ranking, visitLimit, sourceCap));
+                                        ResearchLanguage.fromCode(language), ranking, visitLimit, sourceCap)
+                                        .withSourcePreference(sourcePreference()));
                         running.set(h);
                         return h.getRequestId();
                     }
@@ -1855,7 +1857,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                                         .loadTeamWorkers(hostStateStore),
                                                 com.aresstack.askai.research.host.ResearchRuntimeSettings
                                                         .loadTeamSearchesPerPage(hostStateStore),
-                                                researchArea()));
+                                                researchArea())
+                                        .withSourcePreference(sourcePreference()));
                         running.set(h);
                         return h.getRequestId();
                     }
@@ -2201,7 +2204,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     com.aresstack.askai.research.plan.SearchPlanBuilder.build(store,
                             new com.aresstack.askai.research.plan.SearchPlanBuilder.Input(
                                     com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
-                                    frozen.getRevision(), frozen.getLanguage(), bookTitle(frozen), nodes, blacklist),
+                                    frozen.getRevision(), frozen.getLanguage(), bookTitle(frozen), nodes, blacklist,
+                                    com.aresstack.askai.research.plan.SourcePreference.of(frozen.getMission(),
+                                            com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                    .loadSourcePreference(hostStateStore))),
                             queryPlanner, seedQueriesPerNode(caps), System.currentTimeMillis());
             store.clearBuildPending();
             System.err.println("[search-plan] plan built: nodes=" + nodes.size() + " added=" + result.getAdded());
@@ -2226,6 +2232,23 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /** Plan T5: the book title of the frozen concept for the page workers' brief; empty when none is frozen. */
+    /**
+     * The mission's source preference under the current settings ({@link
+     * com.aresstack.askai.research.plan.SourcePreference}); none without a frozen concept.
+     */
+    private com.aresstack.askai.research.plan.SourcePreference sourcePreference() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen == null) {
+                return com.aresstack.askai.research.plan.SourcePreference.NONE;
+            }
+            return com.aresstack.askai.research.plan.SourcePreference.of(frozen.getMission(),
+                    com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSourcePreference(hostStateStore));
+        } catch (Exception unreadable) {
+            return com.aresstack.askai.research.plan.SourcePreference.NONE;
+        }
+    }
+
     private String bookTitleForTeam() {
         try {
             com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
@@ -2903,11 +2926,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             public void finished(
                                     final com.aresstack.askai.research.drafting.WritingOutcome outcome) {
                                 lastWritingOutcome = outcome.text();
+                                final String gapLine = researchWriterGaps(outcome);
                                 uiExecutor.execute(new Runnable() {
                                     public void run() {
                                         if (sink != null) {
                                             String id = "writing-outcome-" + System.currentTimeMillis();
-                                            sink.appendInfoMessage(id, outcome.text());
+                                            sink.appendInfoMessage(id, outcome.text()
+                                                    + (gapLine.isEmpty() ? "" : "\n" + gapLine));
                                             journal.attribute(id,
                                                     com.aresstack.askai.research.state.oo.ResearchStateIds.DRAFT);
                                             persistJournalNow();
@@ -2995,16 +3020,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             }
                         }),
                 new com.aresstack.askai.research.drafting.EvidenceAssignments(packs, contexts,
-                        () -> new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
-                                new com.aresstack.askai.research.writer.WriterPackSettings(
-                                        com.aresstack.askai.research.writer.WriterPackSettings.LARGE
-                                                .getPassageCount(),
-                                        com.aresstack.askai.research.writer.WriterPackSettings.LARGE
-                                                .getPassageTokens(),
-                                        com.aresstack.askai.research.host.ResearchRuntimeSettings
-                                                .loadWriterProseCriteria(hostStateStore)),
-                                1100, 3072, com.aresstack.askai.research.host.ResearchRuntimeSettings
-                                        .loadWriterCarryCriteria(hostStateStore))));
+                        () -> com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                .loadWriterTargets(hostStateStore)));
     }
 
     private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,
@@ -3120,6 +3137,53 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
+     * The gaps the writer left become "Research this gap" entries of the search plan (setting "Research writer
+     * gaps", default on): a section without evidence is searched again by the plan instead of waiting for a human.
+     * The same gap keeps its entry id, so it is searched once. @return the chat line, "" when nothing was sent
+     */
+    private String researchWriterGaps(com.aresstack.askai.research.drafting.WritingOutcome outcome) {
+        com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
+        if (outcome == null || outcome.isStopped() || !outcome.getRefusal().isEmpty() || runner == null
+                || !com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterGapResearch(hostStateStore)) {
+            return "";
+        }
+        java.util.List<com.aresstack.askai.research.drafting.WriterGaps.Gap> gaps;
+        try {
+            gaps = com.aresstack.askai.research.drafting.WriterGaps.of(
+                    runner.job().writerSections(approvedOutlineOrNull()),
+                    com.aresstack.askai.research.host.ResearchRuntimeSettings.items(
+                            com.aresstack.askai.research.host.ResearchRuntimeSettings.loadText(hostStateStore,
+                                    com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                            .KEY_WRITER_GAP_EVIDENCE_WORDS,
+                                    com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                            .DEFAULT_WRITER_GAP_EVIDENCE_WORDS)),
+                    com.aresstack.askai.research.host.ResearchRuntimeSettings.loadNonNegativeInt(hostStateStore,
+                            com.aresstack.askai.research.host.ResearchRuntimeSettings.KEY_WRITER_GAP_MAX,
+                            com.aresstack.askai.research.host.ResearchRuntimeSettings.DEFAULT_WRITER_GAP_MAX));
+        } catch (RuntimeException unreadable) {
+            technicalLog("writer gaps -> not read: " + unreadable.getMessage());
+            return "";
+        }
+        int sent = 0;
+        String refusal = "";
+        for (com.aresstack.askai.research.drafting.WriterGaps.Gap gap : gaps) {
+            String result = researchGap(gap.getSectionId(), gap.getSectionTitle(), gap.getText());
+            if (result != null && (result.startsWith("Not") || result.startsWith("Nothing"))) {
+                refusal = result;
+            } else {
+                sent++;
+            }
+        }
+        technicalLog("writer gaps -> " + gaps.size() + " found, " + sent + " sent to research"
+                + (refusal.isEmpty() ? "" : " (" + refusal + ")"));
+        if (sent == 0) {
+            return "";
+        }
+        return sent + (sent == 1 ? " writer gap goes" : " writer gaps go") + " to research as search plan entries; "
+                + "\"Rewrite section\" can cite the new sources once they are in.";
+    }
+
+    /**
      * "Research this gap": one priority entry of the search plan with the section title and the gap, run in
      * {@code draft/running} without a phase change. @return the entry id or why not
      */
@@ -3156,7 +3220,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     productiveResources.currentState().getPhaseId(), job);
                             queue.run();
                         }
-                    }).research(sectionId, sectionTitle, gap);
+                    }, sourcePreference()).research(sectionId, sectionTitle, gap);
         } catch (Exception failed) {
             return "Not possible: the plan entry was not saved (" + failed.getMessage() + ")";
         }
@@ -3347,7 +3411,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         acronymLongForms(),
                         System.currentTimeMillis(), java.util.TimeZone.getDefault());
         return new com.aresstack.askai.research.assembly.BookAssembler(
-                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterCarryCriteria(hostStateStore))
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterCarryCriteria(hostStateStore),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTopicDriftCriteria(hostStateStore))
                 .assemble(input);
     }
 

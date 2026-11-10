@@ -28,6 +28,7 @@ public final class SearchPlanCoverage {
         private final int queriesPerNode;
         private final int phaseSources;
         private final int cycles;
+        private final int preferenceQueries;
 
         /** One research cycle: the plan ends when its queries ran. */
         public Caps(int sourcesPerNode, int queriesPerNode, int phaseSources) {
@@ -41,6 +42,11 @@ public final class SearchPlanCoverage {
          *                       are spent
          */
         public Caps(int sourcesPerNode, int queriesPerNode, int phaseSources, int cycles) {
+            this(sourcesPerNode, queriesPerNode, phaseSources, cycles, 0);
+        }
+
+        private Caps(int sourcesPerNode, int queriesPerNode, int phaseSources, int cycles, int preferenceQueries) {
+            this.preferenceQueries = Math.max(0, preferenceQueries);
             this.sourcesPerNode = Math.max(1, sourcesPerNode);
             this.queriesPerNode = Math.max(1, queriesPerNode);
             this.phaseSources = Math.max(1, phaseSources);
@@ -53,7 +59,20 @@ public final class SearchPlanCoverage {
 
         /** The query budget of a node up to and including the given cycle. */
         public int queriesUpTo(int cycle) {
-            return queriesPerNode * Math.max(1, cycle);
+            return (queriesPerNode + preferenceQueries) * Math.max(1, cycle);
+        }
+
+        /**
+         * The same caps with the mission's publisher queries per node and cycle ({@link SourcePreference}) on top of
+         * the planner's budget, so a preferred-source query is never skipped as over budget.
+         */
+        public Caps withPreferenceQueries(int perNodeAndCycle) {
+            return new Caps(sourcesPerNode, queriesPerNode, phaseSources, cycles, perNodeAndCycle);
+        }
+
+        /** The mission's publisher queries per node and cycle on top of {@link #getQueriesPerNode()}. */
+        public int getPreferenceQueries() {
+            return preferenceQueries;
         }
 
         public int getSourcesPerNode() {

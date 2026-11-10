@@ -33,9 +33,17 @@ public final class SearchPlanBuilder {
         final String bookTitle;
         final List<ConceptQueryPlan.Node> nodes;
         final List<String> blacklist;
+        final SourcePreference preference;
 
         public Input(String phase, int revision, String language, String bookTitle,
                      List<ConceptQueryPlan.Node> nodes, List<String> blacklist) {
+            this(phase, revision, language, bookTitle, nodes, blacklist, SourcePreference.NONE);
+        }
+
+        /** @param preference the mission's source preference: its publisher queries join each planned node */
+        public Input(String phase, int revision, String language, String bookTitle,
+                     List<ConceptQueryPlan.Node> nodes, List<String> blacklist, SourcePreference preference) {
+            this.preference = preference == null ? SourcePreference.NONE : preference;
             this.phase = phase;
             this.revision = revision;
             this.language = language;
@@ -70,6 +78,16 @@ public final class SearchPlanBuilder {
                 base.add(node.getBaseQuery());
             }
             queries.put(node.getId(), base);
+        }
+        int index = 0;
+        for (ConceptQueryPlan.Node node : toPlan) {
+            List<String> list = queries.get(node.getId());
+            for (String query : input.preference.queriesFor(node.getBaseQuery(), index++, 1)) {
+                String cleaned = ConceptPlanNodes.removeTerms(query, input.blacklist);
+                if (cleaned.length() >= ConceptQueryPlan.MIN_QUERY_LENGTH && !list.contains(cleaned)) {
+                    list.add(cleaned); // the mission's publishers, next to the base query (not a planner variant)
+                }
+            }
         }
         int variants = Math.max(0, Math.min(MAX_VARIANTS, queriesPerNode - 1));
         if (planner != null && variants > 0 && !toPlan.isEmpty()) {
