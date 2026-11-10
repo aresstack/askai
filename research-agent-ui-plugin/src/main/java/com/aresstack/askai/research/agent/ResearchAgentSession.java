@@ -2778,11 +2778,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             public void finished(
                                     final com.aresstack.askai.research.drafting.WritingOutcome outcome) {
                                 lastWritingOutcome = outcome.text();
+                                final String gapLine = researchWriterGaps(outcome);
                                 uiExecutor.execute(new Runnable() {
                                     public void run() {
                                         if (sink != null) {
                                             String id = "writing-outcome-" + System.currentTimeMillis();
-                                            sink.appendInfoMessage(id, outcome.text());
+                                            sink.appendInfoMessage(id, outcome.text()
+                                                    + (gapLine.isEmpty() ? "" : "\n" + gapLine));
                                             journal.attribute(id,
                                                     com.aresstack.askai.research.state.oo.ResearchStateIds.DRAFT);
                                             persistJournalNow();
@@ -2987,6 +2989,53 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
+     * The gaps the writer left become "Research this gap" entries of the search plan (setting "Research writer
+     * gaps", default on): a section without evidence is searched again by the plan instead of waiting for a human.
+     * The same gap keeps its entry id, so it is searched once. @return the chat line, "" when nothing was sent
+     */
+    private String researchWriterGaps(com.aresstack.askai.research.drafting.WritingOutcome outcome) {
+        com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
+        if (outcome == null || outcome.isStopped() || !outcome.getRefusal().isEmpty() || runner == null
+                || !com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterGapResearch(hostStateStore)) {
+            return "";
+        }
+        java.util.List<com.aresstack.askai.research.drafting.WriterGaps.Gap> gaps;
+        try {
+            gaps = com.aresstack.askai.research.drafting.WriterGaps.of(
+                    runner.job().writerSections(approvedOutlineOrNull()),
+                    com.aresstack.askai.research.host.ResearchRuntimeSettings.items(
+                            com.aresstack.askai.research.host.ResearchRuntimeSettings.loadText(hostStateStore,
+                                    com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                            .KEY_WRITER_GAP_EVIDENCE_WORDS,
+                                    com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                            .DEFAULT_WRITER_GAP_EVIDENCE_WORDS)),
+                    com.aresstack.askai.research.host.ResearchRuntimeSettings.loadNonNegativeInt(hostStateStore,
+                            com.aresstack.askai.research.host.ResearchRuntimeSettings.KEY_WRITER_GAP_MAX,
+                            com.aresstack.askai.research.host.ResearchRuntimeSettings.DEFAULT_WRITER_GAP_MAX));
+        } catch (RuntimeException unreadable) {
+            technicalLog("writer gaps -> not read: " + unreadable.getMessage());
+            return "";
+        }
+        int sent = 0;
+        String refusal = "";
+        for (com.aresstack.askai.research.drafting.WriterGaps.Gap gap : gaps) {
+            String result = researchGap(gap.getSectionId(), gap.getSectionTitle(), gap.getText());
+            if (result != null && (result.startsWith("Not") || result.startsWith("Nothing"))) {
+                refusal = result;
+            } else {
+                sent++;
+            }
+        }
+        technicalLog("writer gaps -> " + gaps.size() + " found, " + sent + " sent to research"
+                + (refusal.isEmpty() ? "" : " (" + refusal + ")"));
+        if (sent == 0) {
+            return "";
+        }
+        return sent + (sent == 1 ? " writer gap goes" : " writer gaps go") + " to research as search plan entries; "
+                + "\"Rewrite section\" can cite the new sources once they are in.";
+    }
+
+    /**
      * "Research this gap": one priority entry of the search plan with the section title and the gap, run in
      * {@code draft/running} without a phase change. @return the entry id or why not
      */
@@ -3023,7 +3072,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     productiveResources.currentState().getPhaseId(), job);
                             queue.run();
                         }
-                    }).research(sectionId, sectionTitle, gap);
+                    }, sourcePreference()).research(sectionId, sectionTitle, gap);
         } catch (Exception failed) {
             return "Not possible: the plan entry was not saved (" + failed.getMessage() + ")";
         }

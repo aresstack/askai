@@ -710,6 +710,35 @@ public final class ResearchRuntimeSettings {
                 loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_RANK_SHIFT, DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT));
     }
 
+    // ------------------------------------------------------------------ Document: writer gaps → research
+    /**
+     * Whether the gaps the writer left (its {@code GAP:} lines, sections it could not write for lack of evidence)
+     * are researched on their own after a writing job, as "Research this gap" entries of the search plan. Default
+     * ON: M2 asks the app to research its own gaps without a human; live run 3 ended with four open points nobody
+     * searched for.
+     */
+    public static final String KEY_WRITER_GAP_RESEARCH = "research.document.researchWriterGaps";
+    /**
+     * The most gaps one writing job sends to research. Default 6: one or two per section of a short book, few enough
+     * that the search plan's phase budget is not spent on a single job's open points.
+     */
+    public static final String KEY_WRITER_GAP_MAX = "research.document.writerGapsPerJob";
+    public static final int DEFAULT_WRITER_GAP_MAX = 6;
+    /** Words in a writer failure that mean "not enough evidence" (the failed section becomes a gap). */
+    public static final String KEY_WRITER_GAP_EVIDENCE_WORDS = "research.document.evidenceFailureWords";
+    public static final String DEFAULT_WRITER_GAP_EVIDENCE_WORDS =
+            "evidence, passage, source, beleg, quelle, citation";
+
+    public static boolean loadWriterGapResearch(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_WRITER_GAP_RESEARCH, true);
+    }
+
+    public static void saveWriterGapResearch(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_WRITER_GAP_RESEARCH, enabled);
+        }
+    }
+
     // ------------------------------------------------------------------ Outline: passage assignment
     /** Minimum cosine between a passage and its nearest outline anchor for the passage to be assigned. */
     public static final String KEY_OUTLINE_ASSIGNMENT_THRESHOLD = "research.outline.assignmentThreshold";

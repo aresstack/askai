@@ -69,6 +69,10 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField preferenceAuthorityHosts = ComicControls.textField(16);
     private final JTextField preferenceDemoted = ComicControls.textField(16);
     private final JTextField preferenceCues = ComicControls.textField(16);
+    // Document: the writer's gaps go to research on their own.
+    private final JCheckBox writerGapResearch = ComicControls.checkBox("Research writer gaps after writing", true);
+    private final JTextField writerGapMax = ComicControls.textField(3);
+    private final JTextField writerGapWords = ComicControls.textField(16);
     // Worker browsers (parallel research workers): separate from the model capacity.
     private final JTextField workerProcesses = ComicControls.textField(3);
     private final JTextField workerUserContexts = ComicControls.textField(3);
@@ -199,6 +203,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         preference.row("Authority hosts", preferenceAuthorityHosts);
         preference.row("Vendor URL parts", preferenceDemoted);
         preference.row("Preference words", preferenceCues);
+        preference.row("Writer gaps", group(writerGapResearch, labelled("Per job", writerGapMax)));
+        preference.row("Evidence failure words", writerGapWords);
 
         // Orchestrated research (ADR 0001 lane F/G): the plan of work packages, its limits and the worker browsers.
         com.aresstack.comiccontrols.control.ComicForm orchestrator =
@@ -659,6 +665,23 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_DEMOTED,
                 "URL parts, comma-separated, of vendor pages (blogs, products, solutions) that move down in the "
                         + "ranking. They are never removed.");
+        writerGapResearch.setSelected(ResearchRuntimeSettings.loadWriterGapResearch(store));
+        writerGapResearch.setToolTipText("After a writing job, each GAP: line of the writer and each section it could "
+                + "not write for lack of evidence becomes a search plan entry (Research this gap), with the "
+                + "mission's preferred sources. The same gap is searched once.");
+        writerGapResearch.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveWriterGapResearch(ResearchRuntimeSettingsPanel.this.store,
+                        writerGapResearch.isSelected());
+            }
+        });
+        bindNonNegativeLimit(writerGapMax, ResearchRuntimeSettings.KEY_WRITER_GAP_MAX,
+                ResearchRuntimeSettings.DEFAULT_WRITER_GAP_MAX,
+                "The most writer gaps one writing job sends to research; 0 = none.");
+        bindText(writerGapWords, ResearchRuntimeSettings.KEY_WRITER_GAP_EVIDENCE_WORDS,
+                ResearchRuntimeSettings.DEFAULT_WRITER_GAP_EVIDENCE_WORDS,
+                "Words, comma-separated: a writer failure naming one means the section lacked evidence and is "
+                        + "researched again.");
         bindText(preferenceCues, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_CUES,
                 ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_CUES,
                 "Words, comma-separated, that open the preference clause of the mission (\"Bevorzuge …\").");
