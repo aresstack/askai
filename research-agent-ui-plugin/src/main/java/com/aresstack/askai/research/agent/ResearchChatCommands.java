@@ -30,7 +30,8 @@ public final class ResearchChatCommands {
         // ONE synchronized command surface: the TEXT adapters — /search (user web search) and /open
         // (artifact navigation) — plus a slash TWIN for exactly the red DECISION tags the user sees
         // ("Fragestellung freigeben & weiter" → /submit-scope, "Neue Quellen auswerten" →
-        // /review-sources, approve/changes/continue). NOTHING more: the domain's interruption
+        // /review-sources, approve/changes/continue) and for the reopen of an earlier phase, which the
+        // phase pill offers as a click. NOTHING more: the domain's interruption
         // machinery (pause/resume/retry/cancel, block/fail) stays out of the user surface — those
         // states exist for the agent/runtime, not as user furniture. Every twin executes through
         // the session's ONE structured command processor — exactly what a red-tag click runs.
@@ -59,6 +60,14 @@ public final class ResearchChatCommands {
                 "Check the negotiated topic space for gaps (Themenraum pr\u00fcfen)"));
         commands.add(new ProcessorCommand("discover-topics",
                 "Show topic areas discovered in the sources as concept suggestions"));
+        // The way back (D10): a typed reopen is the person's explicit decision, so it dispatches without
+        // the dialog the phase pill shows for a click; the description carries the same warning.
+        commands.add(new ProcessorCommand("reopen-concept",
+                "Reopen Concept: " + ReopenConfirmation.messageFor("reopen-concept")));
+        commands.add(new ProcessorCommand("reopen-sources",
+                "Reopen Sources: " + ReopenConfirmation.messageFor("reopen-sources")));
+        commands.add(new ProcessorCommand("reopen-outline",
+                "Reopen Outline: " + ReopenConfirmation.messageFor("reopen-outline")));
         return commands;
     }
 
@@ -98,7 +107,7 @@ public final class ResearchChatCommands {
         return java.util.Arrays.asList(
                 "submit-scope", "finish-sources", "finish-outline", "finish-document", "approve",
                 "request-changes", "continue", "review-sources",
-                "check-scope", "discover-topics");
+                "check-scope", "discover-topics", "reopen-concept", "reopen-sources", "reopen-outline");
     }
 
     private static ResearchAgentSession research(AgentSessionContext context) {

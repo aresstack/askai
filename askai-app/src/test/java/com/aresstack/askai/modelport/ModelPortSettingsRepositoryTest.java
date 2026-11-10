@@ -22,7 +22,8 @@ public class ModelPortSettingsRepositoryTest {
     public void withoutAFileEverythingIsTheDocumentedDefault() {
         ModelPortSettings settings = new ModelPortSettingsRepository(
                 new File(folder.getRoot(), "absent.properties")).load();
-        assertEquals(1, settings.capacityOf("gemma4:e2b"));
+        assertEquals("parallel page workers need parallel model calls (plan T5)", 4,
+                settings.capacityOf("gemma4:e2b"));
         assertEquals(-1L, settings.memoryBudgetBytes("ollama"));
         assertEquals("", settings.slotModel("judge"));
         assertEquals("presets of plan 4.1", 32768, settings.contextOf("gemma4:e2b"));
@@ -72,5 +73,18 @@ public class ModelPortSettingsRepositoryTest {
 
         repository.save(new ModelPortSettings(3, null, null, null, null, null, null, null, 600, 5));
         assertEquals("a save is visible to the next read at once", 3, repository.load().getDefaultCapacity());
+    }
+
+    @Test
+    public void theOldShippedDefaultOfOneIsMigratedButAChosenOneIsKept() throws Exception {
+        File file = new File(folder.getRoot(), "model-port.properties");
+        java.nio.file.Files.write(file.toPath(), "capacity.default=1\n".getBytes("UTF-8"));
+        assertEquals("a file of the old default carries 1 without a revision: the old default, not a choice",
+                ModelPortSettings.DEFAULT_CAPACITY, new ModelPortSettingsRepository(file).load().getDefaultCapacity());
+
+        ModelPortSettingsRepository repository = new ModelPortSettingsRepository(file);
+        repository.save(new ModelPortSettings(1, null, null, null, null, null, null, null, 600, 5));
+        assertEquals("1 saved with the current revision is the user's choice", 1,
+                new ModelPortSettingsRepository(file).load().getDefaultCapacity());
     }
 }

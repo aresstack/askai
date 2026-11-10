@@ -34,15 +34,18 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
 
     private final SectionContextBuilder packs;
     private final Contexts contexts;
-    private final Targets targets;
+    private final java.util.function.Supplier<Targets> targetSettings;
 
-    public EvidenceAssignments(SectionContextBuilder packs, Contexts contexts, Targets targets) {
+    /** @param targets read for every section, so a changed setting applies to the next section written */
+    public EvidenceAssignments(SectionContextBuilder packs, Contexts contexts,
+                               java.util.function.Supplier<Targets> targets) {
         this.packs = packs;
         this.contexts = contexts;
-        this.targets = targets;
+        this.targetSettings = targets;
     }
 
     public SectionAssignment assignmentFor(SectionWriteRequest request) throws Exception {
+        Targets targets = targetSettings.get();
         EvidencePack pack = packs.build(contexts.requestFor(request), targets.pack);
         SectionAssignment base = SectionWriterInputs.of(pack, request.getSection().getTitle(),
                 request.getSection().getBrief().getPurpose(), request.getSection().getBrief().getKeyPoints(),

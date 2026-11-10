@@ -24,11 +24,12 @@ import java.util.Arrays;
 public final class LocalRerankerEndpointDescriptorFactory {
 
     /**
-     * A conservative default request timeout. A local cross-encoder scores a handful of short search
-     * snippets in well under a second on cold start; 15s leaves generous headroom without letting the
-     * research loop hang on a wedged runtime.
+     * The request timeout when the caller names none: the central setting's default
+     * ({@link com.aresstack.askai.config.AiModelSelections#DEFAULT_RERANKER_TIMEOUT_SECONDS}, edited under
+     * Settings → Ollama as "Reranker timeout"). The productive session start passes the configured value.
      */
-    public static final long DEFAULT_REQUEST_TIMEOUT_MILLIS = 15_000L;
+    public static final long DEFAULT_REQUEST_TIMEOUT_MILLIS =
+            com.aresstack.askai.config.AiModelSelections.DEFAULT_RERANKER_TIMEOUT_SECONDS * 1000L;
 
     /**
      * The default number of survivors handed to the browser navigation stage. Reranking exists to

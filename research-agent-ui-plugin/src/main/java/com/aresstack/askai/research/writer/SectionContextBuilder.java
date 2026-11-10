@@ -7,6 +7,7 @@ import com.aresstack.askai.research.knowledge.processing.index.SemanticKnowledge
 import com.aresstack.askai.research.outline.OutlineBrief;
 import com.aresstack.askai.research.outline.OutlineEntry;
 import com.aresstack.askai.research.outline.OutlineSection;
+import com.aresstack.askai.research.runtime.writer.ProsePassageFilter;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,7 +23,8 @@ import java.util.Set;
  * Builds the evidence pack of one section without a model call (plan PR 27). Candidates are the passages of the
  * section's provenance (in provenance order) followed by the hits of a semantic search on its brief, which is
  * embedded once as a {@link EmbeddingPort.Role#QUERY query}; no passage is embedded again. Only passages of sources
- * the {@link EvidenceSourceSet} admits count; passages are deduplicated by id and by text, at most two per source,
+ * the {@link EvidenceSourceSet} admits count, and only prose: navigation, footer and heading passages fail the
+ * pack's {@linkplain WriterPackSettings#getProse() prose criteria} and never reach the writer; passages are deduplicated by id and by text, at most two per source,
  * cut at sentence boundaries to the preset's passage size, and numbered {@code [1]..[k]} in that order. The same
  * store state always gives the same pack.
  */
@@ -98,6 +100,7 @@ public final class SectionContextBuilder {
         Set<String> seenIds = new HashSet<String>();
         Set<String> seenTexts = new HashSet<String>();
         Map<String, Integer> perSource = new HashMap<String, Integer>();
+        ProsePassageFilter prose = new ProsePassageFilter(pack.getProse());
         for (PassageSearchHit hit : candidates) {
             if (chosen.size() >= pack.getPassageCount()) {
                 break;
@@ -111,7 +114,7 @@ public final class SectionContextBuilder {
                 continue;
             }
             String text = TokenBudget.cutAtSentence(hit.getText(), pack.getPassageTokens());
-            if (text.isEmpty() || !seenTexts.add(text)) {
+            if (text.isEmpty() || !prose.isProse(text) || !seenTexts.add(text)) {
                 continue;
             }
             perSource.put(sourceId, used == null ? 1 : used + 1);

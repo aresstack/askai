@@ -31,7 +31,8 @@ public final class ResearchBotSessionTools {
     /** The shared command description — the directory face documents the same commands. */
     static final String RUN_COMMAND_DESCRIPTION =
             "Execute one research command. Always-on commands: search <query> (web search), "
-            + "generate-visualization, generate-outline, review-sources, check-scope. Run offers "
+            + "generate-visualization, generate-outline, write-sections (the Document phase's remaining "
+            + "sections), rewrite-stale (its stale sections), review-sources, check-scope. Run offers "
             + "(only while session_state lists them): run-plan, retry-query, sources, config, refine. "
             + "Phase changes need the user: as a structured command a bot cannot run submit-scope, "
             + "approve, request-changes, continue, retry, resume, the reopen and finish commands or "

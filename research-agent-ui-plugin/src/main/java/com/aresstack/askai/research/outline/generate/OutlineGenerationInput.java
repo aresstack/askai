@@ -47,11 +47,14 @@ public final class OutlineGenerationInput {
     /** The calibration and topic minimums. */
     public static final class Settings {
         /**
-         * Provisional defaults: the plan wants both calibrated on the M2 checkpoint corpus; that live calibration
-         * is still open (recorded in the PR), so they are settings, not constants.
+         * Provisional defaults, settings in the research runtime ("Outline anchors"). Live run 3 (2026-11-10,
+         * "Wearables auf Baustellen", 2068 passages, 1 chapter with 4 sections): every passage's best anchor
+         * similarity lay far above 0.35 (median 0.645), while the lead over the nearest sibling section had a
+         * median of 0.011, because sibling anchors share the whole path but their last label. A margin of 0.02
+         * therefore left three quarters of the corpus unassigned; 0.01 is the measured midpoint of that corpus.
          */
         public static final double DEFAULT_THRESHOLD = 0.35;
-        public static final double DEFAULT_MARGIN = 0.02;
+        public static final double DEFAULT_MARGIN = 0.01;
 
         final double threshold;
         final double margin;
@@ -64,6 +67,24 @@ public final class OutlineGenerationInput {
             this.margin = margin;
             this.minimumPassagesPerTopic = Math.max(1, minimumPassagesPerTopic);
             this.minimumDistinctSourcesPerTopic = Math.max(1, minimumDistinctSourcesPerTopic);
+        }
+
+        /** Minimum cosine between a passage and its nearest anchor. */
+        public double getThreshold() {
+            return threshold;
+        }
+
+        /** Minimum lead of the nearest anchor over the second-nearest. */
+        public double getMargin() {
+            return margin;
+        }
+
+        public int getMinimumPassagesPerTopic() {
+            return minimumPassagesPerTopic;
+        }
+
+        public int getMinimumDistinctSourcesPerTopic() {
+            return minimumDistinctSourcesPerTopic;
         }
     }
 
@@ -100,5 +121,10 @@ public final class OutlineGenerationInput {
     private static List<String> copy(List<String> values) {
         return Collections.unmodifiableList(new ArrayList<String>(
                 values == null ? Collections.<String>emptyList() : values));
+    }
+
+    /** The first part of every anchor's label path (the quoted book title, or empty). */
+    public String getBookTitle() {
+        return bookTitle;
     }
 }

@@ -39,14 +39,30 @@ public final class WorkerAnswer {
     private final String usefulReason;
     private final List<Integer> follow;
     private final List<Outgoing> messages;
+    private final List<String> searches;
 
     public WorkerAnswer(String summary, Usefulness usefulness, String usefulReason, List<Integer> follow,
                         List<Outgoing> messages) {
+        this(summary, usefulness, usefulReason, follow, messages, Collections.<String>emptyList());
+    }
+
+    /**
+     * @param searches new search queries the page suggests (its {@code SEARCH} lines): the research continues from
+     *                 what it has just read, as a person would
+     */
+    public WorkerAnswer(String summary, Usefulness usefulness, String usefulReason, List<Integer> follow,
+                        List<Outgoing> messages, List<String> searches) {
+        this.searches = Collections.unmodifiableList(new ArrayList<String>(searches));
         this.summary = summary;
         this.usefulness = usefulness;
         this.usefulReason = usefulReason == null ? "" : usefulReason;
         this.follow = Collections.unmodifiableList(new ArrayList<Integer>(follow));
         this.messages = Collections.unmodifiableList(new ArrayList<Outgoing>(messages));
+    }
+
+    /** The new search queries this page suggests, at most the parser's limit; empty when none. */
+    public List<String> getSearches() {
+        return searches;
     }
 
     public String getSummary() {

@@ -178,6 +178,28 @@ public class LocalRerankerConfigurationSnapshotProviderTest {
         public void migrateSelection(String model) {
             this.migrated = model;
         }
+
+        public int rerankerTimeoutSeconds() {
+            return timeoutSeconds;
+        }
+
+        int timeoutSeconds = com.aresstack.askai.config.AiModelSelections.DEFAULT_RERANKER_TIMEOUT_SECONDS;
+    }
+
+    @Test
+    public void theRequestTimeoutIsTheCentralSettingNotACodeConstant() throws Exception {
+        // Live run 3 (2026-11-10): the 15 s constant aborted every call on the CPU backend. The session's
+        // descriptor takes the configured "Reranker timeout"; without a central store the setting's default.
+        File root = folder.newFolder("models");
+        RecordingCentralStore central = new RecordingCentralStore("");
+        central.timeoutSeconds = 45;
+        assertEquals(45_000L, new LocalRerankerConfigurationSnapshotProvider(
+                new LocalModelRuntimeManager(root), central).requestTimeoutMillis());
+        assertEquals(com.aresstack.askai.config.AiModelSelections.DEFAULT_RERANKER_TIMEOUT_SECONDS * 1000L,
+                new LocalRerankerConfigurationSnapshotProvider(new LocalModelRuntimeManager(root))
+                        .requestTimeoutMillis());
+        assertEquals(LocalRerankerEndpointDescriptorFactory.DEFAULT_REQUEST_TIMEOUT_MILLIS,
+                com.aresstack.askai.config.AiModelSelections.DEFAULT_RERANKER_TIMEOUT_SECONDS * 1000L);
     }
 
     @Test
