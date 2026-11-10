@@ -152,6 +152,9 @@ public final class ResearchAgentEventMapper {
         }
         if (ResearchRunWire.TYPE_MANUAL_SEARCH_STARTED.equals(type)
                 || ResearchRunWire.TYPE_MANUAL_SEARCH_PROGRESS.equals(type)
+                || ResearchRunWire.TYPE_MANUAL_SEARCH_TEAM_NOTE.equals(type)
+                || ResearchRunWire.TYPE_MANUAL_SEARCH_OPEN_PAGES.equals(type)
+                || ResearchRunWire.TYPE_MANUAL_SEARCH_TEAM_QUERY.equals(type)
                 || ResearchRunWire.TYPE_MANUAL_SEARCH_COMPLETED.equals(type)
                 || ResearchRunWire.TYPE_MANUAL_SEARCH_REVIEW.equals(type)
                 || ResearchRunWire.TYPE_MANUAL_SEARCH_FAILED.equals(type)) {
@@ -181,6 +184,16 @@ public final class ResearchAgentEventMapper {
         } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_PROGRESS.equals(type)) {
             subKind = "progress";
             message = ResearchRunWire.decodedField(f, "note");
+        } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_TEAM_NOTE.equals(type)) {
+            subKind = "team_note";
+            message = ResearchRunWire.decodedField(f, "note");
+        } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_OPEN_PAGES.equals(type)) {
+            subKind = "open_pages";
+            message = Integer.toString(ResearchRunWire.intField(f, "open"));
+        } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_TEAM_QUERY.equals(type)) {
+            subKind = "team_query";
+            message = ResearchRunWire.decodedField(f, "query");
+            publicMessage = ResearchRunWire.decodedField(f, "rejected"); // empty: the fence let it through
         } else if (ResearchRunWire.TYPE_MANUAL_SEARCH_COMPLETED.equals(type)) {
             subKind = "completed";
             int results = ResearchRunWire.intField(f, "results");

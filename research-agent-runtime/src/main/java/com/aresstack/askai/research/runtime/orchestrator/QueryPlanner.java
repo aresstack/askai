@@ -60,13 +60,18 @@ public final class QueryPlanner {
                     + "- Never repeat a query listed under ALREADY SEARCHED and never use a term listed under "
                     + "BLACKLIST.\n"
                     + "- Stay inside the node; do not widen the topic.\n"
+                    + "- AREA OF THE BOOK, when given, is the fence of the research: every query stays inside what it "
+                    + "includes and never aims at what it excludes.\n"
                     + "- When RESEARCH CYCLE is above 1, the earlier queries did not find enough sources for the "
                     + "node: change the strategy instead of rewording. Name the institutions, authorities, "
                     + "associations, standards bodies, universities, journals or publishers that publish on the "
                     + "node's subject, the kinds of document that carry evidence (study, guideline, regulation, "
                     + "standard, report, statistics, PDF) and concrete sub-aspects, people or years. Never aim at "
                     + "shops, booksellers or the domains listed under DOMAINS FOUND SO FAR: a book sold on three "
-                    + "sites is one book and no new knowledge.";
+                    + "sites is one book and no new knowledge.\n"
+                    + "- Use the hints under WHAT THE PAGE WORKERS REPORTED when it is given: the pages the team "
+                    + "read, what they lacked and what the workers suggest searching for. Never repeat a page's "
+                    + "title as a query.";
 
     /** The answer budget of one concept planner call. */
     public static final int CONCEPT_ANSWER_TOKENS = 256;
@@ -277,6 +282,9 @@ public final class QueryPlanner {
         if (!request.getBookTitle().isEmpty()) {
             sb.append("BOOK\n").append(request.getBookTitle()).append("\n\n");
         }
+        if (!request.getArea().isEmpty()) {
+            sb.append("AREA OF THE BOOK\n").append(request.getArea()).append("\n\n");
+        }
         sb.append("NODE\n").append(node.getLabel()).append('\n');
         if (!node.getPath().isEmpty()) {
             sb.append("PATH\n").append(String.join(" > ", node.getPath())).append('\n');
@@ -287,6 +295,10 @@ public final class QueryPlanner {
                     .append(" (the queries under ALREADY SEARCHED left this node without enough sources)\n\n");
             appendList(sb, "DOMAINS FOUND SO FAR", node.getFoundDomains(), "(none)");
             sb.append('\n');
+            if (!node.getWorkerNotes().isEmpty()) {
+                appendList(sb, "WHAT THE PAGE WORKERS REPORTED", node.getWorkerNotes(), "(nothing)");
+                sb.append('\n');
+            }
         }
         appendList(sb, "ALREADY SEARCHED", searched, "(nothing yet)");
         sb.append('\n');

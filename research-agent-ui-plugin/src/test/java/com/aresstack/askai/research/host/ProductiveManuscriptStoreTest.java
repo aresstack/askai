@@ -24,6 +24,7 @@ import java.util.List;
 
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.Fx;
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.assertHandled;
+import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.finishSources;
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.firstMessage;
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.phase;
 import static org.junit.Assert.assertEquals;
@@ -50,7 +51,7 @@ public class ProductiveManuscriptStoreTest {
         firstMessage(fx, "A book about plugin isolation in Java");
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertHandled(fx.session.executeCommand("approve", ""));
         OutlineWorkspace outline = fx.session.outlineWorkspace();
         outline.save(new Outline(Arrays.asList(chapter("Isolation", "Boundaries", "Costs"),
@@ -118,7 +119,7 @@ public class ProductiveManuscriptStoreTest {
     private static Outline toDocumentFromScoping(Fx fx) {
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertHandled(fx.session.executeCommand("approve", ""));
         OutlineWorkspace outline = fx.session.outlineWorkspace();
         outline.save(new Outline(Arrays.asList(chapter("Isolation", "Boundaries", "Costs"),
@@ -147,7 +148,7 @@ public class ProductiveManuscriptStoreTest {
         assertHandled(fx.session.executeCommand("reopen-concept", ""));
         assertEquals("scoping/running", phase(fx));
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertHandled(fx.session.executeCommand("approve", ""));
         assertEquals("outline/running", phase(fx));
         OutlineWorkspace workspace = fx.session.outlineWorkspace();

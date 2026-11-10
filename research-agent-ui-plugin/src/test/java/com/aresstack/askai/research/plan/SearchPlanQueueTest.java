@@ -746,6 +746,172 @@ public class SearchPlanQueueTest {
         }
     }
 
+
+    // ---- plan T5: the research team -------------------------------------------------------------------
+
+    private static SearchPlanQueue.Team team(final int workers) {
+        return new SearchPlanQueue.Team() {
+            public int workers() {
+                return workers;
+            }
+        };
+    }
+
+    private void fourQueriesOverTwoNodes() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Classloader Java", "Classloader Leck"));
+        queries.put("b", Arrays.asList("JPMS Java", "JPMS Layer"));
+        build(Arrays.asList(node("a", "Classloader", "Classloader Java"), node("b", "JPMS", "JPMS Java")), queries);
+    }
+
+    @Test
+    public void theNextSearchStartsOnlyWhenTheTeamHasFewerPagesOpenThanItsThreshold() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        assertEquals("one search; its hits are read side by side", 1, port.searched.size());
+        assertEquals(port.requests, port.teamRequests);
+        queue.onOpenPages("req-1", 9);
+        assertEquals(1, port.searched.size());
+        queue.onOpenPages("req-1", 3); // fewer open pages than workers: the next search starts
+        assertEquals(2, port.searched.size());
+        assertEquals("Classloader Leck", port.searched.get(1));
+        queue.onOpenPages("req-1", 0);
+        assertEquals("the second search has no hits yet: it counts as full", 2, port.searched.size());
+        port.completeRequest("req-1");
+        port.completeRequest("req-2");
+        assertEquals(3, port.searched.size());
+    }
+
+    @Test
+    public void runningQueriesOfOneNodeCountOnceAgainstItsBudget() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Classloader Java", "Classloader Leck", "Classloader OSGi", "Classloader JPMS"));
+        build(Collections.singletonList(node("a", "Classloader", "Classloader Java")), queries);
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        for (int i = 1; i <= 3; i++) {
+            queue.onOpenPages("req-" + i, 0);
+        }
+        assertEquals(4, port.searched.size()); // all four angles of the node run, none is skipped as over budget
+    }
+
+    @Test
+    public void aWorkerQueryRunsBeforeThePlannedOnesAndAFencedOneIsOnlyNoted() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        queue.onTeamQuery("req-1", "Classloader Metaspace Leck", "");
+        queue.onTeamQuery("req-1", "Kaffeemaschine kaufen", "outside scope (nearest exclusion: Shopping)");
+        queue.onTeamQuery("req-1", "classloader leck", ""); // already planned
+        port.completeRequest("req-1");
+        assertEquals("the worker's query runs next, before the planned ones", "Classloader Metaspace Leck",
+                port.searched.get(1));
+        SearchPlanEntry first = null;
+        SearchPlanEntry worker = null;
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            if (entry.getQuery().equals("Classloader Java")) {
+                first = entry;
+            }
+            if (entry.getOrigin() == SearchPlanEntry.Origin.WORKER) {
+                worker = entry;
+            }
+        }
+        assertEquals("a", worker.getNodeId()); // anchored at the node, so coverage still counts per node
+        assertTrue(first.getTeamNotes().toString(),
+                first.getTeamNotes().get(0).startsWith("search \"Classloader Metaspace Leck\" added"));
+        assertTrue(first.getTeamNotes().get(1).contains("dropped: outside scope"));
+        assertTrue(first.getTeamNotes().get(2).contains("dropped: already in the plan"));
+    }
+
+    @Test
+    public void aWorkerQueryBeyondTheNodesBudgetIsDropped() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 2, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        queue.onTeamQuery("req-1", "Classloader Metaspace", "");
+        SearchPlanEntry first = null;
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            if (entry.getQuery().equals("Classloader Java")) {
+                first = entry;
+            }
+        }
+        assertTrue(first.getTeamNotes().get(0).contains("query budget"));
+    }
+
+    @Test
+    public void withoutTheTeamThePlanStaysOneQueryAtATime() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(0));
+        queue.run();
+        assertEquals(1, port.searched.size());
+        assertTrue(port.teamRequests.isEmpty());
+    }
+
+    @Test
+    public void stopSendsEveryRunningTeamQueryBackToPending() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        queue.onOpenPages("req-1", 0);
+        assertEquals(2, port.searched.size());
+        queue.stop();
+        assertEquals(1, port.cancels);
+        current().onSearchEvent("req-1", "failed", "CANCELLED", false);
+        current().onSearchEvent("req-2", "failed", "CANCELLED", false);
+        assertFalse(queue.isRunning());
+        assertEquals(2, port.searched.size()); // nothing new started after the stop
+        int pending = 0;
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            if (entry.getStatus() == SearchPlanEntry.Status.PENDING) {
+                pending++;
+            }
+        }
+        assertEquals(4, pending);
+    }
+
+    @Test
+    public void aMissingWorkerBrowserTurnsTheRunIntoOneQueryAtATime() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        current().onSearchEvent("req-1", "failed", SearchPlanQueue.NO_WORKER_BROWSER, false);
+        assertTrue(queue.isRunning()); // no failure streak: the query went back to pending
+        assertEquals(2, port.searched.size());
+        assertEquals(1, port.teamRequests.size()); // the next runs in the chat browser, alone
+        assertEquals(1, queue.runningEntryCount());
+    }
+
+    @Test
+    public void aPageWorkerReportStaysOnItsEntryAndReachesTheNextCyclePlanner() throws Exception {
+        build(Collections.singletonList(node("a", "Classloader", "Classloader Java")),
+                Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        current().onSearchEvent("req-1", "team_note", "worker 1: search for OSGi class loading", false);
+        current().onSearchEvent("req-1", "team_note", "worker 1: search for OSGi class loading", false);
+        port.completeRequest("req-1");
+        SearchPlanEntry done = store.loadEntries().values().iterator().next();
+        assertEquals(Collections.singletonList("worker 1: search for OSGi class loading"), done.getTeamNotes());
+        Map<String, SearchPlanEntry> all = store.loadEntries();
+        SearchPlanCoverage.Caps c = caps(3, 4, 60);
+        ConceptQueryPlan.Request next = SearchPlanCycles.nextCycleRequest(store.loadRecord(), all.values(),
+                SearchPlanCoverage.of(store.loadRecord(), all.values(), c, sources), c);
+        assertNotNull(next);
+        assertEquals(Collections.singletonList("worker 1: search for OSGi class loading"),
+                next.getNodes().get(0).getWorkerNotes());
+    }
+
+    // ---- fakes ---------------------------------------------------------------------------------------
+
     private final class FakePort implements SearchPlanQueue.SearchPort {
         final List<String> searched = new ArrayList<String>();
         final List<String> languages = new ArrayList<String>();
@@ -754,6 +920,21 @@ public class SearchPlanQueueTest {
         final List<String> requests = new ArrayList<String>();
         SearchPlanQueue owner;
         int cancels;
+        final List<String> teamRequests = new ArrayList<String>();
+        final List<String> teamNodes = new ArrayList<String>();
+
+        public String searchAsTeam(String query, String language, String ranking, int visitLimit, int sourceCap,
+                                   String nodeLabel) {
+            String id = search(query, language, ranking, visitLimit, sourceCap);
+            teamRequests.add(id);
+            teamNodes.add(nodeLabel);
+            return id;
+        }
+
+        void completeRequest(String id) {
+            sources.byRequest.put(id, new ArrayList<String>(sources.next));
+            current().onSearchEvent(id, "completed", "", false);
+        }
 
         public String search(String query, String language, String ranking, int visitLimit, int sourceCap) {
             searched.add(query);

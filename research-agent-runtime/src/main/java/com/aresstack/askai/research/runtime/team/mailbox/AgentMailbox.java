@@ -315,6 +315,26 @@ public final class AgentMailbox {
         return out;
     }
 
+    /**
+     * As {@link #drainOrchestrator}, but only the mail written by {@code senderTaskId}: a worker relays its own
+     * reports in its own thread, so they always reach the host before the end of its task does.
+     */
+    public synchronized List<AgentMessage> drainOrchestratorFrom(String senderTaskId, int max) {
+        List<AgentMessage> out = new ArrayList<AgentMessage>();
+        for (AgentMessage m : new ArrayList<AgentMessage>(messages.values())) {
+            if (out.size() >= max) {
+                break;
+            }
+            if (m.getRecipient().isOrchestrator() && m.getState() == DeliveryState.PENDING
+                    && !inFlight.contains(m.getId()) && senderTaskId != null
+                    && senderTaskId.equals(m.getSenderTaskId())) {
+                inFlight.add(m.getId());
+                out.add(m.isHandedOut() ? m : store(m.handedOut()));
+            }
+        }
+        return out;
+    }
+
     /** Marks handed-out messages as delivered: their recipient has processed them. Unknown or settled ids are ignored. */
     public synchronized void acknowledge(List<AgentMessage> processed) {
         for (AgentMessage m : processed) {

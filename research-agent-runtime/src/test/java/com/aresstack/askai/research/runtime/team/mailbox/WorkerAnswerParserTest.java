@@ -35,6 +35,17 @@ public class WorkerAnswerParserTest {
     }
 
     @Test
+    public void searchLinesBecomeAtMostTheAllowedNewQueries() {
+        WorkerAnswer a = new WorkerAnswerParser(2, 5, 2).parse("SUMMARY: s\nUSEFUL: yes\nFOLLOW: none\n"
+                + "SEARCH: DGUV Regel 112-198; \"ISO 7243 Hitzestress\"\nSEARCH: iso 7243 hitzestress\n"
+                + "SEARCH: WBGT Messung Baustelle").getAnswer();
+        assertEquals(Arrays.asList("DGUV Regel 112-198", "ISO 7243 Hitzestress"), a.getSearches());
+        assertTrue(new WorkerAnswerParser(2, 5, 2).parse("SUMMARY: s\nSEARCH: none").getAnswer().getSearches()
+                .isEmpty());
+        assertTrue(parser.parse("SUMMARY: s\nSEARCH: x y z").getAnswer().getSearches().isEmpty()); // limit 0
+    }
+
+    @Test
     public void markdownChatterContinuationLinesAndOmitPlaceholdersAreTolerated() {
         WorkerAnswerParser.Result r = parser.parse("Sure! Here is my answer.\n\n**Summary:** The page is a shop.\n"
                 + "It sells helmets with sensors.\n- **Useful**: No, vendor advertising only\n"

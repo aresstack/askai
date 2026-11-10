@@ -20,6 +20,7 @@ import java.util.List;
 
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.Fx;
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.assertHandled;
+import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.finishSources;
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.firstMessage;
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.newTempDir;
 import static com.aresstack.askai.research.host.ProductiveBookJourneyTest.phase;
@@ -38,7 +39,7 @@ public class ProductiveOutlineStoreTest {
         firstMessage(fx, "A book about plugin isolation in Java");
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertHandled(fx.session.executeCommand("approve", ""));
         assertEquals("outline/running", phase(fx));
     }
@@ -75,7 +76,7 @@ public class ProductiveOutlineStoreTest {
         assertHandled(fx.session.executeCommand("submit-scope", ""));
         assertEquals("research/running", phase(fx));
         assertRefused(fx.session.outlineWorkspace(), "research/running");
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertHandled(fx.session.executeCommand("approve", ""));
         OutlineWorkspace workspace = fx.session.outlineWorkspace();
         assertEquals("outline/running", phase(fx));
@@ -170,7 +171,7 @@ public class ProductiveOutlineStoreTest {
         assertTrue(fx.session.conceptBranchService().addCards(Collections.<String>emptyList(),
                 Collections.singletonList("Loaders")).isApplied());
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertHandled(fx.session.executeCommand("approve", ""));
         assertEquals("outline/running", phase(fx));
         OutlineWorkspace workspace = fx.session.outlineWorkspace();
