@@ -247,23 +247,13 @@ public final class TopicAnalyzer {
         String root = groupRootOf.get(members.isEmpty() ? "" : members.get(0));
         draft.groupRoot = root == null ? topic.getClusterId() : root;
         if (!nodes.isEmpty()) {
-            int best = -1;
-            double bestScore = Double.NEGATIVE_INFINITY;
-            double second = Double.NEGATIVE_INFINITY;
-            for (int i = 0; i < nodes.size(); i++) {
-                double score = VectorMath.cosine(nodes.get(i).getVector(), draft.centroid);
-                if (score > bestScore) {
-                    second = bestScore;
-                    bestScore = score;
-                    best = i;
-                } else if (score > second) {
-                    second = score;
-                }
-            }
-            double margin = nodes.size() == 1 ? Double.POSITIVE_INFINITY : bestScore - second;
+            double[] scores = scores(nodes, draft.centroid);
+            int best = best(scores);
+            double bestScore = scores[best];
             draft.anchorId = nodes.get(best).getId();
             draft.anchorSimilarity = bestScore;
-            draft.aligned = bestScore >= settings.getConceptThreshold() && margin >= settings.getConceptMargin();
+            draft.aligned = bestScore >= settings.getConceptThreshold()
+                    && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin();
         }
         return draft;
     }
@@ -475,21 +465,64 @@ public final class TopicAnalyzer {
 
     /** The index of the nearest node above threshold and margin, or -1. */
     private int nearest(List<ConceptAnchor> nodes, EmbeddingPort.EmbeddingVector vector) {
-        int best = -1;
-        double bestScore = Double.NEGATIVE_INFINITY;
-        double second = Double.NEGATIVE_INFINITY;
-        for (int i = 0; i < nodes.size(); i++) {
-            double score = VectorMath.cosine(nodes.get(i).getVector(), vector);
-            if (score > bestScore) {
-                second = bestScore;
-                bestScore = score;
+        double[] scores = scores(nodes, vector);
+        int best = best(scores);
+        double bestScore = scores[best];
+        return bestScore >= settings.getConceptThreshold()
+                && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin() ? best : -1;
+    }
+
+    private static double[] scores(List<ConceptAnchor> nodes, EmbeddingPort.EmbeddingVector vector) {
+        double[] scores = new double[nodes.size()];
+        for (int i = 0; i < scores.length; i++) {
+            scores[i] = VectorMath.cosine(nodes.get(i).getVector(), vector);
+        }
+        return scores;
+    }
+
+    /** The index of the highest score; ties keep the earlier node. */
+    private static int best(double[] scores) {
+        int best = 0;
+        for (int i = 1; i < scores.length; i++) {
+            if (scores[i] > scores[best]) {
                 best = i;
-            } else if (score > second) {
-                second = score;
             }
         }
-        double margin = nodes.size() == 1 ? Double.POSITIVE_INFINITY : bestScore - second;
-        return bestScore >= settings.getConceptThreshold() && margin >= settings.getConceptMargin() ? best : -1;
+        return best;
+    }
+
+    /**
+     * The best score among nodes outside the best node's lineage (its ancestors and descendants), or negative
+     * infinity when there is none. A section anchor lies close to its own chapter anchor by construction (live run
+     * 3: about 0.01 apart), so measuring the lead against them would reject passages that clearly belong there.
+     */
+    static double nearestOfAnotherLineage(List<ConceptAnchor> nodes, double[] scores, int best) {
+        Map<String, String> parentOf = new HashMap<String, String>();
+        for (ConceptAnchor node : nodes) {
+            parentOf.put(node.getId(), node.getParentId());
+        }
+        String bestId = nodes.get(best).getId();
+        double nearest = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < nodes.size(); i++) {
+            String id = nodes.get(i).getId();
+            if (i != best && !descends(id, bestId, parentOf) && !descends(bestId, id, parentOf)) {
+                nearest = Math.max(nearest, scores[i]);
+            }
+        }
+        return nearest;
+    }
+
+    /** Whether {@code node} lies below {@code ancestor} in the concept. */
+    private static boolean descends(String node, String ancestor, Map<String, String> parentOf) {
+        Set<String> seen = new HashSet<String>();
+        String current = parentOf.get(node);
+        while (current != null && !current.isEmpty() && seen.add(current)) {
+            if (current.equals(ancestor)) {
+                return true;
+            }
+            current = parentOf.get(current);
+        }
+        return false;
     }
 
     private static EmbeddingPort.EmbeddingVector unit(EmbeddingPort.EmbeddingVector vector) {

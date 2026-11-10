@@ -113,6 +113,31 @@ public final class WebAcquisitionText {
      * "URL: &lt;url&gt;" — the bridge appends {@code title="…" capture_id=…} on the same line, the raw browser runtime
      * puts TITLE on the next line; in both cases the URL is the token right after the prefix.
      */
+    /**
+     * The page text without its header lines ({@code URL: ...}, {@code TITLE: ...}, {@code (truncated)}): what a
+     * reader of the page sees.
+     */
+    public static String bodyOf(String page) {
+        if (page == null) {
+            return "";
+        }
+        String[] lines = page.replace("\r", "").split("\n", -1);
+        int start = 0;
+        while (start < lines.length) {
+            String line = lines[start].trim();
+            if (line.startsWith("URL:") || line.startsWith("TITLE:") || line.equals("(truncated)")) {
+                start++;
+            } else {
+                break;
+            }
+        }
+        StringBuilder body = new StringBuilder();
+        for (int i = start; i < lines.length; i++) {
+            body.append(i > start ? "\n" : "").append(lines[i]);
+        }
+        return body.toString().trim();
+    }
+
     public static String finalUrlOf(String page) {
         if (page == null || !page.startsWith("URL: ")) {
             return null;

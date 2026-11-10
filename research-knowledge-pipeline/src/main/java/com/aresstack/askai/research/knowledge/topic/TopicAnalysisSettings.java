@@ -16,8 +16,12 @@ public final class TopicAnalysisSettings {
     public static final double DEFAULT_TOPIC_GROUP_DISTANCE = 0.75;
     /** A passage or topic belongs to a concept node from this cosine similarity on (plan PR 22's provisional value). */
     public static final double DEFAULT_CONCEPT_THRESHOLD = 0.35;
-    /** ... and only with this lead over the second-best node (plan PR 22's provisional value). */
-    public static final double DEFAULT_CONCEPT_MARGIN = 0.02;
+    /**
+     * ... and only with this lead over the best node of ANOTHER lineage (a node, its ancestors and its descendants
+     * are one lineage). Live run 3 (2026-11-10): with the book-title prefix the median lead was about 0.01, and 0.02
+     * rejected three of four passages although none fell below the threshold.
+     */
+    public static final double DEFAULT_CONCEPT_MARGIN = 0.01;
     /** Material: a topic, sub-topic or concept node needs this many DISTINCT passages (near duplicates count once). */
     public static final int DEFAULT_MINIMUM_PASSAGES = 3;
     /** Confirmation: a topic or concept node needs this many distinct sources ... */

@@ -74,7 +74,7 @@ public final class TopicAnalysisInputs implements SharedTopicDiscovery.AnalysisI
         }
         String title = source.approvedTitle(frozen);
         if (title == null || title.trim().isEmpty()) {
-            title = frozen.getMission();
+            title = anchorTitle(frozen.getMission());
         }
         ConceptFrame frame = ConceptFrame.of(title, OutlineGeneration.conceptNodes(frozen, store));
         Collection<ResearchSourceRecord> records = source.sources();
@@ -117,6 +117,16 @@ public final class TopicAnalysisInputs implements SharedTopicDiscovery.AnalysisI
                     node.getParentId(), queryCache.get(world + "\n" + node.getPath())));
         }
         return anchors;
+    }
+
+    /**
+     * Without an approved title, the book title the mission quotes („…“, "…", »…«), or nothing. Live run 3
+     * (2026-11-10) started every anchor path with the whole mission, so the anchors embedded to nearly the same
+     * vector and almost no passage could be assigned; without a quoted title the concept's own labels are the anchors.
+     */
+    static String anchorTitle(String mission) {
+        String title = com.aresstack.askai.research.plan.ConceptPlanNodes.quotedTitle(mission == null ? "" : mission);
+        return title == null ? "" : title;
     }
 
     /** The host of a URL, without "www."; "" when it has none. */

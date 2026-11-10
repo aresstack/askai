@@ -13,8 +13,9 @@ import java.util.Map;
  *
  * <ul>
  *   <li>{@code defaultCapacity}: concurrent calls per model and endpoint when no per-model value is set
- *       (default 1; it mirrors {@code OLLAMA_NUM_PARALLEL} and stays 1 until the measurement protocol of
- *       ADR 4.5 has run on a machine);</li>
+ *       (default 4: the research team's page workers call the model side by side, and Ollama answers parallel
+ *       requests up to its {@code OLLAMA_NUM_PARALLEL} and queues the rest; the 2026-10-30 benchmark measured
+ *       the best total throughput of {@code gemma4:e2b} at 16 to 24 parallel requests);</li>
  *   <li>{@code modelCapacities}: per-model capacity overrides, keyed by the model name;</li>
  *   <li>{@code endpointMemoryBudgetsMb}: the GPU memory budget per endpoint id in MiB; absent or negative =
  *       not configured, which disables the memory planning for that endpoint (models then never share
@@ -38,7 +39,9 @@ import java.util.Map;
  */
 public final class ModelPortSettings {
 
-    public static final int DEFAULT_CAPACITY = 1;
+    public static final int DEFAULT_CAPACITY = 4;
+    /** The default capacity shipped before the research team (plan T5); a stored value of it is migrated. */
+    static final int FORMER_DEFAULT_CAPACITY = 1;
     /** The slot that closes every resolution chain (plan 5.1). */
     public static final String DEFAULT_SLOT = "default";
     /** The model of the {@link #DEFAULT_SLOT} while the user has not set one (plan 5.2). */
@@ -59,6 +62,7 @@ public final class ModelPortSettings {
      */
     public static final java.util.List<String> DEFAULT_SLOTS = java.util.Collections.unmodifiableList(
             java.util.Arrays.asList(DEFAULT_SLOT, "phase.scoping", "phase.research", "phase.research.planner",
+                    "phase.research.worker",
                     "phase.outline", "phase.outline.labels", "phase.outline.briefs", "phase.draft",
                     "phase.draft.writer", "scope", "judge", "layout-repair", "orchestrator", "planner",
                     "verifier", "synthesis"));

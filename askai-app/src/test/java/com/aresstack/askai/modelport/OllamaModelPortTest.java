@@ -408,9 +408,10 @@ public class OllamaModelPortTest {
 
     @Test
     public void capacityOneSerialisesConcurrentCallsAndCapacityTwoRunsThemSideBySide() throws Exception {
+        writeSettings(1, "5m", 0);
         answerDelayMillis = 300;
         runConcurrently(3);
-        assertEquals("capacity 1 (the default): one call at a time on the wire", 1, maxConcurrent.get());
+        assertEquals("capacity 1: one call at a time on the wire", 1, maxConcurrent.get());
 
         writeSettings(2, "5m", 0);
         maxConcurrent.set(0);
@@ -453,6 +454,7 @@ public class OllamaModelPortTest {
 
     @Test
     public void aCancelledCallKeepsItsPlaceUntilItsStreamHasReallyStopped() throws Exception {
+        writeSettings(1, "5m", 0);
         answers.add("{\"message\":{\"role\":\"assistant\",\"content\":\"he\"},\"done\":false}\n"
                 + done("llo", ""));
         final CountDownLatch entered = new CountDownLatch(1);
