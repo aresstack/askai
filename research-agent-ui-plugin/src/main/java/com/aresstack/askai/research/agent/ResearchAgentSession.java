@@ -2855,7 +2855,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                                 .getPassageTokens(),
                                         com.aresstack.askai.research.host.ResearchRuntimeSettings
                                                 .loadWriterProseCriteria(hostStateStore)),
-                                1100, 3072)));
+                                1100, 3072, com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                        .loadWriterCarryCriteria(hostStateStore))));
     }
 
     private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,
@@ -3197,7 +3198,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         manuscript.store(), productiveResources.getRepository(), pin, concept,
                         acronymLongForms(),
                         System.currentTimeMillis(), java.util.TimeZone.getDefault());
-        return new com.aresstack.askai.research.assembly.BookAssembler().assemble(input);
+        return new com.aresstack.askai.research.assembly.BookAssembler(
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterCarryCriteria(hostStateStore))
+                .assemble(input);
     }
 
     /** The latest change request of the Outline phase (shown above the outline editor, plan PR 23); "" when none. */
