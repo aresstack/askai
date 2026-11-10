@@ -268,6 +268,38 @@ public class BrowserEnginesSearchStrategyTest {
     }
 
     @Test
+    public void googleRowsOfOneGroupRunOneAfterAnotherBesideThePageEngines() throws Exception {
+        final java.util.concurrent.atomic.AtomicInteger inGoogle = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger maxInGoogle = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicBoolean pagesRanBesideGoogle =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        SearchStrategy google = (r, c, b) -> {
+            maxInGoogle.accumulateAndGet(inGoogle.incrementAndGet(), Math::max);
+            try {
+                Thread.sleep(150);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            inGoogle.decrementAndGet();
+            return new Fake("https://" + r.getLanguage() + ".example/").search(r, c, b);
+        };
+        SearchStrategy pages = (r, c, b) -> {
+            long deadline = System.currentTimeMillis() + 1000;
+            while (inGoogle.get() == 0 && System.currentTimeMillis() < deadline) {
+                Thread.yield();
+            }
+            pagesRanBesideGoogle.set(inGoogle.get() > 0);
+            return new Fake("https://page.example/").search(r, c, b);
+        };
+        InitialSearchResult result = new BrowserEnginesSearchStrategy(
+                languageTable("google@0@de", "google@0@en", "duckduckgo@0@de"), ASK_EVERY_GROUP, google, pages)
+                .search(new InitialSearchRequest("q", 10, "de", ""), NOT_CANCELLED, BUDGET);
+        assertEquals("the search browser serves one Google search at a time", 1, maxInGoogle.get());
+        assertTrue("the research browser works beside it", pagesRanBesideGoogle.get());
+        assertEquals(3, result.candidates.size());
+    }
+
+    @Test
     public void aPageEngineIsAskedOnceWhateverItsRowsLanguages() {
         BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
                 languageTable("duckduckgo@0@de", "duckduckgo@1@en"), ASK_EVERY_GROUP, null, new Fake());

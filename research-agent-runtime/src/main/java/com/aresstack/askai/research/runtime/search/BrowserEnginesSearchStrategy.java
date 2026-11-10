@@ -348,54 +348,90 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
                 request.getCountry());
     }
 
-    /** The group's steps, at the same time when there are several (one per browser); outcome or exception each. */
+    /**
+     * The group's steps, one LANE per browser: the search browser's steps (Google, one per language) one after
+     * another, the research browser's step beside them. Lanes run at the same time; within a lane a step starts only
+     * after the previous one ended, so no step's time limit runs while it waits behind another step of its browser.
+     * Outcome or exception per step, in group order.
+     */
     private static Map<Step, Object> runGroup(List<Step> group, final Map<Step, InitialSearchRequest> requests,
                                               final CancellationSignal cancellation, final SearchBudgetGate budget) {
-        Map<Step, Object> outcomes = new LinkedHashMap<Step, Object>();
-        if (group.isEmpty()) {
-            return outcomes;
+        Map<Boolean, List<Step>> lanes = new LinkedHashMap<Boolean, List<Step>>();
+        for (Step step : group) {
+            Boolean searchBrowser = Boolean.valueOf(BrowserSearchEngineCatalog.runsInSearchBrowser(
+                    step.engineIds.isEmpty() ? null : step.engineIds.get(0)));
+            List<Step> lane = lanes.get(searchBrowser);
+            if (lane == null) {
+                lane = new ArrayList<Step>();
+                lanes.put(searchBrowser, lane);
+            }
+            lane.add(step);
         }
-        if (group.size() == 1) {
-            Step only = group.get(0);
-            outcomes.put(only, runStep(only, requests.get(only), cancellation, budget));
-            return outcomes;
+        Map<Step, Object> collected = new java.util.concurrent.ConcurrentHashMap<Step, Object>();
+        if (lanes.size() <= 1) {
+            for (List<Step> lane : lanes.values()) {
+                runLane(lane, requests, cancellation, budget, collected);
+            }
+            return inGroupOrder(group, collected);
         }
-        final java.util.concurrent.CountDownLatch finished = new java.util.concurrent.CountDownLatch(group.size());
-        Map<Step, Future<Object>> running = new LinkedHashMap<Step, Future<Object>>();
-        for (final Step step : group) {
-            running.put(step, GROUP_STEPS.submit(() -> {
+        final java.util.concurrent.CountDownLatch finished = new java.util.concurrent.CountDownLatch(lanes.size());
+        List<Future<?>> running = new ArrayList<Future<?>>();
+        for (final List<Step> lane : lanes.values()) {
+            running.add(GROUP_STEPS.submit(() -> {
                 try {
-                    return runStep(step, requests.get(step), cancellation, budget);
+                    runLane(lane, requests, cancellation, budget, collected);
                 } finally {
                     finished.countDown();
                 }
             }));
         }
         boolean interrupted = false;
-        for (Map.Entry<Step, Future<Object>> entry : running.entrySet()) {
+        for (Future<?> future : running) {
             if (interrupted) {
-                outcomes.put(entry.getKey(), new IllegalStateException("interrupted while searching"));
-                continue;
+                break;
             }
             try {
-                outcomes.put(entry.getKey(), entry.getValue().get());
+                future.get();
             } catch (InterruptedException e) {
                 interrupted = true;
-                outcomes.put(entry.getKey(), new IllegalStateException("interrupted while searching"));
             } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
-                outcomes.put(entry.getKey(), cause instanceof Exception ? cause
-                        : new IllegalStateException(String.valueOf(cause)));
+                // runLane records every failure per step; nothing escapes it
             }
         }
         if (interrupted) {
-            // Stop the steps and wait until they have really ended: the caller releases the one-search lock right
+            // Stop the lanes and wait until they have really ended: the caller releases the one-search lock right
             // after this, and an abandoned step must never type into a browser while the next search runs.
-            for (Future<Object> future : running.values()) {
+            for (Future<?> future : running) {
                 future.cancel(true);
             }
             awaitUninterruptibly(finished);
             Thread.currentThread().interrupt();
+        }
+        return inGroupOrder(group, collected);
+    }
+
+    /** One browser's steps, one after another; once the lane's thread is interrupted the rest are not started. */
+    private static void runLane(List<Step> lane, Map<Step, InitialSearchRequest> requests,
+                                CancellationSignal cancellation, SearchBudgetGate budget, Map<Step, Object> outcomes) {
+        for (Step step : lane) {
+            if (Thread.currentThread().isInterrupted()) {
+                outcomes.put(step, new IllegalStateException("interrupted while searching"));
+                continue;
+            }
+            Object outcome = runStep(step, requests.get(step), cancellation, budget);
+            outcomes.put(step, outcome == null ? NO_RESULT : outcome);
+        }
+    }
+
+    /** Stands for a step that returned no result object (the concurrent map holds no null). */
+    private static final Object NO_RESULT = new Object();
+
+    private static Map<Step, Object> inGroupOrder(List<Step> group, Map<Step, Object> collected) {
+        Map<Step, Object> outcomes = new LinkedHashMap<Step, Object>();
+        for (Step step : group) {
+            Object outcome = collected.get(step);
+            outcomes.put(step, outcome == NO_RESULT ? null
+                    : outcome != null ? outcome : new IllegalStateException("interrupted while searching"));
         }
         return outcomes;
     }
