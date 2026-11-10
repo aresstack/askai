@@ -38,7 +38,12 @@ import java.util.concurrent.locks.ReentrantLock;
  *       ({@link NonSourceHosts#isNonSourcePage}); an unresolved engine redirect wrapper (Google's goto link) counts,
  *       it is resolved only when the hit is opened.</li>
  *   <li>A step that fails, is challenged or delivers nothing counts nothing: the next group is tried.</li>
- *   <li>An engine already searched in an earlier group of this search is not asked the same query again.</li>
+ *   <li>An engine already searched in an earlier group of this search is not asked the same query again. The key
+ *       is engine + search language: Google (the search browser takes a language per search) may appear in several
+ *       rows with other languages, a page engine (typed into its search form, which takes no language) once.</li>
+ *   <li>Each row's languages (Languages plus Further languages) choose the language of its search: the search's
+ *       own language when the row lists it, otherwise the row's first language. A row without languages keeps the
+ *       search's language. The query text stays as the planner wrote it.</li>
  *   <li>Candidates are merged in group and step order; a URL already found is not added twice.</li>
  * </ul>
  * A failure carrying the browser's BROWSER_CLOSED marker (the user closed the window) is rethrown at once, so
@@ -56,16 +61,37 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
     private static final String GOOGLE_STEP = "google";
     private static final String PAGE_STEP_PREFIX = "page-engines";
 
-    /** One searchable step of a group: its name, the engines it asks, and the strategy that asks them. */
+    /**
+     * One searchable step of a group: its name, the engines it asks, the strategy that asks them, and the row's
+     * search languages (empty: the search's own language).
+     */
     private static final class Step {
         final String name;
         final List<String> engineIds;
         final SearchStrategy strategy;
+        final List<String> languages;
 
-        Step(String name, List<String> engineIds, SearchStrategy strategy) {
+        Step(String name, List<String> engineIds, SearchStrategy strategy, List<String> languages) {
             this.name = name;
             this.engineIds = engineIds;
             this.strategy = strategy;
+            this.languages = languages == null ? java.util.Collections.<String>emptyList()
+                    : java.util.Collections.unmodifiableList(new ArrayList<String>(languages));
+        }
+
+        /** The language this step searches in for a search asked in {@code requested} (may be null). */
+        String languageFor(String requested) {
+            if (languages.isEmpty()) {
+                return requested;
+            }
+            if (requested != null) {
+                for (String language : languages) {
+                    if (language.equalsIgnoreCase(requested.trim())) {
+                        return language;
+                    }
+                }
+            }
+            return languages.get(0);
         }
     }
 
@@ -97,43 +123,47 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
     public BrowserEnginesSearchStrategy(BrowserSearchEngineSelection selection, int minimumUsableResults,
                                         SearchStrategy google, SearchStrategy pageEngines) {
         this.minimumUsableResults = Math.max(1, minimumUsableResults);
-        TreeMap<Integer, List<String>> byPriority = new TreeMap<Integer, List<String>>();
+        TreeMap<Integer, List<BrowserSearchEngineSelection.Entry>> byPriority =
+                new TreeMap<Integer, List<BrowserSearchEngineSelection.Entry>>();
         if (selection != null) {
             for (BrowserSearchEngineSelection.Entry entry : selection.getEntries()) {
                 if (!entry.isEnabled() || BrowserSearchEngineCatalog.byId(entry.getEngineId()) == null) {
                     continue; // inactive, or an engine AskAI cannot search with (yet)
                 }
-                List<String> ids = byPriority.get(entry.getPriority());
-                if (ids == null) {
-                    ids = new ArrayList<String>();
-                    byPriority.put(entry.getPriority(), ids);
+                List<BrowserSearchEngineSelection.Entry> rows = byPriority.get(entry.getPriority());
+                if (rows == null) {
+                    rows = new ArrayList<BrowserSearchEngineSelection.Entry>();
+                    byPriority.put(entry.getPriority(), rows);
                 }
-                ids.add(entry.getEngineId());
+                rows.add(entry);
             }
         }
-        Set<String> planned = new LinkedHashSet<String>(); // engine already asked by an earlier group
+        Set<String> planned = new LinkedHashSet<String>(); // engine (+ languages) already asked by an earlier row
         boolean wholePageSearchPlaced = false;
-        for (Map.Entry<Integer, List<String>> group : byPriority.entrySet()) {
+        boolean googlePlaced = false;
+        for (Map.Entry<Integer, List<BrowserSearchEngineSelection.Entry>> group : byPriority.entrySet()) {
             List<Step> steps = new ArrayList<Step>();
             List<String> pageIds = new ArrayList<String>();
-            for (String id : group.getValue()) {
-                if (!planned.add(id)) {
-                    continue; // same query to the same engine again: never (languages per row come with PR F)
-                }
+            for (BrowserSearchEngineSelection.Entry row : group.getValue()) {
+                String id = row.getEngineId();
                 if (BrowserSearchEngineCatalog.runsInSearchBrowser(id)) {
-                    if (google != null) {
-                        steps.add(new Step(GOOGLE_STEP, java.util.Collections.singletonList(id), google));
+                    List<String> languages = row.effectiveLanguages();
+                    if (google == null || !planned.add(id + "|" + String.join("+", languages))) {
+                        continue; // the same engine with the same languages again: never
                     }
-                } else {
-                    pageIds.add(id);
+                    steps.add(new Step(googlePlaced ? GOOGLE_STEP + ":" + String.join("+", languages) : GOOGLE_STEP,
+                            java.util.Collections.singletonList(id), google, languages));
+                    googlePlaced = true;
+                } else if (planned.add(id)) {
+                    pageIds.add(id); // a search form takes no language: one row of a page engine is enough
                 }
             }
             if (!pageIds.isEmpty() && pageEngines != null) {
                 if (pageEngines instanceof EngineGroupSearchStrategy) {
                     steps.add(new Step(PAGE_STEP_PREFIX + ":" + String.join("+", pageIds), pageIds,
-                            ((EngineGroupSearchStrategy) pageEngines).forEngines(pageIds)));
+                            ((EngineGroupSearchStrategy) pageEngines).forEngines(pageIds), null));
                 } else if (!wholePageSearchPlaced) {
-                    steps.add(new Step(PAGE_STEP_PREFIX, pageIds, pageEngines));
+                    steps.add(new Step(PAGE_STEP_PREFIX, pageIds, pageEngines, null));
                     wholePageSearchPlaced = true;
                 }
             }
@@ -225,13 +255,24 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
         Exception lastFailure = null;
         int usable = 0;
         SearchBudgetGate sharedBudget = synchronizedBudget(budget);
+        Set<String> asked = new LinkedHashSet<String>(); // engine + language searched in this search
         for (int g = 0; g < groups.size(); g++) {
             if (cancellation != null && cancellation.isCancelled()) {
                 cancelled = true;
                 break;
             }
-            List<Step> group = groups.get(g);
-            Map<Step, Object> outcomes = runGroup(group, request, cancellation, sharedBudget);
+            List<Step> group = new ArrayList<Step>();
+            Map<Step, InitialSearchRequest> requests = new LinkedHashMap<Step, InitialSearchRequest>();
+            for (Step step : groups.get(g)) {
+                String language = step.languageFor(request.getLanguage());
+                if (!asked.add(String.join("+", step.engineIds) + "|" + (language == null ? "" : language))) {
+                    diagnostics.add("browser search: " + step.name + " skipped, already searched in " + language);
+                    continue; // two rows whose languages lead to the same search: ask it once
+                }
+                group.add(step);
+                requests.put(step, requestIn(request, language));
+            }
+            Map<Step, Object> outcomes = runGroup(group, requests, cancellation, sharedBudget);
             for (Step step : group) {
                 Object outcome = outcomes.get(step);
                 if (outcome instanceof Exception) {
@@ -297,13 +338,26 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
                 InitialSearchStatus.TECHNICAL_PROBLEM);
     }
 
+    /** The search in the step's language; the same request when the language does not change. */
+    private static InitialSearchRequest requestIn(InitialSearchRequest request, String language) {
+        String current = request.getLanguage();
+        if (language == null ? current == null : language.equals(current)) {
+            return request;
+        }
+        return new InitialSearchRequest(request.getQuery(), request.getRequestedResultCount(), language,
+                request.getCountry());
+    }
+
     /** The group's steps, at the same time when there are several (one per browser); outcome or exception each. */
-    private static Map<Step, Object> runGroup(List<Step> group, final InitialSearchRequest request,
+    private static Map<Step, Object> runGroup(List<Step> group, final Map<Step, InitialSearchRequest> requests,
                                               final CancellationSignal cancellation, final SearchBudgetGate budget) {
         Map<Step, Object> outcomes = new LinkedHashMap<Step, Object>();
+        if (group.isEmpty()) {
+            return outcomes;
+        }
         if (group.size() == 1) {
             Step only = group.get(0);
-            outcomes.put(only, runStep(only, request, cancellation, budget));
+            outcomes.put(only, runStep(only, requests.get(only), cancellation, budget));
             return outcomes;
         }
         final java.util.concurrent.CountDownLatch finished = new java.util.concurrent.CountDownLatch(group.size());
@@ -311,7 +365,7 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
         for (final Step step : group) {
             running.put(step, GROUP_STEPS.submit(() -> {
                 try {
-                    return runStep(step, request, cancellation, budget);
+                    return runStep(step, requests.get(step), cancellation, budget);
                 } finally {
                     finished.countDown();
                 }

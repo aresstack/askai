@@ -202,6 +202,79 @@ public class BrowserEnginesSearchStrategyTest {
         return new BrowserSearchEngineSelection(list, null);
     }
 
+    /** Rows "engine@priority@lang+lang" (an empty language part: no languages). */
+    private static BrowserSearchEngineSelection languageTable(String... rows) {
+        List<BrowserSearchEngineSelection.Entry> list = new ArrayList<BrowserSearchEngineSelection.Entry>();
+        for (String row : rows) {
+            String[] parts = row.split("@", -1);
+            List<String> languages = parts[2].isEmpty() ? Collections.<String>emptyList()
+                    : Arrays.asList(parts[2].split("\\+"));
+            list.add(new BrowserSearchEngineSelection.Entry(parts[0], true, 1, 0, Integer.parseInt(parts[1]),
+                    languages, false, Collections.<String>emptyList()));
+        }
+        return new BrowserSearchEngineSelection(list, null);
+    }
+
+    /** Records the language of every search it is asked; finds one result per search. */
+    private static final class LanguageRecorder implements SearchStrategy {
+        final List<String> languages = new ArrayList<String>();
+
+        @Override
+        public synchronized InitialSearchResult search(InitialSearchRequest request, CancellationSignal cancellation,
+                                                       SearchBudgetGate budget) {
+            languages.add(String.valueOf(request.getLanguage()));
+            return new Fake("https://" + request.getLanguage() + languages.size() + ".example/")
+                    .search(request, cancellation, budget);
+        }
+    }
+
+    private static final int ASK_EVERY_GROUP = 100;
+
+    @Test
+    public void aGoogleRowWithOtherLanguagesSearchesAgainInItsLanguage() throws Exception {
+        LanguageRecorder google = new LanguageRecorder();
+        BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
+                languageTable("google@0@de", "google@1@en"), ASK_EVERY_GROUP, google, null);
+        assertEquals(Arrays.asList("google", "google:en"), strategy.stepNames());
+        strategy.search(new InitialSearchRequest("q", 10, "de", ""), NOT_CANCELLED, BUDGET);
+        assertEquals(Arrays.asList("de", "en"), google.languages);
+    }
+
+    @Test
+    public void aRowKeepsTheSearchLanguageWhenItListsItElseTakesItsFirst() throws Exception {
+        LanguageRecorder google = new LanguageRecorder();
+        BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
+                languageTable("google@0@en+de"), ASK_EVERY_GROUP, google, null);
+        strategy.search(new InitialSearchRequest("q", 10, "de", ""), NOT_CANCELLED, BUDGET);
+        strategy.search(new InitialSearchRequest("q", 10, "fr", ""), NOT_CANCELLED, BUDGET);
+        strategy.search(new InitialSearchRequest("q", 10, null, ""), NOT_CANCELLED, BUDGET);
+        assertEquals(Arrays.asList("de", "en", "en"), google.languages);
+
+        LanguageRecorder noLanguages = new LanguageRecorder();
+        new BrowserEnginesSearchStrategy(languageTable("google@0@"), ASK_EVERY_GROUP, noLanguages, null)
+                .search(new InitialSearchRequest("q", 10, "fr", ""), NOT_CANCELLED, BUDGET);
+        assertEquals("a row without languages keeps the search's language",
+                Collections.singletonList("fr"), noLanguages.languages);
+    }
+
+    @Test
+    public void twoRowsLeadingToTheSameSearchAskItOnce() throws Exception {
+        LanguageRecorder google = new LanguageRecorder();
+        InitialSearchResult result = new BrowserEnginesSearchStrategy(
+                languageTable("google@0@de+en", "google@1@de+fr"), ASK_EVERY_GROUP, google, null)
+                .search(new InitialSearchRequest("q", 10, "de", ""), NOT_CANCELLED, BUDGET);
+        assertEquals(Collections.singletonList("de"), google.languages);
+        assertTrue(result.diagnostics.toString().contains("skipped, already searched in de"));
+    }
+
+    @Test
+    public void aPageEngineIsAskedOnceWhateverItsRowsLanguages() {
+        BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
+                languageTable("duckduckgo@0@de", "duckduckgo@1@en"), ASK_EVERY_GROUP, null, new Fake());
+        assertEquals("a search form takes no language", Collections.singletonList("page-engines"),
+                strategy.stepNames());
+    }
+
     private static String[] urls(String prefix, int n) {
         String[] urls = new String[n];
         for (int i = 0; i < n; i++) {
