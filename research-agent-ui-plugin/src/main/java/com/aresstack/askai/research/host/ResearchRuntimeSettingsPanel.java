@@ -267,10 +267,12 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
         com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
         actions.actions(save, check, busy);
+        // Phase 3: the shared topic analysis, the outline synthesis and the book length (saved field by field).
+        com.aresstack.comiccontrols.control.ComicForm[] outline = OutlineSettingsRows.forms(store);
         com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, writer, team, orchestrator, scope,
-                scopeAdvanced);
+                scopeAdvanced, outline[0], outline[1], outline[2]);
         add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, writer, team, orchestrator, scope, scopeAdvanced,
-                actions),
+                outline[0], outline[1], outline[2], actions),
                 BorderLayout.NORTH);
 
         results.setEditable(false);

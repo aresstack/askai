@@ -8,21 +8,23 @@ import com.aresstack.askai.research.outline.synthesis.OutlineSynthesisSettings;
 import com.aresstack.comiccontrols.control.ComicControls;
 import com.aresstack.comiccontrols.control.ComicForm;
 
-import javax.swing.JComponent;
 import javax.swing.JTextField;
 
 /**
- * Phase 3: the "Outline" settings tab: the shared topic analysis that the Sources phase runs and the outline is built
+ * Phase 3: the outline sections of the "Runtime" settings tab: the shared topic analysis that the Sources phase runs and the outline is built
  * on ({@link EvidenceAnalysisSettings}, {@code research.evidence.*}), the synthesis on {@code phase.outline} and the
  * book length ({@link OutlineGenerationSettings}, {@code research.outline.*}). Each field saves on Enter and on focus
  * loss; an invalid value is reset to the stored one. The values are read at the next analysis or generation.
+ * They sit on the Runtime tab, beside the research and writer sections, so the dialog's tab row stays one line
+ * at the narrowest dialog width (a second tab row takes the height the Search tab's engine table needs).
  */
 final class OutlineSettingsRows {
 
     private OutlineSettingsRows() {
     }
 
-    static JComponent page(WorkspaceStateStore store) {
+    /** The sections "Topic analysis", "Outline synthesis" and "Book length", in this order. */
+    static ComicForm[] forms(WorkspaceStateStore store) {
         ComicForm analysis = ComicForm.titled("Topic analysis");
         analysis.row("Minimum distinct passages", positive(store, EvidenceAnalysisSettings.KEY_MINIMUM_PASSAGES,
                 TopicAnalysisSettings.DEFAULT_MINIMUM_PASSAGES,
@@ -111,8 +113,7 @@ final class OutlineSettingsRows {
                 "A regenerated chapter or section takes the place of a stored one from this passage overlap on "
                         + "(0 to 1); edited entries are always kept."));
 
-        ComicForm.alignLabels(analysis, synthesis, length);
-        return ComicForm.page(analysis, synthesis, length);
+        return new ComicForm[]{analysis, synthesis, length};
     }
 
     private interface Parser {

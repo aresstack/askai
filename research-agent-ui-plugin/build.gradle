@@ -67,6 +67,10 @@ dependencies {
 
 test {
     useJUnit()
+    // CI shows only the build log: print the assertion message (e.g. which settings row runs out of the window).
+    testLogging {
+        exceptionFormat = 'full'
+    }
 }
 
 // Phase 3 live acceptance on the owner's machine (local Ollama); skipped in the normal test run.
