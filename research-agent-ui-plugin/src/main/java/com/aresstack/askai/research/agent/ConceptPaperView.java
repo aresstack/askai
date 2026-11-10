@@ -79,13 +79,13 @@ public final class ConceptPaperView extends JPanel {
 
     private final JTextArea editor = ComicControls.textArea();
     private final JLabel statusLabel = new JLabel(" ");
-    private final ComicButton saveButton = new ComicButton("✔");
-    private final ComicButton discardButton = new ComicButton("✖");
+    private final ComicButton saveButton = new ComicButton("Save");
+    private final ComicButton discardButton = new ComicButton("Discard");
     private final ComicButton olderButton = new ComicButton("◀");
     private final ComicButton newerButton = new ComicButton("▶");
     private final ComicButton refreshButton = new ComicButton("⟳");
-    private final ComicButton treeButton = new ComicButton("☷");
-    private final ComicButton jsonButton = new ComicButton("{ }");
+    private final ComicButton treeButton = new ComicButton("Tree");
+    private final ComicButton jsonButton = new ComicButton("JSON");
     private final ConceptTreeView treeView = new ConceptTreeView();
     private final JScrollPane treeScroll = new JScrollPane(treeView);
     /** Tree first — the pretty surface; JSON stays the power/recovery mode. */
@@ -148,14 +148,17 @@ public final class ConceptPaperView extends JPanel {
                 ResearchUiMetrics.FOOTER_PADDING_V, ResearchUiMetrics.FOOTER_PADDING_H,
                 ResearchUiMetrics.FOOTER_PADDING_V, ResearchUiMetrics.FOOTER_PADDING_H));
         searchRow.add(searchBar, BorderLayout.CENTER);
-        // Nothing above or beside the search: the Tree/JSON toggle lives in the footer (buttons below).
+        JPanel modeToggle = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        modeToggle.setOpaque(false);
         for (ComicButton button : new ComicButton[] {treeButton, jsonButton}) {
             button.setFocusable(false);
             button.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
+            modeToggle.add(button);
         }
         treeButton.setToolTipText("Show the concept as an editable card tree");
         jsonButton.setToolTipText("Show and edit the raw JSON document");
-        // The search bar is the topmost element, at the same place as the Chats tab's search.
+        searchRow.add(modeToggle, BorderLayout.EAST);
+        // The search row is the topmost element, at the same place as the Chats tab's search: nothing above.
         add(searchRow, BorderLayout.NORTH);
 
         // Editor + the comic error overlay share the center: a rejected save POPS over the text
@@ -243,6 +246,10 @@ public final class ConceptPaperView extends JPanel {
         missionSaveButton.setEnabled(editable && missionSaver != null);
         modeLabel.setText(editable ? " " : modeMessage);
         modeLabel.setVisible(!editable);
+    }
+
+    javax.swing.JComponent missionFieldForTest() {
+        return missionField;
     }
 
     String missionText() {
@@ -411,8 +418,6 @@ public final class ConceptPaperView extends JPanel {
         refreshButton.setToolTipText("Reload view");
         refreshButton.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
         left.add(refreshButton);
-        left.add(treeButton);
-        left.add(jsonButton);
         footer.add(left, BorderLayout.WEST);
         footer.add(saveActions, BorderLayout.CENTER);
 

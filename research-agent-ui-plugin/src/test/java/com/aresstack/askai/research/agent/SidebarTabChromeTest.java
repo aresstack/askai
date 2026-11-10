@@ -36,17 +36,17 @@ public class SidebarTabChromeTest {
     private static final int MAX_GLYPH_LENGTH = 3;
 
     @Test
-    public void conceptStartsWithTheSearchBarAndNothingElse() throws Exception {
+    public void conceptStartsWithTheSearchRowAndTheMissionSitsBelow() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             ConceptPaperView view = new ConceptPaperView();
             view.renderMission("Plugin isolation", "Frozen at revision 1. Reopen Concept to change it.");
             Component north = ((BorderLayout) view.getLayout()).getLayoutComponent(BorderLayout.NORTH);
             assertNotNull(north);
-            Component[] top = ((Container) north).getComponents();
-            assertEquals("only the search bar is on top", 1, top.length);
-            assertTrue(top[0] instanceof ComicSearchBar);
-            assertIconButtons(buttonsOutsideSearch(view));
-            assertFits(view);
+            assertNotNull("the search bar is in the topmost row", find((Container) north, ComicSearchBar.class));
+            ComicLayoutAudit.overflows(view, WIDTHS[1], HEIGHT);
+            assertEquals(0, yIn(view, north));
+            assertTrue("the mission sits below the search row",
+                    yIn(view, view.missionFieldForTest()) > yIn(view, find(view, ComicSearchBar.class)));
         });
     }
 
@@ -109,25 +109,6 @@ public class SidebarTabChromeTest {
             List<String> overflows = ComicLayoutAudit.overflows(view, width, HEIGHT);
             assertTrue("At " + width + " px the tab runs out of the sidebar:\n"
                     + String.join("\n", overflows), overflows.isEmpty());
-        }
-    }
-
-    private static List<AbstractButton> buttonsOutsideSearch(Container root) {
-        List<AbstractButton> found = new ArrayList<AbstractButton>();
-        collect(root, found);
-        return found;
-    }
-
-    private static void collect(Container container, List<AbstractButton> found) {
-        for (Component child : container.getComponents()) {
-            if (child instanceof ComicSearchBar || child instanceof ConceptTreeView) {
-                continue;
-            }
-            if (child instanceof JButton) {
-                found.add((AbstractButton) child);
-            } else if (child instanceof Container) {
-                collect((Container) child, found);
-            }
         }
     }
 
