@@ -5,6 +5,7 @@ import com.aresstack.askai.research.transition.CorruptProjectFileException;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -119,6 +120,22 @@ public final class SearchPlanQueue {
      */
     public interface Replanner {
         void replan(ConceptQueryPlan.Request request, Replanned callback);
+    }
+
+    /**
+     * Plan T4 gap review: at every cycle boundary the orchestrator reads the shared evidence analysis of the material
+     * read so far and hands its gaps to the planner of the next cycle. {@link #NONE} plans from the source counts.
+     */
+    public interface GapReview {
+        GapReview NONE = new GapReview() {
+            public EvidenceGaps.Gaps atCycleBoundary(Collection<String> activeNodes,
+                                                     Collection<SearchPlanEntry> entries) {
+                return EvidenceGaps.Gaps.NONE;
+            }
+        };
+
+        /** The gaps of the current analysis; {@link EvidenceGaps.Gaps#NONE} when none is settled. Fast: no analysis. */
+        EvidenceGaps.Gaps atCycleBoundary(Collection<String> activeNodes, Collection<SearchPlanEntry> entries);
     }
 
     /** The planner's answer for a cycle. */
@@ -309,6 +326,9 @@ public final class SearchPlanQueue {
     private final Replanner replanner;
     private volatile SearchPlanCoverage.Caps caps;
     private volatile Team team = Team.OFF;
+    private volatile GapReview gapReview = GapReview.NONE;
+    /** The gaps the running re-plan was asked for (the decision of this cycle boundary). */
+    private EvidenceGaps.Gaps replanGaps = EvidenceGaps.Gaps.NONE;
     /** Set when the runtime had no worker browser for a team query: this run goes on one query at a time. */
     private volatile boolean noWorkerBrowser;
 
@@ -360,6 +380,11 @@ public final class SearchPlanQueue {
     /** The research team (plan T5); {@link Team#OFF} keeps one entry at a time. */
     public void setTeam(Team team) {
         this.team = team == null ? Team.OFF : team;
+    }
+
+    /** Plan T4: the gap review of the shared evidence analysis at every cycle boundary. */
+    public void setGapReview(GapReview review) {
+        this.gapReview = review == null ? GapReview.NONE : review;
     }
 
     /** How many entries may run at once: the team's workers, at least one. */
@@ -791,8 +816,13 @@ public final class SearchPlanQueue {
                     Map<String, SearchPlanEntry> all = store.loadEntries();
                     Map<String, SearchPlanCoverage.NodeCoverage> coverage =
                             SearchPlanCoverage.of(record, all.values(), c, sources);
+                    EvidenceGaps.Gaps gaps = EvidenceGaps.Gaps.NONE;
+                    if (!capReached && replanner != null && record.getCycle() < c.getCycles()) {
+                        gaps = gapReview(record, all.values());
+                    }
                     nextCycle = capReached || replanner == null || record.getCycle() >= c.getCycles() ? null
-                            : SearchPlanCycles.nextCycleRequest(record, all.values(), coverage, c);
+                            : SearchPlanCycles.nextCycleRequest(record, all.values(), coverage, c, gaps);
+                    replanGaps = gaps;
                     if (nextCycle != null) {
                         replanning = true; // the queue stays running without an entry
                     } else {
@@ -854,6 +884,44 @@ public final class SearchPlanQueue {
         listener.finished(outcome);
     }
 
+    /** The gaps of this cycle boundary, logged as the boundary's decision; a failing review plans without gaps. */
+    private EvidenceGaps.Gaps gapReview(SearchPlanRecord record, Collection<SearchPlanEntry> entries) {
+        List<String> active = new ArrayList<String>();
+        for (SearchPlanRecord.Node node : record.getNodes()) {
+            if (node.isActive()) {
+                active.add(node.getId());
+            }
+        }
+        EvidenceGaps.Gaps gaps;
+        try {
+            gaps = gapReview.atCycleBoundary(active, entries);
+        } catch (RuntimeException failed) {
+            System.err.println("[search-plan] gap review failed: " + failed.getMessage());
+            return EvidenceGaps.Gaps.NONE;
+        }
+        if (gaps == null || gaps.getAnalysisId().isEmpty()) {
+            System.err.println("[search-plan] gap review cycle " + record.getCycle()
+                    + ": no settled analysis, the next cycle plans from the source counts");
+            return EvidenceGaps.Gaps.NONE;
+        }
+        StringBuilder line = new StringBuilder("[search-plan] gap review cycle ").append(record.getCycle())
+                .append(" analysis ").append(gaps.getAnalysisId()).append(':');
+        for (Map.Entry<String, List<String>> gap : gaps.getEvidenceByNode().entrySet()) {
+            SearchPlanRecord.Node node = record.node(gap.getKey());
+            line.append(" [").append(node == null ? gap.getKey() : node.getLabel()).append(": ")
+                    .append(gap.getValue().isEmpty() ? "" : gap.getValue().get(0)).append(']');
+        }
+        line.append(" covered=").append(gaps.getCoveredNodes().size());
+        for (String topic : gaps.getNewTopics()) {
+            line.append(" [new topic: ").append(topic).append(']');
+        }
+        for (String dropped : gaps.getDropped()) {
+            line.append(" [").append(dropped).append(']');
+        }
+        System.err.println(line);
+        return gaps;
+    }
+
     /** Ask the planner for the next cycle; its answer (any thread) is applied on the queue's executor. */
     private void startReplan(final ConceptQueryPlan.Request request) {
         final int generation;
@@ -900,7 +968,7 @@ public final class SearchPlanQueue {
                     outcome = outcome(record, all, c, SearchPlanCoverage.of(record, all.values(), c, sources),
                             Reason.PLANNER_UNAVAILABLE);
                 } else {
-                    store.saveAll(cycle.getAdded());
+                    store.saveAll(noteGaps(cycle.getAdded()));
                     store.saveRecord(cycle.getRecord());
                 }
             } catch (IOException | CorruptProjectFileException | RuntimeException failed) {
@@ -914,6 +982,28 @@ public final class SearchPlanQueue {
         } else if (isRunning()) {
             scheduleNext();
         }
+    }
+
+    /**
+     * The cycle's new entries, each one planned for a gap carrying that gap and the analysis on its note, so the
+     * decision stays traceable: which analysis, which gap, which query.
+     */
+    private List<SearchPlanEntry> noteGaps(List<SearchPlanEntry> added) {
+        EvidenceGaps.Gaps gaps = replanGaps;
+        List<SearchPlanEntry> noted = new ArrayList<SearchPlanEntry>();
+        long now = clock.now();
+        for (SearchPlanEntry entry : added) {
+            List<String> gap = gaps.getEvidenceByNode().get(entry.getNodeId());
+            if (gap == null || gap.isEmpty()) {
+                noted.add(entry);
+                continue;
+            }
+            String note = "gap " + gap.get(0) + " (analysis " + gaps.getAnalysisId() + ")";
+            System.err.println("[search-plan] query \"" + entry.getQuery() + "\" for \"" + entry.getNodeLabel()
+                    + "\": " + note);
+            noted.add(entry.withNote(note, now));
+        }
+        return noted;
     }
 
     /** How many ranked hits a planned query visits at most: three per source it may accept, 3 to 20. */

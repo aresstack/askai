@@ -10,6 +10,7 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -608,6 +609,115 @@ public class SearchPlanQueueTest {
         assertTrue(store.outcomeFile().isFile());
         assertTrue(outcome.report().contains("A: covered (2 sources from 2 domains, 4 queries run"));
         assertFalse(queue.isRunning());
+    }
+
+    @Test
+    public void theGapReviewPlansAThinNodeAgainAndLeavesAWellCoveredOneAlone() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query"),
+                node("c", "C", "Gamma Query")), queries);
+        sources.domains.put("s1", "one.example");
+        sources.domains.put("s2", "two.example");
+        sources.domains.put("s3", "three.example");
+        sources.domains.put("s4", "four.example");
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("a", "Alpha Messwerte Studie");
+        SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
+        final List<Collection<String>> asked = new ArrayList<Collection<String>>();
+        queue.setGapReview(new SearchPlanQueue.GapReview() {
+            public EvidenceGaps.Gaps atCycleBoundary(Collection<String> active, Collection<SearchPlanEntry> entries) {
+                asked.add(new ArrayList<String>(active));
+                return EvidenceGaps.of(analysis("snap-7", true,
+                        Arrays.asList(
+                                new EvidenceGaps.NodeEvidence("a", EvidenceGaps.Status.REDUNDANT, 20, 1, 10,
+                                        Arrays.asList("sensor", "helmet")),
+                                new EvidenceGaps.NodeEvidence("c", EvidenceGaps.Status.OK, 30, 25, 6,
+                                        Arrays.asList("gamma"))),
+                        Arrays.asList(new EvidenceGaps.NewTopic("Exoskeletons", Arrays.asList("lifting"), 9,
+                                EvidenceGaps.Scope.IN, ""))),
+                        active, entries, Collections.<String>emptyList(), 3, 3);
+            }
+        });
+        sources.next = Arrays.asList("s1", "s2");
+        queue.run();
+        port.complete(false); // Alpha Query: covered by its source count
+        sources.next = Arrays.asList("s3", "s4");
+        port.complete(false); // Beta Query: covered
+        sources.next = Collections.emptyList();
+        port.complete(false); // Gamma Query: nothing, but the analysis finds C well covered
+
+        assertEquals(1, asked.size());
+        assertEquals(1, replanner.requests.size());
+        ConceptQueryPlan.Request request = replanner.requests.get(0);
+        assertEquals("only the node the analysis finds redundant", 1, request.getNodes().size());
+        ConceptQueryPlan.Node a = request.getNodes().get(0);
+        assertEquals("a", a.getId());
+        assertEquals("REDUNDANT: 20 passages but only 1 distinct, from 10 sources", a.getEvidence().get(0));
+        assertEquals("the material so far is about: sensor, helmet", a.getEvidence().get(1));
+        assertEquals(Collections.singletonList("Exoskeletons: lifting"), request.getNewTopics());
+
+        replanner.deliver();
+        SearchPlanEntry planned = null;
+        for (SearchPlanEntry entry : queue.entriesInOrder()) {
+            if (entry.getOrigin() == SearchPlanEntry.Origin.CYCLE) {
+                planned = entry;
+            }
+        }
+        assertEquals("Alpha Messwerte Studie", planned.getQuery());
+        assertTrue(planned.getNote(), planned.getNote().contains("gap REDUNDANT")
+                && planned.getNote().contains("analysis snap-7"));
+    }
+
+    @Test
+    public void anUnsettledAnalysisReportsNoGapAndTheCyclePlansFromTheSourceCounts() throws Exception {
+        build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")),
+                new HashMap<String, List<String>>());
+        sources.domains.put("s1", "one.example");
+        sources.domains.put("s2", "two.example");
+        FakeReplanner replanner = new FakeReplanner();
+        SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
+        queue.setGapReview(new SearchPlanQueue.GapReview() {
+            public EvidenceGaps.Gaps atCycleBoundary(Collection<String> active, Collection<SearchPlanEntry> entries) {
+                return EvidenceGaps.of(analysis("snap-8", false, Collections.singletonList(
+                        new EvidenceGaps.NodeEvidence("b", EvidenceGaps.Status.MISSING, 0, 0, 0,
+                                Arrays.asList("beta"))),
+                        Collections.<EvidenceGaps.NewTopic>emptyList()),
+                        active, entries, Collections.<String>emptyList(), 3, 3);
+            }
+        });
+        sources.next = Collections.emptyList();
+        queue.run();
+        port.complete(false); // Alpha Query: nothing
+        sources.next = Arrays.asList("s1", "s2");
+        port.complete(false); // Beta Query: covered; sources still wait for processing, so "missing" is no gap
+
+        ConceptQueryPlan.Request request = replanner.requests.get(0);
+        assertEquals(1, request.getNodes().size());
+        assertEquals("a", request.getNodes().get(0).getId());
+        assertTrue(request.getNodes().get(0).getEvidence().isEmpty());
+        assertTrue(request.getNewTopics().isEmpty());
+    }
+
+    static EvidenceGaps.Analysis analysis(final String id, final boolean settled,
+                                          final List<EvidenceGaps.NodeEvidence> nodes,
+                                          final List<EvidenceGaps.NewTopic> topics) {
+        return new EvidenceGaps.Analysis() {
+            public String id() {
+                return id;
+            }
+
+            public boolean settled() {
+                return settled;
+            }
+
+            public List<EvidenceGaps.NodeEvidence> nodes() {
+                return nodes;
+            }
+
+            public List<EvidenceGaps.NewTopic> newTopics() {
+                return topics;
+            }
+        };
     }
 
     @Test
