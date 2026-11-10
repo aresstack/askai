@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * The "Browser (SERP)" search as the user configured it under Search → Engines: the enabled engines in their
@@ -29,6 +30,11 @@ import java.util.Set;
  * the caller ends the run as the user's stop instead of trying the next engine.
  * When no step delivers, the result is {@link InitialSearchStatus#NO_RESULTS} if some step searched cleanly,
  * else the last failure is rethrown or reported as {@link InitialSearchStatus#TECHNICAL_PROBLEM}.
+ *
+ * <p>Thread-safe and one search at a time for the whole AskAI process: every chat, the concept phase and any
+ * worker that searches go through this one tool, and a search waits (fair, in arrival order) until the previous
+ * one has finished. The engine pace itself (spacing, pause after a challenge, same search answered from memory)
+ * lives in the search browser.</p>
  */
 public final class BrowserEnginesSearchStrategy implements SearchStrategy {
 
@@ -79,9 +85,36 @@ public final class BrowserEnginesSearchStrategy implements SearchStrategy {
         return new ArrayList<String>(stepNames);
     }
 
+    /** One engine search at a time across every chat and thread of the process, in arrival order. */
+    private static final ReentrantLock ONE_SEARCH_AT_A_TIME = new ReentrantLock(true);
+
+    /** Searches waiting for the running one to finish (diagnostics). */
+    public static int waitingSearches() {
+        return ONE_SEARCH_AT_A_TIME.getQueueLength();
+    }
+
     @Override
     public InitialSearchResult search(InitialSearchRequest request, CancellationSignal cancellation,
                                       SearchBudgetGate budget)
+            throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
+        try {
+            ONE_SEARCH_AT_A_TIME.lockInterruptibly();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            List<String> diagnostics = new ArrayList<String>();
+            diagnostics.add("browser search: interrupted while waiting for the running search");
+            return new InitialSearchResult(new ArrayList<SearchResultCandidate>(), new ArrayList<String>(),
+                    new ArrayList<SearchChallengeState>(), diagnostics, InitialSearchStatus.TECHNICAL_PROBLEM);
+        }
+        try {
+            return searchSerially(request, cancellation, budget);
+        } finally {
+            ONE_SEARCH_AT_A_TIME.unlock();
+        }
+    }
+
+    private InitialSearchResult searchSerially(InitialSearchRequest request, CancellationSignal cancellation,
+                                               SearchBudgetGate budget)
             throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
         if (steps.isEmpty()) {
             List<String> diagnostics = new ArrayList<String>();

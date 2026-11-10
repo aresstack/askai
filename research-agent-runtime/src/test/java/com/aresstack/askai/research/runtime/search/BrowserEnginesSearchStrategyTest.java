@@ -112,6 +112,50 @@ public class BrowserEnginesSearchStrategyTest {
                 selection(EngineAcquisitionMode.FIRST_USABLE, "google:on", "bing:off"), google, pages).isGoogleOnly());
     }
 
+    @Test
+    public void searchesFromManyThreadsNeverRunAtTheSameTime() throws Exception {
+        final java.util.concurrent.atomic.AtomicInteger inside = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger maxInside = new java.util.concurrent.atomic.AtomicInteger();
+        SearchStrategy slowGoogle = new SearchStrategy() {
+            public InitialSearchResult search(InitialSearchRequest r, CancellationSignal c, SearchBudgetGate b) {
+                int now = inside.incrementAndGet();
+                maxInside.accumulateAndGet(now, Math::max);
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                inside.decrementAndGet();
+                return new Fake("https://a.example/" + now).search(r, c, b);
+            }
+        };
+        // two chats, each with its own strategy instance: still one search at a time
+        final BrowserEnginesSearchStrategy chatA = new BrowserEnginesSearchStrategy(
+                selection(EngineAcquisitionMode.FIRST_USABLE, "google:on"), slowGoogle, null);
+        final BrowserEnginesSearchStrategy chatB = new BrowserEnginesSearchStrategy(
+                selection(EngineAcquisitionMode.FIRST_USABLE, "google:on"), slowGoogle, null);
+        final List<Throwable> errors = Collections.synchronizedList(new ArrayList<Throwable>());
+        List<Thread> threads = new ArrayList<Thread>();
+        for (int i = 0; i < 6; i++) {
+            final BrowserEnginesSearchStrategy strategy = i % 2 == 0 ? chatA : chatB;
+            Thread t = new Thread(() -> {
+                try {
+                    strategy.search(REQUEST, NOT_CANCELLED, BUDGET);
+                } catch (Throwable e) {
+                    errors.add(e);
+                }
+            });
+            threads.add(t);
+            t.start();
+        }
+        for (Thread t : threads) {
+            t.join(10_000L);
+        }
+        assertTrue(errors.toString(), errors.isEmpty());
+        assertEquals(1, maxInside.get());
+        assertEquals(0, BrowserEnginesSearchStrategy.waitingSearches());
+    }
+
     private static BrowserSearchEngineSelection selection(EngineAcquisitionMode mode, String... entries) {
         List<BrowserSearchEngineSelection.Entry> list = new ArrayList<BrowserSearchEngineSelection.Entry>();
         for (String entry : entries) {
