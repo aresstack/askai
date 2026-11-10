@@ -38,7 +38,7 @@ public final class SearchEngineCatalog {
     public static final String SEZNAM = BrowserSearchEngineCatalog.SEZNAM;
     public static final String YANDEX = BrowserSearchEngineCatalog.YANDEX;
     public static final String RAMBLER = "rambler";
-    public static final String BAIDU = "baidu";
+    public static final String BAIDU = BrowserSearchEngineCatalog.BAIDU;
     public static final String SOGOU = "sogou";
     public static final String SEARCH_360 = "so360";
     public static final String SHENMA = "shenma";
@@ -97,9 +97,11 @@ public final class SearchEngineCatalog {
                     entry(RAMBLER, "Rambler", "Russia", "https://www.rambler.ru/", "Yandex-based",
                             langs("ru"), NOT_IMPLEMENTED, NO_ADAPTER),
                     entry(BAIDU, "Baidu", "China", "https://www.baidu.com/", "Own index",
-                            langs("zh-CN"), NOT_IMPLEMENTED,
-                            "Its result links are opaque baidu.com/link?url= wrappers (like Google's goto links); "
-                                    + "an adapter needs them resolved lazily and centrally first."),
+                            langs("zh-CN"), EXPERIMENTAL,
+                            "Search form adapter in the research browser. Its hit links are opaque baidu.com/link?url= "
+                                    + "wrappers; the target is read offline from the result block's own mu attribute, "
+                                    + "never by a request to Baidu, and a hit without it is dropped. Not validated "
+                                    + "against the live engine yet."),
                     entry(SOGOU, "Sogou", "China", "https://www.sogou.com/", "Own and partner data",
                             langs("zh-CN"), NOT_IMPLEMENTED, NO_ADAPTER),
                     entry(SEARCH_360, "360 Search", "China", "https://www.so.com/", "Own service",

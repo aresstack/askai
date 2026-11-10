@@ -3,7 +3,7 @@ package com.aresstack.askai.browser.search.engine;
 import java.util.Locale;
 
 /**
- * The hosts of the web search engines AskAI searches with (Google, Bing, DuckDuckGo, Startpage, Yahoo, Yahoo! JAPAN, Seznam, Yandex, Naver, Cốc Cốc). The research browser never
+ * The hosts of the web search engines AskAI searches with (Google, Bing, DuckDuckGo, Startpage, Yahoo, Yahoo! JAPAN, Seznam, Yandex, Naver, Cốc Cốc, Baidu). The research browser never
  * navigates to one of them: a search engine is reached only through the search tool (the search browser or an API
  * provider), so one client with one identity talks to the engine. A search hit that still points at an engine
  * host — Google's opaque {@code /goto?url=…} wrapper, an engine vertical, an unresolved redirect — is resolved by
@@ -19,7 +19,7 @@ public final class SearchEngineHosts {
         String host = hostOf(urlOrHost);
         return isGoogleHost(host) || isBingHost(host) || isDuckDuckGoHost(host) || isStartpageHost(host)
                 || isYahooSearchHost(host) || isSeznamSearchHost(host) || isYandexHost(host)
-                || isNaverSearchHost(host) || isCocCocHost(host);
+                || isNaverSearchHost(host) || isCocCocHost(host) || isBaiduSearchHost(host);
     }
 
     /** {@code google.com}, {@code www.google.de}, {@code google.co.uk}, {@code google.com.br}, … */
@@ -86,6 +86,15 @@ public final class SearchEngineHosts {
     public static boolean isCocCocHost(String urlOrHost) {
         String h = hostOf(urlOrHost);
         return h.equals("coccoc.com") || h.endsWith(".coccoc.com");
+    }
+
+    /**
+     * Baidu's search and start page ({@code www.baidu.com}, {@code baidu.com}, {@code m.baidu.com}) with its result
+     * wrappers ({@code /link?url=}); Baidu Baike, Zhidao and Tieba ({@code baike.baidu.com}, …) are ordinary sites.
+     */
+    public static boolean isBaiduSearchHost(String urlOrHost) {
+        String h = hostOf(urlOrHost);
+        return h.equals("baidu.com") || h.equals("www.baidu.com") || h.equals("m.baidu.com");
     }
 
     /** Google's challenge page ({@code /sorry/…}) or consent/sign-in interstitial: nothing a search can read. */
