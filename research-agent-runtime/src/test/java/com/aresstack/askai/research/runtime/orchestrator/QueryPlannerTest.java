@@ -221,4 +221,27 @@ public class QueryPlannerTest {
                 com.aresstack.askai.research.runtime.plan.QueryPlanWire.renderRequest(request)).getNodes().get(0)
                 .getWorkerNotes());
     }
+
+    @Test
+    public void theGapsOfTheEvidenceAnalysisReachThePromptAndCrossTheWire() {
+        ConceptQueryPlan.Node node = new ConceptQueryPlan.Node("n1", "Hitze", Arrays.asList("Hitze"), "", "Hitze Bau")
+                .withEvidence(Arrays.asList("THIN: 2 distinct passages from 1 sources", "found nothing: Hitze Norm"));
+        ConceptQueryPlan.Request request = new ConceptQueryPlan.Request("de", "Wearables am Bau",
+                Collections.singletonList(node), Collections.<String>emptyList(), Collections.<String>emptyList(), 2, 2)
+                .withNewTopics(Collections.singletonList("Exoskelette: Heben, Rücken"))
+                .withArea("IN: Arbeitsschutz");
+        String prompt = QueryPlanner.conceptPrompt(request, node, "Hitze Bau", request.getQueriesRun());
+        assertTrue(prompt, prompt.contains("WHAT THE MATERIAL SHOWS\n- THIN: 2 distinct passages from 1 sources\n"
+                + "- found nothing: Hitze Norm"));
+        assertTrue(prompt, prompt.contains("NEW TOPICS IN THE MATERIAL\n- Exoskelette: Heben, Rücken"));
+        assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("WHAT THE MATERIAL SHOWS"));
+        ConceptQueryPlan.Request crossed = com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(
+                com.aresstack.askai.research.plan.QueryPlanWireCodec.encodeRequest(request));
+        assertEquals(node.getEvidence(), crossed.getNodes().get(0).getEvidence());
+        assertEquals(request.getNewTopics(), crossed.getNewTopics());
+        assertEquals("IN: Arbeitsschutz", crossed.getArea());
+        ConceptQueryPlan.Node plain = new ConceptQueryPlan.Node("n2", "Kosten", Arrays.asList("Kosten"), "", "Kosten");
+        assertTrue(!QueryPlanner.conceptPrompt(request.withNewTopics(null), plain, "Kosten",
+                request.getQueriesRun()).contains("WHAT THE MATERIAL SHOWS"));
+    }
 }

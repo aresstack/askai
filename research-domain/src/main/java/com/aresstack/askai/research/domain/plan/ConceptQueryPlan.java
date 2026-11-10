@@ -31,6 +31,7 @@ public final class ConceptQueryPlan {
         private final String baseQuery;
         private final List<String> foundDomains;
         private final List<String> workerNotes;
+        private final List<String> evidence;
 
         public Node(String id, String label, List<String> path, String parentId, String baseQuery) {
             this(id, label, path, parentId, baseQuery, null);
@@ -47,6 +48,17 @@ public final class ConceptQueryPlan {
          */
         public Node(String id, String label, List<String> path, String parentId, String baseQuery,
                     List<String> foundDomains, List<String> workerNotes) {
+            this(id, label, path, parentId, baseQuery, foundDomains, workerNotes, null);
+        }
+
+        /**
+         * @param evidence what the evidence analysis of the material read so far says about this node (its
+         *                 status, the material and the key terms of what is there, the queries that found nothing);
+         *                 empty when no analysis ran
+         */
+        public Node(String id, String label, List<String> path, String parentId, String baseQuery,
+                    List<String> foundDomains, List<String> workerNotes, List<String> evidence) {
+            this.evidence = copy(evidence);
             this.workerNotes = copy(workerNotes);
             this.id = text(id);
             this.label = text(label);
@@ -86,6 +98,16 @@ public final class ConceptQueryPlan {
         public List<String> getWorkerNotes() {
             return workerNotes;
         }
+
+        /** The evidence analysis' findings about this node (empty when none ran). */
+        public List<String> getEvidence() {
+            return evidence;
+        }
+
+        /** The same node with the evidence analysis' findings. */
+        public Node withEvidence(List<String> findings) {
+            return new Node(id, label, path, parentId, baseQuery, foundDomains, workerNotes, findings);
+        }
     }
 
     /** What the host asks for. */
@@ -98,6 +120,7 @@ public final class ConceptQueryPlan {
         private final int maxVariantsPerNode;
         private final int cycle;
         private final String area;
+        private final List<String> newTopics;
 
         /**
          * @param language           the language code the queries must be written in ("de", "en")
@@ -127,6 +150,18 @@ public final class ConceptQueryPlan {
          */
         public Request(String language, String bookTitle, List<Node> nodes, List<String> queriesRun,
                        List<String> blacklist, int maxVariantsPerNode, int cycle, String area) {
+            this(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle, area, null);
+        }
+
+        /**
+         * @param newTopics the topics the material read so far shows beyond the concept nodes and inside the
+         *                  Weidezaun (title and key terms); the planner may write a query for one under the node
+         *                  it belongs to. Empty when none.
+         */
+        public Request(String language, String bookTitle, List<Node> nodes, List<String> queriesRun,
+                       List<String> blacklist, int maxVariantsPerNode, int cycle, String area,
+                       List<String> newTopics) {
+            this.newTopics = copy(newTopics);
             this.area = area == null ? "" : area.trim();
             this.language = text(language);
             this.bookTitle = text(bookTitle);
@@ -140,13 +175,25 @@ public final class ConceptQueryPlan {
 
         /** The same request with the book title and blacklist of the frozen concept (the host fills them in). */
         public Request withBook(String title, List<String> terms) {
-            return new Request(language, title, nodes, queriesRun, terms, maxVariantsPerNode, cycle, area);
+            return new Request(language, title, nodes, queriesRun, terms, maxVariantsPerNode, cycle, area,
+                    newTopics);
         }
 
         /** The same request with the book's Weidezaun (the host fills it in before sending). */
         public Request withArea(String renderedScope) {
             return new Request(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle,
-                    renderedScope);
+                    renderedScope, newTopics);
+        }
+
+        /** The same request with the new topics of the evidence analysis. */
+        public Request withNewTopics(List<String> topics) {
+            return new Request(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle, area,
+                    topics);
+        }
+
+        /** The topics beyond the concept nodes inside the Weidezaun; empty when none. */
+        public List<String> getNewTopics() {
+            return newTopics;
         }
 
         /** The Weidezaun of the book; empty when the host sent none. */

@@ -71,7 +71,13 @@ public final class QueryPlanner {
                     + "sites is one book and no new knowledge.\n"
                     + "- Use the hints under WHAT THE PAGE WORKERS REPORTED when it is given: the pages the team "
                     + "read, what they lacked and what the workers suggest searching for. Never repeat a page's "
-                    + "title as a query.";
+                    + "title as a query.\n"
+                    + "- WHAT THE MATERIAL SHOWS, when given, is the analysis of the sources read so far for the node: "
+                    + "THIN means little distinct material, REDUNDANT means many pages saying the same, MISSING means "
+                    + "nothing yet. Aim the queries at what the material lacks, not at its key terms again, and "
+                    + "never repeat a strategy listed as having found nothing.\n"
+                    + "- NEW TOPICS IN THE MATERIAL are topics the sources show beyond the concept, inside the area. "
+                    + "Write a query for one only when it belongs to this node.";
 
     /** The answer budget of one concept planner call. */
     public static final int CONCEPT_ANSWER_TOKENS = 256;
@@ -299,6 +305,14 @@ public final class QueryPlanner {
                 appendList(sb, "WHAT THE PAGE WORKERS REPORTED", node.getWorkerNotes(), "(nothing)");
                 sb.append('\n');
             }
+        }
+        if (!node.getEvidence().isEmpty()) {
+            appendList(sb, "WHAT THE MATERIAL SHOWS", node.getEvidence(), "(nothing)");
+            sb.append('\n');
+        }
+        if (!request.getNewTopics().isEmpty()) {
+            appendList(sb, "NEW TOPICS IN THE MATERIAL", request.getNewTopics(), "(none)");
+            sb.append('\n');
         }
         appendList(sb, "ALREADY SEARCHED", searched, "(nothing yet)");
         sb.append('\n');
