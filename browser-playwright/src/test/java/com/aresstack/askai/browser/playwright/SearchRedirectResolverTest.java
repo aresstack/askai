@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Static resolution of known search-engine redirect wrappers — applied BEFORE any domain judgement.
@@ -112,5 +113,27 @@ public class SearchRedirectResolverTest {
                         .getStatus());
         assertEquals("ordinary Yahoo pages are no wrappers", SearchRedirectResolver.Status.NOT_A_REDIRECT,
                 SearchRedirectResolver.resolve("https://finance.yahoo.com/quote/X").getStatus());
+    }
+
+    @Test
+    public void baiduWrappersResolveOnlyFromTheTargetThePagePrints() {
+        String wrapper = "https://www.baidu.com/link?url=Xq7aB3opaqueToken&wd=&eqid=9f1";
+        assertTrue("Baidu's wrapper is opaque", SearchRedirectResolver.isOpaqueWrapper(wrapper));
+        SearchRedirectResolver.Resolution resolved =
+                SearchRedirectResolver.resolve(wrapper, "https://www.baua.de/DE/Themen/Arbeitsgestaltung");
+        assertEquals(SearchRedirectResolver.Status.RESOLVED, resolved.getStatus());
+        assertEquals("https://www.baua.de/DE/Themen/Arbeitsgestaltung", resolved.getTargetUrl());
+        assertEquals("no hint: never decoded, never fetched", SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve(wrapper).getStatus());
+        assertEquals(SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve(wrapper, "javascript:alert(1)").getStatus());
+        assertEquals("a hint pointing back at Baidu is no target", SearchRedirectResolver.Status.UNRESOLVED,
+                SearchRedirectResolver.resolve(wrapper, "https://www.baidu.com/s?wd=x").getStatus());
+        assertEquals("a hint on an ordinary link changes nothing", SearchRedirectResolver.Status.NOT_A_REDIRECT,
+                SearchRedirectResolver.resolve("https://baike.baidu.com/item/x", "https://other.example/")
+                        .getStatus());
+        assertEquals("https://baike.baidu.com/item/x",
+                SearchRedirectResolver.resolve("https://baike.baidu.com/item/x", "https://other.example/")
+                        .getTargetUrl());
     }
 }

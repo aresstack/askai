@@ -27,6 +27,11 @@ public final class BrowserSearchEngineCatalog {
     public static final String NAVER = "naver";
     public static final String COCCOC = "coccoc";
     /**
+     * Baidu (China). Its hit links are opaque {@code baidu.com/link?url=} wrappers; the target is taken offline from the
+     * result block's {@code mu} attribute when the page is captured, never by asking Baidu.
+     */
+    public static final String BAIDU = "baidu";
+    /**
      * The engine a dev/test {@code --search-url=} override installs. It is not part of the catalog: it
      * exists only when someone hands the sidecar an explicit template, and it then REPLACES the
      * configured engines rather than joining them.
@@ -117,6 +122,13 @@ public final class BrowserSearchEngineCatalog {
                             new BrowserSearchEngine.SearchForm("https://coccoc.com/search",
                                     Arrays.asList("input[name=query]", "input[type=search]"),
                                     Arrays.asList("a[rel=next]", "a:has-text('Trang sau')"))),
+                            10),
+                    new BrowserSearchEngine(BAIDU, "Baidu", Arrays.asList(
+                            // www.baidu.com: search field id kw (name wd); next page through "下一页" (next page).
+                            new BrowserSearchEngine.SearchForm("https://www.baidu.com/",
+                                    Arrays.asList("input#kw", "input[name=wd]", "textarea#chat-textarea",
+                                            "input[type=search]"),
+                                    Arrays.asList("a.n:has-text('下一页')", "a:has-text('下一页')"))),
                             10))));
 
     private BrowserSearchEngineCatalog() {

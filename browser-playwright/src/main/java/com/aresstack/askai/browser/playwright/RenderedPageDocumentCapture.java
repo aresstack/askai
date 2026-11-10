@@ -195,7 +195,8 @@ final class RenderedPageDocumentCapture {
         int opaqueWrappers = 0;
         for (Map<String, Object> l : mapList(root.get("links"))) {
             String rawHref = str(l.get("href"));
-            SearchRedirectResolver.Resolution resolution = SearchRedirectResolver.resolve(rawHref);
+            SearchRedirectResolver.Resolution resolution =
+                    SearchRedirectResolver.resolve(rawHref, str(l.get("targetHint")));
             if (resolution.getStatus() == SearchRedirectResolver.Status.UNRESOLVED
                     && SearchRedirectResolver.isOpaqueWrapper(rawHref)) {
                 opaqueWrappers++;
@@ -225,7 +226,7 @@ final class RenderedPageDocumentCapture {
         }
 
         if (opaqueWrappers > 0) {
-            warnings.add("OPAQUE_REDIRECTS: " + opaqueWrappers + " links are opaque engine wrappers (Google /goto) "
+            warnings.add("OPAQUE_REDIRECTS: " + opaqueWrappers + " links are opaque engine wrappers (Google /goto, Baidu /link) "
                     + "whose target is not in the URL; they stay unresolved and are never results");
         }
         String snapshotId = "snap-" + generation + "-"
@@ -356,6 +357,10 @@ final class RenderedPageDocumentCapture {
                 + "    links.push({\n"
                 + "      id: 'link-' + pad(++linkSeq), containerId: containerId,\n"
                 + "      href: a.href || '', text: textOf(a).slice(0, 300),\n"
+                // the target an engine prints on the result block itself (Baidu's mu attribute): read from the
+                // page, never fetched; only an opaque wrapper link uses it (SearchRedirectResolver)
+                + "      targetHint: (a.closest('[" + SearchRedirectResolver.BAIDU_TARGET_ATTRIBUTE + "]') || a)"
+                + ".getAttribute('" + SearchRedirectResolver.BAIDU_TARGET_ATTRIBUTE + "') || '',\n"
                 + "      surrounding: blockText.slice(0, EXCERPT),\n"
                 + "      heading: ctx.lastHeading.slice(0, 200),\n"
                 + "      displayedDomain: displayedDomainOf(a),\n"
