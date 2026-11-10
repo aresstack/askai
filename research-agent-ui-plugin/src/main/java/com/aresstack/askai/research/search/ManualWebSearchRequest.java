@@ -31,6 +31,12 @@ public final class ManualWebSearchRequest {
     private int teamWorkers;
     private int teamSearches;
     private String teamArea = "";
+    /** The hosts the mission prefers (ranking moves them up); empty = no preference. */
+    private java.util.List<String> preferredHosts = java.util.Collections.emptyList();
+    /** The URL parts of vendor pages (ranking moves them down). */
+    private java.util.List<String> demotedMarkers = java.util.Collections.emptyList();
+    /** How many places a preferred hit moves up and a vendor page moves down; 0 = none. */
+    private int preferenceShift;
 
     /** English snapshot convenience (legacy callers/tests without a session language). */
     public ManualWebSearchRequest(String query) {
@@ -87,6 +93,33 @@ public final class ManualWebSearchRequest {
         copy.teamSearches = Math.max(0, searches);
         copy.teamArea = area == null ? "" : area;
         return copy;
+    }
+
+    /** The same request with the mission's source preference for the ranking of its hits. */
+    public ManualWebSearchRequest withSourcePreference(com.aresstack.askai.research.plan.SourcePreference preference) {
+        ManualWebSearchRequest copy = new ManualWebSearchRequest(query, language, ranking, visitLimit, sourceCap, team,
+                teamNode, teamBook, teamFollow, teamPageCharacters, teamAnswerTokens);
+        copy.teamWorkers = teamWorkers;
+        copy.teamSearches = teamSearches;
+        copy.teamArea = teamArea;
+        if (preference != null && preference.getRankShift() > 0) {
+            copy.preferredHosts = preference.getPreferredHosts();
+            copy.demotedMarkers = preference.getDemotedMarkers();
+            copy.preferenceShift = preference.getRankShift();
+        }
+        return copy;
+    }
+
+    public java.util.List<String> getPreferredHosts() {
+        return preferredHosts;
+    }
+
+    public java.util.List<String> getDemotedMarkers() {
+        return demotedMarkers;
+    }
+
+    public int getPreferenceShift() {
+        return preferenceShift;
     }
 
     public int getTeamWorkers() {

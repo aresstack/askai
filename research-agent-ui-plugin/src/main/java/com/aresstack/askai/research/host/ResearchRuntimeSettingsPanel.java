@@ -61,6 +61,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField teamSearchesPerPage = ComicControls.textField(3);
     private final JTextField teamNextSearchBelow = ComicControls.textField(3);
     private final JTextField teamSeedQueries = ComicControls.textField(3);
+    // The mission's source preference: publisher queries per node and cycle, ranking weights (all settings).
+    private final JCheckBox preferMissionSources = ComicControls.checkBox("Prefer the sources the mission names", true);
+    private final JTextField preferenceQueries = ComicControls.textField(3);
+    private final JTextField preferenceRankShift = ComicControls.textField(3);
+    private final JTextField preferencePublishers = ComicControls.textField(16);
+    private final JTextField preferenceAuthorityHosts = ComicControls.textField(16);
+    private final JTextField preferenceDemoted = ComicControls.textField(16);
+    private final JTextField preferenceCues = ComicControls.textField(16);
     // Worker browsers (parallel research workers): separate from the model capacity.
     private final JTextField workerProcesses = ComicControls.textField(3);
     private final JTextField workerUserContexts = ComicControls.textField(3);
@@ -183,6 +191,15 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Next search below open pages", teamNextSearchBelow),
                 labelled("Seed queries per node", teamSeedQueries)));
 
+        com.aresstack.comiccontrols.control.ComicForm preference =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Source preference");
+        preference.row("Mission sources", group(preferMissionSources,
+                labelled("Queries per node", preferenceQueries), labelled("Rank shift", preferenceRankShift)));
+        preference.row("Publisher domains", preferencePublishers);
+        preference.row("Authority hosts", preferenceAuthorityHosts);
+        preference.row("Vendor URL parts", preferenceDemoted);
+        preference.row("Preference words", preferenceCues);
+
         // Orchestrated research (ADR 0001 lane F/G): the plan of work packages, its limits and the worker browsers.
         com.aresstack.comiccontrols.control.ComicForm orchestrator =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Orchestrator");
@@ -255,10 +272,10 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
         com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
         actions.actions(save, check, busy);
-        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, team, orchestrator, scope,
+        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, team, preference, orchestrator, scope,
                 scopeAdvanced);
-        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, team, orchestrator, scope, scopeAdvanced,
-                actions),
+        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, team, preference, orchestrator, scope,
+                scopeAdvanced, actions),
                 BorderLayout.NORTH);
 
         results.setEditable(false);
@@ -424,6 +441,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_TEAM_WORKERS,
                 "The next search starts when fewer pages than this are still open in the running one, so the "
                         + "workers never wait at the end of a search. Usually the worker count.");
+        bindSourcePreference();
         bindLimit(teamSeedQueries, ResearchRuntimeSettings.KEY_TEAM_SEED_QUERIES_PER_NODE,
                 ResearchRuntimeSettings.DEFAULT_TEAM_SEED_QUERIES_PER_NODE,
                 "With the research team, the plan starts with this many queries per concept node (breadth first); "
@@ -608,6 +626,69 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         group.add(new JLabel(label + ": "));
         group.add(field);
         return group;
+    }
+
+    /** The mission's source preference: the switch, the two numbers and the four lists. */
+    private void bindSourcePreference() {
+        preferMissionSources.setSelected(ResearchRuntimeSettings.loadSourcePreferenceEnabled(store));
+        preferMissionSources.setToolTipText("The mission's \"prefer …\" clause (publishers, domains, kinds of "
+                + "sources) adds publisher queries to every research cycle and moves preferred hosts up and vendor "
+                + "pages down in the ranking. Nothing is forbidden; the Weidezaun and the blacklist stay.");
+        preferMissionSources.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveSourcePreferenceEnabled(ResearchRuntimeSettingsPanel.this.store,
+                        preferMissionSources.isSelected());
+            }
+        });
+        bindNonNegativeLimit(preferenceQueries, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_QUERIES,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_QUERIES,
+                "Publisher queries (base query + site:domain or a preferred kind) per concept node and research "
+                        + "cycle, on top of Queries per node. Each cycle asks the next publisher; 0 = none.");
+        bindNonNegativeLimit(preferenceRankShift, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_RANK_SHIFT,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT,
+                "Places a hit from a preferred host moves up, and a vendor page moves down, among the ranked hits "
+                        + "of a planned query; 0 = the ranking stays as it is.");
+        bindText(preferencePublishers, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_PUBLISHERS,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_PUBLISHERS,
+                "Name=domain pairs, comma-separated: a publisher the mission names becomes site:domain queries and "
+                        + "a preferred host. A domain written in the mission needs no entry.");
+        bindText(preferenceAuthorityHosts, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_AUTHORITY_HOSTS,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_AUTHORITY_HOSTS,
+                "Host suffixes, comma-separated, that are always preferred in the ranking (authorities).");
+        bindText(preferenceDemoted, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_DEMOTED,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_DEMOTED,
+                "URL parts, comma-separated, of vendor pages (blogs, products, solutions) that move down in the "
+                        + "ranking. They are never removed.");
+        bindText(preferenceCues, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_CUES,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_CUES,
+                "Words, comma-separated, that open the preference clause of the mission (\"Bevorzuge …\").");
+    }
+
+    /** A comma-separated list setting: saved on Enter and on focus loss; an empty field restores the default. */
+    private void bindText(final JTextField field, final String key, final String fallback, String tooltip) {
+        field.setText(ResearchRuntimeSettings.loadText(store, key, fallback));
+        field.setToolTipText(tooltip);
+        final Runnable persist = new Runnable() {
+            public void run() {
+                String value = field.getText().trim();
+                if (value.isEmpty()) {
+                    value = fallback;
+                    field.setText(value);
+                }
+                ResearchRuntimeSettings.saveText(store, key, value);
+            }
+        };
+        field.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                persist.run();
+            }
+        });
+        field.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persist.run();
+            }
+        });
     }
 
     /** Z4c: every scope-check knob binds to its persisted setting (loaded per CLICK, no restart). */

@@ -36,6 +36,10 @@ public final class BackendManualWebSearchPort implements ManualWebSearchPort {
                 : ResearchServiceCommandWire.manualSearch(requestId, request.getQuery(),
                         request.getLanguage().getCode(), request.getRanking(), request.getVisitLimit(),
                         request.getSourceCap());
+        if (request != null) {
+            envelope = ResearchServiceCommandWire.withSourcePreference(envelope, request.getPreferredHosts(),
+                    request.getDemotedMarkers(), request.getPreferenceShift());
+        }
         backend.submitServiceCommand(handle, envelope);
         System.err.println("[manual-search] service command sent requestId=" + requestId);
         return new ManualWebSearchHandle() {

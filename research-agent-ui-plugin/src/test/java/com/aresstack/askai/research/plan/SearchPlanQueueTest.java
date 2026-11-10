@@ -713,6 +713,30 @@ public class SearchPlanQueueTest {
         assertFalse("a stop is never announced as coverage", outcomes.get(0).text().contains("covered."));
     }
 
+    @Test
+    public void theMissionsPublishersJoinTheNextCycleEvenWithoutAPlannerAnswer() throws Exception {
+        build(Collections.singletonList(node("a", "Classloader", "Classloader Java")),
+                Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.run();
+        port.completeRequest("req-1");
+        Map<String, SearchPlanEntry> all = store.loadEntries();
+        SearchPlanCoverage.Caps c = caps(3, 4, 60);
+        ConceptQueryPlan.Request next = SearchPlanCycles.nextCycleRequest(store.loadRecord(), all.values(),
+                SearchPlanCoverage.of(store.loadRecord(), all.values(), c, sources), c);
+        assertNotNull(next);
+        SourcePreference preference = SourcePreference.of(SourcePreferenceTest.RUN3,
+                SourcePreferenceTest.settings(1, 3));
+        SearchPlanCycles.Result cycle = SearchPlanCycles.apply(store.loadRecord(), all.values(), next, null,
+                Collections.<String>emptyList(), SearchPlanQueue.ids(), 2L, preference);
+        assertEquals(1, cycle.getAdded().size());
+        assertEquals("Classloader Java site:baua.de", cycle.getAdded().get(0).getQuery()); // cycle 2: next publisher
+        assertEquals(2, cycle.getRecord().getCycle());
+        assertTrue(SearchPlanCycles.apply(store.loadRecord(), all.values(), next, null,
+                Collections.<String>emptyList(), SearchPlanQueue.ids(), 2L).getAdded().isEmpty());
+        assertEquals(5, c.withPreferenceQueries(1).queriesUpTo(1)); // never skipped as over budget
+    }
+
     // ---- fakes ---------------------------------------------------------------------------------------
 
     private static SearchPlanCoverage.Caps caps(int perNode, int queries, int phase) {

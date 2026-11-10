@@ -1672,6 +1672,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return false;
         }
         queue.setCaps(com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSearchPlanCaps(hostStateStore));
+        queue.setSourcePreference(sourcePreference());
         com.aresstack.askai.research.transition.PhaseJobRegistry.Job job =
                 new com.aresstack.askai.research.transition.PhaseJobRegistry.Job() {
                     public void cancel() {
@@ -1827,7 +1828,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         // the recorded working language, never the toolbar language (D4)
                         com.aresstack.askai.research.search.ManualWebSearchHandle h = manualWebSearchPort.search(
                                 new com.aresstack.askai.research.search.ManualWebSearchRequest(query,
-                                        ResearchLanguage.fromCode(language), ranking, visitLimit, sourceCap));
+                                        ResearchLanguage.fromCode(language), ranking, visitLimit, sourceCap)
+                                        .withSourcePreference(sourcePreference()));
                         running.set(h);
                         return h.getRequestId();
                     }
@@ -1850,7 +1852,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                                         .loadTeamWorkers(hostStateStore),
                                                 com.aresstack.askai.research.host.ResearchRuntimeSettings
                                                         .loadTeamSearchesPerPage(hostStateStore),
-                                                researchArea()));
+                                                researchArea())
+                                        .withSourcePreference(sourcePreference()));
                         running.set(h);
                         return h.getRequestId();
                     }
@@ -2196,7 +2199,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     com.aresstack.askai.research.plan.SearchPlanBuilder.build(store,
                             new com.aresstack.askai.research.plan.SearchPlanBuilder.Input(
                                     com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
-                                    frozen.getRevision(), frozen.getLanguage(), bookTitle(frozen), nodes, blacklist),
+                                    frozen.getRevision(), frozen.getLanguage(), bookTitle(frozen), nodes, blacklist,
+                                    com.aresstack.askai.research.plan.SourcePreference.of(frozen.getMission(),
+                                            com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                    .loadSourcePreference(hostStateStore))),
                             queryPlanner, seedQueriesPerNode(caps), System.currentTimeMillis());
             store.clearBuildPending();
             System.err.println("[search-plan] plan built: nodes=" + nodes.size() + " added=" + result.getAdded());
@@ -2221,6 +2227,23 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /** Plan T5: the book title of the frozen concept for the page workers' brief; empty when none is frozen. */
+    /**
+     * The mission's source preference under the current settings ({@link
+     * com.aresstack.askai.research.plan.SourcePreference}); none without a frozen concept.
+     */
+    private com.aresstack.askai.research.plan.SourcePreference sourcePreference() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen == null) {
+                return com.aresstack.askai.research.plan.SourcePreference.NONE;
+            }
+            return com.aresstack.askai.research.plan.SourcePreference.of(frozen.getMission(),
+                    com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSourcePreference(hostStateStore));
+        } catch (Exception unreadable) {
+            return com.aresstack.askai.research.plan.SourcePreference.NONE;
+        }
+    }
+
     private String bookTitleForTeam() {
         try {
             com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
