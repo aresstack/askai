@@ -1,0 +1,117 @@
+package com.aresstack.askai.research.outline.synthesis;
+
+import org.junit.Test;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+/** Phase 3c: the deterministic review and its safe fixes, without a model. */
+public class OutlineQualityCheckTest {
+
+    private static final OutlineQualityCheck CHECK = new OutlineQualityCheck(OutlineLengthSettings.defaults());
+
+    private static PlannedSection section(String title, String... keys) {
+        return new PlannedSection(title, "", Arrays.asList(keys), false);
+    }
+
+    private static PlannedChapter chapter(String title, List<String> material, List<String> concepts,
+                                          PlannedSection... sections) {
+        return new PlannedChapter(title, "Purpose.", material, concepts, Arrays.asList(sections), false);
+    }
+
+    private static boolean has(List<PlanFinding> findings, String code, boolean blocking) {
+        for (PlanFinding finding : findings) {
+            if (finding.getCode().equals(code) && finding.isBlocking() == blocking) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Test
+    public void aGoodPlanHasNoBlockingFinding() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief);
+        for (PlanFinding finding : CHECK.review(plan, brief)) {
+            assertFalse(finding.toString(), finding.isBlocking());
+        }
+    }
+
+    @Test
+    public void unusedTwiceUsedAndLostMaterialIsBlocking() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Safety", Arrays.asList("T1", "T2.1"), Collections.singletonList("C1"),
+                        section("A", "T1"), section("B", "T2.1")),
+                chapter("Data", Arrays.asList("T2"), Collections.<String>emptyList(), section("C", "T2")),
+                chapter("Safety", Arrays.asList("T3"), Collections.<String>emptyList(), section("D", "T3.1", "T3.2"))),
+                Collections.<String>emptyList(), false);
+
+        List<PlanFinding> findings = CHECK.review(plan, brief);
+
+        assertTrue(has(findings, OutlineQualityCheck.MATERIAL_TWICE, true));
+        assertTrue("T4 is in no chapter", has(findings, OutlineQualityCheck.TOPIC_UNUSED, true));
+        assertTrue("C5 is neither treated nor a gap", has(findings, OutlineQualityCheck.REQUIREMENT_LOST, true));
+        assertTrue(has(findings, OutlineQualityCheck.DUPLICATE_TITLES, true));
+        assertTrue("T1 as a whole in one section", has(findings, OutlineQualityCheck.MAJOR_TOPIC_FLAT, false));
+        assertTrue("blocking findings come first", findings.get(0).isBlocking());
+    }
+
+    @Test
+    public void theSafeFixesResolveWhatCodeCanResolve() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Safety", Arrays.asList("T1", "T2.1"), Arrays.asList("C1", "C5"),
+                        section("A", "T1"), section("B", "T2.1")),
+                chapter("Data", Arrays.asList("T2"), Collections.<String>emptyList(), section("C", "T2")),
+                chapter("Law", Arrays.asList("T3"), Collections.<String>emptyList())),
+                Collections.<String>emptyList(), false);
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+        List<PlanFinding> findings = CHECK.review(fixed.getPlan(), brief);
+
+        for (PlanFinding finding : findings) {
+            assertFalse(finding.toString(), finding.isBlocking());
+        }
+        PlannedChapter data = fixed.getPlan().getChapters().get(1);
+        assertEquals("T2.1 stays with its first chapter; Data keeps T2.2", Collections.singletonList("T2.2"),
+                data.getMaterialKeys());
+        assertEquals("T4 became a chapter", 4, fixed.getPlan().getChapters().size());
+        assertEquals(Collections.singletonList("C5"), fixed.getPlan().getGapKeys());
+        assertFalse(fixed.getPlan().getChapters().get(0).getConceptKeys().contains("C5"));
+        assertEquals("T1 split by its sub-topics", 3, fixed.getPlan().getChapters().get(0).getSections().size());
+        assertEquals("Law got sections from its material", 2,
+                fixed.getPlan().getChapters().get(2).getSections().size());
+        assertTrue(fixed.getNotes().size() >= 4);
+    }
+
+    @Test
+    public void theNumberOfSectionsIsCheckedAgainstTheBookLength() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "120 pages";
+        SynthesisBrief brief = corpus.brief();
+        List<PlanFinding> findings = CHECK.review(FallbackOutlinePlan.plan(brief), brief);
+        assertTrue("36000 words over 8 sections", has(findings, OutlineQualityCheck.TOO_FEW_SECTIONS, false));
+
+        corpus.deliverable = "2000 words";
+        brief = corpus.brief();
+        assertTrue(has(CHECK.review(FallbackOutlinePlan.plan(brief), brief), OutlineQualityCheck.TOO_MANY_SECTIONS,
+                false));
+    }
+
+    @Test
+    public void bookLengthsAreReadInPagesOrWords() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        assertEquals(36000, length.targetWords("120 pages"));
+        assertEquals(25000, length.targetWords("20000-30000 words"));
+        assertEquals(30000, length.targetWords("ca. 100 Seiten"));
+        assertEquals(0, length.targetWords("a practical book"));
+        assertEquals(700, length.unboundedTarget(3));
+        assertEquals("capped", 1100, length.unboundedTarget(30));
+    }
+}

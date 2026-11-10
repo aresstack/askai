@@ -67,6 +67,35 @@ dependencies {
 
 test {
     useJUnit()
+    // CI shows only the build log: print the assertion message (e.g. which settings row runs out of the window).
+    testLogging {
+        exceptionFormat = 'full'
+    }
+}
+
+// Phase 3 live acceptance on the owner's machine (local Ollama); skipped in the normal test run.
+tasks.register('outlineLiveAcceptance', Test) {
+    description = 'Runs the live outline acceptance (scenarios A and E) against a local Ollama.'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    filter {
+        includeTestsMatching '*OutlineLiveAcceptanceTest'
+    }
+    systemProperty 'askai.outline.live', 'true'
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
+    }
+    doFirst {
+        System.getProperties().each { key, value ->
+            if (key.toString().startsWith('askai.outline.live.')) {
+                systemProperty key.toString(), value.toString()
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------

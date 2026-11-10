@@ -56,4 +56,15 @@ public class TopicAnalysisInputsTest {
         assertEquals("", TopicAnalysisInputs.host(""));
         assertEquals("", TopicAnalysisInputs.host("not a url"));
     }
+
+    @Test
+    public void withoutAnApprovedTitleTheAnchorsStartWithTheQuotedBookTitleOrNothing() {
+        // Live run 3 (2026-11-10): the whole mission as prefix made every anchor path start with the same
+        // paragraph, so the anchors embedded alike and almost no passage could be assigned.
+        assertEquals("Wearables auf Baustellen: Sicherheit, Sensorik und Datenschutz", TopicAnalysisInputs.anchorTitle(
+                "Erstelle das Konzept für ein kompaktes deutsches Praxisbuch „Wearables auf Baustellen: Sicherheit, "
+                        + "Sensorik und Datenschutz“ für Sicherheitsfachkräfte, Umfang 20–30 Seiten."));
+        assertEquals("", TopicAnalysisInputs.anchorTitle("Write a practical book about wearables on sites."));
+        assertEquals("", TopicAnalysisInputs.anchorTitle(null));
+    }
 }

@@ -3,6 +3,7 @@ package com.aresstack.askai.research.knowledge.topic;
 import com.aresstack.askai.research.domain.scope.ScopeAnchor;
 import com.aresstack.askai.research.domain.scope.ScopeFenceEvaluator;
 import com.aresstack.askai.research.knowledge.ClusteringMonitor;
+import com.aresstack.askai.research.knowledge.EmbeddingPort;
 import com.aresstack.askai.research.knowledge.live.LiveOutlineProjectionBuilder;
 import com.aresstack.askai.research.knowledge.live.LiveTopicProjection;
 import com.aresstack.askai.research.knowledge.live.LiveTopicTree;
@@ -343,6 +344,24 @@ public class TopicAnalyzerTest {
                 "inside");
         assertEquals(ScopeAlignment.Verdict.UNCLASSIFIED, topic.getScopeAlignment().getVerdict());
         assertEquals(null, topic.getScopeAlignment().getHint());
+    }
+
+    @Test
+    public void theLeadIsMeasuredAgainstAnotherLineageOnly() {
+        // Live run 3 (2026-11-10): a section anchor lies about 0.01 from its own chapter anchor, so a lead measured
+        // against the chapter rejected passages that clearly belong to the section.
+        EmbeddingPort.EmbeddingVector v = new EmbeddingPort.EmbeddingVector("m", "fp", new float[]{1f});
+        List<ConceptAnchor> nodes = Arrays.asList(
+                new ConceptAnchor("c-wear", "Wearables", "Book > Wearables", 1, "", v),
+                new ConceptAnchor("c-helmet", "Helmets", "Book > Wearables > Helmets", 2, "c-wear", v),
+                new ConceptAnchor("c-sensor", "Sensors", "Book > Wearables > Helmets > Sensors", 3, "c-helmet", v),
+                new ConceptAnchor("c-law", "Law", "Book > Law", 1, "", v),
+                new ConceptAnchor("c-vest", "Vests", "Book > Wearables > Vests", 2, "c-wear", v));
+        double[] scores = {0.64, 0.65, 0.645, 0.50, 0.55};
+        assertEquals("the sibling counts, the chapter and the sub-section do not", 0.55,
+                TopicAnalyzer.nearestOfAnotherLineage(nodes, scores, 1), 1e-9);
+        assertEquals("without another lineage there is no competitor", Double.NEGATIVE_INFINITY,
+                TopicAnalyzer.nearestOfAnotherLineage(nodes.subList(0, 3), new double[]{0.6, 0.7, 0.65}, 1), 0);
     }
 
     @Test

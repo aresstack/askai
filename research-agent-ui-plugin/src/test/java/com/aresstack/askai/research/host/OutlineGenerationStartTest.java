@@ -1,18 +1,16 @@
 package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.research.book.FrozenConcept;
-import com.aresstack.askai.research.store.FileConceptStore;
-import com.aresstack.askai.research.store.FileOutlineStore;
+import com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery;
 import com.aresstack.askai.research.outline.Outline;
 import com.aresstack.askai.research.outline.OutlineWorkspace;
-import com.aresstack.askai.research.outline.generate.OutlineGenerationInput;
-import com.aresstack.askai.research.sources.ResearchSourceRecord;
+import com.aresstack.askai.research.outline.synthesis.OutlineSynthesisSettings;
+import com.aresstack.askai.research.runtime.team.MainModelChat;
+import com.aresstack.askai.research.store.FileOutlineStore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import java.util.Collection;
-import java.util.Collections;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
@@ -30,26 +28,11 @@ public class OutlineGenerationStartTest {
     public TemporaryFolder folder = new TemporaryFolder();
 
     @Test
-    public void theAnchorPrefixIsTheQuotedBookTitleOfTheMissionOrNothing() {
-        // Live run 3 (2026-11-10): the whole mission as prefix made every anchor path start with the same
-        // paragraph, so the anchors embedded alike and 2063 of 2068 passages failed the margin rule.
-        assertEquals("Wearables auf Baustellen: Sicherheit, Sensorik und Datenschutz", OutlineGeneration.bookTitle(
-                "Erstelle das Konzept für ein kompaktes, vollständig belegtes deutsches Praxisbuch „Wearables auf "
-                        + "Baustellen: Sicherheit, Sensorik und Datenschutz“ für Sicherheitsfachkräfte, Umfang "
-                        + "20–30 Seiten. Vier Hauptthemen: (1) Technologien und Sensortypen."));
-        assertEquals("", OutlineGeneration.bookTitle("Write a practical book about wearables on construction sites."));
-        assertEquals("", OutlineGeneration.bookTitle(null));
-    }
-
-    @Test
     public void aBrokenEnrichmentRefusesTheStartLoudly() {
         final OutlineWorkspace workspace = new OutlineWorkspace(new FileOutlineStore(folder.getRoot()));
         OutlineClusteringRun run = new OutlineClusteringRun();
         final AtomicBoolean executed = new AtomicBoolean();
-        OutlineGeneration generation = new OutlineGeneration(inputs(workspace), null, null,
-                () -> new OutlineGenerationInput.Settings(OutlineGenerationInput.Settings.DEFAULT_THRESHOLD,
-                        OutlineGenerationInput.Settings.DEFAULT_MARGIN, 3, 2),
-                run, new Executor() {
+        OutlineGeneration generation = new OutlineGeneration(inputs(workspace), run, new Executor() {
                     public void execute(Runnable command) {
                         executed.set(true);
                     }
@@ -84,16 +67,20 @@ public class OutlineGenerationStartTest {
                 return null;
             }
 
-            public FileConceptStore conceptStore() {
+            public String bookTitle(FrozenConcept frozen) {
+                return "";
+            }
+
+            public SharedTopicDiscovery discovery() {
                 return null;
             }
 
-            public Collection<String> pinnedSourceIds() {
-                return Collections.emptyList();
+            public OutlineGenerationSettings settings() {
+                return OutlineGenerationSettings.defaults();
             }
 
-            public Collection<ResearchSourceRecord> sources() {
-                return Collections.emptyList();
+            public MainModelChat synthesisChat(OutlineSynthesisSettings settings) {
+                return null;
             }
 
             public long now() {

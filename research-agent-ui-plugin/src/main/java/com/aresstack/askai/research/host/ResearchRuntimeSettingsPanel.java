@@ -42,8 +42,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     // Konzeptpapier tool-round loop: work budget and error tolerance, deliberately separate.
     private final JTextField conceptToolRounds = ComicControls.textField(4);
     private final JTextField conceptRepairAttempts = ComicControls.textField(4);
-    private final JTextField outlineAssignmentThreshold = ComicControls.textField(4);
-    private final JTextField outlineAssignmentMargin = ComicControls.textField(4);
     // Document phase: what a passage needs to enter a writer's evidence pack.
     private final JTextField writerProseMinWords = ComicControls.textField(4);
     private final JTextField writerProseMinSentences = ComicControls.textField(4);
@@ -197,8 +195,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Chars/source", reviewMaxChars)));
         limits.row("Concept loop", group(labelled("Tool rounds", conceptToolRounds),
                 labelled("Repairs", conceptRepairAttempts)));
-        limits.row("Outline anchors", group(labelled("Similarity ≥", outlineAssignmentThreshold),
-                labelled("Lead ≥", outlineAssignmentMargin)));
 
         // Document phase: the section writer's evidence and checks.
         com.aresstack.comiccontrols.control.ComicForm writer =
@@ -307,10 +303,12 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
         com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
         actions.actions(save, check, busy);
+        // Phase 3: the shared topic analysis, the outline synthesis and the book length (saved field by field).
+        com.aresstack.comiccontrols.control.ComicForm[] outline = OutlineSettingsRows.forms(store);
         com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, writer, team, preference,
-                orchestrator, scope, scopeAdvanced);
+                orchestrator, scope, scopeAdvanced, outline[0], outline[1], outline[2]);
         add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, writer, team, preference,
-                orchestrator, scope, scopeAdvanced, actions),
+                orchestrator, scope, scopeAdvanced, outline[0], outline[1], outline[2], actions),
                 BorderLayout.NORTH);
 
         results.setEditable(false);
@@ -513,15 +511,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_CONCEPT_REPAIR_ATTEMPTS,
                 "How many rejected concept steps may be corrected per turn "
                         + "(error tolerance, separate from the work budget).");
-        bindDecimal(outlineAssignmentThreshold, ResearchRuntimeSettings.KEY_OUTLINE_ASSIGNMENT_THRESHOLD,
-                com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings.DEFAULT_THRESHOLD,
-                "Generate outline: a passage joins the nearest outline anchor (book title > chapter > section) only "
-                        + "when their cosine similarity reaches this value. The log line [research-outline] "
-                        + "reports the median similarity of a generation.");
-        bindDecimal(outlineAssignmentMargin, ResearchRuntimeSettings.KEY_OUTLINE_ASSIGNMENT_MARGIN,
-                com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings.DEFAULT_MARGIN,
-                "Generate outline: the nearest anchor must lead the second-nearest by at least this much, "
-                        + "otherwise the passage stays unassigned (a candidate topic instead of a chapter).");
         bindNonNegativeLimit(writerProseMinWords, ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_WORDS,
                 com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_WORDS,
                 "Evidence pack: a passage with fewer words (a heading, a label) never reaches the section writer.");
