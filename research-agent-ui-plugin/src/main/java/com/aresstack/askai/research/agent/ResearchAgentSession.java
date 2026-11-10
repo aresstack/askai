@@ -2847,16 +2847,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             }
                         }),
                 new com.aresstack.askai.research.drafting.EvidenceAssignments(packs, contexts,
-                        () -> new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
-                                new com.aresstack.askai.research.writer.WriterPackSettings(
-                                        com.aresstack.askai.research.writer.WriterPackSettings.LARGE
-                                                .getPassageCount(),
-                                        com.aresstack.askai.research.writer.WriterPackSettings.LARGE
-                                                .getPassageTokens(),
-                                        com.aresstack.askai.research.host.ResearchRuntimeSettings
-                                                .loadWriterProseCriteria(hostStateStore)),
-                                1100, 3072, com.aresstack.askai.research.host.ResearchRuntimeSettings
-                                        .loadWriterCarryCriteria(hostStateStore))));
+                        () -> com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                .loadWriterTargets(hostStateStore)));
     }
 
     private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,
@@ -3199,7 +3191,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         acronymLongForms(),
                         System.currentTimeMillis(), java.util.TimeZone.getDefault());
         return new com.aresstack.askai.research.assembly.BookAssembler(
-                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterCarryCriteria(hostStateStore))
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterCarryCriteria(hostStateStore),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTopicDriftCriteria(hostStateStore))
                 .assemble(input);
     }
 

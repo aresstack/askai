@@ -58,24 +58,27 @@ public final class BookAssembler {
     private final SentenceSegmenter sentences;
     private final AcronymExtractor acronymExtractor;
     private final ClaimCarryCheck carry;
+    private final TopicDriftCheck.Criteria drift;
 
     public BookAssembler() {
-        this(SentenceSegmenter.splitter(), ClaimCarryCheck.Criteria.defaults());
+        this(SentenceSegmenter.splitter(), ClaimCarryCheck.Criteria.defaults(), TopicDriftCheck.Criteria.defaults());
     }
 
-    /** With the claim-check stage 2 thresholds of the settings. */
-    public BookAssembler(ClaimCarryCheck.Criteria carry) {
-        this(SentenceSegmenter.splitter(), carry);
+    /** With the claim-check stage 2 and topic-drift thresholds of the settings. */
+    public BookAssembler(ClaimCarryCheck.Criteria carry, TopicDriftCheck.Criteria drift) {
+        this(SentenceSegmenter.splitter(), carry, drift);
     }
 
     public BookAssembler(SentenceSegmenter sentences) {
-        this(sentences, ClaimCarryCheck.Criteria.defaults());
+        this(sentences, ClaimCarryCheck.Criteria.defaults(), TopicDriftCheck.Criteria.defaults());
     }
 
-    public BookAssembler(SentenceSegmenter sentences, ClaimCarryCheck.Criteria carry) {
+    public BookAssembler(SentenceSegmenter sentences, ClaimCarryCheck.Criteria carry,
+                         TopicDriftCheck.Criteria drift) {
         this.sentences = sentences;
         this.acronymExtractor = new AcronymExtractor(sentences);
         this.carry = new ClaimCarryCheck(carry);
+        this.drift = drift == null ? TopicDriftCheck.Criteria.defaults() : drift;
     }
 
     public AssembledBook assemble(BookAssemblyInput input) {
@@ -89,6 +92,8 @@ public final class BookAssembler {
         StringBuilder plainBook = new StringBuilder();
         Map<String, String> chapterPlain = new LinkedHashMap<String, String>();
         Counts counts = new Counts();
+        TopicDriftCheck topics = new TopicDriftCheck(drift, input.getTitle(), input.getOutline(),
+                input.getGlossaryTerms());
 
         int chapterNo = 0;
         for (OutlineChapter chapter : input.getOutline().getChapters()) {
@@ -120,7 +125,7 @@ public final class BookAssembler {
                 body.append(renumber(text, section.getId(), byMarker, registry, input)).append("\n\n");
                 String plain = stripMarkers(text);
                 chapterText.append(plain).append("\n\n");
-                checkSection(section, label, text, plain, revision, byMarker, findings, shingles, counts);
+                checkSection(section, label, text, plain, revision, byMarker, findings, shingles, counts, topics);
             }
             chapterPlain.put(chapterNo + " " + chapter.getTitle(), chapterText.toString());
             plainBook.append(chapterText);
@@ -255,9 +260,11 @@ public final class BookAssembler {
 
     private void checkSection(OutlineSection section, String label, String text, String plain,
                               SectionRevision revision, Map<String, ManuscriptCitation> byMarker,
-                              List<Finding> findings, List<ParagraphShingles> shingles, Counts counts) {
+                              List<Finding> findings, List<ParagraphShingles> shingles, Counts counts,
+                              TopicDriftCheck topics) {
         String id = section.getId();
         int paragraphNo = 0;
+        List<String> sectionSentences = new ArrayList<String>();
         for (String paragraph : PARAGRAPH_BREAK.split(text)) {
             if (paragraph.trim().isEmpty()) {
                 continue;
@@ -270,6 +277,7 @@ public final class BookAssembler {
                     continue;
                 }
                 counts.sentences++;
+                sectionSentences.add(stripMarkers(sentence).trim());
                 List<ManuscriptCitation> own = citationsIn(sentence, byMarker);
                 if (own.isEmpty()) {
                     findings.add(new Finding(Kind.UNCITED_SENTENCE, id, label + ": " + sentence.trim()));
@@ -309,6 +317,9 @@ public final class BookAssembler {
             } else if (lower.startsWith("unsupported quote")) {
                 findings.add(new Finding(Kind.UNSUPPORTED_QUOTE, id, label + ": " + detail(flag)));
             }
+        }
+        for (String subject : topics.foreignSubjects(sectionSentences)) {
+            findings.add(new Finding(Kind.TOPIC_DRIFT, id, label + ": " + subject));
         }
         int written = words(plain).size();
         int target = section.getBrief().getWordTarget();

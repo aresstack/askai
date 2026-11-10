@@ -19,6 +19,13 @@ public final class WriterPackSettings {
     private final int passageCount;
     private final int passageTokens;
     private final ProsePassageFilter.Criteria prose;
+    private final int passagesPerSource;
+
+    /** The smallest passage a pack accepts. */
+    public static final int MIN_PASSAGE_TOKENS = 20;
+
+    /** Default: at most two passages of one source, so one page cannot fill the pack. */
+    public static final int DEFAULT_PASSAGES_PER_SOURCE = 2;
 
     /** With the default prose criteria. */
     public WriterPackSettings(int passageCount, int passageTokens) {
@@ -26,12 +33,26 @@ public final class WriterPackSettings {
     }
 
     public WriterPackSettings(int passageCount, int passageTokens, ProsePassageFilter.Criteria prose) {
-        if (passageCount < 1 || passageTokens < 20) {
+        this(passageCount, passageTokens, prose, DEFAULT_PASSAGES_PER_SOURCE);
+    }
+
+    public WriterPackSettings(int passageCount, int passageTokens, ProsePassageFilter.Criteria prose,
+                              int passagesPerSource) {
+        if (passagesPerSource < 1) {
+            throw new IllegalArgumentException("a source must be able to contribute at least one passage");
+        }
+        if (passageCount < 1 || passageTokens < MIN_PASSAGE_TOKENS) {
             throw new IllegalArgumentException("an evidence pack needs at least one passage of 20 tokens");
         }
         this.passageCount = passageCount;
         this.passageTokens = passageTokens;
         this.prose = prose == null ? ProsePassageFilter.Criteria.defaults() : prose;
+        this.passagesPerSource = passagesPerSource;
+    }
+
+    /** How many passages one source may contribute. */
+    public int getPassagesPerSource() {
+        return passagesPerSource;
     }
 
     /** The host preset for a writer model id. */
@@ -62,12 +83,13 @@ public final class WriterPackSettings {
     public boolean equals(Object other) {
         return other instanceof WriterPackSettings && ((WriterPackSettings) other).passageCount == passageCount
                 && ((WriterPackSettings) other).passageTokens == passageTokens
-                && ((WriterPackSettings) other).prose.equals(prose);
+                && ((WriterPackSettings) other).prose.equals(prose)
+                && ((WriterPackSettings) other).passagesPerSource == passagesPerSource;
     }
 
     @Override
     public int hashCode() {
-        return (passageCount * 31 + passageTokens) * 31 + prose.hashCode();
+        return ((passageCount * 31 + passageTokens) * 31 + prose.hashCode()) * 31 + passagesPerSource;
     }
 
     @Override

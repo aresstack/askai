@@ -51,6 +51,14 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerCarryMinWordLength = ComicControls.textField(4);
     private final JTextField writerCarryStemLength = ComicControls.textField(4);
     private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
+    private final JTextField writerWordsPerCall = ComicControls.textField(5);
+    private final JTextField writerAnswerTokens = ComicControls.textField(5);
+    private final JTextField writerPassages = ComicControls.textField(4);
+    private final JTextField writerPassageTokens = ComicControls.textField(4);
+    private final JTextField writerPassagesPerSource = ComicControls.textField(4);
+    private final JTextField driftMinTermLength = ComicControls.textField(4);
+    private final JTextField driftMinSentences = ComicControls.textField(4);
+    private final JCheckBox driftNounsOnly = ComicControls.checkBox("Nouns only (capitalised)", true);
     // Search-run limits: the completion target + the safety limits. Every bound is a setting.
     private final JTextField searchTargetSources = ComicControls.textField(4);
     private final JTextField searchMaxPages = ComicControls.textField(4);
@@ -183,11 +191,16 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // Document phase: the section writer's evidence and checks.
         com.aresstack.comiccontrols.control.ComicForm writer =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Document writer");
+        writer.row("Writer preset", group(labelled("Words/call", writerWordsPerCall),
+                labelled("Answer tokens", writerAnswerTokens), labelled("Passages", writerPassages),
+                labelled("Tokens/passage", writerPassageTokens), labelled("Per source", writerPassagesPerSource)));
         writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
                 labelled("Sentences ≥", writerProseMinSentences),
                 labelled("Unpunctuated run ≤", writerProseMaxRun)));
         writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
                 labelled("Stem letters", writerCarryStemLength), labelled("Overlap ≥", writerCarryMinOverlap)));
+        writer.row("Topic drift", group(labelled("Term letters ≥", driftMinTermLength),
+                labelled("Sentences ≥", driftMinSentences), driftNounsOnly));
 
         // Plan T5: the research team of the Sources phase and the worker browsers its page workers read in.
         com.aresstack.comiccontrols.control.ComicForm team =
@@ -497,6 +510,42 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                         .DEFAULT_MAX_UNPUNCTUATED_RUN,
                 "Evidence pack: navigation menus and footers run on for dozens of words without a comma or full "
                         + "stop; a passage with a longer run is left out.");
+        bindLimit(writerWordsPerCall, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
+                ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL,
+                "Section writer: words one call aims for; a section with a larger word target is split by its key "
+                        + "points. With too little evidence the writer stays below it and the book report says so.");
+        bindLimit(writerAnswerTokens, ResearchRuntimeSettings.KEY_WRITER_ANSWER_TOKENS,
+                ResearchRuntimeSettings.DEFAULT_WRITER_ANSWER_TOKENS,
+                "Section writer: answer token budget of one call (keep it above the words per call).");
+        bindLimit(writerPassages, ResearchRuntimeSettings.KEY_WRITER_PASSAGES,
+                com.aresstack.askai.research.writer.WriterPackSettings.LARGE.getPassageCount(),
+                "Evidence pack: passages one section gets. More passages give the writer more to say, and a "
+                        + "longer prompt.");
+        bindLimit(writerPassageTokens, ResearchRuntimeSettings.KEY_WRITER_PASSAGE_TOKENS,
+                com.aresstack.askai.research.writer.WriterPackSettings.LARGE.getPassageTokens(),
+                "Evidence pack: tokens each passage may take (cut at a sentence end; at least "
+                        + com.aresstack.askai.research.writer.WriterPackSettings.MIN_PASSAGE_TOKENS + ").");
+        bindLimit(writerPassagesPerSource, ResearchRuntimeSettings.KEY_WRITER_PASSAGES_PER_SOURCE,
+                com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE,
+                "Evidence pack: passages one source may contribute, so one page cannot fill a section.");
+        bindLimit(driftMinTermLength, ResearchRuntimeSettings.KEY_DRIFT_MIN_TERM_LENGTH,
+                com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_TERM_LENGTH,
+                "Book report: a term this long that a section repeats but the concept and outline never mention "
+                        + "is reported as a foreign subject (live run 3: Funkalarmanlagen in 1.4).");
+        bindLimit(driftMinSentences, ResearchRuntimeSettings.KEY_DRIFT_MIN_SENTENCES,
+                com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_SENTENCES,
+                "Book report: in how many sentences of one section the foreign term must occur.");
+        driftNounsOnly.setSelected(ResearchRuntimeSettings.loadTopicDriftCriteria(store).isNounsOnly());
+        driftNounsOnly.setToolTipText("Book report: count only capitalised words inside a sentence (German nouns), "
+                + "so verbs and adjectives are never reported as subjects.");
+        driftNounsOnly.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                if (ResearchRuntimeSettingsPanel.this.store != null) {
+                    ResearchRuntimeSettingsPanel.this.store.putBoolean(ResearchRuntimeSettings.KEY_DRIFT_NOUNS_ONLY,
+                            driftNounsOnly.isSelected());
+                }
+            }
+        });
         bindLimit(writerCarryMinWordLength, ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_WORD_LENGTH,
                 com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_WORD_LENGTH,
                 "Claim check: words with fewer letters (und, der, ist) are ignored when a sentence is compared "
