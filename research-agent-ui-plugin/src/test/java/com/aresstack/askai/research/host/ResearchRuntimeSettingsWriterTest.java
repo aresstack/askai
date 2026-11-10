@@ -28,6 +28,22 @@ public class ResearchRuntimeSettingsWriterTest {
                 ResearchRuntimeSettings.loadWriterProseCriteria(store));
     }
 
+    @Test
+    public void theCarryCriteriaDefaultAndAStoredOverlapWins() {
+        assertEquals(com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.defaults(),
+                ResearchRuntimeSettings.loadWriterCarryCriteria(new MemoryStore()));
+        MemoryStore store = new MemoryStore();
+        store.put(ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_OVERLAP, "0,45");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_WORDS, "12");
+        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria c =
+                ResearchRuntimeSettings.loadWriterCarryCriteria(store);
+        assertEquals(0.45, c.getMinOverlap(), 1e-9);
+        assertEquals("the prose criteria are the evidence pack's", 12, c.getProse().getMinWords());
+        store.put(ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_OVERLAP, "7");
+        assertEquals("out of range: the default", 0.3,
+                ResearchRuntimeSettings.loadWriterCarryCriteria(store).getMinOverlap(), 1e-9);
+    }
+
     static final class MemoryStore implements WorkspaceStateStore {
         final Map<String, String> values = new HashMap<String, String>();
 
