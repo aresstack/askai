@@ -10,6 +10,7 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -611,6 +612,127 @@ public class SearchPlanQueueTest {
     }
 
     @Test
+    public void theGapReviewPlansAThinNodeAgainAndLeavesAWellCoveredOneAlone() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query"),
+                node("c", "C", "Gamma Query")), queries);
+        sources.domains.put("s1", "one.example");
+        sources.domains.put("s2", "two.example");
+        sources.domains.put("s3", "three.example");
+        sources.domains.put("s4", "four.example");
+        sources.domains.put("s5", "five.example");
+        sources.domains.put("s6", "six.example");
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("a", "Alpha Messwerte Studie");
+        SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
+        final List<Collection<String>> asked = new ArrayList<Collection<String>>();
+        queue.setGapReview(new SearchPlanQueue.GapReview() {
+            public EvidenceGaps.Gaps atCycleBoundary(Collection<String> active, Collection<SearchPlanEntry> entries) {
+                asked.add(new ArrayList<String>(active));
+                return EvidenceGaps.of(analysis("snap-7", true,
+                        Arrays.asList(
+                                new EvidenceGaps.NodeEvidence("a", EvidenceGaps.Status.REDUNDANT, 20, 1, 10,
+                                        Arrays.asList("sensor", "helmet")),
+                                new EvidenceGaps.NodeEvidence("c", EvidenceGaps.Status.OK, 30, 25, 6,
+                                        Arrays.asList("gamma"))),
+                        Arrays.asList(new EvidenceGaps.NewTopic("Exoskeletons", Arrays.asList("lifting"), 9,
+                                EvidenceGaps.Scope.IN, ""))),
+                        active, entries, Collections.<String>emptyList(), 3, 3);
+            }
+        });
+        sources.next = Arrays.asList("s1", "s2");
+        queue.run();
+        port.complete(false); // Alpha Query: covered by its source count
+        sources.next = Arrays.asList("s3", "s4");
+        port.complete(false); // Beta Query: covered
+        sources.next = Arrays.asList("s5", "s6");
+        port.complete(false); // Gamma Query: covered, and the analysis finds C well covered
+
+        assertEquals(1, asked.size());
+        assertEquals(1, replanner.requests.size());
+        ConceptQueryPlan.Request request = replanner.requests.get(0);
+        assertEquals("only the node the analysis finds redundant", 1, request.getNodes().size());
+        ConceptQueryPlan.Node a = request.getNodes().get(0);
+        assertEquals("a", a.getId());
+        assertEquals("REDUNDANT: 20 passages but only 1 distinct, from 10 sources", a.getEvidence().get(0));
+        assertEquals("the material so far is about: sensor, helmet", a.getEvidence().get(1));
+        assertEquals(Collections.singletonList("Exoskeletons: lifting"), request.getNewTopics());
+
+        replanner.deliver();
+        SearchPlanEntry planned = null;
+        for (SearchPlanEntry entry : queue.entriesInOrder()) {
+            if (entry.getOrigin() == SearchPlanEntry.Origin.CYCLE) {
+                planned = entry;
+            }
+        }
+        assertEquals("Alpha Messwerte Studie", planned.getQuery());
+        assertTrue(planned.getNote(), planned.getNote().contains("gap REDUNDANT")
+                && planned.getNote().contains("analysis snap-7"));
+
+        sources.next = Collections.emptyList();
+        port.complete(false); // the last cycle ends: the analysis still finds A redundant
+        assertEquals(1, outcomes.size());
+        SearchPlanQueue.Outcome outcome = outcomes.get(0);
+        assertEquals("ten sources saying the same are no coverage", Collections.singletonList("A"),
+                outcome.getUncovered());
+        assertTrue(outcome.report(), outcome.report().contains("A: uncovered (2 sources from 2 domains"));
+        assertTrue(outcome.report(), outcome.report().contains("; analysis snap-7: REDUNDANT"));
+        assertTrue(outcome.report(), outcome.report().contains("C: covered"));
+    }
+
+    @Test
+    public void anUnsettledAnalysisReportsNoGapAndTheCyclePlansFromTheSourceCounts() throws Exception {
+        build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")),
+                new HashMap<String, List<String>>());
+        sources.domains.put("s1", "one.example");
+        sources.domains.put("s2", "two.example");
+        FakeReplanner replanner = new FakeReplanner();
+        SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
+        queue.setGapReview(new SearchPlanQueue.GapReview() {
+            public EvidenceGaps.Gaps atCycleBoundary(Collection<String> active, Collection<SearchPlanEntry> entries) {
+                return EvidenceGaps.of(analysis("snap-8", false, Collections.singletonList(
+                        new EvidenceGaps.NodeEvidence("b", EvidenceGaps.Status.MISSING, 0, 0, 0,
+                                Arrays.asList("beta"))),
+                        Collections.<EvidenceGaps.NewTopic>emptyList()),
+                        active, entries, Collections.<String>emptyList(), 3, 3);
+            }
+        });
+        sources.next = Collections.emptyList();
+        queue.run();
+        port.complete(false); // Alpha Query: nothing
+        sources.next = Arrays.asList("s1", "s2");
+        port.complete(false); // Beta Query: covered; sources still wait for processing, so "missing" is no gap
+
+        ConceptQueryPlan.Request request = replanner.requests.get(0);
+        assertEquals(1, request.getNodes().size());
+        assertEquals("a", request.getNodes().get(0).getId());
+        assertTrue(request.getNodes().get(0).getEvidence().isEmpty());
+        assertTrue(request.getNewTopics().isEmpty());
+    }
+
+    static EvidenceGaps.Analysis analysis(final String id, final boolean settled,
+                                          final List<EvidenceGaps.NodeEvidence> nodes,
+                                          final List<EvidenceGaps.NewTopic> topics) {
+        return new EvidenceGaps.Analysis() {
+            public String id() {
+                return id;
+            }
+
+            public boolean settled() {
+                return settled;
+            }
+
+            public List<EvidenceGaps.NodeEvidence> nodes() {
+                return nodes;
+            }
+
+            public List<EvidenceGaps.NewTopic> newTopics() {
+                return topics;
+            }
+        };
+    }
+
+    @Test
     public void aPlanOutOfCyclesReportsTheGapAsSpentBudgetNeverAsCoverage() throws Exception {
         build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
         FakeReplanner replanner = new FakeReplanner();
@@ -746,6 +868,172 @@ public class SearchPlanQueueTest {
         }
     }
 
+
+    // ---- plan T5: the research team -------------------------------------------------------------------
+
+    private static SearchPlanQueue.Team team(final int workers) {
+        return new SearchPlanQueue.Team() {
+            public int workers() {
+                return workers;
+            }
+        };
+    }
+
+    private void fourQueriesOverTwoNodes() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Classloader Java", "Classloader Leck"));
+        queries.put("b", Arrays.asList("JPMS Java", "JPMS Layer"));
+        build(Arrays.asList(node("a", "Classloader", "Classloader Java"), node("b", "JPMS", "JPMS Java")), queries);
+    }
+
+    @Test
+    public void theNextSearchStartsOnlyWhenTheTeamHasFewerPagesOpenThanItsThreshold() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        assertEquals("one search; its hits are read side by side", 1, port.searched.size());
+        assertEquals(port.requests, port.teamRequests);
+        queue.onOpenPages("req-1", 9);
+        assertEquals(1, port.searched.size());
+        queue.onOpenPages("req-1", 3); // fewer open pages than workers: the next search starts
+        assertEquals(2, port.searched.size());
+        assertEquals("Classloader Leck", port.searched.get(1));
+        queue.onOpenPages("req-1", 0);
+        assertEquals("the second search has no hits yet: it counts as full", 2, port.searched.size());
+        port.completeRequest("req-1");
+        port.completeRequest("req-2");
+        assertEquals(3, port.searched.size());
+    }
+
+    @Test
+    public void runningQueriesOfOneNodeCountOnceAgainstItsBudget() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Classloader Java", "Classloader Leck", "Classloader OSGi", "Classloader JPMS"));
+        build(Collections.singletonList(node("a", "Classloader", "Classloader Java")), queries);
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        for (int i = 1; i <= 3; i++) {
+            queue.onOpenPages("req-" + i, 0);
+        }
+        assertEquals(4, port.searched.size()); // all four angles of the node run, none is skipped as over budget
+    }
+
+    @Test
+    public void aWorkerQueryRunsBeforeThePlannedOnesAndAFencedOneIsOnlyNoted() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        queue.onTeamQuery("req-1", "Classloader Metaspace Leck", "");
+        queue.onTeamQuery("req-1", "Kaffeemaschine kaufen", "outside scope (nearest exclusion: Shopping)");
+        queue.onTeamQuery("req-1", "classloader leck", ""); // already planned
+        port.completeRequest("req-1");
+        assertEquals("the worker's query runs next, before the planned ones", "Classloader Metaspace Leck",
+                port.searched.get(1));
+        SearchPlanEntry first = null;
+        SearchPlanEntry worker = null;
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            if (entry.getQuery().equals("Classloader Java")) {
+                first = entry;
+            }
+            if (entry.getOrigin() == SearchPlanEntry.Origin.WORKER) {
+                worker = entry;
+            }
+        }
+        assertEquals("a", worker.getNodeId()); // anchored at the node, so coverage still counts per node
+        assertTrue(first.getTeamNotes().toString(),
+                first.getTeamNotes().get(0).startsWith("search \"Classloader Metaspace Leck\" added"));
+        assertTrue(first.getTeamNotes().get(1).contains("dropped: outside scope"));
+        assertTrue(first.getTeamNotes().get(2).contains("dropped: already in the plan"));
+    }
+
+    @Test
+    public void aWorkerQueryBeyondTheNodesBudgetIsDropped() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 2, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        queue.onTeamQuery("req-1", "Classloader Metaspace", "");
+        SearchPlanEntry first = null;
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            if (entry.getQuery().equals("Classloader Java")) {
+                first = entry;
+            }
+        }
+        assertTrue(first.getTeamNotes().get(0).contains("query budget"));
+    }
+
+    @Test
+    public void withoutTheTeamThePlanStaysOneQueryAtATime() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(0));
+        queue.run();
+        assertEquals(1, port.searched.size());
+        assertTrue(port.teamRequests.isEmpty());
+    }
+
+    @Test
+    public void stopSendsEveryRunningTeamQueryBackToPending() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        queue.onOpenPages("req-1", 0);
+        assertEquals(2, port.searched.size());
+        queue.stop();
+        assertEquals(1, port.cancels);
+        current().onSearchEvent("req-1", "failed", "CANCELLED", false);
+        current().onSearchEvent("req-2", "failed", "CANCELLED", false);
+        assertFalse(queue.isRunning());
+        assertEquals(2, port.searched.size()); // nothing new started after the stop
+        int pending = 0;
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            if (entry.getStatus() == SearchPlanEntry.Status.PENDING) {
+                pending++;
+            }
+        }
+        assertEquals(4, pending);
+    }
+
+    @Test
+    public void aMissingWorkerBrowserTurnsTheRunIntoOneQueryAtATime() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        current().onSearchEvent("req-1", "failed", SearchPlanQueue.NO_WORKER_BROWSER, false);
+        assertTrue(queue.isRunning()); // no failure streak: the query went back to pending
+        assertEquals(2, port.searched.size());
+        assertEquals(1, port.teamRequests.size()); // the next runs in the chat browser, alone
+        assertEquals(1, queue.runningEntryCount());
+    }
+
+    @Test
+    public void aPageWorkerReportStaysOnItsEntryAndReachesTheNextCyclePlanner() throws Exception {
+        build(Collections.singletonList(node("a", "Classloader", "Classloader Java")),
+                Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        current().onSearchEvent("req-1", "team_note", "worker 1: search for OSGi class loading", false);
+        current().onSearchEvent("req-1", "team_note", "worker 1: search for OSGi class loading", false);
+        port.completeRequest("req-1");
+        SearchPlanEntry done = store.loadEntries().values().iterator().next();
+        assertEquals(Collections.singletonList("worker 1: search for OSGi class loading"), done.getTeamNotes());
+        Map<String, SearchPlanEntry> all = store.loadEntries();
+        SearchPlanCoverage.Caps c = caps(3, 4, 60);
+        ConceptQueryPlan.Request next = SearchPlanCycles.nextCycleRequest(store.loadRecord(), all.values(),
+                SearchPlanCoverage.of(store.loadRecord(), all.values(), c, sources), c);
+        assertNotNull(next);
+        assertEquals(Collections.singletonList("worker 1: search for OSGi class loading"),
+                next.getNodes().get(0).getWorkerNotes());
+    }
+
+    // ---- fakes ---------------------------------------------------------------------------------------
+
     private final class FakePort implements SearchPlanQueue.SearchPort {
         final List<String> searched = new ArrayList<String>();
         final List<String> languages = new ArrayList<String>();
@@ -754,6 +1042,21 @@ public class SearchPlanQueueTest {
         final List<String> requests = new ArrayList<String>();
         SearchPlanQueue owner;
         int cancels;
+        final List<String> teamRequests = new ArrayList<String>();
+        final List<String> teamNodes = new ArrayList<String>();
+
+        public String searchAsTeam(String query, String language, String ranking, int visitLimit, int sourceCap,
+                                   String nodeLabel) {
+            String id = search(query, language, ranking, visitLimit, sourceCap);
+            teamRequests.add(id);
+            teamNodes.add(nodeLabel);
+            return id;
+        }
+
+        void completeRequest(String id) {
+            sources.byRequest.put(id, new ArrayList<String>(sources.next));
+            current().onSearchEvent(id, "completed", "", false);
+        }
 
         public String search(String query, String language, String ranking, int visitLimit, int sourceCap) {
             searched.add(query);

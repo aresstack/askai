@@ -95,6 +95,62 @@ public class ConceptSeededOutlineBuilderTest {
     }
 
     @Test
+    public void theResultCountsWhyPassagesStayedUnassigned() {
+        // Live run 3 left 2063 of 2068 passages unassigned without saying whether the threshold or the margin
+        // did it; the counts and the median best similarity are the calibration aid of the log line.
+        ConceptSeededOutlineBuilder.Result result = new ConceptSeededOutlineBuilder(new RecordingPort())
+                .build(input("A book"));
+        assertEquals(7, result.assignedPassages);
+        assertEquals(3, result.unassignedPassages);
+        assertEquals("the three 'Unrelated' passages match no anchor at all", 3, result.belowThreshold);
+        assertEquals(0, result.marginTooSmall);
+        assertEquals(1.0, result.medianBestSimilarity, 1e-9);
+    }
+
+    @Test
+    public void aChapterNeverCompetesWithItsOwnSectionForTheMargin() {
+        // Live run 3: anchors "Title > Chapter" and "Title > Chapter > Section" lie 0.01 apart for a passage of
+        // that section, and the 0.02 margin against the second-best anchor left 1550 of 2068 passages
+        // unassigned. The margin is measured against the nearest anchor of ANOTHER lineage.
+        final EmbeddingPort.EmbeddingVector chapter = new EmbeddingPort.EmbeddingVector("t", FP,
+                new float[] {1f, 0.1425f, 0f});
+        final EmbeddingPort.EmbeddingVector section = new EmbeddingPort.EmbeddingVector("t", FP,
+                new float[] {1f, 0f, 0f});
+        final EmbeddingPort.EmbeddingVector other = new EmbeddingPort.EmbeddingVector("t", FP,
+                new float[] {0f, 0f, 1f});
+        EmbeddingPort port = new EmbeddingPort() {
+            public List<EmbeddingVector> embed(Role role, List<String> input) {
+                List<EmbeddingVector> vectors = new ArrayList<EmbeddingVector>();
+                for (String text : input) {
+                    vectors.add(text.endsWith("Sensors") ? section : text.endsWith("Wearables") ? chapter : other);
+                }
+                return vectors;
+            }
+        };
+        List<ConceptOutlineNode> concept = Arrays.asList(
+                node("n-wearables", "Wearables", node("n-sensors", "Sensors")), node("n-law", "Law"));
+        List<OutlineGenerationInput.CorpusPassage> passages = Arrays.asList(
+                new OutlineGenerationInput.CorpusPassage("p1", "s1", "About sensors.", section),
+                new OutlineGenerationInput.CorpusPassage("p2", "s2", "More about sensors.", section),
+                new OutlineGenerationInput.CorpusPassage("p3", "s3", "Still sensors.", section));
+        OutlineGenerationInput input = new OutlineGenerationInput("Book", "", "", concept, passages,
+                Collections.<OutlineGenerationInput.Cluster>emptyList(),
+                new OutlineGenerationInput.Settings(0.35, 0.02, 2, 2));
+
+        ConceptSeededOutlineBuilder.Result result = new ConceptSeededOutlineBuilder(port).build(input);
+
+        assertEquals(3, result.assignedPassages);
+        assertEquals(0, result.marginTooSmall);
+        assertEquals("the lead over the chapter 'Law', not over the own chapter", 1.0, result.medianMargin, 1e-6);
+        OutlineSection sensors = result.outline.getChapters().get(0).getSections().get(0);
+        assertEquals("Sensors", sensors.getTitle());
+        assertEquals(Arrays.asList("p1", "p2", "p3"), sensors.getProvenance().getPassageIds());
+        assertTrue(ConceptSeededOutlineBuilder.sameLineage("Book > A", "Book > A > B"));
+        assertTrue(ConceptSeededOutlineBuilder.sameLineage("Book > A > B", "Book > A"));
+        assertFalse(ConceptSeededOutlineBuilder.sameLineage("Book > A", "Book > AB"));
+    }
+
+    @Test
     public void sameInputGivesByteIdenticalOutlineInConceptOrder() {
         String first = OutlineJson.write(build("", new RecordingPort()));
         String second = OutlineJson.write(build("", new RecordingPort()));

@@ -30,12 +30,24 @@ public class OutlineGenerationStartTest {
     public TemporaryFolder folder = new TemporaryFolder();
 
     @Test
+    public void theAnchorPrefixIsTheQuotedBookTitleOfTheMissionOrNothing() {
+        // Live run 3 (2026-11-10): the whole mission as prefix made every anchor path start with the same
+        // paragraph, so the anchors embedded alike and 2063 of 2068 passages failed the margin rule.
+        assertEquals("Wearables auf Baustellen: Sicherheit, Sensorik und Datenschutz", OutlineGeneration.bookTitle(
+                "Erstelle das Konzept für ein kompaktes, vollständig belegtes deutsches Praxisbuch „Wearables auf "
+                        + "Baustellen: Sicherheit, Sensorik und Datenschutz“ für Sicherheitsfachkräfte, Umfang "
+                        + "20–30 Seiten. Vier Hauptthemen: (1) Technologien und Sensortypen."));
+        assertEquals("", OutlineGeneration.bookTitle("Write a practical book about wearables on construction sites."));
+        assertEquals("", OutlineGeneration.bookTitle(null));
+    }
+
+    @Test
     public void aBrokenEnrichmentRefusesTheStartLoudly() {
         final OutlineWorkspace workspace = new OutlineWorkspace(new FileOutlineStore(folder.getRoot()));
         OutlineClusteringRun run = new OutlineClusteringRun();
         final AtomicBoolean executed = new AtomicBoolean();
         OutlineGeneration generation = new OutlineGeneration(inputs(workspace), null, null,
-                new OutlineGenerationInput.Settings(OutlineGenerationInput.Settings.DEFAULT_THRESHOLD,
+                () -> new OutlineGenerationInput.Settings(OutlineGenerationInput.Settings.DEFAULT_THRESHOLD,
                         OutlineGenerationInput.Settings.DEFAULT_MARGIN, 3, 2),
                 run, new Executor() {
                     public void execute(Runnable command) {

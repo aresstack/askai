@@ -26,6 +26,13 @@ public final class BackendManualWebSearchPort implements ManualWebSearchPort {
         final String requestId = java.util.UUID.randomUUID().toString();
         String envelope = request == null
                 ? ResearchServiceCommandWire.manualSearch(requestId, "", null)
+                : request.isTeam()
+                ? ResearchServiceCommandWire.teamSearch(requestId, request.getQuery(),
+                        request.getLanguage().getCode(), request.getRanking(), request.getVisitLimit(),
+                        request.getSourceCap(), request.getTeamNode(), request.getTeamBook(),
+                        request.getTeamFollow(), request.getTeamPageCharacters(),
+                        request.getTeamAnswerTokens(), request.getTeamWorkers(), request.getTeamSearches(),
+                        request.getTeamArea())
                 : ResearchServiceCommandWire.manualSearch(requestId, request.getQuery(),
                         request.getLanguage().getCode(), request.getRanking(), request.getVisitLimit(),
                         request.getSourceCap());

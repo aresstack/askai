@@ -510,9 +510,13 @@ research: a single concept root became one chapter, and the clusters only sorted
   its cut at the cutoff equals the flat topics). Cuts of that one tree give near-duplicate groups, sub-topics inside a
   topic and topic groups above it. Per topic the analysis measures passages and **distinct** passages (near duplicates
   count once), sources and domains, material, **diversity** (sub-topics, dispersion), related topics (cophenetic
-  distance), concept alignment, and whether the topic is significant, major or new from the research. Per concept node
-  it reports covered, thin or gap. Material and diversity are measured apart: twenty copies of one statement are
-  confirmation, not twenty sections; a broad area with several aspects may earn several sections or chapters.
+  distance), concept alignment, search-fence alignment, and whether the topic is significant, major or new from the
+  research. A topic is significant only with enough **distinct** passages (material) confirmed by enough sources from
+  enough domains (confirmation); both criteria are stored apart. Per concept node it judges evidence quality, breadth
+  (enough children covered) and balance (no child holds most of the material) apart: thirty sources on wearables of
+  which twenty-five cover only smartwatches do not cover "Wearables". Material and diversity are measured apart:
+  twenty copies of one statement are confirmation, not twenty sections; a broad area with several aspects may earn
+  several sections or chapters. The analysis runs already in Phase 2 (D6a); Phase 3 takes one snapshot of it.
 - **The concept frame.** When the approved concept has a single first-level node, that node is the book frame (the
   title or overall subject), not a chapter; its children are the main themes. Concept requirements are the nodes down
   to a configurable depth below the frame; deeper nodes are detail.
@@ -555,6 +559,76 @@ research: a single concept root became one chapter, and the clusters only sorted
   `outline_save` stays removed; the live projection stays an analysis view and never writes into the stored outline.
 - The owner's decision Q6 stands: concept and research clusters are used together. This revision makes the outline an
   actual synthesis of both instead of a copy of the concept.
+
+### D6a. One analysis for Phase 2 and Phase 3
+
+Decided on 2026-11-10 with the owner (architecture note on the shared analysis). **Research and outline never keep two
+truths about the knowledge.** Phase 2 and Phase 3 use the same knowledge store and the same incremental topic
+analysis; only the use differs:
+
+- **Phase 2 uses it to steer the research**: what is well covered, what is missing, thin, redundant, unconfirmed or
+  one-sided, which research areas are new, and which follow-up queries make sense (key terms per node and area). It
+  never builds an outline and never anticipates the user's approval. Recognising that a topic has five sub-topics is
+  Phase 2's business; turning them into five sections is the synthesis of Phase 3.
+- **Phase 3 uses it to structure the book**: the outline generation takes one consistent snapshot, segments, embeds
+  and clusters nothing itself, and its provenance names the snapshot id. The existing outline freeze stays the only
+  freeze. Clusters are no chapters: the synthesis decides whether a cluster becomes part of a chapter, is merged, is
+  split into several sections or only serves as evidence.
+
+What runs where:
+
+| Step | Phase 2 | Phase 3 |
+|---|---|---|
+| Source capture, sentences, passages, embeddings, index | runs (after acceptance) | — |
+| Hierarchical clustering with merge tree | runs | reuses the snapshot |
+| Redundancy, material, diversity, sub-topics | runs | reuses the snapshot |
+| Concept coverage (quality, breadth, balance) | runs | reuses the snapshot |
+| Search-fence (Weidezaun) alignment | runs | reuses the snapshot |
+| Research needs, follow-up queries | runs | — |
+| Chapter hierarchy, sections, quality check, briefs, word targets | — | runs |
+| Store, edit, approve, freeze the outline | — | runs |
+
+Rules:
+
+- **One place**: `SharedTopicDiscovery` runs the analysis (`analyze`, `analysisFor`, `analyzeIfDue`,
+  `latestAnalysis`, `requestAtCycleBoundary`) over the active corpus reader, the existing clusterer
+  (`LiveOutlineProjectionBuilder.discoverTopicTree`; `discoverTopics` and `buildOutline` stay separate) and the
+  `TopicAnalyzer`. No second clusterer, no second pipeline, no model call.
+- **Immutable snapshots with history**: a run yields a `TopicAnalysisSnapshot` whose id is derived from analysis
+  version, corpus, embedding world, concept revision and nodes, scope revision, eligible sources and settings. The
+  latest is "current"; older ones are never overwritten (`FileTopicSnapshotStore`, one file per snapshot), so one can
+  see why an area counted as thin first and as covered later.
+- **Controlled refresh**: completed processing jobs only mark the analysis stale. One debounced, single-flight runner
+  per session runs it when it is due: from a minimum corpus, then after a number of new passages, and at research
+  cycle boundaries when the corpus changed. Never per page. All three values are settings.
+- **Pending sources are no gaps**: a snapshot lists the accepted sources still in the processing queue; it is
+  "settled" only when there are none, and only then is missing material a real gap.
+- **Concept and fence are separate readings**: concept alignment says which concept theme material belongs to; scope
+  alignment says whether it lies inside the negotiated search space (mind map = IN, blacklist = OUT, the fence is the
+  projection of both). Scope alignment uses the search scope gate's anchors and thresholds (`SearchScopeGate`,
+  `ScopeFenceEvaluator`), no competing classification. A topic new to the concept is not OUT by itself.
+
+Responsibilities named in the review and the class that has them in `aresstack/askai` (the review searched another
+repository; every class below exists here):
+
+| Responsibility | Class |
+|---|---|
+| Topic analysis use case (Phase 2 + 3) | `SharedTopicDiscovery` (`knowledge.processing.live`) running `TopicAnalyzer` (`knowledge.topic`) |
+| Immutable analysis result with version reference | `TopicAnalysisSnapshot` (wraps `TopicAnalysis` and `EvidenceReport`) |
+| Coverage of concept areas by evidence | `TopicAnalyzer` → `ConceptCoverage` (quality, breadth, balance) |
+| Breadth and diversity of the evidence | `TopicAnalyzer` → `TopicProfile` (sub-topics, dispersion), `ConceptCoverage` (topic count, dominant share) |
+| Redundant evidence | `TopicAnalyzer` duplicate cut of `TopicDendrogram` → distinct passages, redundancy share |
+| Missing or weakly covered areas | `EvidenceReport` (node status MISSING / REDUNDANT / THIN / UNCONFIRMED / ONE_SIDED / OK, new research areas) |
+| Turning gaps into queries | the existing Phase-2 planning (`SearchPlanBuilder`, `SearchPlanQueue`, `BackendQueryPlanner`, D5) and the research team's gap review; no new planner |
+| Scope alignment | `ScopeFence` / `ScopeAlignment` over `SearchScopeGate`'s `ScopeFenceEvaluator`, anchors from `ConceptAnchorProjection` and `ScopeAnchorVectorIndex` |
+| Phase-3 synthesis, check, store | `OutlineGeneration` (host), `OutlineSynthesizer`, `OutlineBriefWorker`, `FileOutlineStore` |
+
+Further classes the analysis builds on: `SourceAcceptanceService`, `FileSourceProcessingQueue`,
+`SourceProcessingWorker` (Phase-2 processing), `PassageSegmentation`, `TopicClusterer`, `TopicDendrogram`,
+`ActiveKnowledgeCorpusReader`, `TypedBlacklist` (eligibility). `CoverageAnalyzer` is the older detail-research loop
+over section claims and does not replace the gap analysis; `OutlineProposalBuilder` is a test fixture since PR 22;
+`LiveOutlineProjectionBuilder.buildOutline` is the live projection (an analysis view), not the outline;
+`ConceptSeededOutlineBuilder` is replaced by the synthesis (PR 22c).
 
 ### D7. Phase-scoped chat context; every message stays stored
 

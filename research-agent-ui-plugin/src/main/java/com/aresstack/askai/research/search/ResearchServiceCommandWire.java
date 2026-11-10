@@ -8,6 +8,7 @@ package com.aresstack.askai.research.search;
  * ever contains a space. The runtime's parser of the same name is the ONLY consumer.
  *
  * <pre>#RSC1# manual_search request_id=&lt;uuid&gt; query=&lt;urlenc&gt; [ranking=bm25|reranker visit_limit=N source_cap=N]
+ *        [team=1 node=&lt;urlenc&gt; book=&lt;urlenc&gt; follow=N page_chars=N answer_tokens=N workers=N searches=N scope=<urlenc>]
  * #RSC1# set_language language=de|en
  * #RSC1# review_sources request_id=&lt;uuid&gt;</pre>
  */
@@ -51,6 +52,33 @@ public final class ResearchServiceCommandWire {
         if (sourceCap > 0) {
             sb.append(" source_cap=").append(sourceCap);
         }
+        return sb.toString();
+    }
+
+    /**
+     * Plan T5: a planned query run by the research team. Same search as {@link #manualSearch(String, String, String,
+     * String, int, int)} through the one web search tool; {@code team=1} tells the runtime to read its pages in a
+     * worker browser of their own, beside the other team queries, and {@code node}/{@code book} are the brief of the
+     * page worker.
+     */
+    public static String teamSearch(String requestId, String query, String languageCode, String ranking,
+                                    int visitLimit, int sourceCap, String nodeLabel, String bookTitle,
+                                    int followLinks, int pageCharacters, int answerTokens, int workers,
+                                    int searches, String area) {
+        StringBuilder sb = new StringBuilder(manualSearch(requestId, query, languageCode, ranking, visitLimit,
+                sourceCap));
+        sb.append(" team=1");
+        appendEncoded(sb, "node", nodeLabel);
+        appendEncoded(sb, "book", bookTitle);
+        sb.append(" follow=").append(Math.max(0, followLinks)); // 0 = the worker opens no further link
+        if (pageCharacters > 0) {
+            sb.append(" page_chars=").append(pageCharacters);
+        }
+        if (answerTokens > 0) {
+            sb.append(" answer_tokens=").append(answerTokens);
+        }
+        sb.append(" workers=").append(Math.max(1, workers)).append(" searches=").append(Math.max(0, searches));
+        appendEncoded(sb, "scope", area); // the Weidezaun: the page workers' new queries stay inside it
         return sb.toString();
     }
 

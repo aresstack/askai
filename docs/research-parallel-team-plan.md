@@ -485,6 +485,49 @@ only. Each PR comes with its tests and is merged on green CI with a regular merg
 - Done when: the acceptance list of section 7 is green in tests, and the live benchmark on the owner's machine is
   recorded with throughput, GPU memory (`ollama ps`), browser processes and refused sites per configuration.
 
+## 5a. Implementation status of T4/T5 (2026-11-10)
+
+The owner's clarifications of 2026-11-10 are binding:
+
+- ONE search browser (mostly headless) and ONE page browser; every page worker gets its own **tab**.
+- The unit of parallel work is the **page**: the hits of ONE search are read side by side, one tab and one model call
+  per page. A search is never handed to one worker to work through alone.
+- Searches build on each other: the concept gives the **breadth** (the seed queries), the pages read give the
+  **depth** (new queries found while reading), as a person researches.
+- The **Weidezaun** (the rendered scope) and the **blacklist** hold the whole time: at the seed plan, at every cycle
+  and at every query a worker suggests, so the topic does not drift.
+
+What is built:
+
+- **Lanes in the funnel.** `WebSearchApplicationService` runs the search once through the one web search tool, then
+  reads the frontier of THIS search with N lanes (`setLanes`): each lane is a tab of the team's page browser
+  (`TeamTabs`, one user context of the chat's worker browsers) with its own `PageWorker`. The per-page work is one
+  method, `visitOne`, shared by the serial loop and the lanes. Site leases keep two tabs off one site; worker tabs
+  never open a search engine.
+- **Page worker.** One model call per page on the `page-worker` role (slot `phase.research.worker`, thinking off).
+  The labelled answer decides accept or park, picks links to follow (same search), and gives up to
+  `research.team.searchesPerPage` new queries on `SEARCH:` lines. Its prompt carries the Weidezaun.
+- **The fence on every new query.** Before a worker's query reaches the plan, the funnel checks it against the typed
+  blacklist and the scope control (`scopeVerdicts("query", …)`, the same SC1 gate as SERP, links and pages). A dropped
+  query is reported with its reason ("blacklist …", "outside scope …") and noted on the plan entry that found it.
+- **Plan queue.** A query that passes becomes a `WORKER` entry of the same concept node and runs before every planned
+  entry; duplicates and queries over the node's per-cycle budget ("Queries per node") are dropped with a note. The
+  next search starts when the running search has fewer open pages than `research.team.nextSearchBelow` (default: the
+  worker count), so the tabs never wait at the end of a search; a search whose hits are not ranked yet counts as full.
+- **Seed plan.** With the team, the plan starts with `research.team.seedQueriesPerNode` queries per node (default 1:
+  the base query, the concept's breadth); the rest of a node's budget is filled from what the team reads.
+- **Weidezaun in the planner.** `BackendQueryPlanner` attaches the rendered scope to every `plan_queries` request
+  (`ConceptQueryPlan.Request.area`); `QueryPlanner` puts it into the prompt as "AREA OF THE BOOK".
+- **Worker reports.** `TO ORCHESTRATOR` messages and the workers' final summaries are stored on the plan entry and
+  go into the next research cycle's planner request (`worker_notes`).
+- **Settings → Research → Research team:** on/off (default ON), workers (default 4), links to follow, page
+  characters, answer tokens, new searches per page, next search below open pages, seed queries per node. The model
+  port's default capacity per model is 4 (migrated from 1).
+
+Next: the orchestrator's gap review on the deterministic evidence analysis of phase 3 (`EvidenceAnalysis`, PR after
+#183): thin, redundant and missing concept nodes and novel areas become detail queries, through the same fence.
+The live benchmark (T7) runs after live run 3 of the MVP acceptance.
+
 ## 6. Integration without disturbing the MVP
 
 - T1, T3 and T6 touch no line the serial Sources run executes differently; T1 keeps the default behaviour of
