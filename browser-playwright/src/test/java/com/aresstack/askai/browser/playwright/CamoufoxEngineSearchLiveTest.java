@@ -10,7 +10,14 @@ import com.aresstack.askai.browser.search.LegacyBrowserSearchSettings;
 import org.junit.After;
 import org.junit.Test;
 
+import com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog;
+import com.aresstack.askai.browser.search.engine.SearchEngineCatalog;
+import com.aresstack.askai.browser.search.engine.SearchEngineCatalogEntry;
+import com.aresstack.askai.browser.search.engine.SearchEngineImplementationStatus;
+
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assume.assumeTrue;
@@ -22,7 +29,10 @@ import static org.junit.Assume.assumeTrue;
  * as {@code <snapshot>.html} (scripts removed) and {@code <snapshot>.capture.json} (the rendered capture the
  * extraction works on), so a failing engine can be replayed offline.
  *
- * <p>Opt-in: {@code ASKAI_LIVE_ENGINES=google} (comma-separated catalog ids), optional {@code ASKAI_LIVE_QUERY}
+ * <p>Opt-in: {@code ASKAI_LIVE_ENGINES=google} (comma-separated catalog ids) or {@code ASKAI_LIVE_ENGINES=experimental}
+ * (every {@code EXPERIMENTAL} engine of the catalog that has a driver, each searched on its own, one after another,
+ * so each gets its own attempt line and item count: the check before an engine becomes {@code SUPPORTED}). Never
+ * part of the default CI run: it sends real requests from the machine's IP. Optional {@code ASKAI_LIVE_QUERY}
  * (default "Java 21 LTS release") and {@code ASKAI_LIVE_CAMOUFOX_HEADED=1}. Diagnostic output only, no assertion
  * on the engine's answer: what an engine serves changes from day to day.</p>
  */
@@ -48,7 +58,51 @@ public class CamoufoxEngineSearchLiveTest {
         boolean headless = !"1".equals(System.getenv("ASKAI_LIVE_CAMOUFOX_HEADED"));
         session = PlaywrightSessionFactory.create(CamoufoxProvisioning.CHANNEL, headless, false, null,
                 BrowserLimits.defaults(), settings);
-        List<String> ids = Arrays.asList(engines.split("\\s*,\\s*"));
+        if (EXPERIMENTAL.equalsIgnoreCase(engines.trim())) {
+            List<String> failed = new ArrayList<String>();
+            for (String id : experimentalEnginesWithDriver()) {
+                try {
+                    report(query, Collections.singletonList(id)); // one engine per search: one verdict per engine
+                } catch (Exception | AssertionError engineFailure) {
+                    // an unreachable engine is that engine's verdict; the sweep goes on with the next one
+                    failed.add(id);
+                    System.err.println("[engine-live] engines=[" + id + "] query=" + query + " FAILED: "
+                            + engineFailure);
+                }
+            }
+            System.err.println("[engine-live] experimental sweep done; failed=" + failed);
+            return;
+        }
+        report(query, Arrays.asList(engines.split("\\s*,\\s*")));
+    }
+
+    private static final String EXPERIMENTAL = "experimental";
+
+    /** Offline: which engines the "experimental" run covers (no browser, no request). */
+    @Test
+    public void theExperimentalRunCoversEveryUnvalidatedDriverButNotGoogle() {
+        List<String> ids = experimentalEnginesWithDriver();
+        org.junit.Assert.assertTrue(ids.toString(), ids.contains(BrowserSearchEngineCatalog.STARTPAGE));
+        org.junit.Assert.assertTrue(ids.toString(), ids.contains(BrowserSearchEngineCatalog.YAHOO));
+        org.junit.Assert.assertFalse("Google is SUPPORTED and runs in the search browser",
+                ids.contains(BrowserSearchEngineCatalog.GOOGLE));
+        org.junit.Assert.assertFalse(ids.contains(BrowserSearchEngineCatalog.DUCKDUCKGO));
+    }
+
+    /** The catalog's EXPERIMENTAL engines that the research browser can search with. */
+    static List<String> experimentalEnginesWithDriver() {
+        List<String> ids = new ArrayList<String>();
+        for (SearchEngineCatalogEntry entry : SearchEngineCatalog.entries()) {
+            if (entry.getStatus() == SearchEngineImplementationStatus.EXPERIMENTAL
+                    && BrowserSearchEngineCatalog.byId(entry.getId()) != null
+                    && !BrowserSearchEngineCatalog.runsInSearchBrowser(entry.getId())) {
+                ids.add(entry.getId());
+            }
+        }
+        return ids;
+    }
+
+    private void report(String query, List<String> ids) throws Exception {
         long started = System.currentTimeMillis();
         WebSearchResult result = session.search(query, ids);
         System.err.println("[engine-live] engines=" + ids + " query=" + query + " items="
