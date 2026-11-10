@@ -53,10 +53,11 @@ public class SearchEngineTableEditorTest {
             SearchEngineTableEditor editor = new SearchEngineTableEditor(DEFAULTS);
             editor.addEngine("google");
             assertEquals(4, editor.table().getRowCount());
-            assertTrue(editor.get().endsWith(",google:on:3:0:3:de+en+fr+es+it:off:"));
+            assertTrue("a new Google row starts with the catalog's delay",
+                    editor.get().endsWith(",google:on:3:15:3:de+en+fr+es+it:off:"));
             editor.toggleLanguage(3, "es");
             editor.toggleLanguage(3, "ru");
-            assertTrue(editor.get(), editor.get().endsWith(",google:on:3:0:3:de+en+fr+it+ru:off:"));
+            assertTrue(editor.get(), editor.get().endsWith(",google:on:3:15:3:de+en+fr+it+ru:off:"));
             editor.removeRow(3);
             assertEquals(DEFAULTS, editor.get());
         });

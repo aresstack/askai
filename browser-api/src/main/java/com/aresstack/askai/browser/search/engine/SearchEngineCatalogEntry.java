@@ -22,6 +22,7 @@ public final class SearchEngineCatalogEntry {
     private final SearchEngineImplementationStatus status;
     private final String statusNote;
     private final boolean languageFilter;
+    private final int defaultDelayMillis;
 
     /**
      * @param id               stable technical id, persisted in the settings (lower case, digits, {@code -})
@@ -37,7 +38,7 @@ public final class SearchEngineCatalogEntry {
      */
     public SearchEngineCatalogEntry(String id, String displayName, String origin, String homeUrl, String indexSource,
                                     List<String> defaultLanguages, SearchEngineImplementationStatus status,
-                                    String statusNote, boolean languageFilter) {
+                                    String statusNote, boolean languageFilter, int defaultDelayMillis) {
         if (id == null || !id.matches("[a-z][a-z0-9-]*")) {
             throw new IllegalArgumentException("catalog id must be lower case letters, digits or '-': " + id);
         }
@@ -61,6 +62,7 @@ public final class SearchEngineCatalogEntry {
         this.status = status;
         this.statusNote = statusNote == null ? "" : statusNote.trim();
         this.languageFilter = languageFilter;
+        this.defaultDelayMillis = Math.max(0, defaultDelayMillis);
     }
 
     public String getId() {
@@ -99,6 +101,16 @@ public final class SearchEngineCatalogEntry {
     /** Whether AskAI sets a real language filter at this engine (else: language only through the query words). */
     public boolean hasLanguageFilter() {
         return languageFilter;
+    }
+
+    /**
+     * The pause before each further request to this engine that a new row starts with, in milliseconds — the
+     * "Delay (s)" a row gets when its configuration names none (a new row, or a row written before delays existed).
+     * 0 for engines that take requests as they come; Google names one because unpaced request bursts end in a
+     * challenge that blocks the search browser.
+     */
+    public int getDefaultDelayMillis() {
+        return defaultDelayMillis;
     }
 
     /** Whether AskAI can search with this engine now ({@link SearchEngineImplementationStatus#isSearchable()}). */
