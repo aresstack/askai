@@ -56,6 +56,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField teamFollowLinks = ComicControls.textField(3);
     private final JTextField teamPageCharacters = ComicControls.textField(6);
     private final JTextField teamAnswerTokens = ComicControls.textField(5);
+    private final JTextField teamSearchesPerPage = ComicControls.textField(3);
+    private final JTextField teamNextSearchBelow = ComicControls.textField(3);
+    private final JTextField teamSeedQueries = ComicControls.textField(3);
     // Worker browsers (parallel research workers): separate from the model capacity.
     private final JTextField workerProcesses = ComicControls.textField(3);
     private final JTextField workerUserContexts = ComicControls.textField(3);
@@ -172,6 +175,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         team.row("Sources phase", group(teamEnabled, labelled("Workers", teamWorkers)));
         team.row("Page worker", group(labelled("Links to follow", teamFollowLinks),
                 labelled("Page characters", teamPageCharacters), labelled("Answer tokens", teamAnswerTokens)));
+        team.row("New searches", group(labelled("Per page", teamSearchesPerPage),
+                labelled("Next search below open pages", teamNextSearchBelow),
+                labelled("Seed queries per node", teamSeedQueries)));
 
         // Orchestrated research (ADR 0001 lane F/G): the plan of work packages, its limits and the worker browsers.
         com.aresstack.comiccontrols.control.ComicForm orchestrator =
@@ -406,6 +412,18 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(teamAnswerTokens, ResearchRuntimeSettings.KEY_TEAM_ANSWER_TOKENS,
                 ResearchRuntimeSettings.DEFAULT_TEAM_ANSWER_TOKENS,
                 "The longest answer of one page worker turn (tokens): its summary, verdict, links and messages.");
+        bindNonNegativeLimit(teamSearchesPerPage, ResearchRuntimeSettings.KEY_TEAM_SEARCHES_PER_PAGE,
+                ResearchRuntimeSettings.DEFAULT_TEAM_SEARCHES_PER_PAGE,
+                "How many new search queries a page worker may suggest per page it reads. Each passes the Weidezaun "
+                        + "and the blacklist and then runs before the planned queries; 0 = none.");
+        bindLimit(teamNextSearchBelow, ResearchRuntimeSettings.KEY_TEAM_NEXT_SEARCH_BELOW,
+                ResearchRuntimeSettings.DEFAULT_TEAM_WORKERS,
+                "The next search starts when fewer pages than this are still open in the running one, so the "
+                        + "workers never wait at the end of a search. Usually the worker count.");
+        bindLimit(teamSeedQueries, ResearchRuntimeSettings.KEY_TEAM_SEED_QUERIES_PER_NODE,
+                ResearchRuntimeSettings.DEFAULT_TEAM_SEED_QUERIES_PER_NODE,
+                "With the research team, the plan starts with this many queries per concept node (breadth first); "
+                        + "the deeper queries come from what the team reads, up to Queries per node.");
         bindLimit(workerProcesses, ResearchRuntimeSettings.KEY_WORKER_BROWSER_PROCESSES,
                 ResearchRuntimeSettings.DEFAULT_WORKER_BROWSER_PROCESSES,
                 "Worker browser processes for parallel research workers, over all chats. This is also how many "

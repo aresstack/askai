@@ -31,7 +31,8 @@ public final class BackendManualWebSearchPort implements ManualWebSearchPort {
                         request.getLanguage().getCode(), request.getRanking(), request.getVisitLimit(),
                         request.getSourceCap(), request.getTeamNode(), request.getTeamBook(),
                         request.getTeamFollow(), request.getTeamPageCharacters(),
-                        request.getTeamAnswerTokens())
+                        request.getTeamAnswerTokens(), request.getTeamWorkers(), request.getTeamSearches(),
+                        request.getTeamArea())
                 : ResearchServiceCommandWire.manualSearch(requestId, request.getQuery(),
                         request.getLanguage().getCode(), request.getRanking(), request.getVisitLimit(),
                         request.getSourceCap());

@@ -187,6 +187,21 @@ public class QueryPlannerTest {
     }
 
     @Test
+    public void theWeidezaunReachesThePlannerPromptAndCrossesTheWire() {
+        ConceptQueryPlan.Node node = new ConceptQueryPlan.Node("n1", "Hitze", Arrays.asList("Hitze"), "", "Hitze Bau");
+        ConceptQueryPlan.Request request = new ConceptQueryPlan.Request("de", "Wearables am Bau",
+                Collections.singletonList(node), Collections.<String>emptyList(), Collections.<String>emptyList(), 2)
+                .withArea("IN: Hitzeschutz am Bau\nOUT: Freizeitsport");
+        String prompt = QueryPlanner.conceptPrompt(request, node, "Hitze Bau", request.getQueriesRun());
+        assertTrue(prompt, prompt.contains("AREA OF THE BOOK\nIN: Hitzeschutz am Bau\nOUT: Freizeitsport"));
+        assertTrue(QueryPlanner.CONCEPT_SYSTEM.contains("AREA OF THE BOOK"));
+        assertEquals(request.getArea(), com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(
+                com.aresstack.askai.research.plan.QueryPlanWireCodec.encodeRequest(request)).getArea());
+        assertTrue(!QueryPlanner.conceptPrompt(request.withArea(""), node, "Hitze Bau", request.getQueriesRun())
+                .contains("AREA OF THE BOOK"));
+    }
+
+    @Test
     public void aLaterCyclePromptCarriesWhatThePageWorkersReported() {
         ConceptQueryPlan.Node node = new ConceptQueryPlan.Node("n1", "Hitze", Arrays.asList("Wearables", "Hitze"),
                 "root", "Hitze Wearables Baustelle", Arrays.asList("a.example"),

@@ -48,7 +48,12 @@ public final class SearchPlanEntry {
         /** Added or edited by the user. */
         USER,
         /** The comment of "Request changes" at the Sources gate; runs first. */
-        PRIORITY;
+        PRIORITY,
+        /**
+         * Plan T4: a query a page worker found while reading a hit of an earlier search, inside the Weidezaun; runs
+         * before every planned entry, so the searches build on what was read.
+         */
+        WORKER;
 
         String token() {
             return name().toLowerCase(Locale.ROOT);

@@ -36,6 +36,10 @@ public final class ResearchRunWire {
     public static final String TYPE_MANUAL_SEARCH_PROGRESS = "manual_search_progress";
     /** Plan T4: a page worker's message to the orchestrator, correlated with its planned query. */
     public static final String TYPE_MANUAL_SEARCH_TEAM_NOTE = "manual_search_team_note";
+    /** Plan T4: how many pages of a team search are still open. */
+    public static final String TYPE_MANUAL_SEARCH_OPEN_PAGES = "manual_search_open_pages";
+    /** Plan T4: a new search query a page worker suggested, with the fence's verdict. */
+    public static final String TYPE_MANUAL_SEARCH_TEAM_QUERY = "manual_search_team_query";
     public static final String TYPE_MANUAL_SEARCH_COMPLETED = "manual_search_completed";
     public static final String TYPE_MANUAL_SEARCH_REVIEW = "manual_search_review";
     public static final String TYPE_MANUAL_SEARCH_FAILED = "manual_search_failed";

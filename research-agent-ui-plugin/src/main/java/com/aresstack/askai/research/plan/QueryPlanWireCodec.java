@@ -46,6 +46,7 @@ public final class QueryPlanWireCodec {
     static final String CYCLE = "cycle";
     static final String DOMAINS_FOUND = "domains_found";
     static final String WORKER_NOTES = "worker_notes";
+    static final String AREA = "area";
 
     private static JsonArray array(List<String> values) {
         JsonArray array = new JsonArray();
@@ -89,6 +90,7 @@ public final class QueryPlanWireCodec {
         root.addProperty(CYCLE, request.getCycle());
         root.add(QUERIES_RUN, array(request.getQueriesRun()));
         root.add(BLACKLIST, array(request.getBlacklist()));
+        root.addProperty(AREA, request.getArea());
         JsonArray nodes = new JsonArray();
         for (ConceptQueryPlan.Node node : request.getNodes()) {
             JsonObject n = new JsonObject();
@@ -124,7 +126,7 @@ public final class QueryPlanWireCodec {
             return new ConceptQueryPlan.Request(text(root, LANGUAGE), text(root, BOOK_TITLE), nodes,
                     strings(root, QUERIES_RUN), strings(root, BLACKLIST),
                     max == null || !max.isJsonPrimitive() ? 0 : max.getAsInt(),
-                    cycle == null || !cycle.isJsonPrimitive() ? 1 : cycle.getAsInt());
+                    cycle == null || !cycle.isJsonPrimitive() ? 1 : cycle.getAsInt(), text(root, AREA));
         } catch (RuntimeException malformed) {
             throw malformed instanceof IllegalArgumentException ? (IllegalArgumentException) malformed
                     : new IllegalArgumentException(malformed.getMessage(), malformed);

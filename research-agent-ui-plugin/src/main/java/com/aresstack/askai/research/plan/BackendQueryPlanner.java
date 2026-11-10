@@ -24,6 +24,18 @@ public final class BackendQueryPlanner implements SearchPlanBuilder.VariantPlann
 
     private final Submitter submitter;
     private final long timeoutMillis;
+    /** The book's Weidezaun as the planner reads it (the rendered scope); "" when there is none. */
+    public interface AreaSource {
+        String area();
+    }
+
+    private volatile AreaSource areaSource;
+
+    /** Every request from now on carries the current Weidezaun, at the seed plan and at every later cycle. */
+    public void setAreaSource(AreaSource source) {
+        this.areaSource = source;
+    }
+
     private final Map<String, BlockingQueue<String>> pending = new ConcurrentHashMap<String, BlockingQueue<String>>();
 
     public BackendQueryPlanner(Submitter submitter, long timeoutMillis) {
@@ -37,8 +49,12 @@ public final class BackendQueryPlanner implements SearchPlanBuilder.VariantPlann
         BlockingQueue<String> answer = new ArrayBlockingQueue<String>(1);
         pending.put(requestId, answer);
         try {
+            AreaSource source = areaSource;
+            String area = source == null ? "" : source.area();
+            ConceptQueryPlan.Request fenced = request.getArea().isEmpty() && area != null && !area.trim().isEmpty()
+                    ? request.withArea(area) : request;
             if (!submitter.submit(ResearchServiceCommandWire.planQueries(requestId,
-                    QueryPlanWireCodec.encodeRequest(request)))) {
+                    QueryPlanWireCodec.encodeRequest(fenced)))) {
                 return null;
             }
             String payload = answer.poll(timeoutMillis, TimeUnit.MILLISECONDS);

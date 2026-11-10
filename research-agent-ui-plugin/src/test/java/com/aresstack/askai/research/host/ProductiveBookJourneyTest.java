@@ -168,6 +168,38 @@ public class ProductiveBookJourneyTest {
 
     private static long sequence;
 
+    /** The user finishes Sources: the running seed plan is stopped first (see {@link #stopSeedPlan}). */
+    static void finishSources(Fx fx) {
+        stopSeedPlan(fx);
+        assertHandled(fx.session.executeCommand("finish-sources", ""));
+    }
+
+    /**
+     * The seed plan is built on its own thread at submit-scope and its first query never ends in this recording
+     * runtime. The user stops it, as the "Stop search plan" button does: wait until the query runs, stop the plan,
+     * and end the query as the cancelled search would (it goes back to pending).
+     */
+    static void stopSeedPlan(Fx fx) {
+        com.aresstack.askai.research.plan.SearchPlanQueue queue = fx.session.searchPlanQueue();
+        if (queue == null) {
+            return;
+        }
+        long deadline = System.currentTimeMillis() + 3000;
+        while (!queue.hasRunningEntry() && System.currentTimeMillis() < deadline) {
+            Thread.yield();
+        }
+        fx.session.stopSearchPlan();
+        try {
+            for (com.aresstack.askai.research.plan.SearchPlanEntry entry : queue.entriesInOrder()) {
+                if (entry.getStatus() == com.aresstack.askai.research.plan.SearchPlanEntry.Status.RUNNING) {
+                    queue.onSearchEvent(entry.getRequestId(), "failed", "Cancelled", false);
+                }
+            }
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            throw new IllegalStateException(corrupt);
+        }
+    }
+
     static void settle(Fx fx) {
         try {
             assertTrue(fx.session.awaitTransitionEffects(5000));
@@ -255,7 +287,7 @@ public class ProductiveBookJourneyTest {
         assertNull("the pill offers nothing for the current phase",
                 fx.session.currentResearchSnapshot().advanceCommandFor(ResearchStateIds.RESEARCH));
 
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertEquals("research/waiting_approval", phase(fx));
         assertTrue(tagCommands(fx).contains("approve"));
         assertTrue(tagCommands(fx).contains("request-changes"));
@@ -263,7 +295,7 @@ public class ProductiveBookJourneyTest {
         // Request changes with a comment returns to research/running at the Sources gate.
         assertHandled(fx.session.executeCommand("request-changes", "add two primary sources"));
         assertEquals("research/running", phase(fx));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertEquals("research/waiting_approval", phase(fx));
 
         assertHandled(fx.session.executeCommand("approve", ""));
@@ -343,6 +375,7 @@ public class ProductiveBookJourneyTest {
         assertFalse(tags.contains("accept-limitation"));
         assertFalse(tags.contains("limit"));
         assertTrue(tags.contains("end"));
+        stopSeedPlan(fx);
         assertHandled(fx.session.executeCommand("end", ""));
         assertEquals("research/waiting_approval", phase(fx));
     }
@@ -478,7 +511,7 @@ public class ProductiveBookJourneyTest {
         firstMessage(fx, "A book");
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertEquals("research/waiting_approval", phase(fx));
         for (com.aresstack.askai.research.state.CommandSurface surface
                 : com.aresstack.askai.research.state.CommandSurface.values()) {
@@ -502,7 +535,7 @@ public class ProductiveBookJourneyTest {
         firstMessage(fx, "A book");
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         long seen = fx.resources.currentState().getRevision();
         assertHandled(fx.session.executeUserCommand("approve", "", seen));
         String second = fx.session.executeUserCommand("approve", "", seen);
@@ -516,7 +549,7 @@ public class ProductiveBookJourneyTest {
         firstMessage(fx, "A book");
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertHandled(fx.session.executeCommand("approve", ""));
         OutlineTestSupport.makeFinishable(fx.session);
         assertHandled(fx.session.executeCommand("finish-outline", ""));
@@ -541,7 +574,7 @@ public class ProductiveBookJourneyTest {
         firstMessage(fx, "A book");
         ConceptTestSupport.makeSubmittable(fx.session);
         assertHandled(fx.session.executeCommand("submit-scope", ""));
-        assertHandled(fx.session.executeCommand("finish-sources", ""));
+        finishSources(fx);
         assertHandled(fx.session.executeCommand("approve", ""));
         assertEquals("outline/running", phase(fx));
         assertFalse("busy means an agent turn in flight", fx.session.getState().isBusy());

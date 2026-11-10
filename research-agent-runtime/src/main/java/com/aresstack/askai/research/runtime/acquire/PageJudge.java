@@ -57,8 +57,16 @@ public interface PageJudge {
         private final boolean useful;
         private final String reason;
         private final List<Integer> follow;
+        private final List<String> searches;
 
         public Verdict(boolean useful, String reason, List<Integer> follow) {
+            this(useful, reason, follow, null);
+        }
+
+        /** @param searches new search queries the page suggests; they go into the search plan at once */
+        public Verdict(boolean useful, String reason, List<Integer> follow, List<String> searches) {
+            this.searches = searches == null ? Collections.<String>emptyList()
+                    : Collections.unmodifiableList(new ArrayList<String>(searches));
             this.useful = useful;
             this.reason = reason == null ? "" : reason;
             this.follow = follow == null ? Collections.<Integer>emptyList()
@@ -75,6 +83,11 @@ public interface PageJudge {
 
         public List<Integer> getFollow() {
             return follow;
+        }
+
+        /** The new search queries the page suggests (empty when none). */
+        public List<String> getSearches() {
+            return searches;
         }
 
         /** The chosen links out of {@code links} (numbers outside the list are ignored). */

@@ -97,6 +97,7 @@ public final class ConceptQueryPlan {
         private final List<String> blacklist;
         private final int maxVariantsPerNode;
         private final int cycle;
+        private final String area;
 
         /**
          * @param language           the language code the queries must be written in ("de", "en")
@@ -117,6 +118,16 @@ public final class ConceptQueryPlan {
          */
         public Request(String language, String bookTitle, List<Node> nodes, List<String> queriesRun,
                        List<String> blacklist, int maxVariantsPerNode, int cycle) {
+            this(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle, "");
+        }
+
+        /**
+         * @param area the Weidezaun: the rendered scope of the book (what belongs to the area and what it excludes);
+         *             every planned query stays inside it. Empty when the host has none.
+         */
+        public Request(String language, String bookTitle, List<Node> nodes, List<String> queriesRun,
+                       List<String> blacklist, int maxVariantsPerNode, int cycle, String area) {
+            this.area = area == null ? "" : area.trim();
             this.language = text(language);
             this.bookTitle = text(bookTitle);
             this.nodes = nodes == null ? Collections.<Node>emptyList()
@@ -129,7 +140,18 @@ public final class ConceptQueryPlan {
 
         /** The same request with the book title and blacklist of the frozen concept (the host fills them in). */
         public Request withBook(String title, List<String> terms) {
-            return new Request(language, title, nodes, queriesRun, terms, maxVariantsPerNode, cycle);
+            return new Request(language, title, nodes, queriesRun, terms, maxVariantsPerNode, cycle, area);
+        }
+
+        /** The same request with the book's Weidezaun (the host fills it in before sending). */
+        public Request withArea(String renderedScope) {
+            return new Request(language, bookTitle, nodes, queriesRun, blacklist, maxVariantsPerNode, cycle,
+                    renderedScope);
+        }
+
+        /** The Weidezaun of the book; empty when the host sent none. */
+        public String getArea() {
+            return area;
         }
 
         public String getLanguage() {

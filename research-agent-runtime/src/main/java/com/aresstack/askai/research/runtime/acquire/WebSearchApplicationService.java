@@ -227,20 +227,22 @@ public final class WebSearchApplicationService {
      * Ids for the search hits of THIS run, minted in discovery order. They are what makes a hit addressable
      * later ("open #18 again") — a URL is not an identity: the same page can appear on several result pages.
      */
-    private final java.util.Map<String, String> candidateIdByUrl = new java.util.LinkedHashMap<String, String>();
+    private final java.util.Map<String, String> candidateIdByUrl =
+            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, String>());
     /** Expected-content similarity at/above which an ambiguous verdict is rescued to READABLE. */
     private static final double EXPECTED_CONTENT_HIGH = 0.80;
     /** Authoritative language snapshot (ISO code) for the INITIAL SERP request; null keeps the provider default. */
     private volatile String searchLanguage;
 
     /** Sites of the search engine(s) used this run — pure TRANSIT: never a page, host, source or link farm. */
-    private final Set<String> searchProviderSites = new HashSet<String>();
+    private final Set<String> searchProviderSites = java.util.Collections.synchronizedSet(new HashSet<String>());
     /** Domain families with a pending MANUAL challenge: locked (no navigation/retry) until resolved. */
-    private final Set<String> challengedFamilies = new HashSet<String>();
+    private final Set<String> challengedFamilies = java.util.Collections.synchronizedSet(new HashSet<String>());
     /** Domain families that returned a TERMINAL access block this run: skipped for good (never retried). */
-    private final Set<String> blockedFamilies = new HashSet<String>();
+    private final Set<String> blockedFamilies = java.util.Collections.synchronizedSet(new HashSet<String>());
     /** Frontier URLs deferred because their family is challenge-locked (QUEUED_DOMAIN_BLOCKED). */
-    private final List<FrontierEntry> deferredUrls = new ArrayList<FrontierEntry>();
+    private final List<FrontierEntry> deferredUrls =
+            java.util.Collections.synchronizedList(new ArrayList<FrontierEntry>());
     /** Time spent waiting for the USER (manual challenge) — never counted against the time budget. */
     private long waitedForUserMillis;
     private long lastChallengeProbeAt;
@@ -329,6 +331,205 @@ public final class WebSearchApplicationService {
      */
     public void setPageJudge(PageJudge judge) {
         this.pageJudge = judge;
+    }
+
+    /**
+     * Plan T4, the research team: one tab of the page browser and the page worker that reads in it. With two or more
+     * lanes the hits of THIS search are visited side by side, one page per lane at a time, all lanes drawing from the
+     * same frontier; the site leases of the worker browsers keep two lanes off the same site.
+     */
+    public static final class Lane {
+        final ToolInvoker tools;
+        final PageJudge judge;
+
+        public Lane(ToolInvoker tools, PageJudge judge) {
+            if (tools == null) {
+                throw new IllegalArgumentException("a lane needs its tab");
+            }
+            this.tools = tools;
+            this.judge = judge;
+        }
+    }
+
+    /** How many pages of this search are still open (queued or being read); the plan starts the next search early. */
+    public interface OpenPagesListener {
+        void openPages(int open);
+    }
+
+    /**
+     * Where the page workers' new search queries go after the Weidezaun and the blacklist have judged them:
+     * {@code rejectedReason} is {@code null} for a query that may be searched, otherwise why it was dropped.
+     */
+    public interface SuggestionSink {
+        void suggested(String query, String pageUrl, String rejectedReason);
+    }
+
+    private volatile List<Lane> lanes = java.util.Collections.emptyList();
+    private volatile OpenPagesListener openPagesListener;
+    private volatile SuggestionSink suggestionSink;
+    private final ThreadLocal<Lane> currentLane = new ThreadLocal<Lane>();
+
+    public void setLanes(List<Lane> lanes) {
+        this.lanes = lanes == null ? java.util.Collections.<Lane>emptyList()
+                : java.util.Collections.unmodifiableList(new ArrayList<Lane>(lanes));
+    }
+
+    public void setOpenPagesListener(OpenPagesListener listener) {
+        this.openPagesListener = listener;
+    }
+
+    public void setSuggestionSink(SuggestionSink sink) {
+        this.suggestionSink = sink;
+    }
+
+    /**
+     * The page workers' new queries pass the same fence as everything else in this run: the typed blacklist, then
+     * the scope control against the Weidezaun. Every dropped query is reported with its reason, never swallowed.
+     */
+    private void vetSuggestions(List<String> queries, String pageUrl) {
+        SuggestionSink sink = suggestionSink;
+        if (sink == null || queries == null || queries.isEmpty()) {
+            return;
+        }
+        List<SearchScopeControlPort.Item> items = new ArrayList<SearchScopeControlPort.Item>();
+        java.util.Map<String, String> rejected = new java.util.LinkedHashMap<String, String>();
+        for (String query : queries) {
+            String hit = blacklist.firstMatch(query, "", "");
+            if (hit != null) {
+                rejected.put(query, "blacklist \"" + hit + "\"");
+            } else {
+                items.add(new SearchScopeControlPort.Item(query, query));
+            }
+        }
+        java.util.Map<String, SearchScopeControlPort.Decision> verdicts = scopeVerdicts("query", items);
+        for (SearchScopeControlPort.Item item : items) {
+            if (verdicts == null) {
+                rejected.put(item.id, "scope check unavailable");
+                continue;
+            }
+            SearchScopeControlPort.Decision decision = verdicts.get(item.id);
+            if (decision != null && decision.out) {
+                rejected.put(item.id, "outside scope (nearest exclusion: " + decision.nearestOutLabel + ")");
+            }
+        }
+        for (String query : queries) {
+            String reason = rejected.get(query);
+            listener.status(reason == null ? "page worker suggests search \"" + query + "\" (from " + pageUrl + ")"
+                    : "page worker search \"" + query + "\" dropped: " + reason);
+            sink.suggested(query, pageUrl, reason);
+        }
+    }
+
+    /**
+     * The research team's page phase: every lane takes the next page of the shared frontier, reads it in its own tab
+     * and adds what it found back to the frontier; the run ends when no page is left and no lane is still reading,
+     * or at the first stop reason any lane meets (the completion target, a budget, a cancel).
+     */
+    private ResearchStopReason runLanes(List<FrontierEntry> frontier, final Set<String> terms) {
+        final List<FrontierEntry> shared = java.util.Collections.synchronizedList(frontier);
+        final int[] busy = {0};
+        final ResearchStopReason[] stop = {null};
+        final boolean[] exhausted = {false};
+        List<Thread> threads = new ArrayList<Thread>();
+        int number = 0;
+        for (final Lane lane : lanes) {
+            number++;
+            Thread thread = new Thread(new Runnable() {
+                public void run() {
+                    currentLane.set(lane);
+                    try {
+                        while (true) {
+                            FrontierEntry next;
+                            synchronized (shared) {
+                                while (true) {
+                                    if (stop[0] != null || exhausted[0]) {
+                                        return;
+                                    }
+                                    ResearchStopReason gate = stopReasonNow();
+                                    if (gate != null) {
+                                        stop[0] = gate;
+                                        shared.notifyAll();
+                                        return;
+                                    }
+                                    if (!shared.isEmpty()) {
+                                        next = shared.remove(0);
+                                        busy[0]++;
+                                        reportOpenPages(shared.size() + busy[0]);
+                                        break;
+                                    }
+                                    if (busy[0] == 0) {
+                                        exhausted[0] = true; // nothing queued, nobody reading who could add more
+                                        shared.notifyAll();
+                                        return;
+                                    }
+                                    try {
+                                        shared.wait();
+                                    } catch (InterruptedException interrupted) {
+                                        stop[0] = ResearchStopReason.USER_CANCELLED;
+                                        shared.notifyAll();
+                                        return;
+                                    }
+                                }
+                            }
+                            ResearchStopReason visited;
+                            try {
+                                visited = visitOne(next, terms, shared);
+                            } catch (RuntimeException failed) {
+                                listener.status("[web-search] page lane failed url=" + next.getUrl() + " cause="
+                                        + describe(failed));
+                                visited = null;
+                            }
+                            synchronized (shared) {
+                                busy[0]--;
+                                if (visited != null && stop[0] == null) {
+                                    stop[0] = visited;
+                                }
+                                reportOpenPages(shared.size() + busy[0]);
+                                shared.notifyAll();
+                            }
+                        }
+                    } finally {
+                        currentLane.remove();
+                    }
+                }
+            }, "page-lane-" + number);
+            thread.setDaemon(true);
+            threads.add(thread);
+        }
+        listener.status("research team: " + threads.size() + " tabs read the hits of \"" + relevanceQuery
+                + "\" side by side");
+        for (Thread thread : threads) {
+            thread.start();
+        }
+        for (Thread thread : threads) {
+            try {
+                thread.join();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                cancelled.set(true);
+                for (Thread other : threads) {
+                    other.interrupt();
+                }
+            }
+        }
+        reportOpenPages(0);
+        synchronized (shared) {
+            if (stop[0] != null) {
+                return stop[0];
+            }
+        }
+        ResearchStopReason gate = stopReasonNow();
+        if (gate != null) {
+            return gate;
+        }
+        return completionPolicy.labelExhaustion(ResearchStopReason.NO_RELEVANT_PATHS, progress);
+    }
+
+    private void reportOpenPages(int open) {
+        OpenPagesListener l = openPagesListener;
+        if (l != null) {
+            l.openPages(open);
+        }
     }
 
     /**
@@ -560,7 +761,23 @@ public final class WebSearchApplicationService {
             if (frontier.isEmpty()) {
                 return completionPolicy.labelExhaustion(ResearchStopReason.NO_RELEVANT_PATHS, progress);
             }
+            if (lanes.size() > 1) {
+                return runLanes(frontier, terms);
+            }
             FrontierEntry entry = frontier.remove(0);
+            ResearchStopReason visited = visitOne(entry, terms, frontier);
+            if (visited != null) {
+                return visited;
+            }
+        }
+    }
+
+    /**
+     * One page of the frontier: open it, judge it, accept or park it, and add the links worth following to
+     * {@code frontier}. {@code null} = go on with the next page; any other value ends the run. The serial loop and
+     * every lane of the research team (plan T4) run exactly this.
+     */
+    private ResearchStopReason visitOne(FrontierEntry entry, Set<String> terms, List<FrontierEntry> frontier) {
             String url = entry.getUrl();
             // From here on this page has its own identity: a Skip pressed while it is being worked on
             // belongs to THIS visit, and any of its work that finishes afterwards can tell that it does.
@@ -568,18 +785,18 @@ public final class WebSearchApplicationService {
             hudRelevantCurrentPage = false; // ⭐ is per page: start clean for this url
             String canonical = WebAcquisitionText.canonicalish(url);
             if (progress.alreadyVisited(canonical)) {
-                continue; // already visited → never navigate again
+                return null; // already visited → never navigate again
             }
             if (blockedFamilies.contains(familyOf(url))) {
                 // A terminal access block already hit this domain this run: never re-open it (unlike a
                 // pending challenge, there is nothing to resolve).
                 progress.noteVisitedAlias(canonical);
                 listener.status("skipped blocked domain: " + url);
-                continue;
+                return null;
             }
             if (challengedFamilies.contains(familyOf(url))) {
                 deferredUrls.add(entry); // QUEUED_DOMAIN_BLOCKED: starts only after the challenge resolves
-                continue;
+                return null;
             }
             // The research browser NEVER opens a search engine address: Google lists its hits as opaque
             // /goto?url=… wrappers, and following them here means a second browser identity hammering the
@@ -591,22 +808,22 @@ public final class WebSearchApplicationService {
                 String target = resolveEngineRedirect(url);
                 if (target == null) {
                     progress.noteVisitedAlias(canonical);
-                    continue;
+                    return null;
                 }
                 String targetCanonical = WebAcquisitionText.canonicalish(target);
                 if (progress.alreadyVisited(targetCanonical)) {
                     progress.noteVisitedAlias(canonical);
                     listener.status("skipped duplicate target: " + target + " (via " + url + ")");
-                    continue;
+                    return null;
                 }
                 if (blockedFamilies.contains(familyOf(target))) {
                     progress.noteVisitedAlias(canonical);
                     listener.status("skipped blocked domain: " + target + " (via " + url + ")");
-                    continue;
+                    return null;
                 }
                 if (challengedFamilies.contains(familyOf(target))) {
                     deferredUrls.add(entry.withUrl(target));
-                    continue;
+                    return null;
                 }
                 // The SERP lane only saw the opaque wrapper: the typed blacklist and the never-a-source URL
                 // shapes (hit list, shop catalogue) judge the real address now, BEFORE the research browser
@@ -620,7 +837,7 @@ public final class WebSearchApplicationService {
                     progress.noteVisitedAlias(targetCanonical);
                     listener.status("search-blacklist target skip url=" + target + " (via " + url + ") entry=\""
                             + targetHit + "\" -> not opened");
-                    continue;
+                    return null;
                 }
                 url = target;
                 canonical = targetCanonical;
@@ -642,7 +859,7 @@ public final class WebSearchApplicationService {
                     // an empty full text. The score already tells the user this hit still needs reading.
                     progress.noteVisitedAlias(canonical);
                     listener.status("left parked (not readable): " + url);
-                    continue;
+                    return null;
                 }
                 progress.success();
                 // Host diversity MUST come from the FINAL post-redirect URL the browser actually landed on —
@@ -663,7 +880,7 @@ public final class WebSearchApplicationService {
                     listener.status("skipped search-provider page: " + effectiveUrl);
                     listener.progress(progress,
                             ResearchRunActivity.pageSkipped(effectiveUrl, finalHost, pageTitle));
-                    continue;
+                    return null;
                 }
                 // askai #41 (lazy resolution): a search hit's redirect is resolved only when the hit is opened —
                 // an engine wrapper (Google /goto) by the search browser just before, any other redirect by this
@@ -679,7 +896,7 @@ public final class WebSearchApplicationService {
                         progress.noteVisitedAlias(canonical);
                         progress.noteVisitedAlias(provenanceCanonical);
                         listener.status("skipped duplicate target: " + effectiveUrl + " (via " + url + ")");
-                        continue;
+                        return null;
                     }
                 }
                 progress.pageVisited(finalCanonical, finalHost);
@@ -691,7 +908,7 @@ public final class WebSearchApplicationService {
                 listener.progress(progress, ResearchRunActivity.readingPage(effectiveUrl, finalHost, pageTitle));
                 if (visitSkipped()) {
                     skipCurrentPage(effectiveUrl, finalHost, pageTitle, "after reading it");
-                    continue;
+                    return null;
                 }
                 String captureId = WebAcquisitionText.field(page, "capture_id");
                 String pageText = page.toLowerCase(Locale.ROOT);
@@ -707,14 +924,14 @@ public final class WebSearchApplicationService {
                             + blacklistHit + "\" -> not accepted, not expanded");
                     listener.progress(progress,
                             ResearchRunActivity.pageSkipped(effectiveUrl, finalHost, pageTitle));
-                    continue;
+                    return null;
                 }
                 boolean relevant = isRelevantPage(entry, page, pageTitle, pageText, effectiveUrl, terms);
                 if (pageSkip.isCurrentVisitSkipped()) {
                     // The relevance answer belongs to a page the user has meanwhile abandoned. Whatever it
                     // says, it may not make this page a source.
                     skipCurrentPage(effectiveUrl, finalHost, pageTitle, "during the relevance check");
-                    continue;
+                    return null;
                 }
                 if (relevant) {
                     // SC1 page gate: the last guard against wrong SERP snippets — a loaded
@@ -736,9 +953,10 @@ public final class WebSearchApplicationService {
                         listener.progress(progress,
                                 ResearchRunActivity.pageSkipped(effectiveUrl, finalHost,
                                         pageTitle));
-                        continue;
+                        return null;
                     }
-                    PageJudge judge = pageJudge;
+                    Lane lane = currentLane.get();
+                    PageJudge judge = lane != null && lane.judge != null ? lane.judge : pageJudge;
                     if (judge != null) {
                         // Plan T4: the page worker reads the page before it may become a source. Its candidate
                         // links are the ones the relevance model picked; the worker chooses among them.
@@ -758,12 +976,15 @@ public final class WebSearchApplicationService {
                         if (cancelled.get()) {
                             return ResearchStopReason.USER_CANCELLED;
                         }
+                        if (verdict != null) {
+                            vetSuggestions(verdict.getSearches(), effectiveUrl);
+                        }
                         if (verdict != null && !verdict.isUseful()) {
                             listener.status("page worker: not useful url=" + effectiveUrl + " reason=\""
                                     + verdict.getReason() + "\" -> left parked, not expanded");
                             listener.progress(progress,
                                     ResearchRunActivity.pageSkipped(effectiveUrl, finalHost, pageTitle));
-                            continue;
+                            return null;
                         }
                         ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle,
                                 redirected ? provenanceUrl : "", resolution);
@@ -778,7 +999,7 @@ public final class WebSearchApplicationService {
                         for (String linkUrl : chosen) {
                             frontier.add(FrontierEntry.fromDiscoveredLink(linkUrl, url));
                         }
-                        continue;
+                        return null;
                     }
                     ResearchStopReason g3 = acceptSource(captureId, page, effectiveUrl, finalHost, pageTitle,
                             redirected ? provenanceUrl : "", resolution);
@@ -792,7 +1013,7 @@ public final class WebSearchApplicationService {
                     // its links is how one off-topic hit turned into a whole site of off-topic hits.
                     // Traversing deliberately chosen bridge pages would be its own policy, not a side
                     // effect of failing the relevance gate.
-                    continue;
+                    return null;
                 }
 
                 // Which of this page's links are worth opening is a relevance question, and it is asked
@@ -804,7 +1025,7 @@ public final class WebSearchApplicationService {
                 }
                 if (visitSkipped()) {
                     skipCurrentPage(effectiveUrl, finalHost, pageTitle, "before its links were read");
-                    continue;
+                    return null;
                 }
                 String links = callBrowser("web_links", args());
                 progress.success();
@@ -816,7 +1037,7 @@ public final class WebSearchApplicationService {
                     // An abandoned page hands nothing on: its links would carry the run onwards from a
                     // page the user has just said they do not want.
                     skipCurrentPage(effectiveUrl, finalHost, pageTitle, "while its links were assessed");
-                    continue;
+                    return null;
                 }
                 for (String linkUrl : follow) {
                     frontier.add(FrontierEntry.fromDiscoveredLink(linkUrl, url));
@@ -833,7 +1054,7 @@ public final class WebSearchApplicationService {
                         + (entry.getOrigin() == FrontierEntry.Origin.SEARCH_RESULT ? " (search hit kept)" : "")
                         + " cause=" + describe(ex));
             }
-        }
+        return null;
     }
 
     /**
@@ -2103,8 +2324,9 @@ public final class WebSearchApplicationService {
 
     private String callBrowser(String tool, Map<String, Object> a)
             throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
+        Lane lane = currentLane.get();
         try {
-            return browser.call(tool, a);
+            return (lane == null ? browser : lane.tools).call(tool, a);
         } catch (ToolInvoker.ToolFailure failure) {
             noteIfBrowserClosed(failure);
             throw failure;

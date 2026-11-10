@@ -28,6 +28,9 @@ public final class ManualWebSearchRequest {
     private final int teamPageCharacters;
     /** Plan T4: the longest answer of one page worker turn (tokens). */
     private final int teamAnswerTokens;
+    private int teamWorkers;
+    private int teamSearches;
+    private String teamArea = "";
 
     /** English snapshot convenience (legacy callers/tests without a session language). */
     public ManualWebSearchRequest(String query) {
@@ -71,6 +74,31 @@ public final class ManualWebSearchRequest {
                                          int answerTokens) {
         return new ManualWebSearchRequest(query, language, ranking, visitLimit, sourceCap, true, nodeLabel,
                 bookTitle, followLinks, pageCharacters, answerTokens);
+    }
+
+    /**
+     * Plan T4: the same team search with its tab count, the query suggestions a page worker may make per page and
+     * the Weidezaun those suggestions must stay inside.
+     */
+    public ManualWebSearchRequest withTeamLanes(int workers, int searches, String area) {
+        ManualWebSearchRequest copy = new ManualWebSearchRequest(query, language, ranking, visitLimit, sourceCap, team,
+                teamNode, teamBook, teamFollow, teamPageCharacters, teamAnswerTokens);
+        copy.teamWorkers = Math.max(0, workers);
+        copy.teamSearches = Math.max(0, searches);
+        copy.teamArea = area == null ? "" : area;
+        return copy;
+    }
+
+    public int getTeamWorkers() {
+        return teamWorkers;
+    }
+
+    public int getTeamSearches() {
+        return teamSearches;
+    }
+
+    public String getTeamArea() {
+        return teamArea;
     }
 
     public int getTeamAnswerTokens() {

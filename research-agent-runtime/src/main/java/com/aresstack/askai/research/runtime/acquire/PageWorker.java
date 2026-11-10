@@ -74,6 +74,8 @@ public final class PageWorker implements PageJudge {
             + "SUMMARY: what the page states that matters (2-5 sentences)\n"
             + "USEFUL: yes | partly | no - reason\n"
             + "FOLLOW: numbers of links worth opening, or none\n"
+            + "SEARCH: a new search query the page suggests (a term, name, standard, study or publisher it names "
+            + "that the book still needs), one per line, or none\n"
             + "TO ORCHESTRATOR: a message, or omit the line\n"
             + "TO WORKER <n>: a message for another worker, or omit the line";
 
@@ -92,6 +94,8 @@ public final class PageWorker implements PageJudge {
     private final String bookTitle;
     private final int maxFollow;
     private final int pageCharacters;
+    private final int maxSearch;
+    private final String area;
     private final Log log;
     private final List<String> summaries = new ArrayList<String>();
     private int pages;
@@ -104,6 +108,17 @@ public final class PageWorker implements PageJudge {
      */
     public PageWorker(Model model, AgentMailbox mailbox, String taskId, String nodeLabel, String bookTitle,
                       int maxFollow, int pageCharacters, Log log) {
+        this(model, mailbox, taskId, nodeLabel, bookTitle, maxFollow, pageCharacters, 0, "", log);
+    }
+
+    /**
+     * @param maxSearch at most this many new search queries the worker may suggest per page (setting; 0 = none)
+     * @param area      the Weidezaun of the book; the worker suggests only queries inside it ("" = none given)
+     */
+    public PageWorker(Model model, AgentMailbox mailbox, String taskId, String nodeLabel, String bookTitle,
+                      int maxFollow, int pageCharacters, int maxSearch, String area, Log log) {
+        this.maxSearch = Math.max(0, maxSearch);
+        this.area = area == null ? "" : area.trim();
         if (model == null || mailbox == null || taskId == null) {
             throw new IllegalArgumentException("model, mailbox and taskId are required");
         }
@@ -124,7 +139,7 @@ public final class PageWorker implements PageJudge {
         conversation.add(Turn.system(SYSTEM));
         conversation.add(Turn.user(prompt(page, inbox)));
         String answer = model.complete(conversation);
-        WorkerAnswerParser.Result parsed = new WorkerAnswerParser(maxFollow, page.getLinks().size()).parse(answer,
+        WorkerAnswerParser.Result parsed = new WorkerAnswerParser(maxFollow, page.getLinks().size(), maxSearch).parse(answer,
                 new WorkerAnswerParser.Repair() {
                     public String retry(String instruction) {
                         List<Turn> again = new ArrayList<Turn>(conversation);
@@ -156,7 +171,12 @@ public final class PageWorker implements PageJudge {
         log(page.getUrl() + " USEFUL " + worker.getUsefulness().name().toLowerCase(java.util.Locale.ROOT)
                 + (worker.getUsefulReason().isEmpty() ? "" : " - " + worker.getUsefulReason())
                 + " FOLLOW " + worker.getFollow());
-        return new Verdict(isUseful, worker.getUsefulReason(), worker.getFollow());
+        return new Verdict(isUseful, worker.getUsefulReason(), worker.getFollow(), worker.getSearches());
+    }
+
+    /** The task id this worker is registered under in the mailbox (the planned query's request id). */
+    public String taskId() {
+        return taskId;
     }
 
     /** Ends this worker's task in the mailbox with what it found; idempotent there. */
@@ -183,6 +203,10 @@ public final class PageWorker implements PageJudge {
         if (!nodeLabel.isEmpty()) {
             sb.append("Chapter node: ").append(nodeLabel).append(". ");
         }
+        if (!area.isEmpty()) {
+            sb.append("\nAREA OF THE BOOK (suggest searches only inside it, never for what it excludes):\n")
+                    .append(area).append('\n');
+        }
         sb.append("Query that found the page: ").append(page.getQuery()).append("\n");
         Integer number = mailbox.workerNumber(taskId);
         if (number != null) {
@@ -205,8 +229,12 @@ public final class PageWorker implements PageJudge {
         if (!messages.isEmpty()) {
             sb.append('\n').append(messages).append('\n');
         }
-        sb.append("\nAnswer with the lines SUMMARY, USEFUL, FOLLOW (at most ").append(maxFollow)
-                .append("), and TO ORCHESTRATOR or TO WORKER <n> only when you have a message.");
+        sb.append("\nAnswer with the lines SUMMARY, USEFUL, FOLLOW (at most ").append(maxFollow).append(")");
+        if (maxSearch > 0) {
+            sb.append(", SEARCH (at most ").append(maxSearch).append(" new queries this page leads to, inside the "
+                    + "area of the book, or none)");
+        }
+        sb.append(", and TO ORCHESTRATOR or TO WORKER <n> only when you have a message.");
         return sb.toString();
     }
 

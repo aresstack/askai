@@ -533,6 +533,39 @@ public final class ResearchRuntimeSettings {
         return loadPositiveInt(store, KEY_TEAM_ANSWER_TOKENS, DEFAULT_TEAM_ANSWER_TOKENS);
     }
 
+    /**
+     * Plan T4: how many new search queries a page worker may suggest per page it reads. Default 2: enough to follow
+     * a named standard or study, few enough that one search does not flood the plan.
+     */
+    public static final String KEY_TEAM_SEARCHES_PER_PAGE = "research.team.searchesPerPage";
+    public static final int DEFAULT_TEAM_SEARCHES_PER_PAGE = 2;
+
+    /**
+     * Plan T4: the next search starts when fewer pages than this are still open in the running one, so the team
+     * never runs dry. Default: the worker count.
+     */
+    public static final String KEY_TEAM_NEXT_SEARCH_BELOW = "research.team.nextSearchBelow";
+
+    /**
+     * Plan T4: the queries per concept node the seed plan starts with when the research team runs (the base query
+     * and the planner's variants). Default 1: the concept's breadth first, one query per node; the deeper queries
+     * come from what the team reads.
+     */
+    public static final String KEY_TEAM_SEED_QUERIES_PER_NODE = "research.team.seedQueriesPerNode";
+    public static final int DEFAULT_TEAM_SEED_QUERIES_PER_NODE = 1;
+
+    public static int loadTeamSearchesPerPage(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_TEAM_SEARCHES_PER_PAGE, DEFAULT_TEAM_SEARCHES_PER_PAGE);
+    }
+
+    public static int loadTeamNextSearchBelow(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_NEXT_SEARCH_BELOW, Math.max(1, loadTeamWorkers(store)));
+    }
+
+    public static int loadTeamSeedQueriesPerNode(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_SEED_QUERIES_PER_NODE, DEFAULT_TEAM_SEED_QUERIES_PER_NODE);
+    }
+
     public static int loadTeamFollowLinks(WorkspaceStateStore store) {
         return loadNonNegativeInt(store, KEY_TEAM_FOLLOW_LINKS, DEFAULT_TEAM_FOLLOW_LINKS);
     }

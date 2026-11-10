@@ -60,6 +60,8 @@ public final class QueryPlanner {
                     + "- Never repeat a query listed under ALREADY SEARCHED and never use a term listed under "
                     + "BLACKLIST.\n"
                     + "- Stay inside the node; do not widen the topic.\n"
+                    + "- AREA OF THE BOOK, when given, is the fence of the research: every query stays inside what it "
+                    + "includes and never aims at what it excludes.\n"
                     + "- When RESEARCH CYCLE is above 1, the earlier queries did not find enough sources for the "
                     + "node: change the strategy instead of rewording. Name the institutions, authorities, "
                     + "associations, standards bodies, universities, journals or publishers that publish on the "
@@ -279,6 +281,9 @@ public final class QueryPlanner {
                 .append("\n\n");
         if (!request.getBookTitle().isEmpty()) {
             sb.append("BOOK\n").append(request.getBookTitle()).append("\n\n");
+        }
+        if (!request.getArea().isEmpty()) {
+            sb.append("AREA OF THE BOOK\n").append(request.getArea()).append("\n\n");
         }
         sb.append("NODE\n").append(node.getLabel()).append('\n');
         if (!node.getPath().isEmpty()) {

@@ -94,6 +94,28 @@ public class PageWorkerTest {
     }
 
     @Test
+    public void aWorkerRelaysOnlyItsOwnReports() {
+        mailbox.send("q1", "orchestrator", "from q1");
+        mailbox.send("q2", "orchestrator", "from q2");
+        List<AgentMessage> own = mailbox.drainOrchestratorFrom("q1", 10);
+        assertEquals(1, own.size());
+        assertEquals("from q1", own.get(0).getText());
+        assertEquals("from q2", mailbox.drainOrchestratorFrom("q2", 10).get(0).getText());
+    }
+
+    @Test
+    public void theWorkerSeesTheWeidezaunAndHandsOnItsNewQueries() {
+        PageWorker fenced = new PageWorker(model, mailbox, "q1", "Hitze", "Wearables", 2, 1000, 1,
+                "IN: Hitzeschutz am Bau\nOUT: Freizeitsport", null);
+        String prompt = fenced.prompt(page("text"), Collections.<AgentMessage>emptyList());
+        assertTrue(prompt.contains("AREA OF THE BOOK"));
+        assertTrue(prompt.contains("OUT: Freizeitsport"));
+        assertTrue(prompt.contains("SEARCH (at most 1"));
+        answers.add("SUMMARY: s\nUSEFUL: yes\nFOLLOW: none\nSEARCH: ISO 7243\nSEARCH: WBGT");
+        assertEquals(Collections.singletonList("ISO 7243"), fenced.judge(page("text")).getSearches());
+    }
+
+    @Test
     public void noUsableAnswerMeansNoJudgementAndTheInboxComesBack() {
         mailbox.send("q2", "worker 1", "Look at the DGUV rules.");
         PageJudge.Verdict verdict = worker(2, 1000).judge(page("text"));

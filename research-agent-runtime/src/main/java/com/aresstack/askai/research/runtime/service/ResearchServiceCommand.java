@@ -89,6 +89,10 @@ public final class ResearchServiceCommand {
     private final int teamPageCharacters;
     /** Plan T4: the longest answer of one page worker turn (tokens); 0 = the runtime's default. */
     private final int teamAnswerTokens;
+    /** Plan T4: how many tabs (page workers) read the hits of this team search side by side; 0 = one. */
+    private int teamWorkers;
+    /** Plan T4: at most this many new search queries a page worker may suggest per page. */
+    private int teamSearches;
     private final String type;
     private final String requestId;
     private final String query;
@@ -164,6 +168,23 @@ public final class ResearchServiceCommand {
                                            int answerTokens) {
         return new ResearchServiceCommand(type, requestId, query, language, scope, capturedThrough, request,
                 ranking, visitLimit, sourceCap, team, node, book, follow, pageCharacters, answerTokens);
+    }
+
+    /** Plan T4: this team command with its lane count and the page workers' query suggestions per page. */
+    public ResearchServiceCommand withTeamLanes(int workers, int searches) {
+        ResearchServiceCommand copy = withTeam(team, teamNode, teamBook, teamFollow, teamPageCharacters,
+                teamAnswerTokens);
+        copy.teamWorkers = Math.max(0, workers);
+        copy.teamSearches = Math.max(0, searches);
+        return copy;
+    }
+
+    public int getTeamWorkers() {
+        return teamWorkers;
+    }
+
+    public int getTeamSearches() {
+        return teamSearches;
     }
 
     /** Plan T4: the longest answer of one page worker turn (tokens); 0 = the runtime's default. */

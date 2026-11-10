@@ -64,6 +64,35 @@ public class TeamTabsTest {
     }
 
     @Test
+    public void theFirstTabOfALostContextNeverFreesTheFirstTabOfTheNewOne() throws Exception {
+        FakePool pool = new FakePool(3);
+        TeamTabs tabs = new TeamTabs(pool);
+        TeamTabs.Tab old = tabs.acquire("q1");
+        pool.leases.get(0).open = false; // the worker browser is lost while q1 still holds its tab
+        TeamTabs.Tab fresh = tabs.acquire("q2");
+        assertEquals(2, pool.leases.size());
+        assertSame(pool.leases.get(1).firstTab, fresh.tools());
+        old.close();
+        TeamTabs.Tab next = tabs.acquire("q3");
+        assertNotSame("two queries never share one tab", fresh.tools(), next.tools());
+    }
+
+    @Test
+    public void oneSearchTakesAsManyTabsAsAreFreeWithoutWaitingForMore() throws Exception {
+        FakePool pool = new FakePool(3);
+        TeamTabs tabs = new TeamTabs(pool);
+        TeamTabs.Tab other = tabs.acquire("other search");
+        List<TeamTabs.Tab> mine = tabs.acquireUpTo("q1", 4);
+        assertEquals(2, mine.size()); // the limit is three tabs; the other search holds one
+        assertEquals(1, pool.leases.size());
+        other.close();
+        for (TeamTabs.Tab tab : mine) {
+            tab.close();
+        }
+        assertFalse(pool.leases.get(0).open);
+    }
+
+    @Test
     public void withoutWorkerBrowsersTheTeamIsNotAvailable() {
         assertFalse(new TeamTabs(BrowserUserContextPool.unavailable("none")).available());
         assertTrue(new TeamTabs(new FakePool(2)).available());

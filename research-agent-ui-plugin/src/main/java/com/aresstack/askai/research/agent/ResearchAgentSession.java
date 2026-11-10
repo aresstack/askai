@@ -1810,6 +1810,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         return true;
                     }
                 }, QUERY_PLAN_TIMEOUT_MILLIS);
+        // the Weidezaun limits every planned query, at the seed plan and at every later cycle
+        queryPlanner.setAreaSource(
+                new com.aresstack.askai.research.plan.BackendQueryPlanner.AreaSource() {
+                    public String area() {
+                        return researchArea();
+                    }
+                });
         final java.util.concurrent.atomic.AtomicReference<com.aresstack.askai.research.search.ManualWebSearchHandle>
                 running = new java.util.concurrent.atomic.AtomicReference<
                         com.aresstack.askai.research.search.ManualWebSearchHandle>();
@@ -1838,7 +1845,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                                 com.aresstack.askai.research.host.ResearchRuntimeSettings
                                                         .loadTeamPageCharacters(hostStateStore),
                                                 com.aresstack.askai.research.host.ResearchRuntimeSettings
-                                                        .loadTeamAnswerTokens(hostStateStore)));
+                                                        .loadTeamAnswerTokens(hostStateStore))
+                                        .withTeamLanes(com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamWorkers(hostStateStore),
+                                                com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                                        .loadTeamSearchesPerPage(hostStateStore),
+                                                researchArea()));
                         running.set(h);
                         return h.getRequestId();
                     }
@@ -1929,6 +1941,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         searchPlanQueue.setTeam(new com.aresstack.askai.research.plan.SearchPlanQueue.Team() {
             public int workers() {
                 return com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTeamWorkers(hostStateStore);
+            }
+
+            public int nextSearchBelow() {
+                return com.aresstack.askai.research.host.ResearchRuntimeSettings
+                        .loadTeamNextSearchBelow(hostStateStore);
             }
         });
         // every source carries the phase and the plan entry of the search that found it
@@ -2180,7 +2197,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             new com.aresstack.askai.research.plan.SearchPlanBuilder.Input(
                                     com.aresstack.askai.research.state.oo.ResearchStateIds.RESEARCH,
                                     frozen.getRevision(), frozen.getLanguage(), bookTitle(frozen), nodes, blacklist),
-                            queryPlanner, caps.getQueriesPerNode(), System.currentTimeMillis());
+                            queryPlanner, seedQueriesPerNode(caps), System.currentTimeMillis());
             store.clearBuildPending();
             System.err.println("[search-plan] plan built: nodes=" + nodes.size() + " added=" + result.getAdded());
         } catch (java.io.IOException | com.aresstack.askai.research.transition.CorruptProjectFileException failed) {
@@ -2189,6 +2206,18 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         // Q4: the plan starts after the approval (it waits for a running turn), and never before activation
         startSearchPlanWhenActive("search-plan started after the build");
+    }
+
+    /**
+     * The queries per node the seed plan starts with: with the research team only the concept's breadth (setting
+     * "Seed queries per node"), the deeper queries come from what the team reads; without it the whole budget.
+     */
+    private int seedQueriesPerNode(com.aresstack.askai.research.plan.SearchPlanCoverage.Caps caps) {
+        if (com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTeamWorkers(hostStateStore) <= 0) {
+            return caps.getQueriesPerNode();
+        }
+        return Math.min(caps.getQueriesPerNode(),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTeamSeedQueriesPerNode(hostStateStore));
     }
 
     /** Plan T5: the book title of the frozen concept for the page workers' brief; empty when none is frozen. */
@@ -3753,6 +3782,21 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     private void applyManualSearchEvent(ResearchBackendEvent event) {
         com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
         if (planQueue != null && planQueue.owns(event.getTechnicalDetail())) {
+            // Plan T4: the research team's page reports of a running search
+            if ("open_pages".equals(event.getTitle())) {
+                int open;
+                try {
+                    open = Integer.parseInt(event.getText().trim());
+                } catch (NumberFormatException notACount) {
+                    return;
+                }
+                planQueue.onOpenPages(event.getTechnicalDetail(), open);
+                return;
+            }
+            if ("team_query".equals(event.getTitle())) {
+                planQueue.onTeamQuery(event.getTechnicalDetail(), event.getText(), event.getPublicMessage());
+                return;
+            }
             // Plan PR 14: a planned query posts no chat line; the plan checklist shows its status.
             planQueue.onSearchEvent(event.getTechnicalDetail(), event.getTitle(), event.getText(),
                     event.getPublicMessage().trim().endsWith(" keywords"));
@@ -6644,6 +6688,19 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     /** The host-said scope-check question, carried on the fence so the model knows it asked. */
     private volatile String lastScopeCheckQuestion = "";
+
+    /**
+     * The Weidezaun as the query planner and the page workers read it: the rendered scope of the book, without the
+     * conversation blocks the chat assistant gets. "" when there is no usable scope.
+     */
+    private String researchArea() {
+        com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();
+        if (coordinator == null || !coordinator.isUsable()) {
+            return "";
+        }
+        String area = com.aresstack.askai.research.domain.scope.ResearchScopeFenceView.render(coordinator.current());
+        return area == null ? "" : area.trim();
+    }
 
     private void publishScopeFence() {
         com.aresstack.askai.research.scope.ResearchScopeCoordinator coordinator = scopeCoordinator();

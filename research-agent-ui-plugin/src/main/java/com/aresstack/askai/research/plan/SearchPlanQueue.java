@@ -84,6 +84,11 @@ public final class SearchPlanQueue {
     public interface Team {
         int workers();
 
+        /** The next search starts when fewer pages than this are still open (setting; default the worker count). */
+        default int nextSearchBelow() {
+            return workers();
+        }
+
         /** No team: one entry at a time. */
         Team OFF = new Team() {
             public int workers() {
@@ -312,6 +317,8 @@ public final class SearchPlanQueue {
     private final Map<String, SearchPlanEntry> runningEntries = new LinkedHashMap<String, SearchPlanEntry>();
     /** The source cap each running entry was started with: the phase budget they may still use. */
     private final Map<String, Integer> runningCaps = new HashMap<String, Integer>();
+    /** Plan T4: the still open pages of each running team search, as the runtime last reported them. */
+    private final Map<String, Integer> openPages = new HashMap<String, Integer>();
     /** Running entries the user stopped: their end puts them back to pending instead of failing them. */
     private final java.util.Set<String> stopping = new java.util.HashSet<String>();
     /** Planned queries that failed in a row since the last one that searched (see {@link Reason#SEARCH_FAILED}). */
@@ -358,6 +365,112 @@ public final class SearchPlanQueue {
     /** How many entries may run at once: the team's workers, at least one. */
     private int slots() {
         return teamOn() ? Math.max(1, team.workers()) : 1;
+    }
+
+    /**
+     * Plan T4: the research team reads the hits of the running search side by side; the next search starts only
+     * when fewer than the team's threshold of pages are still open, so the searches build on each other and the
+     * workers never run dry at the end of one. A search whose hits are not known yet counts as full.
+     */
+    private boolean teamStillReading() {
+        if (!teamOn() || runningEntries.isEmpty()) {
+            return false;
+        }
+        int open = 0;
+        for (String requestId : runningEntries.keySet()) {
+            Integer pages = openPages.get(requestId);
+            if (pages == null) {
+                return true; // its search is still running or its hits are not ranked yet
+            }
+            open += pages;
+        }
+        return open >= Math.max(1, team.nextSearchBelow());
+    }
+
+    /** Plan T4: the runtime's count of the still open pages of a running team search. */
+    public void onOpenPages(String requestId, int open) {
+        synchronized (this) {
+            if (requestId == null || !runningEntries.containsKey(requestId)) {
+                return;
+            }
+            openPages.put(requestId, Math.max(0, open));
+        }
+        scheduleNext();
+    }
+
+    /**
+     * Plan T4: a page worker read a hit and suggested a new search. One the Weidezaun and the blacklist let through
+     * becomes a WORKER entry of the same node that runs before every planned entry, unless the node's query budget
+     * of this cycle is spent or the query is already in the plan; every other outcome stays visible on the entry
+     * that found it.
+     */
+    public void onTeamQuery(String requestId, String query, String rejected) {
+        synchronized (this) {
+            SearchPlanEntry from = requestId == null ? null : runningEntries.get(requestId);
+            if (from == null || blank(query)) {
+                return;
+            }
+            String q = query.replaceAll("\\s+", " ").trim();
+            try {
+                String outcome;
+                if (rejected != null && !rejected.trim().isEmpty()) {
+                    outcome = "search \"" + q + "\" dropped: " + rejected.trim();
+                } else {
+                    outcome = addWorkerEntry(from, q);
+                }
+                SearchPlanEntry noted = from.withTeamNote(outcome, clock.now());
+                if (noted != from) {
+                    store.save(noted);
+                    runningEntries.put(requestId, noted);
+                }
+                System.err.println("[search-plan] " + outcome);
+            } catch (IOException | CorruptProjectFileException | RuntimeException failed) {
+                System.err.println("[search-plan] worker query \"" + q + "\" not recorded: " + failed.getMessage());
+                return;
+            }
+        }
+        listener.changed();
+        scheduleNext();
+    }
+
+    private String addWorkerEntry(SearchPlanEntry from, String query) throws IOException, CorruptProjectFileException {
+        SearchPlanRecord record = store.loadRecord();
+        if (record == null) {
+            return "search \"" + query + "\" dropped: no plan";
+        }
+        if (query.length() < ConceptQueryPlan.MIN_QUERY_LENGTH || query.length() > ConceptQueryPlan.MAX_QUERY_LENGTH) {
+            return "search \"" + query + "\" dropped: not a usable query length";
+        }
+        Map<String, SearchPlanEntry> entries = store.loadEntries();
+        int ofNode = 0;
+        for (SearchPlanEntry entry : entries.values()) {
+            if (entry.getQuery().equalsIgnoreCase(query)) {
+                return "search \"" + query + "\" dropped: already in the plan";
+            }
+            if (from.getNodeId().equals(entry.getNodeId()) && entry.getStatus() != SearchPlanEntry.Status.SKIPPED) {
+                ofNode++;
+            }
+        }
+        if (!from.getNodeId().isEmpty() && ofNode >= caps.queriesUpTo(record.getCycle())) {
+            return "search \"" + query + "\" dropped: the node's query budget of this cycle is spent";
+        }
+        SearchPlanEntry added = SearchPlanEntry.submit(newId(), from.getPhase(), from.getNodeId(), from.getNodeLabel(),
+                query, SearchPlanEntry.Origin.WORKER, clock.now());
+        store.save(added);
+        // WORKER entries run before every planned entry, in the order the workers found them
+        List<String> order = new ArrayList<String>(record.getOrder());
+        int at = order.size();
+        for (int i = 0; i < order.size(); i++) {
+            SearchPlanEntry entry = entries.get(order.get(i));
+            if (entry != null && entry.getStatus() == SearchPlanEntry.Status.PENDING
+                    && entry.getOrigin() != SearchPlanEntry.Origin.WORKER) {
+                at = i;
+                break;
+            }
+        }
+        order.add(at, added.getId());
+        store.saveRecord(record.withOrder(order, record.getPriority()));
+        return "search \"" + query + "\" added for \"" + from.getNodeLabel() + "\"";
     }
 
     /** Whether the planned queries run as team work (each in its own worker browser). */
@@ -469,7 +582,7 @@ public final class SearchPlanQueue {
     /** Another acquisition ended: the queue may start its next entry. */
     public void kick() {
         synchronized (this) {
-            if ((!running && deferred.isEmpty()) || runningEntries.size() >= slots()) {
+            if ((!running && deferred.isEmpty()) || runningEntries.size() >= slots() || teamStillReading()) {
                 return;
             }
         }
@@ -552,6 +665,7 @@ public final class SearchPlanQueue {
             }
             runningEntries.remove(requestId);
             runningCaps.remove(requestId);
+            openPages.remove(requestId);
             stopping.remove(requestId);
         }
         listener.changed();
@@ -615,7 +729,7 @@ public final class SearchPlanQueue {
         boolean fillMore = false;
         synchronized (this) {
             if (!running || replanning || busy.busy() || !deferred.isEmpty()
-                    || runningEntries.size() >= slots()) {
+                    || runningEntries.size() >= slots() || teamStillReading()) {
                 return; // a busy acquisition calls kick() when it ends; a planner answer re-enters here
             }
             try {
@@ -657,8 +771,8 @@ public final class SearchPlanQueue {
                                 skip(entries, entry, NODE_COVERED);
                                 continue;
                             }
-                            if (node.getQueriesRun() + runningFor(entry.getNodeId())
-                                    >= c.queriesUpTo(record.getCycle())) {
+                            // running entries are saved as RUNNING and already count in getQueriesRun()
+                            if (node.getQueriesRun() >= c.queriesUpTo(record.getCycle())) {
                                 skip(entries, entry, NODE_BUDGET); // the budget of this cycle
                                 continue;
                             }
@@ -729,17 +843,6 @@ public final class SearchPlanQueue {
             }
         }
         return reserved;
-    }
-
-    /** How many entries of {@code nodeId} run right now (they count against the node's query budget). */
-    private int runningFor(String nodeId) {
-        int count = 0;
-        for (SearchPlanEntry active : runningEntries.values()) {
-            if (active.getNodeId().equals(nodeId)) {
-                count++;
-            }
-        }
-        return count;
     }
 
     private void finish(Outcome outcome) {

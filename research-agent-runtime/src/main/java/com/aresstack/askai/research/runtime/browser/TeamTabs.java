@@ -17,11 +17,14 @@ public final class TeamTabs {
     public final class Tab implements AutoCloseable {
         private final ToolInvoker tools;
         private final BrowsingContextLease extra;
+        /** The user context this tab belongs to: a returned first tab frees only its own context's first tab. */
+        private final BrowserUserContextLease owner;
         private boolean closed;
 
-        private Tab(ToolInvoker tools, BrowsingContextLease extra) {
+        private Tab(ToolInvoker tools, BrowsingContextLease extra, BrowserUserContextLease owner) {
             this.tools = tools;
             this.extra = extra;
+            this.owner = owner;
         }
 
         /** The {@code web_*} tools of this tab. */
@@ -52,6 +55,8 @@ public final class TeamTabs {
     private final BrowserUserContextPool pool;
     private BrowserUserContextLease lease;
     private boolean firstTabFree;
+    /** A worker is opening the team's user context right now; the others wait for it. */
+    private boolean opening;
     private int open;
 
     public TeamTabs(BrowserUserContextPool pool) {
@@ -72,19 +77,44 @@ public final class TeamTabs {
      */
     public Tab acquire(String taskId) throws BrowserCapacityException, InterruptedException {
         BrowserUserContextLease current;
+        boolean opener = false;
         synchronized (this) {
+            // one worker opens the user context; the others wait here, interruptibly, instead of on the monitor
+            while (opening) {
+                wait();
+            }
             if (lease != null && !lease.isOpen()) {
                 lease = null; // the worker browser was lost: the next worker opens a fresh user context
             }
             if (lease == null) {
-                lease = pool.acquire(BrowserUserContextRequest.of(WORKER_ID, taskId));
-                firstTabFree = true;
+                opening = true;
+                opener = true;
+            }
+        }
+        if (opener) {
+            BrowserUserContextLease opened = null;
+            try {
+                opened = pool.acquire(BrowserUserContextRequest.of(WORKER_ID, taskId));
+            } finally {
+                synchronized (this) {
+                    if (opened != null) {
+                        lease = opened;
+                        firstTabFree = true;
+                    }
+                    opening = false;
+                    notifyAll();
+                }
+            }
+        }
+        synchronized (this) {
+            if (lease == null) {
+                throw new BrowserCapacityException("the team's user context is not open");
             }
             current = lease;
             open++; // counted before the tab opens, so a worker giving its tab back meanwhile never closes the context
             if (firstTabFree) {
                 firstTabFree = false;
-                return new Tab(current.browser(), null);
+                return new Tab(current.browser(), null, current);
             }
         }
         BrowsingContextLease tab;
@@ -94,7 +124,25 @@ public final class TeamTabs {
             giveBack(); // the slot counted above
             throw failed;
         }
-        return new Tab(tab.tools(), tab);
+        return new Tab(tab.tools(), tab, current);
+    }
+
+    /**
+     * Up to {@code max} tabs for one search: waits for the first like {@link #acquire}, then takes as many more as
+     * the tab limit lets it have right now, never waiting for them.
+     */
+    public java.util.List<Tab> acquireUpTo(String taskId, int max) throws BrowserCapacityException,
+            InterruptedException {
+        java.util.List<Tab> tabs = new java.util.ArrayList<Tab>();
+        tabs.add(acquire(taskId));
+        while (tabs.size() < max) {
+            try {
+                tabs.add(acquire(taskId + "#" + (tabs.size() + 1)));
+            } catch (BrowserCapacityException full) {
+                break; // the other searches hold the rest; this search reads with what it has
+            }
+        }
+        return tabs;
     }
 
     private void giveBack() {
@@ -116,7 +164,9 @@ public final class TeamTabs {
             tab.extra.close();
         } else {
             synchronized (this) {
-                firstTabFree = true;
+                if (tab.owner == lease) {
+                    firstTabFree = true; // a first tab of a lost context frees nothing in the new one
+                }
             }
         }
         giveBack();

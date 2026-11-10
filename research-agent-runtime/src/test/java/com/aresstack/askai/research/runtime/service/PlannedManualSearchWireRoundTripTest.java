@@ -62,7 +62,7 @@ public class PlannedManualSearchWireRoundTripTest {
     public void aTeamQueryCarriesThePageWorkersBrief() {
         String envelope = com.aresstack.askai.research.search.ResearchServiceCommandWire.teamSearch("req-5",
                 "Hitzestress Bau Smartwatch", "de", "reranker", 9, 3, "Hitze & Gesundheit", "Wearables auf Baustellen",
-                2, 12000, 512);
+                2, 12000, 512, 4, 2, "IN: Hitzeschutz am Bau\nOUT: Freizeitsport");
         ResearchServiceCommand command = ResearchServiceCommandWire.parse(envelope);
         assertTrue(command.isTeam());
         assertEquals("Hitzestress Bau Smartwatch", command.getQuery());
@@ -71,12 +71,34 @@ public class PlannedManualSearchWireRoundTripTest {
         assertEquals(2, command.getTeamFollow());
         assertEquals(12000, command.getTeamPageCharacters());
         assertEquals(512, command.getTeamAnswerTokens());
+        assertEquals(4, command.getTeamWorkers());
+        assertEquals(2, command.getTeamSearches());
+        assertEquals("IN: Hitzeschutz am Bau\nOUT: Freizeitsport", command.getScope());
         assertEquals(3, command.getSourceCap());
         ResearchServiceCommand plain = ResearchServiceCommandWire.parse(
                 com.aresstack.askai.research.search.ResearchServiceCommandWire.manualSearch("req-6", "q x", "en",
                         "bm25", 0, 0));
         assertEquals(false, plain.isTeam());
         assertEquals(0, plain.getTeamAnswerTokens());
+    }
+
+    @Test
+    public void openPagesAndFencedWorkerQueriesReachTheHost() {
+        com.aresstack.askai.research.backend.ResearchBackendEvent open =
+                com.aresstack.askai.research.agentwire.ResearchAgentEventMapper.mapMessage("p",
+                        ResearchRunWire.manualSearchOpenPages("req-8", 3)).build();
+        assertEquals("open_pages", open.getTitle());
+        assertEquals("3", open.getText());
+        com.aresstack.askai.research.backend.ResearchBackendEvent dropped =
+                com.aresstack.askai.research.agentwire.ResearchAgentEventMapper.mapMessage("p",
+                        ResearchRunWire.manualSearchTeamQuery("req-8", "Kaffeemaschine kaufen", "https://a.example",
+                                "outside scope (nearest exclusion: Shopping)")).build();
+        assertEquals("team_query", dropped.getTitle());
+        assertEquals("Kaffeemaschine kaufen", dropped.getText());
+        assertEquals("outside scope (nearest exclusion: Shopping)", dropped.getPublicMessage());
+        assertEquals("", com.aresstack.askai.research.agentwire.ResearchAgentEventMapper.mapMessage("p",
+                ResearchRunWire.manualSearchTeamQuery("req-8", "DGUV Hitze", "https://a.example", null)).build()
+                .getPublicMessage());
     }
 
     @Test
