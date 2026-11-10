@@ -34,6 +34,19 @@ public class EvidenceGapsTest {
     }
 
     @Test
+    public void unconfirmedAndOneSidedNodesAskForOtherSourcesAndTheMissingSubTopics() {
+        EvidenceGaps.Gaps gaps = EvidenceGaps.of(SearchPlanQueueTest.analysis("s4", true, Arrays.asList(
+                new EvidenceGaps.NodeEvidence("a", EvidenceGaps.Status.UNCONFIRMED, 12, 10, 1, 1, null),
+                new EvidenceGaps.NodeEvidence("b", EvidenceGaps.Status.ONE_SIDED, 12, 10, 4, 3, null)),
+                Collections.<EvidenceGaps.NewTopic>emptyList()),
+                Arrays.asList("a", "b"), Collections.<SearchPlanEntry>emptyList(),
+                Collections.<String>emptyList(), 3, 3);
+        assertEquals("UNCONFIRMED: 10 distinct passages but only from 1 sources on 1 domains: find other publishers "
+                + "that confirm it", gaps.getEvidenceByNode().get("a").get(0));
+        assertTrue(gaps.getEvidenceByNode().get("b").get(0).startsWith("ONE_SIDED: "));
+    }
+
+    @Test
     public void newTopicsOutsideTheScopeOrOnTheBlacklistAreDroppedWithTheirReason() {
         List<EvidenceGaps.NewTopic> topics = Arrays.asList(
                 new EvidenceGaps.NewTopic("Small", Collections.<String>emptyList(), 2, EvidenceGaps.Scope.IN, ""),

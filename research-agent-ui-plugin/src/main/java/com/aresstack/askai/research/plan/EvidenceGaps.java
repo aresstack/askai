@@ -20,8 +20,11 @@ import java.util.Map;
  */
 public final class EvidenceGaps {
 
-    /** The coverage status of a concept node in the analysis. */
-    public enum Status { OK, THIN, REDUNDANT, MISSING }
+    /**
+     * The coverage status of a concept node in the analysis: MISSING, THIN and REDUNDANT ask for more material,
+     * UNCONFIRMED for more sources or domains, ONE_SIDED for the sub-topics the material leaves out.
+     */
+    public enum Status { OK, THIN, REDUNDANT, MISSING, UNCONFIRMED, ONE_SIDED }
 
     /** Where a new topic lies against the Weidezaun (scope alignment, separate from the concept alignment). */
     public enum Scope { IN, OUT, UNCLASSIFIED }
@@ -33,10 +36,17 @@ public final class EvidenceGaps {
         final int passages;
         final int distinctPassages;
         final int sources;
+        final int domains;
         final List<String> keyTerms;
 
         public NodeEvidence(String nodeId, Status status, int passages, int distinctPassages, int sources,
                             List<String> keyTerms) {
+            this(nodeId, status, passages, distinctPassages, sources, 0, keyTerms);
+        }
+
+        public NodeEvidence(String nodeId, Status status, int passages, int distinctPassages, int sources,
+                            int domains, List<String> keyTerms) {
+            this.domains = Math.max(0, domains);
             this.nodeId = nodeId == null ? "" : nodeId;
             this.status = status == null ? Status.OK : status;
             this.passages = Math.max(0, passages);
@@ -199,6 +209,12 @@ public final class EvidenceGaps {
         switch (node.status) {
             case MISSING:
                 return "MISSING: no material for this node yet";
+            case UNCONFIRMED:
+                return "UNCONFIRMED: " + node.distinctPassages + " distinct passages but only from " + node.sources
+                        + " sources" + (node.domains > 0 ? " on " + node.domains + " domains" : "")
+                        + ": find other publishers that confirm it";
+            case ONE_SIDED:
+                return "ONE_SIDED: the material covers only part of the node: search the sub-topics it leaves out";
             case REDUNDANT:
                 return "REDUNDANT: " + node.passages + " passages but only " + node.distinctPassages
                         + " distinct, from " + node.sources + " sources";
