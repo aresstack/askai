@@ -628,6 +628,33 @@ public class ResearchRunCardsTest {
     }
 
     @Test
+    public void securityChecksMarkTheWebsiteBlockedThenResolvedButCookieBannersDoNot() {
+        Fx fx = new Fx();
+        fx.reachRunningResearch();
+        fx.session.setAttentionSound(null);
+        fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.USER_ATTENTION)
+                .activity("attention-researchgate.net", null, "CAPTCHA", "REQUIRED")
+                .messages("researchgate.net", "https://www.researchgate.net/publication/1"));
+        assertEquals(com.aresstack.askai.research.sources.SourceAccessState.BLOCKED,
+                fx.session.getSourceAccessLog().stateOf("https://www.researchgate.net/publication/2"));
+
+        fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.USER_ATTENTION)
+                .activity("attention-researchgate.net", null, "CAPTCHA", "RESOLVED")
+                .messages("researchgate.net", "https://www.researchgate.net/publication/1"));
+        assertEquals(com.aresstack.askai.research.sources.SourceAccessState.RESOLVED,
+                fx.session.getSourceAccessLog().stateOf("https://researchgate.net/publication/2"));
+
+        fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.USER_ATTENTION)
+                .activity("attention-example.org", null, "COOKIE", "REQUIRED")
+                .messages("example.org", "https://example.org/ — click: Accept"));
+        assertEquals("a cookie banner is no security check",
+                com.aresstack.askai.research.sources.SourceAccessState.NONE,
+                fx.session.getSourceAccessLog().stateOf("https://example.org/"));
+        assertTrue("the cookie notice says cookie banner, not security check",
+                fx.sink.problems.get(fx.sink.problems.size() - 1).contains("cookie banner"));
+    }
+
+    @Test
     public void productiveSessionExposesTheProductiveSourcesAndArtifactsNotTheDemoSeeds() {
         // The user-reported bug: the Sources tab kept showing the clickdummy seed records although the
         // productive run had accepted real sources — the session handed out its session-local demo

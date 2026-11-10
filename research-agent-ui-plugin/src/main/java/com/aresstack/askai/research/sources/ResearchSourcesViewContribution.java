@@ -47,6 +47,12 @@ public final class ResearchSourcesViewContribution implements ArtifactViewContri
                     }
                 }
             });
+            // Websites that demanded a security check: red (unsolved) / yellow (solved) rows.
+            view.setAccessLogSupplier(new java.util.function.Supplier<SourceAccessLog>() {
+                public SourceAccessLog get() {
+                    return research.getSourceAccessLog();
+                }
+            });
             // Plan PR 14: the search plan checklist (shown once a plan exists)
             final SearchPlanChecklistPanel checklist = new SearchPlanChecklistPanel(new SessionPlan(research));
             view.setPlanChecklist(checklist);
