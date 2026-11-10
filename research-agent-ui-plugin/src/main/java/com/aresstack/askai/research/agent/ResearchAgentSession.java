@@ -2351,13 +2351,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }
                     },
                     resources.corpusReader(), resources.outlineEmbeddings(),
-                    new com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings(
-                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
-                                    .DEFAULT_THRESHOLD,
-                            com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
-                                    .DEFAULT_MARGIN,
-                            knowledge == null ? 3 : knowledge.minimumPassagesPerTopic,
-                            knowledge == null ? 2 : knowledge.minimumDistinctSourcesPerTopic),
+                    () -> com.aresstack.askai.research.host.ResearchRuntimeSettings.loadOutlineSettings(
+                            hostStateStore, knowledge),
                     resources.outlineRun(), outlineGenerationExecutor);
             outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
                 public String refusal() {

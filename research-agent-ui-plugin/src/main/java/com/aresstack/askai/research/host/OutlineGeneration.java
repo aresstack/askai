@@ -19,6 +19,7 @@ import com.aresstack.askai.research.outline.generate.ConceptSeededOutlineBuilder
 import com.aresstack.askai.research.outline.generate.OutlineGenerationInput;
 import com.aresstack.askai.research.outline.generate.OutlineProvenanceMerge;
 import com.aresstack.askai.research.outline.generate.OutlineSourceRule;
+import com.aresstack.askai.research.plan.ConceptPlanNodes;
 import com.aresstack.askai.research.sources.ResearchSourceRecord;
 import com.aresstack.askai.research.store.FileConceptStore;
 import com.google.gson.JsonElement;
@@ -58,7 +59,8 @@ public final class OutlineGeneration {
     private final Inputs inputs;
     private final ActiveKnowledgeCorpusReader corpus;
     private final EmbeddingPort embeddings;
-    private final OutlineGenerationInput.Settings settings;
+    /** Read at each start, so a changed threshold or margin applies to the next generation without a restart. */
+    private final java.util.function.Supplier<OutlineGenerationInput.Settings> settings;
     private final OutlineClusteringRun run;
     private final Executor executor;
     /** Plan PR 24: the label and brief pass after the model-free proposal; {@code null} = none. */
@@ -80,7 +82,8 @@ public final class OutlineGeneration {
     }
 
     public OutlineGeneration(Inputs inputs, ActiveKnowledgeCorpusReader corpus, EmbeddingPort embeddings,
-                             OutlineGenerationInput.Settings settings, OutlineClusteringRun run, Executor executor) {
+                             java.util.function.Supplier<OutlineGenerationInput.Settings> settings,
+                             OutlineClusteringRun run, Executor executor) {
         this.inputs = inputs;
         this.corpus = corpus;
         this.embeddings = embeddings;
@@ -157,6 +160,9 @@ public final class OutlineGeneration {
             workspace.save(OutlineProvenanceMerge.merge(stored, proposal), expected, inputs.now());
             System.err.println("[research-outline] generated chapters=" + result.outline.getChapters().size()
                     + " assigned=" + result.assignedPassages + " unassigned=" + result.unassignedPassages
+                    + " (below threshold " + result.belowThreshold + ", margin too small " + result.marginTooSmall
+                    + ", median best similarity " + String.format(java.util.Locale.ROOT, "%.3f",
+                            result.medianBestSimilarity) + ") title=\"" + prepared.input.getBookTitle() + "\""
                     + " candidates=" + result.outline.getCandidates().size()
                     + " omitted=" + prepared.omitted);
             monitor.finished(prepared.omitted);
@@ -221,7 +227,19 @@ public final class OutlineGeneration {
                     whole.getVectors().get(passage.getPassageId())));
         }
         String mission = frozen.getMission();
-        return new Prepared(new OutlineGenerationInput(mission, mission, frozen.getDeliverable(), chapters, passages,
-                clusters, settings), whole.getPassages().size() - limited.getPassages().size());
+        return new Prepared(new OutlineGenerationInput(bookTitle(mission), mission, frozen.getDeliverable(),
+                chapters, passages, clusters, settings.get()),
+                whole.getPassages().size() - limited.getPassages().size());
+    }
+
+    /**
+     * The first part of every anchor's label path: the book title the mission quotes („…“, "…", »…«), or nothing.
+     * Live run 3 (2026-11-10) used the whole mission here, so every anchor path started with the same long
+     * paragraph, the anchors embedded to nearly the same vector and the margin rule left 2063 of 2068 passages
+     * unassigned. A mission without a quoted title gets no prefix: the concept's own labels are the anchors.
+     */
+    static String bookTitle(String mission) {
+        String title = ConceptPlanNodes.quotedTitle(mission == null ? "" : mission);
+        return title == null ? "" : title;
     }
 }

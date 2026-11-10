@@ -95,6 +95,19 @@ public class ConceptSeededOutlineBuilderTest {
     }
 
     @Test
+    public void theResultCountsWhyPassagesStayedUnassigned() {
+        // Live run 3 left 2063 of 2068 passages unassigned without saying whether the threshold or the margin
+        // did it; the counts and the median best similarity are the calibration aid of the log line.
+        ConceptSeededOutlineBuilder.Result result = new ConceptSeededOutlineBuilder(new RecordingPort())
+                .build(input("A book"));
+        assertEquals(7, result.assignedPassages);
+        assertEquals(3, result.unassignedPassages);
+        assertEquals("the three 'Unrelated' passages match no anchor at all", 3, result.belowThreshold);
+        assertEquals(0, result.marginTooSmall);
+        assertEquals(1.0, result.medianBestSimilarity, 1e-9);
+    }
+
+    @Test
     public void sameInputGivesByteIdenticalOutlineInConceptOrder() {
         String first = OutlineJson.write(build("", new RecordingPort()));
         String second = OutlineJson.write(build("", new RecordingPort()));

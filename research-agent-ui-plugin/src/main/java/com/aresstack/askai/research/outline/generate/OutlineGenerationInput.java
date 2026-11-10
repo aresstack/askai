@@ -65,6 +65,24 @@ public final class OutlineGenerationInput {
             this.minimumPassagesPerTopic = Math.max(1, minimumPassagesPerTopic);
             this.minimumDistinctSourcesPerTopic = Math.max(1, minimumDistinctSourcesPerTopic);
         }
+
+        /** Minimum cosine between a passage and its nearest anchor. */
+        public double getThreshold() {
+            return threshold;
+        }
+
+        /** Minimum lead of the nearest anchor over the second-nearest. */
+        public double getMargin() {
+            return margin;
+        }
+
+        public int getMinimumPassagesPerTopic() {
+            return minimumPassagesPerTopic;
+        }
+
+        public int getMinimumDistinctSourcesPerTopic() {
+            return minimumDistinctSourcesPerTopic;
+        }
     }
 
     final String bookTitle;
@@ -100,5 +118,10 @@ public final class OutlineGenerationInput {
     private static List<String> copy(List<String> values) {
         return Collections.unmodifiableList(new ArrayList<String>(
                 values == null ? Collections.<String>emptyList() : values));
+    }
+
+    /** The first part of every anchor's label path (the quoted book title, or empty). */
+    public String getBookTitle() {
+        return bookTitle;
     }
 }

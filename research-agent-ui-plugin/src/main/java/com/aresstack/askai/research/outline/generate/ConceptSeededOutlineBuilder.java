@@ -59,11 +59,21 @@ public final class ConceptSeededOutlineBuilder {
         public final int assignedPassages;
         /** Passages below the threshold or the margin. */
         public final int unassignedPassages;
+        /** Unassigned because the best anchor similarity is below the threshold. */
+        public final int belowThreshold;
+        /** Unassigned because the best and the second-best anchor lie closer than the margin. */
+        public final int marginTooSmall;
+        /** The median of every passage's best anchor similarity ({@code 0} without passages): the calibration aid. */
+        public final double medianBestSimilarity;
 
-        Result(Outline outline, int assignedPassages, int unassignedPassages) {
+        Result(Outline outline, int assignedPassages, int unassignedPassages, int belowThreshold,
+               int marginTooSmall, double medianBestSimilarity) {
             this.outline = outline;
             this.assignedPassages = assignedPassages;
             this.unassignedPassages = unassignedPassages;
+            this.belowThreshold = belowThreshold;
+            this.marginTooSmall = marginTooSmall;
+            this.medianBestSimilarity = medianBestSimilarity;
         }
     }
 
@@ -114,6 +124,9 @@ public final class ConceptSeededOutlineBuilder {
         // Assignment: label paths as queries against the stored passage vectors (never re-embedded).
         Map<String, Anchor> assignment = new HashMap<String, Anchor>();
         Map<String, Double> similarity = new HashMap<String, Double>();
+        int belowThreshold = 0;
+        int marginTooSmall = 0;
+        List<Double> bestScores = new ArrayList<Double>();
         if (!anchors.isEmpty() && !passages.isEmpty()) {
             m.progress("Embedding the outline anchors", 0, passages.size());
             List<String> paths = new ArrayList<String>();
@@ -144,9 +157,14 @@ public final class ConceptSeededOutlineBuilder {
                     }
                 }
                 double margin = anchors.size() == 1 ? Double.POSITIVE_INFINITY : bestScore - second;
+                bestScores.add(bestScore);
                 if (best >= 0 && bestScore >= input.settings.threshold && margin >= input.settings.margin) {
                     assignment.put(passage.passageId, anchors.get(best));
                     similarity.put(passage.passageId, bestScore);
+                } else if (bestScore < input.settings.threshold) {
+                    belowThreshold++;
+                } else {
+                    marginTooSmall++;
                 }
                 done++;
                 if (done % 64 == 0 || done == passages.size()) {
@@ -231,7 +249,17 @@ public final class ConceptSeededOutlineBuilder {
         }
         List<OutlineCandidate> candidates = candidates(input, assignment, passages);
         return new Result(new Outline(chapters, candidates), assignment.size(),
-                passages.size() - assignment.size());
+                passages.size() - assignment.size(), belowThreshold, marginTooSmall, median(bestScores));
+    }
+
+    private static double median(List<Double> values) {
+        if (values.isEmpty()) {
+            return 0;
+        }
+        List<Double> sorted = new ArrayList<Double>(values);
+        Collections.sort(sorted);
+        int middle = sorted.size() / 2;
+        return sorted.size() % 2 == 1 ? sorted.get(middle) : (sorted.get(middle - 1) + sorted.get(middle)) / 2;
     }
 
     private static final class ChapterDraft {

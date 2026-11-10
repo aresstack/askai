@@ -509,6 +509,33 @@ public final class ResearchRuntimeSettings {
                 loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES));
     }
 
+    // ------------------------------------------------------------------ Outline: passage assignment
+    /** Minimum cosine between a passage and its nearest outline anchor for the passage to be assigned. */
+    public static final String KEY_OUTLINE_ASSIGNMENT_THRESHOLD = "research.outline.assignmentThreshold";
+    /** Minimum lead of the nearest anchor over the second-nearest; below it the passage stays unassigned. */
+    public static final String KEY_OUTLINE_ASSIGNMENT_MARGIN = "research.outline.assignmentMargin";
+
+    /**
+     * The calibration of the outline generation, read at each start: threshold and margin from this store (the
+     * provisional defaults of {@link OutlineGenerationInput.Settings} until a live calibration replaces them), the
+     * topic minimums from the knowledge settings of the session.
+     */
+    public static com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings loadOutlineSettings(
+            WorkspaceStateStore store,
+            com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledge) {
+        com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings minimums =
+                knowledge == null ? com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings
+                        .defaults() : knowledge;
+        return new com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings(
+                loadDouble(store, KEY_OUTLINE_ASSIGNMENT_THRESHOLD,
+                        com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
+                                .DEFAULT_THRESHOLD),
+                loadDouble(store, KEY_OUTLINE_ASSIGNMENT_MARGIN,
+                        com.aresstack.askai.research.outline.generate.OutlineGenerationInput.Settings
+                                .DEFAULT_MARGIN),
+                minimums.minimumPassagesPerTopic, minimums.minimumDistinctSourcesPerTopic);
+    }
+
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";
     /** How many model↔tool cycles ONE concept turn may make — the WORK budget of the loop. */
     public static final int DEFAULT_CONCEPT_TOOL_ROUNDS = 4;
