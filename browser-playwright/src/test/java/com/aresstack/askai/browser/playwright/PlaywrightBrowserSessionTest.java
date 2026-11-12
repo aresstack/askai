@@ -118,9 +118,19 @@ public class PlaywrightBrowserSessionTest {
         /** Pacing pump slices requested by the session's per-engine delay (no real waiting in tests). */
         final List<Long> pacedSlices = new ArrayList<Long>();
 
+        /** Behind an owner-thread actor: how long one idle pump round really waits, so the actor never spins. */
+        volatile long idlePumpSleepMillis;
+
         @Override
         public boolean pumpEvents(java.util.function.BooleanSupplier wake, long timeoutMillis) {
             pacedSlices.add(timeoutMillis);
+            if (idlePumpSleepMillis > 0L) {
+                try {
+                    Thread.sleep(Math.min(timeoutMillis, idlePumpSleepMillis));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             return true;
         }
 
@@ -162,11 +172,15 @@ public class PlaywrightBrowserSessionTest {
         /** The user closed the window: opening tabs fails the way the real driver reports it. */
         boolean windowClosed;
 
+        /** The thread that opened the last set of search tabs. */
+        volatile String searchTabThread;
+
         @Override
         public List<String> openSearchTabs(List<String> homeUrls) throws BrowserException {
             if (windowClosed) {
                 throw new BrowserException("BROWSER_CLOSED: the browser window was closed");
             }
+            searchTabThread = Thread.currentThread().getName();
             openedTabSets.add(new ArrayList<String>(homeUrls));
             tabHomes.clear();
             tabHomes.addAll(homeUrls);
@@ -382,6 +396,45 @@ public class PlaywrightBrowserSessionTest {
                 BrowserToolSet.engines(java.util.Collections.<String, Object>singletonMap("engines",
                         "duckduckgo, bing")));
         assertEquals(null, BrowserToolSet.engines(java.util.Collections.<String, Object>emptyMap()));
+    }
+
+    /**
+     * Live run 4 (2026-11-12): once Google was paused after a challenge, every search went on to the next priority
+     * group (DuckDuckGo) in the research browser, whose tool set holds the owner-thread actor instead of the session,
+     * and failed with "This browser backend does not take engines for web_search_prepare". Through the actor a group
+     * prepare searches exactly the group's engines, on the owner thread.
+     */
+    @Test
+    public void aGroupPrepareThroughTheOwnerThreadActorSearchesExactlyTheGroupsEngines() throws Exception {
+        final FakeDriver driver = new FakeDriver();
+        driver.idlePumpSleepMillis = 2L;
+        String home = "https://html.duckduckgo.com/html/";
+        driver.typedResults.put(home, resultsPage(home + "?q=hase", "ddg"));
+        final PlaywrightBrowserSession session = session(driver,
+                com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
+        BrowserSessionActor actor = BrowserSessionActor.start(() -> session);
+        try {
+            BrowserToolSet tools = new BrowserToolSet(actor,
+                    new com.aresstack.askai.browser.search.analysis.SearchLayoutRepairTools(
+                            com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create(),
+                            new PlaywrightRenderedPageSource(actor), System::currentTimeMillis));
+            Map<String, Object> args = new LinkedHashMap<String, Object>();
+            args.put("query", "hase");
+            args.put("engines", "duckduckgo");
+
+            String prepared = tools.call("web_search_prepare", args);
+
+            assertEquals("exactly the group's engine got a search tab",
+                    java.util.Collections.singletonList(java.util.Collections.singletonList(home)),
+                    driver.openedTabSets);
+            assertEquals("the group search ran on the owner thread", BrowserSessionActor.OWNER_THREAD_NAME,
+                    driver.searchTabThread);
+            assertTrue("the engine's result page was captured: " + driver.captured,
+                    driver.captured.contains(home + "?q=hase"));
+            assertTrue(prepared, prepared.startsWith("{") && prepared.contains("\"status\""));
+        } finally {
+            actor.close();
+        }
     }
 
     private static PlaywrightPageState state(String url, String title, String text, String... links) {
