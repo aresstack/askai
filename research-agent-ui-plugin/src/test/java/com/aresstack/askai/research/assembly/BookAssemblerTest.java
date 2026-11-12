@@ -350,6 +350,32 @@ public class BookAssemblerTest {
         assertFalse(md.contains("LLM"));
     }
 
+    /**
+     * Live run 4, book 6: the appendix named sources by raw id ("source-47") and page title, and listed the soft-
+     * hyphenated "Bun\u00ADdes\u00ADda\u00ADten\u00ADschutz\u00ADge\u00ADsetz" as a second, conflicting long form.
+     */
+    @Test
+    public void theAppendixNamesSourcesByNumberOnlyAndIgnoresSoftHyphens() {
+        BookAssemblyInput input = clean()
+                .section(written("s11", "c1"), revision(
+                        "Photovoltaic modules follow the BDSG when they log data [1].",
+                        cite("1", "a", "Solar panels convert sunlight into electricity.", "p-a-1")))
+                .acronyms(Arrays.asList(longForms("BDSG",
+                        statement("a", "Bundesdatenschutzgesetz"),
+                        statement("source-47", "Bundesdatenschutzgesetz"),
+                        statement("b", "Bun\u00ADdes\u00ADda\u00ADten\u00ADschutz\u00ADge\u00ADsetz"),
+                        statement("source-54", "Bundesdatenschutzgesetzbuch"))))
+                .source(source("source-54", "Datenschutz-Seite", TEXT_C, false))
+                .build();
+        AssembledBook book = new BookAssembler().assemble(input);
+        String md = book.getMarkdown();
+        assertTrue(md, md.contains("- **BDSG**: Bundesdatenschutzgesetz ([1], [2]); Bundesdatenschutzgesetzbuch "
+                + "(the sources disagree)"));
+        assertFalse(md, md.contains("source-47"));
+        assertFalse(md, md.contains("Datenschutz-Seite"));
+        assertFalse(md, md.contains("\u00AD"));
+    }
+
     @Test
     public void acronymWithoutLongFormIsReported() {
         AssembledBook book = new BookAssembler().assemble(clean().section(written("s21", "c2"), revision(
