@@ -61,6 +61,13 @@ final class SynthesisFixture {
         return base;
     }
 
+    /** {@code count} passages along an existing topic base only (no aspect): the topic's rest; distinct each. */
+    void rest(String topic, int base, int count, int sources) {
+        for (int i = 0; i < count; i++) {
+            add(topic + " rest", topic, i % sources, new int[]{base, direction()}, new double[]{1.2, 0.6});
+        }
+    }
+
     /** {@code count} copies of one statement; returns the base. */
     int redundant(String topic, int count, int sources) {
         int base = direction();

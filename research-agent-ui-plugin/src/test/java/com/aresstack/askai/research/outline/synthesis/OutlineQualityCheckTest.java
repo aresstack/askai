@@ -180,4 +180,41 @@ public class OutlineQualityCheckTest {
         assertEquals(Collections.singletonList("T1.1"), fixed.getChapters().get(0).getMaterialKeys());
         assertEquals(Arrays.asList("T1.2", "T1.3"), fixed.getChapters().get(1).getMaterialKeys());
     }
+
+    /**
+     * The rest of a topic (passages assigned to no concept node) is used once, even when its concept parts end up in
+     * different chapters.
+     */
+    @Test
+    public void theRestOfATopicSplitOverChaptersIsUsedOnce() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int perAspect = 6;
+        int base = corpus.diverse("sites", 2, perAspect, 3);
+        corpus.rest("sites", base, 4, 3);
+        corpus.concept("c-sensors", "Sensors", base + 1);
+        corpus.concept("c-safety", "Safety", base + 1 + (perAspect + 1));
+        SynthesisBrief brief = corpus.brief();
+        assertEquals(2, brief.getTopics().get(0).getSubtopics().size());
+        assertEquals(4, brief.restOf("T1").size());
+        OutlinePlan plan = CHECK.fix(new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Collections.singletonList("T1"), Collections.singletonList("C1"),
+                        section("A", "T1")),
+                chapter("Safety", Collections.singletonList("T1"), Collections.singletonList("C2"),
+                        section("B", "T1"))),
+                Collections.<String>emptyList(), false), brief).getPlan();
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "snap", Collections.<PlanFinding>emptyList(),
+                        Collections.<String>emptyList());
+
+        assertEquals(2, outline.getChapters().size());
+        List<String> used = new java.util.ArrayList<String>();
+        for (com.aresstack.askai.research.outline.OutlineChapter chapter : outline.getChapters()) {
+            for (com.aresstack.askai.research.outline.OutlineSection section : chapter.getSections()) {
+                used.addAll(section.getProvenance().getPassageIds());
+            }
+        }
+        assertEquals("every passage of the topic once", brief.passagesOf("T1").size(), used.size());
+        assertEquals(brief.passagesOf("T1").size(), new java.util.HashSet<String>(used).size());
+    }
 }
