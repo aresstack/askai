@@ -281,4 +281,34 @@ public class OutlineSynthesizerTest {
         assertEquals(ThinkingMode.OFF, role.getThinking());
         assertNotNull(role.getOutput());
     }
+
+    /**
+     * Live run 4 after #210: every chapter named the whole large topic, every section call saw all of it, and three
+     * chapters got the same section. Each section call now sees only the material its chapter will own.
+     */
+    @Test
+    public void eachSectionCallSeesOnlyTheMaterialItsChapterOwns() {
+        SynthesisBrief brief = OutlineQualityCheckTest.oneTopicThreeConcepts().brief();
+        String plan = "{\"chapters\":["
+                + "{\"title\":\"Sensors\",\"purpose\":\"Sensors.\",\"topics\":[\"T1\"],\"concepts\":[\"C1\"]},"
+                + "{\"title\":\"Safety\",\"purpose\":\"Safety.\",\"topics\":[\"T1\"],\"concepts\":[\"C2\"]},"
+                + "{\"title\":\"Law\",\"purpose\":\"Law.\",\"topics\":[\"T1\"],\"concepts\":[\"C3\"]}],"
+                + "\"gaps\":[]}";
+        ScriptedChat chat = new ScriptedChat().then(plan)
+                .then(sections("T1.1")).then(sections("T1.2")).then(sections("T1.3"));
+
+        OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 0).synthesize(brief, null);
+
+        assertEquals(4, chat.calls.size());
+        for (int i = 1; i <= 3; i++) {
+            String schema = chat.calls.get(i).schema;
+            for (int j = 1; j <= 3; j++) {
+                assertEquals("section call " + i + " and T1." + j, i == j, schema.contains("\"T1." + j + "\""));
+            }
+        }
+        for (int i = 0; i < 3; i++) {
+            assertEquals(Collections.singletonList("T1." + (i + 1)),
+                    result.getPlan().getChapters().get(i).getSections().get(0).getMaterialKeys());
+        }
+    }
 }

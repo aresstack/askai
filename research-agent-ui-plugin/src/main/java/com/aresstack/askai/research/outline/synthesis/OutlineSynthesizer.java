@@ -182,6 +182,11 @@ public final class OutlineSynthesizer {
     private OutlinePlan withSections(OutlinePlan plan, OutlinePlan previous, SynthesisBrief brief, List<String> notes,
                                      ClusteringMonitor monitor) {
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
+        // The sections are planned from the material each chapter will own after the quality check (a concept part
+        // goes to the chapter of its requirement, the rest to the first chapter naming it). Live run 4 after #210:
+        // every chapter named the whole large topic, so every section call saw all of it and three chapters got the
+        // same section "Technologien und Herausforderungen" before the ownership fix took the parts apart.
+        java.util.Map<String, Integer> owner = OutlineQualityCheck.owners(plan, brief);
         int index = 0;
         for (PlannedChapter chapter : plan.getChapters()) {
             index++;
@@ -193,11 +198,19 @@ public final class OutlineSynthesizer {
                 chapters.add(chapter.withSections(kept.getSections()));
                 continue;
             }
-            List<PlannedSection> sections = askSections(brief, chapter, monitor);
+            List<String> own = OutlineQualityCheck.owned(chapter.getMaterialKeys(), brief, owner, index - 1);
+            if (own.isEmpty()) {
+                // Only material of earlier chapters: the quality check drops the chapter; no section call for it.
+                chapters.add(chapter.withSections(FallbackOutlinePlan.sections(brief, chapter)));
+                continue;
+            }
+            PlannedChapter owning = new PlannedChapter(chapter.getTitle(), chapter.getPurpose(), own,
+                    chapter.getConceptKeys(), null, chapter.isUntitled());
+            List<PlannedSection> sections = askSections(brief, owning, monitor);
             if (sections == null) {
                 notes.add("The sections of \"" + chapter.getTitle() + "\" were not generated; code split the chapter "
                         + "by its material.");
-                sections = FallbackOutlinePlan.sections(brief, chapter);
+                sections = FallbackOutlinePlan.sections(brief, owning);
             }
             chapters.add(chapter.withSections(sections));
         }
