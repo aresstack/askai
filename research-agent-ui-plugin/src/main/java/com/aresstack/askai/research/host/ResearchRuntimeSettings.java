@@ -473,8 +473,14 @@ public final class ResearchRuntimeSettings {
     public static final int DEFAULT_PLAN_SOURCES_PER_NODE = 3;
     /** Queries per node: the base query and up to three planner variants. */
     public static final int DEFAULT_PLAN_QUERIES_PER_NODE = 4;
-    /** Accepted sources the whole Sources phase may collect through the plan. */
-    public static final int DEFAULT_PLAN_PHASE_SOURCES = 60;
+    /**
+     * Accepted sources the whole Sources phase may collect through the plan; 0 = automatic, what the node budgets
+     * allow ({@link com.aresstack.askai.research.plan.SearchPlanCoverage.Caps#phaseSourcesFor}). Live run 4
+     * (2026-11-12): a fixed 60 was spent in the first research cycle of a five-node concept (every node runs all its
+     * planned angles, each may add "Sources per node" sources), the last node starved and the plan never reached a
+     * second cycle for its gaps.
+     */
+    public static final int DEFAULT_PLAN_PHASE_SOURCES = 0;
     public static final String KEY_PLAN_CYCLES = "research.plan.cycles";
     /**
      * Research cycles: after each cycle the still uncovered nodes are planned again from another angle (M2). Three
@@ -638,7 +644,7 @@ public final class ResearchRuntimeSettings {
         return new com.aresstack.askai.research.plan.SearchPlanCoverage.Caps(
                 loadPositiveInt(store, KEY_PLAN_SOURCES_PER_NODE, DEFAULT_PLAN_SOURCES_PER_NODE),
                 loadPositiveInt(store, KEY_PLAN_QUERIES_PER_NODE, DEFAULT_PLAN_QUERIES_PER_NODE),
-                loadPositiveInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES),
+                loadNonNegativeInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES),
                 loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES))
                 .withPreferenceQueries(loadSourcePreferenceEnabled(store)
                         ? loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_QUERIES, DEFAULT_SOURCE_PREFERENCE_QUERIES)

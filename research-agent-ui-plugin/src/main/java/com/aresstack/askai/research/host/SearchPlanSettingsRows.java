@@ -41,7 +41,10 @@ final class SearchPlanSettingsRows {
                 cyclesLabel, cycles);
         form.row("Sources for the Sources phase", field(store, ResearchRuntimeSettings.KEY_PLAN_PHASE_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_PLAN_PHASE_SOURCES,
-                "The search plan stops once the Sources phase has this many accepted sources."));
+                "The search plan stops once the Sources phase has this many accepted sources. 0 = automatic: what "
+                        + "the node budgets allow (active nodes × sources per node × the queries of every research "
+                        + "cycle), so the first cycle never spends the sources the gaps of the next cycles need.",
+                true));
         form.row("Skip shop sites", skipNonSourceHosts(store));
         return form;
     }
@@ -58,21 +61,27 @@ final class SearchPlanSettingsRows {
 
     private static JTextField field(final WorkspaceStateStore store, final String key, final int fallback,
                                     String tooltip) {
+        return field(store, key, fallback, tooltip, false);
+    }
+
+    /** @param zeroAllowed 0 is a legal value of the field ("automatic") */
+    private static JTextField field(final WorkspaceStateStore store, final String key, final int fallback,
+                                    String tooltip, final boolean zeroAllowed) {
         final JTextField field = ComicControls.textField(5);
-        field.setText(String.valueOf(ResearchRuntimeSettings.loadPositiveInt(store, key, fallback)));
+        field.setText(String.valueOf(load(store, key, fallback, zeroAllowed)));
         field.setToolTipText(tooltip);
         final Runnable persist = new Runnable() {
             public void run() {
                 try {
                     int value = Integer.parseInt(field.getText().trim());
-                    if (value > 0) {
-                        ResearchRuntimeSettings.savePositiveInt(store, key, value);
+                    if (value > 0 || (zeroAllowed && value == 0)) {
+                        ResearchRuntimeSettings.saveNonNegativeInt(store, key, value);
                         return;
                     }
                 } catch (NumberFormatException invalid) {
                     // reset below
                 }
-                field.setText(String.valueOf(ResearchRuntimeSettings.loadPositiveInt(store, key, fallback)));
+                field.setText(String.valueOf(load(store, key, fallback, zeroAllowed)));
             }
         };
         field.addActionListener(e -> persist.run());
@@ -83,5 +92,10 @@ final class SearchPlanSettingsRows {
             }
         });
         return field;
+    }
+
+    private static int load(WorkspaceStateStore store, String key, int fallback, boolean zeroAllowed) {
+        return zeroAllowed ? ResearchRuntimeSettings.loadNonNegativeInt(store, key, fallback)
+                : ResearchRuntimeSettings.loadPositiveInt(store, key, fallback);
     }
 }

@@ -470,6 +470,49 @@ public class SearchPlanQueueTest {
         assertTrue(outcomes.get(0).isPhaseCapReached());
     }
 
+    /**
+     * Live run 4 (2026-11-12): a fixed 60 sources were spent in cycle 1 of a five-node concept, the fifth node
+     * starved and no second cycle could research it. With "Sources for the Sources phase" at 0 (automatic, the
+     * default) the limit is what the node budgets allow, so the uncovered node gets its next cycle.
+     */
+    @Test
+    public void anAutomaticPhaseCapLeavesTheSourcesTheNextCycleNeeds() throws Exception {
+        build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")),
+                Collections.<String, List<String>>emptyMap());
+        sources.domains.put("s1", "one.example");
+        sources.domains.put("s2", "two.example");
+        sources.domains.put("s3", "three.example");
+        sources.domains.put("s4", "four.example");
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("b", "Beta Studie");
+        SearchPlanQueue queue = queue(caps(3, 1, 0, 2), replanner);
+        sources.next = Arrays.asList("s1", "s2", "s3");
+        queue.run();
+        port.complete(false); // Alpha Query: A covered
+        sources.next = Arrays.asList("s4");
+        port.complete(false); // Beta Query: B short of its sources
+        assertEquals("every query may add the node's source number", Arrays.asList(3, 3), port.caps);
+        assertTrue("4 of 12 sources (2 nodes × 3 × 2 cycles): no phase cap, the next cycle comes",
+                outcomes.isEmpty());
+        assertTrue(queue.isReplanning());
+        assertEquals(1, replanner.requests.size());
+        assertEquals(2, replanner.requests.get(0).getCycle());
+        assertEquals("b", replanner.requests.get(0).getNodes().get(0).getId());
+        replanner.deliver();
+        assertEquals("Beta Studie", port.searched.get(2));
+    }
+
+    @Test
+    public void theAutomaticPhaseCapIsWhatTheNodeBudgetsAllow() throws Exception {
+        build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")),
+                Collections.<String, List<String>>emptyMap());
+        SearchPlanRecord record = store.loadRecord();
+        // 2 active nodes × 3 sources per node × (4 planner + 1 publisher queries) × 3 cycles
+        assertEquals(90, caps(3, 4, 0, 3).withPreferenceQueries(1).phaseSourcesFor(record));
+        assertEquals("a configured limit stays the limit", 60, caps(3, 4, 60, 3).phaseSourcesFor(record));
+        assertEquals(0, caps(3, 4, 0, 3).getPhaseSources());
+    }
+
     @Test
     public void aKeywordFallbackIsNotedOnTheEntry() throws Exception {
         build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());

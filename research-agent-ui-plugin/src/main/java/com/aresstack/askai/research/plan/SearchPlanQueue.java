@@ -833,7 +833,7 @@ public final class SearchPlanQueue {
                         }
                         int phaseUsed = SearchPlanCoverage.phaseSources(entries.values(), entry.getPhase())
                                 + reservedSources(entry.getPhase());
-                        if (phaseUsed >= c.getPhaseSources()) {
+                        if (phaseUsed >= c.phaseSourcesFor(record)) {
                             capReached = true; // this entry's phase spent its budget; another phase may not have
                             continue;
                         }
@@ -859,7 +859,7 @@ public final class SearchPlanQueue {
                         }
                         // Every planned query may add up to the node's source number: the variants are the
                         // node's angles, not spare queries for a base query that came back short.
-                        int phaseLeft = c.getPhaseSources() - phaseUsed;
+                        int phaseLeft = c.phaseSourcesFor(record) - phaseUsed;
                         perQueryCap = Math.max(1, Math.min(c.getSourcesPerNode(), phaseLeft));
                         next = entry;
                         break;
@@ -1167,7 +1167,7 @@ public final class SearchPlanQueue {
         Map<String, SearchPlanEntry> entries = store.loadEntries();
         SearchPlanCoverage.Caps c = caps;
         boolean capReached = SearchPlanCoverage.phaseSources(entries.values(), record.getPhase())
-                >= c.getPhaseSources();
+                >= c.phaseSourcesFor(record);
         return outcome(record, entries, c, SearchPlanCoverage.of(record, entries.values(), c, sources),
                 capReached ? Reason.PHASE_CAP : null);
     }

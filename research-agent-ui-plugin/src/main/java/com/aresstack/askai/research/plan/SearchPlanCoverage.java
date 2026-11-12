@@ -37,6 +37,8 @@ public final class SearchPlanCoverage {
 
         /**
          * @param queriesPerNode the query budget of a node PER research cycle
+         * @param phaseSources   the accepted sources a phase may collect through the plan; 0 = automatic, what the
+         *                       node budgets allow ({@link #phaseSourcesFor})
          * @param cycles         how many research cycles the plan may run: after each cycle the still uncovered
          *                       nodes are planned again from another angle, until they are covered or the cycles
          *                       are spent
@@ -49,7 +51,7 @@ public final class SearchPlanCoverage {
             this.preferenceQueries = Math.max(0, preferenceQueries);
             this.sourcesPerNode = Math.max(1, sourcesPerNode);
             this.queriesPerNode = Math.max(1, queriesPerNode);
-            this.phaseSources = Math.max(1, phaseSources);
+            this.phaseSources = Math.max(0, phaseSources);
             this.cycles = Math.max(1, cycles);
         }
 
@@ -83,8 +85,32 @@ public final class SearchPlanCoverage {
             return queriesPerNode;
         }
 
+        /** The configured "Sources for the Sources phase"; 0 = automatic ({@link #phaseSourcesFor}). */
         public int getPhaseSources() {
             return phaseSources;
+        }
+
+        /**
+         * The source limit of a phase of this plan: the configured number, or with 0 (automatic) what the node
+         * budgets allow, every active node of the record with "Sources per node" for each of its queries in every
+         * research cycle ({@link #queriesUpTo}). A fixed number below that ends the first cycle before the gaps get
+         * theirs: live run 4 (2026-11-12) spent 60 sources on four of five nodes in cycle 1, the fifth stayed
+         * uncovered and no second cycle could research it.
+         */
+        public int phaseSourcesFor(SearchPlanRecord record) {
+            if (phaseSources > 0) {
+                return phaseSources;
+            }
+            int nodes = 0;
+            if (record != null) {
+                for (SearchPlanRecord.Node node : record.getNodes()) {
+                    if (node.isActive()) {
+                        nodes++;
+                    }
+                }
+            }
+            long budget = (long) Math.max(1, nodes) * sourcesPerNode * queriesUpTo(cycles);
+            return (int) Math.min(Integer.MAX_VALUE, budget);
         }
     }
 
