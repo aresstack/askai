@@ -2956,6 +2956,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             public void finished(
                                     final com.aresstack.askai.research.drafting.WritingOutcome outcome) {
                                 lastWritingOutcome = outcome.text();
+                                // sources a gap search accepted during the model calls were not in the packs
+                                markSectionsStaleAfterGapResearch();
                                 final String gapLine = researchWriterGaps(outcome);
                                 uiExecutor.execute(new Runnable() {
                                     public void run() {

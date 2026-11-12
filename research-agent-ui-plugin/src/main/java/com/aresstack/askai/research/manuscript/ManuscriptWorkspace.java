@@ -215,11 +215,13 @@ public final class ManuscriptWorkspace {
 
     /**
      * The mark after the research of writer gaps (live run 4, fix 5), exempt from the guard like the other stale
-     * marks: a written section whose current revision is older than the newest source its gap research accepted
-     * becomes stale, so {@code rewrite-stale} writes it again with the new sources in its evidence pack. A section
-     * without text (pending, failed), skipped, orphaned or already stale keeps its status: {@code write-sections}
-     * writes a failed one with the new sources anyway. Idempotent: once the section is rewritten, its revision is
-     * newer than the sources and nothing is marked again.
+     * marks: a written section whose current revision the writer wrote from evidence taken before the newest
+     * source its gap research accepted ({@link SectionRevision#getEvidenceAt()}, so a source accepted during the
+     * model call counts too) becomes stale, so {@code rewrite-stale} writes it again with the new sources in its
+     * evidence pack. A text of the user (edited or restored) is never marked; a section without text (pending,
+     * failed), skipped, orphaned or already stale keeps its status: {@code write-sections} writes a failed one with
+     * the new sources anyway. Idempotent: once the section is rewritten, its evidence is newer than the sources and
+     * nothing is marked again.
      * @return section id -> the reason of each new stale mark
      */
     public Map<String, String> markGapsResearched(List<GapSources> researched, long nowMillis) {
@@ -233,7 +235,8 @@ public final class ManuscriptWorkspace {
                 continue;
             }
             SectionRevision current = store.revision(state.getSectionId(), state.getRevision());
-            if (current == null || current.getCreatedAt() >= gap.getLastSourceAtMillis()) {
+            if (current == null || !SectionRevision.AUTHOR_WRITER.equals(current.getAuthor())
+                    || current.getEvidenceAt() >= gap.getLastSourceAtMillis()) {
                 continue;
             }
             int count = gap.getSourceIds().size();

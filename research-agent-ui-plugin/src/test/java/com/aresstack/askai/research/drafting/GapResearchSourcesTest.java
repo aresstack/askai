@@ -22,6 +22,8 @@ public class GapResearchSourcesTest {
                 SearchPlanEntries.gap("gap-sec-1-abc", "Ortung Helm Baustelle", 100, "s1", "s2"),
                 SearchPlanEntries.gap("gap-sec-1-abc-def", "Ortung Helm Baustelle site:dguv.de", 200, "s2", "s3"),
                 SearchPlanEntries.gap("gap-sec-1-2-ff", "Datenschutz Betriebsrat", 50, "s4"),
+                SearchPlanEntries.gap("gap-sec-1-2-ff-plan-0123456789abcdef0123456789abcdef",
+                        "Datenschutz Betriebsrat", 60, "s7"),
                 SearchPlanEntries.gap("gap-sec-2-aa", "nothing found", 300),
                 SearchPlanEntries.gap("gap-unknown-bb", "a section that is gone", 400, "s5"),
                 SearchPlanEntries.done("plan-0001", "Node", "Base query", "s6"));
@@ -34,7 +36,9 @@ public class GapResearchSourcesTest {
         assertEquals(Arrays.asList("Ortung Helm Baustelle", "Ortung Helm Baustelle site:dguv.de"),
                 first.getQueries());
         assertEquals("the longest section id an entry names wins", "sec-1-2", researched.get(1).getSectionId());
-        assertEquals(Collections.singletonList("s4"), researched.get(1).getSourceIds());
+        assertEquals("a re-run keeps the gap's id in front", Arrays.asList("s4", "s7"),
+                researched.get(1).getSourceIds());
+        assertEquals(60, researched.get(1).getLastSourceAtMillis());
     }
 
     @Test

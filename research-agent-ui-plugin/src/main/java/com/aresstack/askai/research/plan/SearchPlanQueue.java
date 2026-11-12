@@ -796,7 +796,7 @@ public final class SearchPlanQueue {
         }
         // retries spent: a new pending task takes the stopped one's place in the order
         SearchPlanRecord record = store.loadRecord();
-        SearchPlanEntry again = SearchPlanEntry.submit(newId(), entry.getPhase(), entry.getNodeId(),
+        SearchPlanEntry again = SearchPlanEntry.submit(againId(entry.getId()), entry.getPhase(), entry.getNodeId(),
                 entry.getNodeLabel(), entry.getQuery(), entry.getOrigin(), now);
         store.save(again);
         store.save(entry.skipped(why, now));
@@ -1417,7 +1417,7 @@ public final class SearchPlanQueue {
             return null;
         }
         // an explicit re-run is the user's request: coverage and the node budget do not skip it
-        SearchPlanEntry again = SearchPlanEntry.submit(newId(), entry.getPhase(), entry.getNodeId(),
+        SearchPlanEntry again = SearchPlanEntry.submit(againId(entry.getId()), entry.getPhase(), entry.getNodeId(),
                 entry.getNodeLabel(), entry.getQuery(), SearchPlanEntry.Origin.USER, clock.now());
         store.save(again);
         List<String> order = new ArrayList<String>(record.getOrder());
@@ -1487,8 +1487,25 @@ public final class SearchPlanQueue {
         };
     }
 
+    /** The prefix of every id the queue makes itself. */
+    static final String PLAN_ID_PREFIX = "plan-";
+    private static final java.util.regex.Pattern AGAIN_SUFFIX =
+            java.util.regex.Pattern.compile("-" + PLAN_ID_PREFIX + "[0-9a-f]{32}$");
+
     static String newId() {
-        return "plan-" + java.util.UUID.randomUUID().toString().replace("-", "");
+        return PLAN_ID_PREFIX + java.util.UUID.randomUUID().toString().replace("-", "");
+    }
+
+    /**
+     * The id of an entry that repeats {@code entryId}: a new plan id, but an entry added under a fixed id (a writer
+     * gap's "gap-<section>-...", a gate comment's priority id) keeps that id in front, so the repeat stays
+     * attributed to it (a re-run gap search that finds sources still makes its section stale).
+     */
+    static String againId(String entryId) {
+        if (entryId == null || entryId.startsWith(PLAN_ID_PREFIX)) {
+            return newId();
+        }
+        return AGAIN_SUFFIX.matcher(entryId).replaceFirst("") + "-" + newId();
     }
 
     private static boolean blank(String text) {

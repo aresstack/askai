@@ -87,10 +87,13 @@ public final class GapResearch {
         return com.aresstack.askai.research.plan.ConceptPlanNodes.gapQuery(gap, subject, blacklist);
     }
 
-    /** Whether a plan entry is a writer gap's search (or one of its source-preference variants). */
+    /**
+     * Whether a plan entry is a writer gap's search: one of its source-preference variants, or a re-run of either,
+     * whose id keeps the gap's id in front ({@code SearchPlanQueue.againId}).
+     */
     public static boolean isGapEntry(SearchPlanEntry entry) {
-        return entry != null && entry.getOrigin() == SearchPlanEntry.Origin.PRIORITY
-                && SectionWritingJob.PHASE.equals(entry.getPhase()) && entry.getId().startsWith(ENTRY_PREFIX);
+        return entry != null && SectionWritingJob.PHASE.equals(entry.getPhase())
+                && entry.getId().startsWith(ENTRY_PREFIX);
     }
 
     /**

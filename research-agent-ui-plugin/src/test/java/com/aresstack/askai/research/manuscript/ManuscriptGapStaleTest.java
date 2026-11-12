@@ -27,7 +27,7 @@ public class ManuscriptGapStaleTest {
     }
 
     private static SectionRevision.Builder text(String text) {
-        return SectionRevision.builder().text(text)
+        return SectionRevision.builder().text(text).author(SectionRevision.AUTHOR_WRITER)
                 .citations(Collections.singletonList(new ManuscriptCitation("1", "src-a", "sha-src-a", "Cited words.", "p-src-a", null)));
     }
 
@@ -74,6 +74,25 @@ public class ManuscriptGapStaleTest {
                 .isEmpty());
         assertEquals(Collections.singleton("s1"), manuscript.markGapsResearched(
                 Collections.singletonList(gap("s1", 4_000L, "n1", "n2")), 4_500L).keySet());
+    }
+
+    /** Codex on #222: a source accepted during the model call was not in the pack, though the save is newer. */
+    @Test
+    public void aSourceAcceptedDuringTheModelCallMarksTheSectionSavedAfterIt() {
+        ManuscriptWorkspace manuscript = workspace();
+        manuscript.save("s1", "c1", 0, text("Helme orten Beschäftigte [1].").evidenceAt(1_000L), 3_000L);
+        assertEquals(1_000L, manuscript.store().revision("s1", 1).getEvidenceAt());
+        assertEquals(Collections.singleton("s1"), manuscript.markGapsResearched(
+                Collections.singletonList(gap("s1", 2_000L, "n1")), 3_500L).keySet());
+    }
+
+    @Test
+    public void aTextOfTheUserIsNeverMarked() {
+        ManuscriptWorkspace manuscript = workspace();
+        manuscript.save("s1", "c1", 0, text("Helme orten Beschäftigte [1].").author(SectionRevision.AUTHOR_USER),
+                1_000L);
+        assertTrue(manuscript.markGapsResearched(Collections.singletonList(gap("s1", 2_000L, "n1")), 2_500L)
+                .isEmpty());
     }
 
     @Test

@@ -268,6 +268,8 @@ public final class SectionWritingJob {
             SectionWriteRequest request = comment == null || current == null
                     ? SectionWriteRequest.draft(target.chapter, target.section)
                     : SectionWriteRequest.rewrite(target.chapter, target.section, comment, current.getText());
+            // the evidence pack is built inside the call, from the sources accepted until now
+            long evidenceAt = clock.now();
             try {
                 SectionRevision.Builder content;
                 try {
@@ -288,7 +290,7 @@ public final class SectionWritingJob {
                     return LEFT_TO_USER;
                 }
                 content.sectionFingerprint(OutlineFingerprint.of(target.section))
-                        .chapterFingerprint(OutlineFingerprint.of(target.chapter));
+                        .chapterFingerprint(OutlineFingerprint.of(target.chapter)).evidenceAt(evidenceAt);
                 FileManuscriptStore.Write saved = manuscript.save(sectionId, target.chapter.getId(), expected,
                         content, clock.now());
                 board.save(task.complete(clock.now()));

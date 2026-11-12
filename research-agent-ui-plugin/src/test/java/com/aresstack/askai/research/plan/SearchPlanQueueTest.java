@@ -571,6 +571,27 @@ public class SearchPlanQueueTest {
         assertTrue("the acceptance time is kept", ended.get(0).getLastSourceAtMillis() > 0);
     }
 
+    /** Codex on #222: a re-run of a gap search stays attributed to the gap; a plan entry's re-run gets a new id. */
+    @Test
+    public void aRerunKeepsAFixedIdInFrontAndAPlanIdIsNew() throws Exception {
+        String again = SearchPlanQueue.againId("gap-sec-1-abc");
+        assertTrue(again.startsWith("gap-sec-1-abc-plan-"));
+        String twice = SearchPlanQueue.againId(again);
+        assertTrue(twice.startsWith("gap-sec-1-abc-plan-"));
+        assertEquals("no chain of suffixes", again.length(), twice.length());
+        assertFalse(SearchPlanQueue.againId("plan-0001").startsWith("plan-0001-"));
+
+        build(Arrays.asList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.addPriority("gap-sec-1-abc", "draft", "Funkortung Helm Baustelle", "Section: Ortung");
+        queue.run();
+        port.complete(false);
+        port.complete(false);
+        String rerun = queue.rerun("gap-sec-1-abc");
+        assertTrue(rerun, rerun.startsWith("gap-sec-1-abc-plan-"));
+        assertEquals("draft", store.loadEntries().get(rerun).getPhase());
+    }
+
     @Test
     public void aPriorityEntryRunsFirstAndUserEditsReplaceEntries() throws Exception {
         build(Arrays.asList(node("a", "A", "Alpha Query"), node("b", "B", "Beta Query")),
