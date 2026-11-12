@@ -67,4 +67,19 @@ public class TopicAnalysisInputsTest {
         assertEquals("", TopicAnalysisInputs.anchorTitle("Write a practical book about wearables on sites."));
         assertEquals("", TopicAnalysisInputs.anchorTitle(null));
     }
+
+    /** Live run 4: the analysis takes the writer's prose rule, so boilerplate lines are no topic material. */
+    @Test
+    public void navigationContactAndPriceLinesAreNoTopicMaterial() {
+        com.aresstack.askai.research.knowledge.processing.live.TopicAnalysisRequest.PassageFilter prose =
+                TopicAnalysisInputs.proseOnly(
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.defaults());
+        org.junit.Assert.assertFalse(prose.accepts("Email*"));
+        org.junit.Assert.assertFalse(prose.accepts("CHF 69"));
+        org.junit.Assert.assertFalse(prose.accepts(
+                "+49 5251 60-0 Rechtliches Impressum Datenschutz Barrierefreiheit Kontakt Karriere Presse"));
+        org.junit.Assert.assertTrue(prose.accepts("Smarte Helme melden Stürze sofort an die Leitstelle, sodass "
+                + "Ersthelfer schneller auf der Baustelle eintreffen."));
+        org.junit.Assert.assertTrue("the rule's values are part of the snapshot state", prose.key().contains("words"));
+    }
 }

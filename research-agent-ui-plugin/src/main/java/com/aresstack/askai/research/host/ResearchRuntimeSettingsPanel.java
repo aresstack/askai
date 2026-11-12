@@ -536,16 +536,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                         + "(error tolerance, separate from the work budget).");
         bindNonNegativeLimit(writerProseMinWords, ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_WORDS,
                 com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_WORDS,
-                "Evidence pack: a passage with fewer words (a heading, a label) never reaches the section writer.");
+                "Evidence pack and topic analysis: a passage with fewer words (a heading, a label) never reaches "
+                        + "the section writer and is no topic material.");
         bindNonNegativeLimit(writerProseMinSentences, ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_SENTENCES,
                 com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_SENTENCES,
-                "Evidence pack: a passage needs this many finished sentences (. ! ?); breadcrumbs and titles "
-                        + "have none.");
+                "Evidence pack and topic analysis: a passage needs this many finished sentences (. ! ?); "
+                        + "breadcrumbs, titles and contact lines have none.");
         bindLimit(writerProseMaxRun, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_RUN,
                 com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
                         .DEFAULT_MAX_UNPUNCTUATED_RUN,
-                "Evidence pack: navigation menus and footers run on for dozens of words without a comma or full "
-                        + "stop; a passage with a longer run is left out.");
+                "Evidence pack and topic analysis: navigation menus and footers run on for dozens of words "
+                        + "without a comma or full stop; a passage with a longer run is left out.");
         bindLimit(writerWordsPerCall, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
                 ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL,
                 "Section writer: words one call aims for; a section with a larger word target is split by its key "
