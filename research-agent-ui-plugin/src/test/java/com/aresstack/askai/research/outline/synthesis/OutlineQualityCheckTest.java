@@ -219,6 +219,37 @@ public class OutlineQualityCheckTest {
     }
 
     /**
+     * Live outline acceptance 2026-11-12: the chapter named the whole topic, its sections named the sub-topics, and
+     * the topic's rest was in no section. The sections decide where the rest goes.
+     */
+    @Test
+    public void theRestOfATopicWhoseSectionsNameItsSubtopicsIsUsed() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int base = corpus.diverse("sites", 2, 6, 3);
+        corpus.rest("sites", base, 2, 2, 0.9);
+        SynthesisBrief brief = corpus.brief();
+        assertEquals(1, brief.getTopics().size());
+        assertEquals("two passages are too few for a sub-topic of their own", 2, brief.restOf("T1").size());
+        OutlinePlan plan = new OutlinePlan(Collections.singletonList(
+                chapter("Sites", Collections.singletonList("T1"), Collections.<String>emptyList(),
+                        section("A", "T1.1"), section("B", "T1.2"))),
+                Collections.<String>emptyList(), false);
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "snap", Collections.<PlanFinding>emptyList(),
+                        Collections.<String>emptyList());
+
+        java.util.Set<String> used = new java.util.HashSet<String>();
+        for (com.aresstack.askai.research.outline.OutlineSection section : outline.getChapters().get(0)
+                .getSections()) {
+            used.addAll(section.getProvenance().getPassageIds());
+        }
+        assertEquals("every passage of the topic", new java.util.HashSet<String>(brief.passagesOf("T1")), used);
+        assertEquals(new java.util.HashSet<String>(brief.passagesOf("T1")), new java.util.HashSet<String>(
+                outline.getChapters().get(0).getProvenance().getPassageIds()));
+    }
+
+    /**
      * Live run 4 after #204: one aspect per concept node gave every chapter one section, also the chapter of 809
      * passages. A node's material that the sub-topic cut separates gives several aspects of that node; a used
      * concept part treats its requirement even when no chapter names it.
