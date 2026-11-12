@@ -76,12 +76,19 @@ public final class SynthesisBrief {
         private final String topicKey;
         private final Subtopic subtopic;
         private final String excerpt;
+        private final String conceptKey;
 
-        SubtopicEntry(String key, String topicKey, Subtopic subtopic, String excerpt) {
+        SubtopicEntry(String key, String topicKey, Subtopic subtopic, String excerpt, String conceptKey) {
             this.key = key;
             this.topicKey = topicKey;
             this.subtopic = subtopic;
             this.excerpt = excerpt;
+            this.conceptKey = conceptKey == null ? "" : conceptKey;
+        }
+
+        /** The key of the concept requirement whose material this concept part is, or "". */
+        public String getConceptKey() {
+            return conceptKey;
         }
 
         public String getKey() {
@@ -208,23 +215,13 @@ public final class SynthesisBrief {
                 groupTopicKeys.put(groupKey, members);
             }
             members.add(key);
-            String conceptKey = "";
-            if (profile.isConceptAligned()) {
-                String anchor = profile.getConceptAnchorId();
-                Set<String> visited = new LinkedHashSet<String>();
-                while (anchor != null && !anchor.isEmpty() && visited.add(anchor)) {
-                    String found = requirementKeyOfAnchor.get(anchor);
-                    if (found != null) {
-                        conceptKey = found;
-                        break;
-                    }
-                    anchor = parentOf.get(anchor);
-                }
-            }
+            String conceptKey = profile.isConceptAligned()
+                    ? requirementKeyOf(profile.getConceptAnchorId(), requirementKeyOfAnchor, parentOf) : "";
             List<SubtopicEntry> subtopics = new ArrayList<SubtopicEntry>();
             for (Subtopic subtopic : profile.getSubtopics()) {
                 subtopics.add(new SubtopicEntry(key + "." + (subtopics.size() + 1), key, subtopic,
-                        excerpt(texts, subtopic.getRepresentativePassageId(), limits.getExcerptChars())));
+                        excerpt(texts, subtopic.getRepresentativePassageId(), limits.getExcerptChars()),
+                        requirementKeyOf(subtopic.getConceptAnchorId(), requirementKeyOfAnchor, parentOf)));
             }
             List<String> excerpts = new ArrayList<String>();
             for (String passageId : profile.getRepresentativePassageIds()) {
@@ -236,6 +233,21 @@ public final class SynthesisBrief {
             topics.add(new TopicEntry(key, profile, groupKey, conceptKey, subtopics, excerpts));
         }
         return new SynthesisBrief(context, analysis, topics, omitted, outOfScope, requirements, groupTopicKeys);
+    }
+
+    /** The requirement key of a concept node or of its nearest ancestor within the requirement depth, or "". */
+    private static String requirementKeyOf(String anchorId, Map<String, String> requirementKeyOfAnchor,
+                                           Map<String, String> parentOf) {
+        String anchor = anchorId;
+        Set<String> visited = new LinkedHashSet<String>();
+        while (anchor != null && !anchor.isEmpty() && visited.add(anchor)) {
+            String found = requirementKeyOfAnchor.get(anchor);
+            if (found != null) {
+                return found;
+            }
+            anchor = parentOf.get(anchor);
+        }
+        return "";
     }
 
     /**

@@ -269,9 +269,28 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         return new Fixed(fixed, notes);
     }
 
-    /** An item used twice stays with its first chapter; chapters and sections left empty are dropped. */
-    private static OutlinePlan materialOnce(OutlinePlan plan, SynthesisBrief brief, List<String> notes) {
+    /**
+     * The chapter that keeps each unit: a concept part goes to the first chapter that names it (or its topic) AND
+     * treats its concept requirement; every other unit stays with the first chapter naming it.
+     * <p>
+     * Live run 4 (2026-11-12): the first chapter named the whole topic, the chapters on occupational safety, law and
+     * implementation named it again with their requirements; first-come ownership gave every concept part to the
+     * first chapter and dropped the other three as "only repeated material".
+     */
+    static Map<String, Integer> owners(OutlinePlan plan, SynthesisBrief brief) {
         Map<String, Integer> owner = new LinkedHashMap<String, Integer>();
+        for (int i = 0; i < plan.getChapters().size(); i++) {
+            PlannedChapter chapter = plan.getChapters().get(i);
+            for (String key : chapter.getMaterialKeys()) {
+                for (String unit : units(brief, key)) {
+                    SynthesisBrief.SubtopicEntry part = brief.subtopic(unit);
+                    if (!owner.containsKey(unit) && part != null && !part.getConceptKey().isEmpty()
+                            && chapter.getConceptKeys().contains(part.getConceptKey())) {
+                        owner.put(unit, i);
+                    }
+                }
+            }
+        }
         for (int i = 0; i < plan.getChapters().size(); i++) {
             for (String key : plan.getChapters().get(i).getMaterialKeys()) {
                 for (String unit : units(brief, key)) {
@@ -281,6 +300,14 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                 }
             }
         }
+        return owner;
+    }
+
+    /**
+     * An item used twice stays with its owner ({@link #owners}); chapters and sections left empty are dropped.
+     */
+    private static OutlinePlan materialOnce(OutlinePlan plan, SynthesisBrief brief, List<String> notes) {
+        Map<String, Integer> owner = owners(plan, brief);
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
         for (int i = 0; i < plan.getChapters().size(); i++) {
             PlannedChapter chapter = plan.getChapters().get(i);
@@ -347,6 +374,23 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                     missing.add(unit);
                 }
             }
+            for (String unit : new ArrayList<String>(missing)) {
+                int target = chapterOfConcept(chapters, brief.subtopic(unit));
+                if (target >= 0) {
+                    PlannedChapter chapter = chapters.get(target);
+                    List<String> material = new ArrayList<String>(chapter.getMaterialKeys());
+                    material.add(unit);
+                    List<PlannedSection> sections = new ArrayList<PlannedSection>(chapter.getSections());
+                    sections.addAll(FallbackOutlinePlan.sections(brief, new PlannedChapter(chapter.getTitle(), "",
+                            Collections.singletonList(unit), null, null, true)));
+                    chapters.set(target, new PlannedChapter(chapter.getTitle(), chapter.getPurpose(), material,
+                            chapter.getConceptKeys(), sections, chapter.isUntitled()));
+                    notes.add(describe(brief, unit) + " was in no chapter; it joined \"" + chapter.getTitle()
+                            + "\", the chapter of its concept requirement.");
+                    missing.remove(unit);
+                    used.add(unit);
+                }
+            }
             if (missing.isEmpty()) {
                 continue;
             }
@@ -375,6 +419,19 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             used.addAll(missing);
         }
         return plan.withChapters(chapters);
+    }
+
+    /** The first chapter treating the concept requirement of a concept part, or -1 (also for no concept part). */
+    private static int chapterOfConcept(List<PlannedChapter> chapters, SynthesisBrief.SubtopicEntry part) {
+        if (part == null || part.getConceptKey().isEmpty()) {
+            return -1;
+        }
+        for (int i = 0; i < chapters.size(); i++) {
+            if (chapters.get(i).getConceptKeys().contains(part.getConceptKey())) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /** The chapter with most distinct material of {@code groupKey}, or -1. */

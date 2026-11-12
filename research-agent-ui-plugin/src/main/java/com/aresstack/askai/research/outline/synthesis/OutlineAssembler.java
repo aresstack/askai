@@ -104,6 +104,7 @@ public final class OutlineAssembler {
         for (PlannedChapter planned : plan.getChapters()) {
             chapters.add(chapter(planned, brief));
         }
+        attachRests(plan, brief, chapters);
         placeOmitted(chapters, brief, allNotes);
         assignWordTargets(chapters, brief);
 
@@ -171,7 +172,6 @@ public final class OutlineAssembler {
             chapter.sections.add(new Draft(section.getTitle(), section.getPurpose(), points, sectionIds, passages,
                     section.isUntitled()));
         }
-        attachRests(planned, brief, chapter);
         return chapter;
     }
 
@@ -193,15 +193,20 @@ public final class OutlineAssembler {
         return points;
     }
 
-    /** The rest of a topic named only through its sub-topics goes to the section of its largest sub-topic. */
-    private static void attachRests(PlannedChapter planned, SynthesisBrief brief, ChapterDraft chapter) {
+    /**
+     * The rest of a topic named only through its sub-topics goes, once, to the section of its largest sub-topic over
+     * all chapters: concept parts of one topic may lie in different chapters, the rest is still used only once.
+     */
+    private static void attachRests(OutlinePlan plan, SynthesisBrief brief, List<ChapterDraft> chapters) {
         Set<String> topicKeysNamed = new LinkedHashSet<String>();
         Set<String> topicKeysOfSubtopics = new LinkedHashSet<String>();
-        for (String key : planned.getMaterialKeys()) {
-            if (brief.topic(key) != null) {
-                topicKeysNamed.add(key);
-            } else if (brief.subtopic(key) != null) {
-                topicKeysOfSubtopics.add(brief.subtopic(key).getTopicKey());
+        for (PlannedChapter planned : plan.getChapters()) {
+            for (String key : planned.getMaterialKeys()) {
+                if (brief.topic(key) != null) {
+                    topicKeysNamed.add(key);
+                } else if (brief.subtopic(key) != null) {
+                    topicKeysOfSubtopics.add(brief.subtopic(key).getTopicKey());
+                }
             }
         }
         for (String topicKey : topicKeysOfSubtopics) {
@@ -214,12 +219,14 @@ public final class OutlineAssembler {
             }
             Draft target = null;
             int best = -1;
-            for (Draft section : chapter.sections) {
-                for (SynthesisBrief.SubtopicEntry subtopic : brief.topic(topicKey).getSubtopics()) {
-                    int distinct = subtopic.getSubtopic().getDistinctPassageCount();
-                    if (section.ids.contains(subtopic.getSubtopic().getSubtopicId()) && distinct > best) {
-                        target = section;
-                        best = distinct;
+            for (ChapterDraft chapter : chapters) {
+                for (Draft section : chapter.sections) {
+                    for (SynthesisBrief.SubtopicEntry subtopic : brief.topic(topicKey).getSubtopics()) {
+                        int distinct = subtopic.getSubtopic().getDistinctPassageCount();
+                        if (section.ids.contains(subtopic.getSubtopic().getSubtopicId()) && distinct > best) {
+                            target = section;
+                            best = distinct;
+                        }
                     }
                 }
             }

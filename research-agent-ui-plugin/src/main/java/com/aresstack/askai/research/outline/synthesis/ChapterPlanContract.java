@@ -29,6 +29,8 @@ final class ChapterPlanContract {
             + "- Every research topic is used by a chapter. A topic's sub-topics may go to different chapters; then "
             + "name the sub-topic keys instead of the topic key.\n"
             + "- A major topic with several sub-topics deserves a chapter of its own or several chapters.\n"
+            + "- A sub-topic marked with a concept requirement is that requirement's material inside a larger topic: "
+            + "the chapter treating the requirement names that sub-topic key, not the whole topic.\n"
             + "- Topics of different groups are independent areas: do not put two major areas of different groups "
             + "into one chapter.\n"
             + "- Repeated material (many passages, few distinct ones) is confirmation, not a reason for more "
@@ -123,8 +125,17 @@ final class ChapterPlanContract {
                 .append(profile.getPassageCount()).append(" passages, ").append(profile.getDistinctPassageCount())
                 .append(" distinct, ").append(profile.getSourceCount()).append(" sources, ")
                 .append(profile.getDomainCount()).append(" domains; group ").append(topic.getGroupKey());
+        List<String> partConcepts = new ArrayList<String>();
+        for (SynthesisBrief.SubtopicEntry subtopic : topic.getSubtopics()) {
+            if (!subtopic.getConceptKey().isEmpty() && !partConcepts.contains(subtopic.getConceptKey())) {
+                partConcepts.add(subtopic.getConceptKey());
+            }
+        }
         if (!topic.getConceptKey().isEmpty()) {
             text.append("; concept ").append(topic.getConceptKey());
+        } else if (!partConcepts.isEmpty()) {
+            text.append("; holds the material of concepts ").append(String.join(", ", partConcepts))
+                    .append(" (one sub-topic each)");
         } else {
             text.append("; not in the concept");
         }
@@ -138,7 +149,9 @@ final class ChapterPlanContract {
                 SynthesisBrief.SubtopicEntry subtopic = topic.getSubtopics().get(i);
                 text.append(i > 0 ? "; " : "").append(subtopic.getKey()).append(' ')
                         .append(PlanJson.quote(subtopic.getSubtopic().getTitle())).append(" (")
-                        .append(subtopic.getSubtopic().getDistinctPassageCount()).append(" distinct)");
+                        .append(subtopic.getSubtopic().getDistinctPassageCount()).append(" distinct")
+                        .append(subtopic.getConceptKey().isEmpty() ? "" : "; concept " + subtopic.getConceptKey())
+                        .append(')');
             }
             text.append('\n');
         }
