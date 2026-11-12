@@ -305,9 +305,11 @@ public final class SharedTopicDiscovery {
                 new LinkedHashMap<String, com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector>();
         Map<String, String> sources = new HashMap<String, String>();
         Set<String> kept = new java.util.HashSet<String>();
+        Set<String> onPage = rejectedOnPage(whole.getPassages(), filter);
         for (Passage passage : whole.getPassages()) {
             String sourceId = whole.sourceIdOf(passage.getPassageId());
-            if ((eligible == null || eligible.contains(sourceId)) && filter.accepts(passage.getText())) {
+            if ((eligible == null || eligible.contains(sourceId)) && filter.accepts(passage.getText())
+                    && !onPage.contains(passage.getPassageId())) {
                 passages.add(passage);
                 kept.add(passage.getPassageId());
                 sources.put(passage.getPassageId(), sourceId);
@@ -323,6 +325,52 @@ public final class SharedTopicDiscovery {
         return new ActiveKnowledgeCorpusReader.Corpus(passages, vectors, relevant, sources);
     }
 
+    /** A passage id's place on its page: the ordinal of its first sentence, then its piece number. */
+    private static final java.util.regex.Pattern PLACE = java.util.regex.Pattern.compile("#p(\\d+)(?:~(\\d+))?@");
+
+    /**
+     * The passages the filter rejects only with their page: each capture's passages in page order (the passage id
+     * carries the ordinal of its first sentence), handed to {@link TopicAnalysisRequest.PassageFilter#rejectedOnPage}.
+     */
+    static Set<String> rejectedOnPage(List<Passage> passages, TopicAnalysisRequest.PassageFilter filter) {
+        Map<String, List<Passage>> pages = new LinkedHashMap<String, List<Passage>>();
+        for (Passage passage : passages) {
+            List<Passage> page = pages.get(passage.getCaptureId());
+            if (page == null) {
+                page = new ArrayList<Passage>();
+                pages.put(passage.getCaptureId(), page);
+            }
+            page.add(passage);
+        }
+        Set<String> rejected = new java.util.HashSet<String>();
+        for (List<Passage> page : pages.values()) {
+            java.util.Collections.sort(page, new java.util.Comparator<Passage>() {
+                public int compare(Passage a, Passage b) {
+                    long[] x = place(a.getPassageId());
+                    long[] y = place(b.getPassageId());
+                    int byOrdinal = x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0;
+                    return byOrdinal != 0 ? byOrdinal : x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0;
+                }
+            });
+            List<String> texts = new ArrayList<String>();
+            for (Passage passage : page) {
+                texts.add(passage.getText());
+            }
+            for (int index : filter.rejectedOnPage(texts)) {
+                rejected.add(page.get(index).getPassageId());
+            }
+        }
+        return rejected;
+    }
+
+    private static long[] place(String passageId) {
+        java.util.regex.Matcher m = PLACE.matcher(passageId == null ? "" : passageId);
+        if (!m.find()) {
+            return new long[]{Long.MAX_VALUE, 0};
+        }
+        return new long[]{Long.parseLong(m.group(1)), m.group(2) == null ? 0 : Long.parseLong(m.group(2))};
+    }
+
     /** The builder with the clustering values of the analysis settings: both consumers cut the same topics. */
     private LiveOutlineProjectionBuilder clustering(TopicAnalysisSettings settings) {
         return settings == null ? builder : builder.with(settings.getTopicDistance(), settings.getRepresentatives());
@@ -332,7 +380,8 @@ public final class SharedTopicDiscovery {
     private static TopicDendrogram.SplitRule splitRule(TopicAnalysisRequest request,
                                                        ActiveKnowledgeCorpusReader.Corpus corpus) {
         return request == null ? TopicDendrogram.SplitRule.NONE
-                : new TopicAnalyzer(request.getSettings(), request.getFrame()).conceptSplit(corpus.getVectors(), request.getAnchors());
+                : new TopicAnalyzer(request.getSettings(), request.getFrame()).conceptSplit(corpus.getVectors(),
+                        request.getAnchors());
     }
 
     /** The request of the current inputs, or {@code null} without inputs (the builder's own values, no split). */
@@ -361,7 +410,8 @@ public final class SharedTopicDiscovery {
                     passage.getText()));
             texts.put(passage.getPassageId(), passage.getText());
         }
-        TopicAnalysis analysis = new TopicAnalyzer(request.getSettings(), request.getFrame()).analyze(passages, whole.getVectors(), tree,
+        TopicAnalysis analysis = new TopicAnalyzer(request.getSettings(), request.getFrame()).analyze(passages,
+                whole.getVectors(), tree,
                 request.getAnchors(), request.getFence(), monitor);
         if (monitor.isCancelled()) {
             throw new ClusteringMonitor.ClusteringCancelledException();

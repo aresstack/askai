@@ -123,6 +123,11 @@ public final class TopicAnalysisInputs implements SharedTopicDiscovery.AnalysisI
                 return prose.isProse(text);
             }
 
+            @Override
+            public java.util.Set<Integer> rejectedOnPage(List<String> page) {
+                return prose.captions(page);
+            }
+
             public String key() {
                 return "prose(" + prose.getCriteria() + ")";
             }
