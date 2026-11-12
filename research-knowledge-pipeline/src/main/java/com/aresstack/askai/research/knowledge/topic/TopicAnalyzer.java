@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
@@ -461,6 +462,91 @@ public final class TopicAnalyzer {
         List<ConceptCoverage> coverage = new ArrayList<ConceptCoverage>();
         Collections.addAll(coverage, result);
         return coverage;
+    }
+
+    /**
+     * The split rule of the clustering run: a topic that holds the material of two independent concept areas (each
+     * with at least the minimum of distinct passages, from nodes of which neither lies below the other) is not one
+     * topic. It falls apart along the merge tree into the two groups it was merged from, and those are judged again,
+     * never below the sub-topic distance (deeper parts are sub-topics or near duplicates of one topic). Topics new to
+     * the concept are never split; without concept nodes the rule splits nothing.
+     * <p>
+     * Live run 4 (2026-11-12): with an embedding model whose passages lie close together, average linkage merged the
+     * whole corpus below the topic distance into one topic although four concept nodes each held their own material;
+     * the outline then had one topic with eighteen sub-topics, the search one "new topic" for the whole research.
+     * Uses only settings that exist anyway: the concept threshold and margin, the minimum distinct passages, the
+     * duplicate and the sub-topic distance.
+     *
+     * @param vectors the stored document vectors of the clustered passages
+     * @param anchors the concept nodes below the book frame with their query vectors
+     */
+    public TopicDendrogram.SplitRule conceptSplit(final Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                                  List<ConceptAnchor> anchors) {
+        if (anchors == null || anchors.size() < 2 || vectors == null) {
+            return TopicDendrogram.SplitRule.NONE;
+        }
+        final List<ConceptAnchor> nodes = new ArrayList<ConceptAnchor>(anchors);
+        final Map<String, String> parentOf = new HashMap<String, String>();
+        for (ConceptAnchor node : nodes) {
+            parentOf.put(node.getId(), node.getParentId());
+        }
+        return new TopicDendrogram.SplitRule() {
+            private final Map<String, Integer> nodeOf = new HashMap<String, Integer>();
+            private Map<String, String> duplicateGroupOf;
+
+            public boolean split(TopicDendrogram tree, List<String> members, double height) {
+                if (height <= settings.getSubtopicDistance()) {
+                    return false;
+                }
+                if (duplicateGroupOf == null) {
+                    duplicateGroupOf = new HashMap<String, String>();
+                    for (List<String> group : tree.cut(settings.getDuplicateDistance())) {
+                        for (String id : group) {
+                            duplicateGroupOf.put(id, group.get(0));
+                        }
+                    }
+                }
+                Map<Integer, Set<String>> distinctByNode = new TreeMap<Integer, Set<String>>();
+                for (String id : members) {
+                    int node = nodeOf(id);
+                    if (node < 0) {
+                        continue;
+                    }
+                    Set<String> distinct = distinctByNode.get(node);
+                    if (distinct == null) {
+                        distinct = new HashSet<String>();
+                        distinctByNode.put(node, distinct);
+                    }
+                    String group = duplicateGroupOf.get(id);
+                    distinct.add(group == null ? id : group);
+                }
+                List<String> covered = new ArrayList<String>();
+                for (Map.Entry<Integer, Set<String>> entry : distinctByNode.entrySet()) {
+                    if (settings.isMaterialCovered(entry.getValue().size())) {
+                        covered.add(nodes.get(entry.getKey()).getId());
+                    }
+                }
+                for (int a = 0; a < covered.size(); a++) {
+                    for (int b = a + 1; b < covered.size(); b++) {
+                        if (!descends(covered.get(a), covered.get(b), parentOf)
+                                && !descends(covered.get(b), covered.get(a), parentOf)) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            private int nodeOf(String passageId) {
+                Integer known = nodeOf.get(passageId);
+                if (known == null) {
+                    EmbeddingPort.EmbeddingVector vector = vectors.get(passageId);
+                    known = vector == null ? -1 : nearest(nodes, vector);
+                    nodeOf.put(passageId, known);
+                }
+                return known;
+            }
+        };
     }
 
     /** The index of the nearest node above threshold and margin, or -1. */

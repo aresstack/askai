@@ -45,6 +45,10 @@ final class OutlineSettingsRows {
         analysis.row("Major topic (share)", decimal(store, EvidenceAnalysisSettings.KEY_MAJOR_TOPIC_SHARE,
                 TopicAnalysisSettings.DEFAULT_MAJOR_TOPIC_SHARE,
                 "A topic with at least this share of the distinct material is a major area."));
+        analysis.row("Topic distance", decimal(store, EvidenceAnalysisSettings.KEY_TOPIC_DISTANCE,
+                TopicAnalysisSettings.DEFAULT_TOPIC_DISTANCE,
+                "Passages closer than this (cosine distance) form one research topic; it depends on the embedding "
+                        + "model. A topic holding the material of two independent concept nodes is split anyway."));
         analysis.row("Duplicate distance", decimal(store, EvidenceAnalysisSettings.KEY_DUPLICATE_DISTANCE,
                 TopicAnalysisSettings.DEFAULT_DUPLICATE_DISTANCE,
                 "Passages closer than this (cosine distance) say the same and count as one distinct passage."));

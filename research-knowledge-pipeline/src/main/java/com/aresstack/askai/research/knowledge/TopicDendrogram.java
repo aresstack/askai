@@ -108,6 +108,130 @@ public final class TopicDendrogram {
         return groups.partition(passageIds);
     }
 
+    /** Decides whether a group of a cut falls apart into the two groups it was merged from. */
+    public interface SplitRule {
+        /** No group is split: the plain cut. */
+        SplitRule NONE = new SplitRule() {
+            public boolean split(TopicDendrogram tree, List<String> members, double height) {
+                return false;
+            }
+        };
+
+        /**
+         * @param tree    this tree (for further cuts, e.g. the near duplicates)
+         * @param members the group's passages in input order
+         * @param height  the distance its two parts were joined at
+         */
+        boolean split(TopicDendrogram tree, List<String> members, double height);
+    }
+
+    /**
+     * The cut at {@code distance}, and then every group the rule asks to split replaced by the two groups it was
+     * merged from, again for those, until the rule keeps every group or it is a single passage. Splitting walks down
+     * the merge tree only, so every group is still a node of this tree and lies inside one group of the plain cut.
+     * With {@link SplitRule#NONE} this is {@link #cut(double)}. Groups ordered by their first member, members in
+     * input order.
+     */
+    public List<List<String>> cut(double distance, SplitRule rule) {
+        int n = passageIds.size();
+        if (n == 0 || rule == null || rule == SplitRule.NONE) {
+            return cut(distance);
+        }
+        int nodes = n + merges.size();
+        int[] left = new int[nodes];
+        int[] right = new int[nodes];
+        int[] first = new int[nodes];
+        double[] height = new double[nodes];
+        boolean[] hasParent = new boolean[nodes];
+        Arrays.fill(left, -1);
+        Arrays.fill(right, -1);
+        for (int i = 0; i < n; i++) {
+            first[i] = i;
+        }
+        UnionFind groups = new UnionFind(n);
+        int[] nodeOfRoot = new int[n];
+        for (int i = 0; i < n; i++) {
+            nodeOfRoot[i] = i;
+        }
+        int next = n;
+        for (Merge merge : merges) {
+            int a = groups.find(merge.left);
+            int b = groups.find(merge.right);
+            if (a == b) {
+                continue;
+            }
+            int node = next++;
+            left[node] = nodeOfRoot[a];
+            right[node] = nodeOfRoot[b];
+            hasParent[left[node]] = true;
+            hasParent[right[node]] = true;
+            first[node] = Math.min(first[left[node]], first[right[node]]);
+            height[node] = merge.height;
+            nodeOfRoot[groups.union(a, b)] = node;
+        }
+        // The plain cut, top down: a node joined above the distance falls apart into its two parts.
+        List<Integer> open = new ArrayList<Integer>();
+        for (int node = 0; node < next; node++) {
+            if (!hasParent[node]) {
+                open.add(node);
+            }
+        }
+        List<Integer> cut = new ArrayList<Integer>();
+        while (!open.isEmpty()) {
+            int node = open.remove(open.size() - 1);
+            if (left[node] >= 0 && height[node] > distance) {
+                open.add(left[node]);
+                open.add(right[node]);
+            } else {
+                cut.add(node);
+            }
+        }
+        // Then the rule: a group it splits falls apart into its two parts, which are judged again.
+        final int[] firstOf = first;
+        List<Integer> result = new ArrayList<Integer>();
+        while (!cut.isEmpty()) {
+            int node = cut.remove(cut.size() - 1);
+            if (left[node] >= 0 && rule.split(this, membersOf(node, left, right), height[node])) {
+                cut.add(left[node]);
+                cut.add(right[node]);
+            } else {
+                result.add(node);
+            }
+        }
+        Collections.sort(result, new Comparator<Integer>() {
+            public int compare(Integer a, Integer b) {
+                return Integer.compare(firstOf[a], firstOf[b]);
+            }
+        });
+        List<List<String>> partition = new ArrayList<List<String>>();
+        for (Integer node : result) {
+            partition.add(membersOf(node, left, right));
+        }
+        return partition;
+    }
+
+    /** The passages below one node of the tree, in input order. */
+    private List<String> membersOf(int node, int[] left, int[] right) {
+        List<Integer> leaves = new ArrayList<Integer>();
+        List<Integer> stack = new ArrayList<Integer>();
+        stack.add(node);
+        while (!stack.isEmpty()) {
+            int current = stack.remove(stack.size() - 1);
+            if (left[current] < 0) {
+                leaves.add(current);
+            } else {
+                stack.add(left[current]);
+                stack.add(right[current]);
+            }
+        }
+        Collections.sort(leaves);
+        List<String> members = new ArrayList<String>();
+        for (Integer leaf : leaves) {
+            members.add(passageIds.get(leaf));
+        }
+        return members;
+    }
+
     /**
      * The cut at {@code distance} restricted to {@code members}: the groups that lie inside {@code members}, for
      * a member set that is itself a union of groups of a higher cut (a topic and its sub-topics). Members the tree

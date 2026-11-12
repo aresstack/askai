@@ -18,12 +18,17 @@ import java.util.Map;
  */
 public final class TopicClusterer {
 
+    /** Passages joined at or below this cosine distance form one topic (the default of the topic analysis setting). */
+    public static final double DEFAULT_TOPIC_DISTANCE = 0.55;
+    /** Representative passages per topic. */
+    public static final int DEFAULT_REPRESENTATIVES = 2;
+
     private final IdSequence ids;
     private final double mergeDistanceCutoff;
     private final int representativesPerTopic;
 
     public TopicClusterer(IdSequence ids) {
-        this(ids, 0.55, 2);
+        this(ids, DEFAULT_TOPIC_DISTANCE, DEFAULT_REPRESENTATIVES);
     }
 
     public TopicClusterer(IdSequence ids, double mergeDistanceCutoff, int representativesPerTopic) {
@@ -82,6 +87,15 @@ public final class TopicClusterer {
      */
     public Tree clusterTree(List<Passage> passages, Map<String, EmbeddingPort.EmbeddingVector> vectors,
                             ClusteringMonitor monitor) {
+        return clusterTree(passages, vectors, monitor, TopicDendrogram.SplitRule.NONE);
+    }
+
+    /**
+     * The same run with a split rule over the cut ({@link TopicDendrogram#cut(double, TopicDendrogram.SplitRule)}):
+     * the topic analysis splits a topic that spans independent concept areas along the tree.
+     */
+    public Tree clusterTree(List<Passage> passages, Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                            ClusteringMonitor monitor, TopicDendrogram.SplitRule rule) {
         ClusteringMonitor m = monitor == null ? ClusteringMonitor.NONE : monitor;
         float[][] unit = unitVectors(passages, vectors);
         List<TopicDendrogram.Merge> merges = new ArrayList<TopicDendrogram.Merge>();
@@ -96,7 +110,7 @@ public final class TopicClusterer {
             index.put(ids.get(i), i);
         }
         List<List<Integer>> members = new ArrayList<List<Integer>>();
-        for (List<String> group : dendrogram.cut(mergeDistanceCutoff)) {
+        for (List<String> group : dendrogram.cut(mergeDistanceCutoff, rule)) {
             List<Integer> indexes = new ArrayList<Integer>();
             for (String id : group) {
                 indexes.add(index.get(id));

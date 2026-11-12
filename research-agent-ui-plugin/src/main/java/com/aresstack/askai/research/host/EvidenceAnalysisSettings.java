@@ -25,6 +25,7 @@ public final class EvidenceAnalysisSettings {
     public static final String KEY_MAXIMUM_DOMINANT_SHARE = "research.evidence.maximumDominantShare";
     public static final String KEY_MAJOR_TOPIC_SHARE = "research.evidence.majorTopicShare";
     public static final String KEY_REPRESENTATIVES = "research.evidence.representatives";
+    public static final String KEY_TOPIC_DISTANCE = "research.evidence.topicDistance";
     public static final String KEY_KEY_TERMS = "research.evidence.keyTerms";
     public static final String KEY_MINIMUM_CORPUS = "research.evidence.minimumCorpusPassages";
     public static final String KEY_EVERY_NEW_PASSAGES = "research.evidence.everyNewPassages";
@@ -84,7 +85,9 @@ public final class EvidenceAnalysisSettings {
                     ResearchRuntimeSettings.loadDouble(store, KEY_MAJOR_TOPIC_SHARE,
                             TopicAnalysisSettings.DEFAULT_MAJOR_TOPIC_SHARE),
                     ResearchRuntimeSettings.loadPositiveInt(store, KEY_REPRESENTATIVES,
-                            TopicAnalysisSettings.DEFAULT_REPRESENTATIVES));
+                            TopicAnalysisSettings.DEFAULT_REPRESENTATIVES),
+                    ResearchRuntimeSettings.loadDouble(store, KEY_TOPIC_DISTANCE,
+                            TopicAnalysisSettings.DEFAULT_TOPIC_DISTANCE));
         } catch (IllegalArgumentException inconsistent) {
             System.err.println("[evidence-analysis] settings ignored: " + inconsistent.getMessage());
             analysis = TopicAnalysisSettings.defaults();

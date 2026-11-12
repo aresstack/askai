@@ -54,6 +54,19 @@ public class EvidenceAnalysisSettingsTest {
         assertEquals(EvidenceAnalysisSettings.DEFAULT_EVERY_NEW_PASSAGES, loaded.getEveryNewPassages());
         assertEquals(TopicAnalysisSettings.DEFAULT_SUBTOPIC_DISTANCE,
                 loaded.getAnalysis().getSubtopicDistance(), 0.0);
+        assertEquals(TopicAnalysisSettings.DEFAULT_TOPIC_DISTANCE, loaded.getAnalysis().getTopicDistance(), 0.0);
+    }
+
+    /** Live run 4: the topic cut is a setting, not a constant in the code. */
+    @Test
+    public void theTopicDistanceIsAStoredSetting() {
+        MemoryStore store = new MemoryStore();
+        ResearchRuntimeSettings.saveDouble(store, EvidenceAnalysisSettings.KEY_TOPIC_DISTANCE, 0.45);
+        assertEquals(0.45, EvidenceAnalysisSettings.load(store).getAnalysis().getTopicDistance(), 1e-9);
+
+        ResearchRuntimeSettings.saveDouble(store, EvidenceAnalysisSettings.KEY_TOPIC_DISTANCE, 0.05);
+        assertEquals("a topic distance below the duplicates falls back", TopicAnalysisSettings.DEFAULT_TOPIC_DISTANCE,
+                EvidenceAnalysisSettings.load(store).getAnalysis().getTopicDistance(), 0.0);
     }
 
     @Test
