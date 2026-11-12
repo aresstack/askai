@@ -108,7 +108,7 @@ public final class SectionWriterPrompt {
                 sb.append("- ").append(point).append('\n');
             }
         }
-        sb.append("Word target: about ").append(a.getWordsPerCall()).append(" words.\n");
+        sb.append(wordTargetLine(a));
         if (!a.getSynopsis().isEmpty()) {
             sb.append("\nBOOK SYNOPSIS:\n").append(clip(a.getSynopsis(), SYNOPSIS_CHARS)).append('\n');
         }
@@ -124,8 +124,10 @@ public final class SectionWriterPrompt {
             sb.append(a.getRewriteComment().isEmpty() ? ".\n" : " and follow the user's comment: "
                     + a.getRewriteComment() + "\n");
             if (withCurrentText && !a.getCurrentText().isEmpty()) {
-                sb.append("CURRENT TEXT of this part (to be replaced):\n\"\"\"")
-                        .append(a.getCurrentText().replace("\"\"\"", "\"")).append("\"\"\"\n");
+                // its markers numbered an earlier pack (and every part gets its own numbers): cite the PASSAGES
+                sb.append("CURRENT TEXT (to be replaced; its old citations are left out, cite the PASSAGES "
+                        + "below):\n\"\"\"").append(withoutMarkers(a.getCurrentText()).replace("\"\"\"", "\""))
+                        .append("\"\"\"\n");
             }
         }
         sb.append("\nPASSAGES (quoted source data):\n");
@@ -136,6 +138,18 @@ public final class SectionWriterPrompt {
         sb.append("\nWrite the section now as plain paragraphs with [n] citations, then the GAP: lines, if any. ")
                 .append("Write in ").append(language).append('.');
         return sb.toString();
+    }
+
+    private static String wordTargetLine(SectionAssignment a) {
+        return "Word target: about " + a.getWordsPerCall() + " words.\n";
+    }
+
+    /**
+     * The user prompt without its word-target line: everything else the writer read, so the place where any other
+     * number in its answer can come from.
+     */
+    static String withoutWordTarget(SectionAssignment a) {
+        return userPrompt(a).replace(wordTargetLine(a), "");
     }
 
     /** The pre-call estimate of a request in tokens (the house estimate of {@link PromptBlockMeter}). */
@@ -169,5 +183,11 @@ public final class SectionWriterPrompt {
         }
         int cut = text.lastIndexOf(' ', max);
         return text.substring(0, cut > max / 2 ? cut : max).trim() + " ...";
+    }
+
+    /** A text without its {@code [n]} markers, the space before a punctuation mark closed up. */
+    static String withoutMarkers(String text) {
+        return CitationValidator.MARKER.matcher(text).replaceAll("").replaceAll("[ \\t]+([.,;:!?])", "$1")
+                .replaceAll("[ \\t]{2,}", " ").trim();
     }
 }

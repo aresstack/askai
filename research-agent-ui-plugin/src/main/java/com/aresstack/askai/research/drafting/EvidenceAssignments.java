@@ -10,7 +10,9 @@ import com.aresstack.askai.research.writer.WriterPackSettings;
 /**
  * The writer assignment of one section from its evidence pack (PR 27) and the writer's targets (PR 28). A rewrite
  * carries the user's comment and the current text; the writer splits the section by key points and keeps its word
- * target and budget.
+ * target and budget. A section written in several parts gets a pack of the set passage count for each part, and each
+ * part's call gets the set count of them (live run 4: a section of 1,100 words in three parts drew on eight passages,
+ * section 2.1 on eight of its 457).
  */
 public final class EvidenceAssignments implements RuntimeSectionWriter.Assignments {
 
@@ -61,11 +63,14 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
 
     public SectionAssignment assignmentFor(SectionWriteRequest request) throws Exception {
         Targets targets = targetSettings.get();
-        EvidencePack pack = packs.build(contexts.requestFor(request), targets.pack);
+        int parts = SectionAssignment.partCount(request.getSection().getBrief().getWordTarget(),
+                targets.wordsPerCall, request.getSection().getBrief().getKeyPoints().size());
+        EvidencePack pack = packs.build(contexts.requestFor(request),
+                targets.pack.withPassageCount(targets.pack.getPassageCount() * parts));
         SectionAssignment base = SectionWriterInputs.of(pack, request.getSection().getTitle(),
                 request.getSection().getBrief().getPurpose(), request.getSection().getBrief().getKeyPoints(),
                 request.getSection().getBrief().getWordTarget(), targets.wordsPerCall, targets.answerTokens,
-                targets.carry);
+                targets.carry, targets.pack.getPassageCount());
         if (!request.isRewrite()) {
             return base;
         }
@@ -74,6 +79,7 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
                 .previousDigest(base.getPreviousDigest()).glossary(base.getGlossary())
                 .bookLanguage(base.getBookLanguage()).sectionWords(base.getSectionWords())
                 .wordsPerCall(base.getWordsPerCall()).answerTokens(base.getAnswerTokens()).carry(base.getCarry())
-                .rewriteComment(request.getComment()).currentText(request.getCurrentText()).build();
+                .passagesPerCall(base.getPassagesPerCall()).rewriteComment(request.getComment())
+                .currentText(request.getCurrentText()).build();
     }
 }

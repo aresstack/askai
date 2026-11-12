@@ -111,6 +111,10 @@ public class ConceptPlanNodesTest {
         assertEquals("no blacklist term", "Ortung Baustellen Sicherheit Sensorik",
                 ConceptPlanNodes.gapQuery("Ortung per GPS", subject, Arrays.asList("GPS", "Wearables")));
         assertEquals("", ConceptPlanNodes.gapQuery("", "", Collections.<String>emptyList()));
+        assertEquals("a gap without a content word is no query, however good the subject", "",
+                ConceptPlanNodes.gapQuery("und die von der", subject, Collections.<String>emptyList()));
+        assertEquals("a gap of blacklist terms only is no query either", "",
+                ConceptPlanNodes.gapQuery("GPS", subject, Arrays.asList("GPS")));
         StringBuilder sentence = new StringBuilder("Die Überwachung von Vitaldaten und Umgebungsbedingungen");
         for (int i = 0; i < 20; i++) {
             sentence.append(" ermöglicht Reaktion").append(i);

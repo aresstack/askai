@@ -839,7 +839,7 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_WRITER_WORDS_PER_CALL = "research.writer.wordsPerCall";
     /** Answer token budget of one writer call. */
     public static final String KEY_WRITER_ANSWER_TOKENS = "research.writer.answerTokens";
-    /** Passages in one section's evidence pack. */
+    /** Passages one writer call gets; a section written in key-point parts gets this many for each part. */
     public static final String KEY_WRITER_PASSAGES = "research.writer.passages";
     /** Tokens each evidence passage may take. */
     public static final String KEY_WRITER_PASSAGE_TOKENS = "research.writer.passageTokens";

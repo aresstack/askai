@@ -250,8 +250,9 @@ public final class ConceptPlanNodes {
      * blacklist terms of the plan queries, and up to {@value #MISSION_KEYWORDS} content words of the book's subject
      * (its title, else the mission), as a first-level card's base query takes them. A gap names what a section lacks
      * ("Recht auf informationelle Selbstbestimmung"), not the book it belongs to; the section title did not help
-     * either: "Technologien und Herausforderungen" said nothing about wearables on building sites. Empty when
-     * nothing usable is left.
+     * either: "Technologien und Herausforderungen" said nothing about wearables on building sites. Empty when the
+     * gap itself has no content word ("und die von der"): the subject alone is the book's first search again, no
+     * open point.
      *
      * @param gap       the open point
      * @param subject   the book title, or the mission when there is none
@@ -260,6 +261,9 @@ public final class ConceptPlanNodes {
     public static String gapQuery(String gap, String subject, List<String> blacklist) {
         List<String> words = new ArrayList<String>();
         addKeywords(removeTerms(gap, blacklist), words, new HashSet<String>());
+        if (words.isEmpty()) {
+            return "";
+        }
         return baseQuery(join(words), "", missionKeywords(subject, blacklist), blacklist);
     }
 

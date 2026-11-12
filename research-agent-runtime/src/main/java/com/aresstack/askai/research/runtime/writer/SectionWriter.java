@@ -27,8 +27,13 @@ import java.util.function.Consumer;
  *
  * <p>A cut-off answer gets exactly one continuation from its last full sentence; an answer with uncited sentences or
  * unsupported numbers or quotes gets exactly one repair, which sends the error list and never the failed answer. The
- * repaired answer is stored with whatever flags remain. A section longer than the word target of one call is split
- * by its key points, one call per part. {@code WriterWorker} stays for the orchestrated path until PR 37.</p>
+ * repaired answer is stored with whatever flags remain, unless it keeps fewer words in sentences without an error
+ * than the first answer: then the first answer stays (live run 4: repairs cut parts from 97 words to none and from 123
+ * to 42). A section longer than the word target of one call is split by its key points, one call per part, and each
+ * part gets the passages of the pack that cover its key points best, those no earlier part took first, numbered
+ * {@code [1]..[m]} in its prompt and renumbered to the pack's numbers in the section (live run 4: three parts of one
+ * section saw the same eight passages, and up to 13 repeated sentences per part had to be taken out).
+ * {@code WriterWorker} stays for the orchestrated path until PR 37.</p>
  *
  * <p>An open point names what the passages lack, never the writing itself (live run 4, book 5): a {@code GAP:} line
  * that names the call's word target ("Zielwert von 1100 Wörtern"), and a {@code GAP:} line of a repaired answer that
@@ -86,7 +91,9 @@ public final class SectionWriter {
         String digest = assignment.getPreviousDigest();
         java.util.Set<String> written = new java.util.HashSet<String>();
         for (SectionAssignment part : parts) {
-            SectionDraft draft = writePart(part.part(part.getKeyPoints(), part.getWordsPerCall(), digest), written);
+            List<EvidencePassage> packed = part.getPassages();
+            SectionDraft draft = writePart(part.part(part.getKeyPoints(), numbered(packed), part.getWordsPerCall(),
+                    digest), written);
             calls += draft.getCalls();
             if (hash.isEmpty()) {
                 hash = draft.getPromptHash();
@@ -97,11 +104,15 @@ public final class SectionWriter {
             if (text.length() > 0) {
                 text.append("\n\n");
             }
-            text.append(draft.getText());
-            citations.putAll(draft.getCitations());
+            text.append(renumber(draft.getText(), packed));
+            for (Map.Entry<Integer, EvidencePassage> cited : draft.getCitations().entrySet()) {
+                EvidencePassage passage = cited.getKey() >= 1 && cited.getKey() <= packed.size()
+                        ? packed.get(cited.getKey() - 1) : cited.getValue();
+                citations.put(passage.getNumber(), passage);
+            }
             for (ClaimFlag f : draft.getFlags()) {
-                flags.add(new ClaimFlag(f.getKind(), f.getParagraph() + paragraphOffset, f.getSentence(),
-                        f.getDetail()));
+                flags.add(new ClaimFlag(f.getKind(), f.getParagraph() + paragraphOffset,
+                        renumber(f.getSentence(), packed), renumber(f.getDetail(), packed)));
             }
             paragraphOffset += draft.getText().isEmpty() ? 0 : draft.getText().split("\n\n").length;
             gaps.addAll(draft.getGaps());
@@ -143,13 +154,21 @@ public final class SectionWriter {
                     listed.add(CitationValidator.pointKey(error.getSentence()));
                 }
                 Checked again = check(repaired, a, written);
-                checked = new Checked(again.result.withoutGaps(new java.util.function.Predicate<String>() {
+                Checked fixed = new Checked(again.result.withoutGaps(new java.util.function.Predicate<String>() {
                     public boolean test(String point) {
                         return listed.contains(CitationValidator.pointKey(point));
                     }
                 }), again.unsupported);
-                log.accept("section " + a.getSectionId() + ": repaired answer of " + checked.result.wordCount()
-                        + " words, " + checked.repairable().size() + " citation errors");
+                log.accept("section " + a.getSectionId() + ": repaired answer of " + fixed.result.wordCount()
+                        + " words, " + fixed.repairable().size() + " citation errors");
+                int before = supportedWords(checked.result, errors);
+                int after = supportedWords(fixed.result, fixed.repairable());
+                if (after < before) {
+                    log.accept("section " + a.getSectionId() + ": kept the first answer (" + before
+                            + " words without an error, the repaired one " + after + ")");
+                } else {
+                    checked = fixed;
+                }
             }
         }
         for (String marker : checked.result.getStrippedMarkers()) {
@@ -274,10 +293,12 @@ public final class SectionWriter {
 
     private Checked check(String answer, SectionAssignment a, java.util.Set<String> written) {
         final int target = a.getWordsPerCall();
+        // the target echoed back is no open point; a number the material names too may be one ("450 Beschäftigte")
+        final boolean onlyTheTargetNamesIt = !namesNumber(SectionWriterPrompt.withoutWordTarget(a), target);
         CitationValidator.Result result = validator.validate(answer, a.getPassages().size(), written)
                 .withoutGaps(new java.util.function.Predicate<String>() {
                     public boolean test(String point) {
-                        return namesNumber(point, target);
+                        return onlyTheTargetNamesIt && namesNumber(point, target);
                     }
                 });
         List<ClaimFlag> unsupported = new ArrayList<ClaimFlag>(claims.check(result, a.getPassages()));
@@ -300,8 +321,9 @@ public final class SectionWriter {
     }
 
     /**
-     * Whether a text names {@code number} as a number of its own ("1100", "1.100", "1 100"): an open point that
-     * names the call's word target talks about the writing, not about what the passages lack.
+     * Whether a text names {@code number} as a number of its own ("1100", "1.100", "1 100"). An open point that names
+     * the call's word target, while nothing else the writer read names that number, talks about the writing ("Zielwert
+     * von 1100 Wörtern"), not about what the passages lack; structural, like the other checks, with no word list.
      */
     static boolean namesNumber(String text, int number) {
         java.util.regex.Matcher m = NUMBER.matcher(text == null ? "" : text);
@@ -328,24 +350,121 @@ public final class SectionWriter {
         return null;
     }
 
-    /** Splits a section into key-point parts when it needs more words than one call writes. */
+    /**
+     * Splits a section into key-point parts when it needs more words than one call writes; each part carries the
+     * passages of the pack it gets ({@link #passagesFor}), with the pack's numbers.
+     */
     static List<SectionAssignment> parts(SectionAssignment a) {
         List<SectionAssignment> parts = new ArrayList<SectionAssignment>();
         int per = a.getWordsPerCall();
-        int count = (a.getSectionWords() + per - 1) / per;
         List<String> points = a.getKeyPoints();
-        count = Math.max(1, Math.min(count, points.size()));
+        int count = SectionAssignment.partCount(a.getSectionWords(), per, points.size());
         if (count == 1) {
             parts.add(a.part(points, Math.min(a.getSectionWords(), per), a.getPreviousDigest()));
             return parts;
         }
         int words = Math.min(per, (a.getSectionWords() + count - 1) / count);
+        ClaimCarryCheck measure = new ClaimCarryCheck(a.getCarry());
+        Set<Integer> taken = new HashSet<Integer>();
         for (int i = 0; i < count; i++) {
             int from = i * points.size() / count;
             int to = (i + 1) * points.size() / count;
-            parts.add(a.part(new ArrayList<String>(points.subList(from, to)), words, a.getPreviousDigest()));
+            List<String> partPoints = new ArrayList<String>(points.subList(from, to));
+            parts.add(a.part(partPoints, passagesFor(a, partPoints, taken, measure), words, a.getPreviousDigest()));
         }
         return parts;
+    }
+
+    /**
+     * The passages of one part: every passage of the pack when it holds no more than one call gets, otherwise the
+     * {@link SectionAssignment#getPassagesPerCall() passages per call} that cover the most content words of the
+     * part's key points (the measure of claim-check stage 2), passages no earlier part took first, ties in pack
+     * order (the pack is ranked by the section brief). In pack order, with the pack's numbers.
+     *
+     * @param taken the numbers earlier parts took; this part's numbers are added
+     */
+    static List<EvidencePassage> passagesFor(SectionAssignment a, List<String> partPoints, Set<Integer> taken,
+                                             ClaimCarryCheck measure) {
+        List<EvidencePassage> pack = a.getPassages();
+        int count = a.getPassagesPerCall();
+        if (count <= 0 || pack.size() <= count) {
+            return pack;
+        }
+        StringBuilder points = new StringBuilder();
+        for (String point : partPoints) {
+            points.append(point).append(' ');
+        }
+        List<String> words = measure.contentWords(points.toString());
+        final Map<Integer, Double> cover = new java.util.HashMap<Integer, Double>();
+        for (EvidencePassage passage : pack) {
+            cover.put(passage.getNumber(), measure.overlap(words, measure.stemsOf(passage.getText())));
+        }
+        final Set<Integer> earlier = new HashSet<Integer>(taken);
+        List<EvidencePassage> ranked = new ArrayList<EvidencePassage>(pack);
+        java.util.Collections.sort(ranked, new java.util.Comparator<EvidencePassage>() {
+            public int compare(EvidencePassage x, EvidencePassage y) {
+                boolean xTaken = earlier.contains(x.getNumber());
+                if (xTaken != earlier.contains(y.getNumber())) {
+                    return xTaken ? 1 : -1;
+                }
+                int byCover = Double.compare(cover.get(y.getNumber()), cover.get(x.getNumber()));
+                return byCover != 0 ? byCover : Integer.compare(x.getNumber(), y.getNumber());
+            }
+        });
+        List<EvidencePassage> chosen = new ArrayList<EvidencePassage>(ranked.subList(0, count));
+        java.util.Collections.sort(chosen, new java.util.Comparator<EvidencePassage>() {
+            public int compare(EvidencePassage x, EvidencePassage y) {
+                return Integer.compare(x.getNumber(), y.getNumber());
+            }
+        });
+        for (EvidencePassage passage : chosen) {
+            taken.add(passage.getNumber());
+        }
+        return chosen;
+    }
+
+    /** The passages numbered {@code [1]..[m]} in their order, as one call's prompt lists them. */
+    static List<EvidencePassage> numbered(List<EvidencePassage> passages) {
+        List<EvidencePassage> out = new ArrayList<EvidencePassage>();
+        for (EvidencePassage p : passages) {
+            out.add(p.getNumber() == out.size() + 1 ? p : new EvidencePassage(out.size() + 1, p.getSourceId(),
+                    p.getSourceChecksum(), p.getPassageId(), p.getText()));
+        }
+        return out;
+    }
+
+    /** A part's markers {@code [i]} as the numbers of {@code packed.get(i - 1)}; other numbers stay. */
+    static String renumber(String text, List<EvidencePassage> packed) {
+        if (text == null || text.isEmpty()) {
+            return text == null ? "" : text;
+        }
+        java.util.regex.Matcher m = CitationValidator.MARKER.matcher(text);
+        StringBuffer out = new StringBuffer();
+        while (m.find()) {
+            List<String> numbers = new ArrayList<String>();
+            for (String n : m.group(1).split("[,;]")) {
+                int local = Integer.parseInt(n.trim());
+                numbers.add(String.valueOf(local >= 1 && local <= packed.size()
+                        ? packed.get(local - 1).getNumber() : local));
+            }
+            m.appendReplacement(out, java.util.regex.Matcher.quoteReplacement("[" + String.join(", ", numbers)
+                    + "]"));
+        }
+        m.appendTail(out);
+        return out.toString();
+    }
+
+    /** The words of an answer outside the sentences an error names; each sentence counts once. */
+    static int supportedWords(CitationValidator.Result result, List<ClaimFlag> errors) {
+        int words = result.wordCount();
+        Set<String> counted = new HashSet<String>();
+        for (ClaimFlag error : errors) {
+            if (counted.add(CitationValidator.pointKey(error.getSentence()))) {
+                String plain = CitationValidator.MARKER.matcher(error.getSentence()).replaceAll(" ").trim();
+                words -= plain.isEmpty() ? 0 : plain.split("\\s+").length;
+            }
+        }
+        return Math.max(0, words);
     }
 
     private static String lastSentences(String text) {

@@ -27,6 +27,17 @@ public final class SectionWriterInputs {
     public static SectionAssignment of(EvidencePack pack, String title, String brief, List<String> keyPoints,
                                        int sectionWords, int wordsPerCall, int answerTokens,
                                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry) {
+        return of(pack, title, brief, keyPoints, sectionWords, wordsPerCall, answerTokens, carry, 0);
+    }
+
+    /**
+     * @param passagesPerCall passages one writer call gets; a section written in parts gives each part that many of
+     *                        the pack's passages (0 = every passage to every call)
+     */
+    public static SectionAssignment of(EvidencePack pack, String title, String brief, List<String> keyPoints,
+                                       int sectionWords, int wordsPerCall, int answerTokens,
+                                       com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry,
+                                       int passagesPerCall) {
         List<com.aresstack.askai.research.runtime.writer.EvidencePassage> passages =
                 new ArrayList<com.aresstack.askai.research.runtime.writer.EvidencePassage>();
         for (EvidencePassage p : pack.getPassages()) {
@@ -36,6 +47,7 @@ public final class SectionWriterInputs {
         return SectionAssignment.builder(pack.getSectionId()).title(title).brief(brief).keyPoints(keyPoints)
                 .passages(passages).synopsis(pack.getSynopsis()).previousDigest(pack.getPreviousSectionDigest())
                 .glossary(pack.getGlossary()).bookLanguage(pack.getBookLanguage()).sectionWords(sectionWords)
-                .wordsPerCall(wordsPerCall).answerTokens(answerTokens).carry(carry).build();
+                .wordsPerCall(wordsPerCall).answerTokens(answerTokens).carry(carry).passagesPerCall(passagesPerCall)
+                .build();
     }
 }

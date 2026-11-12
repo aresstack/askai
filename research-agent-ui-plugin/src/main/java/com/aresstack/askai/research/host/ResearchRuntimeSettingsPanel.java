@@ -558,8 +558,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "Section writer: answer token budget of one call (keep it above the words per call).");
         bindLimit(writerPassages, ResearchRuntimeSettings.KEY_WRITER_PASSAGES,
                 com.aresstack.askai.research.writer.WriterPackSettings.LARGE.getPassageCount(),
-                "Evidence pack: passages one section gets. More passages give the writer more to say, and a "
-                        + "longer prompt.");
+                "Evidence pack: passages one writer call gets. A section written in parts gets this many for "
+                        + "each part, chosen by the part's key points. More passages give the writer more to say, "
+                        + "and a longer prompt.");
         bindLimit(writerPassageTokens, ResearchRuntimeSettings.KEY_WRITER_PASSAGE_TOKENS,
                 com.aresstack.askai.research.writer.WriterPackSettings.LARGE.getPassageTokens(),
                 "Evidence pack: tokens each passage may take (cut at a sentence end; at least "

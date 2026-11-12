@@ -187,6 +187,34 @@ public class SectionContextBuilderTest {
         assertEquals("the criteria are settings", 3, all.getPassages().size());
     }
 
+    /** Live run 4: a section of 1,100 words in three parts drew on the eight passages of one call. */
+    @Test
+    public void aSectionWrittenInPartsGetsTheSetPassagesForEachPart() throws Exception {
+        Corpus corpus = corpus();
+        final OutlineChapter chapter = new OutlineChapter("ch-1", 0, "Grundlagen", OutlineBrief.EMPTY,
+                OutlineProvenance.NONE, false, "", Collections.<OutlineSection>emptyList());
+        final OutlineSection section = new OutlineSection("sec-1", "ch-1", 0, "Begriffe",
+                new OutlineBrief("Die Begriffe klären", Arrays.asList("Alpha", "Beta"), 900),
+                new OutlineProvenance("node-1", Collections.<String>emptyList(), Arrays.asList("p-a1")), false, "");
+        final SectionContextRequest request = new SectionContextRequest("proj", FP, chapter, section, sources(),
+                "Ein Buch über Grundlagen.", "", Collections.<String>emptyList(), "de");
+        com.aresstack.askai.research.drafting.EvidenceAssignments assignments =
+                new com.aresstack.askai.research.drafting.EvidenceAssignments(
+                        new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus),
+                        new com.aresstack.askai.research.drafting.EvidenceAssignments.Contexts() {
+                            public SectionContextRequest requestFor(
+                                    com.aresstack.askai.research.drafting.SectionWriteRequest ignored) {
+                                return request;
+                            }
+                        },
+                        () -> new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
+                                new WriterPackSettings(4, 300), 450, 3072, null));
+        com.aresstack.askai.research.runtime.writer.SectionAssignment twoParts = assignments.assignmentFor(
+                com.aresstack.askai.research.drafting.SectionWriteRequest.draft(chapter, section));
+        assertEquals("900 words at 450 per call: two parts of four passages", 8, twoParts.getPassages().size());
+        assertEquals(4, twoParts.getPassagesPerCall());
+    }
+
     @Test
     public void sameStoreStateGivesAnIdenticalPack() {
         EvidencePack first = new SectionContextBuilder(new RecordingEmbeddings(), corpus(), corpus())
