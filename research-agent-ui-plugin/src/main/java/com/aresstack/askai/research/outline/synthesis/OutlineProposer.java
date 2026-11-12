@@ -41,8 +41,22 @@ public final class OutlineProposer {
         OutlineQualityCheck.Fixed fixed = check.fix(result.getPlan(), result.getBrief());
         List<String> allNotes = new ArrayList<String>(result.getNotes());
         allNotes.addAll(fixed.getNotes());
+        List<PlanFinding> findings = check.review(fixed.getPlan(), result.getBrief());
+        if (blocking(result.getFindings()) && !blocking(findings)) {
+            // Live run 4: the note "still has findings" stood beside an empty findings list; say how it ended.
+            allNotes.add("After the safe fixes the review has no blocking findings left.");
+        }
         allNotes.addAll(notes == null ? Collections.<String>emptyList() : notes);
-        return new OutlineAssembler(length).assemble(fixed.getPlan(), result.getBrief(), snapshotId,
-                check.review(fixed.getPlan(), result.getBrief()), allNotes);
+        return new OutlineAssembler(length).assemble(fixed.getPlan(), result.getBrief(), snapshotId, findings,
+                allNotes);
+    }
+
+    private static boolean blocking(List<PlanFinding> findings) {
+        for (PlanFinding finding : findings) {
+            if (finding.isBlocking()) {
+                return true;
+            }
+        }
+        return false;
     }
 }

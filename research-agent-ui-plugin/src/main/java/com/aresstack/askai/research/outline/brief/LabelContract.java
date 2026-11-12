@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.outline.brief;
 
+import com.aresstack.askai.research.outline.OutlineChapter;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -32,7 +33,8 @@ final class LabelContract {
     static String prompt(BriefContext context, String chapterTitle, List<String> excerpts, String comment) {
         StringBuilder text = new StringBuilder(context.header());
         if (chapterTitle != null && !chapterTitle.trim().isEmpty()) {
-            text.append("Chapter: ").append(chapterTitle.trim()).append('\n');
+            text.append("Chapter: ").append(chapterTitle.trim())
+                    .append(" (the title names this group's part of the chapter, not the chapter itself)\n");
         }
         if (comment != null && !comment.trim().isEmpty()) {
             text.append("Author's request: ").append(comment.trim()).append('\n');
@@ -58,6 +60,11 @@ final class LabelContract {
     }
 
     static OutlineLabel read(String answer) throws BriefAnswerException {
+        return read(answer, "");
+    }
+
+    /** @param chapterTitle the chapter of the labelled section; the title must not repeat it ("" for none) */
+    static OutlineLabel read(String answer, String chapterTitle) throws BriefAnswerException {
         JsonObject root;
         try {
             JsonElement parsed = JsonParser.parseString(answer == null ? "" : answer.trim());
@@ -80,6 +87,9 @@ final class LabelContract {
             char last = title.charAt(title.length() - 1);
             if (last == '.' || last == '!' || last == '?' || last == ':' || last == ';') {
                 errors.add("the title must not end with punctuation");
+            }
+            if (OutlineChapter.repeatsChapterTitle(title, chapterTitle)) {
+                errors.add("the title repeats the chapter title; name this group's part of the chapter");
             }
         }
         if (summary.isEmpty()) {
