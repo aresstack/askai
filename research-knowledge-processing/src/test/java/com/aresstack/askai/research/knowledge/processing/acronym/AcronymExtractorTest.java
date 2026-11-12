@@ -180,6 +180,63 @@ public class AcronymExtractorTest {
     public void thresholdsComeFromTheSettings() {
         String text = "Die NIZZA läuft.";
         assertNotNull(analyze(text).acronym("NIZZA"));
-        assertFalse(extractor.analyze(text, new AcronymSettings(4, 60, 3)).acronyms().size() > 0);
+        assertFalse(extractor.analyze(text, new AcronymSettings(4, 60, 3, AcronymSettings.DEFAULT_MAX_FILLER_LETTERS)).acronyms().size() > 0);
+    }
+
+    /** Live run 4, book 6: wrong long forms and a "CO" from CO₂ in the book's abbreviations. */
+    @Test
+    public void aLongFormWithAWordThatHoldsNoLetterOfTheShortFormIsNoDefinition() {
+        assertTrue(analyze("Die Integration des Internets der Dinge (IoT) verändert Baustellen.").acronym("IOT")
+                .longForms().isEmpty());
+        assertTrue(analyze("Das gilt, solange KI (künstliche Intelligenz weiterentwickelt wird) bleibt.")
+                .acronym("KI").longForms().isEmpty());
+        assertEquals(Arrays.asList("Internet of Things"),
+                analyze("Das Internet of Things (IoT) vernetzt Sensoren.").acronym("IOT").longForms());
+        assertEquals(Arrays.asList("Künstliche Intelligenz"),
+                analyze("Künstliche Intelligenz (KI) wertet Daten aus.").acronym("KI").longForms());
+    }
+
+    @Test
+    public void fillersAndAcronymsInsideALongFormStay() {
+        assertEquals(Arrays.asList("Institut für Arbeitsschutz der DGUV"),
+                analyze("Das Institut für Arbeitsschutz der DGUV (IFA) prüft Geräte.").acronym("IFA").longForms());
+        assertEquals(Arrays.asList("Bundesanstalt für Arbeitsschutz und Arbeitsmedizin"),
+                analyze("Die Bundesanstalt für Arbeitsschutz und Arbeitsmedizin (BAuA) berät.").acronym("BAUA")
+                        .longForms());
+        assertEquals(Arrays.asList("Partnership for European Research in Occupational Safety and Health"),
+                analyze("Das Netz „Partnership for European Research in Occupational Safety and Health“ (PEROSH) "
+                        + "forscht.").acronym("PEROSH").longForms());
+        assertEquals(Arrays.asList("Deutsche Gesetzliche Unfallversicherung e.V."),
+                analyze("Die Deutsche Gesetzliche Unfallversicherung e.V. (DGUV) berät.").acronym("DGUV")
+                        .longForms());
+        AcronymSettings noFillers = new AcronymSettings(AcronymSettings.DEFAULT_MAX_LETTERS,
+                AcronymSettings.DEFAULT_SHOUTING_PERCENT, AcronymSettings.DEFAULT_SHOUTING_MIN_WORDS, 0);
+        assertTrue("the filler length is a setting", extractor.analyze(
+                "Die Bundesanstalt für Arbeitsschutz und Arbeitsmedizin (BAuA) berät.", noFillers)
+                .acronym("BAUA").longForms().isEmpty());
+    }
+
+    @Test
+    public void softHyphensLeaveTheLongFormAndAFormulaIsNoAcronym() {
+        assertEquals(Arrays.asList("Bundesdatenschutzgesetz"), analyze(
+                "Das Bun\u00ADdes\u00ADda\u00ADten\u00ADschutz\u00ADge\u00ADsetz (BDSG) gilt.").acronym("BDSG")
+                .longForms());
+        AcronymAnalysis co2 = analyze("Baustellen stoßen viel CO₂ aus, auch m² Fläche zählen.");
+        assertNull(co2.acronym("CO"));
+        assertTrue(normalized(co2.acronyms()).toString(), co2.acronyms().isEmpty());
+        assertEquals("bundesdatenschutzgesetz", AcronymForms.normalizeLongForm(
+                "„Bun\u00ADdes\u00ADda\u00ADten\u00ADschutz\u00ADge\u00ADsetz“"));
+    }
+
+    @Test
+    public void longFormsDifferingOnlyBySoftHyphensOrQuotesDoNotConflict() {
+        TextSpan span = new TextSpan(0, 1);
+        AcronymLongForms forms = new AcronymLongForms("BDSG", Arrays.asList(
+                new AcronymLongForms.Statement("a", new SourceAcronymRecord.LongForm("Bundesdatenschutzgesetz",
+                        span, span, span)),
+                new AcronymLongForms.Statement("b", new SourceAcronymRecord.LongForm(
+                        "Bun\u00ADdes\u00ADda\u00ADten\u00ADschutz\u00ADge\u00ADsetz“", span, span, span))));
+        assertFalse(forms.conflicting());
+        assertEquals(Arrays.asList("Bundesdatenschutzgesetz"), forms.distinctLongForms());
     }
 }

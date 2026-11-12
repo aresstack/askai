@@ -53,10 +53,12 @@ public final class ConceptFrame {
     static final String PATH_SEPARATOR = " > ";
 
     private final String frameLabel;
+    private final String framePath;
     private final List<Node> nodes;
 
-    private ConceptFrame(String frameLabel, List<Node> nodes) {
+    private ConceptFrame(String frameLabel, String framePath, List<Node> nodes) {
         this.frameLabel = frameLabel;
+        this.framePath = framePath;
         this.nodes = Collections.unmodifiableList(nodes);
     }
 
@@ -73,12 +75,12 @@ public final class ConceptFrame {
             for (ConceptOutlineNode child : frame.getChildren()) {
                 collect(child, 1, framePath, "", nodes);
             }
-            return new ConceptFrame(frame.getLabel(), nodes);
+            return new ConceptFrame(frame.getLabel(), framePath, nodes);
         }
         for (ConceptOutlineNode node : firstLevel) {
             collect(node, 1, root, "", nodes);
         }
-        return new ConceptFrame("", nodes);
+        return new ConceptFrame("", root, nodes);
     }
 
     private static void collect(ConceptOutlineNode node, int depth, String parentPath, String parentId,
@@ -97,6 +99,14 @@ public final class ConceptFrame {
     /** The single first-level node acting as book frame, or "" when the concept has several main themes. */
     public String getFrameLabel() {
         return frameLabel;
+    }
+
+    /**
+     * The prefix every node path shares (book title, frame label), or "" when the paths share none. The analysis
+     * embeds it too: the bare frame is no evidence for a node.
+     */
+    public String getFramePath() {
+        return framePath;
     }
 
     public boolean hasFrame() {

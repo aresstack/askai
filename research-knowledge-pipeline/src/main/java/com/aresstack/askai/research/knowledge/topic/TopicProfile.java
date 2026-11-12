@@ -3,6 +3,8 @@ package com.aresstack.askai.research.knowledge.topic;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Phase 3: everything the outline synthesis needs to know about one topic cluster, measured in code. Material
@@ -39,13 +41,15 @@ public final class TopicProfile {
     private final boolean major;
     private final ScopeAlignment scopeAlignment;
     private final List<String> conceptMaterialNodeIds;
+    private final Map<String, String> restSubtopicOf;
 
     public TopicProfile(String topicId, String title, List<String> passageIds, List<String> representativePassageIds,
                         int distinctPassageCount, int sourceCount, int domainCount, long materialChars,
                         double dispersion, List<Subtopic> subtopics, String groupId, List<TopicRelation> related,
                         String conceptAnchorId, double conceptSimilarity, boolean conceptAligned,
                         boolean materialCovered, boolean sourceConfirmed, double evidenceShare, boolean major,
-                        ScopeAlignment scopeAlignment, List<String> conceptMaterialNodeIds) {
+                        ScopeAlignment scopeAlignment, List<String> conceptMaterialNodeIds,
+                        Map<String, String> restSubtopicOf) {
         this.topicId = topicId == null ? "" : topicId;
         this.title = title == null ? "" : title;
         this.passageIds = copy(passageIds);
@@ -69,6 +73,8 @@ public final class TopicProfile {
         this.evidenceShare = evidenceShare;
         this.major = major;
         this.conceptMaterialNodeIds = copy(conceptMaterialNodeIds);
+        this.restSubtopicOf = restSubtopicOf == null ? Collections.<String, String>emptyMap()
+                : Collections.unmodifiableMap(new LinkedHashMap<String, String>(restSubtopicOf));
     }
 
     private static List<String> copy(List<String> values) {
@@ -127,6 +133,14 @@ public final class TopicProfile {
     /** The recognisable aspects; empty when the topic has fewer than two of them. */
     public List<Subtopic> getSubtopics() {
         return subtopics;
+    }
+
+    /**
+     * For each passage of the topic in none of its sub-topics (the rest), the sub-topic whose centroid lies nearest;
+     * empty without sub-topics. The outline gives such a passage to the section of that sub-topic.
+     */
+    public Map<String, String> getRestSubtopicOf() {
+        return restSubtopicOf;
     }
 
     public String getGroupId() {

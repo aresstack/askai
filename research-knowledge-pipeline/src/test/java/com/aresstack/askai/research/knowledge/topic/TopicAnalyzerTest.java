@@ -453,4 +453,62 @@ public class TopicAnalyzerTest {
         assertTrue(merged.getSubtopics().get(0).getTitle().contains("helmets"));
         assertTrue(merged.getSubtopics().get(1).getTitle().contains("training"));
     }
+
+    /**
+     * Live outline acceptance 2026-11-12 (bge-m3): every passage of four other areas lay above the concept threshold
+     * for "Training apprentices" because all of them are close to the book frame the anchor path starts with. A
+     * passage is evidence for a node only when it points in the direction the node adds to the frame.
+     */
+    @Test
+    public void theBareBookFrameIsNoEvidenceForAConceptNode() {
+        TopicCorpusFixture corpus = new TopicCorpusFixture();
+        int frame = corpus.direction();
+        int training = corpus.plain("training", 6, 3, frame);
+        corpus.plain("sites", 6, 3, frame);
+        corpus.plain("helmets", 6, 3, frame);
+        List<ConceptAnchor> anchors = Collections.singletonList(new ConceptAnchor("c-training", "Training",
+                "Book > Training", 1, "", corpus.query(frame, training)));
+        LiveTopicTree tree = new LiveOutlineProjectionBuilder().discoverTopicTree(corpus.passages, corpus.vectors,
+                ClusteringMonitor.NONE);
+
+        ConceptCoverage withoutFrame = new TopicAnalyzer(TopicAnalysisSettings.defaults()).analyze(
+                corpus.analysisPassages, corpus.vectors, tree, anchors, null, ClusteringMonitor.NONE)
+                .getCoverage().get(0);
+        ConceptCoverage withFrame = new TopicAnalyzer(TopicAnalysisSettings.defaults(), corpus.query(frame)).analyze(
+                corpus.analysisPassages, corpus.vectors, tree, anchors, null, ClusteringMonitor.NONE)
+                .getCoverage().get(0);
+
+        assertEquals("near the frame, every passage passes the threshold", 18,
+                withoutFrame.getPassageIds().size());
+        assertEquals("only the training passages point towards the node", 6, withFrame.getPassageIds().size());
+        for (String id : withFrame.getPassageIds()) {
+            for (AnalysisPassage passage : corpus.analysisPassages) {
+                if (passage.getPassageId().equals(id)) {
+                    assertTrue(passage.getText(), passage.getText().startsWith("training "));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void withoutTheTrainingMaterialTheNodeIsAGapDespiteTheFrame() {
+        TopicCorpusFixture corpus = new TopicCorpusFixture();
+        int frame = corpus.direction();
+        int training = corpus.direction();
+        corpus.plain("sites", 6, 3, frame);
+        corpus.plain("helmets", 6, 3, frame);
+        List<ConceptAnchor> anchors = Collections.singletonList(new ConceptAnchor("c-training", "Training",
+                "Book > Training", 1, "", corpus.query(frame, training)));
+        LiveTopicTree tree = new LiveOutlineProjectionBuilder().discoverTopicTree(corpus.passages, corpus.vectors,
+                ClusteringMonitor.NONE);
+
+        TopicAnalysis analysis = new TopicAnalyzer(TopicAnalysisSettings.defaults(), corpus.query(frame)).analyze(
+                corpus.analysisPassages, corpus.vectors, tree, anchors, null, ClusteringMonitor.NONE);
+
+        assertEquals(ConceptCoverage.Status.GAP, analysis.getCoverage().get(0).getStatus());
+        for (TopicProfile topic : analysis.getTopics()) {
+            assertFalse("a topic near only the frame is aligned to no node: " + topic.getTitle(),
+                    topic.isConceptAligned());
+        }
+    }
 }

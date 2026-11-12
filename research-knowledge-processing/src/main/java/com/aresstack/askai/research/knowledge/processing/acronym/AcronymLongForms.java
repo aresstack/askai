@@ -4,12 +4,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
  * The answer for the assembler (PR 30) per acronym: the long forms eligible sources state, each with its source and
- * spans, and whether they conflict (more than one distinct long form, compared case- and whitespace-insensitively).
+ * spans, and whether they conflict (more than one distinct long form, compared case- and whitespace-insensitively,
+ * soft hyphens and enclosing quotes left out: {@link AcronymForms#normalizeLongForm}).
  */
 public final class AcronymLongForms {
 
@@ -53,9 +53,9 @@ public final class AcronymLongForms {
     public List<String> distinctLongForms() {
         Map<String, String> distinct = new LinkedHashMap<String, String>();
         for (Statement statement : statements) {
-            String key = statement.longForm().longForm().replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+            String key = AcronymForms.normalizeLongForm(statement.longForm().longForm());
             if (!distinct.containsKey(key)) {
-                distinct.put(key, statement.longForm().longForm());
+                distinct.put(key, AcronymForms.cleanLongForm(statement.longForm().longForm()));
             }
         }
         return new ArrayList<String>(distinct.values());

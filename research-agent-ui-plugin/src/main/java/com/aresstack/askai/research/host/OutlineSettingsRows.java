@@ -64,6 +64,9 @@ final class OutlineSettingsRows {
         analysis.row("Concept margin", decimal(store, EvidenceAnalysisSettings.KEY_CONCEPT_MARGIN,
                 TopicAnalysisSettings.DEFAULT_CONCEPT_MARGIN,
                 "... and only with this lead over the second-best node."));
+        analysis.row("Concept lead over the book frame", decimal(store,
+                EvidenceAnalysisSettings.KEY_CONCEPT_FRAME_LEAD, TopicAnalysisSettings.DEFAULT_CONCEPT_FRAME_LEAD,
+                "... and only when it points this far from the bare book frame towards the node."));
         analysis.row("Representative passages", positive(store, EvidenceAnalysisSettings.KEY_REPRESENTATIVES,
                 TopicAnalysisSettings.DEFAULT_REPRESENTATIVES, "Excerpts per topic that the model sees."));
         analysis.row("Key terms", positive(store, EvidenceAnalysisSettings.KEY_KEY_TERMS,

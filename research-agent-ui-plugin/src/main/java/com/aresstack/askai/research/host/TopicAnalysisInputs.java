@@ -15,6 +15,7 @@ import com.aresstack.askai.research.store.FileConceptStore;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -89,7 +90,25 @@ public final class TopicAnalysisInputs implements SharedTopicDiscovery.AnalysisI
         return new TopicAnalysisRequest(title, frame.hasFrame(), anchors(frame),
                 frozen.getPin().getWorkingRevision(), source.fence(), eligible, domains, source.pendingSourceIds(),
                 settings.getAnalysis(), settings.getKeyTerms(), settings.getMinimumCorpusPassages(),
-                settings.getEveryNewPassages(), settings.getCorpusLimit(), proseOnly(settings.getProse()));
+                settings.getEveryNewPassages(), settings.getCorpusLimit(), proseOnly(settings.getProse()))
+                .withFrame(frame.getFramePath(), frameVector(frame));
+    }
+
+    /** The query vector of the prefix every anchor path shares, or {@code null} when there is none. */
+    private synchronized EmbeddingPort.EmbeddingVector frameVector(ConceptFrame frame) {
+        String path = frame.getFramePath();
+        if (path.isEmpty() || frame.nodes().isEmpty()) {
+            return null;
+        }
+        String key = source.embeddingFingerprint() + "\n" + path;
+        if (!queryCache.containsKey(key)) {
+            List<EmbeddingPort.EmbeddingVector> vectors = embeddings.embedQueries(Collections.singletonList(path));
+            if (vectors == null || vectors.size() != 1) {
+                throw new IllegalStateException("The embedding model returned no vector for the book frame.");
+            }
+            queryCache.put(key, vectors.get(0));
+        }
+        return queryCache.get(key);
     }
 
     /**

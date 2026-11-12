@@ -60,6 +60,18 @@ public class OutlineLiveAcceptanceTest {
     static final String DEFAULT_MODEL = "gemma4:e2b";
     static final String DEFAULT_EMBEDDING = "bge-m3";
     static final int DEFAULT_NUM_CTX = 32768;
+    static final String FRAME = "Wearables on construction sites";
+
+    /**
+     * Not part of the corpus: sentences that DO treat the requirement, to show how far real evidence points from the
+     * frame towards the node (the calibration of the concept frame lead).
+     */
+    private static final String[] TRAINING_CONTROL = {
+            "Apprentices practise with smart helmets and sensor vests in the training workshop before their first "
+                    + "day on site.",
+            "Vocational schools teach trainees how to wear, charge and read the alarms of safety wearables.",
+            "A two-day course shows new construction apprentices how proximity tags and gas monitors work."
+    };
 
     /** Four areas, two aspects each, three passages per aspect from three websites. */
     private static final String[][][] AREAS = {
@@ -158,15 +170,19 @@ public class OutlineLiveAcceptanceTest {
         }
         // ONE concept root (the book frame) with one requirement that the research does not cover.
         float[] training = embed(url, embedding, Collections.singletonList(
-                "Wearables on construction sites > Training apprentices to use wearables")).get(0);
+                FRAME + " > Training apprentices to use wearables")).get(0);
         List<ConceptAnchor> anchors = Collections.singletonList(new ConceptAnchor("c-training",
                 "Training apprentices", "Wearables on construction sites > Training apprentices", 1, "",
                 new EmbeddingPort.EmbeddingVector(embedding, "live", training)));
 
         LiveTopicTree tree = new LiveOutlineProjectionBuilder().discoverTopicTree(passages, byId,
                 ClusteringMonitor.NONE);
-        TopicAnalysis analysis = new TopicAnalyzer(TopicAnalysisSettings.defaults()).analyze(analysisPassages, byId,
-                tree, anchors, null, ClusteringMonitor.NONE);
+        // The book frame, the prefix of the anchor path: like the host, the analysis knows it.
+        float[] frame = embed(url, embedding, Collections.singletonList(FRAME)).get(0);
+        TopicAnalysis analysis = new TopicAnalyzer(TopicAnalysisSettings.defaults(),
+                new EmbeddingPort.EmbeddingVector(embedding, "live", frame)).analyze(analysisPassages, byId, tree,
+                anchors, null, ClusteringMonitor.NONE);
+        diagnose(url, embedding, passages, vectors, training, frame, analysis, out);
         SynthesisBrief brief = SynthesisBrief.of(new SynthesisContext("Wearables on construction sites",
                 "Explain how wearables make construction sites safer and what stands in their way",
                 "about 60 pages", "English", Collections.<String>emptyList()), analysis, new SynthesisBrief.Texts() {
@@ -218,6 +234,92 @@ public class OutlineLiveAcceptanceTest {
         for (OutlineReport.Finding finding : outline.getReport().getFindings()) {
             assertFalse(finding.getMessage(), finding.isBlocking());
         }
+    }
+
+    /**
+     * Calibration data for the embedding model (written to {@code analysis.txt}): each passage's cosine similarity
+     * to the requirement anchor and to the bare book frame, the similarity between the areas, and what the analysis
+     * made of it (topics, sub-topics, the requirement's coverage). Live outline acceptance 2026-11-12 (bge-m3): the
+     * four areas formed one topic and the requirement without evidence counted as covered.
+     */
+    private static void diagnose(String url, String embedding, List<Passage> passages, List<float[]> vectors,
+                                 float[] requirement, float[] frame, TopicAnalysis analysis, File out)
+            throws Exception {
+        float[] direction = direction(requirement, frame);
+        StringBuilder text = new StringBuilder("embedding " + embedding + "\n");
+        text.append(String.format(java.util.Locale.ROOT, "sim(requirement, frame) %.3f; frame lead setting %.3f%n",
+                cosine(requirement, frame), TopicAnalysisSettings.DEFAULT_CONCEPT_FRAME_LEAD));
+        text.append("passage  area  sim(requirement)  sim(frame)  frame lead\n");
+        for (int i = 0; i < passages.size(); i++) {
+            text.append(String.format(java.util.Locale.ROOT, "%s  %d  %.3f  %.3f  %.3f%n",
+                    passages.get(i).getPassageId(), i / 6, cosine(vectors.get(i), requirement),
+                    cosine(vectors.get(i), frame), cosine(vectors.get(i), direction)));
+        }
+        List<float[]> control = embed(url, embedding, java.util.Arrays.asList(TRAINING_CONTROL));
+        for (int i = 0; i < control.size(); i++) {
+            text.append(String.format(java.util.Locale.ROOT, "control%d  -  %.3f  %.3f  %.3f%n", i,
+                    cosine(control.get(i), requirement), cosine(control.get(i), frame),
+                    cosine(control.get(i), direction)));
+        }
+        text.append("mean similarity between areas (row x column)\n");
+        for (int a = 0; a < AREAS.length; a++) {
+            for (int b = 0; b < AREAS.length; b++) {
+                double sum = 0;
+                int count = 0;
+                for (int i = a * 6; i < a * 6 + 6; i++) {
+                    for (int j = b * 6; j < b * 6 + 6; j++) {
+                        if (i != j) {
+                            sum += cosine(vectors.get(i), vectors.get(j));
+                            count++;
+                        }
+                    }
+                }
+                text.append(String.format(java.util.Locale.ROOT, "%.3f ", sum / count));
+            }
+            text.append('\n');
+        }
+        for (com.aresstack.askai.research.knowledge.topic.TopicProfile topic : analysis.getTopics()) {
+            text.append("topic ").append(topic.getTopicId()).append(' ').append(topic.getPassageIds().size())
+                    .append(" passages, sub-topics");
+            for (com.aresstack.askai.research.knowledge.topic.Subtopic subtopic : topic.getSubtopics()) {
+                text.append(' ').append(subtopic.getPassageIds());
+            }
+            text.append('\n');
+        }
+        for (com.aresstack.askai.research.knowledge.topic.ConceptCoverage coverage : analysis.getCoverage()) {
+            text.append("requirement ").append(coverage.getLabel()).append(": ").append(coverage.getStatus())
+                    .append(", ").append(coverage.getDistinctPassageCount()).append(" distinct passages ")
+                    .append(coverage.getPassageIds()).append('\n');
+        }
+        System.out.print(text.toString().replaceAll("(?m)^", "[outline-live] "));
+        Files.write(new File(out, "analysis.txt").toPath(), text.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** The unit vector from the frame to the node (both normalised first), as the analysis computes it. */
+    private static float[] direction(float[] node, float[] frame) {
+        double nn = 0;
+        double nf = 0;
+        for (int i = 0; i < node.length; i++) {
+            nn += node[i] * node[i];
+            nf += frame[i] * frame[i];
+        }
+        float[] difference = new float[node.length];
+        for (int i = 0; i < node.length; i++) {
+            difference[i] = (float) (node[i] / Math.sqrt(nn) - frame[i] / Math.sqrt(nf));
+        }
+        return difference;
+    }
+
+    private static double cosine(float[] a, float[] b) {
+        double dot = 0;
+        double na = 0;
+        double nb = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            na += a[i] * a[i];
+            nb += b[i] * b[i];
+        }
+        return na == 0 || nb == 0 ? 0 : dot / Math.sqrt(na * nb);
     }
 
     private static List<float[]> embed(String url, String model, List<String> inputs) throws Exception {

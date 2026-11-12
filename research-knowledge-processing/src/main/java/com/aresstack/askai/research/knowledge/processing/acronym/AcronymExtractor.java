@@ -23,7 +23,12 @@ public final class AcronymExtractor {
     /** Identity of this extractor in stored facts. */
     public static final String ID = "text-acronyms";
     /** Raise when the rules change, so stored facts are re-evaluated. */
-    public static final String VERSION = "1";
+    public static final String VERSION = "2";
+
+    /** Closing and opening quotes that end a long form's candidate text. */
+    private static final String QUOTES = "\"'“”„»«’‘‚";
+    /** A word of a long form: a run without whitespace. */
+    private static final java.util.regex.Pattern WORD = java.util.regex.Pattern.compile("[^\\s\\u00A0]+");
 
     private final SentenceSegmenter sentences;
 
@@ -229,8 +234,9 @@ public final class AcronymExtractor {
         }
         String base = AcronymForms.withoutPlural(shortForm);
         int candidateEnd = open;
-        while (candidateEnd > sentence.start() && Character.isWhitespace(text.charAt(candidateEnd - 1))) {
-            candidateEnd--;
+        while (candidateEnd > sentence.start() && (Character.isWhitespace(text.charAt(candidateEnd - 1))
+                || QUOTES.indexOf(text.charAt(candidateEnd - 1)) >= 0)) {
+            candidateEnd--; // "… Safety and Health“ (PEROSH)": the closing quote is no part of the long form
         }
         int candidateStart = wordsBack(text, sentence.start(), candidateEnd,
                 LongFormMatcher.maxWords(LongFormMatcher.characters(base)));
@@ -240,7 +246,7 @@ public final class AcronymExtractor {
             return null;
         }
         TextSpan longSpan = new TextSpan(candidateStart + at, candidateEnd);
-        if (!isLongForm(longSpan.of(text), base)) {
+        if (!isLongForm(longSpan.of(text), base) || !everyWordCarries(longSpan.of(text), base, rules)) {
             return null;
         }
         return new AcronymDefinition(shortForm, collapse(longSpan.of(text)), AcronymDefinition.Pattern.LONG_FORM_FIRST,
@@ -279,12 +285,62 @@ public final class AcronymExtractor {
             return null;
         }
         // The whole inner text must be the long form: the alignment has to reach its first word.
-        if (LongFormMatcher.longFormStart(base, candidate) != 0 || !isLongForm(candidate, base)) {
+        if (LongFormMatcher.longFormStart(base, candidate) != 0 || !isLongForm(candidate, base)
+                || !everyWordCarries(candidate, base, rules)) {
             return null;
         }
         TextSpan shortSpan = new TextSpan(start + word.span().start(), start + word.span().end());
         return new AcronymDefinition(word.text(), collapse(candidate), AcronymDefinition.Pattern.SHORT_FORM_FIRST,
                 shortSpan, inner, sentence);
+    }
+
+    /**
+     * Whether a long form is a real definition of {@code shortForm}: each of its words starts with a letter or digit of
+     * the short form, unless it is a short lower-case filler ("of", "der", at most
+     * {@link AcronymSettings#maxFillerLetters()} letters) or itself an acronym ("Institut für Arbeitsschutz der
+     * DGUV"). The letter alignment alone accepts "Integration des Internets der Dinge" for "IoT" and "künstliche
+     * Intelligenz weiterentwickelt wird" for "KI" (live run 4, book 6); here "Dinge" and "weiterentwickelt" start with
+     * no letter of the short form. A compound ("Datenschutz-Grundverordnung") is one word.
+     */
+    static boolean everyWordCarries(String longForm, String shortForm, AcronymSettings rules) {
+        String letters = shortForm.toLowerCase(java.util.Locale.ROOT);
+        java.util.regex.Matcher word = WORD.matcher(longForm);
+        while (word.find()) {
+            String w = word.group();
+            int first = -1;
+            for (int i = 0; i < w.length() && first < 0; i++) {
+                if (Character.isLetterOrDigit(w.charAt(i))) {
+                    first = i;
+                }
+            }
+            if (first < 0) {
+                continue; // a dash or a quote between words
+            }
+            if (letters.indexOf(Character.toLowerCase(w.charAt(first))) >= 0 || isFiller(w, rules.maxFillerLetters())
+                    || AcronymForms.classify(w.replaceAll("[^\\p{L}\\p{N}.]", ""), rules.maxLetters())
+                    == TermKind.ACRONYM) {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * A filler: at most {@code max} letters, either all lower case ("of", "für", "der") or with a dot, an abbreviation
+     * such as the legal form "e.V." after "Deutsche Gesetzliche Unfallversicherung".
+     */
+    private static boolean isFiller(String word, int max) {
+        int letters = 0;
+        boolean capital = false;
+        for (int i = 0; i < word.length(); i++) {
+            char c = word.charAt(i);
+            if (Character.isLetter(c)) {
+                letters++;
+                capital |= !Character.isLowerCase(c);
+            }
+        }
+        return letters <= max && (!capital || word.indexOf('.') >= 0);
     }
 
     /** The text inside the parentheses up to the first comma or semicolon, trimmed; {@code null} if empty. */
@@ -335,8 +391,9 @@ public final class AcronymExtractor {
         return lower && !value.contains(shortForm);
     }
 
+    /** A long form without soft hyphens, with single spaces and without enclosing quotes. */
     private static String collapse(String value) {
-        return value.replaceAll("[\\s\\u00A0]+", " ").trim();
+        return AcronymForms.cleanLongForm(value);
     }
 
     /** Occurrences and definitions of one normalized form while collecting. */

@@ -153,7 +153,8 @@ public class SharedTopicAnalysisTest {
         double everything = 1.5;
         TopicAnalysisSettings d = TopicAnalysisSettings.defaults();
         settings = new TopicAnalysisSettings(d.getDuplicateDistance(), d.getSubtopicDistance(), everything,
-                d.getConceptThreshold(), d.getConceptMargin(), d.getMinimumPassages(), d.getMinimumSources(),
+                d.getConceptThreshold(), d.getConceptMargin(), d.getConceptFrameLead(), d.getMinimumPassages(),
+                d.getMinimumSources(),
                 d.getMinimumDomains(), d.getMinimumChildCoverage(), d.getMaximumDominantShare(),
                 d.getMajorTopicShare(), d.getRepresentatives(), everything);
         SharedTopicDiscovery discovery = discovery(temp.newFolder("p"));
