@@ -18,7 +18,7 @@ import java.util.Set;
  * model. {@link #review} lists the findings (blocking ones send the plan back to the model for a revision round);
  * {@link #fix} applies only the corrections that change no decision of the model's beyond the obvious: a material
  * item used twice stays with its first chapter, an unused item joins the chapter of its topic group, a requirement
- * without evidence moves to the gaps, a major topic squeezed into one section is split by its sub-topics, a chapter
+ * without evidence moves to the gaps, a requirement with evidence that a chapter treats leaves the gaps, a major topic squeezed into one section is split by its sub-topics, a chapter
  * without sections is split by its material.
  * <p>Checked: every research topic is used once; every concept requirement is treated or listed as a gap; a
  * requirement named by a chapter has evidence there; two major areas of different groups are not one chapter; a
@@ -496,6 +496,16 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             }
         }
         Set<String> treated = treatedRequirements(next, brief, used);
+        // A requirement with evidence that a chapter treats is no gap, even when the model also listed it as one
+        // (live run 4 after #206: Kapitel 2 carried C2, the gaps listed C2 as well).
+        for (SynthesisBrief.RequirementEntry requirement : brief.getRequirements()) {
+            String key = requirement.getKey();
+            if (treated.contains(key) && requirement.getCoverage().getStatus() != ConceptCoverage.Status.GAP
+                    && gaps.remove(key)) {
+                notes.add("Concept requirement \"" + requirement.getCoverage().getLabel() + "\" is treated by a "
+                        + "chapter; it was removed from the gaps.");
+            }
+        }
         for (SynthesisBrief.RequirementEntry requirement : brief.getRequirements()) {
             if (!treated.contains(requirement.getKey()) && gaps.add(requirement.getKey())) {
                 notes.add("Concept requirement \"" + requirement.getCoverage().getLabel() + "\" is treated by no "
