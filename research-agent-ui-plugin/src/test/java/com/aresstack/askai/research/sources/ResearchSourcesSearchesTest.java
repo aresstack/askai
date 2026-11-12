@@ -166,8 +166,7 @@ public class ResearchSourcesSearchesTest {
 
     @Test
     public void aWeakNodeIsMarkedInTheSearchSummary() {
-        SearchPlanEntry done = SearchPlanEntry.submit("e1", "research", "a", "A", "alpha",
-                SearchPlanEntry.Origin.BASE, 1L).started("r1", 2L).done(3L);
+        SearchPlanEntry done = SearchPlanEntries.done("e1", "A", "alpha", "s-1");
         assertEquals("1 of 1 searches done · uncovered: Licensing, Implementierung (weak evidence)",
                 ResearchSourcesView.searchSummary(Collections.singletonList(done),
                         Arrays.asList("Licensing", "Implementierung"), Collections.singletonList("Implementierung")));
