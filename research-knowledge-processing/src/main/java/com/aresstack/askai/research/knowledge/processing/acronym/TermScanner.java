@@ -14,7 +14,9 @@ import java.util.regex.Pattern;
  *
  * <p>A token starts with a letter or digit and continues over letters, digits and the joiners {@code - . / _} as long
  * as a letter or digit follows the joiner ({@code U.S.A.} becomes {@code U.S.A}, {@code IAR-Schnittstelle} stays one
- * token and is split into its parts by the caller).</p>
+ * token and is split into its parts by the caller). A subscript or superscript digit belongs to its token, so a
+ * formula or unit stays one word ({@code CO₂}, {@code m²}) and never yields the acronym {@code CO} (live run 4,
+ * book 6).</p>
  */
 public final class TermScanner {
 
@@ -71,7 +73,7 @@ public final class TermScanner {
             i++;
             while (i < n) {
                 char c = text.charAt(i);
-                if (Character.isLetterOrDigit(c)) {
+                if (Character.isLetterOrDigit(c) || isIndex(c)) {
                     i++;
                 } else if (isJoiner(c) && i + 1 < n && Character.isLetterOrDigit(text.charAt(i + 1))) {
                     i += 2;
@@ -85,6 +87,11 @@ public final class TermScanner {
             }
         }
         return tokens;
+    }
+
+    /** A subscript or superscript digit ({@code ₂}, {@code ²}): part of a formula or unit, never a word break. */
+    static boolean isIndex(char c) {
+        return Character.getType(c) == Character.OTHER_NUMBER;
     }
 
     /** The parts of a token between hyphens and slashes, each with its own span. */
