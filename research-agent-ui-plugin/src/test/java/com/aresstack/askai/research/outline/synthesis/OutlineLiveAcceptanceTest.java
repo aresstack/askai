@@ -167,6 +167,7 @@ public class OutlineLiveAcceptanceTest {
                 ClusteringMonitor.NONE);
         TopicAnalysis analysis = new TopicAnalyzer(TopicAnalysisSettings.defaults()).analyze(analysisPassages, byId,
                 tree, anchors, null, ClusteringMonitor.NONE);
+        diagnose(url, embedding, passages, vectors, training, analysis, out);
         SynthesisBrief brief = SynthesisBrief.of(new SynthesisContext("Wearables on construction sites",
                 "Explain how wearables make construction sites safer and what stands in their way",
                 "about 60 pages", "English", Collections.<String>emptyList()), analysis, new SynthesisBrief.Texts() {
@@ -218,6 +219,67 @@ public class OutlineLiveAcceptanceTest {
         for (OutlineReport.Finding finding : outline.getReport().getFindings()) {
             assertFalse(finding.getMessage(), finding.isBlocking());
         }
+    }
+
+    /**
+     * Calibration data for the embedding model (written to {@code analysis.txt}): each passage's cosine similarity
+     * to the requirement anchor and to the bare book frame, the similarity between the areas, and what the analysis
+     * made of it (topics, sub-topics, the requirement's coverage). Live outline acceptance 2026-11-12 (bge-m3): the
+     * four areas formed one topic and the requirement without evidence counted as covered.
+     */
+    private static void diagnose(String url, String embedding, List<Passage> passages, List<float[]> vectors,
+                                 float[] requirement, TopicAnalysis analysis, File out) throws Exception {
+        float[] frame = embed(url, embedding, Collections.singletonList("Wearables on construction sites")).get(0);
+        StringBuilder text = new StringBuilder("embedding " + embedding + "\n");
+        text.append("passage  area  sim(requirement)  sim(frame)\n");
+        for (int i = 0; i < passages.size(); i++) {
+            text.append(String.format(java.util.Locale.ROOT, "%s  %d  %.3f  %.3f%n", passages.get(i).getPassageId(),
+                    i / 6, cosine(vectors.get(i), requirement), cosine(vectors.get(i), frame)));
+        }
+        text.append("mean similarity between areas (row x column)\n");
+        for (int a = 0; a < AREAS.length; a++) {
+            for (int b = 0; b < AREAS.length; b++) {
+                double sum = 0;
+                int count = 0;
+                for (int i = a * 6; i < a * 6 + 6; i++) {
+                    for (int j = b * 6; j < b * 6 + 6; j++) {
+                        if (i != j) {
+                            sum += cosine(vectors.get(i), vectors.get(j));
+                            count++;
+                        }
+                    }
+                }
+                text.append(String.format(java.util.Locale.ROOT, "%.3f ", sum / count));
+            }
+            text.append('\n');
+        }
+        for (com.aresstack.askai.research.knowledge.topic.TopicProfile topic : analysis.getTopics()) {
+            text.append("topic ").append(topic.getTopicId()).append(' ').append(topic.getPassageIds().size())
+                    .append(" passages, sub-topics");
+            for (com.aresstack.askai.research.knowledge.topic.Subtopic subtopic : topic.getSubtopics()) {
+                text.append(' ').append(subtopic.getPassageIds());
+            }
+            text.append('\n');
+        }
+        for (com.aresstack.askai.research.knowledge.topic.ConceptCoverage coverage : analysis.getCoverage()) {
+            text.append("requirement ").append(coverage.getLabel()).append(": ").append(coverage.getStatus())
+                    .append(", ").append(coverage.getDistinctPassageCount()).append(" distinct passages ")
+                    .append(coverage.getPassageIds()).append('\n');
+        }
+        System.out.print(text.toString().replaceAll("(?m)^", "[outline-live] "));
+        Files.write(new File(out, "analysis.txt").toPath(), text.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static double cosine(float[] a, float[] b) {
+        double dot = 0;
+        double na = 0;
+        double nb = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            na += a[i] * a[i];
+            nb += b[i] * b[i];
+        }
+        return na == 0 || nb == 0 ? 0 : dot / Math.sqrt(na * nb);
     }
 
     private static List<float[]> embed(String url, String model, List<String> inputs) throws Exception {

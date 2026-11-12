@@ -17,10 +17,12 @@ import java.util.List;
  * Phase 3b: the outline synthesis on {@code phase.outline}. Bounded, traceable steps:
  * <ol>
  * <li>the chapter hierarchy from the brief ({@link ChapterPlanContract});</li>
+ * <li>a topic several chapters name as a whole divided among them by its sub-topics
+ * ({@link SharedTopicContract});</li>
  * <li>the sections of each chapter ({@link SectionPlanContract});</li>
  * <li>the deterministic review ({@link OutlinePlanReview});</li>
- * <li>on blocking findings, a revised chapter hierarchy with the finding list; chapters whose material did not
- * change keep their sections, the others are planned again; then back to 3.</li>
+ * <li>on blocking findings, a revised chapter hierarchy with the finding list (its shared topics divided again);
+ * chapters whose material did not change keep their sections, the others are planned again; then back to 4.</li>
  * </ol>
  * The revision rounds are limited by the settings; the run ends when the review has no blocking finding or the rounds
  * are spent. Every answer is validated; an invalid answer gets one repair with its error list and is never used.
@@ -135,7 +137,7 @@ public final class OutlineSynthesizer {
             plan = FallbackOutlinePlan.plan(brief);
             return new Result(plan, review.review(plan, brief), 0, notes, brief);
         }
-        plan = withSections(plan, null, brief, notes, m);
+        plan = withSections(divideSharedTopics(plan, brief, notes, m), null, brief, notes, m);
 
         int revisions = 0;
         List<PlanFinding> findings = review.review(plan, brief);
@@ -149,7 +151,7 @@ public final class OutlineSynthesizer {
                 notes.add("Revision round " + revisions + " gave no valid chapter plan; the previous plan stays.");
                 break;
             }
-            plan = withSections(revised, plan, brief, notes, m);
+            plan = withSections(divideSharedTopics(revised, brief, notes, m), plan, brief, notes, m);
             findings = review.review(plan, brief);
         }
         if (hasBlocking(findings)) {
@@ -223,6 +225,76 @@ public final class OutlineSynthesizer {
      * The previous chapter that owned the same material, compared by what each chapter owns: chapters naming the same
      * large topic own different parts of it, so their unfiltered material keys are no match.
      */
+    /**
+     * Every topic that several chapters name as a whole is divided among them by its sub-topics, one model call per
+     * topic ({@link SharedTopicContract}); when the call fails, the plan stays and the first chapter keeps the topic.
+     */
+    private OutlinePlan divideSharedTopics(OutlinePlan plan, SynthesisBrief brief, List<String> notes,
+                                           ClusteringMonitor monitor) {
+        OutlinePlan current = plan;
+        for (SharedTopicContract.Shared shared : SharedTopicContract.shared(plan, brief)) {
+            // Each division changes chapter indices only by dropping chapters; look the topic up again.
+            SharedTopicContract.Shared now = null;
+            for (SharedTopicContract.Shared candidate : SharedTopicContract.shared(current, brief)) {
+                if (candidate.topicKey.equals(shared.topicKey)) {
+                    now = candidate;
+                }
+            }
+            if (now == null) {
+                continue;
+            }
+            String chapters = chapterNumbers(now.chapters);
+            java.util.Map<String, Integer> chapterOf = askDivision(brief, current, now, monitor);
+            if (chapterOf == null) {
+                notes.add("Chapters " + chapters + " all named " + now.topicKey + "; dividing it among them failed, "
+                        + "so the first of them keeps it.");
+                continue;
+            }
+            current = SharedTopicContract.apply(current, brief, now, chapterOf, notes);
+            notes.add("Chapters " + chapters + " all named " + now.topicKey + "; its sub-topics were divided among "
+                    + "them.");
+        }
+        return current;
+    }
+
+    private static String chapterNumbers(List<Integer> indices) {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < indices.size(); i++) {
+            text.append(i == 0 ? "" : i == indices.size() - 1 ? " and " : ", ").append(indices.get(i) + 1);
+        }
+        return text.toString();
+    }
+
+    private java.util.Map<String, Integer> askDivision(SynthesisBrief brief, OutlinePlan plan,
+                                                      SharedTopicContract.Shared shared, ClusteringMonitor monitor) {
+        List<ChatMessage> messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system(SharedTopicContract.SYSTEM));
+        messages.add(ChatMessage.user(SharedTopicContract.prompt(brief, plan, shared)));
+        String schema = SharedTopicContract.schema(shared);
+        String step = "divide-" + shared.topicKey;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            checkCancel(monitor);
+            MainModelChatResult result = chat.completeJson(messages, settings.getTemperature(),
+                    settings.getSectionAnswerTokens(), schema);
+            if (!result.isOk()) {
+                telemetry.call(step, chat.modelName(), settings.getSectionAnswerTokens(), attempt, false,
+                        result.getDetail());
+                return null;
+            }
+            try {
+                java.util.Map<String, Integer> chapterOf = SharedTopicContract.read(result.getText(), shared);
+                telemetry.call(step, chat.modelName(), settings.getSectionAnswerTokens(), attempt, true,
+                        shared.open.size() + " sub-topics over chapters " + chapterNumbers(shared.chapters));
+                return chapterOf;
+            } catch (PlanAnswerException refused) {
+                telemetry.call(step, chat.modelName(), settings.getSectionAnswerTokens(), attempt, false,
+                        refused.getMessage());
+                repair(messages, result.getText(), refused);
+            }
+        }
+        return null;
+    }
+
     private static PlannedChapter sameMaterial(OutlinePlan previous, java.util.Map<String, Integer> previousOwner,
                                                List<String> own, SynthesisBrief brief) {
         java.util.Set<String> wanted = new java.util.TreeSet<String>(own);

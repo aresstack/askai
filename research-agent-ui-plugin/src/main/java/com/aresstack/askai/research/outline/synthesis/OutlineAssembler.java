@@ -197,18 +197,22 @@ public final class OutlineAssembler {
     }
 
     /**
-     * The rest of a topic named only through its sub-topics goes, once, to the section of its largest sub-topic over
-     * all chapters: concept parts of one topic may lie in different chapters, the rest is still used only once.
+     * The rest of a topic that no section names as a whole goes, once, to the section of its largest sub-topic over
+     * all chapters: concept parts of one topic may lie in different chapters, the rest is still used only once. The
+     * sections decide, not the chapters: live outline acceptance 2026-11-12, a chapter named the whole topic, its
+     * sections named the sub-topics, and the 8 passages of the topic's rest were in no section.
      */
     private static void attachRests(OutlinePlan plan, SynthesisBrief brief, List<ChapterDraft> chapters) {
         Set<String> topicKeysNamed = new LinkedHashSet<String>();
         Set<String> topicKeysOfSubtopics = new LinkedHashSet<String>();
         for (PlannedChapter planned : plan.getChapters()) {
-            for (String key : planned.getMaterialKeys()) {
-                if (brief.topic(key) != null) {
-                    topicKeysNamed.add(key);
-                } else if (brief.subtopic(key) != null) {
-                    topicKeysOfSubtopics.add(brief.subtopic(key).getTopicKey());
+            for (PlannedSection section : planned.getSections()) {
+                for (String key : section.getMaterialKeys()) {
+                    if (brief.topic(key) != null) {
+                        topicKeysNamed.add(key);
+                    } else if (brief.subtopic(key) != null) {
+                        topicKeysOfSubtopics.add(brief.subtopic(key).getTopicKey());
+                    }
                 }
             }
         }

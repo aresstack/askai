@@ -339,4 +339,58 @@ public class OutlineSynthesizerTest {
         assertTrue(repair, repair.contains("repeats the chapter title"));
         assertEquals("Part 1", result.getPlan().getChapters().get(0).getSections().get(0).getTitle());
     }
+
+    private static final String THREE_CHAPTERS_ON_T1 = "{\"chapters\":["
+            + "{\"title\":\"Helmets\",\"purpose\":\"Helmets.\",\"topics\":[\"T1\"],\"concepts\":[]},"
+            + "{\"title\":\"Location\",\"purpose\":\"Location.\",\"topics\":[\"T1\"],\"concepts\":[]},"
+            + "{\"title\":\"Law\",\"purpose\":\"Law.\",\"topics\":[\"T1\"],\"concepts\":[]}],"
+            + "\"gaps\":[]}";
+
+    /**
+     * Live outline acceptance 2026-11-12 (bge-m3): four areas formed one topic, four chapters named it, and the
+     * first chapter kept everything. The model now divides the topic's sub-topics among the chapters naming it.
+     */
+    @Test
+    public void aTopicSeveralChaptersNameIsDividedAmongThemBySubtopic() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.diverse("sites", 4, 6, 3);
+        SynthesisBrief brief = corpus.brief();
+        assertEquals(1, brief.getTopics().size());
+        assertEquals(4, brief.getTopics().get(0).getSubtopics().size());
+        ScriptedChat chat = new ScriptedChat().then(THREE_CHAPTERS_ON_T1)
+                .then("{\"T1.1\":1,\"T1.2\":2,\"T1.3\":3,\"T1.4\":3}")
+                .then(sections("T1.1")).then(sections("T1.2")).then(sections("T1.3", "T1.4"));
+
+        OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 0).synthesize(brief, null);
+
+        assertEquals("plan, one division, three section calls", 5, chat.calls.size());
+        ScriptedChat.Call division = chat.calls.get(1);
+        assertTrue(division.prompt(), division.prompt().contains("1 \"Helmets\""));
+        assertTrue(division.prompt().contains("T1.4 "));
+        assertTrue(division.schema, division.schema.contains("\"enum\":[1,2,3]"));
+        List<PlannedChapter> chapters = result.getPlan().getChapters();
+        assertEquals(3, chapters.size());
+        assertEquals(Collections.singletonList("T1.1"), chapters.get(0).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.2"), chapters.get(1).getMaterialKeys());
+        assertEquals(java.util.Arrays.asList("T1.3", "T1.4"), chapters.get(2).getMaterialKeys());
+        assertTrue(String.join("\n", result.getNotes()).contains("its sub-topics were divided among them"));
+    }
+
+    @Test
+    public void aDivisionNamingAChapterOutsideTheTopicIsRepairedAndAChapterWithoutAPartIsDropped() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.diverse("sites", 4, 6, 3);
+        SynthesisBrief brief = corpus.brief();
+        ScriptedChat chat = new ScriptedChat().then(THREE_CHAPTERS_ON_T1)
+                .then("{\"T1.1\":1,\"T1.2\":7,\"T1.3\":3,\"T1.4\":3}")
+                .then("{\"T1.1\":1,\"T1.2\":1,\"T1.3\":3,\"T1.4\":3}")
+                .then(sections("T1.1", "T1.2")).then(sections("T1.3", "T1.4"));
+
+        OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 0).synthesize(brief, null);
+
+        assertTrue(chat.calls.get(2).last().contains("T1.2 names chapter 7, which does not name T1"));
+        assertEquals(2, result.getPlan().getChapters().size());
+        assertEquals("Law", result.getPlan().getChapters().get(1).getTitle());
+        assertTrue(String.join("\n", result.getNotes()).contains("\"Location\" got no part of T1"));
+    }
 }
