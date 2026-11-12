@@ -60,9 +60,4 @@ public final class PlannedChapter {
     public PlannedChapter withSections(List<PlannedSection> newSections) {
         return new PlannedChapter(title, purpose, materialKeys, conceptKeys, newSections, untitled);
     }
-
-    /** Whether both chapters name the same material (sections can then be kept on a revision). */
-    boolean sameMaterial(PlannedChapter other) {
-        return new java.util.TreeSet<String>(materialKeys).equals(new java.util.TreeSet<String>(other.materialKeys));
-    }
 }

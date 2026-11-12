@@ -284,7 +284,8 @@ public class OutlineSynthesizerTest {
 
     /**
      * Live run 4 after #210: every chapter named the whole large topic, every section call saw all of it, and three
-     * chapters got the same section. Each section call now sees only the material its chapter will own.
+     * chapters got the same section. Each section call now sees only the material its chapter will own, and a
+     * revision keeps a chapter's sections when it owns the same parts again.
      */
     @Test
     public void eachSectionCallSeesOnlyTheMaterialItsChapterOwns() {
@@ -294,12 +295,22 @@ public class OutlineSynthesizerTest {
                 + "{\"title\":\"Safety\",\"purpose\":\"Safety.\",\"topics\":[\"T1\"],\"concepts\":[\"C2\"]},"
                 + "{\"title\":\"Law\",\"purpose\":\"Law.\",\"topics\":[\"T1\"],\"concepts\":[\"C3\"]}],"
                 + "\"gaps\":[]}";
+        final int[] reviews = {0};
+        OutlinePlanReview onceBlocking = new OutlinePlanReview() {
+            public List<PlanFinding> review(OutlinePlan plan, SynthesisBrief brief) {
+                return reviews[0]++ == 0
+                        ? Collections.singletonList(PlanFinding.blocking("thin", "Chapter 3 is thin."))
+                        : Collections.<PlanFinding>emptyList();
+            }
+        };
         ScriptedChat chat = new ScriptedChat().then(plan)
-                .then(sections("T1.1")).then(sections("T1.2")).then(sections("T1.3"));
+                .then(sections("T1.1")).then(sections("T1.2")).then(sections("T1.3"))
+                .then(plan);
 
-        OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 0).synthesize(brief, null);
+        OutlineSynthesizer.Result result = synthesizer(chat, onceBlocking, 1).synthesize(brief, null);
 
-        assertEquals(4, chat.calls.size());
+        assertEquals(1, result.getRevisions());
+        assertEquals("the revision owns the same parts, so every chapter keeps its sections", 5, chat.calls.size());
         for (int i = 1; i <= 3; i++) {
             String schema = chat.calls.get(i).schema;
             for (int j = 1; j <= 3; j++) {
