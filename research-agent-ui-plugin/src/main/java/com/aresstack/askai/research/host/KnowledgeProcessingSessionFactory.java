@@ -177,12 +177,16 @@ final class KnowledgeProcessingSessionFactory {
         SemanticKnowledgeIndex index = new CompositeSemanticKnowledgeIndex(projectDir, projectId);
         RepositoryIndexableGenerationSource generations =
                 new RepositoryIndexableGenerationSource(repository, vectorStore, projectId);
+        retireSupersededCaptures(repository, index, projectId, documentFingerprint);
 
         // The DURABLE fallback (issue #29): when the bounded in-memory capture store no longer holds the
         // capture (restart, eviction), the reader rebuilds it from the persisted source record's full text —
         // a delayed, user-triggered segmentation never depends on in-memory state.
-        SourceCaptureReader reader = new CaptureStoreSourceCaptureReader(captures,
-                new CanonicalUrlSourceIdResolver(sourceRepository), sourceRepository);
+        // The knowledge project's own persisted capture comes FIRST: a re-read page refreshes its source record in
+        // place, so only the persisted original still holds an older capture's exact input.
+        SourceCaptureReader reader = new com.aresstack.askai.research.knowledge.processing
+                .PersistedFirstSourceCaptureReader(repository, new CaptureStoreSourceCaptureReader(captures,
+                        new CanonicalUrlSourceIdResolver(sourceRepository), sourceRepository));
 
         // One-time readiness line for the live gate: language, the resolved segmenter (model id/version/artifact
         // name — never an absolute path — or the regex reason), and the embedding world.
@@ -391,6 +395,32 @@ final class KnowledgeProcessingSessionFactory {
         session.projectId = projectId;
         session.embeddingFingerprint = fingerprint;
         return session;
+    }
+
+    /**
+     * One active capture per source: loading the project retires every older capture of a source that was
+     * captured again (also in projects written before the rule), and their passages leave the semantic index
+     * here, so the writer's evidence never sees a source twice. A failure never blocks the session start.
+     */
+    private static void retireSupersededCaptures(FileResearchProjectRepository repository,
+                                                 SemanticKnowledgeIndex index, String projectId,
+                                                 String documentFingerprint) {
+        try {
+            repository.load(projectId);
+            java.util.Set<String> superseded = repository.supersededCaptureIds();
+            for (String captureId : superseded) {
+                index.replacePassagesForCapture(projectId, documentFingerprint, captureId,
+                        java.util.Collections.<com.aresstack.askai.research.knowledge.processing.index
+                                .PassageIndexDocument>emptyList());
+            }
+            if (!superseded.isEmpty()) {
+                System.err.println("[research-knowledge] " + superseded.size()
+                        + " superseded capture(s) kept out of the active corpus and the index");
+            }
+        } catch (RuntimeException failed) {
+            System.err.println("[research-knowledge] retiring superseded captures failed: "
+                    + failed.getMessage());
+        }
     }
 
     /** Wrap the diagnostics listener so a COMPLETED job NOTIFIES the UI (staleness re-check) — no rebuild. */

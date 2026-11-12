@@ -55,7 +55,10 @@ public final class CaptureStoreSourceCaptureReader implements SourceCaptureReade
     public SourceCapture read(String captureId, String sourceId) {
         VisitedCapture capture = captures == null ? null : captures.get(captureId);
         if (capture != null) {
-            String resolved = sourceIds.resolve(capture);
+            // The job names the source the acceptance created or refreshed — authoritative. Only a job without
+            // one falls back to the canonical-URL lookup (which picks the FIRST source of that address).
+            String resolved = sourceId != null && !sourceId.trim().isEmpty()
+                    ? sourceId.trim() : sourceIds.resolve(capture);
             return VisitedCaptureSourceCaptureAdapter.toSourceCapture(capture,
                     resolved == null ? "" : resolved);
         }

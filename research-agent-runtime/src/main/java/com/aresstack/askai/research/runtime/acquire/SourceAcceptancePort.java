@@ -48,4 +48,19 @@ public interface SourceAcceptancePort {
      */
     void park(String url, String title, String excerpt, double rerankScore)
             throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable;
+
+    /** The park status of an address whose page is already a captured source: the search does not read it again. */
+    String ALREADY_CAPTURED = "status=ALREADY_CAPTURED";
+
+    /**
+     * As {@link #park} but returns the host's park result line
+     * ({@code status=PARKED|ALREADY_PRESENT|ALREADY_CAPTURED source_id=…}). A line starting with
+     * {@link #ALREADY_CAPTURED} means the page was read and accepted before (in this or an earlier run, also
+     * before a restart): the search skips it instead of reading it again. The default parks and reports nothing.
+     */
+    default String parkReporting(String url, String title, String excerpt, double rerankScore)
+            throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
+        park(url, title, excerpt, rerankScore);
+        return "";
+    }
 }

@@ -178,8 +178,10 @@ public final class SourceProcessingWorker {
         // from the durable data — no expensive NLP/embedding recompute for a transient index error.
         List<PassageIndexDocument> documents = loadPersisted(captureId, segVersion, fingerprint, languageCode);
         int sentenceCount = Listener.RESUMED;
+        String sourceId = documents.isEmpty() ? req.getSourceId() : documents.get(0).getSourceId();
         if (documents.isEmpty()) {
             SourceCapture capture = readCapture(captureId, req.getSourceId());
+            sourceId = capture.getSourceId();
             PassageSegmentation.Result result = segment(capture, languageCode);
             storePassages(capture, result); // passages + vectors durable BEFORE the index (which is a projection)
             documents = toIndexDocuments(capture, result, segVersion, fingerprint);
@@ -188,7 +190,19 @@ public final class SourceProcessingWorker {
         // INDEXING is the LAST stage: only after a successful index update may the job be COMPLETED. A capture's
         // passages are replaced atomically so a retry never duplicates and a new generation supersedes the old.
         indexPassages(captureId, fingerprint, documents);
+        // One active capture per source: the passages of every capture a newer capture of this source replaced
+        // (possibly this very one, when it lost) leave the index, so no search sees a source twice.
+        retireSupersededCaptures(sourceId, fingerprint);
         return new PipelineOutcome(sentenceCount, documents.size());
+    }
+
+    private void retireSupersededCaptures(String sourceId, String fingerprint) {
+        if (sourceId == null || sourceId.isEmpty()) {
+            return;
+        }
+        for (String superseded : passageStore.supersededCaptureIds(sourceId)) {
+            indexPassages(superseded, fingerprint, new ArrayList<PassageIndexDocument>());
+        }
     }
 
     /** The counts reported to the listener on completion; sentenceCount is {@link Listener#RESUMED} on resume. */

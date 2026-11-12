@@ -148,11 +148,21 @@ public class SourceProcessingWorkerTest {
         final java.util.Map<String, EmbeddingPort.EmbeddingVector> vectors =
                 new java.util.LinkedHashMap<String, EmbeddingPort.EmbeddingVector>();
 
+        /** source id → the captures a newer capture of that source replaced. */
+        final java.util.Map<String, java.util.Set<String>> superseded =
+                new java.util.HashMap<String, java.util.Set<String>>();
+
         public void store(SourceCapture capture, List<Sentence> s, List<Passage> p,
                           java.util.Map<String, EmbeddingPort.EmbeddingVector> v) {
             sentences.addAll(s);
             passages.addAll(p);
             vectors.putAll(v);
+        }
+
+        @Override
+        public java.util.Set<String> supersededCaptureIds(String sourceId) {
+            java.util.Set<String> ids = superseded.get(sourceId);
+            return ids == null ? Collections.<String>emptySet() : ids;
         }
     }
 
@@ -200,6 +210,18 @@ public class SourceProcessingWorkerTest {
         assertEquals(Arrays.asList("cap-ok"), fx.listener.completed);
         assertTrue(fx.queue.isAlreadyCompleted(req("cap-ok").idempotencyKey()));
         assertNull(fx.queue.takeNext());
+    }
+
+    @Test
+    public void theCapturesANewerCaptureOfTheSourceReplacedLeaveTheIndex() throws IOException {
+        // One active capture per source: a re-read page's older capture must not stay searchable for the writer.
+        Fx fx = new Fx(tempDir(), 3);
+        fx.store.superseded.put("src-1", Collections.singleton("cap-old"));
+        fx.queue.enqueue(req("cap-new"));
+        assertTrue(fx.worker.processOne());
+        assertEquals("the new capture is indexed, the replaced one is emptied",
+                Arrays.asList("cap-new", "cap-old"), fx.index.replacedCaptures);
+        assertEquals(Arrays.asList("cap-new"), fx.listener.completed);
     }
 
     @Test

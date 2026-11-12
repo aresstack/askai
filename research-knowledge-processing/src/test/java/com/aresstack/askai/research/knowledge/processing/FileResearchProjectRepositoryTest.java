@@ -173,6 +173,128 @@ public class FileResearchProjectRepositoryTest {
         }
     }
 
+    // ------------------------------------------------------------------ one active capture per source
+
+    /** One processed capture of {@code sourceId}, captured at {@code capturedAt}, with one passage. */
+    private static ResearchProject processed(String captureId, String sourceId, long capturedAt, String text) {
+        ResearchProject p = new ResearchProject("p1", IdSequence.counting());
+        SourceCapture.StructuralBlock b = new SourceCapture.StructuralBlock("b1",
+                SourceCapture.BlockKind.PARAGRAPH, "", text);
+        p.recordSourceCapture(new SourceCapture(captureId, sourceId, "https://x/page", capturedAt,
+                "h-" + captureId, "T", "", Collections.singletonList(b)));
+        p.recordSentences(Arrays.asList(new Sentence(captureId + "#s0", captureId, "b1", 0, text)));
+        p.recordPassages(Arrays.asList(new Passage(captureId + "#p0", captureId,
+                Arrays.asList(captureId + "#s0"), "", text, "fpA", "seg-v1")));
+        return p;
+    }
+
+    /** As the passage store does it: load, record the new capture, save. */
+    private static void store(FileResearchProjectRepository repo, ResearchProject processed) {
+        ResearchProject project = repo.load("p1");
+        for (SourceCapture capture : processed.captures().values()) {
+            project.recordSourceCapture(capture);
+        }
+        project.recordSentences(new ArrayList<Sentence>(processed.sentences().values()));
+        project.recordPassages(new ArrayList<Passage>(processed.passages().values()));
+        repo.save(project);
+    }
+
+    @Test
+    public void aNewerCaptureOfTheSameSourceReplacesTheOlderOne() throws IOException {
+        File dir = tempDir();
+        FileResearchProjectRepository repo = new FileResearchProjectRepository(dir);
+        store(repo, processed("cap-34", "source-61", 1000L, "First read of the page."));
+        store(repo, processed("cap-7", "source-2", 1500L, "Another source."));
+        store(repo, processed("cap-8", "source-61", 2000L, "Second read of the page."));
+
+        ResearchProject r = new FileResearchProjectRepository(dir).load("p1");
+        assertNull("the older capture of source-61 is no longer active", r.captures().get("cap-34"));
+        assertNotNull(r.captures().get("cap-8"));
+        assertNotNull("other sources are untouched", r.captures().get("cap-7"));
+        assertEquals("only the newest capture's passages count", 2, r.passages().size());
+        assertNull(r.passages().get("cap-34#p0"));
+        assertNotNull(r.passages().get("cap-8#p0"));
+        assertEquals("one active pointer per source", 2, new File(dir, "knowledge/active").listFiles().length);
+        assertEquals(Collections.singleton("cap-34"), repo.supersededCaptureIds());
+        assertEquals(Collections.singleton("cap-34"), repo.supersededCaptureIds("source-61"));
+        assertTrue(repo.supersededCaptureIds("source-2").isEmpty());
+        // History stays on disk: the older capture file and its generation are kept, only inactive.
+        assertEquals(3, new File(dir, "knowledge/captures").listFiles().length);
+    }
+
+    @Test
+    public void anOlderCaptureStoredLateNeverReplacesTheNewerOne() throws IOException {
+        File dir = tempDir();
+        FileResearchProjectRepository repo = new FileResearchProjectRepository(dir);
+        store(repo, processed("cap-8", "source-61", 2000L, "Second read of the page."));
+        store(repo, processed("cap-34", "source-61", 1000L, "First read of the page."));
+
+        ResearchProject r = repo.load("p1");
+        assertNotNull(r.captures().get("cap-8"));
+        assertNull(r.captures().get("cap-34"));
+        assertEquals(1, r.passages().size());
+        assertNotNull(r.passages().get("cap-8#p0"));
+        assertEquals(Collections.singleton("cap-34"), repo.supersededCaptureIds("source-61"));
+    }
+
+    @Test
+    public void reStoringTheActiveCaptureKeepsItActive() throws IOException {
+        File dir = tempDir();
+        FileResearchProjectRepository repo = new FileResearchProjectRepository(dir);
+        store(repo, processed("cap-34", "source-61", 1000L, "First read of the page."));
+        store(repo, processed("cap-8", "source-61", 2000L, "Second read of the page."));
+        store(repo, processed("cap-8", "source-61", 2000L, "Second read of the page."));
+        ResearchProject r = repo.load("p1");
+        assertEquals(1, r.captures().size());
+        assertNotNull(r.passages().get("cap-8#p0"));
+    }
+
+    @Test
+    public void capturesWithoutASourceAreNeverGrouped() throws IOException {
+        File dir = tempDir();
+        FileResearchProjectRepository repo = new FileResearchProjectRepository(dir);
+        store(repo, processed("cap-1", "", 1000L, "Unlinked one."));
+        store(repo, processed("cap-2", "", 2000L, "Unlinked two."));
+        ResearchProject r = repo.load("p1");
+        assertEquals(2, r.captures().size());
+        assertEquals(2, r.passages().size());
+        assertTrue(repo.supersededCaptureIds().isEmpty());
+    }
+
+    @Test
+    public void loadingAProjectWrittenBeforeTheRuleKeepsOnlyTheNewestCapturePerSource() throws IOException {
+        File dir = tempDir();
+        FileResearchProjectRepository repo = new FileResearchProjectRepository(dir);
+        store(repo, processed("cap-34", "source-61", 1000L, "First read of the page."));
+        File olderPointer = new File(dir, "knowledge/active").listFiles()[0];
+        String legacy = new String(Files.readAllBytes(olderPointer.toPath()), UTF8);
+        store(repo, processed("cap-8", "source-61", 2000L, "Second read of the page."));
+        // Recreate the on-disk state of live run 4: both captures active, pointers in the old format (capture id +
+        // processing key only), no superseded notes.
+        String oldFormat = legacy.substring(0, legacy.indexOf("sourceId="));
+        Files.write(olderPointer.toPath(), oldFormat.getBytes(UTF8));
+        for (File f : new File(dir, "knowledge/active").listFiles()) {
+            String content = new String(Files.readAllBytes(f.toPath()), UTF8);
+            if (content.contains("sourceId=")) {
+                Files.write(f.toPath(), content.substring(0, content.indexOf("sourceId=")).getBytes(UTF8));
+            }
+        }
+        for (File f : new File(dir, "knowledge/superseded").listFiles()) {
+            assertTrue(f.delete());
+        }
+        assertEquals(2, new File(dir, "knowledge/active").listFiles().length);
+
+        ResearchProject r = new FileResearchProjectRepository(dir).load("p1");
+        assertNull("newest wins on load", r.captures().get("cap-34"));
+        assertNotNull(r.captures().get("cap-8"));
+        assertEquals(1, r.passages().size());
+        assertEquals("the duplicate pointer is cleaned up on disk", 1,
+                new File(dir, "knowledge/active").listFiles().length);
+        assertEquals(Collections.singleton("cap-34"), repo.supersededCaptureIds());
+        // And stays clean on the next load.
+        assertEquals(1, new FileResearchProjectRepository(dir).load("p1").captures().size());
+    }
+
     private static File activePointer(File dir) {
         File[] pointers = new File(dir, "knowledge/active").listFiles();
         assertEquals("exactly one capture pointer", 1, pointers.length);
