@@ -397,4 +397,35 @@ public class OutlineSynthesizerTest {
         assertEquals("Law", result.getPlan().getChapters().get(1).getTitle());
         assertTrue(String.join("\n", result.getNotes()).contains("\"Location\" got no part of T1"));
     }
+
+    /**
+     * Live outline acceptance 2026-11-12 (gemma4:e2b): chapter 1 named all of T1, the other chapters named its
+     * sub-topics; first-come ownership kept everything in chapter 1 and dropped the others. A sub-topic named by key
+     * belongs to that chapter; the chapter naming the whole topic keeps the rest, without a division call.
+     */
+    @Test
+    public void aChapterNamingTheWholeTopicKeepsOnlyTheSubtopicsNoOtherChapterNames() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.diverse("sites", 4, 6, 3);
+        SynthesisBrief brief = corpus.brief();
+        ScriptedChat chat = new ScriptedChat().then("{\"chapters\":["
+                + "{\"title\":\"Safety systems\",\"purpose\":\"Overview.\",\"topics\":[\"T1\"],\"concepts\":[]},"
+                + "{\"title\":\"Location\",\"purpose\":\"Location.\",\"topics\":[\"T1.2\"],\"concepts\":[]},"
+                + "{\"title\":\"Heat\",\"purpose\":\"Heat.\",\"topics\":[\"T1.3\"],\"concepts\":[]},"
+                + "{\"title\":\"Costs\",\"purpose\":\"Costs.\",\"topics\":[\"T1.4\"],\"concepts\":[]}],"
+                + "\"gaps\":[]}")
+                .then(sections("T1.1")).then(sections("T1.2")).then(sections("T1.3")).then(sections("T1.4"));
+
+        OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 0).synthesize(brief, null);
+
+        assertEquals("plan and four section calls, no division", 5, chat.calls.size());
+        String first = chat.calls.get(1).prompt();
+        assertTrue(first, first.contains("T1.1"));
+        assertFalse(first, first.contains("T1.2 "));
+        OutlinePlan fixed = new OutlineQualityCheck(OutlineLengthSettings.defaults()).fix(result.getPlan(), brief)
+                .getPlan();
+        assertEquals(4, fixed.getChapters().size());
+        assertEquals(Collections.singletonList("T1.1"), fixed.getChapters().get(0).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.2"), fixed.getChapters().get(1).getMaterialKeys());
+    }
 }

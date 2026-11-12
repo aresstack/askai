@@ -12,9 +12,9 @@ import java.util.Set;
 
 /**
  * Phase 3b, between the chapter plan and the sections: a research topic that several chapters name as a whole is
- * divided among them by its sub-topics. Concept parts already belong to the chapter of their requirement
- * ({@link OutlineQualityCheck#owners}); the model decides for the other sub-topics which of these chapters each one
- * fits, the code applies the answer.
+ * divided among them by its sub-topics. Concept parts and sub-topics another chapter names by key are already
+ * placed ({@link OutlineQualityCheck#claimedOwners}); the model decides for the other sub-topics which of these
+ * chapters each one fits, the code applies the answer.
  * <p>
  * Live outline acceptance 2026-11-12 (bge-m3): four independent areas formed one topic with five sub-topics, the
  * model planned four chapters that all named it, and first-come ownership kept everything in the first chapter and
@@ -48,8 +48,8 @@ final class SharedTopicContract {
     }
 
     /**
-     * The topics that two or more chapters name as a whole and that have sub-topics no concept requirement places
-     * (0-based chapter indices, in plan order).
+     * The topics that two or more chapters name as a whole and that have sub-topics neither a concept requirement nor
+     * a chapter naming them by key places (0-based chapter indices, in plan order).
      */
     static List<Shared> shared(OutlinePlan plan, SynthesisBrief brief) {
         Map<String, List<Integer>> namedBy = new LinkedHashMap<String, List<Integer>>();
@@ -69,7 +69,7 @@ final class SharedTopicContract {
                 }
             }
         }
-        Map<String, Integer> placed = OutlineQualityCheck.conceptOwners(plan, brief);
+        Map<String, Integer> placed = OutlineQualityCheck.claimedOwners(plan, brief);
         List<Shared> result = new ArrayList<Shared>();
         for (Map.Entry<String, List<Integer>> entry : namedBy.entrySet()) {
             if (entry.getValue().size() < 2) {
@@ -173,7 +173,7 @@ final class SharedTopicContract {
      */
     static OutlinePlan apply(OutlinePlan plan, SynthesisBrief brief, Shared shared, Map<String, Integer> chapterOf,
                              List<String> notes) {
-        Map<String, Integer> placed = OutlineQualityCheck.conceptOwners(plan, brief);
+        Map<String, Integer> placed = OutlineQualityCheck.claimedOwners(plan, brief);
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
         for (int i = 0; i < plan.getChapters().size(); i++) {
             PlannedChapter chapter = plan.getChapters().get(i);

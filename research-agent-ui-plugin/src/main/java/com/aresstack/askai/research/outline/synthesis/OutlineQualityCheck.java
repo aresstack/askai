@@ -287,13 +287,33 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
      * first chapter and dropped the other three as "only repeated material".
      */
     static Map<String, Integer> owners(OutlinePlan plan, SynthesisBrief brief) {
-        Map<String, Integer> owner = conceptOwners(plan, brief);
+        Map<String, Integer> owner = claimedOwners(plan, brief);
         for (int i = 0; i < plan.getChapters().size(); i++) {
             for (String key : plan.getChapters().get(i).getMaterialKeys()) {
                 for (String unit : units(brief, key)) {
                     if (!owner.containsKey(unit)) {
                         owner.put(unit, i);
                     }
+                }
+            }
+        }
+        return owner;
+    }
+
+    /**
+     * The units placed before first-come: the concept parts ({@link #conceptOwners}), then every sub-topic a chapter
+     * names by its own key; a chapter naming the whole topic keeps only the sub-topics no chapter claims.
+     * <p>
+     * Live outline acceptance 2026-11-12 (gemma4:e2b): both revisions let chapter 1 name all of T1 while chapters 2 to
+     * 5 named T1.2, T1.3, T1.5 and T1.4; first-come ownership gave everything to chapter 1 and dropped the other four
+     * as "only repeated material", so the book had one chapter.
+     */
+    static Map<String, Integer> claimedOwners(OutlinePlan plan, SynthesisBrief brief) {
+        Map<String, Integer> owner = conceptOwners(plan, brief);
+        for (int i = 0; i < plan.getChapters().size(); i++) {
+            for (String key : plan.getChapters().get(i).getMaterialKeys()) {
+                if (brief.subtopic(key) != null && !owner.containsKey(key)) {
+                    owner.put(key, i);
                 }
             }
         }
