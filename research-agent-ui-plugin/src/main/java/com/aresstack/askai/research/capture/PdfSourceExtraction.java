@@ -1,22 +1,17 @@
 package com.aresstack.askai.research.capture;
 
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDDocumentInformation;
-import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
-import org.apache.pdfbox.text.PDFTextStripper;
+import com.aresstack.askai.browser.playwright.PdfDocumentText;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * #39 — MECHANICAL PDF text extraction for user imports (PDFBox 2.0.x, the Java-8 line):
- * {@code PDDocument} loads from the delivered bytes, {@code PDFTextStripper} with
- * position-sorting yields reading-order text, the title comes from the PDF metadata.
- * Deterministic, no model, no OCR in this slice — an image-only or encrypted document
- * reports an honest warning and empty text instead of invented content; the raw PDF stays
- * byte-identical in the {@link ImportedSourceStore} regardless.
+ * #39 — MECHANICAL PDF text extraction for user imports. The extraction itself is {@link PdfDocumentText}, the one
+ * PDF extraction of AskAI that the research browser uses for PDF search hits too, so a PDF yields the same text
+ * whichever way it entered the research. Deterministic, no model, no OCR in this slice — an image-only or encrypted
+ * document reports an honest warning and empty text instead of invented content; the raw PDF stays byte-identical
+ * in the {@link ImportedSourceStore} regardless.
  */
 final class PdfSourceExtraction {
 
@@ -43,37 +38,23 @@ final class PdfSourceExtraction {
         if (rawBytes == null || rawBytes.length == 0) {
             return new Extracted("", "", warnings);
         }
-        PDDocument document = null;
-        try {
-            document = PDDocument.load(rawBytes);
-            if (document.isEncrypted()) {
-                warnings.add("PDF is encrypted; extraction may be incomplete");
-            }
-            warnings.add("pages=" + document.getNumberOfPages());
-            PDFTextStripper stripper = new PDFTextStripper();
-            stripper.setSortByPosition(true);
-            String text = stripper.getText(document).trim();
-            if (text.isEmpty()) {
-                warnings.add("no extractable text — image-only or scanned PDF"
-                        + " (OCR is not part of this slice)");
-            }
-            PDDocumentInformation info = document.getDocumentInformation();
-            String title = info == null || info.getTitle() == null ? "" : info.getTitle().trim();
-            return new Extracted(title, text, warnings);
-        } catch (InvalidPasswordException locked) {
+        PdfDocumentText pdf = PdfDocumentText.extract(rawBytes);
+        if (pdf.failure == PdfDocumentText.Failure.PASSWORD_PROTECTED) {
             warnings.add("PDF is password-protected; no text extracted");
             return new Extracted("", "", warnings);
-        } catch (IOException unparseable) {
-            warnings.add("PDF could not be parsed: " + unparseable.getMessage());
-            return new Extracted("", "", warnings);
-        } finally {
-            if (document != null) {
-                try {
-                    document.close();
-                } catch (IOException ignored) {
-                    // closing a read-only in-memory document failed — nothing to recover
-                }
-            }
         }
+        if (pdf.failure == PdfDocumentText.Failure.UNPARSEABLE) {
+            warnings.add("PDF could not be parsed: " + pdf.failureDetail);
+            return new Extracted("", "", warnings);
+        }
+        if (pdf.encrypted) {
+            warnings.add("PDF is encrypted; extraction may be incomplete");
+        }
+        warnings.add("pages=" + pdf.pages);
+        if (pdf.text.isEmpty()) {
+            warnings.add("no extractable text — image-only or scanned PDF"
+                    + " (OCR is not part of this slice)");
+        }
+        return new Extracted(pdf.title, pdf.text, warnings);
     }
 }
