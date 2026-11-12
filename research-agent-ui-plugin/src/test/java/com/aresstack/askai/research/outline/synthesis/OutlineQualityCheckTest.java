@@ -371,4 +371,26 @@ public class OutlineQualityCheckTest {
         assertEquals(OutlineQualityCheck.units(brief, "T4").size() == 1 ? Collections.singletonList("T4")
                 : OutlineQualityCheck.units(brief, "T4"), rest);
     }
+
+    /** Live 2026-11-12: one run planned the whole book as one chapter and no finding named it. */
+    @Test
+    public void aBookOfOneChapterIsBlockingWhenSeveralPartsCarryAChapter() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.diverse("sites", 4, 6, 3);
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan one = new OutlinePlan(Collections.singletonList(chapter("Everything", Arrays.asList("T1"),
+                Collections.<String>emptyList(), section("A", "T1.1"), section("B", "T1.2"), section("C", "T1.3"),
+                section("D", "T1.4"))), Collections.<String>emptyList(), false);
+        OutlinePlan two = new OutlinePlan(Arrays.asList(
+                chapter("Helmets", Arrays.asList("T1.1", "T1.2"), Collections.<String>emptyList(),
+                        section("A", "T1.1"), section("B", "T1.2")),
+                chapter("Location", Arrays.asList("T1.3", "T1.4"), Collections.<String>emptyList(),
+                        section("C", "T1.3"), section("D", "T1.4"))), Collections.<String>emptyList(), false);
+
+        List<PlanFinding> findings = CHECK.review(one, brief);
+
+        assertTrue(findings.toString(), has(findings, OutlineQualityCheck.ONE_CHAPTER, true));
+        assertTrue(findings.get(0).getMessage(), findings.get(0).getMessage().contains("T1.4"));
+        assertFalse(has(CHECK.review(two, brief), OutlineQualityCheck.ONE_CHAPTER, true));
+    }
 }
