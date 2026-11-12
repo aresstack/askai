@@ -796,6 +796,129 @@ public class SearchPlanQueueTest {
         assertTrue(request.getNewTopics().isEmpty());
     }
 
+    /**
+     * Live run 4 (2026-11-12): after cycle 1 every node counted as covered by its sources, "Implementierung" with
+     * vendor pages only, and no second cycle ran. Under the plan's own bar the analysis' OK is not enough: the node
+     * is WEAK, cycle 2 plans it with the finding and the mission's publisher query, and the outcome says so.
+     */
+    @Test
+    public void aNodeCoveredByVendorPagesOnlyGetsASecondCycleAimedAtThePreferredSources() throws Exception {
+        build(Arrays.asList(node("impl", "Implementierung", "Wearables Implementierung Kosten"),
+                node("law", "Recht", "Wearables Datenschutz Recht")), new HashMap<String, List<String>>());
+        sources.domains.put("s1", "wearable-vendor.example");
+        sources.domains.put("s2", "linkedin.com");
+        sources.domains.put("s3", "publikationen.dguv.de");
+        sources.domains.put("s4", "e-recht24.de");
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("impl", "Wearables Kosten Studie Unfallversicherung");
+        SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
+        SourcePreference preference = CoverageQualityTest.run4Preference();
+        queue.setSourcePreference(preference);
+        queue.setCoverageQuality(CoverageQuality.of(16, 0.2, preference));
+        final List<CoverageQuality> bars = new ArrayList<CoverageQuality>();
+        queue.setGapReview(new SearchPlanQueue.GapReview() {
+            public EvidenceGaps.Gaps atCycleBoundary(Collection<String> active, Collection<SearchPlanEntry> entries) {
+                throw new AssertionError("the queue hands its bar to the review");
+            }
+
+            @Override
+            public EvidenceGaps.Gaps atCycleBoundary(Collection<String> active, Collection<SearchPlanEntry> entries,
+                                                     CoverageQuality quality) {
+                bars.add(quality);
+                return EvidenceGaps.of(analysis("run4-" + bars.size(), true, Arrays.asList(
+                        new EvidenceGaps.NodeEvidence("impl", EvidenceGaps.Status.OK, 12, 11, 6, 4,
+                                Arrays.asList("kosten", "akku"), CoverageQualityTest.run4Implementation()),
+                        new EvidenceGaps.NodeEvidence("law", EvidenceGaps.Status.OK, 30, 25, 12, 6,
+                                Arrays.asList("dsgvo"), CoverageQualityTest.run4Law())),
+                        Collections.<EvidenceGaps.NewTopic>emptyList()),
+                        active, entries, Collections.<String>emptyList(), 3, 3, quality);
+            }
+        }, DIRECT_REVIEW);
+        sources.next = Arrays.asList("s1", "s2");
+        queue.run();
+        port.complete(false); // Implementierung: two vendor pages, covered by the source count
+        sources.next = Arrays.asList("s3", "s4");
+        port.complete(false); // Recht: DGUV and a law portal
+
+        assertEquals(1, bars.size());
+        assertEquals(16, bars.get(0).getMinimumDistinctPassages());
+        assertEquals(1, replanner.requests.size());
+        ConceptQueryPlan.Request request = replanner.requests.get(0);
+        assertEquals("only the weak node is researched again", 1, request.getNodes().size());
+        ConceptQueryPlan.Node impl = request.getNodes().get(0);
+        assertEquals("impl", impl.getId());
+        assertTrue(impl.getEvidence().get(0), impl.getEvidence().get(0).startsWith("WEAK: only 11 distinct passages"));
+        assertTrue(impl.getEvidence().get(0), impl.getEvidence().get(0).contains("search site:dguv.de"));
+        assertEquals(2, request.getCycle());
+
+        replanner.deliver();
+        List<String> cycle2 = new ArrayList<String>();
+        for (SearchPlanEntry entry : queue.entriesInOrder()) {
+            if (entry.getOrigin() == SearchPlanEntry.Origin.CYCLE) {
+                cycle2.add(entry.getQuery());
+                assertTrue(entry.getNote(), entry.getNote().contains("gap WEAK"));
+            }
+        }
+        assertEquals(Arrays.asList("Wearables Kosten Studie Unfallversicherung",
+                "Wearables Implementierung Kosten site:baua.de"), cycle2);
+
+        sources.next = Collections.emptyList();
+        port.complete(false);
+        port.complete(false); // cycle 2 ends; the analysis still finds the node weak, the cycles are spent
+        assertEquals(1, outcomes.size());
+        SearchPlanQueue.Outcome outcome = outcomes.get(0);
+        assertEquals(SearchPlanQueue.Reason.BUDGET, outcome.getReason());
+        assertEquals(Collections.singletonList("Implementierung"), outcome.getUncovered());
+        assertEquals(Collections.singletonList("Implementierung"), outcome.getWeak());
+        assertTrue(outcome.text(), outcome.text().contains("Still uncovered: Implementierung (weak evidence)."));
+        assertTrue(outcome.report(), outcome.report().contains("Implementierung: uncovered, weak evidence (2 sources"));
+        assertTrue(outcome.report(), outcome.report().contains("Recht: covered"));
+    }
+
+    @Test
+    public void withoutAnAnalysisTheMissionsPreferredSourcesStillDecideCoverage() throws Exception {
+        build(Arrays.asList(node("impl", "Implementierung", "Wearables Implementierung Kosten"),
+                node("law", "Recht", "Wearables Datenschutz Recht")), new HashMap<String, List<String>>());
+        sources.domains.put("s1", "wearable-vendor.example");
+        sources.domains.put("s2", "linkedin.com");
+        sources.domains.put("s3", "publikationen.dguv.de");
+        sources.domains.put("s4", "e-recht24.de");
+        FakeReplanner replanner = new FakeReplanner();
+        SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
+        SourcePreference preference = CoverageQualityTest.run4Preference();
+        queue.setSourcePreference(preference);
+        queue.setCoverageQuality(CoverageQuality.of(16, 0.2, preference)); // no gap review: the source counts decide
+        sources.next = Arrays.asList("s1", "s2");
+        queue.run();
+        port.complete(false);
+        sources.next = Arrays.asList("s3", "s4");
+        port.complete(false);
+
+        assertEquals("both nodes are covered by number, one only by vendor pages", 1, replanner.requests.size());
+        ConceptQueryPlan.Request request = replanner.requests.get(0);
+        assertEquals(1, request.getNodes().size());
+        assertEquals("impl", request.getNodes().get(0).getId());
+        assertTrue(request.getNodes().get(0).getEvidence().get(0),
+                request.getNodes().get(0).getEvidence().get(0).startsWith("WEAK: 0 of 2 sources (0 %)"));
+    }
+
+    @Test
+    public void withoutTheBarEveryNodeCoveredByItsSourcesEndsThePlanAsBefore() throws Exception {
+        build(Arrays.asList(node("impl", "Implementierung", "Wearables Implementierung Kosten")),
+                new HashMap<String, List<String>>());
+        sources.domains.put("s1", "wearable-vendor.example");
+        sources.domains.put("s2", "linkedin.com");
+        FakeReplanner replanner = new FakeReplanner();
+        SearchPlanQueue queue = queue(caps(2, 4, 60, 2), replanner);
+        queue.setSourcePreference(CoverageQualityTest.run4Preference());
+        sources.next = Arrays.asList("s1", "s2");
+        queue.run();
+        port.complete(false);
+        assertTrue(replanner.requests.isEmpty());
+        assertEquals(SearchPlanQueue.Reason.COVERED, outcomes.get(0).getReason());
+        assertTrue(outcomes.get(0).getWeak().isEmpty());
+    }
+
     /** The gap review runs at once in tests (the app runs it off the UI thread). */
     static final java.util.concurrent.Executor DIRECT_REVIEW = new java.util.concurrent.Executor() {
         public void execute(Runnable command) {

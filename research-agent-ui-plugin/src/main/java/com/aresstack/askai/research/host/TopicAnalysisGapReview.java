@@ -4,6 +4,7 @@ import com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscove
 import com.aresstack.askai.research.knowledge.processing.live.TopicAnalysisSnapshot;
 import com.aresstack.askai.research.knowledge.topic.EvidenceReport;
 import com.aresstack.askai.research.knowledge.topic.ScopeAlignment;
+import com.aresstack.askai.research.plan.CoverageQuality;
 import com.aresstack.askai.research.plan.EvidenceGaps;
 import com.aresstack.askai.research.plan.SearchPlanEntry;
 import com.aresstack.askai.research.plan.SearchPlanQueue;
@@ -11,7 +12,9 @@ import com.aresstack.askai.research.plan.SearchPlanQueue;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -41,6 +44,15 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
         int maxNewTopics();
 
         int maxFailedQueries();
+
+        /**
+         * The domain of an accepted source ("" when unknown), for the share of a node's passages from the mission's
+         * preferred sources ({@link CoverageQuality}). The default knows none: the share bar then finds no preferred
+         * passage.
+         */
+        default String domainOf(String sourceId) {
+            return "";
+        }
     }
 
     private final Inputs inputs;
@@ -50,14 +62,24 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
     }
 
     public EvidenceGaps.Gaps atCycleBoundary(Collection<String> activeNodes, Collection<SearchPlanEntry> entries) {
+        return atCycleBoundary(activeNodes, entries, CoverageQuality.OFF);
+    }
+
+    /**
+     * The gaps of the settled snapshot under the plan's own bar: a node the analysis calls OK is WEAK when its
+     * distinct passages or the share of its passages from the mission's preferred sources stay below the settings.
+     */
+    @Override
+    public EvidenceGaps.Gaps atCycleBoundary(Collection<String> activeNodes, Collection<SearchPlanEntry> entries,
+                                             CoverageQuality quality) {
         SharedTopicDiscovery discovery = inputs.discovery();
         if (discovery == null) {
             return EvidenceGaps.Gaps.NONE;
         }
         TopicAnalysisSnapshot snapshot = settledSnapshot(discovery, System.currentTimeMillis() + inputs.waitMillis(),
                 inputs.recheckMillis());
-        return EvidenceGaps.of(view(snapshot), activeNodes, entries, inputs.blacklist(), inputs.maxNewTopics(),
-                inputs.maxFailedQueries());
+        return EvidenceGaps.of(view(snapshot, inputs), activeNodes, entries, inputs.blacklist(),
+                inputs.maxNewTopics(), inputs.maxFailedQueries(), quality);
     }
 
     /**
@@ -107,13 +129,22 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
 
     /** The snapshot as the gap review reads it; {@code null} stays {@code null}. */
     static EvidenceGaps.Analysis view(final TopicAnalysisSnapshot snapshot) {
+        return view(snapshot, null);
+    }
+
+    /**
+     * The snapshot as the gap review reads it, each node with its passages per source domain (the snapshot names the
+     * source of a passage, {@code inputs} its domain); {@code null} stays {@code null}.
+     */
+    static EvidenceGaps.Analysis view(final TopicAnalysisSnapshot snapshot, Inputs inputs) {
         if (snapshot == null) {
             return null;
         }
         final List<EvidenceGaps.NodeEvidence> nodes = new ArrayList<EvidenceGaps.NodeEvidence>();
         for (EvidenceReport.NodeEvidence node : snapshot.nodes()) {
             nodes.add(new EvidenceGaps.NodeEvidence(node.getAnchorId(), status(node.getStatus()), node.getPassages(),
-                    node.getDistinctPassages(), node.getSources(), node.getDomains(), node.getKeyTerms()));
+                    node.getDistinctPassages(), node.getSources(), node.getDomains(), node.getKeyTerms(),
+                    passagesByDomain(snapshot, node, inputs)));
         }
         final List<EvidenceGaps.NewTopic> topics = new ArrayList<EvidenceGaps.NewTopic>();
         for (EvidenceReport.ResearchArea area : snapshot.novelAreas()) {
@@ -141,6 +172,28 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
         };
     }
 
+    /** The node's passages per source domain; empty without inputs or coverage. */
+    static Map<String, Integer> passagesByDomain(TopicAnalysisSnapshot snapshot, EvidenceReport.NodeEvidence node,
+                                                 Inputs inputs) {
+        Map<String, Integer> byDomain = new LinkedHashMap<String, Integer>();
+        if (inputs == null || node.getCoverage() == null || snapshot.analysis() == null) {
+            return byDomain;
+        }
+        Map<String, String> domainOfSource = new java.util.HashMap<String, String>();
+        for (String passageId : node.getCoverage().getPassageIds()) {
+            String sourceId = snapshot.analysis().sourceOf(passageId);
+            String domain = domainOfSource.get(sourceId);
+            if (domain == null) {
+                String resolved = sourceId.isEmpty() ? "" : inputs.domainOf(sourceId);
+                domain = resolved == null ? "" : resolved.trim().toLowerCase(java.util.Locale.ROOT);
+                domainOfSource.put(sourceId, domain);
+            }
+            Integer count = byDomain.get(domain);
+            byDomain.put(domain, count == null ? 1 : count + 1);
+        }
+        return byDomain;
+    }
+
     static EvidenceGaps.Status status(EvidenceReport.Status status) {
         return status == null ? EvidenceGaps.Status.OK : EvidenceGaps.Status.valueOf(status.name());
     }
@@ -152,7 +205,26 @@ public final class TopicAnalysisGapReview implements SearchPlanQueue.GapReview {
     /** The adapter over the session's settings store. */
     public static Inputs inputs(final Supplier<SharedTopicDiscovery> discovery, final Supplier<List<String>> blacklist,
                                 final com.aresstack.askai.plugin.api.service.WorkspaceStateStore store) {
+        return inputs(discovery, blacklist, store, null);
+    }
+
+    /**
+     * The adapter over the session's settings store and its sources.
+     *
+     * @param domains the domain of an accepted source; {@code null} = unknown
+     */
+    public static Inputs inputs(final Supplier<SharedTopicDiscovery> discovery, final Supplier<List<String>> blacklist,
+                                final com.aresstack.askai.plugin.api.service.WorkspaceStateStore store,
+                                final java.util.function.Function<String, String> domains) {
         return new Inputs() {
+            public String domainOf(String sourceId) {
+                if (domains == null) {
+                    return "";
+                }
+                String domain = domains.apply(sourceId);
+                return domain == null ? "" : domain;
+            }
+
             public SharedTopicDiscovery discovery() {
                 return discovery.get();
             }

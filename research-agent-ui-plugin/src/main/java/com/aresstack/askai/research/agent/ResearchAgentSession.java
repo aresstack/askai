@@ -1677,7 +1677,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return false;
         }
         queue.setCaps(com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSearchPlanCaps(hostStateStore));
-        queue.setSourcePreference(sourcePreference());
+        com.aresstack.askai.research.plan.SourcePreference preference = sourcePreference();
+        queue.setSourcePreference(preference);
+        // the plan's own bar for "covered" at every cycle boundary: evidence quality and the mission's sources
+        queue.setCoverageQuality(com.aresstack.askai.research.host.ResearchRuntimeSettings.loadCoverageQuality(
+                hostStateStore, preference));
         com.aresstack.askai.research.transition.PhaseJobRegistry.Job job =
                 new com.aresstack.askai.research.transition.PhaseJobRegistry.Job() {
                     public void cancel() {
@@ -1991,7 +1995,15 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     return java.util.Collections.<String>emptyList();
                                 }
                             }
-                        }, hostStateStore)));
+                        }, hostStateStore, new java.util.function.Function<String, String>() {
+                            public String apply(String sourceId) {
+                                // the same domain the shared analysis counts for the source (its URL's host)
+                                com.aresstack.askai.research.sources.ResearchSourceRecord record =
+                                        project.getSourceRepository().get(sourceId);
+                                return record == null ? "" : com.aresstack.askai.research.host.TopicAnalysisInputs
+                                        .host(record.getUrl());
+                            }
+                        })));
         // every source carries the phase and the plan entry of the search that found it
         final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
         com.aresstack.askai.research.capture.SourceAcceptanceService acceptance = resources.acceptance();

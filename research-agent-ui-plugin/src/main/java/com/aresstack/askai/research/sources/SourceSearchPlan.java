@@ -17,6 +17,14 @@ public interface SourceSearchPlan {
     /** The labels of the concept nodes no source covers yet. */
     List<String> uncovered();
 
+    /**
+     * The uncovered nodes whose sources would cover them by number but whose evidence is weak (too few distinct
+     * passages, too few from the mission's preferred sources); a subset of {@link #uncovered()}.
+     */
+    default List<String> weak() {
+        return java.util.Collections.emptyList();
+    }
+
     void run();
 
     void stop();

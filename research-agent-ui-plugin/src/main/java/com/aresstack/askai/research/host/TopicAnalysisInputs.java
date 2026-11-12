@@ -168,7 +168,7 @@ public final class TopicAnalysisInputs implements SharedTopicDiscovery.AnalysisI
     }
 
     /** The host of a URL, without "www."; "" when it has none. */
-    static String host(String url) {
+    public static String host(String url) {
         if (url == null || url.trim().isEmpty()) {
             return "";
         }

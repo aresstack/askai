@@ -154,6 +154,17 @@ public final class SearchPlanQueue {
          * Called outside the queue's lock on its executor: it may wait (bounded) for the shared analysis to catch up.
          */
         EvidenceGaps.Gaps atCycleBoundary(Collection<String> activeNodes, Collection<SearchPlanEntry> entries);
+
+        /**
+         * Like {@link #atCycleBoundary(Collection, Collection)} under the plan's own bar for "covered": a node the
+         * analysis calls OK but that misses the bar is a WEAK gap ({@link EvidenceGaps#of(EvidenceGaps.Analysis,
+         * Collection, Collection, List, int, int, CoverageQuality)}). A review that cannot read passages per node
+         * ignores the bar.
+         */
+        default EvidenceGaps.Gaps atCycleBoundary(Collection<String> activeNodes, Collection<SearchPlanEntry> entries,
+                                                  CoverageQuality quality) {
+            return atCycleBoundary(activeNodes, entries);
+        }
     }
 
     /** The planner's answer for a cycle. */
@@ -196,6 +207,7 @@ public final class SearchPlanQueue {
         private final int domains;
         private final List<String> nodeLines;
         private final String detail;
+        private final List<String> weak;
 
         Outcome(Reason reason, int nodes, List<String> uncovered, int cycles, int queriesRun, int sources,
                 int domains, List<String> nodeLines) {
@@ -204,6 +216,14 @@ public final class SearchPlanQueue {
 
         Outcome(Reason reason, int nodes, List<String> uncovered, int cycles, int queriesRun, int sources,
                 int domains, List<String> nodeLines, String detail) {
+            this(reason, nodes, uncovered, cycles, queriesRun, sources, domains, nodeLines, detail,
+                    Collections.<String>emptyList());
+        }
+
+        Outcome(Reason reason, int nodes, List<String> uncovered, int cycles, int queriesRun, int sources,
+                int domains, List<String> nodeLines, String detail, List<String> weak) {
+            this.weak = Collections.unmodifiableList(new ArrayList<String>(weak == null
+                    ? Collections.<String>emptyList() : weak));
             this.detail = detail == null ? "" : detail;
             this.reason = reason;
             this.nodes = nodes;
@@ -226,6 +246,15 @@ public final class SearchPlanQueue {
         /** The labels of the uncovered nodes, exhausted or not, in concept order. */
         public List<String> getUncovered() {
             return uncovered;
+        }
+
+        /**
+         * The labels of the uncovered nodes whose sources would cover them by number, but whose evidence misses the
+         * plan's own bar ({@link CoverageQuality}: too few distinct passages or too few from the preferred sources);
+         * a subset of {@link #getUncovered()}.
+         */
+        public List<String> getWeak() {
+            return weak;
         }
 
         public boolean isPhaseCapReached() {
@@ -291,7 +320,8 @@ public final class SearchPlanQueue {
             if (!uncovered.isEmpty()) {
                 sb.append(" Still uncovered: ");
                 for (int i = 0; i < uncovered.size(); i++) {
-                    sb.append(i > 0 ? ", " : "").append(uncovered.get(i));
+                    sb.append(i > 0 ? ", " : "").append(uncovered.get(i))
+                            .append(weak.contains(uncovered.get(i)) ? " (weak evidence)" : "");
                 }
                 sb.append('.');
             }
@@ -347,6 +377,8 @@ public final class SearchPlanQueue {
     /** The mission's source preference: its publisher queries join every later research cycle. */
     private volatile SourcePreference preference = SourcePreference.NONE;
     private volatile GapReview gapReview = GapReview.NONE;
+    /** The plan's own bar for "covered" at a cycle boundary (evidence quality, the mission's preferred sources). */
+    private volatile CoverageQuality coverageQuality = CoverageQuality.OFF;
     private volatile Executor reviewer;
     /** The gaps the running re-plan was asked for (the decision of this cycle boundary). */
     private EvidenceGaps.Gaps replanGaps = EvidenceGaps.Gaps.NONE;
@@ -408,6 +440,14 @@ public final class SearchPlanQueue {
     /** The mission's source preference for the later research cycles; {@code null} = none. */
     public void setSourcePreference(SourcePreference preference) {
         this.preference = preference == null ? SourcePreference.NONE : preference;
+    }
+
+    /**
+     * The plan's own bar for "covered" at every cycle boundary ({@link CoverageQuality}); {@code null} =
+     * {@link CoverageQuality#OFF}, the analysis' status and the source counts alone decide.
+     */
+    public void setCoverageQuality(CoverageQuality quality) {
+        this.coverageQuality = quality == null ? CoverageQuality.OFF : quality;
     }
 
     /** The research team (plan T5); {@link Team#OFF} keeps one entry at a time. */
@@ -992,6 +1032,10 @@ public final class SearchPlanQueue {
                 SearchPlanCoverage.Caps c = caps;
                 Map<String, SearchPlanCoverage.NodeCoverage> coverage =
                         SearchPlanCoverage.of(record, all.values(), c, sources);
+                if (gaps == null || gaps.getAnalysisId().isEmpty()) {
+                    // no settled analysis: the source counts decide, the mission's preferred sources still count
+                    gaps = sourceGaps(record, coverage);
+                }
                 nextCycle = capReached || replanner == null || record.getCycle() >= c.getCycles() ? null
                         : SearchPlanCycles.nextCycleRequest(record, all.values(), coverage, c, gaps);
                 replanGaps = gaps;
@@ -1013,6 +1057,27 @@ public final class SearchPlanQueue {
         if (outcome != null) {
             finish(outcome);
         }
+    }
+
+    /**
+     * The WEAK nodes of the source counts alone ({@link EvidenceGaps#ofSources}), logged like a review and kept as the
+     * boundary's decision; {@link EvidenceGaps.Gaps#NONE} without a mission preference or a weak node.
+     */
+    private EvidenceGaps.Gaps sourceGaps(SearchPlanRecord record,
+                                         Map<String, SearchPlanCoverage.NodeCoverage> coverage) {
+        EvidenceGaps.Gaps gaps = EvidenceGaps.ofSources(coverage, sources, coverageQuality);
+        if (!gaps.getWeakNodes().isEmpty()) {
+            StringBuilder line = new StringBuilder("[search-plan] coverage quality cycle ").append(record.getCycle())
+                    .append(" (source counts):");
+            for (Map.Entry<String, List<String>> gap : gaps.getEvidenceByNode().entrySet()) {
+                SearchPlanRecord.Node node = record.node(gap.getKey());
+                line.append(" [").append(node == null ? gap.getKey() : node.getLabel()).append(": ")
+                        .append(gap.getValue().get(0)).append(']');
+            }
+            System.err.println(line);
+        }
+        lastGaps = gaps;
+        return gaps;
     }
 
     /** The sources the running entries of {@code phase} may still add (their caps): reserved, not yet counted. */
@@ -1046,7 +1111,7 @@ public final class SearchPlanQueue {
         }
         EvidenceGaps.Gaps gaps;
         try {
-            gaps = gapReview.atCycleBoundary(active, entries);
+            gaps = gapReview.atCycleBoundary(active, entries, coverageQuality);
         } catch (RuntimeException failed) {
             System.err.println("[search-plan] gap review failed: " + failed.getMessage());
             return EvidenceGaps.Gaps.NONE;
@@ -1065,6 +1130,9 @@ public final class SearchPlanQueue {
                     .append(gap.getValue().isEmpty() ? "" : gap.getValue().get(0)).append(']');
         }
         line.append(" covered=").append(gaps.getCoveredNodes().size());
+        if (!gaps.getWeakNodes().isEmpty()) {
+            line.append(" weak=").append(gaps.getWeakNodes().size());
+        }
         for (String topic : gaps.getNewTopics()) {
             line.append(" [new topic: ").append(topic).append(']');
         }
@@ -1197,6 +1265,7 @@ public final class SearchPlanQueue {
                             SearchPlanCoverage.Caps c, Map<String, SearchPlanCoverage.NodeCoverage> coverage,
                             Reason forced, String detail) {
         List<String> uncovered = new ArrayList<String>();
+        List<String> weak = new ArrayList<String>();
         List<String> lines = new ArrayList<String>();
         java.util.Set<String> allSources = new java.util.LinkedHashSet<String>();
         java.util.Set<String> allDomains = new java.util.HashSet<String>();
@@ -1209,10 +1278,14 @@ public final class SearchPlanQueue {
             boolean covered = nc.getState() == SearchPlanCoverage.State.COVERED && gap == null;
             if (!covered) {
                 uncovered.add(node.getLabel());
+                if (lastGaps.getWeakNodes().contains(node.getId())) {
+                    weak.add(node.getLabel());
+                }
             }
             allSources.addAll(nc.getSources());
             allDomains.addAll(nc.getDomains());
-            lines.add(node.getLabel() + ": " + (covered ? "covered" : "uncovered") + " (" + nc.getSources().size()
+            lines.add(node.getLabel() + ": " + (covered ? "covered" : weak.contains(node.getLabel())
+                    ? "uncovered, weak evidence" : "uncovered") + " (" + nc.getSources().size()
                     + (nc.getSources().size() == 1 ? " source" : " sources") + " from " + nc.getDomains().size()
                     + (nc.getDomains().size() == 1 ? " domain" : " domains") + ", " + nc.getQueriesRun()
                     + (nc.getQueriesRun() == 1 ? " query" : " queries") + " run"
@@ -1228,7 +1301,7 @@ public final class SearchPlanQueue {
         }
         Reason reason = forced != null ? forced : uncovered.isEmpty() ? Reason.COVERED : Reason.BUDGET;
         return new Outcome(reason, coverage.size(), uncovered, record.getCycle(), run, allSources.size(),
-                allDomains.size(), lines, detail);
+                allDomains.size(), lines, detail, weak);
     }
 
     // ---- the user's edits (checklist) --------------------------------------------------------------------

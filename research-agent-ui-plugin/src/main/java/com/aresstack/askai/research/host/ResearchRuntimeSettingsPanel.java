@@ -93,6 +93,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField gapRecheckSeconds = ComicControls.textField(3);
     private final JTextField gapNewTopics = ComicControls.textField(3);
     private final JTextField gapFailedQueries = ComicControls.textField(3);
+    private final JTextField gapMinDistinctPassages = ComicControls.textField(3);
+    private final JTextField gapMinPreferredShare = ComicControls.textField(3);
     // Worker browsers (parallel research workers): separate from the model capacity.
     private final JTextField workerProcesses = ComicControls.textField(3);
     private final JTextField workerUserContexts = ComicControls.textField(3);
@@ -230,7 +232,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Seed queries per node", teamSeedQueries)));
         team.row("Gap review", group(labelled("Wait for analysis (s)", gapWaitSeconds),
                 labelled("Recheck (s)", gapRecheckSeconds),
-                labelled("New topics", gapNewTopics), labelled("Failed queries named", gapFailedQueries)));
+                labelled("New topics", gapNewTopics), labelled("Failed queries named", gapFailedQueries),
+                labelled("Covered from distinct passages", gapMinDistinctPassages),
+                labelled("Preferred share", gapMinPreferredShare)));
 
         com.aresstack.comiccontrols.control.ComicForm preference =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Source preference");
@@ -504,6 +508,15 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_GAP_NEW_TOPICS,
                 "The most new topics of the material, inside the scope, the planner may search for in the next "
                         + "cycle; 0 = none.");
+        bindNonNegativeLimit(gapMinDistinctPassages, ResearchRuntimeSettings.KEY_GAP_MIN_DISTINCT_PASSAGES,
+                ResearchRuntimeSettings.DEFAULT_GAP_MIN_DISTINCT_PASSAGES,
+                "A concept node counts as covered only from this many distinct passages; below it the next research "
+                        + "cycle searches it again, even when the analysis calls it OK. 0 = off.");
+        bindDecimal(gapMinPreferredShare, ResearchRuntimeSettings.KEY_GAP_MIN_PREFERRED_SHARE,
+                ResearchRuntimeSettings.DEFAULT_GAP_MIN_PREFERRED_SHARE,
+                "When the mission prefers sources (DGUV, BAuA, laws …): the share of a node's passages, 0 to 1, that "
+                        + "must come from the preferred publishers and authority hosts. Below it the next research "
+                        + "cycle searches those publishers (site:). 0 = off.");
         bindNonNegativeLimit(gapFailedQueries, ResearchRuntimeSettings.KEY_GAP_FAILED_QUERIES,
                 ResearchRuntimeSettings.DEFAULT_GAP_FAILED_QUERIES,
                 "The most queries that found nothing the planner sees per thin or missing node, so it changes "

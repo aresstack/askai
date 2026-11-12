@@ -163,4 +163,14 @@ public class ResearchSourcesSearchesTest {
                 com.aresstack.askai.research.agent.ResearchAgentSessionGateAccess.gate(
                         Collections.singletonList("Licensing")));
     }
+
+    @Test
+    public void aWeakNodeIsMarkedInTheSearchSummary() {
+        SearchPlanEntry done = SearchPlanEntries.done("e1", "A", "alpha", "s-1");
+        assertEquals("1 of 1 searches done · uncovered: Licensing, Implementierung (weak evidence)",
+                ResearchSourcesView.searchSummary(Collections.singletonList(done),
+                        Arrays.asList("Licensing", "Implementierung"), Collections.singletonList("Implementierung")));
+        assertEquals("1 of 1 searches done · uncovered: Licensing", ResearchSourcesView.searchSummary(
+                Collections.singletonList(done), Collections.singletonList("Licensing")));
+    }
 }
