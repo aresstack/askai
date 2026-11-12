@@ -1912,6 +1912,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         });
                     }
 
+                    public void entryEnded(final com.aresstack.askai.research.plan.SearchPlanEntry entry) {
+                        if (com.aresstack.askai.research.drafting.GapResearch.isGapEntry(entry)
+                                && !entry.getAcceptedSourceIds().isEmpty()) {
+                            markSectionsStaleAfterGapResearch();
+                        }
+                    }
+
                     public void finished(final com.aresstack.askai.research.plan.SearchPlanQueue.Outcome outcome) {
                         releaseSearchPlanJob();
                         uiExecutor.execute(new Runnable() {
@@ -2949,6 +2956,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             public void finished(
                                     final com.aresstack.askai.research.drafting.WritingOutcome outcome) {
                                 lastWritingOutcome = outcome.text();
+                                // sources a gap search accepted during the model calls were not in the packs
+                                markSectionsStaleAfterGapResearch();
                                 final String gapLine = researchWriterGaps(outcome);
                                 uiExecutor.execute(new Runnable() {
                                     public void run() {
@@ -3213,6 +3222,61 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         return sent + (sent == 1 ? " writer gap goes" : " writer gaps go") + " to research as search plan entries; "
                 + "\"Rewrite section\" can cite the new sources once they are in.";
+    }
+
+    /**
+     * Live run 4, fix 5: a written section whose gap research accepted new sources becomes stale (setting "Mark
+     * section stale on new sources", default on), so {@code rewrite-stale} writes it again with them; the chat says
+     * which sections. Called when a gap entry with sources ended; idempotent.
+     */
+    private void markSectionsStaleAfterGapResearch() {
+        com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
+        com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscript = manuscript();
+        com.aresstack.askai.research.outline.Outline outline = approvedOutlineOrNull();
+        if (queue == null || manuscript == null || outline == null
+                || !com.aresstack.askai.research.host.ResearchRuntimeSettings.loadStaleAfterGapResearch(
+                        hostStateStore)) {
+            return;
+        }
+        java.util.List<String> sectionIds = new java.util.ArrayList<String>();
+        java.util.Map<String, String> titles = new java.util.HashMap<String, String>();
+        for (com.aresstack.askai.research.outline.OutlineChapter chapter : outline.getChapters()) {
+            for (com.aresstack.askai.research.outline.OutlineSection section : chapter.getSections()) {
+                sectionIds.add(section.getId());
+                titles.put(section.getId(), section.getTitle());
+            }
+        }
+        final java.util.Map<String, String> marked;
+        try {
+            marked = manuscript.markGapsResearched(com.aresstack.askai.research.drafting.GapResearch.researched(
+                    queue.store().loadEntries().values(), sectionIds), System.currentTimeMillis());
+        } catch (RuntimeException failed) {
+            technicalLog("gap research -> stale marks failed: " + failed.getMessage());
+            return;
+        }
+        if (marked.isEmpty()) {
+            return;
+        }
+        StringBuilder line = new StringBuilder();
+        for (java.util.Map.Entry<String, String> e : marked.entrySet()) {
+            line.append(line.length() == 0 ? "" : "; ").append('"').append(titles.get(e.getKey())).append("\": ")
+                    .append(e.getValue());
+        }
+        final String text = (marked.size() == 1 ? "1 section is" : marked.size() + " sections are")
+                + " stale after gap research (" + line + "). \"rewrite-stale\" writes "
+                + (marked.size() == 1 ? "it" : "them") + " again with the new sources.";
+        technicalLog("gap research -> " + text);
+        uiExecutor.execute(new Runnable() {
+            public void run() {
+                if (sink != null) {
+                    String id = "gap-stale-" + System.currentTimeMillis();
+                    sink.appendInfoMessage(id, text);
+                    journal.attribute(id, com.aresstack.askai.research.state.oo.ResearchStateIds.DRAFT);
+                    persistJournalNow();
+                }
+                fireStateChanged();
+            }
+        });
     }
 
     /**

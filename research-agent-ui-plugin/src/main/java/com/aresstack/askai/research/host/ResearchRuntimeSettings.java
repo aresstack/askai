@@ -782,6 +782,23 @@ public final class ResearchRuntimeSettings {
         }
     }
 
+    /**
+     * Whether a written section becomes stale when the research of its writer gaps accepted new sources, so
+     * {@code rewrite-stale} writes it again with them. Default ON: in live run 4 the gap searches ran, and nothing
+     * was written again with what they found.
+     */
+    public static final String KEY_STALE_AFTER_GAP_RESEARCH = "research.document.staleAfterGapResearch";
+
+    public static boolean loadStaleAfterGapResearch(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_STALE_AFTER_GAP_RESEARCH, true);
+    }
+
+    public static void saveStaleAfterGapResearch(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_STALE_AFTER_GAP_RESEARCH, enabled);
+        }
+    }
+
     // ------------------------------------------------------------------ Document: evidence pack
     /** Fewest words a passage needs to enter a writer's evidence pack. */
     public static final String KEY_WRITER_PROSE_MIN_WORDS = "research.writer.prose.minWords";

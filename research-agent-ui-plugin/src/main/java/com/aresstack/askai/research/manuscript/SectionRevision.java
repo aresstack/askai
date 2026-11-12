@@ -31,6 +31,7 @@ public final class SectionRevision {
     private final String chapterFingerprint;
     private final int restoredFrom;
     private final long createdAt;
+    private final long evidenceAt;
 
     private SectionRevision(Builder b, int number, long createdAt) {
         this.number = number;
@@ -47,6 +48,7 @@ public final class SectionRevision {
         this.chapterFingerprint = b.chapterFingerprint == null ? "" : b.chapterFingerprint;
         this.restoredFrom = b.restoredFrom;
         this.createdAt = createdAt;
+        this.evidenceAt = b.evidenceAt > 0 ? b.evidenceAt : createdAt;
         Set<String> markers = new HashSet<String>();
         for (ManuscriptCitation citation : citations) {
             if (citation == null) {
@@ -69,6 +71,7 @@ public final class SectionRevision {
                 .evidenceIds(evidenceIds).sectionFingerprint(sectionFingerprint)
                 .chapterFingerprint(chapterFingerprint);
         b.restoredFrom = restoredFrom;
+        b.evidenceAt = evidenceAt;
         return b;
     }
 
@@ -133,6 +136,14 @@ public final class SectionRevision {
         return createdAt;
     }
 
+    /**
+     * When the evidence this text was written from was taken: the writer builds its evidence pack before the model
+     * call, and sources accepted during the call are not in it. The creation time for a text without that record.
+     */
+    public long getEvidenceAt() {
+        return evidenceAt;
+    }
+
     /** SHA-256 of the text, for the manuscript pin. */
     public String textHash() {
         return ManuscriptCitation.sha256(text);
@@ -152,6 +163,7 @@ public final class SectionRevision {
         private String sectionFingerprint = "";
         private String chapterFingerprint = "";
         private int restoredFrom;
+        private long evidenceAt;
 
         private Builder() {
         }
@@ -230,6 +242,12 @@ public final class SectionRevision {
         }
 
         /** Store use: the revision with its number and time. */
+        /** When the evidence of the text was taken (before the writer's model call); 0 = the creation time. */
+        public Builder evidenceAt(long value) {
+            evidenceAt = value;
+            return this;
+        }
+
         public SectionRevision build(int number, long createdAt) {
             return new SectionRevision(this, number, createdAt);
         }

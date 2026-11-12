@@ -59,6 +59,14 @@ public class ResearchRuntimeSettingsWriterTest {
     }
 
     @Test
+    public void sectionsBecomeStaleAfterGapResearchByDefault() {
+        org.junit.Assert.assertTrue(ResearchRuntimeSettings.loadStaleAfterGapResearch(new MemoryStore()));
+        MemoryStore store = new MemoryStore();
+        ResearchRuntimeSettings.saveStaleAfterGapResearch(store, false);
+        org.junit.Assert.assertFalse(ResearchRuntimeSettings.loadStaleAfterGapResearch(store));
+    }
+
+    @Test
     public void storedBriefRelevanceWinsAndOutOfRangeFallsBack() {
         MemoryStore store = new MemoryStore();
         store.put(ResearchRuntimeSettings.KEY_WRITER_MIN_BRIEF_SIMILARITY, "0,6");

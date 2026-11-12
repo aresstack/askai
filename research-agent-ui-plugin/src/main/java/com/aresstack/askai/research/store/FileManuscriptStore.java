@@ -292,6 +292,7 @@ public final class FileManuscriptStore {
         json.addProperty("chapterFingerprint", revision.getChapterFingerprint());
         json.addProperty("restoredFrom", revision.getRestoredFrom());
         json.addProperty("createdAt", revision.getCreatedAt());
+        json.addProperty("evidenceAt", revision.getEvidenceAt());
         return json;
     }
 
@@ -316,6 +317,7 @@ public final class FileManuscriptStore {
                 .sectionFingerprint(string(json, "sectionFingerprint"))
                 .chapterFingerprint(string(json, "chapterFingerprint"))
                 .restoredFromNumber(json.has("restoredFrom") ? json.get("restoredFrom").getAsInt() : 0)
+                .evidenceAt(json.has("evidenceAt") ? json.get("evidenceAt").getAsLong() : 0L)
                 .build(json.get("number").getAsInt(), json.get("createdAt").getAsLong());
     }
 
