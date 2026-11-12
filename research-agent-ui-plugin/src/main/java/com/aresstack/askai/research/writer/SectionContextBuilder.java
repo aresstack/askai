@@ -95,7 +95,7 @@ public final class SectionContextBuilder {
              query != null && (rank || relevance.isActive() || chosen.size() < pack.getPassageCount());
              limit *= 2) {
             List<PassageSearchHit> hits = search(request, query, limit);
-            double floor = relevance.isActive() ? relevance.floorFor(best(hits, sources)) : 0;
+            double floor = relevance.isActive() ? relevance.floorFor(best(hits, sources, pack)) : 0;
             List<PassageSearchHit> candidates = weighed(byScore(provenance, hits), sources);
             candidates.addAll(weighed(outside(hits, provenance), sources));
             chosen = select(candidates, sources, pack, relevance.isActive() ? scores(hits) : null, floor);
@@ -112,10 +112,19 @@ public final class SectionContextBuilder {
                 glossaryWithAcronyms(request.getGlossary(), chosen, sources), request.getBookLanguage());
     }
 
-    /** The similarity of the best hit of an admitted source, or 0 when the hits have none (hits best first). */
-    static double best(List<PassageSearchHit> hits, EvidenceSourceSet sources) {
+    /**
+     * The similarity of the best hit the pack could take: of an admitted source, and prose after the cut to the
+     * passage size; 0 when the hits have none (hits best first). A heading or menu that scores high but never enters
+     * the pack must not raise the floor above the usable prose.
+     */
+    static double best(List<PassageSearchHit> hits, EvidenceSourceSet sources, WriterPackSettings pack) {
+        ProsePassageFilter prose = new ProsePassageFilter(pack.getProse());
         for (PassageSearchHit hit : hits) {
-            if (sources.admits(hit.getSourceId())) {
+            if (!sources.admits(hit.getSourceId())) {
+                continue;
+            }
+            String text = TokenBudget.cutAtSentence(hit.getText(), pack.getPassageTokens());
+            if (!text.isEmpty() && prose.isProse(text)) {
                 return hit.getScore();
             }
         }

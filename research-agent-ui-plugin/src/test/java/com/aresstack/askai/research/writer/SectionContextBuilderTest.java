@@ -476,6 +476,29 @@ public class SectionContextBuilderTest {
                 Collections.singletonList("src-helmet"), sourcesOf(one));
     }
 
+    /** A heading that scores high but never enters the pack does not set the margin's baseline (Codex, #219). */
+    @Test
+    public void aHeadingAboveTheProseDoesNotRaiseTheFloor() {
+        Corpus corpus = new Corpus();
+        Map<String, String> accepted = new HashMap<String, String>();
+        corpus.add("p-heading", "src-nav", "Wearables auf Baustellen", 0.98);
+        corpus.add("p-menu", "src-nav2", HEXAGON_NAVIGATION, 0.95);
+        corpus.add("p-prose-a", "src-a", sentences("Smart helmet", 3), 0.70);
+        corpus.add("p-prose-b", "src-b", sentences("Vest", 3), 0.60);
+        corpus.add("p-far", "src-c", sentences("Apple Watch", 3), 0.50);
+        for (String source : Arrays.asList("src-nav", "src-nav2", "src-a", "src-b", "src-c")) {
+            accepted.put(source, "c-" + source);
+        }
+        SectionContextRequest base = request(new EvidenceSourceSet(accepted, null, null));
+        OutlineSection noProvenance = new OutlineSection("sec-2", "ch-1", 1, "Ohne Herkunft",
+                base.getSection().getBrief(), OutlineProvenance.NONE, false, "");
+        SectionContextRequest request = new SectionContextRequest("proj", FP, base.getChapter(), noProvenance,
+                base.getSources(), "", "", null, "de");
+        EvidencePack pack = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus)
+                .build(request, withRelevance(6, 0.45, 0.15));
+        assertEquals("floor 0.70 - 0.15", Arrays.asList("src-a", "src-b"), sourcesOf(pack));
+    }
+
     @Test
     public void theRetrievalWindowStopsGrowingOnceItsHitsFallBelowTheFloor() {
         Corpus corpus = new Corpus();
