@@ -27,7 +27,9 @@ final class SharedTopicContract {
 
     static final String RULES = "Rules:\n"
             + "- Give every sub-topic to exactly one of these chapters: the one whose title and purpose it fits best.\n"
-            + "- A chapter may get several sub-topics or none.\n";
+            + "- A chapter may get several sub-topics or none.\n"
+            + "- An introduction, overview or conclusion chapter gets a sub-topic only when no other chapter fits "
+            + "it.\n";
 
     private SharedTopicContract() {
     }

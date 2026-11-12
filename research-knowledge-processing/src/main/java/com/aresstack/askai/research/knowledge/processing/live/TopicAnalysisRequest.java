@@ -56,6 +56,8 @@ public final class TopicAnalysisRequest {
     private final int everyNewPassages;
     private final int corpusLimit;
     private final PassageFilter passageFilter;
+    private final String framePath;
+    private final com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector frame;
 
     /**
      * @param eligibleSourceIds the sources the analysis reads (D4); {@code null} = every source of the corpus filter
@@ -76,6 +78,20 @@ public final class TopicAnalysisRequest {
                                 Set<String> pendingSourceIds, TopicAnalysisSettings settings, int keyTerms,
                                 int minimumCorpusPassages, int everyNewPassages, int corpusLimit,
                                 PassageFilter passageFilter) {
+        this(bookTitle, bookFrame, anchors, conceptRevision, fence, eligibleSourceIds, domainBySource,
+                pendingSourceIds, settings, keyTerms, minimumCorpusPassages, everyNewPassages, corpusLimit,
+                passageFilter, "", null);
+    }
+
+    private TopicAnalysisRequest(String bookTitle, boolean bookFrame, List<ConceptAnchor> anchors,
+                                 long conceptRevision, ScopeFence fence, Set<String> eligibleSourceIds,
+                                 Map<String, String> domainBySource, Set<String> pendingSourceIds,
+                                 TopicAnalysisSettings settings, int keyTerms, int minimumCorpusPassages,
+                                 int everyNewPassages, int corpusLimit, PassageFilter passageFilter,
+                                 String framePath,
+                                 com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector frame) {
+        this.framePath = framePath == null ? "" : framePath;
+        this.frame = frame;
         this.passageFilter = passageFilter == null ? PassageFilter.ALL : passageFilter;
         this.bookTitle = bookTitle == null ? "" : bookTitle.trim();
         this.bookFrame = bookFrame;
@@ -97,6 +113,22 @@ public final class TopicAnalysisRequest {
             throw new IllegalArgumentException("corpus limit must be at least 2: " + corpusLimit);
         }
         this.corpusLimit = corpusLimit;
+    }
+
+    /**
+     * The same request with the book frame: the prefix every anchor path shares and its query vector (see
+     * {@link com.aresstack.askai.research.knowledge.topic.TopicAnalysisSettings#DEFAULT_CONCEPT_FRAME_LEAD}).
+     */
+    public TopicAnalysisRequest withFrame(String path,
+                                          com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector vector) {
+        return new TopicAnalysisRequest(bookTitle, bookFrame, anchors, conceptRevision, fence, eligibleSourceIds,
+                domainBySource, pendingSourceIds, settings, keyTerms, minimumCorpusPassages, everyNewPassages,
+                corpusLimit, passageFilter, path, vector);
+    }
+
+    /** The vector of the book frame, or {@code null} when the anchor paths share no prefix. */
+    public com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector getFrame() {
+        return frame;
     }
 
     public String getBookTitle() {
@@ -168,12 +200,14 @@ public final class TopicAnalysisRequest {
         for (ConceptAnchor anchor : anchors) {
             key.append(anchor.getId()).append('=').append(anchor.getPath()).append(';');
         }
+        key.append("|frame=").append(frame == null ? "" : framePath);
         key.append('|').append(fence == null ? "no-fence" : "fence-" + fence.getRevision() + "-"
                 + fence.getAnchors().size());
         TopicAnalysisSettings s = settings;
         key.append('|').append(s.getDuplicateDistance()).append('/').append(s.getSubtopicDistance()).append('/')
                 .append(s.getTopicGroupDistance()).append('/').append(s.getConceptThreshold()).append('/')
-                .append(s.getConceptMargin()).append('/').append(s.getMinimumPassages()).append('/')
+                .append(s.getConceptMargin()).append('/').append(s.getConceptFrameLead()).append('/')
+                .append(s.getMinimumPassages()).append('/')
                 .append(s.getMinimumSources()).append('/').append(s.getMinimumDomains()).append('/')
                 .append(s.getMinimumChildCoverage()).append('/').append(s.getMaximumDominantShare()).append('/')
                 .append(s.getMajorTopicShare()).append('/').append(s.getRepresentatives()).append('/')

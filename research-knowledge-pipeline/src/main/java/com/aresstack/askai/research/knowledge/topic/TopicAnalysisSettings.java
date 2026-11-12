@@ -24,6 +24,14 @@ public final class TopicAnalysisSettings {
      * rejected three of four passages although none fell below the threshold.
      */
     public static final double DEFAULT_CONCEPT_MARGIN = 0.01;
+    /**
+     * ... and, when the book frame (the prefix every anchor path shares) is known, only when it points this far in
+     * the direction the node adds to the frame: the passage's cosine with the unit vector from the frame to the node.
+     * Unrelated passages scatter around 0; the bare frame is no evidence. Live outline acceptance 2026-11-12 (bge-m3):
+     * all 24 passages of four other areas lay above the threshold 0.35 for "Training apprentices", their raw lead over
+     * the frame stayed at or below 0.061.
+     */
+    public static final double DEFAULT_CONCEPT_FRAME_LEAD = 0.15;
     /** Material: a topic, sub-topic or concept node needs this many DISTINCT passages (near duplicates count once). */
     public static final int DEFAULT_MINIMUM_PASSAGES = 3;
     /** Confirmation: a topic or concept node needs this many distinct sources ... */
@@ -49,6 +57,7 @@ public final class TopicAnalysisSettings {
     private final double topicGroupDistance;
     private final double conceptThreshold;
     private final double conceptMargin;
+    private final double conceptFrameLead;
     private final int minimumPassages;
     private final int minimumSources;
     private final int minimumDomains;
@@ -59,7 +68,8 @@ public final class TopicAnalysisSettings {
     private final double topicDistance;
 
     public TopicAnalysisSettings(double duplicateDistance, double subtopicDistance, double topicGroupDistance,
-                                 double conceptThreshold, double conceptMargin, int minimumPassages,
+                                 double conceptThreshold, double conceptMargin, double conceptFrameLead,
+                                 int minimumPassages,
                                  int minimumSources, int minimumDomains, double minimumChildCoverage,
                                  double maximumDominantShare, double majorTopicShare, int representatives,
                                  double topicDistance) {
@@ -79,6 +89,7 @@ public final class TopicAnalysisSettings {
         this.topicGroupDistance = topicGroupDistance;
         this.conceptThreshold = conceptThreshold;
         this.conceptMargin = Math.max(0, conceptMargin);
+        this.conceptFrameLead = conceptFrameLead;
         this.minimumPassages = Math.max(1, minimumPassages);
         this.minimumSources = Math.max(1, minimumSources);
         this.minimumDomains = Math.max(1, minimumDomains);
@@ -101,7 +112,7 @@ public final class TopicAnalysisSettings {
     public static TopicAnalysisSettings defaults() {
         return new TopicAnalysisSettings(DEFAULT_DUPLICATE_DISTANCE, DEFAULT_SUBTOPIC_DISTANCE,
                 DEFAULT_TOPIC_GROUP_DISTANCE, DEFAULT_CONCEPT_THRESHOLD, DEFAULT_CONCEPT_MARGIN,
-                DEFAULT_MINIMUM_PASSAGES, DEFAULT_MINIMUM_SOURCES, DEFAULT_MINIMUM_DOMAINS,
+                DEFAULT_CONCEPT_FRAME_LEAD, DEFAULT_MINIMUM_PASSAGES, DEFAULT_MINIMUM_SOURCES, DEFAULT_MINIMUM_DOMAINS,
                 DEFAULT_MINIMUM_CHILD_COVERAGE, DEFAULT_MAXIMUM_DOMINANT_SHARE, DEFAULT_MAJOR_TOPIC_SHARE,
                 DEFAULT_REPRESENTATIVES, DEFAULT_TOPIC_DISTANCE);
     }
@@ -124,6 +135,11 @@ public final class TopicAnalysisSettings {
 
     public double getConceptMargin() {
         return conceptMargin;
+    }
+
+    /** The minimum projection on the direction from the book frame to the node (see the default). */
+    public double getConceptFrameLead() {
+        return conceptFrameLead;
     }
 
     public int getMinimumPassages() {

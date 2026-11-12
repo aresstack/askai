@@ -33,9 +33,23 @@ import java.util.TreeSet;
 public final class TopicAnalyzer {
 
     private final TopicAnalysisSettings settings;
+    private final EmbeddingPort.EmbeddingVector frame;
+    private final Map<ConceptAnchor, EmbeddingPort.EmbeddingVector> directionOf =
+            new java.util.IdentityHashMap<ConceptAnchor, EmbeddingPort.EmbeddingVector>();
 
+    /** An analysis without a known book frame. */
     public TopicAnalyzer(TopicAnalysisSettings settings) {
+        this(settings, null);
+    }
+
+    /**
+     * @param frame the vector of the book frame, the prefix every anchor path shares (title and frame node); a passage
+     *              belongs to a node only when it points in the direction the node adds to it. {@code null} = no
+     *              frame, the anchor paths share no prefix.
+     */
+    public TopicAnalyzer(TopicAnalysisSettings settings, EmbeddingPort.EmbeddingVector frame) {
         this.settings = settings == null ? TopicAnalysisSettings.defaults() : settings;
+        this.frame = frame == null ? null : unit(frame);
     }
 
     /**
@@ -732,13 +746,49 @@ public final class TopicAnalyzer {
         };
     }
 
-    /** The index of the nearest node above threshold and margin, or -1. */
+    /** The index of the nearest node above threshold, margin and frame lead, or -1. */
     private int nearest(List<ConceptAnchor> nodes, EmbeddingPort.EmbeddingVector vector) {
         double[] scores = scores(nodes, vector);
         int best = best(scores);
         double bestScore = scores[best];
         return bestScore >= settings.getConceptThreshold()
-                && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin() ? best : -1;
+                && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin()
+                && frameLead(nodes.get(best), vector) >= settings.getConceptFrameLead() ? best : -1;
+    }
+
+    /**
+     * How far {@code vector} points in the direction {@code node} adds to the book frame: its cosine with the unit
+     * vector from the frame to the node. The raw difference of the two similarities shrinks with the frame's share of
+     * the anchor path (live run 3: a long prefix left about 0.01 between nodes); the direction does not. Without a
+     * frame, or for a node equal to it, every passage passes.
+     */
+    double frameLead(ConceptAnchor node, EmbeddingPort.EmbeddingVector vector) {
+        if (frame == null) {
+            return Double.POSITIVE_INFINITY;
+        }
+        EmbeddingPort.EmbeddingVector direction;
+        synchronized (directionOf) {
+            direction = directionOf.containsKey(node) ? directionOf.get(node) : direction(node);
+            directionOf.put(node, direction);
+        }
+        return direction == null ? Double.POSITIVE_INFINITY : VectorMath.cosine(vector, direction);
+    }
+
+    /** The unit vector from the frame to {@code node}, or {@code null} when they are equal. */
+    private EmbeddingPort.EmbeddingVector direction(ConceptAnchor node) {
+        float[] anchor = unit(node.getVector()).getValues();
+        float[] base = frame.getValues();
+        if (anchor.length != base.length) {
+            return null;
+        }
+        float[] difference = new float[anchor.length];
+        double norm = 0;
+        for (int i = 0; i < anchor.length; i++) {
+            difference[i] = anchor[i] - base[i];
+            norm += difference[i] * difference[i];
+        }
+        return norm == 0 ? null : unit(new EmbeddingPort.EmbeddingVector(frame.getModelId(),
+                frame.getModelFingerprint(), difference));
     }
 
     private static double[] scores(List<ConceptAnchor> nodes, EmbeddingPort.EmbeddingVector vector) {
