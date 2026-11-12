@@ -305,7 +305,8 @@ public final class TopicAnalyzer {
 
     /** One aspect of a topic from a passage group, or {@code null} below the minimum of distinct passages. */
     private Subtopic subtopic(List<String> group, Map<String, AnalysisPassage> byId,
-                              Map<String, EmbeddingPort.EmbeddingVector> vectors, Map<String, String> duplicateGroupOf) {
+                              Map<String, EmbeddingPort.EmbeddingVector> vectors, Map<String, String> duplicateGroupOf,
+                              String conceptAnchorId) {
         Set<String> groupsSeen = new HashSet<String>();
         Set<String> sources = new TreeSet<String>();
         List<EmbeddingPort.EmbeddingVector> unitVectors = new ArrayList<EmbeddingPort.EmbeddingVector>();
@@ -334,7 +335,7 @@ public final class TopicAnalyzer {
         AnalysisPassage passage = byId.get(representative);
         String title = TopicClusterer.suggestedTitle(passage == null ? "" : passage.getText());
         String id = "subtopic-" + LiveTopicProjection.deterministicClusterId(group).substring("topic-".length());
-        return new Subtopic(id, title, representative, group, groupsSeen.size(), sources.size());
+        return new Subtopic(id, title, representative, group, groupsSeen.size(), sources.size(), conceptAnchorId);
     }
 
     /**
@@ -371,7 +372,7 @@ public final class TopicAnalyzer {
                     group.add(id);
                 }
             }
-            Subtopic part = subtopic(group, byId, vectors, duplicateGroupOf);
+            Subtopic part = subtopic(group, byId, vectors, duplicateGroupOf, nodeId);
             if (part != null) {
                 parts.add(part);
             }
@@ -401,7 +402,7 @@ public final class TopicAnalyzer {
             if (group.isEmpty() || !inside.contains(group.get(0))) {
                 continue;
             }
-            Subtopic subtopic = subtopic(group, byId, vectors, duplicateGroupOf);
+            Subtopic subtopic = subtopic(group, byId, vectors, duplicateGroupOf, "");
             if (subtopic != null) {
                 result.add(subtopic);
             }

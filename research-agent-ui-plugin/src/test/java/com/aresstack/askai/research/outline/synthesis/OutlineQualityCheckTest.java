@@ -114,4 +114,70 @@ public class OutlineQualityCheckTest {
         assertEquals(700, length.unboundedTarget(3));
         assertEquals("capped", 1100, length.unboundedTarget(30));
     }
+
+    /** One topic holding the material of three independent concept nodes, one aspect each (live run 4). */
+    static SynthesisFixture oneTopicThreeConcepts() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int perAspect = 6;
+        int base = corpus.diverse("sites", 3, perAspect, 3);
+        corpus.concept("c-sensors", "Sensors", base + 1);
+        corpus.concept("c-safety", "Safety", base + 1 + (perAspect + 1));
+        corpus.concept("c-law", "Law", base + 1 + 2 * (perAspect + 1));
+        return corpus;
+    }
+
+    /**
+     * Live run 4: every chapter named the one large topic with its own requirement; first-come ownership gave the
+     * whole topic to the first chapter and dropped the other chapters as repeated material. Each concept part now
+     * stays with the chapter treating its requirement, and the prompt tells the model which part is whose.
+     */
+    @Test
+    public void eachConceptPartStaysWithTheChapterOfItsRequirement() {
+        SynthesisBrief brief = oneTopicThreeConcepts().brief();
+        assertEquals(1, brief.getTopics().size());
+        SynthesisBrief.TopicEntry topic = brief.getTopics().get(0);
+        assertEquals("", topic.getConceptKey());
+        assertEquals(3, topic.getSubtopics().size());
+        assertEquals("C1", brief.subtopic("T1.1").getConceptKey());
+        assertEquals("C2", brief.subtopic("T1.2").getConceptKey());
+        assertEquals("C3", brief.subtopic("T1.3").getConceptKey());
+        String prompt = ChapterPlanContract.prompt(brief);
+        assertTrue(prompt, prompt.contains("holds the material of concepts C1, C2, C3 (one sub-topic each)"));
+        assertTrue(prompt, prompt.contains("distinct; concept C2)"));
+
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Collections.singletonList("T1"), Collections.singletonList("C1"),
+                        section("A", "T1")),
+                chapter("Safety", Collections.singletonList("T1"), Collections.singletonList("C2"),
+                        section("B", "T1")),
+                chapter("Law", Collections.singletonList("T1"), Collections.singletonList("C3"),
+                        section("C", "T1"))),
+                Collections.<String>emptyList(), false);
+
+        OutlinePlan fixed = CHECK.fix(plan, brief).getPlan();
+
+        assertEquals("no chapter is dropped as repeated material", 3, fixed.getChapters().size());
+        assertEquals(Collections.singletonList("T1.1"), fixed.getChapters().get(0).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.2"), fixed.getChapters().get(1).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.3"), fixed.getChapters().get(2).getMaterialKeys());
+        assertTrue(fixed.getGapKeys().isEmpty());
+    }
+
+    /** An unused concept part joins the chapter of its requirement, not the chapter with most group material. */
+    @Test
+    public void anUnusedConceptPartJoinsTheChapterOfItsRequirement() {
+        SynthesisBrief brief = oneTopicThreeConcepts().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Arrays.asList("T1.1", "T1.2"), Collections.singletonList("C1"),
+                        section("A", "T1.1", "T1.2")),
+                chapter("Law", Collections.singletonList("T1.2"), Arrays.asList("C2", "C3"),
+                        section("C", "T1.2"))),
+                Collections.<String>emptyList(), false);
+
+        OutlinePlan fixed = CHECK.fix(plan, brief).getPlan();
+
+        assertEquals(2, fixed.getChapters().size());
+        assertEquals(Collections.singletonList("T1.1"), fixed.getChapters().get(0).getMaterialKeys());
+        assertEquals(Arrays.asList("T1.2", "T1.3"), fixed.getChapters().get(1).getMaterialKeys());
+    }
 }
