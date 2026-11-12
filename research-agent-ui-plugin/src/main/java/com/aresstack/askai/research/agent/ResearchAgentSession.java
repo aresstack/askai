@@ -2324,13 +2324,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     private static String bookTitle(com.aresstack.askai.research.book.FrozenConcept frozen) {
-        try {
-            com.google.gson.JsonElement title = com.google.gson.JsonParser.parseString(frozen.getApprovedDocument())
-                    .getAsJsonObject().get("title");
-            return title == null || !title.isJsonPrimitive() ? "" : title.getAsString();
-        } catch (RuntimeException unreadable) {
-            return "";
-        }
+        return frozen.getBookTitle();
     }
 
     // ------------------------------------------------------------------ PR 07: concept freeze
@@ -3426,10 +3420,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
             com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
             if (frozen != null) {
-                String title = frozen.getDeliverable() == null || frozen.getDeliverable().trim().isEmpty()
-                        ? frozen.getMission() : frozen.getDeliverable();
-                concept = new com.aresstack.askai.research.assembly.BookAssemblyInputs.Concept(
-                        title, frozen.getRevision(), frozen.cardNames());
+                concept = com.aresstack.askai.research.assembly.BookAssemblyInputs.Concept.of(frozen);
             }
         } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
             System.err.println("[research] book assembly reads a damaged manifest: " + corrupt.getMessage());

@@ -40,6 +40,21 @@ public final class BookAssemblyInputs {
             this.revision = revision;
             this.labels = labels;
         }
+
+        /** The heading of the assembled book. */
+        public String getTitle() {
+            return title;
+        }
+
+        /**
+         * The concept part of the book: headed with the book title of the frozen concept, only without one with
+         * its mission. Never with the deliverable, which only describes the length ("20-30 pages").
+         */
+        public static Concept of(com.aresstack.askai.research.book.FrozenConcept frozen) {
+            String title = frozen.getBookTitle();
+            return new Concept(title.isEmpty() ? frozen.getMission() : title, frozen.getRevision(),
+                    frozen.cardNames());
+        }
     }
 
     public static BookAssemblyInput read(Outline outline, int outlineRevision, FileManuscriptStore manuscript,

@@ -79,6 +79,31 @@ public final class FrozenConcept {
         return pin.getMission();
     }
 
+    /**
+     * The book's title: the title of the approved concept, else the title the mission quotes („…“, "…", »…«; the
+     * author's own words, which the plan queries and the outline anchors already read as the title), else empty.
+     * The Concept phase never writes the concept's title, so without this every later phase saw no title, and the
+     * assembled book was headed with the whole mission (live run 4, 2026-11-12).
+     */
+    public String getBookTitle() {
+        String title = conceptTitle(approvedDocument);
+        if (!title.isEmpty()) {
+            return title;
+        }
+        String quoted = com.aresstack.askai.research.plan.ConceptPlanNodes.quotedTitle(getMission());
+        return quoted == null ? "" : quoted;
+    }
+
+    /** The {@code title} of a concept document's envelope ("" when it has none or is unreadable). */
+    private static String conceptTitle(String document) {
+        try {
+            JsonElement title = JsonParser.parseString(document).getAsJsonObject().get("title");
+            return title == null || !title.isJsonPrimitive() ? "" : title.getAsString().trim();
+        } catch (RuntimeException unreadable) {
+            return "";
+        }
+    }
+
     public String getDeliverable() {
         return pin.getDeliverable();
     }
