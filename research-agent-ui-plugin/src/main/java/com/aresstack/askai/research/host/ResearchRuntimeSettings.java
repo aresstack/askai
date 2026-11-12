@@ -892,6 +892,28 @@ public final class ResearchRuntimeSettings {
     // ------------------------------------------------------------------ Document: writer preset
     /** Words the section writer aims for in one call; a longer section is split by its key points. */
     public static final String KEY_WRITER_WORDS_PER_CALL = "research.writer.wordsPerCall";
+    /** Repeat check: fewest content words a sentence needs before a near repeat of the book takes it out. */
+    public static final String KEY_WRITER_REPEAT_MIN_WORDS = "research.writer.repeat.minWords";
+    /** Repeat check: share (0..1) of a sentence's content words an earlier sentence of the book must hold. */
+    public static final String KEY_WRITER_REPEAT_MIN_SHARE = "research.writer.repeat.minShare";
+
+    /**
+     * The section writer's repeat check (live run 4, book 6): a sentence that another written section or an earlier
+     * part already says, nearly word for word, leaves the text; the word and stem lengths are the claim check's.
+     */
+    public static com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria loadWriterRepeatCriteria(
+            WorkspaceStateStore store) {
+        double share = loadDouble(store, KEY_WRITER_REPEAT_MIN_SHARE,
+                com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SHARE);
+        if (share <= 0 || share > 1) {
+            share = com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SHARE;
+        }
+        return new com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria(
+                loadPositiveInt(store, KEY_WRITER_REPEAT_MIN_WORDS,
+                        com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_WORDS),
+                share);
+    }
+
     /** Answer token budget of one writer call. */
     public static final String KEY_WRITER_ANSWER_TOKENS = "research.writer.answerTokens";
     /** Passages one writer call gets; a section written in key-point parts gets this many for each part. */
@@ -941,7 +963,7 @@ public final class ResearchRuntimeSettings {
                         loadWriterBriefRelevance(store)),
                 loadPositiveInt(store, KEY_WRITER_WORDS_PER_CALL, DEFAULT_WRITER_WORDS_PER_CALL),
                 loadPositiveInt(store, KEY_WRITER_ANSWER_TOKENS, DEFAULT_WRITER_ANSWER_TOKENS),
-                loadWriterCarryCriteria(store));
+                loadWriterCarryCriteria(store), loadWriterRepeatCriteria(store));
     }
 
     /**

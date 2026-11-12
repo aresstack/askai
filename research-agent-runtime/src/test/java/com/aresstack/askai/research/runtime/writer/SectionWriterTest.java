@@ -211,6 +211,51 @@ public class SectionWriterTest {
                 SectionWriter.currentTextShares("Eins zwei drei vier.", 3, 50));
     }
 
+    /**
+     * Live run 4, book 6: "Wearables wie smarte Helme, Sicherheitswesten und Handschuhe … [2]" stood four times in
+     * sections 1.2 and 1.3. The writer now checks every answer against the other written sections of the book.
+     */
+    @Test
+    public void aSentenceAnotherSectionAlreadySaysLeavesTheSection() {
+        String other = "Wearables wie smarte Helme, Sicherheitswesten und Handschuhe sind mit Sensoren ausgestattet, "
+                + "die die Vitalwerte und Bewegungen der Arbeiter überwachen [4]. Die Rate stieg auf 15,5 % [2].";
+        SectionAssignment a = assignment(6).toBuilder().writtenSections(Arrays.asList(other)).build();
+        ScriptedChat chat = new ScriptedChat().answer("Wearables wie smarte Helme, Sicherheitswesten und Handschuhe "
+                + "sind mit Sensoren ausgestattet, die die Vitalwerte und Bewegungen der Arbeiter laufend überwachen "
+                + "[1]. Die Rate stieg auf 15,5 % [1]. Im Jahr 2020 kam ein Rückgang [2].");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(a);
+        assertEquals("a near repeat and an exact (short) repeat of the other section leave",
+                "Im Jahr 2020 kam ein Rückgang [2].", draft.getText());
+        assertTrue(log.toString(), log.toString().contains("repeat check against 2 sentences of 1 other written"));
+        assertTrue(log.toString(), log.toString().contains("2 repeated sentences"));
+    }
+
+    @Test
+    public void laterPartsAreCheckedAgainstTheBookAndTheEarlierParts() {
+        String other = "Bei einem Sturz oder ungewöhnlichen Gesundheitswerten sendet das Wearable sofort einen Alarm "
+                + "an die Bauleitung und Rettungsteams [3].";
+        List<EvidencePassage> pack = new ArrayList<EvidencePassage>();
+        for (int i = 1; i <= 6; i++) {
+            pack.add(new EvidencePassage(i, "src-" + i, "sha-" + i, "p-" + i, "Exoskelette entlasten nachweislich "
+                    + "den Rücken beim Heben schwerer Lasten auf der Baustelle und auf Baustellen. Bei einem Sturz "
+                    + "oder ungewöhnlichen Gesundheitswerten sendet das Wearable sofort einen Alarm an die "
+                    + "Bauleitung, die dann eingreift. Die Rate stieg auf 15,5 %."));
+        }
+        SectionAssignment a = SectionAssignment.builder("s1").title("T")
+                .keyPoints(Arrays.asList("k1", "k2", "k3", "k4")).passages(pack).wordsPerCall(450)
+                .sectionWords(900).answerTokens(1200).writtenSections(Arrays.asList(other))
+                .repeats(new RepeatCheck.Criteria(6, 0.75)).build();
+        ScriptedChat chat = new ScriptedChat()
+                .answer("Exoskelette entlasten den Rücken beim Heben schwerer Lasten auf der Baustelle [1].")
+                .answer("Exoskelette entlasten nachweislich den Rücken beim Heben schwerer Lasten auf Baustellen [2]. "
+                        + "Bei einem Sturz oder ungewöhnlichen Gesundheitswerten sendet das Wearable sofort einen "
+                        + "Alarm an die Bauleitung, die dann eingreift [2]. Die Rate stieg auf 15,5 % [2].");
+        SectionDraft draft = new SectionWriter(chat, null).write(a);
+        assertEquals("Exoskelette entlasten den Rücken beim Heben schwerer Lasten auf der Baustelle [1].\n\n"
+                + "Die Rate stieg auf 15,5 % [2].", draft.getText());
+    }
+
     @Test
     public void longSectionIsSplitByKeyPoints() {
         SectionAssignment a = SectionAssignment.builder("s1").title("T")

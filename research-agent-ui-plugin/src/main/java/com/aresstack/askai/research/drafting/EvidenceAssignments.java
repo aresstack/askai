@@ -12,28 +12,43 @@ import com.aresstack.askai.research.writer.WriterPackSettings;
  * carries the user's comment and the current text; the writer splits the section by key points and keeps its word
  * target and budget. A section written in several parts gets a pack of the set passage count for each part, and each
  * part's call gets the set count of them (live run 4: a section of 1,100 words in three parts drew on eight passages,
- * section 2.1 on eight of its 457).
+ * section 2.1 on eight of its 457). Every section carries the current text of the manuscript's other written
+ * sections, so the writer leaves out what the book already says (live run 4, book 6).
  */
 public final class EvidenceAssignments implements RuntimeSectionWriter.Assignments {
 
     /** The project side of a pack request: source set, synopsis, previous digest, glossary, language. */
     public interface Contexts {
         SectionContextRequest requestFor(SectionWriteRequest request) throws Exception;
+
+        /**
+         * The current text of every other written section of the manuscript, which the writer's repeat check reads
+         * (live run 4, book 6: the same sentences in sections 1.1, 1.2 and 1.3); none by default.
+         */
+        default java.util.List<String> writtenSections(SectionWriteRequest request) throws Exception {
+            return java.util.Collections.emptyList();
+        }
     }
 
-    /** Word target per call, answer budget, evidence pack and claim-check thresholds (settings, read per section). */
+    /**
+     * Word target per call, answer budget, evidence pack, claim-check and repeat-check thresholds (settings, read per
+     * section).
+     */
     public static final class Targets {
         final WriterPackSettings pack;
         final int wordsPerCall;
         final int answerTokens;
         final com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry;
+        final com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats;
 
         public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens,
-                       com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry) {
+                       com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry,
+                       com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats) {
             this.pack = pack;
             this.wordsPerCall = wordsPerCall;
             this.answerTokens = answerTokens;
             this.carry = carry;
+            this.repeats = repeats;
         }
 
         public WriterPackSettings getPack() {
@@ -71,15 +86,11 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
                 request.getSection().getBrief().getPurpose(), request.getSection().getBrief().getKeyPoints(),
                 request.getSection().getBrief().getWordTarget(), targets.wordsPerCall, targets.answerTokens,
                 targets.carry, targets.pack.getPassageCount());
-        if (!request.isRewrite()) {
-            return base;
+        SectionAssignment.Builder assignment = base.toBuilder().writtenSections(contexts.writtenSections(request))
+                .repeats(targets.repeats);
+        if (request.isRewrite()) {
+            assignment.rewriteComment(request.getComment()).currentText(request.getCurrentText());
         }
-        return SectionAssignment.builder(base.getSectionId()).title(base.getTitle()).brief(base.getBrief())
-                .keyPoints(base.getKeyPoints()).passages(base.getPassages()).synopsis(base.getSynopsis())
-                .previousDigest(base.getPreviousDigest()).glossary(base.getGlossary())
-                .bookLanguage(base.getBookLanguage()).sectionWords(base.getSectionWords())
-                .wordsPerCall(base.getWordsPerCall()).answerTokens(base.getAnswerTokens()).carry(base.getCarry())
-                .passagesPerCall(base.getPassagesPerCall()).rewriteComment(request.getComment())
-                .currentText(request.getCurrentText()).build();
+        return assignment.build();
     }
 }

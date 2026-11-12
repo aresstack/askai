@@ -20,8 +20,9 @@ import java.util.function.Consumer;
  * The section writer of the Document phase (plan D8, PR 28). It runs on the {@code phase.draft.writer} slot (which
  * inherits the model of {@code phase.draft}), asks for plain text with {@code [n]} markers and checks the answer in
  * code: {@link CitationValidator} strips unknown markers, flags uncited sentences and paragraphs, parses gaps and
- * takes label lines, repeated sentences (also those of the section's earlier parts) and question-only paragraphs out
- * of the prose; {@link ClaimSupportCheck} flags numbers and quotations the cited passages do not contain;
+ * takes label lines, repeated sentences (also those of the section's earlier parts and of every other written
+ * section of the manuscript, word for word or nearly: {@link RepeatCheck}) and question-only paragraphs out of the
+ * prose; {@link ClaimSupportCheck} flags numbers and quotations the cited passages do not contain;
  * {@link ClaimCarryCheck} (stage 2) flags sentences whose cited passages are no prose or share too few of their
  * words; {@link VoiceCheck} flags sentences that speak with a passage author's "we".
  *
@@ -75,8 +76,19 @@ public final class SectionWriter {
     /** Writes the whole section; more words than one call's target are split by key points. */
     public SectionDraft write(SectionAssignment assignment) {
         List<SectionAssignment> parts = parts(assignment);
+        // what the book already says: every other written section; each part adds its own sentences
+        java.util.Set<String> written = new java.util.HashSet<String>();
+        for (String text : assignment.getWrittenSections()) {
+            written.addAll(CitationValidator.sentenceKeys(text));
+        }
+        RepeatCheck.Memory book = new RepeatCheck(assignment.getRepeats(), assignment.getCarry())
+                .memory(assignment.getWrittenSections());
+        if (!assignment.getWrittenSections().isEmpty()) {
+            log.accept("section " + assignment.getSectionId() + ": repeat check against " + book.size()
+                    + " sentences of " + assignment.getWrittenSections().size() + " other written sections");
+        }
         if (parts.size() == 1) {
-            return writePart(parts.get(0));
+            return writePart(parts.get(0), written, book);
         }
         StringBuilder text = new StringBuilder();
         Map<Integer, EvidencePassage> citations = new LinkedHashMap<Integer, EvidencePassage>();
@@ -89,11 +101,10 @@ public final class SectionWriter {
         int words = 0;
         int paragraphOffset = 0;
         String digest = assignment.getPreviousDigest();
-        java.util.Set<String> written = new java.util.HashSet<String>();
         for (SectionAssignment part : parts) {
             List<EvidencePassage> packed = part.getPassages();
             SectionDraft draft = writePart(part.part(part.getKeyPoints(), numbered(packed), part.getWordsPerCall(),
-                    digest), written);
+                    digest), written, book);
             calls += draft.getCalls();
             if (hash.isEmpty()) {
                 hash = draft.getPromptHash();
@@ -121,6 +132,7 @@ public final class SectionWriter {
             words += draft.getWordCount();
             digest = lastSentences(draft.getText());
             written.addAll(CitationValidator.sentenceKeys(draft.getText()));
+            book.rememberText(draft.getText());
         }
         return new SectionDraft(true, "", text.toString(), new java.util.TreeMap<Integer, EvidencePassage>(citations),
                 flags, gaps, stripped, model, hash, calls, words);
@@ -128,11 +140,15 @@ public final class SectionWriter {
 
     /** One call's worth: first answer, at most one continuation, at most one repair (with its own continuation). */
     SectionDraft writePart(SectionAssignment a) {
-        return writePart(a, java.util.Collections.<String>emptySet());
+        return writePart(a, java.util.Collections.<String>emptySet(), RepeatCheck.none());
     }
 
-    /** @param written the sentence keys of the section's earlier parts; this part leaves out what they say */
-    SectionDraft writePart(SectionAssignment a, java.util.Set<String> written) {
+    /**
+     * @param written the sentence keys of the book's other sections and of the section's earlier parts; this part
+     *                leaves out what they say
+     * @param book    the same sentences for the near-repeat check; not changed
+     */
+    SectionDraft writePart(SectionAssignment a, java.util.Set<String> written, RepeatCheck.Memory book) {
         List<ChatMessage> first = SectionWriterPrompt.first(a);
         String hash = SectionWriterPrompt.hash(first);
         int[] calls = {0};
@@ -141,7 +157,7 @@ public final class SectionWriter {
         if (answer == null) {
             return SectionDraft.failed(lastFailure, hash, calls[0]);
         }
-        Checked checked = check(answer, a, written);
+        Checked checked = check(answer, a, written, book);
         List<ClaimFlag> errors = checked.repairable();
         log.accept("section " + a.getSectionId() + ": answer of " + checked.result.wordCount() + " words (target "
                 + a.getWordsPerCall() + "), " + errors.size() + " citation errors");
@@ -153,7 +169,7 @@ public final class SectionWriter {
                 for (ClaimFlag error : errors) {
                     listed.add(CitationValidator.pointKey(error.getSentence()));
                 }
-                Checked again = check(repaired, a, written);
+                Checked again = check(repaired, a, written, book);
                 Checked fixed = new Checked(again.result.withoutGaps(new java.util.function.Predicate<String>() {
                     public boolean test(String point) {
                         return listed.contains(CitationValidator.pointKey(point));
@@ -291,11 +307,12 @@ public final class SectionWriter {
         return cut + (newParagraph ? "\n\n" : " ") + more;
     }
 
-    private Checked check(String answer, SectionAssignment a, java.util.Set<String> written) {
+    private Checked check(String answer, SectionAssignment a, java.util.Set<String> written,
+                          RepeatCheck.Memory book) {
         final int target = a.getWordsPerCall();
         // the target echoed back is no open point; a number the material names too may be one ("450 Beschäftigte")
         final boolean onlyTheTargetNamesIt = !namesNumber(SectionWriterPrompt.withoutWordTarget(a), target);
-        CitationValidator.Result result = validator.validate(answer, a.getPassages().size(), written)
+        CitationValidator.Result result = validator.validate(answer, a.getPassages().size(), written, book)
                 .withoutGaps(new java.util.function.Predicate<String>() {
                     public boolean test(String point) {
                         return onlyTheTargetNamesIt && namesNumber(point, target);

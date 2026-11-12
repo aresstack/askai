@@ -20,8 +20,9 @@ import java.util.regex.Pattern;
  *
  * <p>What is no prose leaves the text (live run 4, books 2 and 3): a heading or list line without a sentence end and
  * without a marker, and a paragraph made only of such words, is a label the writer echoed (its key points, run
- * together into one line); a sentence the answer, or an earlier part of the same section, already contains is a
- * repeat; a paragraph of uncited questions holds the writer's open questions, which become open points like
+ * together into one line); a sentence the answer, an earlier part of the same section or another written section of
+ * the book already contains, word for word or nearly ({@link RepeatCheck}, live run 4, book 6), is a repeat; a
+ * paragraph of uncited questions holds the writer's open questions, which become open points like
  * {@code GAP:} lines. A {@code GAP:} line that repeats a sentence of the text (or of an earlier part) or another
  * {@code GAP:} line is no open point (live run 4, book 5: 12 of 23 gap lines were sentences of the section's own
  * text, and each became a search query); it is dropped and reported. A finding about a claim is still only a flag:
@@ -184,7 +185,10 @@ public final class CitationValidator {
             return labelLines;
         }
 
-        /** Sentences the answer or an earlier part of the section already contained; removed from the text. */
+        /**
+         * Sentences the answer, an earlier part of the section or another section of the book already contained, or
+         * nearly contained ({@link RepeatCheck}); removed from the text.
+         */
         public List<String> getRepeatedSentences() {
             return repeatedSentences;
         }
@@ -255,6 +259,21 @@ public final class CitationValidator {
      *                     sentence of this answer that repeats one of them is removed like a repeat within it
      */
     public Result validate(String answer, int passageCount, Set<String> written) {
+        return validate(answer, passageCount, written, RepeatCheck.none());
+    }
+
+    /**
+     * @param answer       the writer's plain-text answer
+     * @param passageCount k, the number of passages in the pack: valid markers are {@code [1]..[k]}
+     * @param written      the {@linkplain #sentenceKeys(String) sentence keys} of the book's other sections and of the
+     *                     section's earlier parts: a sentence of this answer that repeats one of them is removed like
+     *                     a repeat within it
+     * @param earlier      the same sentences for the near-repeat check ({@link RepeatCheck}); a sentence that nearly
+     *                     repeats one of them, or an earlier sentence of this answer, is removed as well. Not changed:
+     *                     the check works on a copy.
+     */
+    public Result validate(String answer, int passageCount, Set<String> written, RepeatCheck.Memory earlier) {
+        RepeatCheck.Memory near = (earlier == null ? RepeatCheck.none() : earlier).copy();
         List<String> stripped = new ArrayList<String>();
         List<String> gapLines = new ArrayList<String>();
         List<String> questionPoints = new ArrayList<String>();
@@ -309,12 +328,16 @@ public final class CitationValidator {
                 continue;
             }
             List<Sentence> kept = new ArrayList<Sentence>();
+            // the paragraph's sentences join the memory only when it stays prose (not an uncited question block)
+            RepeatCheck.Memory paragraph = near.copy();
             for (Sentence sentence : sentences(text)) {
-                String key = key(sentence.plainText());
-                if (!key.isEmpty() && !seen.add(key)) {
+                String plain = sentence.plainText();
+                String key = key(plain);
+                if (!key.isEmpty() && (!seen.add(key) || paragraph.repeats(plain))) {
                     repeated.add(sentence.getText());
                     continue;
                 }
+                paragraph.remember(plain);
                 kept.add(sentence);
             }
             if (kept.isEmpty()) {
@@ -333,6 +356,7 @@ public final class CitationValidator {
             for (Sentence sentence : kept) {
                 prose.add(key(sentence.plainText()));
             }
+            near = paragraph;
             paragraphs.add(new Paragraph(kept));
         }
         List<String> gaps = new ArrayList<String>();

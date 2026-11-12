@@ -49,6 +49,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerCarryMinWordLength = ComicControls.textField(4);
     private final JTextField writerCarryStemLength = ComicControls.textField(4);
     private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
+    private final JTextField writerRepeatMinWords = ComicControls.textField(4);
+    private final JTextField writerRepeatMinShare = ComicControls.textField(4);
     private final JTextField writerMinBriefSimilarity = ComicControls.textField(4);
     private final JTextField writerBriefSimilarityMargin = ComicControls.textField(4);
     private final JTextField writerWordsPerCall = ComicControls.textField(5);
@@ -218,6 +220,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Below best ≤", writerBriefSimilarityMargin)));
         writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
                 labelled("Stem letters", writerCarryStemLength), labelled("Overlap ≥", writerCarryMinOverlap)));
+        writer.row("Repeat check", group(labelled("Words ≥", writerRepeatMinWords),
+                labelled("Share ≥", writerRepeatMinShare)));
         writer.row("Topic drift", group(labelled("Term letters ≥", driftMinTermLength),
                 labelled("Sentences ≥", driftMinSentences), driftNounsOnly));
 
@@ -627,6 +631,15 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "Claim check: a cited passage must contain at least this share (0..1) of the sentence's words, "
                         + "otherwise the sentence is flagged \"citation does not carry the claim\" and the "
                         + "writer gets one repair. A menu, footer or heading never carries a claim.");
+        bindLimit(writerRepeatMinWords, ResearchRuntimeSettings.KEY_WRITER_REPEAT_MIN_WORDS,
+                com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_WORDS,
+                "Repeat check: a sentence with at least this many content words leaves the section when another "
+                        + "written section (or an earlier part) already holds most of them. Shorter sentences leave "
+                        + "only when they are repeated word for word.");
+        bindDecimal(writerRepeatMinShare, ResearchRuntimeSettings.KEY_WRITER_REPEAT_MIN_SHARE,
+                com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SHARE,
+                "Repeat check: the share (0..1) of a sentence's content words that one sentence the book already "
+                        + "has must contain for the new sentence to count as a repeat. Lower values take out more.");
         refreshBackendStatus();
         // The "Browser" tab changes the channel: the status follows whenever this tab is shown again.
         addHierarchyListener(new java.awt.event.HierarchyListener() {

@@ -32,6 +32,8 @@ public final class SectionAssignment {
     private final String currentText;
     private final ClaimCarryCheck.Criteria carry;
     private final int passagesPerCall;
+    private final List<String> writtenSections;
+    private final RepeatCheck.Criteria repeats;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -50,6 +52,8 @@ public final class SectionAssignment {
         this.currentText = b.currentText;
         this.carry = b.carry;
         this.passagesPerCall = Math.max(0, b.passagesPerCall);
+        this.writtenSections = Collections.unmodifiableList(new ArrayList<String>(b.writtenSections));
+        this.repeats = b.repeats;
     }
 
     /**
@@ -146,8 +150,45 @@ public final class SectionAssignment {
         return passagesPerCall;
     }
 
+    /**
+     * The current text of every other written section of the manuscript: what the book already says. A sentence of
+     * this section that repeats one of them, word for word or nearly ({@link #getRepeats()}), leaves the text (live
+     * run 4, book 6: the same sentences stood in sections 1.1, 1.2 and 1.3).
+     */
+    public List<String> getWrittenSections() {
+        return writtenSections;
+    }
+
+    /** The near-repeat bounds of {@link RepeatCheck} for this section (settings). */
+    public RepeatCheck.Criteria getRepeats() {
+        return repeats;
+    }
+
     public boolean isRewrite() {
         return !rewriteComment.isEmpty() || !currentText.isEmpty();
+    }
+
+    /** A builder holding every value of this assignment, for a copy with some of them changed. */
+    public Builder toBuilder() {
+        Builder b = new Builder(sectionId);
+        b.title = title;
+        b.brief = brief;
+        b.keyPoints = keyPoints;
+        b.passages = passages;
+        b.synopsis = synopsis;
+        b.previousDigest = previousDigest;
+        b.glossary = glossary;
+        b.bookLanguage = bookLanguage;
+        b.sectionWords = sectionWords;
+        b.wordsPerCall = wordsPerCall;
+        b.answerTokens = answerTokens;
+        b.rewriteComment = rewriteComment;
+        b.currentText = currentText;
+        b.carry = carry;
+        b.passagesPerCall = passagesPerCall;
+        b.writtenSections = writtenSections;
+        b.repeats = repeats;
+        return b;
     }
 
     /** A copy for one key-point part of the section, with that part's key points, words and digest. */
@@ -178,6 +219,8 @@ public final class SectionAssignment {
         b.rewriteComment = rewriteComment;
         b.currentText = partText == null ? "" : partText.trim();
         b.carry = carry;
+        b.writtenSections = writtenSections;
+        b.repeats = repeats;
         return new SectionAssignment(b);
     }
 
@@ -198,6 +241,8 @@ public final class SectionAssignment {
         private String currentText = "";
         private ClaimCarryCheck.Criteria carry = ClaimCarryCheck.Criteria.defaults();
         private int passagesPerCall;
+        private List<String> writtenSections = new ArrayList<String>();
+        private RepeatCheck.Criteria repeats = RepeatCheck.Criteria.defaults();
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -280,6 +325,26 @@ public final class SectionAssignment {
         /** Passages one writer call gets (the pack size setting); 0 = every passage of the pack. */
         public Builder passagesPerCall(int value) {
             this.passagesPerCall = value;
+            return this;
+        }
+
+        /** The current text of every other written section of the manuscript ({@link #getWrittenSections()}). */
+        public Builder writtenSections(List<String> value) {
+            List<String> texts = new ArrayList<String>();
+            if (value != null) {
+                for (String text : value) {
+                    if (text != null && !text.trim().isEmpty()) {
+                        texts.add(text);
+                    }
+                }
+            }
+            this.writtenSections = texts;
+            return this;
+        }
+
+        /** Near-repeat bounds (settings); the defaults when {@code null}. */
+        public Builder repeats(RepeatCheck.Criteria value) {
+            this.repeats = value == null ? RepeatCheck.Criteria.defaults() : value;
             return this;
         }
 
