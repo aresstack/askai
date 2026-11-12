@@ -410,7 +410,7 @@ final class Playwright4jDriver implements PlaywrightDriver {
         } catch (PlaywrightException ex) {
             if (startedDownload(ex)) {
                 // The tab keeps its page; the session reads the document (a PDF, or it says what it is instead).
-                return PlaywrightPageState.downloadedDocument(url);
+                return PlaywrightPageState.downloadedDocument(url, page.url());
             }
             throw asBrowserException("Navigation failed", ex);
         }
@@ -427,6 +427,17 @@ final class Playwright4jDriver implements PlaywrightDriver {
             return state();
         } catch (PlaywrightException ex) {
             throw asBrowserException("Reading the current page failed", ex);
+        }
+    }
+
+    @Override
+    public String currentUrl() throws BrowserException {
+        owner.check();
+        requireOpen();
+        try {
+            return page.url();
+        } catch (PlaywrightException ex) {
+            throw asBrowserException("Reading the current URL failed", ex);
         }
     }
 

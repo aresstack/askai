@@ -35,7 +35,10 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
     private boolean hasPage;
     /** Reads the PDF documents the browser reaches but cannot read as pages. */
     private final PdfPageReader documents;
-    /** The current page when it is a read PDF document (the tab shows a viewer or never left the page), else null. */
+    /**
+     * The current page when it is a read PDF document (the tab shows its viewer, or kept its page for a download),
+     * else null. Every navigation drops it, and so does a tab that shows something else since ({@link #shownDocument}).
+     */
     private PlaywrightPageState currentDocument;
     /** MANUAL_CHALLENGE_PENDING: the domain family whose parked challenge waits for the user, or null. */
     private String challengeFamily;
@@ -794,6 +797,7 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
 
     public BrowserPageSnapshot open(String url) throws BrowserException {
         checkPolicy(url);
+        currentDocument = null; // superseded by this navigation, whatever it brings
         return checkedSnapshot(readDocument(driver.open(url)));
     }
 
@@ -805,6 +809,7 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
     @Override
     public BrowserPageReadiness probe(String url) throws BrowserException {
         checkPolicy(url);
+        currentDocument = null; // superseded by this navigation, whatever it brings
         return readinessFrom(checkedSnapshot(readDocument(driver.open(url))));
     }
 
@@ -817,7 +822,7 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
     @Override
     public String dismissConsent() throws BrowserException {
         requirePage();
-        if (currentDocument != null) {
+        if (shownDocument() != null) {
             return "none"; // a PDF document has no consent banner to click
         }
         return driver.tryDismissConsent();
@@ -875,7 +880,9 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
 
     public BrowserPageSnapshot back() throws BrowserException {
         requirePage();
-        if (currentDocument != null && !currentDocument.documentInTab) {
+        PlaywrightPageState document = shownDocument();
+        currentDocument = null; // superseded by this navigation, whatever it brings
+        if (document != null && !document.documentInTab) {
             // The download never replaced the tab's page: going back means the page the tab still shows.
             return checkedSnapshot(readDocument(driver.current()));
         }
@@ -909,8 +916,12 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
         driver.close();
     }
 
-    /** EMERGENCY teardown from a foreign thread (stuck owner): see {@link PlaywrightDriver#terminate()}. */
+    /**
+     * EMERGENCY teardown from a foreign thread (stuck owner): see {@link PlaywrightDriver#terminate()}. A PDF
+     * download in progress runs outside the driver, so it is cut first ({@link PdfPageReader#terminate()}).
+     */
     void terminate() {
+        documents.terminate();
         driver.terminate();
     }
 
@@ -967,7 +978,19 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
 
     /** The current page: the read PDF document, or what the driver's tab shows (a document there is read). */
     private PlaywrightPageState current() throws BrowserException {
-        return currentDocument != null ? currentDocument : readDocument(driver.current());
+        PlaywrightPageState document = shownDocument();
+        return document != null ? document : readDocument(driver.current());
+    }
+
+    /**
+     * The read PDF document while the tab still shows it (its viewer, or the page the tab kept for a download),
+     * else null: a tab that shows something else since (the user navigated the visible window) has left it.
+     */
+    private PlaywrightPageState shownDocument() throws BrowserException {
+        if (currentDocument != null && !currentDocument.tabUrl.equals(driver.currentUrl())) {
+            currentDocument = null;
+        }
+        return currentDocument;
     }
 
     /**

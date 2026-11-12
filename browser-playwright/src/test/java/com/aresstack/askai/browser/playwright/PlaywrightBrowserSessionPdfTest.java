@@ -27,11 +27,14 @@ import static org.junit.Assert.fail;
 /**
  * PDF search hits in the session: a document the driver reports (viewer or download) is read from the network and
  * stays the current page, without page reads or consent/challenge guards that would only wait for page scripts the
- * viewer never runs; "back" leaves it the way the tab history really is.
+ * viewer never runs; "back" leaves it the way the tab history really is. It stays current only while the tab still
+ * shows it: the next navigation (even a failed one) and a user who navigates the visible window both leave it.
  */
 public class PlaywrightBrowserSessionPdfTest {
 
     private static final String PDF_TEXT = "Wearables warn workers before a fall.";
+    /** What a tab shows before its first navigation. */
+    private static final String FRESH_TAB = "about:blank";
 
     /** Tab with a history; a downloaded document never enters it, a viewed one does. */
     private static final class DocumentDriver implements PlaywrightDriver {
@@ -46,10 +49,26 @@ public class PlaywrightBrowserSessionPdfTest {
             if (state == null) {
                 throw new BrowserException("Navigation failed: 404 " + url);
             }
-            if (!state.isDocument() || state.documentInTab) {
-                history.add(state);
+            if (state.isDocument() && !state.documentInTab) {
+                return PlaywrightPageState.downloadedDocument(url, currentUrl());
             }
+            history.add(state);
             return state;
+        }
+
+        /** The user navigates the visible window; the session is not asked. */
+        void userNavigatesTo(String url) {
+            history.add(byUrl.get(url));
+        }
+
+        PlaywrightPageState top() {
+            return history.get(history.size() - 1);
+        }
+
+        /** The tab's URL from its own state, the way the real driver answers: no page read. */
+        @Override
+        public String currentUrl() {
+            return history.isEmpty() ? FRESH_TAB : top().url;
         }
 
         public PlaywrightPageState current() throws BrowserException {
@@ -118,7 +137,9 @@ public class PlaywrightBrowserSessionPdfTest {
         driver.byUrl.put(base + "/report.pdf",
                 PlaywrightPageState.viewedDocument(base + "/report.pdf", "application/pdf"));
         driver.byUrl.put(base + "/download/report.pdf",
-                PlaywrightPageState.downloadedDocument(base + "/download/report.pdf"));
+                PlaywrightPageState.downloadedDocument(base + "/download/report.pdf", ""));
+        driver.byUrl.put(base + "/download/gone.pdf",
+                PlaywrightPageState.downloadedDocument(base + "/download/gone.pdf", ""));
         driver.byUrl.put(base + "/gone.pdf", PlaywrightPageState.viewedDocument(base + "/gone.pdf", "application/pdf"));
         session = new PlaywrightBrowserSession(driver, UrlSafetyPolicy.allowingPrivateNetworks(),
                 BrowserLimits.defaults(), null, null);
@@ -186,6 +207,80 @@ public class PlaywrightBrowserSessionPdfTest {
 
         assertEquals("results page", session.currentPage().getText());
         assertEquals(1, driver.currentReads);
+    }
+
+    @Test
+    public void aDownloadStaysTheCurrentPageWhileTheTabKeepsItsPage() throws Exception {
+        session.open(base + "/start");
+        session.open(base + "/download/report.pdf");
+
+        assertEquals(PDF_TEXT, session.currentPage().getText());
+        assertEquals("the kept page is not read instead of the download", 0, driver.currentReads);
+    }
+
+    @Test
+    public void aDocumentTheUserNavigatedAwayFromIsNoLongerTheCurrentPage() throws Exception {
+        session.open(base + "/report.pdf");
+        driver.userNavigatesTo(base + "/start");
+
+        BrowserPageSnapshot now = session.currentPage();
+
+        assertEquals(base + "/start", now.getUrl());
+        assertEquals("results page", now.getText());
+        assertEquals("the page's links are back", 1, session.links().size());
+    }
+
+    @Test
+    public void aDownloadIsLeftOnceTheUserNavigatesTheTab() throws Exception {
+        session.open(base + "/start");
+        session.open(base + "/download/report.pdf");
+        driver.userNavigatesTo(base + "/report.pdf");
+
+        BrowserPageReadiness now = session.probeCurrent();
+
+        assertEquals(base + "/report.pdf", now.url);
+        assertEquals("the viewer the user opened is read, not the old download", PDF_TEXT.length(), now.textLength);
+    }
+
+    @Test
+    public void consentIsAskedAgainOnceTheUserLeftTheDocument() throws Exception {
+        session.open(base + "/report.pdf");
+        assertEquals("none", session.dismissConsent());
+        assertEquals(0, driver.guardCalls);
+
+        driver.userNavigatesTo(base + "/start");
+        session.dismissConsent();
+
+        assertEquals("a page may carry a consent banner again", 1, driver.guardCalls);
+    }
+
+    @Test
+    public void aFailedDocumentNavigationLeavesNoStaleDocument() throws Exception {
+        session.open(base + "/start");
+        session.open(base + "/download/report.pdf");
+        try {
+            session.open(base + "/download/gone.pdf");
+            fail("a missing PDF must not become a page");
+        } catch (BrowserException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("HTTP 404"));
+        }
+
+        BrowserPageSnapshot now = session.currentPage();
+
+        assertEquals("the tab's page, never the earlier download", "results page", now.getText());
+    }
+
+    @Test
+    public void afterTheEmergencyTeardownNoDocumentIsRead() throws Exception {
+        session.open(base + "/start");
+        session.terminate();
+
+        try {
+            session.open(base + "/download/report.pdf");
+            fail("a torn-down session must not start a download");
+        } catch (BrowserException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("shut down"));
+        }
     }
 
     @Test

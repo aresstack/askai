@@ -41,13 +41,19 @@ final class PlaywrightPageState {
      * step); {@code false} when the browser only started a download and the tab still shows the previous page.
      */
     final boolean documentInTab;
+    /**
+     * What the tab shows while a document is the current page: the viewer's URL, or for a download the URL of
+     * the page the tab kept. Once the tab shows anything else (the user navigated the visible window), the
+     * document is no longer the current page. Equal to {@link #url} for a rendered page.
+     */
+    final String tabUrl;
 
     PlaywrightPageState(String url, String title, String text, List<Anchor> anchors) {
-        this(url, title, text, anchors, null, false);
+        this(url, title, text, anchors, null, false, url);
     }
 
     private PlaywrightPageState(String url, String title, String text, List<Anchor> anchors,
-                                String documentType, boolean documentInTab) {
+                                String documentType, boolean documentInTab, String tabUrl) {
         this.url = url == null ? "" : url;
         this.title = title == null ? "" : title;
         this.text = text == null ? "" : text;
@@ -55,16 +61,17 @@ final class PlaywrightPageState {
                 anchors == null ? Collections.<Anchor>emptyList() : anchors));
         this.documentType = documentType;
         this.documentInTab = documentInTab;
+        this.tabUrl = tabUrl == null ? "" : tabUrl;
     }
 
     /** The browser shows {@code url} in its document viewer (the response carried {@code contentType}). */
     static PlaywrightPageState viewedDocument(String url, String contentType) {
-        return new PlaywrightPageState(url, "", "", null, contentType == null ? "" : contentType, true);
+        return new PlaywrightPageState(url, "", "", null, contentType == null ? "" : contentType, true, url);
     }
 
-    /** Navigating to {@code url} only started a download; the tab kept its previous page. */
-    static PlaywrightPageState downloadedDocument(String url) {
-        return new PlaywrightPageState(url, "", "", null, "", false);
+    /** Navigating to {@code url} only started a download; the tab kept its previous page at {@code tabUrl}. */
+    static PlaywrightPageState downloadedDocument(String url, String tabUrl) {
+        return new PlaywrightPageState(url, "", "", null, "", false, tabUrl);
     }
 
     boolean isDocument() {
@@ -75,6 +82,6 @@ final class PlaywrightPageState {
     PlaywrightPageState withDocumentText(String finalUrl, String documentTitle, String documentText,
                                          String contentType) {
         return new PlaywrightPageState(finalUrl, documentTitle, documentText, null,
-                contentType == null ? "" : contentType, documentInTab);
+                contentType == null ? "" : contentType, documentInTab, tabUrl);
     }
 }

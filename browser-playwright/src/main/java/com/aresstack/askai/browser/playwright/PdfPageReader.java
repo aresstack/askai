@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Reads a PDF document the research browser reached but cannot read as a page. Firefox (and so Camoufox) shows a
@@ -19,9 +20,10 @@ import java.net.URL;
  * <p>The document is fetched once over the host's network path ({@link #useConnector}: proxy, certificates and
  * User-Agent from AskAI's network settings) and extracted with {@link PdfDocumentText}, the one PDF extraction of
  * AskAI. The fetch obeys the browser's rules: the {@link UrlSafetyPolicy} checks EVERY hop (redirects are followed
- * here one by one, never by {@link HttpURLConnection} itself), and the {@link BrowserLimits} bound size and
- * timeouts. Anything that is not a readable PDF fails with an honest {@link BrowserException}; an image-only scan
- * yields an empty text (there is no OCR), never invented content.</p>
+ * here one by one, never by {@link HttpURLConnection} itself), and the {@link BrowserLimits} bound the size and
+ * the time of the WHOLE read (all hops and the body, like a page load), not only each stalled socket read.
+ * Anything that is not a readable PDF fails with an honest {@link BrowserException}; an image-only scan yields an
+ * empty text (there is no OCR), never invented content.</p>
  */
 public final class PdfPageReader {
 
@@ -49,6 +51,8 @@ public final class PdfPageReader {
 
     private final BrowserLimits limits;
     private final UrlSafetyPolicy policy;
+    /** Set once by the emergency teardown: the read in progress stops, every later read fails at once. */
+    private volatile boolean terminated;
 
     PdfPageReader(BrowserLimits limits, UrlSafetyPolicy policy) {
         this.limits = limits;
@@ -70,15 +74,18 @@ public final class PdfPageReader {
      *                          is no PDF, is password-protected or cannot be parsed
      */
     PlaywrightPageState read(PlaywrightPageState document) throws BrowserException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(limits.getTimeoutMillis());
         String url = document.url;
         for (int redirects = 0; ; redirects++) {
             policy.check(url);
+            int remainingMillis = remainingMillis(deadline, url);
             HttpURLConnection connection = null;
             try {
                 connection = open(url);
+                requireRunning(url);
                 connection.setInstanceFollowRedirects(false);
-                connection.setConnectTimeout(limits.getTimeoutMillis());
-                connection.setReadTimeout(limits.getTimeoutMillis());
+                connection.setConnectTimeout(remainingMillis);
+                connection.setReadTimeout(remainingMillis);
                 connection.setRequestProperty("Accept", ACCEPT);
                 int status = connection.getResponseCode();
                 if (isRedirect(status)) {
@@ -97,8 +104,12 @@ public final class PdfPageReader {
                 if (status != HttpURLConnection.HTTP_OK) {
                     throw new BrowserException("PDF " + url + " could not be read: HTTP " + status);
                 }
-                return extracted(document, url, connection.getContentType(), download(connection, url));
+                return extracted(document, url, connection.getContentType(), download(connection, url, deadline));
+            } catch (java.net.SocketTimeoutException slow) {
+                requireRunning(url);
+                throw timedOut(url); // every socket wait is bounded by what is left of the read's budget
             } catch (IOException ex) {
+                requireRunning(url);
                 throw new BrowserException("PDF " + url + " could not be read: " + ex.getMessage(), ex);
             } finally {
                 if (connection != null) {
@@ -106,6 +117,37 @@ public final class PdfPageReader {
                 }
             }
         }
+    }
+
+    /**
+     * EMERGENCY teardown from a foreign thread (the host abandoned a stuck browser owner): the read in progress
+     * stops at its next received block and every later read fails at once. The connection is NOT disconnected from
+     * here: {@link HttpURLConnection#disconnect()} waits for the stream lock the blocked read holds and so would
+     * hang the teardown itself. A stalled read still ends, at the latest when the read's time budget is used up:
+     * every socket wait is bounded by what is left of it.
+     */
+    void terminate() {
+        terminated = true;
+    }
+
+    private void requireRunning(String url) throws BrowserException {
+        if (terminated) {
+            throw new BrowserException("PDF " + url + " was not read: the browser was shut down");
+        }
+    }
+
+    /** What is left of the read's time budget, refused once it is used up. */
+    private int remainingMillis(long deadline, String url) throws BrowserException {
+        long left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+        if (left <= 0) {
+            throw timedOut(url);
+        }
+        return (int) Math.min(Integer.MAX_VALUE, left);
+    }
+
+    private BrowserException timedOut(String url) {
+        return new BrowserException("PDF " + url + " could not be read within the browser's timeout ("
+                + limits.getTimeoutMillis() + " ms)");
     }
 
     private PlaywrightPageState extracted(PlaywrightPageState document, String url, String declaredType,
@@ -133,8 +175,9 @@ public final class PdfPageReader {
         return document.withDocumentText(url, title, pdf.text, PDF_CONTENT_TYPE);
     }
 
-    /** The body, refused as soon as it exceeds the browser's download limit. */
-    private byte[] download(HttpURLConnection connection, String url) throws IOException, BrowserException {
+    /** The body, refused as soon as it exceeds the browser's download limit or the read's time budget. */
+    private byte[] download(HttpURLConnection connection, String url, long deadline)
+            throws IOException, BrowserException {
         long declared = connection.getContentLengthLong();
         if (declared > limits.getMaxDownloadBytes()) {
             throw tooLarge(url, declared);
@@ -146,6 +189,8 @@ public final class PdfPageReader {
             long total = 0;
             int read;
             while ((read = in.read(buffer)) != -1) {
+                requireRunning(url);
+                remainingMillis(deadline, url);
                 total += read;
                 if (total > limits.getMaxDownloadBytes()) {
                     throw tooLarge(url, total);
