@@ -21,12 +21,17 @@ import java.util.Set;
 
 /**
  * Builds the evidence pack of one section without a model call (plan PR 27). Candidates are the passages of the
- * section's provenance (in provenance order) followed by the hits of a semantic search on its brief, which is
- * embedded once as a {@link EmbeddingPort.Role#QUERY query}; no passage is embedded again. Only passages of sources
- * the {@link EvidenceSourceSet} admits count, and only prose: navigation, footer and heading passages fail the
- * pack's {@linkplain WriterPackSettings#getProse() prose criteria} and never reach the writer; passages are deduplicated by id and by text, at most {@linkplain WriterPackSettings#getPassagesPerSource() passages per source} each,
- * cut at sentence boundaries to the preset's passage size, and numbered {@code [1]..[k]} in that order. The same
- * store state always gives the same pack.
+ * section's provenance followed by the hits of a semantic search on its brief, which is embedded once as a
+ * {@link EmbeddingPort.Role#QUERY query}; no passage is embedded again. A provenance of more than one passage is
+ * ranked by each passage's similarity to the brief: the pack takes only a few passages, and in the provenance's id
+ * order the DGUV guidance of live run 4 (section 2.1, 361 provenance passages) never reached it. Both parts follow
+ * the mission's source preference ({@link EvidenceSourceSet#preferenceShift}): a passage of a preferred publisher
+ * moves up, a vendor page down, by the places the Rank shift setting gives. Only passages of sources the
+ * {@link EvidenceSourceSet} admits count, and only prose: navigation, footer and heading passages fail the pack's
+ * {@linkplain WriterPackSettings#getProse() prose criteria} and never reach the writer; passages are deduplicated by
+ * id and by text, at most {@linkplain WriterPackSettings#getPassagesPerSource() passages per source} each, cut at
+ * sentence boundaries to the preset's passage size, and numbered {@code [1]..[k]} in that order. The same store
+ * state always gives the same pack.
  */
 public final class SectionContextBuilder {
 
@@ -72,16 +77,20 @@ public final class SectionContextBuilder {
                 provenance.add(hit);
             }
         }
-        List<EvidencePassage> chosen = select(provenance, sources, pack);
-        float[] query = chosen.size() < pack.getPassageCount() ? embedBrief(request) : null;
+        // Several provenance passages compete for the pack's few places, so every one of them needs its score: the
+        // first window then covers the whole index (the vector index scores every passage anyway).
+        boolean rank = provenance.size() > 1;
+        List<EvidencePassage> chosen = select(weighed(provenance, sources), sources, pack);
+        float[] query = rank || chosen.size() < pack.getPassageCount() ? embedBrief(request) : null;
         // Admission, deduplication and the per-source cap apply after retrieval, so the window grows until the
         // pack is full or the index has no further hits.
-        for (int limit = pack.getPassageCount() * SEARCH_FACTOR;
-             query != null && chosen.size() < pack.getPassageCount(); limit *= 2) {
+        for (int limit = rank ? MAX_SEARCH_WINDOW : pack.getPassageCount() * SEARCH_FACTOR;
+             query != null && (rank || chosen.size() < pack.getPassageCount()); limit *= 2) {
             List<PassageSearchHit> hits = search(request, query, limit);
-            List<PassageSearchHit> candidates = new ArrayList<PassageSearchHit>(provenance);
-            candidates.addAll(hits);
+            List<PassageSearchHit> candidates = weighed(byScore(provenance, hits), sources);
+            candidates.addAll(weighed(outside(hits, provenance), sources));
             chosen = select(candidates, sources, pack);
+            rank = false;
             if (hits.size() < limit || limit >= MAX_SEARCH_WINDOW) {
                 break;
             }
@@ -121,6 +130,70 @@ public final class SectionContextBuilder {
                     sources.checksum(sourceId), text));
         }
         return chosen;
+    }
+
+    /** The provenance by score among the hits, best first; a passage the hits miss keeps its place after them. */
+    static List<PassageSearchHit> byScore(List<PassageSearchHit> provenance, List<PassageSearchHit> hits) {
+        final Map<String, Double> scores = new HashMap<String, Double>();
+        for (PassageSearchHit hit : hits) {
+            scores.put(hit.getPassageId(), hit.getScore());
+        }
+        List<PassageSearchHit> ranked = new ArrayList<PassageSearchHit>(provenance);
+        Collections.sort(ranked, new Comparator<PassageSearchHit>() { // stable: ties keep the provenance order
+            @Override
+            public int compare(PassageSearchHit a, PassageSearchHit b) {
+                Double first = scores.get(a.getPassageId());
+                Double second = scores.get(b.getPassageId());
+                if (first == null || second == null) {
+                    return first == null ? (second == null ? 0 : 1) : -1;
+                }
+                return Double.compare(second, first);
+            }
+        });
+        return ranked;
+    }
+
+    /** The hits that are not part of the provenance, in their order. */
+    private static List<PassageSearchHit> outside(List<PassageSearchHit> hits, List<PassageSearchHit> provenance) {
+        Set<String> ids = new HashSet<String>();
+        for (PassageSearchHit hit : provenance) {
+            ids.add(hit.getPassageId());
+        }
+        List<PassageSearchHit> out = new ArrayList<PassageSearchHit>();
+        for (PassageSearchHit hit : hits) {
+            if (!ids.contains(hit.getPassageId())) {
+                out.add(hit);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The candidates under the mission's source preference: each moves by its source's shift, a passage of a
+     * preferred publisher up, a vendor page down; ties keep the given order.
+     */
+    static List<PassageSearchHit> weighed(List<PassageSearchHit> ordered, EvidenceSourceSet sources) {
+        if (ordered.size() < 2 || !sources.hasPreferenceShifts()) {
+            return new ArrayList<PassageSearchHit>(ordered);
+        }
+        final int[] weight = new int[ordered.size()];
+        List<Integer> order = new ArrayList<Integer>();
+        for (int i = 0; i < ordered.size(); i++) {
+            weight[i] = i + sources.preferenceShift(ordered.get(i).getSourceId());
+            order.add(i);
+        }
+        Collections.sort(order, new Comparator<Integer>() {
+            @Override
+            public int compare(Integer a, Integer b) {
+                int byWeight = Integer.compare(weight[a], weight[b]);
+                return byWeight != 0 ? byWeight : Integer.compare(a, b);
+            }
+        });
+        List<PassageSearchHit> out = new ArrayList<PassageSearchHit>(ordered.size());
+        for (Integer i : order) {
+            out.add(ordered.get(i));
+        }
+        return out;
     }
 
     /** The brief as one query vector of the active world, or {@code null} when the brief is empty. */

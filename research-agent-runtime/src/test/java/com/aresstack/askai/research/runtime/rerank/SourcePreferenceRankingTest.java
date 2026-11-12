@@ -58,6 +58,19 @@ public class SourcePreferenceRankingTest {
         assertFalse(RUN3.demoted(hit(1, "https://www.dguv.de/blog/x").candidate)); // a preferred host is never demoted
     }
 
+    /** The evidence pack of a section weighs its sources by their URLs with the same rule. */
+    @Test
+    public void aSourceUrlMovesUpWhenPreferredAndDownWhenAVendorPage() {
+        assertEquals(-3, RUN3.shiftOf("https://publikationen.dguv.de/widgets/pdf/download/article/4517"));
+        assertEquals(-3, RUN3.shiftOf("https://www.bfdi.bund.de/DE/Home/home_node.html"));
+        assertEquals(-3, RUN3.shiftOf("https://www.dguv.de/blog/x")); // a preferred host is never demoted
+        assertEquals(3, RUN3.shiftOf("https://built-smart-hub.com/blog/wearables"));
+        assertEquals(0, RUN3.shiftOf("https://notdguv.de/x"));
+        assertEquals(0, RUN3.shiftOf(""));
+        assertEquals(0, RUN3.shiftOf(null));
+        assertEquals(0, new SourcePreferenceRanking(Arrays.asList("dguv.de"), null, 0).shiftOf("https://dguv.de/x"));
+    }
+
     @Test
     public void noShiftOrNoListsLeavesTheOrderAsItIs() {
         List<RerankedSearchResultCandidate> ranked = Arrays.asList(hit(1, "https://a.example"),

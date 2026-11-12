@@ -327,6 +327,75 @@ public class SectionContextBuilderTest {
         assertEquals(2, corpus.searches);
     }
 
+    /** A request whose section names the given provenance passages. */
+    private static SectionContextRequest withProvenance(EvidenceSourceSet sources, List<String> provenance) {
+        SectionContextRequest base = request(sources);
+        OutlineSection section = new OutlineSection("sec-3", "ch-1", 2, "Arbeitsschutz",
+                base.getSection().getBrief(), new OutlineProvenance("node-1", Collections.<String>emptyList(),
+                provenance), false, "");
+        return new SectionContextRequest("proj", FP, base.getChapter(), section, sources, "", "", null, "de");
+    }
+
+    private static List<String> sourcesOf(EvidencePack pack) {
+        List<String> out = new ArrayList<String>();
+        for (EvidencePassage passage : pack.getPassages()) {
+            out.add(passage.getSourceId());
+        }
+        return out;
+    }
+
+    /**
+     * Live run 4, section 2.1: 361 provenance passages in id order ("cap-1", "cap-10", ...), and the pack took the
+     * first eight; the DGUV guidance sorted last and never reached the writer.
+     */
+    @Test
+    public void aLargeProvenanceIsRankedByItsSimilarityToTheBrief() {
+        Corpus corpus = new Corpus();
+        List<String> provenance = new ArrayList<String>();
+        Map<String, String> accepted = new HashMap<String, String>();
+        for (int i = 0; i < 6; i++) { // first in id order, least similar
+            corpus.add("cap-" + i + "#p1", "src-blog" + i, sentences("Blog " + i, 3), 0.30 + i * 0.01);
+            provenance.add("cap-" + i + "#p1");
+            accepted.put("src-blog" + i, "c-blog" + i);
+        }
+        for (int i = 0; i < 4; i++) { // last in id order, most similar
+            corpus.add("import-reconciled-source-9" + i + "#p1", "src-dguv" + i, sentences("DGUV " + i, 3),
+                    0.80 - i * 0.01);
+            provenance.add("import-reconciled-source-9" + i + "#p1");
+            accepted.put("src-dguv" + i, "c-dguv" + i);
+        }
+        EvidencePack pack = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus).build(
+                withProvenance(new EvidenceSourceSet(accepted, null, null), provenance), WriterPackSettings.SMALL);
+        assertEquals(Arrays.asList("src-dguv0", "src-dguv1", "src-dguv2", "src-dguv3", "src-blog5", "src-blog4"),
+                sourcesOf(pack));
+        assertEquals("one search scores the whole provenance", 1, corpus.searches);
+    }
+
+    /** The mission's source preference: a preferred publisher moves up, a vendor page down, by the rank shift. */
+    @Test
+    public void aPreferredPublisherMovesUpAndAVendorPageDown() {
+        Corpus corpus = new Corpus();
+        List<String> provenance = new ArrayList<String>();
+        Map<String, String> accepted = new HashMap<String, String>();
+        String[] ids = {"vendor", "wiki", "news", "baua"};
+        for (int i = 0; i < ids.length; i++) {
+            corpus.add("p-" + ids[i], "src-" + ids[i], sentences("Text " + ids[i], 3), 0.9 - i * 0.1);
+            provenance.add("p-" + ids[i]);
+            accepted.put("src-" + ids[i], "c-" + ids[i]);
+        }
+        Map<String, Integer> shifts = new HashMap<String, Integer>();
+        shifts.put("src-baua", -3);
+        shifts.put("src-vendor", 3);
+        WriterPackSettings two = new WriterPackSettings(2, 250);
+        EvidencePack weighed = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus).build(
+                withProvenance(new EvidenceSourceSet(accepted, null, null, shifts), provenance), two);
+        assertEquals(Arrays.asList("src-baua", "src-wiki"), sourcesOf(weighed));
+        EvidencePack plain = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus).build(
+                withProvenance(new EvidenceSourceSet(accepted, null, null), provenance), two);
+        assertEquals("without a preference the relevance order stays", Arrays.asList("src-vendor", "src-wiki"),
+                sourcesOf(plain));
+    }
+
     @Test(expected = IllegalStateException.class)
     public void aBriefFromAnotherEmbeddingWorldIsRejected() {
         Corpus corpus = corpus();

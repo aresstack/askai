@@ -8,6 +8,8 @@ import com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCor
 import com.aresstack.askai.research.manuscript.SectionRevision;
 import com.aresstack.askai.research.outline.OutlineChapter;
 import com.aresstack.askai.research.outline.OutlineSection;
+import com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking;
+import com.aresstack.askai.research.sources.ResearchSourceRecord;
 import com.aresstack.askai.research.store.FileManuscriptStore;
 import com.aresstack.askai.research.writer.EvidencePassageLookup;
 import com.aresstack.askai.research.writer.EvidenceSourceSet;
@@ -21,15 +23,21 @@ import java.util.Map;
 
 /**
  * The productive side of a section's evidence pack (plan PR 29 wiring of PR 27/28): the accepted sources of this
- * moment (the approved set plus sources a gap search accepted later), the active passages by id for the
- * provenance lookup, and the digest of the previous written section. The passage map is read once per writing
- * run ({@link #refresh()}), so a pack never reads the whole corpus per section.
+ * moment (the approved set plus sources a gap search accepted later) with the weight the mission's source
+ * preference gives each of them, the active passages by id for the provenance lookup, and the digest of the
+ * previous written section. The passage map is read once per writing run ({@link #refresh()}), so a pack never
+ * reads the whole corpus per section.
  */
 public final class ProductiveSectionContexts implements EvidenceAssignments.Contexts, EvidencePassageLookup {
 
     /** The accepted sources (id -> checksum) right now. */
     public interface AcceptedSources {
         Map<String, String> checksums();
+
+        /** The URLs of the accepted sources (id -> URL), which the source preference judges. */
+        default Map<String, String> urls() {
+            return Collections.emptyMap();
+        }
     }
 
     static final int DIGEST_CHARS = 1200;
@@ -40,11 +48,24 @@ public final class ProductiveSectionContexts implements EvidenceAssignments.Cont
     private final AcceptedSources sources;
     private final FileManuscriptStore manuscript;
     private final java.util.function.Supplier<String> bookLanguage;
+    private final java.util.function.Supplier<SourcePreferenceRanking> preference;
     private volatile Map<String, PassageSearchHit> passages;
 
     public ProductiveSectionContexts(String projectId, String embeddingFingerprint, ActiveKnowledgeCorpusReader corpus,
                                      AcceptedSources sources, FileManuscriptStore manuscript,
                                      java.util.function.Supplier<String> bookLanguage) {
+        this(projectId, embeddingFingerprint, corpus, sources, manuscript, bookLanguage, null);
+    }
+
+    /**
+     * @param preference the mission's source preference, read for every section, so a changed setting applies to
+     *                   the next section written; {@code null} keeps the relevance order
+     */
+    public ProductiveSectionContexts(String projectId, String embeddingFingerprint, ActiveKnowledgeCorpusReader corpus,
+                                     AcceptedSources sources, FileManuscriptStore manuscript,
+                                     java.util.function.Supplier<String> bookLanguage,
+                                     java.util.function.Supplier<SourcePreferenceRanking> preference) {
+        this.preference = preference;
         this.projectId = projectId;
         this.embeddingFingerprint = embeddingFingerprint;
         this.corpus = corpus;
@@ -63,6 +84,15 @@ public final class ProductiveSectionContexts implements EvidenceAssignments.Cont
                 }
                 return checksums;
             }
+
+            public Map<String, String> urls() {
+                Map<String, String> urls = new HashMap<String, String>();
+                for (ResearchSourceRecord record : repository.find(
+                        com.aresstack.askai.research.sources.SourceQuery.all())) {
+                    urls.put(record.getSourceId(), record.getUrl() == null ? "" : record.getUrl());
+                }
+                return urls;
+            }
         };
     }
 
@@ -72,11 +102,28 @@ public final class ProductiveSectionContexts implements EvidenceAssignments.Cont
     }
 
     public SectionContextRequest requestFor(SectionWriteRequest request) {
-        EvidenceSourceSet set = new EvidenceSourceSet(sources.checksums(), Collections.<String>emptyList(),
-                Collections.<String>emptyList());
+        Map<String, String> checksums = sources.checksums();
+        EvidenceSourceSet set = new EvidenceSourceSet(checksums, Collections.<String>emptyList(),
+                Collections.<String>emptyList(), preferenceShifts(checksums.keySet()));
         return new SectionContextRequest(projectId, embeddingFingerprint, request.getChapter(), request.getSection(),
                 set, request.getChapter().getBrief().getPurpose(), previousDigest(request),
                 Collections.<String>emptyList(), language());
+    }
+
+    /** The places each accepted source moves in the pack under the mission's source preference; only shifts != 0. */
+    private Map<String, Integer> preferenceShifts(java.util.Set<String> accepted) {
+        SourcePreferenceRanking ranking = preference == null ? null : preference.get();
+        Map<String, Integer> shifts = new HashMap<String, Integer>();
+        if (ranking == null || ranking.isNone()) {
+            return shifts;
+        }
+        for (Map.Entry<String, String> source : sources.urls().entrySet()) {
+            int shift = accepted.contains(source.getKey()) ? ranking.shiftOf(source.getValue()) : 0;
+            if (shift != 0) {
+                shifts.put(source.getKey(), shift);
+            }
+        }
+        return shifts;
     }
 
     /** The approved concept's language at write time ("" lets the writer fall back). */
