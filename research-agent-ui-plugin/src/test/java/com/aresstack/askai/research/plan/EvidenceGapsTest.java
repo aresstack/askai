@@ -5,6 +5,7 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -75,5 +76,72 @@ public class EvidenceGapsTest {
                         null)), Collections.<EvidenceGaps.NewTopic>emptyList()),
                 Collections.singletonList("a"), Collections.<SearchPlanEntry>emptyList(),
                 Collections.<String>emptyList(), 3, 3).getAnalysisId());
+    }
+
+    @Test
+    public void aNodeTheAnalysisCallsOkIsWeakBelowThePlansOwnBar() {
+        SearchPlanEntry vendorQuery = SearchPlanEntry.submit("e1", "research", "impl", "Implementierung",
+                "Wearables Kosten Grenzen", SearchPlanEntry.Origin.BASE, 1L).started("r1", 2L).done(3L);
+        CoverageQuality quality = CoverageQuality.of(16, 0.2, CoverageQualityTest.run4Preference());
+        EvidenceGaps.Gaps gaps = EvidenceGaps.of(SearchPlanQueueTest.analysis("run4", true, Arrays.asList(
+                new EvidenceGaps.NodeEvidence("impl", EvidenceGaps.Status.OK, 12, 11, 6, 4,
+                        Arrays.asList("kosten", "akku"), CoverageQualityTest.run4Implementation()),
+                new EvidenceGaps.NodeEvidence("law", EvidenceGaps.Status.OK, 30, 25, 12, 6,
+                        Arrays.asList("dsgvo"), CoverageQualityTest.run4Law()),
+                new EvidenceGaps.NodeEvidence("thin", EvidenceGaps.Status.THIN, 2, 2, 1, 1,
+                        Arrays.asList("x"), CoverageQualityTest.run4Implementation())),
+                Collections.<EvidenceGaps.NewTopic>emptyList()),
+                Arrays.asList("impl", "law", "thin"), Collections.<SearchPlanEntry>emptyList(),
+                Collections.<String>emptyList(), 3, 3, quality);
+        assertEquals(Arrays.asList("impl", "thin"), new java.util.ArrayList<String>(gaps.getEvidenceByNode().keySet()));
+        assertEquals(Collections.singletonList("impl"), gaps.getWeakNodes());
+        assertEquals(Collections.singletonList("law"), gaps.getCoveredNodes());
+        List<String> impl = gaps.getEvidenceByNode().get("impl");
+        assertTrue(impl.get(0), impl.get(0).startsWith("WEAK: only 11 distinct passages"));
+        assertTrue(impl.get(0), impl.get(0).contains("0 of 12 passages (0 %) from the preferred sources"));
+        assertTrue(impl.get(0), impl.get(0).contains("site:dguv.de"));
+        assertEquals("the material so far is about: kosten, akku", impl.get(1));
+        assertEquals("a thin node keeps its own status line", "THIN: 2 distinct passages from 1 sources",
+                gaps.getEvidenceByNode().get("thin").get(0));
+        assertTrue(EvidenceGaps.of(SearchPlanQueueTest.analysis("run4", true, Collections.singletonList(
+                new EvidenceGaps.NodeEvidence("impl", EvidenceGaps.Status.OK, 12, 11, 6, 4,
+                        Arrays.asList("kosten"), CoverageQualityTest.run4Implementation())),
+                Collections.<EvidenceGaps.NewTopic>emptyList()),
+                Collections.singletonList("impl"), Collections.singletonList(vendorQuery),
+                Collections.<String>emptyList(), 3, 3).getEvidenceByNode().isEmpty());
+    }
+
+    @Test
+    public void withoutAnAnalysisNodesCoveredByVendorSourcesAreWeak() {
+        Map<String, SearchPlanCoverage.NodeCoverage> coverage = new java.util.LinkedHashMap<String,
+                SearchPlanCoverage.NodeCoverage>();
+        coverage.put("impl", new SearchPlanCoverage.NodeCoverage("impl", SearchPlanCoverage.State.COVERED,
+                new java.util.LinkedHashSet<String>(Arrays.asList("s1", "s2", "s3")),
+                new java.util.HashSet<String>(Arrays.asList("vendor.example", "linkedin.com")), 3));
+        coverage.put("law", new SearchPlanCoverage.NodeCoverage("law", SearchPlanCoverage.State.COVERED,
+                new java.util.LinkedHashSet<String>(Arrays.asList("s4", "s5")),
+                new java.util.HashSet<String>(Arrays.asList("dguv.de", "e-recht24.de")), 3));
+        coverage.put("open", new SearchPlanCoverage.NodeCoverage("open", SearchPlanCoverage.State.EXHAUSTED,
+                new java.util.LinkedHashSet<String>(), new java.util.HashSet<String>(), 3));
+        final Map<String, String> domains = new java.util.HashMap<String, String>();
+        domains.put("s1", "vendor.example");
+        domains.put("s2", "linkedin.com");
+        domains.put("s3", "vendor.example");
+        domains.put("s4", "dguv.de");
+        domains.put("s5", "e-recht24.de");
+        SearchPlanCoverage.Domains resolver = new SearchPlanCoverage.Domains() {
+            public String of(String sourceId) {
+                return domains.get(sourceId);
+            }
+        };
+        EvidenceGaps.Gaps gaps = EvidenceGaps.ofSources(coverage, resolver,
+                CoverageQuality.of(16, 0.2, CoverageQualityTest.run4Preference()));
+        assertEquals(EvidenceGaps.SOURCE_COUNTS, gaps.getAnalysisId());
+        assertEquals(Collections.singletonList("impl"), gaps.getWeakNodes());
+        assertEquals(Collections.singletonList("law"), gaps.getCoveredNodes());
+        assertTrue(gaps.getEvidenceByNode().get("impl").get(0),
+                gaps.getEvidenceByNode().get("impl").get(0).startsWith("WEAK: 0 of 3 sources (0 %)"));
+        assertTrue("without a mission preference the source counts decide alone", EvidenceGaps.ofSources(coverage,
+                resolver, CoverageQuality.of(16, 0.2, SourcePreference.NONE)).isEmpty());
     }
 }

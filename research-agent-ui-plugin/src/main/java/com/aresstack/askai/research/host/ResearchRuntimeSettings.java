@@ -584,6 +584,44 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_GAP_FAILED_QUERIES = "research.gaps.failedQueries";
     public static final int DEFAULT_GAP_FAILED_QUERIES = 3;
 
+    /**
+     * The search plan's own bar for "covered" at a cycle boundary, evidence quality: a concept node the analysis calls
+     * OK stays WEAK, and the next research cycle plans it again, while it has fewer distinct passages than this.
+     * Default 16: two writer calls' evidence packs (8 passages each, the "Passages" of the large writer preset) of
+     * different material; live run 4 (2026-11-12) stopped after cycle 1 with "Implementierung mit Kosten und Grenzen"
+     * at 5 to 12 passages, and the analysis' own minimum (3 distinct passages) only says that a topic exists. 0 = off.
+     */
+    public static final String KEY_GAP_MIN_DISTINCT_PASSAGES = "research.gaps.minDistinctPassages";
+    public static final int DEFAULT_GAP_MIN_DISTINCT_PASSAGES = 16;
+
+    /**
+     * The search plan's own bar for "covered", the mission's source preference: when the mission names preferred
+     * sources ("Bevorzuge … DGUV, BAuA …"), a node stays WEAK while fewer than this share of its passages come from
+     * the preferred hosts (the mission's publisher domains and the authority hosts of Source preference); without
+     * a settled analysis the share of its accepted sources counts. The next cycle then searches those publishers
+     * ({@code site:}). Default 0.2, one passage in five: the book of live run 4 cited 15 of 65 sources (23 %) from
+     * authorities, insurers and laws, while nodes read only from vendor pages counted as covered with none. 0 = off.
+     */
+    public static final String KEY_GAP_MIN_PREFERRED_SHARE = "research.gaps.minPreferredShare";
+    public static final double DEFAULT_GAP_MIN_PREFERRED_SHARE = 0.2;
+
+    public static int loadGapMinDistinctPassages(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_GAP_MIN_DISTINCT_PASSAGES, DEFAULT_GAP_MIN_DISTINCT_PASSAGES);
+    }
+
+    /** The preferred-share bar in [0, 1]; a value outside falls back to the default. */
+    public static double loadGapMinPreferredShare(WorkspaceStateStore store) {
+        double share = loadDouble(store, KEY_GAP_MIN_PREFERRED_SHARE, DEFAULT_GAP_MIN_PREFERRED_SHARE);
+        return share >= 0 && share <= 1 ? share : DEFAULT_GAP_MIN_PREFERRED_SHARE;
+    }
+
+    /** The search plan's bar for "covered" under the mission's source preference, read at each queue start. */
+    public static com.aresstack.askai.research.plan.CoverageQuality loadCoverageQuality(
+            WorkspaceStateStore store, com.aresstack.askai.research.plan.SourcePreference preference) {
+        return com.aresstack.askai.research.plan.CoverageQuality.of(loadGapMinDistinctPassages(store),
+                loadGapMinPreferredShare(store), preference);
+    }
+
     public static int loadGapWaitSeconds(WorkspaceStateStore store) {
         return loadNonNegativeInt(store, KEY_GAP_WAIT_SECONDS, DEFAULT_GAP_WAIT_SECONDS);
     }

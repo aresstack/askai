@@ -22,9 +22,11 @@ public final class EvidenceGaps {
 
     /**
      * The coverage status of a concept node in the analysis: MISSING, THIN and REDUNDANT ask for more material,
-     * UNCONFIRMED for more sources or domains, ONE_SIDED for the sub-topics the material leaves out.
+     * UNCONFIRMED for more sources or domains, ONE_SIDED for the sub-topics the material leaves out. WEAK is the
+     * search plan's own reading of a node the analysis calls OK ({@link CoverageQuality}): too little distinct
+     * material for a chapter, or too little of it from the sources the mission prefers.
      */
-    public enum Status { OK, THIN, REDUNDANT, MISSING, UNCONFIRMED, ONE_SIDED }
+    public enum Status { OK, THIN, REDUNDANT, MISSING, UNCONFIRMED, ONE_SIDED, WEAK }
 
     /** Where a new topic lies against the Weidezaun (scope alignment, separate from the concept alignment). */
     public enum Scope { IN, OUT, UNCLASSIFIED }
@@ -38,6 +40,7 @@ public final class EvidenceGaps {
         final int sources;
         final int domains;
         final List<String> keyTerms;
+        final Map<String, Integer> passagesByDomain;
 
         public NodeEvidence(String nodeId, Status status, int passages, int distinctPassages, int sources,
                             List<String> keyTerms) {
@@ -46,6 +49,18 @@ public final class EvidenceGaps {
 
         public NodeEvidence(String nodeId, Status status, int passages, int distinctPassages, int sources,
                             int domains, List<String> keyTerms) {
+            this(nodeId, status, passages, distinctPassages, sources, domains, keyTerms,
+                    Collections.<String, Integer>emptyMap());
+        }
+
+        /**
+         * @param passagesByDomain the node's passages per source domain ("" = unknown), for the share of preferred
+         *                         sources ({@link CoverageQuality}); empty when unknown
+         */
+        public NodeEvidence(String nodeId, Status status, int passages, int distinctPassages, int sources,
+                            int domains, List<String> keyTerms, Map<String, Integer> passagesByDomain) {
+            this.passagesByDomain = passagesByDomain == null ? Collections.<String, Integer>emptyMap()
+                    : Collections.unmodifiableMap(new LinkedHashMap<String, Integer>(passagesByDomain));
             this.domains = Math.max(0, domains);
             this.nodeId = nodeId == null ? "" : nodeId;
             this.status = status == null ? Status.OK : status;
@@ -96,17 +111,20 @@ public final class EvidenceGaps {
     /** The gaps of one analysis. */
     public static final class Gaps {
         public static final Gaps NONE = new Gaps("", Collections.<String, List<String>>emptyMap(),
-                Collections.<String>emptyList(), Collections.<String>emptyList(), Collections.<String>emptyList());
+                Collections.<String>emptyList(), Collections.<String>emptyList(), Collections.<String>emptyList(),
+                Collections.<String>emptyList());
 
         private final String analysisId;
         private final Map<String, List<String>> evidenceByNode;
         private final List<String> newTopics;
         private final List<String> dropped;
         private final List<String> coveredNodes;
+        private final List<String> weakNodes;
 
         Gaps(String analysisId, Map<String, List<String>> evidenceByNode, List<String> newTopics,
-             List<String> dropped, List<String> coveredNodes) {
+             List<String> dropped, List<String> coveredNodes, List<String> weakNodes) {
             this.coveredNodes = Collections.unmodifiableList(new ArrayList<String>(coveredNodes));
+            this.weakNodes = Collections.unmodifiableList(new ArrayList<String>(weakNodes));
             this.analysisId = analysisId;
             this.evidenceByNode = Collections.unmodifiableMap(new LinkedHashMap<String, List<String>>(evidenceByNode));
             this.newTopics = Collections.unmodifiableList(new ArrayList<String>(newTopics));
@@ -137,6 +155,15 @@ public final class EvidenceGaps {
             return coveredNodes;
         }
 
+        /**
+         * The gap nodes the analysis calls OK but the search plan's own bar ({@link CoverageQuality}) finds weak:
+         * too little distinct material or too little from the preferred sources. Each one is also in
+         * {@link #getEvidenceByNode()}.
+         */
+        public List<String> getWeakNodes() {
+            return weakNodes;
+        }
+
         public boolean isEmpty() {
             return evidenceByNode.isEmpty() && newTopics.isEmpty();
         }
@@ -155,21 +182,38 @@ public final class EvidenceGaps {
      */
     public static Gaps of(Analysis analysis, Collection<String> activeNodes, Collection<SearchPlanEntry> entries,
                           List<String> blacklist, int maxTopics, int maxFailed) {
+        return of(analysis, activeNodes, entries, blacklist, maxTopics, maxFailed, CoverageQuality.OFF);
+    }
+
+    /**
+     * Like {@link #of(Analysis, Collection, Collection, List, int, int)}, and a node the analysis calls OK is a gap
+     * too when it misses the search plan's own bar ({@link CoverageQuality}): status WEAK, with the reason for the
+     * planner (too few distinct passages, too few passages from the preferred sources and which ones to search).
+     */
+    public static Gaps of(Analysis analysis, Collection<String> activeNodes, Collection<SearchPlanEntry> entries,
+                          List<String> blacklist, int maxTopics, int maxFailed, CoverageQuality quality) {
         if (analysis == null || !analysis.settled()) {
             return Gaps.NONE;
         }
+        CoverageQuality bar = quality == null ? CoverageQuality.OFF : quality;
         Map<String, List<String>> byNode = new LinkedHashMap<String, List<String>>();
         List<String> covered = new ArrayList<String>();
+        List<String> weak = new ArrayList<String>();
         for (NodeEvidence node : analysis.nodes()) {
             if (!activeNodes.contains(node.nodeId)) {
                 continue;
             }
+            String weakness = null;
             if (node.status == Status.OK) {
-                covered.add(node.nodeId);
-                continue;
+                weakness = bar.weakness(node.distinctPassages, node.passagesByDomain);
+                if (weakness == null) {
+                    covered.add(node.nodeId);
+                    continue;
+                }
+                weak.add(node.nodeId);
             }
             List<String> findings = new ArrayList<String>();
-            findings.add(statusLine(node));
+            findings.add(weakness == null ? statusLine(node) : "WEAK: " + weakness);
             if (node.status != Status.MISSING && !node.keyTerms.isEmpty()) {
                 findings.add("the material so far is about: " + join(node.keyTerms));
             }
@@ -202,7 +246,51 @@ public final class EvidenceGaps {
                 kept.add(text);
             }
         }
-        return new Gaps(analysis.id(), byNode, kept, dropped, covered);
+        return new Gaps(analysis.id(), byNode, kept, dropped, covered, weak);
+    }
+
+    /** The analysis id of gaps read from the source counts alone ({@link #ofSources}). */
+    public static final String SOURCE_COUNTS = "source counts";
+
+    /**
+     * Without a settled analysis the cycle plans from the source counts; the mission's preference still holds: a node
+     * whose accepted sources cover it by number but come mostly from hosts the mission does not prefer is WEAK and
+     * planned again ({@link CoverageQuality#weaknessOfSources}). {@link Gaps#NONE} when the share bar is off or no
+     * node is weak.
+     *
+     * @param coverage the source coverage of the active nodes ({@link SearchPlanCoverage#of})
+     * @param domains  the domain of an accepted source
+     */
+    public static Gaps ofSources(Map<String, SearchPlanCoverage.NodeCoverage> coverage,
+                                 SearchPlanCoverage.Domains domains, CoverageQuality quality) {
+        if (quality == null || !quality.checksPreferredShare() || coverage == null || domains == null) {
+            return Gaps.NONE;
+        }
+        Map<String, List<String>> byNode = new LinkedHashMap<String, List<String>>();
+        List<String> covered = new ArrayList<String>();
+        List<String> weak = new ArrayList<String>();
+        for (SearchPlanCoverage.NodeCoverage node : coverage.values()) {
+            if (node.getState() != SearchPlanCoverage.State.COVERED) {
+                continue; // planned again anyway
+            }
+            List<String> sourceDomains = new ArrayList<String>();
+            for (String sourceId : node.getSources()) {
+                String domain = domains.of(sourceId);
+                sourceDomains.add(domain == null ? "" : domain);
+            }
+            String weakness = quality.weaknessOfSources(sourceDomains);
+            if (weakness == null) {
+                covered.add(node.getNodeId());
+            } else {
+                weak.add(node.getNodeId());
+                byNode.put(node.getNodeId(), Collections.singletonList("WEAK: " + weakness));
+            }
+        }
+        if (weak.isEmpty()) {
+            return Gaps.NONE;
+        }
+        return new Gaps(SOURCE_COUNTS, byNode, Collections.<String>emptyList(), Collections.<String>emptyList(),
+                covered, weak);
     }
 
     private static String statusLine(NodeEvidence node) {

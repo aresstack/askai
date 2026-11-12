@@ -139,6 +139,19 @@ public final class ResearchSourcesViewContribution implements ArtifactViewContri
             }
         }
 
+        @Override
+        public java.util.List<String> weak() {
+            com.aresstack.askai.research.plan.SearchPlanQueue queue = queue();
+            if (queue == null) {
+                return java.util.Collections.emptyList();
+            }
+            try {
+                return queue.outcome().getWeak();
+            } catch (Exception unreadable) {
+                return java.util.Collections.emptyList();
+            }
+        }
+
         public void run() {
             research.runSearchPlan();
         }

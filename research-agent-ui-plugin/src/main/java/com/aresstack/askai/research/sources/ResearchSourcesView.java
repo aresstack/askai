@@ -456,7 +456,7 @@ public final class ResearchSourcesView extends JPanel {
 
     private void updateSummary() {
         summary.setText(card == CARD_SEARCHES
-                ? searchSummary(planEntries(), plan == null ? null : uncovered())
+                ? searchSummary(planEntries(), plan == null ? null : uncovered(), plan == null ? null : weak())
                 : resultSummary(resultsModel.rows));
         summary.setToolTipText(summary.getText());
     }
@@ -464,6 +464,14 @@ public final class ResearchSourcesView extends JPanel {
     private List<String> uncovered() {
         try {
             return plan.uncovered();
+        } catch (RuntimeException unreadable) {
+            return Collections.emptyList();
+        }
+    }
+
+    private List<String> weak() {
+        try {
+            return plan.weak();
         } catch (RuntimeException unreadable) {
             return Collections.emptyList();
         }
@@ -502,6 +510,14 @@ public final class ResearchSourcesView extends JPanel {
     }
 
     static String searchSummary(List<SearchPlanEntry> entries, List<String> uncovered) {
+        return searchSummary(entries, uncovered, null);
+    }
+
+    /**
+     * "n of m searches done · uncovered: A, B (weak evidence)": a node whose sources cover it by number but whose
+     * evidence misses the plan's bar (too few distinct passages, too few from the preferred sources) is marked.
+     */
+    static String searchSummary(List<SearchPlanEntry> entries, List<String> uncovered, List<String> weak) {
         int done = 0;
         for (SearchPlanEntry entry : entries) {
             if (entry.getStatus() == SearchPlanEntry.Status.DONE) {
@@ -513,6 +529,9 @@ public final class ResearchSourcesView extends JPanel {
             text.append(" · uncovered: ");
             for (int i = 0; i < uncovered.size(); i++) {
                 text.append(i > 0 ? ", " : "").append(uncovered.get(i));
+                if (weak != null && weak.contains(uncovered.get(i))) {
+                    text.append(" (weak evidence)");
+                }
             }
         }
         return text.toString();
