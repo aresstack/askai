@@ -154,7 +154,8 @@ public final class OutlineSynthesizer {
         }
         if (hasBlocking(findings)) {
             notes.add("The review still has findings after " + revisions + " revision round"
-                    + (revisions == 1 ? "" : "s") + ".");
+                    + (revisions == 1 ? "" : "s") + "; the safe fixes below correct what code can correct, the "
+                    + "report lists what remains.");
         }
         return new Result(plan, findings, revisions, notes, brief);
     }

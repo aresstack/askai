@@ -275,4 +275,29 @@ public class OutlineQualityCheckTest {
         assertTrue(fixed.getPlan().getGapKeys().toString(), fixed.getPlan().getGapKeys().isEmpty());
         assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.REQUIREMENT_LOST, false));
     }
+
+    /**
+     * Live run 4 after #207: six of eight section answers were refused for leaving out a small advertising topic, and
+     * code split the chapters by material. Material the answer leaves out becomes untitled sections; the model's
+     * sections stay.
+     */
+    @Test
+    public void materialASectionAnswerLeavesOutBecomesSectionsOfItsOwn() throws Exception {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        PlannedChapter chapter = new PlannedChapter("Safety", "Purpose.", Arrays.asList("T1", "T4"),
+                Collections.<String>emptyList(), null, false);
+
+        List<PlannedSection> sections = SectionPlanContract.read("{\"sections\":[{\"title\":\"Helmets\","
+                + "\"purpose\":\"Why helmets.\",\"material\":[\"T1\"]}]}", brief, chapter);
+
+        assertEquals("Helmets", sections.get(0).getTitle());
+        assertFalse(sections.get(0).isUntitled());
+        List<String> rest = new java.util.ArrayList<String>();
+        for (PlannedSection section : sections.subList(1, sections.size())) {
+            assertTrue(section.isUntitled());
+            rest.addAll(section.getMaterialKeys());
+        }
+        assertEquals(OutlineQualityCheck.units(brief, "T4").size() == 1 ? Collections.singletonList("T4")
+                : OutlineQualityCheck.units(brief, "T4"), rest);
+    }
 }
