@@ -252,4 +252,27 @@ public class OutlineQualityCheckTest {
             assertFalse(finding.toString(), finding.getCode().equals(OutlineQualityCheck.REQUIREMENT_LOST));
         }
     }
+
+    /**
+     * Live run 4 after #206: the model treated C2 in a chapter and listed it as a gap as well; the outline reported
+     * "evidence exists, but no chapter treats it". A treated requirement with evidence leaves the gaps.
+     */
+    @Test
+    public void aTreatedRequirementWithEvidenceIsNoGap() {
+        SynthesisBrief brief = oneTopicThreeConcepts().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Collections.singletonList("T1.1"), Collections.singletonList("C1"),
+                        section("A", "T1.1")),
+                chapter("Safety", Collections.singletonList("T1.2"), Collections.singletonList("C2"),
+                        section("B", "T1.2")),
+                chapter("Law", Collections.singletonList("T1.3"), Collections.singletonList("C3"),
+                        section("C", "T1.3"))),
+                Collections.singletonList("C2"), false);
+        assertTrue(has(CHECK.review(plan, brief), OutlineQualityCheck.REQUIREMENT_LOST, false));
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        assertTrue(fixed.getPlan().getGapKeys().toString(), fixed.getPlan().getGapKeys().isEmpty());
+        assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.REQUIREMENT_LOST, false));
+    }
 }
