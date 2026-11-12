@@ -846,6 +846,16 @@ public final class ResearchRuntimeSettings {
     /** Passages one source may contribute to a pack. */
     public static final String KEY_WRITER_PASSAGES_PER_SOURCE = "research.writer.passagesPerSource";
     /**
+     * Least similarity of a passage to the section's brief (cosine, 0..1, 0 = off). Embedding-dependent: the default
+     * is calibrated for {@code bge-m3} ({@link com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance}).
+     */
+    public static final String KEY_WRITER_MIN_BRIEF_SIMILARITY = "research.writer.minBriefSimilarity";
+    /**
+     * How far a passage may lie below the section's best passage (cosine, 0..1, 0 = off). Embedding-dependent: the
+     * default is calibrated for {@code bge-m3}.
+     */
+    public static final String KEY_WRITER_BRIEF_SIMILARITY_MARGIN = "research.writer.briefSimilarityMargin";
+    /**
      * Words per call: the plan's small preset (450). Live run 4 measured {@code llama3.1:8b} at 148 to 425 words per
      * call in all 14 section revisions against the old target of 1,100, so a section of 1,100 words came out at a
      * fifth of its length; at 450, such a section is written in three key-point parts of about 370 words each.
@@ -872,10 +882,29 @@ public final class ResearchRuntimeSettings {
                         loadPositiveInt(store, KEY_WRITER_PASSAGES, large.getPassageCount()), passageTokens,
                         loadWriterProseCriteria(store),
                         loadPositiveInt(store, KEY_WRITER_PASSAGES_PER_SOURCE,
-                                com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE)),
+                                com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE),
+                        loadWriterBriefRelevance(store)),
                 loadPositiveInt(store, KEY_WRITER_WORDS_PER_CALL, DEFAULT_WRITER_WORDS_PER_CALL),
                 loadPositiveInt(store, KEY_WRITER_ANSWER_TOKENS, DEFAULT_WRITER_ANSWER_TOKENS),
                 loadWriterCarryCriteria(store));
+    }
+
+    /**
+     * How close an evidence passage must be to its section's brief (live run 4, book 6: passages of another subject
+     * filled the packs of 1.1, 1.2, 2.1 and 4.1). A value outside 0..1 falls back to its default.
+     */
+    public static com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance loadWriterBriefRelevance(
+            WorkspaceStateStore store) {
+        return new com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance(
+                loadUnitInterval(store, KEY_WRITER_MIN_BRIEF_SIMILARITY,
+                        com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MIN_SIMILARITY),
+                loadUnitInterval(store, KEY_WRITER_BRIEF_SIMILARITY_MARGIN,
+                        com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MARGIN));
+    }
+
+    private static double loadUnitInterval(WorkspaceStateStore store, String key, double fallback) {
+        double value = loadDouble(store, key, fallback);
+        return value >= 0 && value <= 1 ? value : fallback;
     }
 
     // ------------------------------------------------------------------ Document: topic drift in the book report

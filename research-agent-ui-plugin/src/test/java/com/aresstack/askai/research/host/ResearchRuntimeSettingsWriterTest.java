@@ -53,6 +53,24 @@ public class ResearchRuntimeSettingsWriterTest {
         assertEquals(8, t.getPack().getPassageCount());
         assertEquals(300, t.getPack().getPassageTokens());
         assertEquals(2, t.getPack().getPassagesPerSource());
+        assertEquals("brief relevance calibrated for bge-m3",
+                com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.defaults(),
+                t.getPack().getRelevance());
+    }
+
+    @Test
+    public void storedBriefRelevanceWinsAndOutOfRangeFallsBack() {
+        MemoryStore store = new MemoryStore();
+        store.put(ResearchRuntimeSettings.KEY_WRITER_MIN_BRIEF_SIMILARITY, "0,6");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_BRIEF_SIMILARITY_MARGIN, "0");
+        com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance r =
+                ResearchRuntimeSettings.loadWriterTargets(store).getPack().getRelevance();
+        assertEquals(0.6, r.getMinSimilarity(), 1e-9);
+        assertEquals("0 switches the margin off", 0, r.getMargin(), 1e-9);
+        store.put(ResearchRuntimeSettings.KEY_WRITER_MIN_BRIEF_SIMILARITY, "1.5");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_BRIEF_SIMILARITY_MARGIN, "-1");
+        assertEquals(com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.defaults(),
+                ResearchRuntimeSettings.loadWriterBriefRelevance(store));
     }
 
     @Test

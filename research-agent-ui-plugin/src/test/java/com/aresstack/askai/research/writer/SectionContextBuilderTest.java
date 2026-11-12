@@ -424,6 +424,103 @@ public class SectionContextBuilderTest {
                 sourcesOf(plain));
     }
 
+    private static WriterPackSettings withRelevance(int passages, double minSimilarity, double margin) {
+        return new WriterPackSettings(passages, 250, null, WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE,
+                new WriterPackSettings.BriefRelevance(minSimilarity, margin));
+    }
+
+    /**
+     * Live run 4, book 6, section 4.1: twelve provenance passages, a pack of 24 for three parts, and the search tail
+     * filled it with predictive maintenance, the cost of developing a wearable and a study design. Below the
+     * section's best passage by more than the margin, a hit stays out and the pack stays smaller.
+     */
+    @Test
+    public void hitsFarBelowTheSectionsBestPassageStayOutOfAPackOfSeveralParts() {
+        Corpus corpus = new Corpus();
+        Map<String, String> accepted = new HashMap<String, String>();
+        double[] scores = {0.80, 0.78, 0.75, 0.70, 0.62, 0.55, 0.50, 0.40};
+        String[] names = {"own-a", "own-b", "near-a", "near-b", "maintenance", "cost", "study", "vo2max"};
+        for (int i = 0; i < names.length; i++) {
+            corpus.add("p-" + names[i], "src-" + names[i], sentences(names[i], 3), scores[i]);
+            accepted.put("src-" + names[i], "c-" + names[i]);
+        }
+        SectionContextRequest request = withProvenance(new EvidenceSourceSet(accepted, null, null),
+                Arrays.asList("p-own-a", "p-own-b"));
+        EvidencePack pack = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus)
+                .build(request, withRelevance(24, 0.45, 0.15));
+        assertEquals("floor 0.80 - 0.15", Arrays.asList("src-own-a", "src-own-b", "src-near-a", "src-near-b"),
+                sourcesOf(pack));
+        EvidencePack unbounded = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus)
+                .build(request, withRelevance(24, 0, 0));
+        assertEquals("without a bound the tail fills the pack", 8, unbounded.getPassages().size());
+    }
+
+    /** Book 6, section 1.1: a provenance passage of another subject (a history of wearables) stays out too. */
+    @Test
+    public void aProvenancePassageBelowTheFloorIsHeldBackEvenAlone() {
+        Corpus corpus = new Corpus();
+        Map<String, String> accepted = new HashMap<String, String>();
+        corpus.add("p-history", "src-history", sentences("Wearables since the 17th century", 3), 0.41);
+        corpus.add("p-helmet", "src-helmet", sentences("Smart helmet", 3), 0.66);
+        accepted.put("src-history", "c-history");
+        accepted.put("src-helmet", "c-helmet");
+        SectionContextRequest request = withProvenance(new EvidenceSourceSet(accepted, null, null),
+                Collections.singletonList("p-history"));
+        WriterPackSettings floorOnly = withRelevance(6, 0.45, 0);
+        EvidencePack pack = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus)
+                .build(request, floorOnly);
+        assertEquals(Collections.singletonList("src-helmet"), sourcesOf(pack));
+        EvidencePack one = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus)
+                .build(request, withRelevance(1, 0.45, 0));
+        assertEquals("a full pack of one is still measured against the brief",
+                Collections.singletonList("src-helmet"), sourcesOf(one));
+    }
+
+    @Test
+    public void theRetrievalWindowStopsGrowingOnceItsHitsFallBelowTheFloor() {
+        Corpus corpus = new Corpus();
+        Map<String, String> accepted = new HashMap<String, String>();
+        accepted.put("src-big", "c-big");
+        for (int i = 0; i < 30; i++) {
+            corpus.add("p-top" + (100 + i), "src-big", sentences("Top " + i, 2), 0.99 - i * 0.001);
+            corpus.add("p-low" + (100 + i), "src-low" + i, sentences("Low " + i, 2), 0.5 - i * 0.001);
+            accepted.put("src-low" + i, "c-low" + i);
+        }
+        SectionContextRequest base = request(new EvidenceSourceSet(accepted, null, null));
+        OutlineSection noProvenance = new OutlineSection("sec-2", "ch-1", 1, "Ohne Herkunft",
+                base.getSection().getBrief(), OutlineProvenance.NONE, false, "");
+        SectionContextRequest request = new SectionContextRequest("proj", FP, base.getChapter(), noProvenance,
+                base.getSources(), "", "", null, "de");
+        EvidencePack filled = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus)
+                .build(request, WriterPackSettings.SMALL);
+        assertEquals("without a bound the far hits fill the pack", 6, filled.getPassages().size());
+        corpus.searches = 0;
+        EvidencePack pack = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus)
+                .build(request, withRelevance(6, 0.45, 0.15));
+        assertEquals("the top source only, at most two passages", 2, pack.getPassages().size());
+        assertEquals("the second window is not exhausted, but its last hits lie below the floor: no third", 2,
+                corpus.searches);
+    }
+
+    @Test
+    public void theFloorIsTheMinimumRaisedToTheBestPassageMinusTheMargin() {
+        WriterPackSettings.BriefRelevance relevance = WriterPackSettings.BriefRelevance.defaults();
+        assertEquals(0.45, relevance.getMinSimilarity(), 1e-9);
+        assertEquals(0.15, relevance.getMargin(), 1e-9);
+        assertEquals(0.65, relevance.floorFor(0.80), 1e-9);
+        assertEquals("a narrow brief keeps the floor", 0.45, relevance.floorFor(0.55), 1e-9);
+        assertEquals(0.45, new WriterPackSettings.BriefRelevance(0.45, 0).floorFor(0.9), 1e-9);
+        assertFalse(WriterPackSettings.BriefRelevance.OFF.isActive());
+        assertEquals("parts keep the relevance", relevance, new WriterPackSettings(8, 300, null, 2, relevance)
+                .withPassageCount(24).getRelevance());
+        assertEquals(WriterPackSettings.BriefRelevance.OFF, WriterPackSettings.LARGE.getRelevance());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void aSimilarityOutsideZeroToOneIsRejected() {
+        new WriterPackSettings.BriefRelevance(1.2, 0);
+    }
+
     @Test(expected = IllegalStateException.class)
     public void aBriefFromAnotherEmbeddingWorldIsRejected() {
         Corpus corpus = corpus();
