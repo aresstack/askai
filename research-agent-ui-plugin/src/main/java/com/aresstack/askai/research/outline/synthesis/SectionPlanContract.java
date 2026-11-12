@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.outline.synthesis;
 
+import com.aresstack.askai.research.outline.OutlineChapter;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -30,7 +31,8 @@ final class SectionPlanContract {
             + "sections.\n"
             + "- A sub-topic with much distinct material may be a section of its own; repeated material is no reason "
             + "for more sections.\n"
-            + "- Titles are short noun phrases; the purpose is one sentence.\n";
+            + "- Titles are short noun phrases; the purpose is one sentence.\n"
+            + "- A section title names what the section adds to the chapter; it never repeats the chapter title.\n";
 
     static final String ANSWER = "Answer: {\"sections\":[{\"title\":\"...\",\"purpose\":\"one sentence\","
             + "\"material\":[\"T1.1\"]}]}";
@@ -119,6 +121,9 @@ final class SectionPlanContract {
             JsonObject section = element.getAsJsonObject();
             String title = PlanJson.string(section.get("title"));
             errors.addAll(PlanJson.titleErrors(what, title));
+            if (OutlineChapter.repeatsChapterTitle(title, chapter.getTitle())) {
+                errors.add(what + " repeats the chapter title; name what the section adds to the chapter");
+            }
             String purpose = PlanJson.string(section.get("purpose"));
             if (purpose.isEmpty()) {
                 errors.add(what + " has no purpose");

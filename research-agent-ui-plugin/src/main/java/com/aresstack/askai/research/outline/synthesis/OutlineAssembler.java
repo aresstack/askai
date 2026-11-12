@@ -169,8 +169,11 @@ public final class OutlineAssembler {
                 sectionIds.add(brief.idOf(key));
                 points.addAll(materialPoints(brief, key, section.getTitle()));
             }
+            // A title that only repeats the chapter title (kept from an earlier round or a fallback) is no name: the
+            // label call names the section.
             chapter.sections.add(new Draft(section.getTitle(), section.getPurpose(), points, sectionIds, passages,
-                    section.isUntitled()));
+                    section.isUntitled() || OutlineChapter.repeatsChapterTitle(section.getTitle(),
+                            planned.getTitle())));
         }
         return chapter;
     }

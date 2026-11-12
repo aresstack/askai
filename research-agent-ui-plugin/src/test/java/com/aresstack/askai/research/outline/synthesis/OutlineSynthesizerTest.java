@@ -322,4 +322,21 @@ public class OutlineSynthesizerTest {
                     result.getPlan().getChapters().get(i).getSections().get(0).getMaterialKeys());
         }
     }
+
+    /** Live run 4: section 1.2 carried the title of chapter 1. Such an answer is refused and repaired. */
+    @Test
+    public void aSectionTitleRepeatingTheChapterTitleIsRepaired() {
+        String repeating = "{\"sections\":[{\"title\":\"area  1\",\"purpose\":\"Covers it.\","
+                + "\"material\":[\"T1.1\",\"T1.2\"]}]}";
+        ScriptedChat chat = new ScriptedChat().then(chapters("T1", "T2", "T3", "T4")).then(repeating)
+                .then(sections("T1.1", "T1.2"));
+        sectionsForAll(chat, "T2", "T3", "T4");
+
+        OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 0).synthesize(fourAreas().brief(), null);
+
+        assertEquals("plan, a refused and a repaired section answer, three more chapters", 6, chat.calls.size());
+        String repair = chat.calls.get(2).messages.get(chat.calls.get(2).messages.size() - 1).getContent();
+        assertTrue(repair, repair.contains("repeats the chapter title"));
+        assertEquals("Part 1", result.getPlan().getChapters().get(0).getSections().get(0).getTitle());
+    }
 }

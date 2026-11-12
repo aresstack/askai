@@ -292,7 +292,11 @@ public class OutlineAcceptanceTest {
         assertEquals("Training", gap.getRequirement());
         assertEquals("GAP", gap.getStatus());
         assertEquals("no evidence in the research", gap.getReason());
-        assertTrue(String.join("\n", outline.getReport().getNotes()).contains("moved from"));
+        String notes = String.join("\n", outline.getReport().getNotes());
+        assertTrue(notes.contains("moved from"));
+        // Live run 4: "still has findings" stood beside an empty findings list; the report says how it ended.
+        assertTrue(notes, notes.contains("still has findings after 2 revision rounds"));
+        assertTrue(notes, notes.contains("After the safe fixes the review has no blocking findings left."));
         assertFalse("the chapter no longer claims it", outline.getChapters().get(0).getBrief().getKeyPoints()
                 .contains("Training"));
     }

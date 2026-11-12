@@ -121,7 +121,7 @@ public final class OutlineBriefWorker {
                 return null;
             }
             try {
-                OutlineLabel label = LabelContract.read(result.getText());
+                OutlineLabel label = LabelContract.read(result.getText(), chapterTitle);
                 telemetry.call(new BriefCallTelemetry(labels.modelName(), BriefCallTelemetry.Kind.LABEL, target,
                         LabelContract.BUDGET, attempt, true));
                 return label;

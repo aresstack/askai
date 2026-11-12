@@ -359,4 +359,40 @@ public class OutlineBriefWorkerTest {
         assertEquals(SectionReclusterer.split(passages.vectors, 3), SectionReclusterer.split(passages.vectors, 3));
         assertThrows(IllegalArgumentException.class, () -> SectionReclusterer.split(passages.vectors, 9));
     }
+
+    /** Live run 4: a section was named like its chapter. A label repeating the chapter title is repaired. */
+    @Test
+    public void aLabelRepeatingTheChapterTitleIsRepaired() {
+        ScriptedChat labels = new ScriptedChat("labels", "{\"title\":\"praxis\",\"summary\":\"s\"}",
+                "{\"title\":\"Wärmepumpen im Altbau\",\"summary\":\"Wie Altbauten umgerüstet werden.\"}");
+        OutlineBriefWorker worker = new OutlineBriefWorker(labels, new ScriptedChat("briefs"), null);
+
+        OutlineLabel label = worker.label(CONTEXT, "c9", "Praxis", Arrays.asList("Text"), null);
+
+        assertEquals("Wärmepumpen im Altbau", label.getTitle());
+        List<ChatMessage> repair = labels.calls.get(1);
+        assertTrue(repair.get(repair.size() - 1).getContent().contains("repeats the chapter title"));
+        assertTrue(labels.calls.get(0).get(1).getContent().contains("not the chapter itself"));
+    }
+
+    /** Live run 4: label telemetry of generated sections had an empty target; it names the place instead. */
+    @Test
+    public void labelTelemetryNamesAGeneratedSectionByItsPlace() {
+        OutlineSection section = OutlineSection.draft("Untitled", new OutlineBrief("", Collections.<String>emptyList(),
+                100), new OutlineProvenance("", Collections.<String>emptyList(), Collections.<String>emptyList()))
+                .withUntitled(true);
+        Outline generated = new Outline(Collections.singletonList(OutlineChapter.draft("Praxis",
+                new OutlineBrief("", Collections.<String>emptyList(), 100), new OutlineProvenance("",
+                        Collections.<String>emptyList(), Collections.<String>emptyList()),
+                Collections.singletonList(section))), Collections.<com.aresstack.askai.research.outline
+                .OutlineCandidate>emptyList(), null);
+        ScriptedChat labels = new ScriptedChat("labels", "{\"title\":\"Benannt\",\"summary\":\"Kurz.\"}");
+        List<BriefCallTelemetry> telemetry = new ArrayList<BriefCallTelemetry>();
+
+        new OutlineEnricher(new OutlineBriefWorker(labels, new ScriptedChat("briefs", briefAnswer(1)),
+                telemetry::add), new Passages()).enrich(generated, CONTEXT, () -> false);
+
+        assertEquals(BriefCallTelemetry.Kind.LABEL, telemetry.get(0).getKind());
+        assertEquals("section 1.1", telemetry.get(0).getTarget());
+    }
 }

@@ -48,7 +48,9 @@ public final class OutlineEnricher {
         OutlinePassages view = passages.snapshot();
         List<String> failures = new ArrayList<String>();
         List<OutlineChapter> chapters = new ArrayList<OutlineChapter>();
+        int chapterNumber = 0;
         for (OutlineChapter chapter : generated.getChapters()) {
+            chapterNumber++;
             if (cancelled.getAsBoolean()) {
                 chapters.add(chapter);
                 continue;
@@ -56,9 +58,13 @@ public final class OutlineEnricher {
             List<OutlineSection> sections = new ArrayList<OutlineSection>();
             for (OutlineSection section : chapter.getSections()) {
                 OutlineSection labelled = section;
+                // A generated section gets its id when the outline is saved; until then the telemetry names it by
+                // its place (live run 4: "LABEL  on slot ..." with an empty target).
+                String target = section.getId().isEmpty()
+                        ? "section " + chapterNumber + "." + (sections.size() + 1) : section.getId();
                 if (section.isUntitled() && !section.isUserEdited() && !cancelled.getAsBoolean()) {
                     List<String> ids = section.getProvenance().getPassageIds();
-                    OutlineLabel label = worker.label(context, section.getId(), chapter.getTitle(),
+                    OutlineLabel label = worker.label(context, target, chapter.getTitle(),
                             ChapterRegenerator.texts(view, ids.subList(0,
                                     Math.min(LabelContract.MAX_EXCERPTS, ids.size()))), "");
                     if (label != null) {

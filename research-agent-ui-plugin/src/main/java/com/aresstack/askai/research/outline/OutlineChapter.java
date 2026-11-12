@@ -26,6 +26,16 @@ public final class OutlineChapter extends OutlineEntry {
         return sections;
     }
 
+    /**
+     * Whether a section title only repeats its chapter title (case and spacing ignored). Live run 4: section 1.2 was
+     * named like chapter 1, which tells the reader nothing about the section.
+     */
+    public static boolean repeatsChapterTitle(String sectionTitle, String chapterTitle) {
+        String section = sectionTitle == null ? "" : sectionTitle.replaceAll("\\s+", " ").trim();
+        String chapter = chapterTitle == null ? "" : chapterTitle.replaceAll("\\s+", " ").trim();
+        return !section.isEmpty() && section.equalsIgnoreCase(chapter);
+    }
+
     public OutlineChapter withTitle(String newTitle) {
         return new OutlineChapter(getId(), getOrder(), newTitle, getBrief(), getProvenance(), isUserEdited(),
                 getStaleReason(), sections);
