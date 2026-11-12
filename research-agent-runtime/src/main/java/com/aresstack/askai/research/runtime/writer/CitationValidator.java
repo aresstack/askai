@@ -328,14 +328,16 @@ public final class CitationValidator {
                 continue;
             }
             List<Sentence> kept = new ArrayList<Sentence>();
+            // the paragraph's sentences join the memory only when it stays prose (not an uncited question block)
+            RepeatCheck.Memory paragraph = near.copy();
             for (Sentence sentence : sentences(text)) {
                 String plain = sentence.plainText();
                 String key = key(plain);
-                if (!key.isEmpty() && (!seen.add(key) || near.repeats(plain))) {
+                if (!key.isEmpty() && (!seen.add(key) || paragraph.repeats(plain))) {
                     repeated.add(sentence.getText());
                     continue;
                 }
-                near.remember(plain);
+                paragraph.remember(plain);
                 kept.add(sentence);
             }
             if (kept.isEmpty()) {
@@ -354,6 +356,7 @@ public final class CitationValidator {
             for (Sentence sentence : kept) {
                 prose.add(key(sentence.plainText()));
             }
+            near = paragraph;
             paragraphs.add(new Paragraph(kept));
         }
         List<String> gaps = new ArrayList<String>();

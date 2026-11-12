@@ -19,8 +19,9 @@ import java.util.Set;
  * and stem length are those settings), so "…, die dann schnell eingreifen können" after the same sentence without
  * that clause is a repeat, and so is a short sentence another sentence already holds. A sentence with fewer than
  * {@link Criteria#getMinWords() min words} content words is only a repeat when it is the same sentence (exact
- * match, {@link CitationValidator}): a short sentence shares its few words with too many others. Deterministic, no
- * model call; both bounds are settings.</p>
+ * match, {@link CitationValidator}): a short sentence shares its few words with too many others. A sentence that
+ * states a number the earlier sentence does not ("um 40 %" after "um 20 %") is never a near repeat: it is another
+ * claim, and the claim check judges it. Deterministic, no model call; both bounds are settings.</p>
  */
 public final class RepeatCheck {
 
@@ -82,6 +83,10 @@ public final class RepeatCheck {
         }
     }
 
+    /** A number with its sign, decimals and a directly following unit sign: "-20 °C", "15,5 %", "1.100". */
+    private static final java.util.regex.Pattern NUMBER = java.util.regex.Pattern.compile(
+            "[-+\u2212]?\\d+(?:[.,]\\d+)*(?:\\s?(?:%|\u2030|°\\s?[CF]?))?");
+
     private final Criteria criteria;
     private final ClaimCarryCheck words;
 
@@ -101,7 +106,7 @@ public final class RepeatCheck {
 
     /** A memory of the sentences of {@code texts} (paragraphs separated by a blank line, markers allowed). */
     public Memory memory(Collection<String> texts) {
-        Memory memory = new Memory(this, new ArrayList<Set<String>>(), true);
+        Memory memory = new Memory(this, new ArrayList<Remembered>(), true);
         if (texts != null) {
             for (String text : texts) {
                 memory.rememberText(text);
@@ -115,12 +120,33 @@ public final class RepeatCheck {
      * one answer is checked, its own kept sentences. Not thread-safe; {@link #copy()} before each check, so a repair
      * is checked without the sentences of the answer it replaces.
      */
+    /** The numbers of a sentence as written, spaces left out ("-20°C", "15,5%"). */
+    static Set<String> numbers(String sentence) {
+        Set<String> out = new java.util.HashSet<String>();
+        java.util.regex.Matcher m = NUMBER.matcher(sentence == null ? "" : sentence.replace('\u00A0', ' '));
+        while (m.find()) {
+            out.add(m.group().replace(" ", "").replace('\u2212', '-'));
+        }
+        return out;
+    }
+
+    /** One remembered sentence: the stems of its words and its numbers; immutable. */
+    private static final class Remembered {
+        final Set<String> stems;
+        final Set<String> numbers;
+
+        Remembered(Set<String> stems, Set<String> numbers) {
+            this.stems = Collections.unmodifiableSet(stems);
+            this.numbers = Collections.unmodifiableSet(numbers);
+        }
+    }
+
     public static final class Memory {
         private final RepeatCheck check;
-        private final List<Set<String>> sentences;
+        private final List<Remembered> sentences;
         private final boolean enabled;
 
-        private Memory(RepeatCheck check, List<Set<String>> sentences, boolean enabled) {
+        private Memory(RepeatCheck check, List<Remembered> sentences, boolean enabled) {
             this.check = check;
             this.sentences = sentences;
             this.enabled = enabled;
@@ -132,7 +158,7 @@ public final class RepeatCheck {
 
         /** An independent copy; the stem sets are shared, they never change. */
         public Memory copy() {
-            return new Memory(check, new ArrayList<Set<String>>(sentences), enabled);
+            return new Memory(check, new ArrayList<Remembered>(sentences), enabled);
         }
 
         /** How many sentences it holds. */
@@ -143,7 +169,7 @@ public final class RepeatCheck {
         /**
          * Whether {@code sentence} (without markers) is a near repeat of a remembered one: it has at least
          * {@link Criteria#getMinWords() min words} content words and a remembered sentence holds at least
-         * {@link Criteria#getMinShare() min share} of them.
+         * {@link Criteria#getMinShare() min share} of them and every number it states.
          */
         public boolean repeats(String sentence) {
             if (!enabled) {
@@ -153,8 +179,10 @@ public final class RepeatCheck {
             if (content.size() < check.criteria.getMinWords()) {
                 return false;
             }
-            for (Set<String> earlier : sentences) {
-                if (check.words.overlap(content, earlier) >= check.criteria.getMinShare()) {
+            Set<String> numbers = numbers(sentence);
+            for (Remembered earlier : sentences) {
+                if (earlier.numbers.containsAll(numbers)
+                        && check.words.overlap(content, earlier.stems) >= check.criteria.getMinShare()) {
                     return true;
                 }
             }
@@ -165,7 +193,7 @@ public final class RepeatCheck {
         public void remember(String sentence) {
             Set<String> stems = check.words.stemsOf(sentence);
             if (!stems.isEmpty()) {
-                sentences.add(Collections.unmodifiableSet(stems));
+                sentences.add(new Remembered(stems, numbers(sentence)));
             }
         }
 
