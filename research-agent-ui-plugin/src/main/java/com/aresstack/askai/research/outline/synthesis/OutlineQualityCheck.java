@@ -343,8 +343,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
     }
 
     /** The keys of {@code keys} whose units chapter {@code index} owns; a partly owned topic gives its sub-topics. */
-    private static List<String> owned(List<String> keys, SynthesisBrief brief, Map<String, Integer> owner,
-                                      int index) {
+    static List<String> owned(List<String> keys, SynthesisBrief brief, Map<String, Integer> owner, int index) {
         Set<String> result = new LinkedHashSet<String>();
         for (String key : keys) {
             List<String> units = units(brief, key);

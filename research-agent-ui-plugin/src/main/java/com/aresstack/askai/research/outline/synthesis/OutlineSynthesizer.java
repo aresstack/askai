@@ -178,35 +178,58 @@ public final class OutlineSynthesizer {
         return current;
     }
 
-    /** Sections for every chapter; a chapter with the same material as one of {@code previous} keeps its sections. */
+    /** Sections for every chapter; a chapter owning the same material as one of {@code previous} keeps its sections. */
     private OutlinePlan withSections(OutlinePlan plan, OutlinePlan previous, SynthesisBrief brief, List<String> notes,
                                      ClusteringMonitor monitor) {
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
+        // The sections are planned from the material each chapter will own after the quality check (a concept part
+        // goes to the chapter of its requirement, the rest to the first chapter naming it). Live run 4 after #210:
+        // every chapter named the whole large topic, so every section call saw all of it and three chapters got the
+        // same section "Technologien und Herausforderungen" before the ownership fix took the parts apart.
+        java.util.Map<String, Integer> owner = OutlineQualityCheck.owners(plan, brief);
+        java.util.Map<String, Integer> previousOwner = previous == null ? null
+                : OutlineQualityCheck.owners(previous, brief);
         int index = 0;
         for (PlannedChapter chapter : plan.getChapters()) {
             index++;
             checkCancel(monitor);
             monitor.progress("Planning the sections of chapter " + index + " of " + plan.getChapters().size(), index,
                     plan.getChapters().size());
-            PlannedChapter kept = previous == null ? null : sameMaterial(previous, chapter);
+            List<String> own = OutlineQualityCheck.owned(chapter.getMaterialKeys(), brief, owner, index - 1);
+            if (own.isEmpty()) {
+                // Only material of earlier chapters: the quality check drops the chapter; no section call for it.
+                chapters.add(chapter.withSections(FallbackOutlinePlan.sections(brief, chapter)));
+                continue;
+            }
+            PlannedChapter kept = previous == null ? null : sameMaterial(previous, previousOwner, own, brief);
             if (kept != null) {
                 chapters.add(chapter.withSections(kept.getSections()));
                 continue;
             }
-            List<PlannedSection> sections = askSections(brief, chapter, monitor);
+            PlannedChapter owning = new PlannedChapter(chapter.getTitle(), chapter.getPurpose(), own,
+                    chapter.getConceptKeys(), null, chapter.isUntitled());
+            List<PlannedSection> sections = askSections(brief, owning, monitor);
             if (sections == null) {
                 notes.add("The sections of \"" + chapter.getTitle() + "\" were not generated; code split the chapter "
                         + "by its material.");
-                sections = FallbackOutlinePlan.sections(brief, chapter);
+                sections = FallbackOutlinePlan.sections(brief, owning);
             }
             chapters.add(chapter.withSections(sections));
         }
         return plan.withChapters(chapters);
     }
 
-    private static PlannedChapter sameMaterial(OutlinePlan previous, PlannedChapter chapter) {
+    /**
+     * The previous chapter that owned the same material, compared by what each chapter owns: chapters naming the same
+     * large topic own different parts of it, so their unfiltered material keys are no match.
+     */
+    private static PlannedChapter sameMaterial(OutlinePlan previous, java.util.Map<String, Integer> previousOwner,
+                                               List<String> own, SynthesisBrief brief) {
+        java.util.Set<String> wanted = new java.util.TreeSet<String>(own);
+        int index = 0;
         for (PlannedChapter old : previous.getChapters()) {
-            if (old.sameMaterial(chapter) && !old.getSections().isEmpty()) {
+            List<String> owned = OutlineQualityCheck.owned(old.getMaterialKeys(), brief, previousOwner, index++);
+            if (!old.getSections().isEmpty() && wanted.equals(new java.util.TreeSet<String>(owned))) {
                 return old;
             }
         }
