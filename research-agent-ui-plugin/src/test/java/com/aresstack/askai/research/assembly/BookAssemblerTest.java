@@ -252,6 +252,23 @@ public class BookAssemblerTest {
         assertTrue(report.toMarkdown().contains("15 %"));
     }
 
+    /** Live run 4, books 2 and 3: a manufacturer's "unsere tragbaren Geräte" and "implementieren wir" stood in the book. */
+    @Test
+    public void aSourcesWeInTheStoredTextIsReportedAndKeepsTheBookADraft() {
+        AssembledBook book = new BookAssembler().assemble(clean()
+                .section(written("s21", "c2"), revision(
+                        "Our battery storage shifts surplus energy into the evening [1].",
+                        cite("1", "c", TEXT_C, "p-c-1")))
+                .section(written("s22", "c2"), revision(
+                        "The vendor says \"we lead the market\" while lithium cells dominate [1].",
+                        cite("1", "c", TEXT_C, "p-c-2")))
+                .build());
+        assertEquals("a quoted we is the quoted author's", 1, book.getReport().count(Kind.FIRST_PERSON_VOICE));
+        assertEquals("2.1 Batteries: Our battery storage shifts surplus energy into the evening. (Our)",
+                book.getReport().findings(Kind.FIRST_PERSON_VOICE).get(0).getDetail());
+        assertEquals(BookQualityReport.Status.INCOMPLETE_DRAFT, book.getReport().getStatus());
+    }
+
     @Test
     public void gapsAndUncitedParagraphsBlockCompleteness() {
         AssembledBook book = new BookAssembler().assemble(clean()

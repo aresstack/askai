@@ -17,9 +17,11 @@ import java.util.function.Consumer;
 /**
  * The section writer of the Document phase (plan D8, PR 28). It runs on the {@code phase.draft.writer} slot (which
  * inherits the model of {@code phase.draft}), asks for plain text with {@code [n]} markers and checks the answer in
- * code: {@link CitationValidator} strips unknown markers, flags uncited sentences and paragraphs and parses gaps;
- * {@link ClaimSupportCheck} flags numbers and quotations the cited passages do not contain; {@link ClaimCarryCheck}
- * (stage 2) flags sentences whose cited passages are no prose or share too few of their words.
+ * code: {@link CitationValidator} strips unknown markers, flags uncited sentences and paragraphs, parses gaps and
+ * takes label lines, repeated sentences (also those of the section's earlier parts) and question-only paragraphs out
+ * of the prose; {@link ClaimSupportCheck} flags numbers and quotations the cited passages do not contain;
+ * {@link ClaimCarryCheck} (stage 2) flags sentences whose cited passages are no prose or share too few of their
+ * words; {@link VoiceCheck} flags sentences that speak with a passage author's "we".
  *
  * <p>A cut-off answer gets exactly one continuation from its last full sentence; an answer with uncited sentences or
  * unsupported numbers or quotes gets exactly one repair, which sends the error list and never the failed answer. The
@@ -34,6 +36,7 @@ public final class SectionWriter {
     private final MainModelChat chat;
     private final CitationValidator validator = new CitationValidator();
     private final ClaimSupportCheck claims = new ClaimSupportCheck();
+    private final VoiceCheck voice = new VoiceCheck();
     private final Consumer<String> log;
 
     /**
@@ -73,8 +76,9 @@ public final class SectionWriter {
         int words = 0;
         int paragraphOffset = 0;
         String digest = assignment.getPreviousDigest();
+        java.util.Set<String> written = new java.util.HashSet<String>();
         for (SectionAssignment part : parts) {
-            SectionDraft draft = writePart(part.part(part.getKeyPoints(), part.getWordsPerCall(), digest));
+            SectionDraft draft = writePart(part.part(part.getKeyPoints(), part.getWordsPerCall(), digest), written);
             calls += draft.getCalls();
             if (hash.isEmpty()) {
                 hash = draft.getPromptHash();
@@ -97,6 +101,7 @@ public final class SectionWriter {
             model = draft.getModelLabel().isEmpty() ? model : draft.getModelLabel();
             words += draft.getWordCount();
             digest = lastSentences(draft.getText());
+            written.addAll(CitationValidator.sentenceKeys(draft.getText()));
         }
         return new SectionDraft(true, "", text.toString(), new java.util.TreeMap<Integer, EvidencePassage>(citations),
                 flags, gaps, stripped, model, hash, calls, words);
@@ -104,6 +109,11 @@ public final class SectionWriter {
 
     /** One call's worth: first answer, at most one continuation, at most one repair (with its own continuation). */
     SectionDraft writePart(SectionAssignment a) {
+        return writePart(a, java.util.Collections.<String>emptySet());
+    }
+
+    /** @param written the sentence keys of the section's earlier parts; this part leaves out what they say */
+    SectionDraft writePart(SectionAssignment a, java.util.Set<String> written) {
         List<ChatMessage> first = SectionWriterPrompt.first(a);
         String hash = SectionWriterPrompt.hash(first);
         int[] calls = {0};
@@ -112,19 +122,20 @@ public final class SectionWriter {
         if (answer == null) {
             return SectionDraft.failed(lastFailure, hash, calls[0]);
         }
-        Checked checked = check(answer, a);
+        Checked checked = check(answer, a, written);
         List<ClaimFlag> errors = checked.repairable();
         if (!errors.isEmpty()) {
             log.accept("section " + a.getSectionId() + ": one repair for " + errors.size() + " citation errors");
             String repaired = answer(a, SectionWriterPrompt.repair(a, errors), calls, model);
             if (repaired != null) {
-                checked = check(repaired, a);
+                checked = check(repaired, a, written);
             }
         }
         for (String marker : checked.result.getStrippedMarkers()) {
             log.accept("section " + a.getSectionId() + ": stripped unknown marker " + marker + " (k = "
                     + a.getPassages().size() + ")");
         }
+        logRemoved(a, checked.result);
         Map<Integer, EvidencePassage> citations = new java.util.TreeMap<Integer, EvidencePassage>();
         for (Integer n : checked.result.citedNumbers()) {
             EvidencePassage passage = byNumber(a, n);
@@ -240,11 +251,23 @@ public final class SectionWriter {
         return cut + (newParagraph ? "\n\n" : " ") + more;
     }
 
-    private Checked check(String answer, SectionAssignment a) {
-        CitationValidator.Result result = validator.validate(answer, a.getPassages().size());
+    private Checked check(String answer, SectionAssignment a, java.util.Set<String> written) {
+        CitationValidator.Result result = validator.validate(answer, a.getPassages().size(), written);
         List<ClaimFlag> unsupported = new ArrayList<ClaimFlag>(claims.check(result, a.getPassages()));
         unsupported.addAll(new ClaimCarryCheck(a.getCarry()).check(result, a.getPassages()));
+        unsupported.addAll(voice.check(result));
         return new Checked(result, unsupported);
+    }
+
+    /** One count line for what the check took out of the prose (never the text itself). */
+    private void logRemoved(SectionAssignment a, CitationValidator.Result result) {
+        int labels = result.getLabelLines().size();
+        int repeats = result.getRepeatedSentences().size();
+        int questions = result.getQuestions().size();
+        if (labels + repeats + questions > 0) {
+            log.accept("section " + a.getSectionId() + ": removed " + labels + " label lines and " + repeats
+                    + " repeated sentences, moved " + questions + " uncited questions to the open points");
+        }
     }
 
     private static EvidencePassage byNumber(SectionAssignment a, int n) {
@@ -300,7 +323,7 @@ public final class SectionWriter {
             return all;
         }
 
-        /** What the repair lists: uncited sentences and unsupported numbers and quotes. */
+        /** What the repair lists: uncited sentences, unsupported numbers and quotes, and a source's voice. */
         List<ClaimFlag> repairable() {
             List<ClaimFlag> out = new ArrayList<ClaimFlag>();
             for (ClaimFlag f : flags()) {

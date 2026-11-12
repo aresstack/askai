@@ -16,7 +16,9 @@ public final class ClaimFlag {
         /** A quotation that no passage cited by the sentence or its paragraph contains. */
         UNSUPPORTED_QUOTE("unsupported quote"),
         /** A sentence no cited passage carries: the passage is no prose or shares too few of its words (stage 2). */
-        UNCARRIED_CLAIM("citation does not carry the claim");
+        UNCARRIED_CLAIM("citation does not carry the claim"),
+        /** A sentence that speaks as "we": the voice of a passage's author, never the book's ({@link VoiceCheck}). */
+        FIRST_PERSON_VOICE("first-person voice of a source");
 
         private final String label;
 
@@ -70,7 +72,7 @@ public final class ClaimFlag {
      * sentence for uncited findings ({@code uncited sentence: <sentence>}).
      */
     public String revisionLine() {
-        if (kind == Kind.UNCARRIED_CLAIM) {
+        if (kind == Kind.UNCARRIED_CLAIM || kind == Kind.FIRST_PERSON_VOICE) {
             return kind.label() + ": " + sentence + " (" + detail + ")";
         }
         return kind.label() + ": " + (detail.isEmpty() ? sentence : detail);

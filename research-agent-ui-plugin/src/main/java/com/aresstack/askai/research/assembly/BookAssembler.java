@@ -16,6 +16,7 @@ import com.aresstack.askai.research.manuscript.SectionStatus;
 import com.aresstack.askai.research.outline.OutlineChapter;
 import com.aresstack.askai.research.outline.OutlineSection;
 import com.aresstack.askai.research.runtime.writer.ClaimCarryCheck;
+import com.aresstack.askai.research.runtime.writer.VoiceCheck;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -58,6 +59,7 @@ public final class BookAssembler {
     private final SentenceSegmenter sentences;
     private final AcronymExtractor acronymExtractor;
     private final ClaimCarryCheck carry;
+    private final VoiceCheck voice = new VoiceCheck();
     private final TopicDriftCheck.Criteria drift;
 
     public BookAssembler() {
@@ -278,6 +280,11 @@ public final class BookAssembler {
                 }
                 counts.sentences++;
                 sectionSentences.add(stripMarkers(sentence).trim());
+                String we = voice.firstPersonWord(sentence);
+                if (!we.isEmpty()) {
+                    findings.add(new Finding(Kind.FIRST_PERSON_VOICE, id, label + ": "
+                            + stripMarkers(sentence).trim() + " (" + we + ")"));
+                }
                 List<ManuscriptCitation> own = citationsIn(sentence, byMarker);
                 if (own.isEmpty()) {
                     findings.add(new Finding(Kind.UNCITED_SENTENCE, id, label + ": " + sentence.trim()));
