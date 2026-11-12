@@ -420,4 +420,37 @@ public class TopicAnalyzerTest {
                 new ConceptAnchor("c-helmets", "Helmets", "Book > Helmets", 1, "", corpus.query(helmets)),
                 new ConceptAnchor("c-training", "Training", "Book > Training", 1, "", corpus.query(training)))));
     }
+
+    /**
+     * Live run 4: one topic held the material of four concept nodes; its centroid lay between them and aligned with
+     * none, so the whole research counted as a new topic. A topic carrying a node's own material is no new topic.
+     */
+    @Test
+    public void aTopicCarryingTheMaterialOfConceptNodesIsNoNewTopic() {
+        TopicCorpusFixture corpus = new TopicCorpusFixture();
+        int area = corpus.direction();
+        int helmets = corpus.plain("helmets", 6, 3, area);
+        int training = corpus.plain("training", 6, 3, area);
+        List<ConceptAnchor> anchors = Arrays.asList(
+                new ConceptAnchor("c-helmets", "Helmets", "Book > Helmets", 1, "", corpus.query(helmets)),
+                new ConceptAnchor("c-training", "Training", "Book > Training", 1, "", corpus.query(training)));
+        TopicAnalyzer analyzer = new TopicAnalyzer(TopicAnalysisSettings.defaults());
+        LiveTopicTree tree = new LiveOutlineProjectionBuilder(0.8, 2).discoverTopicTree(corpus.passages,
+                corpus.vectors, ClusteringMonitor.NONE); // no split rule: the merged topic stays whole
+        List<TopicProfile> topics = analyzer.analyze(corpus.analysisPassages, corpus.vectors, tree, anchors, null,
+                ClusteringMonitor.NONE).getTopics();
+
+        assertEquals(1, topics.size());
+        TopicProfile merged = topics.get(0);
+        assertTrue(merged.isSignificant());
+        assertFalse("the centroid lies between the two nodes", merged.isConceptAligned());
+        assertEquals(Arrays.asList("c-helmets", "c-training"), merged.getConceptMaterialNodeIds());
+        assertFalse("the concept's own material is no new topic", merged.isNovel());
+        assertEquals("the coverage's node assignment gives the topic one aspect per concept area", 2,
+                merged.getSubtopics().size());
+        assertEquals(6, merged.getSubtopics().get(0).getDistinctPassageCount());
+        assertEquals(6, merged.getSubtopics().get(1).getDistinctPassageCount());
+        assertTrue(merged.getSubtopics().get(0).getTitle().contains("helmets"));
+        assertTrue(merged.getSubtopics().get(1).getTitle().contains("training"));
+    }
 }

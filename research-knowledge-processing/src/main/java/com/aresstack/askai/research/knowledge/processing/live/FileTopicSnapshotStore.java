@@ -202,6 +202,7 @@ public final class FileTopicSnapshotStore {
             line(sb, "t." + i + ".subtopics", Integer.toString(topic.getSubtopics().size()));
             line(sb, "t." + i + ".group", topic.getGroupId());
             line(sb, "t." + i + ".concept", topic.isConceptAligned() ? topic.getConceptAnchorId() : "");
+            line(sb, "t." + i + ".conceptMaterial", join(topic.getConceptMaterialNodeIds()));
             line(sb, "t." + i + ".significant", Boolean.toString(topic.isSignificant()));
             line(sb, "t." + i + ".novel", Boolean.toString(topic.isNovel()));
             line(sb, "t." + i + ".scope", topic.getScopeAlignment().getVerdict().name());

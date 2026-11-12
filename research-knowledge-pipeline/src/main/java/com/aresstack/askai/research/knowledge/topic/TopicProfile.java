@@ -38,13 +38,14 @@ public final class TopicProfile {
     private final double evidenceShare;
     private final boolean major;
     private final ScopeAlignment scopeAlignment;
+    private final List<String> conceptMaterialNodeIds;
 
     public TopicProfile(String topicId, String title, List<String> passageIds, List<String> representativePassageIds,
                         int distinctPassageCount, int sourceCount, int domainCount, long materialChars,
                         double dispersion, List<Subtopic> subtopics, String groupId, List<TopicRelation> related,
                         String conceptAnchorId, double conceptSimilarity, boolean conceptAligned,
                         boolean materialCovered, boolean sourceConfirmed, double evidenceShare, boolean major,
-                        ScopeAlignment scopeAlignment) {
+                        ScopeAlignment scopeAlignment, List<String> conceptMaterialNodeIds) {
         this.topicId = topicId == null ? "" : topicId;
         this.title = title == null ? "" : title;
         this.passageIds = copy(passageIds);
@@ -67,6 +68,7 @@ public final class TopicProfile {
         this.scopeAlignment = scopeAlignment == null ? ScopeAlignment.UNKNOWN : scopeAlignment;
         this.evidenceShare = evidenceShare;
         this.major = major;
+        this.conceptMaterialNodeIds = copy(conceptMaterialNodeIds);
     }
 
     private static List<String> copy(List<String> values) {
@@ -180,8 +182,20 @@ public final class TopicProfile {
         return major;
     }
 
-    /** A significant topic that no concept node covers: new from the research (which says nothing about the fence). */
+    /**
+     * The concept nodes whose own material (at least the minimum of distinct passages assigned to the node) lies in
+     * this topic, in concept order; independent of the centroid alignment.
+     */
+    public List<String> getConceptMaterialNodeIds() {
+        return conceptMaterialNodeIds;
+    }
+
+    /**
+     * A significant topic that no concept node covers: new from the research (which says nothing about the fence).
+     * Neither its centroid aligns with a node nor does it carry the material of one; a topic whose centroid lies
+     * between the nodes whose material it holds is the concept's research, not a new topic.
+     */
     public boolean isNovel() {
-        return isSignificant() && !conceptAligned;
+        return isSignificant() && !conceptAligned && conceptMaterialNodeIds.isEmpty();
     }
 }

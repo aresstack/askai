@@ -12,10 +12,17 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Phase 2/3: characteristic terms of a passage set, deterministic and without a model: TF-IDF of the set's words
- * against the whole corpus, so words every passage uses (articles, the book's subject itself) sink and the words that
- * set this material apart rise. A word is a run of letters or digits of at least {@link #MIN_TERM_CHARS} characters
- * (the convention of the live projection's question coverage), lower-cased; pure numbers are skipped.
+ * Phase 2/3: characteristic terms of a passage set, deterministic and without a model or word list. A term scores by
+ * how much more often the set's passages use it than the corpus does: {@code df_set * ln(share_set / share_corpus)},
+ * with the shares counted in passages (its part of the divergence between the set and the corpus). A term the set
+ * uses no more often than the corpus scores nothing and is no key term: articles, auxiliaries and conjunctions of
+ * any language, and the subject of the whole book, are spread over every topic alike.
+ * <p>
+ * Live run 4 (2026-11-12): the former TF-IDF counted raw occurrences, so in a topic of 1681 passages "werden, oder,
+ * eine" outweighed every word that sets the material apart.
+ * <p>
+ * A word is a run of letters or digits of at least {@link #MIN_TERM_CHARS} characters (the convention of the live
+ * projection's question coverage), lower-cased; pure numbers are skipped.
  */
 public final class KeyTerms {
 
@@ -38,20 +45,31 @@ public final class KeyTerms {
         this.documents = count;
     }
 
-    /** The {@code count} highest-scoring terms of {@code texts}, best first; ties by the term. */
+    /**
+     * The {@code count} highest-scoring terms of {@code texts}, best first; ties by the term. Fewer when fewer terms
+     * are more frequent in the set than in the corpus (a set holding the whole corpus has none).
+     */
     public List<String> of(Collection<String> texts, int count) {
-        final Map<String, Integer> frequency = new HashMap<String, Integer>();
+        final Map<String, Integer> setFrequency = new HashMap<String, Integer>();
+        int setDocuments = 0;
         for (String text : texts) {
-            for (String term : terms(text)) {
-                Integer seen = frequency.get(term);
-                frequency.put(term, seen == null ? 1 : seen + 1);
+            setDocuments++;
+            for (String term : new HashSet<String>(terms(text))) {
+                Integer seen = setFrequency.get(term);
+                setFrequency.put(term, seen == null ? 1 : seen + 1);
             }
         }
+        long corpus = Math.max(documents, setDocuments);
         final Map<String, Double> score = new HashMap<String, Double>();
-        for (Map.Entry<String, Integer> entry : frequency.entrySet()) {
-            Integer df = documentFrequency.get(entry.getKey());
-            double idf = Math.log((documents + 1.0) / ((df == null ? 0 : df) + 1.0)) + 1.0;
-            score.put(entry.getKey(), entry.getValue() * idf);
+        for (Map.Entry<String, Integer> entry : setFrequency.entrySet()) {
+            long inSet = entry.getValue();
+            Integer known = documentFrequency.get(entry.getKey());
+            long inCorpus = Math.max(inSet, known == null ? 0 : known);
+            // share_set > share_corpus, compared exactly in integers so an even spread never scores by rounding
+            if (inSet * corpus > inCorpus * setDocuments) {
+                score.put(entry.getKey(),
+                        inSet * Math.log(((double) inSet * corpus) / ((double) inCorpus * setDocuments)));
+            }
         }
         List<String> ranked = new ArrayList<String>(score.keySet());
         Collections.sort(ranked, new Comparator<String>() {
