@@ -294,6 +294,20 @@ public class BookAssemblerTest {
         assertEquals(1, book.getReport().count(Kind.LATE_SOURCE));
     }
 
+    /**
+     * Live run 4, book 6: the source had a no-break space between two sentences, the passage (its sentences joined
+     * by one space) a plain space, and four citations showed "[?]".
+     */
+    @Test
+    public void aCitationResolvesWhenItsSourceHasANoBreakSpaceBetweenTwoSentences() {
+        String withNoBreakSpace = TEXT_C.replace("evening. Lithium", "evening. \u00A0Lithium");
+        AssembledBook book = new BookAssembler().assemble(clean()
+                .source(source("c", "Storage basics", withNoBreakSpace, false)).build());
+        assertTrue(book.getCitations().issues().toString(), book.getCitations().issues().isEmpty());
+        assertEquals(3, book.getCitations().numberOf("c"));
+        assertFalse(book.getMarkdown().contains("[?]"));
+    }
+
     @Test
     public void citationsResolveAfterReEmbeddingAndMismatchIsReportedNotRepointed() {
         BookAssemblyInput.Builder reembedded = clean().section(written("s21", "c2"), revision(

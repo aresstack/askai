@@ -31,6 +31,16 @@ public final class CitationValidator {
 
     /** {@code [3]}, {@code [1, 4]}, {@code [2; 5]}. */
     static final Pattern MARKER = Pattern.compile("\\[(\\d{1,3}(?:\\s*[,;]\\s*\\d{1,3})*)\\]");
+    /**
+     * A bracket group with a letter and no digit: the writer's own note in place of a citation ("[keine Passage]",
+     * live run 4) when it stands {@linkplain #inMarkerPlace where a marker belongs}. Only {@code [n]} cites a
+     * passage.
+     */
+    private static final Pattern NOTE = Pattern.compile("\\s*\\[(?=[^\\[\\]\\d]*\\p{L})[^\\[\\]\\d]+\\]");
+    /** What follows a note before a sentence end: closing quotes or brackets, then the end. */
+    private static final Pattern BEFORE_SENTENCE_END = Pattern.compile("^[\"'“”»’)]*(?:[.!?…]|$)");
+    /** What precedes a note after a sentence end: a full stop as {@link #SENTENCE_END} reads it. */
+    private static final Pattern AFTER_SENTENCE_END = Pattern.compile("[.!?][\"“”»’')]?$");
     private static final Pattern GAP = Pattern.compile("^\\s*(?:[-*]\\s*)?GAP\\s*:\\s*(.*)$",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern HEADING = Pattern.compile("^\\s*#{1,6}\\s+");
@@ -398,9 +408,21 @@ public final class CitationValidator {
         return SENTENCE_CLOSE.matcher(WHITESPACE.matcher(n).replaceAll(" ").trim()).replaceAll("");
     }
 
-    /** Removes the numbers of a marker outside 1..k; a marker left empty disappears with its leading space. */
+    /**
+     * Removes the numbers of a marker outside 1..k and every {@linkplain #NOTE note in a marker's place}; a marker
+     * left empty disappears with its leading space.
+     */
     static String stripUnknown(String text, int k, List<String> stripped) {
-        Matcher m = MARKER.matcher(text);
+        Matcher note = NOTE.matcher(text);
+        StringBuffer clean = new StringBuffer();
+        while (note.find()) {
+            if (inMarkerPlace(text, note.start(), note.end())) {
+                stripped.add(note.group().trim());
+                note.appendReplacement(clean, "");
+            }
+        }
+        note.appendTail(clean);
+        Matcher m = MARKER.matcher(clean.toString());
         StringBuffer out = new StringBuffer();
         while (m.find()) {
             List<String> kept = new ArrayList<String>();
@@ -417,6 +439,24 @@ public final class CitationValidator {
         }
         m.appendTail(out);
         return out.toString().replaceAll("\\s+([.,;:!?])", "$1").replaceAll("\\s{2,}", " ").trim();
+    }
+
+    /**
+     * True when the bracket group from {@code start} to {@code end} stands where a marker belongs: before a sentence
+     * end, or after one as {@link #sentences} reads it. A full stop after an abbreviation ("z. B.") or before a
+     * lowercase word or a comma ends no sentence, so a bracket there is prose ("z. B. [Puls und Temperatur], …").
+     */
+    private static boolean inMarkerPlace(String text, int start, int end) {
+        String after = text.substring(end);
+        if (BEFORE_SENTENCE_END.matcher(after).find()) {
+            return true;
+        }
+        String before = text.substring(0, start).trim();
+        String next = after.trim();
+        return AFTER_SENTENCE_END.matcher(before).find()
+                && !ABBREVIATION.matcher(before).find()
+                && (after.isEmpty() || Character.isWhitespace(after.charAt(0)))
+                && (next.isEmpty() || !startsLowercase(next));
     }
 
     /** Splits a paragraph into sentences; markers written after the full stop belong to the sentence before. */
