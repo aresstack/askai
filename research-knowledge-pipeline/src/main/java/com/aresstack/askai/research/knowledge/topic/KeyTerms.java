@@ -13,10 +13,12 @@ import java.util.Set;
 
 /**
  * Phase 2/3: characteristic terms of a passage set, deterministic and without a model or word list. A term scores by
- * how much more often the set's passages use it than the corpus does: {@code df_set * ln(share_set / share_corpus)},
- * with the shares counted in passages (its part of the divergence between the set and the corpus). A term the set
- * uses no more often than the corpus scores nothing and is no key term: articles, auxiliaries and conjunctions of
- * any language, and the subject of the whole book, are spread over every topic alike.
+ * how much more often the set's passages use it than the corpus does, weighted by how rare it is in the corpus:
+ * {@code df_set * ln(share_set / share_corpus) * ln(N / df_corpus)}, with the shares counted in passages. A term the
+ * set uses no more often than the corpus scores nothing and is no key term: articles, auxiliaries and conjunctions of
+ * any language, and the subject of the whole book, are spread over every topic alike. The rarity weight keeps a
+ * function word out that a set uses only slightly more often (live run 4 after #203: "diese" and "nach" in nodes
+ * whose sources were more often German than the rest of the corpus).
  * <p>
  * Live run 4 (2026-11-12): the former TF-IDF counted raw occurrences, so in a topic of 1681 passages "werden, oder,
  * eine" outweighed every word that sets the material apart.
@@ -68,7 +70,8 @@ public final class KeyTerms {
             // share_set > share_corpus, compared exactly in integers so an even spread never scores by rounding
             if (inSet * corpus > inCorpus * setDocuments) {
                 score.put(entry.getKey(),
-                        inSet * Math.log(((double) inSet * corpus) / ((double) inCorpus * setDocuments)));
+                        inSet * Math.log(((double) inSet * corpus) / ((double) inCorpus * setDocuments))
+                                * Math.log((double) corpus / inCorpus));
             }
         }
         List<String> ranked = new ArrayList<String>(score.keySet());

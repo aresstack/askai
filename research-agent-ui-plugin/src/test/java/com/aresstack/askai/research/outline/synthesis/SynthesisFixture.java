@@ -103,6 +103,16 @@ final class SynthesisFixture {
         return base;
     }
 
+    /** A first-level concept node along the sum of several directions (a node spanning several aspects). */
+    void conceptAlong(String id, String label, int... directions) {
+        float[] values = new float[DIMENSION];
+        for (int direction : directions) {
+            values[direction] = 1f;
+        }
+        anchors.add(new ConceptAnchor(id, label, "Book > " + label, 1, "",
+                new EmbeddingPort.EmbeddingVector("m", "fp", values)));
+    }
+
     /** A first-level concept node (below the book frame) along {@code direction}. */
     void concept(String id, String label, int direction) {
         float[] values = new float[DIMENSION];

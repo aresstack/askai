@@ -163,13 +163,16 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             treated.addAll(chapter.getConceptKeys());
         }
         for (SynthesisBrief.TopicEntry topic : brief.getTopics()) {
-            if (topic.getConceptKey().isEmpty()) {
-                continue;
-            }
             for (String unit : units(brief, topic.getKey())) {
-                if (usedUnits.contains(unit)) {
+                if (!usedUnits.contains(unit)) {
+                    continue;
+                }
+                if (!topic.getConceptKey().isEmpty()) {
                     treated.add(topic.getConceptKey());
-                    break;
+                }
+                SynthesisBrief.SubtopicEntry part = brief.subtopic(unit);
+                if (part != null && !part.getConceptKey().isEmpty()) {
+                    treated.add(part.getConceptKey()); // a used concept part treats its requirement
                 }
             }
         }
@@ -183,6 +186,12 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             SynthesisBrief.TopicEntry topic = brief.topic(brief.topicKeyOf(key));
             if (topic != null && !topic.getConceptKey().isEmpty()) {
                 evidenced.add(topic.getConceptKey());
+            }
+            for (String unit : units(brief, key)) {
+                SynthesisBrief.SubtopicEntry part = brief.subtopic(unit);
+                if (part != null && !part.getConceptKey().isEmpty()) {
+                    evidenced.add(part.getConceptKey());
+                }
             }
         }
         return evidenced;

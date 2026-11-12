@@ -115,7 +115,7 @@ public final class TopicAnalyzer {
             Draft draft = draft(topic, byId, vectors, duplicateGroupOf, subtopicCut, groupRootOf, nodes, fence);
             draft.conceptMaterial = conceptMaterial(topic.getMemberPassageIds(), nodeOf, duplicateGroupOf, nodes);
             List<Subtopic> parts = conceptParts(topic.getMemberPassageIds(), draft.conceptMaterial, nodeOf, nodes,
-                    byId, vectors, duplicateGroupOf);
+                    byId, vectors, duplicateGroupOf, subtopicCut);
             if (parts != null) {
                 draft.subtopics = parts;
             }
@@ -353,7 +353,7 @@ public final class TopicAnalyzer {
                                         Map<String, Integer> nodeOf, List<ConceptAnchor> nodes,
                                         Map<String, AnalysisPassage> byId,
                                         Map<String, EmbeddingPort.EmbeddingVector> vectors,
-                                        Map<String, String> duplicateGroupOf) {
+                                        Map<String, String> duplicateGroupOf, List<List<String>> subtopicCut) {
         Map<String, String> parentOf = new HashMap<String, String>();
         Map<String, Integer> indexOf = new HashMap<String, Integer>();
         for (int i = 0; i < nodes.size(); i++) {
@@ -372,12 +372,58 @@ public final class TopicAnalyzer {
                     group.add(id);
                 }
             }
-            Subtopic part = subtopic(group, byId, vectors, duplicateGroupOf, nodeId);
-            if (part != null) {
-                parts.add(part);
-            }
+            parts.addAll(piecesOf(group, nodeId, byId, vectors, duplicateGroupOf, subtopicCut));
         }
         return parts.size() < 2 ? null : parts;
+    }
+
+    /**
+     * The aspects of one concept node's material in a topic: the groups of the sub-topic cut within that material
+     * that keep the minimum of distinct passages, each marked with the node; the node's passages in no such group
+     * join its largest group. Without such a group the whole material is one aspect.
+     * <p>
+     * Live run 4 (2026-11-12): one aspect per concept node gave every chapter exactly one section, also the chapter
+     * holding 809 passages of 74 sources; the sub-topic cut inside the node's material gives the section planning the
+     * aspects it can treat separately.
+     */
+    private List<Subtopic> piecesOf(List<String> group, String nodeId, Map<String, AnalysisPassage> byId,
+                                    Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                    Map<String, String> duplicateGroupOf, List<List<String>> subtopicCut) {
+        Set<String> inNode = new HashSet<String>(group);
+        List<List<String>> pieces = new ArrayList<List<String>>();
+        Set<String> placed = new HashSet<String>();
+        for (List<String> cut : subtopicCut) {
+            List<String> piece = new ArrayList<String>();
+            for (String id : cut) {
+                if (inNode.contains(id)) {
+                    piece.add(id);
+                }
+            }
+            if (!piece.isEmpty() && subtopic(piece, byId, vectors, duplicateGroupOf, nodeId) != null) {
+                pieces.add(piece);
+                placed.addAll(piece);
+            }
+        }
+        if (pieces.isEmpty()) {
+            Subtopic whole = subtopic(group, byId, vectors, duplicateGroupOf, nodeId);
+            return whole == null ? Collections.<Subtopic>emptyList() : Collections.singletonList(whole);
+        }
+        List<String> largest = pieces.get(0);
+        for (List<String> piece : pieces) {
+            if (piece.size() > largest.size()) {
+                largest = piece;
+            }
+        }
+        for (String id : group) {
+            if (!placed.contains(id)) {
+                largest.add(id);
+            }
+        }
+        List<Subtopic> result = new ArrayList<Subtopic>();
+        for (List<String> piece : pieces) {
+            result.add(subtopic(piece, byId, vectors, duplicateGroupOf, nodeId));
+        }
+        return result;
     }
 
     /** Whether two of the nodes lie in independent lineages (neither below the other). */
