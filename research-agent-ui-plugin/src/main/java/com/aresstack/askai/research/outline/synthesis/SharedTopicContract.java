@@ -110,12 +110,18 @@ final class SharedTopicContract {
                 text.append("   excerpt: ").append(PlanJson.quote(subtopic.getExcerpt())).append('\n');
             }
         }
+        // Live outline acceptance 2026-11-12 (gemma4:e2b): the answer example used real chapter numbers in turn and
+        // the model copied it, so the sub-topics went round-robin instead of by fit. The example names no number.
         text.append(RULES).append("Answer: {");
         for (int i = 0; i < shared.open.size(); i++) {
-            text.append(i > 0 ? "," : "").append('"').append(shared.open.get(i)).append("\":")
-                    .append(shared.chapters.get(i % shared.chapters.size()) + 1);
+            text.append(i > 0 ? "," : "").append('"').append(shared.open.get(i)).append("\":N");
         }
-        return text.append("} (chapter numbers)").toString();
+        text.append("} where each N is the number of the chapter that sub-topic fits best (");
+        for (int i = 0; i < shared.chapters.size(); i++) {
+            text.append(i == 0 ? "" : i == shared.chapters.size() - 1 ? " or " : ", ")
+                    .append(shared.chapters.get(i) + 1);
+        }
+        return text.append(')').toString();
     }
 
     static String schema(Shared shared) {

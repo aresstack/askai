@@ -368,6 +368,10 @@ public class OutlineSynthesizerTest {
         assertTrue(division.prompt(), division.prompt().contains("1 \"Helmets\""));
         assertTrue(division.prompt().contains("T1.4 "));
         assertTrue(division.schema, division.schema.contains("\"enum\":[1,2,3]"));
+        // live 2026-11-12: gemma4:e2b copied an example with real numbers in turn instead of dividing by fit
+        assertTrue(division.prompt(), division.prompt().contains("{\"T1.1\":N,\"T1.2\":N,\"T1.3\":N,\"T1.4\":N}"));
+        assertTrue(division.prompt(), division.prompt().contains("(1, 2 or 3)"));
+        assertFalse(division.prompt(), division.prompt().contains("\"T1.1\":1"));
         List<PlannedChapter> chapters = result.getPlan().getChapters();
         assertEquals(3, chapters.size());
         assertEquals(Collections.singletonList("T1.1"), chapters.get(0).getMaterialKeys());
