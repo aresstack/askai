@@ -3015,6 +3015,15 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     return "";
                                 }
                             }
+                        },
+                        new java.util.function.Supplier<
+                                com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking>() {
+                            public com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking get() {
+                                com.aresstack.askai.research.plan.SourcePreference preference = sourcePreference();
+                                return new com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking(
+                                        preference.getPreferredHosts(), preference.getDemotedMarkers(),
+                                        preference.getRankShift());
+                            }
                         });
         writingContexts = contexts;
         final com.aresstack.askai.research.knowledge.processing.acronym.SourceAcronymService acronyms =

@@ -43,7 +43,30 @@ public final class SourcePreferenceRanking {
 
     /** Whether a hit comes from a preferred host. */
     public boolean preferred(SearchResultCandidate candidate) {
-        String host = hostOf(candidate);
+        return preferredHost(hostOf(candidate));
+    }
+
+    /** Whether a hit is a vendor page (and not from a preferred host). */
+    public boolean demoted(SearchResultCandidate candidate) {
+        return !preferred(candidate) && vendorUrl(candidate.resolvedTargetUrl);
+    }
+
+    /**
+     * The places a page at this URL moves: up ({@code -shift}) when it comes from a preferred host, down
+     * ({@code +shift}) when it is a vendor page, 0 otherwise. The evidence pack of a section weighs its sources by
+     * it, as a planned query weighs its hits.
+     */
+    public int shiftOf(String url) {
+        if (isNone()) {
+            return 0;
+        }
+        if (preferredHost(hostOf(url))) {
+            return -shift;
+        }
+        return vendorUrl(url) ? shift : 0;
+    }
+
+    private boolean preferredHost(String host) {
         if (host.isEmpty()) {
             return false;
         }
@@ -56,14 +79,13 @@ public final class SourcePreferenceRanking {
         return false;
     }
 
-    /** Whether a hit is a vendor page (and not from a preferred host). */
-    public boolean demoted(SearchResultCandidate candidate) {
-        if (preferred(candidate)) {
+    private boolean vendorUrl(String url) {
+        String lower = url == null ? "" : url.toLowerCase(Locale.ROOT);
+        if (lower.isEmpty()) {
             return false;
         }
-        String url = candidate.resolvedTargetUrl == null ? "" : candidate.resolvedTargetUrl.toLowerCase(Locale.ROOT);
         for (String marker : demotedMarkers) {
-            if (!url.isEmpty() && url.contains(marker)) {
+            if (lower.contains(marker)) {
                 return true;
             }
         }
@@ -101,20 +123,28 @@ public final class SourcePreferenceRanking {
     }
 
     private static String hostOf(SearchResultCandidate candidate) {
-        String url = candidate.resolvedTargetUrl == null ? "" : candidate.resolvedTargetUrl.trim();
-        String host = "";
-        if (!url.isEmpty()) {
-            try {
-                String h = new java.net.URI(url).getHost();
-                host = h == null ? "" : h;
-            } catch (java.net.URISyntaxException malformed) {
-                host = "";
-            }
-        }
+        String host = hostOf(candidate.resolvedTargetUrl);
         if (host.isEmpty() && candidate.displayedDomain != null) {
             host = candidate.displayedDomain.trim();
             int slash = host.indexOf('/');
             host = slash >= 0 ? host.substring(0, slash) : host;
+            host = host.toLowerCase(Locale.ROOT);
+            host = host.startsWith("www.") ? host.substring(4) : host;
+        }
+        return host;
+    }
+
+    /** The lower-case host of a URL without "www.", or "" when the URL has none. */
+    private static String hostOf(String url) {
+        String trimmed = url == null ? "" : url.trim();
+        String host = "";
+        if (!trimmed.isEmpty()) {
+            try {
+                String h = new java.net.URI(trimmed).getHost();
+                host = h == null ? "" : h;
+            } catch (java.net.URISyntaxException malformed) {
+                host = "";
+            }
         }
         host = host.toLowerCase(Locale.ROOT);
         return host.startsWith("www.") ? host.substring(4) : host;

@@ -687,8 +687,9 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_SOURCE_PREFERENCE_QUERIES = "research.sources.preferenceQueriesPerNode";
     public static final int DEFAULT_SOURCE_PREFERENCE_QUERIES = 1;
     /**
-     * The places a preferred hit moves up and a vendor page moves down among the selected hits of a planned query.
-     * Default 3: a guideline ranked fifth opens before a vendor blog ranked second, the clearly best hit stays first.
+     * The places a preferred hit moves up and a vendor page moves down among the selected hits of a planned query,
+     * and a passage of such a source in the evidence pack of a section. Default 3: a guideline ranked fifth opens
+     * before a vendor blog ranked second, the clearly best hit stays first.
      */
     public static final String KEY_SOURCE_PREFERENCE_RANK_SHIFT = "research.sources.preferenceRankShift";
     public static final int DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT = 3;

@@ -755,7 +755,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindNonNegativeLimit(preferenceRankShift, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_RANK_SHIFT,
                 ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT,
                 "Places a hit from a preferred host moves up, and a vendor page moves down, among the ranked hits "
-                        + "of a planned query; 0 = the ranking stays as it is.");
+                        + "of a planned query and among the passages of a section's evidence pack; 0 = the ranking "
+                        + "stays as it is.");
         bindText(preferencePublishers, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_PUBLISHERS,
                 ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_PUBLISHERS,
                 "Name=domain pairs, comma-separated: a publisher the mission names becomes site:domain queries and "
