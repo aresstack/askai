@@ -157,6 +157,12 @@ public final class SectionAssignment {
 
     /** A copy for one key-point part with that part's passages; the part's calls get all of them. */
     SectionAssignment part(List<String> partKeyPoints, List<EvidencePassage> partPassages, int words, String digest) {
+        return part(partKeyPoints, partPassages, words, digest, currentText);
+    }
+
+    /** As above, with the part's share of a rewrite's current text (empty: the part is written as a first draft). */
+    SectionAssignment part(List<String> partKeyPoints, List<EvidencePassage> partPassages, int words, String digest,
+                           String partText) {
         Builder b = new Builder(sectionId);
         b.title = title;
         b.brief = brief;
@@ -170,7 +176,7 @@ public final class SectionAssignment {
         b.sectionWords = words;
         b.answerTokens = answerTokens;
         b.rewriteComment = rewriteComment;
-        b.currentText = currentText;
+        b.currentText = partText == null ? "" : partText.trim();
         b.carry = carry;
         return new SectionAssignment(b);
     }

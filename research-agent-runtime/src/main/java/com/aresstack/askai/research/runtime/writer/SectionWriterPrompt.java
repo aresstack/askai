@@ -124,9 +124,9 @@ public final class SectionWriterPrompt {
             sb.append(a.getRewriteComment().isEmpty() ? ".\n" : " and follow the user's comment: "
                     + a.getRewriteComment() + "\n");
             if (withCurrentText && !a.getCurrentText().isEmpty()) {
-                // its markers numbered an earlier pack (and every part gets its own numbers): cite the PASSAGES
-                sb.append("CURRENT TEXT (to be replaced; its old citations are left out, cite the PASSAGES "
-                        + "below):\n\"\"\"").append(withoutMarkers(a.getCurrentText()).replace("\"\"\"", "\""))
+                // this part's share; its markers numbered an earlier pack (every part numbers its own passages)
+                sb.append("CURRENT TEXT OF THIS PART (to be replaced; its old citations are left out, cite the "
+                        + "PASSAGES below):\n\"\"\"").append(withoutMarkers(a.getCurrentText()).replace("\"\"\"", "\""))
                         .append("\"\"\"\n");
             }
         }

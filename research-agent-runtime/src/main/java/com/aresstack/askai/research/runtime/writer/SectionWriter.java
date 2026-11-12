@@ -352,27 +352,85 @@ public final class SectionWriter {
 
     /**
      * Splits a section into key-point parts when it needs more words than one call writes; each part carries the
-     * passages of the pack it gets ({@link #passagesFor}), with the pack's numbers.
+     * passages of the pack it gets ({@link #passagesFor}), with the pack's numbers, and in a rewrite its share of the
+     * current text ({@link #currentTextShares}).
      */
     static List<SectionAssignment> parts(SectionAssignment a) {
         List<SectionAssignment> parts = new ArrayList<SectionAssignment>();
         int per = a.getWordsPerCall();
         List<String> points = a.getKeyPoints();
         int count = SectionAssignment.partCount(a.getSectionWords(), per, points.size());
+        int words = count == 1 ? Math.min(a.getSectionWords(), per)
+                : Math.min(per, (a.getSectionWords() + count - 1) / count);
+        // a part rewrites at most its own word target of the old text (SectionAssignment raises it to the minimum)
+        List<String> shares = currentTextShares(a.getCurrentText(), count,
+                Math.max(SectionAssignment.MIN_WORDS_PER_CALL, words));
         if (count == 1) {
-            parts.add(a.part(points, Math.min(a.getSectionWords(), per), a.getPreviousDigest()));
+            parts.add(a.part(points, a.getPassages(), words, a.getPreviousDigest(), shares.get(0)));
             return parts;
         }
-        int words = Math.min(per, (a.getSectionWords() + count - 1) / count);
         ClaimCarryCheck measure = new ClaimCarryCheck(a.getCarry());
         Set<Integer> taken = new HashSet<Integer>();
         for (int i = 0; i < count; i++) {
             int from = i * points.size() / count;
             int to = (i + 1) * points.size() / count;
             List<String> partPoints = new ArrayList<String>(points.subList(from, to));
-            parts.add(a.part(partPoints, passagesFor(a, partPoints, taken, measure), words, a.getPreviousDigest()));
+            parts.add(a.part(partPoints, passagesFor(a, partPoints, taken, measure), words, a.getPreviousDigest(),
+                    shares.get(i)));
         }
         return parts;
+    }
+
+    /**
+     * The share of a rewrite's current text that each of {@code count} parts rewrites (plan, "Rewrite section part":
+     * the current text of the part, up to the per-call word target). The sentences keep their order; each goes to the
+     * part in whose k-th of the text its middle lies, paragraph breaks stay, and a share takes no sentence beyond
+     * {@code max} words. Live run 4: every part got the whole old section, copied its sentences (uncited, the old
+     * markers are left out of the prompt) and repeated the other parts. Empty shares for a first draft.
+     */
+    static List<String> currentTextShares(String text, int count, int max) {
+        List<String> sentences = new ArrayList<String>();
+        List<Integer> paragraphs = new ArrayList<Integer>();
+        List<Integer> sizes = new ArrayList<Integer>();
+        int total = 0;
+        String[] blocks = text == null || text.trim().isEmpty() ? new String[0] : text.trim().split("\\n\\s*\\n");
+        for (int p = 0; p < blocks.length; p++) {
+            for (CitationValidator.Sentence sentence : CitationValidator.sentences(blocks[p].replace('\n', ' '))) {
+                String plain = sentence.plainText();
+                int size = plain.isEmpty() ? 0 : plain.split("\\s+").length;
+                sentences.add(sentence.getText());
+                paragraphs.add(p);
+                sizes.add(size);
+                total += size;
+            }
+        }
+        StringBuilder[] shares = new StringBuilder[count];
+        int[] used = new int[count];
+        int[] lastParagraph = new int[count];
+        for (int i = 0; i < count; i++) {
+            shares[i] = new StringBuilder();
+            lastParagraph[i] = -1;
+        }
+        int before = 0;
+        for (int j = 0; j < sentences.size(); j++) {
+            int size = sizes.get(j);
+            int part = (int) Math.min(count - 1, (2L * before + size) * count / (2L * Math.max(1, total)));
+            before += size;
+            if (used[part] + size > max) {
+                continue;
+            }
+            if (shares[part].length() > 0) {
+                shares[part].append(lastParagraph[part] == paragraphs.get(j) ? " " : "\n\n");
+            }
+            shares[part].append(sentences.get(j));
+            used[part] += size;
+            lastParagraph[part] = paragraphs.get(j);
+        }
+        List<String> out = new ArrayList<String>();
+        for (StringBuilder share : shares) {
+            out.add(share.toString());
+        }
+        return out;
     }
 
     /**

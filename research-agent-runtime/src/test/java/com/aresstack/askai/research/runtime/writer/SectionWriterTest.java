@@ -171,6 +171,46 @@ public class SectionWriterTest {
         assertEquals("Neu [1]. Weiter [2].", draft.getText());
     }
 
+    /** Live run 4: every part of a rewrite got the whole old section and copied sentences of the other parts. */
+    @Test
+    public void eachPartOfARewriteGetsItsShareOfTheCurrentText() {
+        SectionAssignment a = SectionAssignment.builder("s1").title("T")
+                .keyPoints(Arrays.asList("k1", "k2", "k3", "k4")).passages(pack(6)).wordsPerCall(450)
+                .sectionWords(900).answerTokens(1200)
+                .currentText("Erster alter Satz des Abschnitts [1]. Zweiter alter Satz des Abschnitts [2].\n\n"
+                        + "Dritter alter Satz des Abschnitts [3]. Vierter alter Satz des Abschnitts [4].")
+                .build();
+        ScriptedChat chat = new ScriptedChat().answer("Teil eins [1].").answer("Teil zwei [2].");
+        new SectionWriter(chat, null).write(a);
+        String first = chat.requests.get(0).get(1).getContent();
+        String second = chat.requests.get(1).get(1).getContent();
+        assertTrue(first, first.contains("CURRENT TEXT OF THIS PART"));
+        assertTrue(first.contains("Erster alter Satz des Abschnitts. Zweiter alter Satz des Abschnitts."));
+        assertFalse(first.contains("Dritter alter Satz"));
+        assertTrue(second.contains("Dritter alter Satz des Abschnitts. Vierter alter Satz des Abschnitts."));
+        assertFalse(second.contains("Zweiter alter Satz"));
+    }
+
+    @Test
+    public void theCurrentTextIsSharedInOrderAndCappedAtThePartTarget() {
+        String text = "Eins zwei drei vier [1]. Fünf sechs sieben acht.\n\n"
+                + "Neun zehn elf zwölf [2]. Dreizehn vierzehn fünfzehn sechzehn.";
+        assertEquals(Arrays.asList("Eins zwei drei vier [1]. Fünf sechs sieben acht.",
+                "Neun zehn elf zwölf [2]. Dreizehn vierzehn fünfzehn sechzehn."),
+                SectionWriter.currentTextShares(text, 2, 50));
+        assertEquals("paragraph breaks stay within a share",
+                Arrays.asList("Eins zwei drei vier [1]. Fünf sechs sieben acht.\n\nNeun zehn elf zwölf [2]. "
+                        + "Dreizehn vierzehn fünfzehn sechzehn."), SectionWriter.currentTextShares(text, 1, 50));
+        assertEquals("no sentence beyond the part's target",
+                Arrays.asList("Eins zwei drei vier [1].", "Neun zehn elf zwölf [2]."),
+                SectionWriter.currentTextShares(text, 2, 6));
+        assertEquals("a first draft has empty shares", Arrays.asList("", ""),
+                SectionWriter.currentTextShares("", 2, 50));
+        assertEquals("more parts than sentences: a sentence goes to the part its middle lies in, others get none",
+                Arrays.asList("", "Eins zwei drei vier.", ""),
+                SectionWriter.currentTextShares("Eins zwei drei vier.", 3, 50));
+    }
+
     @Test
     public void longSectionIsSplitByKeyPoints() {
         SectionAssignment a = SectionAssignment.builder("s1").title("T")
