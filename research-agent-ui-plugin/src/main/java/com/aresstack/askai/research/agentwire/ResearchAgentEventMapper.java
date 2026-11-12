@@ -211,6 +211,9 @@ public final class ResearchAgentEventMapper {
         } else {
             subKind = "failed";
             message = manualSearchFailureText(f.get("reason"));
+            // The reason token itself for the search plan: the plan decides by it (a team without a free tab is
+            // not a failing engine), the German line above is only for the chat.
+            publicMessage = f.get("reason") == null ? "" : f.get("reason").trim();
         }
         return ResearchBackendEvent.builder(ResearchBackendEventType.MANUAL_SEARCH)
                 .activity("manual-search-" + requestId, ResearchActivityKind.TOOL_UPDATE, subKind, message)

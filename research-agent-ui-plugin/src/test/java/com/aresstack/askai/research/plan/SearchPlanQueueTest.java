@@ -1042,6 +1042,47 @@ public class SearchPlanQueueTest {
         assertEquals(1, queue.runningEntryCount());
     }
 
+    /**
+     * Live run 4 (2026-11-10): the first search held every tab of the team; the next three planned searches got
+     * none and paused the plan as "3 planned searches in a row failed". A query without a free tab is no failing
+     * engine: it waits for a running search to end and keeps the team.
+     */
+    @Test
+    public void aTeamQueryWithoutAFreeTabWaitsForARunningSearchInsteadOfFailing() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(4));
+        queue.run();
+        for (int round = 0; round < SearchPlanQueue.MAX_CONSECUTIVE_FAILURES; round++) {
+            String reading = port.requests.get(port.requests.size() - 1);
+            queue.onOpenPages(reading, 1); // the running search nears its end: the next one starts
+            String waiting = port.requests.get(port.requests.size() - 1);
+            int started = port.searched.size();
+            current().onSearchEvent(waiting, "failed", SearchPlanQueue.TEAM_TABS_BUSY, false);
+            assertTrue("no failure streak", queue.isRunning());
+            assertTrue(outcomes.isEmpty());
+            queue.onOpenPages(reading, 0);
+            assertEquals("no search starts while the running one holds the tabs", started, port.searched.size());
+            port.completeRequest(reading); // its tabs are free: the waiting query runs, again as team work
+            assertEquals(started + 1, port.searched.size());
+            assertEquals(port.searched.get(started - 1), port.searched.get(started));
+            assertEquals(port.requests, port.teamRequests);
+        }
+    }
+
+    @Test
+    public void aTeamQueryWithoutAFreeTabAndNoOtherSearchGoesOnInTheChatBrowser() throws Exception {
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setTeam(team(2));
+        queue.run();
+        current().onSearchEvent("req-1", "failed", SearchPlanQueue.TEAM_TABS_BUSY, false);
+        assertTrue(queue.isRunning());
+        assertEquals(2, port.searched.size());
+        assertEquals(1, port.teamRequests.size()); // nothing of the team can come free: one query at a time
+        assertEquals(1, queue.runningEntryCount());
+    }
+
     @Test
     public void aPageWorkerReportStaysOnItsEntryAndReachesTheNextCyclePlanner() throws Exception {
         build(Collections.singletonList(node("a", "Classloader", "Classloader Java")),

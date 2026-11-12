@@ -4003,6 +4003,22 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      * Render a user web search lifecycle event as a transient activity, correlated by requestId so late events
      * of a superseded or cancelled run are ignored. It changes NO phase and NO state — a pure service surface.
      */
+    /**
+     * What the search plan reads of a planned query's event: the reason token of a failed search (live run 4,
+     * 2026-11-10: the plan got the German chat line "Websuche fehlgeschlagen." instead of NO_WORKER_BROWSER, so a
+     * research team without a free tab counted as a failing engine and paused the plan after one search), the
+     * event's text otherwise.
+     */
+    static String planEventDetail(ResearchBackendEvent event) {
+        if ("failed".equals(event.getTitle())) {
+            String reason = event.getPublicMessage() == null ? "" : event.getPublicMessage().trim();
+            if (!reason.isEmpty()) {
+                return reason;
+            }
+        }
+        return event.getText();
+    }
+
     /** The accepted-source count a "completed" manual-search event carries (0 when absent). */
     static int acceptedCount(ResearchBackendEvent event) {
         try {
@@ -4045,7 +4061,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 return;
             }
             // Plan PR 14: a planned query posts no chat line; the plan checklist shows its status.
-            planQueue.onSearchEvent(event.getTechnicalDetail(), event.getTitle(), event.getText(),
+            planQueue.onSearchEvent(event.getTechnicalDetail(), event.getTitle(), planEventDetail(event),
                     event.getPublicMessage().trim().endsWith(" keywords"));
             return;
         }

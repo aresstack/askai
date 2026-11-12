@@ -9,7 +9,11 @@ import com.aresstack.askai.research.runtime.loop.ToolInvoker;
  * search engine; searching is the search browser's job). The user context is opened with the first worker and
  * closed when the last one has given its tab back.
  *
- * <p>Thread-safe. The number of tabs is bounded by the "Tabs/user context" setting of the worker browsers.</p>
+ * <p>Thread-safe. The number of tabs is bounded by the "Tabs/user context" setting of the worker browsers. When
+ * every tab is taken, a worker waits for one that another search gives back, at most the worker browsers' wait
+ * setting ({@link BrowserUserContextPool#acquireTimeoutMillis()}), then fails honestly — live run 4 (2026-11-10):
+ * the first planned search held all four tabs until its end and the next three planned searches failed at once
+ * for want of a tab, which paused the whole plan after one search.</p>
  */
 public final class TeamTabs {
 
@@ -58,6 +62,8 @@ public final class TeamTabs {
     /** A worker is opening the team's user context right now; the others wait for it. */
     private boolean opening;
     private int open;
+    /** Counts every tab given back, so a worker waiting at the tab limit knows one came free. */
+    private long released;
 
     public TeamTabs(BrowserUserContextPool pool) {
         this.pool = pool;
@@ -70,12 +76,56 @@ public final class TeamTabs {
 
     /**
      * A tab of its own for one page worker; opens the team's user context first when none is open (waits at most
-     * the worker browsers' wait setting).
+     * the worker browsers' wait setting), and waits as long for a tab another worker gives back when the tab limit
+     * is reached.
      *
-     * @throws BrowserCapacityException no worker browser came free, or the tab limit is reached
+     * @throws BrowserCapacityException no worker browser came free, or no tab came free within the wait setting
      * @throws InterruptedException     the waiting worker was cancelled
      */
     public Tab acquire(String taskId) throws BrowserCapacityException, InterruptedException {
+        long deadline = System.currentTimeMillis() + Math.max(0L, pool.acquireTimeoutMillis());
+        boolean waited = false;
+        while (true) {
+            long seen;
+            synchronized (this) {
+                seen = released;
+            }
+            try {
+                return acquireNow(taskId);
+            } catch (BrowserCapacityException full) {
+                if (!tabLimitReached()) {
+                    throw full;
+                }
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) {
+                    throw new BrowserCapacityException(full.getMessage() + (waited
+                            ? " No tab came free within " + (pool.acquireTimeoutMillis() / 1000L) + " s."
+                            : ""), full);
+                }
+                if (!waited) {
+                    System.err.println("[team] every tab is taken: " + taskId + " waits up to " + (left / 1000L)
+                            + " s for one that a running search gives back");
+                    waited = true;
+                }
+                synchronized (this) {
+                    while (released == seen) {
+                        long remaining = deadline - System.currentTimeMillis();
+                        if (remaining <= 0) {
+                            break;
+                        }
+                        wait(remaining);
+                    }
+                }
+            }
+        }
+    }
+
+    /** Whether a refused acquisition failed at the tab limit (worth a wait) rather than for want of a browser. */
+    private synchronized boolean tabLimitReached() {
+        return lease != null && open > 0; // without an open team user context nothing of ours can come free
+    }
+
+    private Tab acquireNow(String taskId) throws BrowserCapacityException, InterruptedException {
         BrowserUserContextLease current;
         boolean opener = false;
         synchronized (this) {
@@ -137,7 +187,7 @@ public final class TeamTabs {
         tabs.add(acquire(taskId));
         while (tabs.size() < max) {
             try {
-                tabs.add(acquire(taskId + "#" + (tabs.size() + 1)));
+                tabs.add(acquireNow(taskId + "#" + (tabs.size() + 1)));
             } catch (BrowserCapacityException full) {
                 break; // the other searches hold the rest; this search reads with what it has
             }
@@ -170,6 +220,10 @@ public final class TeamTabs {
             }
         }
         giveBack();
+        synchronized (this) {
+            released++; // after the tab is closed in the browser, so a waiting worker's next try finds it free
+            notifyAll();
+        }
     }
 
     private synchronized String userContextIdOf() {

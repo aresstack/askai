@@ -92,6 +92,73 @@ public class TeamTabsTest {
         assertFalse(pool.leases.get(0).open);
     }
 
+    /**
+     * Live run 4 (2026-11-10): the first planned search held every tab until its end and the next search failed at
+     * once. A worker at the tab limit now waits for a tab another search gives back, within the wait setting.
+     */
+    @Test(timeout = 10_000)
+    public void aWorkerAtTheTabLimitWaitsForATabThatAnotherSearchGivesBack() throws Exception {
+        FakePool pool = new FakePool(2, 5_000L);
+        final TeamTabs tabs = new TeamTabs(pool);
+        TeamTabs.Tab first = tabs.acquire("q1");
+        TeamTabs.Tab second = tabs.acquire("q2");
+        final TeamTabs.Tab[] got = new TeamTabs.Tab[1];
+        final Exception[] failed = new Exception[1];
+        Thread waiting = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    got[0] = tabs.acquire("q3");
+                } catch (Exception e) {
+                    failed[0] = e;
+                }
+            }
+        }, "q3");
+        waiting.start();
+        while (waiting.getState() != Thread.State.TIMED_WAITING) {
+            assertTrue("the worker must wait for a tab, not fail", waiting.isAlive());
+            Thread.sleep(5L);
+        }
+        assertEquals(2, tabs.openTabs()); // the waiting worker holds no tab yet
+        second.close(); // the other search ends and gives its tab back
+        waiting.join();
+        assertEquals(null, failed[0]);
+        assertTrue(got[0] != null);
+        assertEquals(1, pool.leases.size()); // the freed slot in the same user context
+        assertEquals(2, tabs.openTabs());
+        got[0].close();
+        first.close();
+        assertFalse(pool.leases.get(0).open);
+    }
+
+    @Test(timeout = 10_000)
+    public void noTabWithinTheWaitSettingFailsHonestlyAndKeepsTheCount() throws Exception {
+        FakePool pool = new FakePool(1, 50L);
+        TeamTabs tabs = new TeamTabs(pool);
+        TeamTabs.Tab first = tabs.acquire("q1");
+        try {
+            tabs.acquire("q2");
+            fail("no tab came free within the wait setting");
+        } catch (BrowserCapacityException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("No tab came free"));
+        }
+        assertEquals(1, tabs.openTabs());
+        first.close();
+        assertFalse(pool.leases.get(0).open);
+    }
+
+    @Test(timeout = 2_000)
+    public void theExtraTabsOfOneSearchNeverWaitForTheWaitSetting() throws Exception {
+        FakePool pool = new FakePool(3, 60_000L);
+        TeamTabs tabs = new TeamTabs(pool);
+        TeamTabs.Tab other = tabs.acquire("other search");
+        List<TeamTabs.Tab> mine = tabs.acquireUpTo("q1", 4);
+        assertEquals(2, mine.size()); // what is free right now; the search reads with it at once
+        other.close();
+        for (TeamTabs.Tab tab : mine) {
+            tab.close();
+        }
+    }
+
     @Test
     public void withoutWorkerBrowsersTheTeamIsNotAvailable() {
         assertFalse(new TeamTabs(BrowserUserContextPool.unavailable("none")).available());
@@ -109,9 +176,20 @@ public class TeamTabsTest {
     private static final class FakePool implements BrowserUserContextPool {
         final List<FakeLease> leases = new ArrayList<FakeLease>();
         final int tabsPerContext;
+        final long waitMillis;
 
         FakePool(int tabsPerContext) {
+            this(tabsPerContext, 0L);
+        }
+
+        FakePool(int tabsPerContext, long waitMillis) {
             this.tabsPerContext = tabsPerContext;
+            this.waitMillis = waitMillis;
+        }
+
+        @Override
+        public long acquireTimeoutMillis() {
+            return waitMillis;
         }
 
         public BrowserUserContextLease acquire(BrowserUserContextRequest request) {
