@@ -2,6 +2,7 @@ package com.aresstack.askai.research.knowledge.processing.live;
 
 import com.aresstack.askai.research.domain.Passage;
 import com.aresstack.askai.research.knowledge.ClusteringMonitor;
+import com.aresstack.askai.research.knowledge.TopicDendrogram;
 import com.aresstack.askai.research.knowledge.live.LiveOutlineProjection;
 import com.aresstack.askai.research.knowledge.live.LiveOutlineProjectionBuilder;
 import com.aresstack.askai.research.knowledge.live.LiveTopicProjection;
@@ -9,6 +10,7 @@ import com.aresstack.askai.research.knowledge.live.LiveTopicTree;
 import com.aresstack.askai.research.knowledge.topic.AnalysisPassage;
 import com.aresstack.askai.research.knowledge.topic.EvidenceReport;
 import com.aresstack.askai.research.knowledge.topic.TopicAnalysis;
+import com.aresstack.askai.research.knowledge.topic.TopicAnalysisSettings;
 import com.aresstack.askai.research.knowledge.topic.TopicAnalyzer;
 
 import java.util.ArrayList;
@@ -119,8 +121,9 @@ public final class SharedTopicDiscovery {
         ActiveKnowledgeCorpusReader.Corpus whole = corpus.read();
         ActiveKnowledgeCorpusReader.Corpus current = CorpusLimit.apply(whole, corpusLimit);
         int omitted = whole.getPassages().size() - current.getPassages().size();
-        List<LiveTopicProjection> topics =
-                builder.discoverTopics(current.getPassages(), current.getVectors(), monitor);
+        TopicAnalysisRequest request = currentRequest();
+        List<LiveTopicProjection> topics = clustering(request == null ? null : request.getSettings())
+                .discoverTopics(current.getPassages(), current.getVectors(), monitor, splitRule(request, current));
         if (monitor != null && monitor.isCancelled()) {
             throw new ClusteringMonitor.ClusteringCancelledException(); // never overwrite on a late cancel
         }
@@ -310,11 +313,36 @@ public final class SharedTopicDiscovery {
         return new ActiveKnowledgeCorpusReader.Corpus(passages, vectors, relevant, sources);
     }
 
+    /** The builder with the clustering values of the analysis settings: both consumers cut the same topics. */
+    private LiveOutlineProjectionBuilder clustering(TopicAnalysisSettings settings) {
+        return settings == null ? builder : builder.with(settings.getTopicDistance(), settings.getRepresentatives());
+    }
+
+    /** The concept split of the request (no split without a request or without concept nodes). */
+    private static TopicDendrogram.SplitRule splitRule(TopicAnalysisRequest request,
+                                                       ActiveKnowledgeCorpusReader.Corpus corpus) {
+        return request == null ? TopicDendrogram.SplitRule.NONE
+                : new TopicAnalyzer(request.getSettings()).conceptSplit(corpus.getVectors(), request.getAnchors());
+    }
+
+    /** The request of the current inputs, or {@code null} without inputs (the builder's own values, no split). */
+    private TopicAnalysisRequest currentRequest() {
+        AnalysisInputs inputs = analysisInputs;
+        if (inputs == null) {
+            return null;
+        }
+        try {
+            return inputs.request();
+        } catch (Exception unavailable) {
+            return null;
+        }
+    }
+
     private TopicAnalysisSnapshot run(TopicAnalysisRequest request, ActiveKnowledgeCorpusReader.Corpus whole,
                                       ClusteringMonitor monitor) {
         ActiveKnowledgeCorpusReader.Corpus limited = CorpusLimit.apply(whole, request.getCorpusLimit());
-        LiveTopicTree tree = builder.withRepresentatives(request.getSettings().getRepresentatives())
-                .discoverTopicTree(limited.getPassages(), limited.getVectors(), monitor);
+        LiveTopicTree tree = clustering(request.getSettings())
+                .discoverTopicTree(limited.getPassages(), limited.getVectors(), monitor, splitRule(request, limited));
         List<AnalysisPassage> passages = new ArrayList<AnalysisPassage>();
         Map<String, String> texts = new LinkedHashMap<String, String>();
         for (Passage passage : whole.getPassages()) {

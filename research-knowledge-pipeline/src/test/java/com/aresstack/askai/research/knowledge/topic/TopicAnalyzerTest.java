@@ -369,9 +369,55 @@ public class TopicAnalyzerTest {
         TopicCorpusFixture corpus = new TopicCorpusFixture();
         corpus.diverse("broad", 4, 5, 6);
         LiveOutlineProjectionBuilder defaults = new LiveOutlineProjectionBuilder();
-        LiveTopicTree tree = defaults.withRepresentatives(4).discoverTopicTree(corpus.passages, corpus.vectors,
-                ClusteringMonitor.NONE);
+        TopicAnalysisSettings settings = TopicAnalysisSettings.defaults();
+        LiveTopicTree tree = defaults.with(settings.getTopicDistance(), 4)
+                .discoverTopicTree(corpus.passages, corpus.vectors, ClusteringMonitor.NONE);
         assertEquals(4, tree.getTopics().get(0).getRepresentativePassageIds().size());
-        assertTrue("the default count is the same builder", defaults.withRepresentatives(2) == defaults);
+        assertTrue("the default values are the same builder",
+                defaults.with(settings.getTopicDistance(), settings.getRepresentatives()) == defaults);
+    }
+
+    /** Two related research areas (one topic group) that a wide topic distance merges into one topic. */
+    private static int topicsAtAWideDistance(TopicCorpusFixture corpus, List<ConceptAnchor> anchors) {
+        TopicAnalyzer analyzer = new TopicAnalyzer(TopicAnalysisSettings.defaults());
+        double wide = 0.8; // like an embedding model whose passages all lie close together (live run 4)
+        LiveTopicTree tree = new LiveOutlineProjectionBuilder(wide, 2).discoverTopicTree(corpus.passages,
+                corpus.vectors, ClusteringMonitor.NONE, analyzer.conceptSplit(corpus.vectors, anchors));
+        return analyzer.analyze(corpus.analysisPassages, corpus.vectors, tree, anchors, null, ClusteringMonitor.NONE)
+                .getTopics().size();
+    }
+
+    /**
+     * Live run 4: the whole corpus was one topic although several concept nodes held their own material. A topic with
+     * the material of two independent concept nodes is split along the merge tree; nodes of one lineage, or a corpus
+     * without concept nodes, keep the topic whole.
+     */
+    @Test
+    public void aTopicHoldingTwoIndependentConceptAreasIsSplitAlongTheTree() {
+        TopicCorpusFixture corpus = new TopicCorpusFixture();
+        int area = corpus.direction();
+        int helmets = corpus.plain("helmets", 6, 3, area);
+        int training = corpus.plain("training", 6, 3, area);
+        assertEquals("without concept nodes the wide distance leaves one topic", 1,
+                topicsAtAWideDistance(corpus, Collections.<ConceptAnchor>emptyList()));
+        assertEquals("two independent concept areas are two topics", 2, topicsAtAWideDistance(corpus, Arrays.asList(
+                new ConceptAnchor("c-helmets", "Helmets", "Book > Helmets", 1, "", corpus.query(helmets)),
+                new ConceptAnchor("c-training", "Training", "Book > Training", 1, "", corpus.query(training)))));
+        assertEquals("a node and its child are one lineage: no split", 1, topicsAtAWideDistance(corpus,
+                Arrays.asList(
+                        new ConceptAnchor("c-helmets", "Helmets", "Book > Helmets", 1, "", corpus.query(helmets)),
+                        new ConceptAnchor("c-training", "Training", "Book > Helmets > Training", 2, "c-helmets",
+                                corpus.query(training)))));
+    }
+
+    @Test
+    public void aConceptNodeWithTooLittleMaterialSplitsNoTopic() {
+        TopicCorpusFixture corpus = new TopicCorpusFixture();
+        int area = corpus.direction();
+        int helmets = corpus.plain("helmets", 6, 3, area);
+        int training = corpus.plain("training", 2, 2, area);
+        assertEquals("two passages are below the minimum material", 1, topicsAtAWideDistance(corpus, Arrays.asList(
+                new ConceptAnchor("c-helmets", "Helmets", "Book > Helmets", 1, "", corpus.query(helmets)),
+                new ConceptAnchor("c-training", "Training", "Book > Training", 1, "", corpus.query(training)))));
     }
 }

@@ -98,6 +98,49 @@ public class TopicClustererTreeTest {
         }
     }
 
+    /**
+     * A split rule takes a group of the cut apart along the tree: here everything merges below the cutoff and the
+     * rule splits every group larger than three passages, so the root falls into A (3) and B/C (6), and B/C into
+     * B and C.
+     */
+    @Test
+    public void aSplitRuleTakesGroupsOfTheCutApartAlongTheTree() {
+        List<Passage> passages = TopicClustererParityTest.passages(9);
+        float[][] points = {
+                {1f, 0f, 0f}, {0.98f, 0.05f, 0f}, {0.97f, 0f, 0.05f},                          // A
+                {0f, 1f, 0f}, {0.03f, 0.98f, 0f}, {0f, 0.97f, 0.04f},                          // B
+                {0f, 0.5f, 0.87f}, {0.03f, 0.47f, 0.88f}, {0f, 0.53f, 0.85f}};                 // C, nearer B than A
+        Map<String, EmbeddingPort.EmbeddingVector> vectors =
+                new java.util.LinkedHashMap<String, EmbeddingPort.EmbeddingVector>();
+        for (int i = 0; i < points.length; i++) {
+            vectors.put(passages.get(i).getPassageId(), new EmbeddingPort.EmbeddingVector("m", "fp", points[i]));
+        }
+        double everything = 1.9;
+        TopicClusterer.Tree plain = new TopicClusterer(IdSequence.counting(), everything, 2)
+                .clusterTree(passages, vectors, ClusteringMonitor.NONE);
+        assertEquals("without a rule the whole corpus is one topic", 1, plain.getTopics().size());
+
+        final List<Double> seenHeights = new ArrayList<Double>();
+        TopicDendrogram.SplitRule largerThanThree = new TopicDendrogram.SplitRule() {
+            public boolean split(TopicDendrogram tree, List<String> members, double height) {
+                seenHeights.add(height);
+                return members.size() > 3;
+            }
+        };
+        TopicClusterer.Tree split = new TopicClusterer(IdSequence.counting(), everything, 2)
+                .clusterTree(passages, vectors, ClusteringMonitor.NONE, largerThanThree);
+        Set<Set<String>> expected = new HashSet<Set<String>>();
+        expected.add(new HashSet<String>(java.util.Arrays.asList("p00000", "p00001", "p00002")));
+        expected.add(new HashSet<String>(java.util.Arrays.asList("p00003", "p00004", "p00005")));
+        expected.add(new HashSet<String>(java.util.Arrays.asList("p00006", "p00007", "p00008")));
+        assertEquals(expected, sets(members(split.getTopics())));
+        assertEquals("the same cut from the tree", expected,
+                sets(split.getDendrogram().cut(everything, largerThanThree)));
+        assertTrue("the rule is asked with the join height", seenHeights.get(0) > 0.5);
+        assertEquals("the NONE rule is the plain cut", sets(split.getDendrogram().cut(0.2)),
+                sets(split.getDendrogram().cut(0.2, TopicDendrogram.SplitRule.NONE)));
+    }
+
     @Test
     public void anEmptyCorpusGivesAnEmptyTree() {
         TopicClusterer.Tree tree = new TopicClusterer(IdSequence.counting()).clusterTree(

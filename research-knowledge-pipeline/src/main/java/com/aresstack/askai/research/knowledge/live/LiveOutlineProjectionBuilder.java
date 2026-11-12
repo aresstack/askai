@@ -6,6 +6,7 @@ import com.aresstack.askai.research.domain.TopicProposal;
 import com.aresstack.askai.research.knowledge.ClusteringMonitor;
 import com.aresstack.askai.research.knowledge.EmbeddingPort;
 import com.aresstack.askai.research.knowledge.TopicClusterer;
+import com.aresstack.askai.research.knowledge.TopicDendrogram;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,8 +35,9 @@ public final class LiveOutlineProjectionBuilder {
     private final double mergeDistanceCutoff;
     private final int representativesPerTopic;
 
+    /** The defaults of the topic analysis settings: topic distance and representatives. */
     public LiveOutlineProjectionBuilder() {
-        this(0.55, 2);
+        this(TopicClusterer.DEFAULT_TOPIC_DISTANCE, TopicClusterer.DEFAULT_REPRESENTATIVES);
     }
 
     public LiveOutlineProjectionBuilder(double mergeDistanceCutoff, int representativesPerTopic) {
@@ -52,39 +54,50 @@ public final class LiveOutlineProjectionBuilder {
         return discoverTopics(passages, vectors, ClusteringMonitor.NONE);
     }
 
-    /** PR 20: the same discovery with progress and cancel. */
+    /**
+     * PR 20: the same discovery with progress and cancel. The topics are exactly those of
+     * {@link #discoverTopicTree}: one cut, one truth for every consumer.
+     */
     public List<LiveTopicProjection> discoverTopics(List<Passage> passages,
                                                     Map<String, EmbeddingPort.EmbeddingVector> vectors,
                                                     ClusteringMonitor monitor) {
+        return discoverTopics(passages, vectors, monitor, TopicDendrogram.SplitRule.NONE);
+    }
+
+    /** The same discovery with a split rule over the cut (the topic analysis' concept split). */
+    public List<LiveTopicProjection> discoverTopics(List<Passage> passages,
+                                                    Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                                    ClusteringMonitor monitor, TopicDendrogram.SplitRule rule) {
         if (passages == null || passages.isEmpty()) {
             return Collections.emptyList();
         }
-        // Deterministic input order → deterministic clustering (the clusterer resolves ties by order).
-        List<Passage> sorted = sortedById(passages);
-
-        // REUSE the existing clustering math; the counter-based proposal ids are ignored — live identity
-        // comes deterministically from the sorted member ids.
-        List<TopicProposal> proposals = new TopicClusterer(IdSequence.counting(), mergeDistanceCutoff,
-                representativesPerTopic).cluster(sorted, vectors, monitor);
-        return liveTopics(proposals);
+        return discoverTopicTree(passages, vectors, monitor, rule).getTopics();
     }
 
-    /** The same builder with another number of representative passages per topic (the analysis setting). */
-    public LiveOutlineProjectionBuilder withRepresentatives(int representatives) {
-        return representatives == representativesPerTopic ? this
-                : new LiveOutlineProjectionBuilder(mergeDistanceCutoff, representatives);
+    /** The same builder with the clustering values of the topic analysis settings. */
+    public LiveOutlineProjectionBuilder with(double topicDistance, int representatives) {
+        return topicDistance == mergeDistanceCutoff && representatives == representativesPerTopic ? this
+                : new LiveOutlineProjectionBuilder(topicDistance, representatives);
     }
 
     /**
-     * Phase 3: the same topics as {@link #discoverTopics(List, Map, ClusteringMonitor)} from ONE clustering run
-     * that also keeps the complete merge tree (sub-topics, topic groups) for the topic analysis.
+     * Phase 3: the topics from ONE clustering run that also keeps the complete merge tree (sub-topics, topic groups)
+     * for the topic analysis. Deterministic input order (sorted by id) gives deterministic topics; the counter-based
+     * proposal ids are ignored, live identity comes from the sorted member ids.
      */
     public LiveTopicTree discoverTopicTree(List<Passage> passages,
                                            Map<String, EmbeddingPort.EmbeddingVector> vectors,
                                            ClusteringMonitor monitor) {
+        return discoverTopicTree(passages, vectors, monitor, TopicDendrogram.SplitRule.NONE);
+    }
+
+    /** The same run with a split rule over the cut (the topic analysis' concept split). */
+    public LiveTopicTree discoverTopicTree(List<Passage> passages,
+                                           Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                           ClusteringMonitor monitor, TopicDendrogram.SplitRule rule) {
         List<Passage> sorted = sortedById(passages == null ? Collections.<Passage>emptyList() : passages);
         TopicClusterer.Tree tree = new TopicClusterer(IdSequence.counting(), mergeDistanceCutoff,
-                representativesPerTopic).clusterTree(sorted, vectors, monitor);
+                representativesPerTopic).clusterTree(sorted, vectors, monitor, rule);
         return new LiveTopicTree(liveTopics(tree.getTopics()), tree.getDendrogram());
     }
 

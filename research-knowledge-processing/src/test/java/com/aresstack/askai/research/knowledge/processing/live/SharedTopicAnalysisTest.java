@@ -51,6 +51,7 @@ public class SharedTopicAnalysisTest {
     private int minimumCorpus = 4;
     private int everyNew = 3;
     private boolean conceptApproved = true;
+    private TopicAnalysisSettings settings = TopicAnalysisSettings.defaults();
     private int next;
 
     /** {@code count} passages of {@code sourceId} along {@code direction}, each with its own second direction. */
@@ -95,7 +96,7 @@ public class SharedTopicAnalysisTest {
                     domains.put(sourceId, sourceId + ".example");
                 }
                 return new TopicAnalysisRequest("The Smart Site", true, anchors, conceptRevision, null,
-                        new LinkedHashSet<String>(eligible), domains, pending, TopicAnalysisSettings.defaults(), 3,
+                        new LinkedHashSet<String>(eligible), domains, pending, settings, 3,
                         minimumCorpus, everyNew, SharedTopicDiscovery.DEFAULT_CORPUS_LIMIT);
             }
         });
@@ -136,6 +137,29 @@ public class SharedTopicAnalysisTest {
         assertEquals("OK", history.get(0).nodeStatus.get("safety"));
         assertEquals("MISSING", history.get(0).nodeStatus.get("law"));
         assertEquals("a fresh instance reads the same history", 1, discovery(dir).analysisHistory().size());
+    }
+
+    /**
+     * Live run 4: the topic distance is the request's setting, and a topic holding the material of two independent
+     * concept nodes is split along the tree. A distance that merges everything still gives the two concept areas.
+     */
+    @Test
+    public void theTopicDistanceSettingAndTheConceptSplitReachTheSharedAnalysis() throws Exception {
+        source("s1", 0, 3);
+        source("s2", 0, 3);
+        source("s3", 20, 3);
+        source("s4", 20, 3);
+        double everything = 1.5;
+        TopicAnalysisSettings d = TopicAnalysisSettings.defaults();
+        settings = new TopicAnalysisSettings(d.getDuplicateDistance(), d.getSubtopicDistance(), everything,
+                d.getConceptThreshold(), d.getConceptMargin(), d.getMinimumPassages(), d.getMinimumSources(),
+                d.getMinimumDomains(), d.getMinimumChildCoverage(), d.getMaximumDominantShare(),
+                d.getMajorTopicShare(), d.getRepresentatives(), everything);
+        SharedTopicDiscovery discovery = discovery(temp.newFolder("p"));
+        TopicAnalysisSnapshot snapshot = discovery.analyze(null);
+        assertEquals("safety and law stay two topics", 2, snapshot.analysis().getTopics().size());
+        assertEquals("the legacy discovery cuts the same topics", 2,
+                discovery.refreshPinned(0L).snapshot.topics.size());
     }
 
     @Test

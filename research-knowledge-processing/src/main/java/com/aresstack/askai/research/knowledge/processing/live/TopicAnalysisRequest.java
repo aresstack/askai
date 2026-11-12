@@ -138,6 +138,7 @@ public final class TopicAnalysisRequest {
                 .append(s.getMinimumSources()).append('/').append(s.getMinimumDomains()).append('/')
                 .append(s.getMinimumChildCoverage()).append('/').append(s.getMaximumDominantShare()).append('/')
                 .append(s.getMajorTopicShare()).append('/').append(s.getRepresentatives()).append('/')
+                .append(s.getTopicDistance()).append('/')
                 .append(keyTerms).append('/').append(corpusLimit);
         // a queue change is a new state: the snapshot must not report "settled" while sources are still pending
         key.append("|pending=").append(new java.util.TreeSet<String>(pendingSourceIds));
