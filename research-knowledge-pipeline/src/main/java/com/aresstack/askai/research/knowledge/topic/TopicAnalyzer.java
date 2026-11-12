@@ -163,7 +163,8 @@ public final class TopicAnalyzer {
                     groupId(draft.groupRoot, drafts), related, draft.anchorId, draft.anchorSimilarity,
                     draft.aligned, draft.materialCovered, draft.sourceConfirmed, share,
                     draft.significant && share >= settings.getMajorTopicShare(), draft.scope,
-                    draft.conceptMaterial));
+                    draft.conceptMaterial, restSubtopicOf(draft.topic.getMemberPassageIds(), draft.subtopics,
+                            vectors)));
         }
         Collections.sort(profiles, new Comparator<TopicProfile>() {
             public int compare(TopicProfile a, TopicProfile b) {
@@ -463,6 +464,54 @@ public final class TopicAnalyzer {
             }
         });
         return result;
+    }
+
+    /**
+     * Each passage of the topic in none of its sub-topics, mapped to the sub-topic with the nearest centroid. Live
+     * outline acceptance 2026-11-12 (bge-m3): the rest of one topic came from three different areas and went as a
+     * whole to the section of the largest sub-topic, which got 8200 instead of 2450 words.
+     */
+    private static Map<String, String> restSubtopicOf(List<String> members, List<Subtopic> subtopics,
+                                                      Map<String, EmbeddingPort.EmbeddingVector> vectors) {
+        Map<String, String> home = new LinkedHashMap<String, String>();
+        if (subtopics.isEmpty()) {
+            return home;
+        }
+        Set<String> inSubtopics = new HashSet<String>();
+        List<EmbeddingPort.EmbeddingVector> centroids = new ArrayList<EmbeddingPort.EmbeddingVector>();
+        for (Subtopic subtopic : subtopics) {
+            inSubtopics.addAll(subtopic.getPassageIds());
+            List<EmbeddingPort.EmbeddingVector> memberVectors = new ArrayList<EmbeddingPort.EmbeddingVector>();
+            for (String id : subtopic.getPassageIds()) {
+                EmbeddingPort.EmbeddingVector vector = vectors.get(id);
+                if (vector != null) {
+                    memberVectors.add(unit(vector));
+                }
+            }
+            centroids.add(memberVectors.isEmpty() ? null : unit(VectorMath.mean(memberVectors)));
+        }
+        for (String id : members) {
+            EmbeddingPort.EmbeddingVector vector = vectors.get(id);
+            if (inSubtopics.contains(id) || vector == null) {
+                continue;
+            }
+            int best = -1;
+            double bestSimilarity = -2;
+            for (int i = 0; i < centroids.size(); i++) {
+                if (centroids.get(i) == null) {
+                    continue;
+                }
+                double similarity = VectorMath.cosine(vector, centroids.get(i));
+                if (similarity > bestSimilarity) {
+                    best = i;
+                    bestSimilarity = similarity;
+                }
+            }
+            if (best >= 0) {
+                home.put(id, subtopics.get(best).getSubtopicId());
+            }
+        }
+        return home;
     }
 
     private List<String> representatives(LiveTopicProjection topic) {
