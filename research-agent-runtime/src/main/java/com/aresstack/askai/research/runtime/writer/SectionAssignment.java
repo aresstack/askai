@@ -34,6 +34,7 @@ public final class SectionAssignment {
     private final int passagesPerCall;
     private final List<String> writtenSections;
     private final RepeatCheck.Criteria repeats;
+    private final SynthesisCriteria synthesis;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -54,6 +55,7 @@ public final class SectionAssignment {
         this.passagesPerCall = Math.max(0, b.passagesPerCall);
         this.writtenSections = Collections.unmodifiableList(new ArrayList<String>(b.writtenSections));
         this.repeats = b.repeats;
+        this.synthesis = b.synthesis;
     }
 
     /**
@@ -164,6 +166,11 @@ public final class SectionAssignment {
         return repeats;
     }
 
+    /** How many paragraphs of each part combine how many sources ({@link SynthesisCriteria}, settings). */
+    public SynthesisCriteria getSynthesis() {
+        return synthesis;
+    }
+
     public boolean isRewrite() {
         return !rewriteComment.isEmpty() || !currentText.isEmpty();
     }
@@ -188,6 +195,7 @@ public final class SectionAssignment {
         b.passagesPerCall = passagesPerCall;
         b.writtenSections = writtenSections;
         b.repeats = repeats;
+        b.synthesis = synthesis;
         return b;
     }
 
@@ -221,6 +229,7 @@ public final class SectionAssignment {
         b.carry = carry;
         b.writtenSections = writtenSections;
         b.repeats = repeats;
+        b.synthesis = synthesis;
         return new SectionAssignment(b);
     }
 
@@ -243,6 +252,7 @@ public final class SectionAssignment {
         private int passagesPerCall;
         private List<String> writtenSections = new ArrayList<String>();
         private RepeatCheck.Criteria repeats = RepeatCheck.Criteria.defaults();
+        private SynthesisCriteria synthesis = SynthesisCriteria.defaults();
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -345,6 +355,12 @@ public final class SectionAssignment {
         /** Near-repeat bounds (settings); the defaults when {@code null}. */
         public Builder repeats(RepeatCheck.Criteria value) {
             this.repeats = value == null ? RepeatCheck.Criteria.defaults() : value;
+            return this;
+        }
+
+        /** Synthesis bounds (settings); the defaults when {@code null}. */
+        public Builder synthesis(SynthesisCriteria value) {
+            this.synthesis = value == null ? SynthesisCriteria.defaults() : value;
             return this;
         }
 

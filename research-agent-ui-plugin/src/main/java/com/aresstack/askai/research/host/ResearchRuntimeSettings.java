@@ -914,6 +914,39 @@ public final class ResearchRuntimeSettings {
                 share);
     }
 
+    /** Synthesis: different sources one synthesis paragraph combines (writer prompt and book report). */
+    public static final String KEY_WRITER_SYNTHESIS_MIN_SOURCES = "research.writer.synthesis.minSources";
+    /** Synthesis: paragraphs combining sources the writer prompt asks of each key-point part (0 = none). */
+    public static final String KEY_WRITER_SYNTHESIS_PARAGRAPHS = "research.writer.synthesis.paragraphsPerPart";
+    /** Synthesis: sentences a paragraph needs before the book report counts it. */
+    public static final String KEY_WRITER_SYNTHESIS_MIN_SENTENCES = "research.writer.synthesis.minSentences";
+    /** Synthesis: share (0..1) of single-source paragraphs above which the book report notes a section. */
+    public static final String KEY_WRITER_SYNTHESIS_MAX_SHARE = "research.writer.synthesis.maxSingleSourceShare";
+
+    /**
+     * Synthesis instead of retelling (live run 4, book 6): what the writer prompt asks of each part, and when the
+     * book's quality report notes a section whose paragraphs each retell one source (a note, never blocking).
+     */
+    public static com.aresstack.askai.research.runtime.writer.SynthesisCriteria loadWriterSynthesisCriteria(
+            WorkspaceStateStore store) {
+        int sources = loadPositiveInt(store, KEY_WRITER_SYNTHESIS_MIN_SOURCES,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SOURCES);
+        if (sources < 2) {
+            sources = com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SOURCES;
+        }
+        double share = loadDouble(store, KEY_WRITER_SYNTHESIS_MAX_SHARE,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MAX_SINGLE_SOURCE_SHARE);
+        if (share < 0 || share > 1) {
+            share = com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MAX_SINGLE_SOURCE_SHARE;
+        }
+        return new com.aresstack.askai.research.runtime.writer.SynthesisCriteria(sources,
+                loadNonNegativeInt(store, KEY_WRITER_SYNTHESIS_PARAGRAPHS,
+                        com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_PARAGRAPHS_PER_PART),
+                loadPositiveInt(store, KEY_WRITER_SYNTHESIS_MIN_SENTENCES,
+                        com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SENTENCES),
+                share);
+    }
+
     /** Answer token budget of one writer call. */
     public static final String KEY_WRITER_ANSWER_TOKENS = "research.writer.answerTokens";
     /** Passages one writer call gets; a section written in key-point parts gets this many for each part. */
@@ -963,7 +996,7 @@ public final class ResearchRuntimeSettings {
                         loadWriterBriefRelevance(store)),
                 loadPositiveInt(store, KEY_WRITER_WORDS_PER_CALL, DEFAULT_WRITER_WORDS_PER_CALL),
                 loadPositiveInt(store, KEY_WRITER_ANSWER_TOKENS, DEFAULT_WRITER_ANSWER_TOKENS),
-                loadWriterCarryCriteria(store), loadWriterRepeatCriteria(store));
+                loadWriterCarryCriteria(store), loadWriterRepeatCriteria(store), loadWriterSynthesisCriteria(store));
     }
 
     /**

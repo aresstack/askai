@@ -3551,7 +3551,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         System.currentTimeMillis(), java.util.TimeZone.getDefault());
         return new com.aresstack.askai.research.assembly.BookAssembler(
                 com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterCarryCriteria(hostStateStore),
-                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTopicDriftCriteria(hostStateStore))
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTopicDriftCriteria(hostStateStore),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterSynthesisCriteria(hostStateStore))
                 .assemble(input);
     }
 

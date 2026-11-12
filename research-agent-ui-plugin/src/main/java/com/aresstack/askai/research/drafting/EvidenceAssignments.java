@@ -31,8 +31,8 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
     }
 
     /**
-     * Word target per call, answer budget, evidence pack, claim-check and repeat-check thresholds (settings, read per
-     * section).
+     * Word target per call, answer budget, evidence pack, claim-check, repeat-check and synthesis thresholds
+     * (settings, read per section).
      */
     public static final class Targets {
         final WriterPackSettings pack;
@@ -40,10 +40,13 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         final int answerTokens;
         final com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry;
         final com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats;
+        final com.aresstack.askai.research.runtime.writer.SynthesisCriteria synthesis;
 
         public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens,
                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry,
-                       com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats) {
+                       com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats,
+                       com.aresstack.askai.research.runtime.writer.SynthesisCriteria synthesis) {
+            this.synthesis = synthesis;
             this.pack = pack;
             this.wordsPerCall = wordsPerCall;
             this.answerTokens = answerTokens;
@@ -87,7 +90,7 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
                 request.getSection().getBrief().getWordTarget(), targets.wordsPerCall, targets.answerTokens,
                 targets.carry, targets.pack.getPassageCount());
         SectionAssignment.Builder assignment = base.toBuilder().writtenSections(contexts.writtenSections(request))
-                .repeats(targets.repeats);
+                .repeats(targets.repeats).synthesis(targets.synthesis);
         if (request.isRewrite()) {
             assignment.rewriteComment(request.getComment()).currentText(request.getCurrentText());
         }

@@ -58,6 +58,8 @@ public final class BookQualityReport {
         ACRONYM_CONFLICT("acronym with conflicting long forms", false),
         ACRONYM_FIRST_USE_WITHOUT_LONG_FORM("chapter's first use of an acronym lacks its long form", false),
         WORDS_OFF_TARGET("section far from its word target", false),
+        /** Most paragraphs of a section cite one source only: retelling instead of synthesis (live run 4, book 6). */
+        SINGLE_SOURCE_PARAGRAPHS("paragraphs retelling one source each", false),
         TOPIC_DRIFT("recurring subject outside the concept and outline", false);
 
         private final String label;

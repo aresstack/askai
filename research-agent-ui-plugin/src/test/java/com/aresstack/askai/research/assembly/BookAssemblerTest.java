@@ -157,12 +157,17 @@ public class BookAssemblerTest {
 
     @Test
     public void goldenTwoChaptersTwoSectionsRenderExactlyAndComplete() {
-        AssembledBook book = new BookAssembler().assemble(clean().build());
+        // 1.1 retells one source in two sentences; the synthesis note has its own tests, here it counts from three
+        BookAssembler assembler = new BookAssembler(
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.defaults(),
+                TopicDriftCheck.Criteria.defaults(),
+                new com.aresstack.askai.research.runtime.writer.SynthesisCriteria(2, 1, 3, 0.5));
+        AssembledBook book = assembler.assemble(clean().build());
         assertTrue(book.getReport().getFindings().toString(), book.getReport().getFindings().isEmpty());
         assertEquals(GOLDEN, book.getMarkdown());
         assertEquals(BookQualityReport.Status.COMPLETE, book.getReport().getStatus());
         assertTrue(book.getReport().getFindings().toString(), book.getReport().getFindings().isEmpty());
-        assertEquals(GOLDEN, new BookAssembler().assemble(clean().build()).getMarkdown());
+        assertEquals(GOLDEN, assembler.assemble(clean().build()).getMarkdown());
     }
 
     @Test
@@ -250,6 +255,33 @@ public class BookAssemblerTest {
         assertTrue(book.getMarkdown().contains("## Open points\n\n- 2.2 Outlook: skipped."));
         assertTrue(report.warnings().contains("1 x skipped section"));
         assertTrue(report.toMarkdown().contains("15 %"));
+    }
+
+    /**
+     * Live run 4, book 6: nearly every paragraph retold one passage; section 1.1 had no paragraph that drew on two
+     * sources. The report notes such a section, without blocking the book.
+     */
+    @Test
+    public void aSectionWhoseParagraphsEachRetellOneSourceIsNotedNotBlocking() {
+        String retelling = "Solar panels convert sunlight into electricity [1]. Hot modules lose efficiency [1].\n\n"
+                + "Turbines turn moving air into power [2]. Larger rotors capture more energy [2].\n\n"
+                + "Solar panels convert sunlight [1]. Turbines turn moving air into power [2].\n\n"
+                + "Hot modules lose efficiency [1].";
+        AssembledBook book = new BookAssembler().assemble(clean().section(written("s11", "c1"), revision(retelling,
+                cite("1", "a", TEXT_A, "p-a-1"), cite("2", "b", TEXT_B, "p-b-1"))).build());
+        BookQualityReport report = book.getReport();
+        assertEquals(report.getFindings().toString(), 1, report.count(Kind.SINGLE_SOURCE_PARAGRAPHS));
+        assertTrue(report.getFindings().toString(), report.getFindings().toString().contains(
+                "1.1 Solar power: 2 of 3 paragraphs cite fewer than 2 sources (paragraphs 1, 2)"));
+        assertEquals("a note, never blocking", BookQualityReport.Status.COMPLETE, report.getStatus());
+
+        BookAssembler lenient = new BookAssembler(
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.defaults(),
+                TopicDriftCheck.Criteria.defaults(),
+                new com.aresstack.askai.research.runtime.writer.SynthesisCriteria(2, 1, 2, 0.7));
+        assertEquals("the share is a setting", 0, lenient.assemble(clean().section(written("s11", "c1"),
+                revision(retelling, cite("1", "a", TEXT_A, "p-a-1"), cite("2", "b", TEXT_B, "p-b-1"))).build())
+                .getReport().count(Kind.SINGLE_SOURCE_PARAGRAPHS));
     }
 
     /** Live run 4, books 2 and 3: a manufacturer's "unsere tragbaren Geräte" and "implementieren wir" stood in the book. */
