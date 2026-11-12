@@ -1430,7 +1430,9 @@ and document; kill the app once during an approval and once in `research/waiting
     `ManualSourceAcceptancePort` already sends, and `ResearchSourceRecord` stores both.
   - Coverage and caps: coverage per node (covered, exhausted or open) and caps per query, node and phase (D5); new
     rows in the Search settings tab ("Sources per node", "Queries per node", "Sources for the Sources phase") through
-    `ComicForm.fit`. At the end one outcome names uncovered nodes and offers `finish-sources`; the state stays
+    `ComicForm.fit`. "Sources for the Sources phase" defaults to 0, automatic: what the node budgets allow (active
+    nodes × sources per node × the queries of every research cycle); live run 4 (2026-11-12) spent a fixed 60 in the
+    first cycle of a five-node concept and never reached a second cycle for the gap it left. At the end one outcome names uncovered nodes and offers `finish-sources`; the state stays
     `research/running`. At the review gate the Sources view and the gate message list the uncovered nodes.
   - Gate: "Request changes" at the gate shows its comment on the checklist and adds it as a priority entry that runs
     first. The last `beforeApply` step of `APPROVE_EVIDENCE` appends the approved source set (id, content checksum and
