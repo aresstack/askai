@@ -223,7 +223,7 @@ final class ChapterPlanContract {
                     errors.add(what + " names the unknown concept requirement " + key);
                 }
             }
-            planned.add(new PlannedChapter(title, purpose, material, concepts, null, false));
+            planned.add(new PlannedChapter(title, purpose, wholeTopics(material, brief), concepts, null, false));
         }
         List<String> gaps = PlanJson.strings(root.get("gaps"));
         for (String key : gaps) {
@@ -235,5 +235,29 @@ final class ChapterPlanContract {
             throw new PlanAnswerException(errors);
         }
         return new OutlinePlan(planned, gaps, false);
+    }
+
+    /**
+     * The keys with every topic whose sub-topics are all named replaced by the topic itself (at its first sub-topic's
+     * place). Live outline acceptance 2026-11-12 (gemma4:e2b): a closing chapter "Training and implementation gaps"
+     * named T1.1 to T1.5 by key; as five claims it took the sub-topic the whole-topic chapter kept and that chapter
+     * was dropped. A chapter naming all parts names the whole.
+     */
+    static List<String> wholeTopics(List<String> keys, SynthesisBrief brief) {
+        List<String> result = new ArrayList<String>();
+        for (String key : keys) {
+            String topicKey = brief.subtopic(key) == null ? key : brief.topicKeyOf(key);
+            SynthesisBrief.TopicEntry topic = brief.topic(topicKey);
+            boolean all = topic != null && !topic.getSubtopics().isEmpty();
+            for (SynthesisBrief.SubtopicEntry subtopic : all ? topic.getSubtopics()
+                    : java.util.Collections.<SynthesisBrief.SubtopicEntry>emptyList()) {
+                all &= keys.contains(subtopic.getKey());
+            }
+            String kept = all ? topicKey : key;
+            if (!result.contains(kept)) {
+                result.add(kept);
+            }
+        }
+        return result;
     }
 }

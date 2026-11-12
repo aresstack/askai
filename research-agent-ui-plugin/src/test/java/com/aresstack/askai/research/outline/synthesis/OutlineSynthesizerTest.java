@@ -428,4 +428,25 @@ public class OutlineSynthesizerTest {
         assertEquals(Collections.singletonList("T1.1"), fixed.getChapters().get(0).getMaterialKeys());
         assertEquals(Collections.singletonList("T1.2"), fixed.getChapters().get(1).getMaterialKeys());
     }
+
+    /**
+     * Live 2026-11-12: a closing chapter named T1.1 to T1.5 by key, took as five claims the sub-topic the whole-topic
+     * chapter kept, and that chapter was dropped. A chapter naming every part names the whole topic.
+     */
+    @Test
+    public void aChapterNamingEverySubtopicNamesTheWholeTopic() throws Exception {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.diverse("sites", 4, 6, 3);
+        SynthesisBrief brief = corpus.brief();
+
+        OutlinePlan plan = ChapterPlanContract.read("{\"chapters\":["
+                + "{\"title\":\"Proximity\",\"purpose\":\"P.\",\"topics\":[\"T1\"],\"concepts\":[]},"
+                + "{\"title\":\"Law\",\"purpose\":\"L.\",\"topics\":[\"T1.1\"],\"concepts\":[]},"
+                + "{\"title\":\"Gaps\",\"purpose\":\"G.\",\"topics\":[\"T1.1\",\"T1.2\",\"T1.3\",\"T1.4\"],"
+                + "\"concepts\":[]}],\"gaps\":[]}", brief);
+
+        assertEquals(Collections.singletonList("T1"), plan.getChapters().get(2).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.1"), plan.getChapters().get(1).getMaterialKeys());
+        assertEquals(2, SharedTopicContract.shared(plan, brief).get(0).chapters.size());
+    }
 }
