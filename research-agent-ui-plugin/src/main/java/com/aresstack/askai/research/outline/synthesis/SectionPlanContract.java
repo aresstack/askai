@@ -15,7 +15,8 @@ import java.util.Set;
  * Phase 3b step 2: the sections of one planned chapter. The model sees only this chapter's material (its topics with
  * their sub-topics, or the sub-topics the chapter names) and answers with sections, each naming the material keys it
  * draws on. One item of material belongs to one section; every item of the chapter is used, as itself or through its
- * sub-topics. Sub-topics a section leaves unnamed stay with their topic and are placed by code.
+ * sub-topics: an item the answer leaves out becomes an untitled section of its own. Sub-topics a section leaves
+ * unnamed stay with their topic and are placed by code.
  */
 final class SectionPlanContract {
 
@@ -151,6 +152,7 @@ final class SectionPlanContract {
                         + "sub-topics");
             }
         }
+        List<String> unused = new ArrayList<String>();
         for (String key : chapter.getMaterialKeys()) {
             if (usedBy.containsKey(key)) {
                 continue;
@@ -163,12 +165,17 @@ final class SectionPlanContract {
                 }
             }
             if (!throughSubtopic) {
-                errors.add(key + " is not used by any section");
+                unused.add(key);
             }
         }
         if (!errors.isEmpty()) {
             throw new PlanAnswerException(errors);
         }
+        // Material the model left out becomes untitled sections of its own (the label call names them), as the
+        // quality check places unused material; the model's sections stay. Live run 4: six of eight section answers
+        // were refused for leaving out a 14-passage advertising topic, and code split the chapters by material.
+        planned.addAll(FallbackOutlinePlan.sections(brief, new PlannedChapter(chapter.getTitle(), "", unused, null,
+                null, true)));
         return planned;
     }
 }
