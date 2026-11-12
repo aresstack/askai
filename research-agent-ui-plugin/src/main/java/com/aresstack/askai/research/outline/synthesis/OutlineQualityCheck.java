@@ -287,6 +287,21 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
      * first chapter and dropped the other three as "only repeated material".
      */
     static Map<String, Integer> owners(OutlinePlan plan, SynthesisBrief brief) {
+        Map<String, Integer> owner = conceptOwners(plan, brief);
+        for (int i = 0; i < plan.getChapters().size(); i++) {
+            for (String key : plan.getChapters().get(i).getMaterialKeys()) {
+                for (String unit : units(brief, key)) {
+                    if (!owner.containsKey(unit)) {
+                        owner.put(unit, i);
+                    }
+                }
+            }
+        }
+        return owner;
+    }
+
+    /** The concept parts a chapter keeps because it names them (or their topic) and treats their requirement. */
+    static Map<String, Integer> conceptOwners(OutlinePlan plan, SynthesisBrief brief) {
         Map<String, Integer> owner = new LinkedHashMap<String, Integer>();
         for (int i = 0; i < plan.getChapters().size(); i++) {
             PlannedChapter chapter = plan.getChapters().get(i);
@@ -295,15 +310,6 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                     SynthesisBrief.SubtopicEntry part = brief.subtopic(unit);
                     if (!owner.containsKey(unit) && part != null && !part.getConceptKey().isEmpty()
                             && chapter.getConceptKeys().contains(part.getConceptKey())) {
-                        owner.put(unit, i);
-                    }
-                }
-            }
-        }
-        for (int i = 0; i < plan.getChapters().size(); i++) {
-            for (String key : plan.getChapters().get(i).getMaterialKeys()) {
-                for (String unit : units(brief, key)) {
-                    if (!owner.containsKey(unit)) {
                         owner.put(unit, i);
                     }
                 }
