@@ -296,16 +296,11 @@ public final class BookIntegrityCheck {
             return;
         }
         run.examine(IntegrityFinding.Check.CITATION_TEXT);
-        if (!normalize(record.getFullText()).contains(normalize(citation.getCitedText()))) {
+        if (!citation.isFoundIn(record.getFullText())) {
             run.miss(IntegrityFinding.Check.CITATION_TEXT, subject,
                     "the cited text is not found in source " + citation.getSourceId());
         }
         run.encoding(subject, citation.getCitedText());
-    }
-
-    /** Whitespace runs collapse to one space, so a passage cut across a line break still matches its source. */
-    static String normalize(String text) {
-        return text == null ? "" : text.replaceAll("\\s+", " ").trim();
     }
 
     /** {@code true} when {@code text} shows a replacement character or UTF-8 decoded as Latin-1. */

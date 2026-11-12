@@ -105,15 +105,10 @@ public final class CitationRegistry {
         if (!source.getChecksum().equals(citation.getSourceChecksum())) {
             return Problem.CHECKSUM_MISMATCH;
         }
-        if (!normalize(source.getText()).contains(normalize(citation.getCitedText()))) {
+        if (!citation.isFoundIn(source.getText())) {
             return Problem.TEXT_NOT_FOUND;
         }
         return null;
-    }
-
-    /** Whitespace collapsed, so a passage cut at other line breaks is still found in the source. */
-    static String normalize(String text) {
-        return text == null ? "" : text.replaceAll("\\s+", " ").trim();
     }
 
     /** The number of a source, or {@code -1} when the book does not cite it. */

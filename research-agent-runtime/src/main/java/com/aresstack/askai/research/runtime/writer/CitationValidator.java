@@ -31,6 +31,13 @@ public final class CitationValidator {
 
     /** {@code [3]}, {@code [1, 4]}, {@code [2; 5]}. */
     static final Pattern MARKER = Pattern.compile("\\[(\\d{1,3}(?:\\s*[,;]\\s*\\d{1,3})*)\\]");
+    /**
+     * A bracket group with a letter and no digit where a marker belongs, before a sentence end or after it: the
+     * writer's own note in place of a citation ("[keine Passage]", live run 4). Only {@code [n]} cites a passage.
+     */
+    private static final Pattern PSEUDO_MARKER = Pattern.compile(
+            "\\s*\\[(?=[^\\[\\]\\d]*\\p{L})[^\\[\\]\\d]+\\](?=[\"'“”»’)]*(?:[.!?…]|$))"
+                    + "|(?<=[.!?…])\\s*\\[(?=[^\\[\\]\\d]*\\p{L})[^\\[\\]\\d]+\\]");
     private static final Pattern GAP = Pattern.compile("^\\s*(?:[-*]\\s*)?GAP\\s*:\\s*(.*)$",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern HEADING = Pattern.compile("^\\s*#{1,6}\\s+");
@@ -398,9 +405,19 @@ public final class CitationValidator {
         return SENTENCE_CLOSE.matcher(WHITESPACE.matcher(n).replaceAll(" ").trim()).replaceAll("");
     }
 
-    /** Removes the numbers of a marker outside 1..k; a marker left empty disappears with its leading space. */
+    /**
+     * Removes the numbers of a marker outside 1..k and every {@linkplain #PSEUDO_MARKER note in a marker's place}; a
+     * marker left empty disappears with its leading space.
+     */
     static String stripUnknown(String text, int k, List<String> stripped) {
-        Matcher m = MARKER.matcher(text);
+        Matcher note = PSEUDO_MARKER.matcher(text);
+        StringBuffer clean = new StringBuffer();
+        while (note.find()) {
+            stripped.add(note.group().trim());
+            note.appendReplacement(clean, "");
+        }
+        note.appendTail(clean);
+        Matcher m = MARKER.matcher(clean.toString());
         StringBuffer out = new StringBuffer();
         while (m.find()) {
             List<String> kept = new ArrayList<String>();

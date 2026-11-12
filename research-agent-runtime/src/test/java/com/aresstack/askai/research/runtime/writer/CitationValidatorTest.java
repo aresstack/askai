@@ -20,6 +20,31 @@ public class CitationValidatorTest {
         assertEquals(ClaimFlag.Kind.UNCITED_SENTENCE, r.getFlags().get(0).getKind());
     }
 
+    /** Live run 4, section 1.2 of book 6: "… die Sicherheit der Arbeiter zu erhöhen [keine Passage]." */
+    @Test
+    public void aNoteInPlaceOfAMarkerIsStrippedAndTheSentenceStaysUncited() {
+        CitationValidator.Result r = validator.validate("Wearables messen den Puls [1]. Das erhöht die Sicherheit "
+                + "[keine Passage]. Helme warnen bei Stürzen. [Quelle fehlt] Westen leuchten [n].", 3);
+        assertEquals(Arrays.asList("[keine Passage]", "[Quelle fehlt]", "[n]"), r.getStrippedMarkers());
+        assertEquals("Wearables messen den Puls [1]. Das erhöht die Sicherheit. Helme warnen bei Stürzen. "
+                + "Westen leuchten.", r.text());
+        boolean flagged = false;
+        for (ClaimFlag flag : r.getFlags()) {
+            flagged |= flag.getKind() == ClaimFlag.Kind.UNCITED_SENTENCE
+                    && flag.getSentence().equals("Das erhöht die Sicherheit.");
+        }
+        assertTrue(r.getFlags().toString(), flagged);
+    }
+
+    @Test
+    public void aBracketInsideASentenceOrWithoutALetterIsNoNote() {
+        String text = "Die Werte [Puls und Temperatur] gehen an die Leitstelle [1]. „Die Daten […] bleiben im "
+                + "Betrieb“ [2].";
+        CitationValidator.Result r = validator.validate(text, 2);
+        assertTrue(r.getStrippedMarkers().toString(), r.getStrippedMarkers().isEmpty());
+        assertEquals(text, r.text());
+    }
+
     @Test
     public void markerAfterFullStopBelongsToSentenceBefore() {
         CitationValidator.Result r = validator.validate("Erster Satz. [1] Zweiter Satz. [2]", 6);

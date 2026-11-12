@@ -6,6 +6,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * One entry of a section revision's citation map (plan PR 26, D8): the local marker in the section text, the
@@ -15,6 +16,8 @@ import java.util.List;
 public final class ManuscriptCitation {
 
     private static final Charset UTF8 = Charset.forName("UTF-8");
+    /** A run of whitespace in Unicode's or Java's sense, a no-break space too. */
+    private static final Pattern WHITESPACE = Pattern.compile("(?U)[\\s\\p{javaWhitespace}]+");
 
     private final String marker;
     private final String sourceId;
@@ -75,6 +78,21 @@ public final class ManuscriptCitation {
 
     public List<String> getFlags() {
         return flags;
+    }
+
+    /**
+     * True when the cited text occurs in {@code sourceText}, every whitespace run on both sides read as one space.
+     * A passage is its sentences joined by one space, and the sentence segmenter reads a no-break space between two
+     * sentences as whitespace (live run 4: a no-break space after "Gefahren." in the source, a plain space in the
+     * passage, four "[?]" in the book).
+     */
+    public boolean isFoundIn(String sourceText) {
+        return collapse(sourceText).contains(collapse(citedText));
+    }
+
+    /** Every whitespace run as one space, trimmed. */
+    static String collapse(String text) {
+        return text == null ? "" : WHITESPACE.matcher(text).replaceAll(" ").trim();
     }
 
     static String sha256(String text) {
