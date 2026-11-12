@@ -43,10 +43,18 @@ public final class SearchPlanQueue {
     static final String NODE_BUDGET = "The query budget of the node is spent";
     static final String STOPPED = "Stopped by the user";
     static final String KEYWORD_FALLBACK = "Ranked by keywords, reranker unavailable";
+    static final String NO_TEAM_BROWSER = "No worker browser for the research team: runs in the chat browser";
+    static final String WAITS_FOR_TAB = "Every tab of the research team was taken: runs when a search ends";
     /** The sub-kind of a page worker's message to the orchestrator (plan T4). */
     static final String TEAM_NOTE = "team_note";
-    /** The runtime's failure reason when a team query got no tab in the team's page browser. */
+    /** The runtime's failure reason when the chat has no worker browser for the research team. */
     static final String NO_WORKER_BROWSER = "NO_WORKER_BROWSER";
+    /**
+     * The runtime's failure reason when a team query got no tab of the team's page browser within the worker
+     * browsers' wait setting: the running searches hold them all. No failing engine: the query waits for a search
+     * to end and keeps the team.
+     */
+    static final String TEAM_TABS_BUSY = "TEAM_TABS_BUSY";
 
     /** The ranking a planned query asks for until the retrieval benchmark of PR 04 fixes another one. */
     public static final String PLANNED_RANKING = "reranker";
@@ -339,6 +347,11 @@ public final class SearchPlanQueue {
     private volatile EvidenceGaps.Gaps lastGaps = EvidenceGaps.Gaps.NONE;
     /** Set when the runtime had no worker browser for a team query: this run goes on one query at a time. */
     private volatile boolean noWorkerBrowser;
+    /**
+     * Set when a team query got no free tab while other searches ran: no new search starts until one of them ends
+     * and gives its tabs back (live run 4, 2026-11-10).
+     */
+    private boolean waitForTabs;
 
     private boolean running;
     /** The entries running right now, by request id, in start order (at most one with the team off). */
@@ -423,6 +436,9 @@ public final class SearchPlanQueue {
     private boolean teamStillReading() {
         if (!teamOn() || runningEntries.isEmpty()) {
             return false;
+        }
+        if (waitForTabs) {
+            return true; // the running searches hold every tab: the next starts when one of them ends
         }
         int open = 0;
         for (String requestId : runningEntries.keySet()) {
@@ -601,6 +617,7 @@ public final class SearchPlanQueue {
             running = true;
             failedStreak = 0; // a new run gets its own chances
             noWorkerBrowser = false; // and tries the research team again
+            waitForTabs = false;
         }
         listener.changed();
         scheduleNext();
@@ -682,13 +699,20 @@ public final class SearchPlanQueue {
                     store.save(entry);
                     failedStreak = 0;
                 } else if (stopping.contains(requestId)) {
-                    backToPending(entry, now);
-                } else if (NO_WORKER_BROWSER.equals(detail)) {
-                    // the chat has no worker browser (or none came free): the plan goes on one query at a time in
-                    // the chat browser instead of failing every planned query
+                    backToPending(entry, STOPPED, now);
+                } else if (TEAM_TABS_BUSY.equals(detail) && runningEntries.size() > 1) {
+                    // the other running searches hold every tab of the team: not a failing engine. The query goes
+                    // back to pending and the next search starts when one of them ends and gives its tabs back.
+                    System.err.println("[search-plan] every tab of the research team is taken: \""
+                            + entry.getQuery() + "\" runs when a search ends");
+                    waitForTabs = true;
+                    backToPending(entry, WAITS_FOR_TAB, now);
+                } else if (NO_WORKER_BROWSER.equals(detail) || TEAM_TABS_BUSY.equals(detail)) {
+                    // the chat has no worker browser, or no tab came free although no other search holds one:
+                    // the plan goes on one query at a time in the chat browser instead of failing every query
                     System.err.println("[search-plan] no worker browser for the research team: one query at a time");
                     noWorkerBrowser = true;
-                    backToPending(entry, now);
+                    backToPending(entry, NO_TEAM_BROWSER, now);
                 } else {
                     String reason = detail == null || detail.isEmpty() ? "The search failed" : detail;
                     store.save(entry.failedRun(reason, now));
@@ -711,10 +735,16 @@ public final class SearchPlanQueue {
             } catch (IOException | CorruptProjectFileException | RuntimeException failed) {
                 System.err.println("[search-plan] entry " + entry.getId() + " not recorded: " + failed.getMessage());
             }
+            // a search that read with tabs of the team gives them back when it ends; one that got none frees nothing
+            boolean gotNoTab = "failed".equals(subKind)
+                    && (TEAM_TABS_BUSY.equals(detail) || NO_WORKER_BROWSER.equals(detail));
             runningEntries.remove(requestId);
             runningCaps.remove(requestId);
             openPages.remove(requestId);
             stopping.remove(requestId);
+            if (!gotNoTab || runningEntries.isEmpty()) {
+                waitForTabs = false; // the tabs of the ended search are free for the next one
+            }
         }
         listener.changed();
         if (paused != null) {
@@ -744,9 +774,10 @@ public final class SearchPlanQueue {
         return true;
     }
 
-    private void backToPending(SearchPlanEntry entry, long now) throws IOException, CorruptProjectFileException {
+    private void backToPending(SearchPlanEntry entry, String why, long now)
+            throws IOException, CorruptProjectFileException {
         if (entry.canRequeue()) {
-            store.save(entry.requeued(STOPPED, now));
+            store.save(entry.requeued(why, now));
             return;
         }
         // retries spent: a new pending task takes the stopped one's place in the order
@@ -754,7 +785,7 @@ public final class SearchPlanQueue {
         SearchPlanEntry again = SearchPlanEntry.submit(newId(), entry.getPhase(), entry.getNodeId(),
                 entry.getNodeLabel(), entry.getQuery(), entry.getOrigin(), now);
         store.save(again);
-        store.save(entry.skipped(STOPPED, now));
+        store.save(entry.skipped(why, now));
         if (record != null) {
             store.saveRecord(replaceInOrder(record, entry.getId(), again.getId()));
         }

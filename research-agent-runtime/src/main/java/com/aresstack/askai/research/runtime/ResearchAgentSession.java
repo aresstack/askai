@@ -1584,6 +1584,13 @@ public final class ResearchAgentSession {
                     ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
                             .manualSearchFailed(requestId, "CANCELLED"));
                     return;
+                } catch (com.aresstack.askai.research.runtime.browser.BrowserCapacityException busy) {
+                    // every tab is held by the running searches and none came free within the wait setting: the
+                    // query goes back to the plan and runs when a search ends (not a failure of the engine)
+                    System.err.println("[team] no tab for requestId=" + requestId + ": " + busy.getMessage());
+                    ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                            .manualSearchFailed(requestId, TEAM_TABS_BUSY));
+                    return;
                 }
                 if (teamLeases.isEmpty()) {
                     ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
@@ -1921,29 +1928,35 @@ public final class ResearchAgentSession {
         return teamMailbox;
     }
 
-    /** The failure reason of a team query that got no worker browser within the pool's wait setting. */
+    /** The failure reason of a team query that got no worker browser: the chat has none (the plan goes on alone). */
     static final String NO_WORKER_BROWSER = "NO_WORKER_BROWSER";
+    /**
+     * The failure reason of a team query that got no tab of the team's page browser within the worker browsers'
+     * wait setting: the running searches hold them all. The plan keeps the query pending and runs it when a
+     * search ends; the team stays on.
+     */
+    static final String TEAM_TABS_BUSY = "TEAM_TABS_BUSY";
 
     /**
      * A tab of its own in the team's page browser for one team query (plan T5): one user context of this chat's
-     * worker browsers holds the tabs of all page workers. {@code null} when the chat has no worker browsers, none
-     * came free within the wait setting or the tab limit is reached, so the query fails honestly and stays in the
-     * plan.
+     * worker browsers holds the tabs of all page workers. Empty when the chat has no worker browsers at all, so the
+     * query fails honestly with {@link #NO_WORKER_BROWSER} and the plan goes on in the chat browser.
+     *
+     * @throws com.aresstack.askai.research.runtime.browser.BrowserCapacityException no worker browser and no tab
+     *         came free within the wait setting ({@link #TEAM_TABS_BUSY}: the query stays in the plan)
      */
     private java.util.List<com.aresstack.askai.research.runtime.browser.TeamTabs.Tab> acquireTeamTabs(
-            String requestId, int max) throws InterruptedException {
+            String requestId, int max) throws InterruptedException,
+            com.aresstack.askai.research.runtime.browser.BrowserCapacityException {
         com.aresstack.askai.research.runtime.browser.TeamTabs tabs = teamTabs();
         if (tabs == null || !tabs.available()) {
             System.err.println("[team] no worker browsers in this chat: requestId=" + requestId);
             return java.util.Collections.emptyList();
         }
-        // Stop interrupts the wait for a worker browser at once instead of after the pool's wait setting
+        // Stop interrupts the wait for a worker browser or a free tab at once instead of after the wait setting
         teamWaiters.add(Thread.currentThread());
         try {
             return tabs.acquireUpTo(requestId, max);
-        } catch (com.aresstack.askai.research.runtime.browser.BrowserCapacityException busy) {
-            System.err.println("[team] no tab for requestId=" + requestId + ": " + busy.getMessage());
-            return java.util.Collections.emptyList();
         } finally {
             teamWaiters.remove(Thread.currentThread());
             Thread.interrupted(); // a Stop that came after the wait must not hit the query's later browser calls
