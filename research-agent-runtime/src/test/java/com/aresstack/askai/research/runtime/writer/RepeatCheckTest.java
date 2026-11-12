@@ -86,4 +86,30 @@ public class RepeatCheckTest {
         assertEquals("one repeat of the book, one of the answer itself", 2, result.getRepeatedSentences().size());
         assertEquals("the caller's memory is not changed", 3, book.size());
     }
+
+    /** Review of #221: the same wording with another measurement is another claim. */
+    @Test
+    public void aSentenceWithANumberTheEarlierOneLacksIsNoRepeat() {
+        RepeatCheck.Memory book = check.memory(Collections.singletonList("Die Sensoren reduzieren die "
+                + "durchschnittliche Belastung der Arbeiter beim Heben schwerer Lasten um 20 % [1]."));
+        assertFalse(book.repeats("Die Sensoren reduzieren die durchschnittliche Belastung der Arbeiter beim Heben "
+                + "schwerer Lasten um 40 %."));
+        assertFalse(book.repeats("Die Sensoren reduzieren die durchschnittliche Belastung der Arbeiter beim Heben "
+                + "schwerer Lasten um -20 %."));
+        assertTrue("the same number again is a repeat", book.repeats("Die Sensoren reduzieren die durchschnittliche "
+                + "Belastung der Arbeiter beim Heben schwerer Lasten nachweislich um 20 %."));
+        assertEquals(new java.util.HashSet<String>(Arrays.asList("-20°C", "15,5%", "1.100")),
+                RepeatCheck.numbers("Bei -20 °C stieg die Rate auf 15,5 % von 1.100 Fällen."));
+    }
+
+    /** Review of #221: an uncited question that becomes an open point says nothing the answer would repeat. */
+    @Test
+    public void aQuestionParagraphTakenOutOfTheProseIsNoEarlierSentence() {
+        CitationValidator.Result result = new CitationValidator().validate("Wie können Sensoren die Sicherheit der "
+                        + "Arbeiter auf Baustellen verbessern?\n\nSensoren können die Sicherheit der Arbeiter auf "
+                        + "Baustellen verbessern [1].", 1, Collections.<String>emptySet(),
+                check.memory(Collections.<String>emptyList()));
+        assertEquals("Sensoren können die Sicherheit der Arbeiter auf Baustellen verbessern [1].", result.text());
+        assertEquals(1, result.getGaps().size());
+    }
 }
