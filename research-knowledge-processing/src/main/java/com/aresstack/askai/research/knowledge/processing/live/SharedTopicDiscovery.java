@@ -119,9 +119,12 @@ public final class SharedTopicDiscovery {
      */
     public synchronized Pinned refreshPinned(long nowMillis, ClusteringMonitor monitor) {
         ActiveKnowledgeCorpusReader.Corpus whole = corpus.read();
-        ActiveKnowledgeCorpusReader.Corpus current = CorpusLimit.apply(whole, corpusLimit);
-        int omitted = whole.getPassages().size() - current.getPassages().size();
         TopicAnalysisRequest request = currentRequest();
+        // the same material rule as the analysis (no boilerplate topics); the sources stay those of the corpus filter
+        ActiveKnowledgeCorpusReader.Corpus material = request == null ? whole
+                : narrowed(whole, null, request.getPassageFilter());
+        ActiveKnowledgeCorpusReader.Corpus current = CorpusLimit.apply(material, corpusLimit);
+        int omitted = material.getPassages().size() - current.getPassages().size();
         List<LiveTopicProjection> topics = clustering(request == null ? null : request.getSettings())
                 .discoverTopics(current.getPassages(), current.getVectors(), monitor, splitRule(request, current));
         if (monitor != null && monitor.isCancelled()) {
@@ -283,11 +286,18 @@ public final class SharedTopicDiscovery {
         return request;
     }
 
-    /** The corpus of the request: the discovery's corpus, narrowed to the eligible sources (D4). */
+    /**
+     * The corpus of the request: the discovery's corpus, narrowed to the eligible sources (D4) and to the passages the
+     * request's passage filter accepts (no page boilerplate as topics; live run 4).
+     */
     private ActiveKnowledgeCorpusReader.Corpus read(TopicAnalysisRequest request) {
-        ActiveKnowledgeCorpusReader.Corpus whole = corpus.read();
-        Set<String> eligible = request.getEligibleSourceIds();
-        if (eligible == null) {
+        return narrowed(corpus.read(), request.getEligibleSourceIds(), request.getPassageFilter());
+    }
+
+    private static ActiveKnowledgeCorpusReader.Corpus narrowed(ActiveKnowledgeCorpusReader.Corpus whole,
+                                                               Set<String> eligible,
+                                                               TopicAnalysisRequest.PassageFilter filter) {
+        if (eligible == null && filter == TopicAnalysisRequest.PassageFilter.ALL) {
             return whole;
         }
         List<Passage> passages = new ArrayList<Passage>();
@@ -297,7 +307,7 @@ public final class SharedTopicDiscovery {
         Set<String> kept = new java.util.HashSet<String>();
         for (Passage passage : whole.getPassages()) {
             String sourceId = whole.sourceIdOf(passage.getPassageId());
-            if (eligible.contains(sourceId)) {
+            if ((eligible == null || eligible.contains(sourceId)) && filter.accepts(passage.getText())) {
                 passages.add(passage);
                 kept.add(passage.getPassageId());
                 sources.put(passage.getPassageId(), sourceId);

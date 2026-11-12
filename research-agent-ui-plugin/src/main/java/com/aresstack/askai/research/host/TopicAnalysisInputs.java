@@ -9,6 +9,7 @@ import com.aresstack.askai.research.knowledge.topic.ConceptAnchor;
 import com.aresstack.askai.research.knowledge.topic.ScopeFence;
 import com.aresstack.askai.research.outline.generate.ConceptFrame;
 import com.aresstack.askai.research.outline.generate.OutlineSourceRule;
+import com.aresstack.askai.research.runtime.writer.ProsePassageFilter;
 import com.aresstack.askai.research.sources.ResearchSourceRecord;
 import com.aresstack.askai.research.store.FileConceptStore;
 
@@ -88,7 +89,25 @@ public final class TopicAnalysisInputs implements SharedTopicDiscovery.AnalysisI
         return new TopicAnalysisRequest(title, frame.hasFrame(), anchors(frame),
                 frozen.getPin().getWorkingRevision(), source.fence(), eligible, domains, source.pendingSourceIds(),
                 settings.getAnalysis(), settings.getKeyTerms(), settings.getMinimumCorpusPassages(),
-                settings.getEveryNewPassages(), settings.getCorpusLimit());
+                settings.getEveryNewPassages(), settings.getCorpusLimit(), proseOnly(settings.getProse()));
+    }
+
+    /**
+     * Live run 4 (2026-11-12): navigation, contact, price and heading passages ("Email*", "+49 5251 60-0 Rechtliches
+     * Impressum …", "CHF 69") reached the topic corpus and became topics of their own; the writer's evidence packs had
+     * dropped them since live run 3. One rule decides for both: a passage that carries no statement is no material.
+     */
+    static TopicAnalysisRequest.PassageFilter proseOnly(ProsePassageFilter.Criteria criteria) {
+        final ProsePassageFilter prose = new ProsePassageFilter(criteria);
+        return new TopicAnalysisRequest.PassageFilter() {
+            public boolean accepts(String text) {
+                return prose.isProse(text);
+            }
+
+            public String key() {
+                return "prose(" + prose.getCriteria() + ")";
+            }
+        };
     }
 
     /** The concept nodes below the frame with their query vectors; each label path is embedded once. */

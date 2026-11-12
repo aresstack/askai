@@ -3,6 +3,7 @@ package com.aresstack.askai.research.host;
 import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
 import com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery;
 import com.aresstack.askai.research.knowledge.topic.TopicAnalysisSettings;
+import com.aresstack.askai.research.runtime.writer.ProsePassageFilter;
 
 /**
  * Phase 2/3: the settings of the shared topic analysis (D6): the topic-analysis knobs, the key terms per node or
@@ -42,9 +43,21 @@ public final class EvidenceAnalysisSettings {
     private final int minimumCorpusPassages;
     private final int everyNewPassages;
     private final int corpusLimit;
+    private final ProsePassageFilter.Criteria prose;
 
     public EvidenceAnalysisSettings(TopicAnalysisSettings analysis, int keyTerms, int minimumCorpusPassages,
                                     int everyNewPassages, int corpusLimit) {
+        this(analysis, keyTerms, minimumCorpusPassages, everyNewPassages, corpusLimit,
+                ProsePassageFilter.Criteria.defaults());
+    }
+
+    /**
+     * @param prose which passages are material for the analysis: the writer's prose criteria (live run 3, fix 2), so
+     *              navigation, contact and price lines are neither evidence nor topics (live run 4)
+     */
+    public EvidenceAnalysisSettings(TopicAnalysisSettings analysis, int keyTerms, int minimumCorpusPassages,
+                                    int everyNewPassages, int corpusLimit, ProsePassageFilter.Criteria prose) {
+        this.prose = prose == null ? ProsePassageFilter.Criteria.defaults() : prose;
         this.analysis = analysis == null ? TopicAnalysisSettings.defaults() : analysis;
         this.keyTerms = Math.max(1, keyTerms);
         this.minimumCorpusPassages = Math.max(2, minimumCorpusPassages);
@@ -96,7 +109,7 @@ public final class EvidenceAnalysisSettings {
                 ResearchRuntimeSettings.loadPositiveInt(store, KEY_KEY_TERMS, DEFAULT_KEY_TERMS),
                 ResearchRuntimeSettings.loadPositiveInt(store, KEY_MINIMUM_CORPUS, DEFAULT_MINIMUM_CORPUS),
                 ResearchRuntimeSettings.loadPositiveInt(store, KEY_EVERY_NEW_PASSAGES, DEFAULT_EVERY_NEW_PASSAGES),
-                SharedTopicDiscovery.DEFAULT_CORPUS_LIMIT);
+                SharedTopicDiscovery.DEFAULT_CORPUS_LIMIT, ResearchRuntimeSettings.loadWriterProseCriteria(store));
     }
 
     public TopicAnalysisSettings getAnalysis() {
@@ -117,6 +130,11 @@ public final class EvidenceAnalysisSettings {
 
     public int getCorpusLimit() {
         return corpusLimit;
+    }
+
+    /** The prose criteria a passage must meet to be material for the analysis (the writer's, one rule). */
+    public ProsePassageFilter.Criteria getProse() {
+        return prose;
     }
 
 }

@@ -20,6 +20,28 @@ import java.util.TreeSet;
  */
 public final class TopicAnalysisRequest {
 
+    /**
+     * Which passages are material at all: page boilerplate (navigation, contact lines, prices, bare headings) is no
+     * topic. The host passes the same prose rule the writer's evidence packs use, so one rule decides what counts.
+     */
+    public interface PassageFilter {
+        /** Every passage counts. */
+        PassageFilter ALL = new PassageFilter() {
+            public boolean accepts(String text) {
+                return true;
+            }
+
+            public String key() {
+                return "all";
+            }
+        };
+
+        boolean accepts(String text);
+
+        /** The rule's values, for the snapshot id: a changed rule is a new state. */
+        String key();
+    }
+
     private final String bookTitle;
     private final boolean bookFrame;
     private final List<ConceptAnchor> anchors;
@@ -33,6 +55,7 @@ public final class TopicAnalysisRequest {
     private final int minimumCorpusPassages;
     private final int everyNewPassages;
     private final int corpusLimit;
+    private final PassageFilter passageFilter;
 
     /**
      * @param eligibleSourceIds the sources the analysis reads (D4); {@code null} = every source of the corpus filter
@@ -42,6 +65,18 @@ public final class TopicAnalysisRequest {
                                 ScopeFence fence, Set<String> eligibleSourceIds, Map<String, String> domainBySource,
                                 Set<String> pendingSourceIds, TopicAnalysisSettings settings, int keyTerms,
                                 int minimumCorpusPassages, int everyNewPassages, int corpusLimit) {
+        this(bookTitle, bookFrame, anchors, conceptRevision, fence, eligibleSourceIds, domainBySource,
+                pendingSourceIds, settings, keyTerms, minimumCorpusPassages, everyNewPassages, corpusLimit,
+                PassageFilter.ALL);
+    }
+
+    /** @param passageFilter which passages are material; {@code null} = every passage */
+    public TopicAnalysisRequest(String bookTitle, boolean bookFrame, List<ConceptAnchor> anchors, long conceptRevision,
+                                ScopeFence fence, Set<String> eligibleSourceIds, Map<String, String> domainBySource,
+                                Set<String> pendingSourceIds, TopicAnalysisSettings settings, int keyTerms,
+                                int minimumCorpusPassages, int everyNewPassages, int corpusLimit,
+                                PassageFilter passageFilter) {
+        this.passageFilter = passageFilter == null ? PassageFilter.ALL : passageFilter;
         this.bookTitle = bookTitle == null ? "" : bookTitle.trim();
         this.bookFrame = bookFrame;
         this.anchors = Collections.unmodifiableList(new ArrayList<ConceptAnchor>(
@@ -122,6 +157,10 @@ public final class TopicAnalysisRequest {
         return corpusLimit;
     }
 
+    public PassageFilter getPassageFilter() {
+        return passageFilter;
+    }
+
     /** Every value that changes the result besides corpus and embedding world, for the snapshot id. */
     String fingerprint() {
         StringBuilder key = new StringBuilder();
@@ -141,6 +180,7 @@ public final class TopicAnalysisRequest {
                 .append(s.getTopicDistance()).append('/')
                 .append(keyTerms).append('/').append(corpusLimit);
         // a queue change is a new state: the snapshot must not report "settled" while sources are still pending
+        key.append("|passages=").append(passageFilter.key());
         key.append("|pending=").append(new java.util.TreeSet<String>(pendingSourceIds));
         return key.toString();
     }

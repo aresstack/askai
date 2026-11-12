@@ -52,6 +52,7 @@ public class SharedTopicAnalysisTest {
     private int everyNew = 3;
     private boolean conceptApproved = true;
     private TopicAnalysisSettings settings = TopicAnalysisSettings.defaults();
+    private TopicAnalysisRequest.PassageFilter passageFilter = TopicAnalysisRequest.PassageFilter.ALL;
     private int next;
 
     /** {@code count} passages of {@code sourceId} along {@code direction}, each with its own second direction. */
@@ -97,7 +98,7 @@ public class SharedTopicAnalysisTest {
                 }
                 return new TopicAnalysisRequest("The Smart Site", true, anchors, conceptRevision, null,
                         new LinkedHashSet<String>(eligible), domains, pending, settings, 3,
-                        minimumCorpus, everyNew, SharedTopicDiscovery.DEFAULT_CORPUS_LIMIT);
+                        minimumCorpus, everyNew, SharedTopicDiscovery.DEFAULT_CORPUS_LIMIT, passageFilter);
             }
         });
         return discovery;
@@ -160,6 +161,33 @@ public class SharedTopicAnalysisTest {
         assertEquals("safety and law stay two topics", 2, snapshot.analysis().getTopics().size());
         assertEquals("the legacy discovery cuts the same topics", 2,
                 discovery.refreshPinned(0L).snapshot.topics.size());
+    }
+
+    /** Live run 4: navigation and contact passages are no material; the request's passage filter keeps them out. */
+    @Test
+    public void passagesTheFilterRejectsAreNoMaterialAndNoTopic() throws Exception {
+        source("s1", 0, 3);
+        source("s2", 0, 3);
+        source("imprint", 10, 4);
+        TopicAnalysisSnapshot all = discovery(temp.newFolder("all")).analyze(null);
+        assertEquals(10, all.getPassages());
+
+        passageFilter = new TopicAnalysisRequest.PassageFilter() {
+            public boolean accepts(String text) {
+                return !text.endsWith("from imprint");
+            }
+
+            public String key() {
+                return "no-imprint";
+            }
+        };
+        SharedTopicDiscovery discovery = discovery(temp.newFolder("prose"));
+        TopicAnalysisSnapshot prose = discovery.analyze(null);
+        assertEquals("the imprint passages are left out", 6, prose.getPassages());
+        assertEquals(1, prose.analysis().getTopics().size());
+        assertNotEquals("a changed rule is a new state", all.getId(), prose.getId());
+        assertEquals("the legacy discovery reads the same material", 6,
+                discovery.refreshPinned(0L).corpus.getPassages().size());
     }
 
     @Test
