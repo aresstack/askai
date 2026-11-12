@@ -24,8 +24,8 @@ import java.util.Map;
 /**
  * The productive side of a section's evidence pack (plan PR 29 wiring of PR 27/28): the accepted sources of this
  * moment (the approved set plus sources a gap search accepted later) with the weight the mission's source
- * preference gives each of them, the active passages by id for the provenance lookup, and the digest of the
- * previous written section. The passage map is read once per writing run ({@link #refresh()}), so a pack never
+ * preference gives each of them, the active passages by id for the provenance lookup, the digest of the
+ * previous written section and the text of every other written section (the writer's repeat check). The passage map is read once per writing run ({@link #refresh()}), so a pack never
  * reads the whole corpus per section.
  */
 public final class ProductiveSectionContexts implements EvidenceAssignments.Contexts, EvidencePassageLookup {
@@ -148,6 +148,27 @@ public final class ProductiveSectionContexts implements EvidenceAssignments.Cont
             passages = map;
         }
         return map;
+    }
+
+    /**
+     * The current text of every other section of the manuscript that has one and stays in the book (not skipped, not
+     * orphaned), in id order: what the writer's repeat check compares the new section with.
+     */
+    public List<String> writtenSections(SectionWriteRequest request) {
+        List<String> texts = new java.util.ArrayList<String>();
+        String own = request.getSection().getId();
+        for (com.aresstack.askai.research.manuscript.ManuscriptSection state : manuscript.sections()) {
+            if (state.getSectionId().equals(own) || !state.hasText()
+                    || state.getStatus() == com.aresstack.askai.research.manuscript.SectionStatus.SKIPPED
+                    || state.getStatus() == com.aresstack.askai.research.manuscript.SectionStatus.ORPHAN) {
+                continue;
+            }
+            SectionRevision revision = manuscript.revision(state.getSectionId(), state.getRevision());
+            if (revision != null && !revision.getText().trim().isEmpty()) {
+                texts.add(revision.getText());
+            }
+        }
+        return texts;
     }
 
     /** The beginning of the previous section's current text in the same chapter, or "". */

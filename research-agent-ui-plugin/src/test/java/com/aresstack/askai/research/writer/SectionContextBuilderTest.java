@@ -206,13 +206,23 @@ public class SectionContextBuilderTest {
                                     com.aresstack.askai.research.drafting.SectionWriteRequest ignored) {
                                 return request;
                             }
+
+                            public java.util.List<String> writtenSections(
+                                    com.aresstack.askai.research.drafting.SectionWriteRequest ignored) {
+                                return Arrays.asList("Ein anderer Abschnitt sagt dies schon [1].", " ");
+                            }
                         },
                         () -> new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
-                                new WriterPackSettings(4, 300), 450, 3072, null));
+                                new WriterPackSettings(4, 300), 450, 3072, null,
+                                new com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria(7, 0.6)));
         com.aresstack.askai.research.runtime.writer.SectionAssignment twoParts = assignments.assignmentFor(
                 com.aresstack.askai.research.drafting.SectionWriteRequest.draft(chapter, section));
         assertEquals("900 words at 450 per call: two parts of four passages", 8, twoParts.getPassages().size());
         assertEquals(4, twoParts.getPassagesPerCall());
+        assertEquals("the other written sections reach the repeat check; blank texts are left out",
+                Arrays.asList("Ein anderer Abschnitt sagt dies schon [1]."), twoParts.getWrittenSections());
+        assertEquals(new com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria(7, 0.6),
+                twoParts.getRepeats());
     }
 
     @Test
