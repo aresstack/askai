@@ -332,7 +332,7 @@ public final class SharedTopicDiscovery {
     private static TopicDendrogram.SplitRule splitRule(TopicAnalysisRequest request,
                                                        ActiveKnowledgeCorpusReader.Corpus corpus) {
         return request == null ? TopicDendrogram.SplitRule.NONE
-                : new TopicAnalyzer(request.getSettings()).conceptSplit(corpus.getVectors(), request.getAnchors());
+                : new TopicAnalyzer(request.getSettings(), request.getFrame()).conceptSplit(corpus.getVectors(), request.getAnchors());
     }
 
     /** The request of the current inputs, or {@code null} without inputs (the builder's own values, no split). */
@@ -361,7 +361,7 @@ public final class SharedTopicDiscovery {
                     passage.getText()));
             texts.put(passage.getPassageId(), passage.getText());
         }
-        TopicAnalysis analysis = new TopicAnalyzer(request.getSettings()).analyze(passages, whole.getVectors(), tree,
+        TopicAnalysis analysis = new TopicAnalyzer(request.getSettings(), request.getFrame()).analyze(passages, whole.getVectors(), tree,
                 request.getAnchors(), request.getFence(), monitor);
         if (monitor.isCancelled()) {
             throw new ClusteringMonitor.ClusteringCancelledException();

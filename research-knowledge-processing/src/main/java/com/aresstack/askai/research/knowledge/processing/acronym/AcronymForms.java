@@ -119,8 +119,19 @@ public final class AcronymForms {
         return words >= minWords && loud * 100 >= percent * words;
     }
 
-    /** A long form for comparing: lower case, whitespace runs as single spaces. */
+    /**
+     * A long form for comparing: {@linkplain #cleanLongForm cleaned} and in lower case, so the same word written with
+     * soft hyphens (U+00AD, "Bundesdatenschutzgesetz" from a hyphenated page) and without them is one long form
+     * (live run 4, book 6).
+     */
     public static String normalizeLongForm(String longForm) {
-        return longForm.toLowerCase(Locale.ROOT).replaceAll("[\\s\\u00A0]+", " ").trim();
+        return cleanLongForm(longForm).toLowerCase(Locale.ROOT);
+    }
+
+    /** A long form as shown: soft hyphens removed, whitespace runs as single spaces, enclosing quotes removed. */
+    public static String cleanLongForm(String longForm) {
+        String value = (longForm == null ? "" : longForm).replace("\u00AD", "")
+                .replaceAll("[\\s\\u00A0]+", " ").trim();
+        return value.replaceAll("^[\"'“”„»«’‘‚]+|[\"'“”„»«’‘‚]+$", "").trim();
     }
 }

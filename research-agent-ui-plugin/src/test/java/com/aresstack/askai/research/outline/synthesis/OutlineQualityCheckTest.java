@@ -219,6 +219,77 @@ public class OutlineQualityCheckTest {
     }
 
     /**
+     * Live outline acceptance 2026-11-12: the chapter named the whole topic, its sections named the sub-topics, and
+     * the topic's rest was in no section. The sections decide where the rest goes.
+     */
+    @Test
+    public void theRestOfATopicWhoseSectionsNameItsSubtopicsIsUsed() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int base = corpus.diverse("sites", 2, 6, 3);
+        corpus.rest("sites", base, 2, 2, 0.9);
+        SynthesisBrief brief = corpus.brief();
+        assertEquals(1, brief.getTopics().size());
+        assertEquals("two passages are too few for a sub-topic of their own", 2, brief.restOf("T1").size());
+        OutlinePlan plan = new OutlinePlan(Collections.singletonList(
+                chapter("Sites", Collections.singletonList("T1"), Collections.<String>emptyList(),
+                        section("A", "T1.1"), section("B", "T1.2"))),
+                Collections.<String>emptyList(), false);
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "snap", Collections.<PlanFinding>emptyList(),
+                        Collections.<String>emptyList());
+
+        java.util.Set<String> used = new java.util.HashSet<String>();
+        for (com.aresstack.askai.research.outline.OutlineSection section : outline.getChapters().get(0)
+                .getSections()) {
+            used.addAll(section.getProvenance().getPassageIds());
+        }
+        assertEquals("every passage of the topic", new java.util.HashSet<String>(brief.passagesOf("T1")), used);
+        assertEquals(new java.util.HashSet<String>(brief.passagesOf("T1")), new java.util.HashSet<String>(
+                outline.getChapters().get(0).getProvenance().getPassageIds()));
+    }
+
+    /**
+     * Live outline acceptance 2026-11-12 (bge-m3): the rest of one topic came from three areas and went as a whole to
+     * one section (8200 instead of 2450 words). Each rest passage now goes to the section of its nearest sub-topic.
+     */
+    @Test
+    public void eachRestPassageGoesToTheSectionOfItsNearestSubtopic() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int perAspect = 6;
+        int base = corpus.diverse("sites", 2, perAspect, 3);
+        corpus.leaningRest("sites", base, base + 1, 1, 1);
+        corpus.leaningRest("sites", base, base + 1 + (perAspect + 1), 1, 1);
+        SynthesisBrief brief = corpus.brief();
+        assertEquals(1, brief.getTopics().size());
+        List<String> rest = brief.restOf("T1");
+        assertEquals(2, rest.size());
+        java.util.Map<String, String> home = brief.topic("T1").getProfile().getRestSubtopicOf();
+        assertFalse("the two rest passages lean towards different sub-topics",
+                home.get(rest.get(0)).equals(home.get(rest.get(1))));
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("One", Collections.singletonList("T1.1"), Collections.<String>emptyList(),
+                        section("A", "T1.1")),
+                chapter("Two", Collections.singletonList("T1.2"), Collections.<String>emptyList(),
+                        section("B", "T1.2"))),
+                Collections.<String>emptyList(), false);
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "snap", Collections.<PlanFinding>emptyList(),
+                        Collections.<String>emptyList());
+
+        for (int c = 0; c < 2; c++) {
+            SynthesisBrief.SubtopicEntry subtopic = brief.subtopic("T1." + (c + 1));
+            List<String> passages = outline.getChapters().get(c).getSections().get(0).getProvenance()
+                    .getPassageIds();
+            for (String passage : rest) {
+                assertEquals(passage + " in chapter " + (c + 1),
+                        home.get(passage).equals(subtopic.getSubtopic().getSubtopicId()), passages.contains(passage));
+            }
+        }
+    }
+
+    /**
      * Live run 4 after #204: one aspect per concept node gave every chapter one section, also the chapter of 809
      * passages. A node's material that the sub-topic cut separates gives several aspects of that node; a used
      * concept part treats its requirement even when no chapter names it.

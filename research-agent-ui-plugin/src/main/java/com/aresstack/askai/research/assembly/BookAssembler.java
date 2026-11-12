@@ -5,6 +5,7 @@ import com.aresstack.askai.research.assembly.BookQualityReport.Kind;
 import com.aresstack.askai.research.knowledge.processing.acronym.AcronymDefinition;
 import com.aresstack.askai.research.knowledge.processing.acronym.AcronymExtractor;
 import com.aresstack.askai.research.knowledge.processing.acronym.AcronymFinding;
+import com.aresstack.askai.research.knowledge.processing.acronym.AcronymForms;
 import com.aresstack.askai.research.knowledge.processing.acronym.AcronymLongForms;
 import com.aresstack.askai.research.knowledge.processing.acronym.AcronymSettings;
 import com.aresstack.askai.research.knowledge.processing.acronym.SentenceSegmenter;
@@ -447,30 +448,44 @@ public final class BookAssembler {
         return false;
     }
 
-    /** Each distinct long form with the sources that state it, as reference numbers or titles. */
+    /**
+     * Each distinct long form with the sources that state it, as reference numbers only (live run 4, book 6: raw ids
+     * such as "source-47" and page titles stood in the appendix). A source the book does not cite has no number and is
+     * left out of the parentheses; a long form only such sources state stands without them. Long forms are compared
+     * without soft hyphens and enclosing quotes ({@link AcronymForms#normalizeLongForm}).
+     */
     private static String longForms(AcronymLongForms forms, BookAssemblyInput input, CitationRegistry registry) {
-        Map<String, Set<String>> sourcesByForm = new TreeMap<String, Set<String>>();
+        Map<String, Set<Integer>> sourcesByForm = new TreeMap<String, Set<Integer>>();
         Map<String, String> display = new HashMap<String, String>();
         for (AcronymLongForms.Statement statement : forms.statements()) {
-            String form = statement.longForm().longForm().trim();
-            String key = form.toLowerCase(Locale.ROOT);
+            String form = AcronymForms.cleanLongForm(statement.longForm().longForm());
+            String key = AcronymForms.normalizeLongForm(form);
+            if (key.isEmpty()) {
+                continue;
+            }
             if (!display.containsKey(key)) {
                 display.put(key, form);
             }
-            Set<String> names = sourcesByForm.get(key);
-            if (names == null) {
-                names = new TreeSet<String>();
-                sourcesByForm.put(key, names);
+            Set<Integer> numbers = sourcesByForm.get(key);
+            if (numbers == null) {
+                numbers = new TreeSet<Integer>();
+                sourcesByForm.put(key, numbers);
             }
             int number = registry.numberOf(statement.sourceId());
-            AssemblySource source = input.source(statement.sourceId());
-            names.add(number > 0 ? "[" + number + "]"
-                    : source != null && !source.getTitle().isEmpty() ? source.getTitle() : statement.sourceId());
+            if (number > 0) {
+                numbers.add(number);
+            }
         }
         StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, Set<String>> entry : sourcesByForm.entrySet()) {
-            sb.append(sb.length() == 0 ? "" : "; ").append(display.get(entry.getKey()))
-                    .append(" (").append(join(entry.getValue())).append(')');
+        for (Map.Entry<String, Set<Integer>> entry : sourcesByForm.entrySet()) {
+            sb.append(sb.length() == 0 ? "" : "; ").append(display.get(entry.getKey()));
+            if (!entry.getValue().isEmpty()) {
+                StringBuilder refs = new StringBuilder();
+                for (Integer number : entry.getValue()) {
+                    refs.append(refs.length() == 0 ? "" : ", ").append('[').append(number).append(']');
+                }
+                sb.append(" (").append(refs).append(')');
+            }
         }
         return sb.toString();
     }

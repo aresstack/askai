@@ -19,6 +19,7 @@ public final class EvidenceAnalysisSettings {
     public static final String KEY_TOPIC_GROUP_DISTANCE = "research.evidence.topicGroupDistance";
     public static final String KEY_CONCEPT_THRESHOLD = "research.evidence.conceptThreshold";
     public static final String KEY_CONCEPT_MARGIN = "research.evidence.conceptMargin";
+    public static final String KEY_CONCEPT_FRAME_LEAD = "research.evidence.conceptFrameLead";
     public static final String KEY_MINIMUM_PASSAGES = "research.evidence.minimumPassages";
     public static final String KEY_MINIMUM_SOURCES = "research.evidence.minimumSources";
     public static final String KEY_MINIMUM_DOMAINS = "research.evidence.minimumDomains";
@@ -85,6 +86,8 @@ public final class EvidenceAnalysisSettings {
                             TopicAnalysisSettings.DEFAULT_CONCEPT_THRESHOLD),
                     ResearchRuntimeSettings.loadDouble(store, KEY_CONCEPT_MARGIN,
                             TopicAnalysisSettings.DEFAULT_CONCEPT_MARGIN),
+                    ResearchRuntimeSettings.loadDouble(store, KEY_CONCEPT_FRAME_LEAD,
+                            TopicAnalysisSettings.DEFAULT_CONCEPT_FRAME_LEAD),
                     ResearchRuntimeSettings.loadPositiveInt(store, KEY_MINIMUM_PASSAGES,
                             TopicAnalysisSettings.DEFAULT_MINIMUM_PASSAGES),
                     ResearchRuntimeSettings.loadPositiveInt(store, KEY_MINIMUM_SOURCES,

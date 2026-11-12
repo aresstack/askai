@@ -63,8 +63,27 @@ final class SynthesisFixture {
 
     /** {@code count} passages along an existing topic base only (no aspect): the topic's rest; distinct each. */
     void rest(String topic, int base, int count, int sources) {
+        rest(topic, base, count, sources, 0.6);
+    }
+
+    /**
+     * As {@link #rest(String, int, int, int)} with the weight of each passage's own direction: 0.9 keeps the rest
+     * apart from the topic's aspects (beyond the sub-topic cut), 0.6 lets the sub-topic cut join it to an aspect.
+     */
+    void rest(String topic, int base, int count, int sources, double own) {
         for (int i = 0; i < count; i++) {
-            add(topic + " rest", topic, i % sources, new int[]{base, direction()}, new double[]{1.2, 0.6});
+            add(topic + " rest", topic, i % sources, new int[]{base, direction()}, new double[]{1.2, own});
+        }
+    }
+
+    /**
+     * {@code count} rest passages of a topic leaning towards the aspect with direction {@code aspect}, but beyond the
+     * sub-topic cut: in no sub-topic, nearest to that aspect's sub-topic.
+     */
+    void leaningRest(String topic, int base, int aspect, int count, int sources) {
+        for (int i = 0; i < count; i++) {
+            add(topic + " rest", topic, i % sources, new int[]{base, aspect, direction()},
+                    new double[]{1.2, 0.3, 1.4});
         }
     }
 
