@@ -502,10 +502,13 @@ public class TopicAnalyzerTest {
         LiveTopicTree tree = new LiveOutlineProjectionBuilder().discoverTopicTree(corpus.passages, corpus.vectors,
                 ClusteringMonitor.NONE);
 
-        ConceptCoverage coverage = new TopicAnalyzer(TopicAnalysisSettings.defaults(), corpus.query(frame)).analyze(
-                corpus.analysisPassages, corpus.vectors, tree, anchors, null, ClusteringMonitor.NONE)
-                .getCoverage().get(0);
+        TopicAnalysis analysis = new TopicAnalyzer(TopicAnalysisSettings.defaults(), corpus.query(frame)).analyze(
+                corpus.analysisPassages, corpus.vectors, tree, anchors, null, ClusteringMonitor.NONE);
 
-        assertEquals(ConceptCoverage.Status.GAP, coverage.getStatus());
+        assertEquals(ConceptCoverage.Status.GAP, analysis.getCoverage().get(0).getStatus());
+        for (TopicProfile topic : analysis.getTopics()) {
+            assertFalse("a topic near only the frame is aligned to no node: " + topic.getTitle(),
+                    topic.isConceptAligned());
+        }
     }
 }

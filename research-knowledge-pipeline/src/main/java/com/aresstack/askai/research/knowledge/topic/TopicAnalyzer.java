@@ -312,8 +312,8 @@ public final class TopicAnalyzer {
             double bestScore = scores[best];
             draft.anchorId = nodes.get(best).getId();
             draft.anchorSimilarity = bestScore;
-            draft.aligned = bestScore >= settings.getConceptThreshold()
-                    && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin();
+            // the same rule as for a single passage: a topic near only the book frame is aligned to no node
+            draft.aligned = assigned(nodes, scores, best, draft.centroid);
         }
         return draft;
     }
@@ -750,10 +750,16 @@ public final class TopicAnalyzer {
     private int nearest(List<ConceptAnchor> nodes, EmbeddingPort.EmbeddingVector vector) {
         double[] scores = scores(nodes, vector);
         int best = best(scores);
+        return assigned(nodes, scores, best, vector) ? best : -1;
+    }
+
+    /** Whether {@code vector} belongs to its nearest node {@code best}: threshold, margin and frame lead. */
+    private boolean assigned(List<ConceptAnchor> nodes, double[] scores, int best,
+                             EmbeddingPort.EmbeddingVector vector) {
         double bestScore = scores[best];
         return bestScore >= settings.getConceptThreshold()
                 && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin()
-                && frameLead(nodes.get(best), vector) >= settings.getConceptFrameLead() ? best : -1;
+                && frameLead(nodes.get(best), vector) >= settings.getConceptFrameLead();
     }
 
     /**
