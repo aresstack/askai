@@ -24,7 +24,7 @@ import java.util.List;
  * per-snapshot stable ids {@code link-1..n}); old link ids are invalidated by the next navigation.
  * {@code web_search} navigates to the configured provider URL — without one it fails honestly.
  */
-final class PlaywrightBrowserSession implements BrowserSession {
+final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSession {
 
     private final PlaywrightDriver driver;
     private final UrlSafetyPolicy policy;
@@ -133,6 +133,7 @@ final class PlaywrightBrowserSession implements BrowserSession {
      * in the order given, and every one of them ({@code ALL_ENABLED} within the group), whatever the settings' order
      * and mode. The group's fallback to the next priority is the web search tool's business, not this browser's.
      */
+    @Override
     public <T> T withEngineGroup(List<String> engineIds, BrowserCall<T> call) throws BrowserException {
         if (searchUrlTemplate != null) {
             throw new BrowserException("This browser runtime searches only its --search-url override; "

@@ -147,11 +147,12 @@ final class BrowserToolSet {
         if (engineIds == null) {
             return repair().prepare(query);
         }
-        if (!(session instanceof PlaywrightBrowserSession)) {
+        if (!(session instanceof EngineGroupSession)) {
             throw new BrowserException("This browser backend does not take engines for web_search_prepare.");
         }
         final SearchLayoutRepairTools tools = repair();
-        return ((PlaywrightBrowserSession) session).withEngineGroup(engineIds,
+        // The research browser's session sits behind its owner-thread actor; both run the group (EngineGroupSession).
+        return ((EngineGroupSession) session).withEngineGroup(engineIds,
                 () -> tools.prepare(query, com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED));
     }
 
