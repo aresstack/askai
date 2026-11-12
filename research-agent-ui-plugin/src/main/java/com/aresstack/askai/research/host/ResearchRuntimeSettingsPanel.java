@@ -51,6 +51,10 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
     private final JTextField writerRepeatMinWords = ComicControls.textField(4);
     private final JTextField writerRepeatMinShare = ComicControls.textField(4);
+    private final JTextField writerSynthesisMinSources = ComicControls.textField(4);
+    private final JTextField writerSynthesisParagraphs = ComicControls.textField(4);
+    private final JTextField writerSynthesisMinSentences = ComicControls.textField(4);
+    private final JTextField writerSynthesisMaxShare = ComicControls.textField(4);
     private final JTextField writerWordsPerCall = ComicControls.textField(5);
     private final JTextField writerAnswerTokens = ComicControls.textField(5);
     private final JTextField writerPassages = ComicControls.textField(4);
@@ -215,6 +219,10 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Stem letters", writerCarryStemLength), labelled("Overlap ≥", writerCarryMinOverlap)));
         writer.row("Repeat check", group(labelled("Words ≥", writerRepeatMinWords),
                 labelled("Share ≥", writerRepeatMinShare)));
+        writer.row("Synthesis", group(labelled("Sources ≥", writerSynthesisMinSources),
+                labelled("Paragraphs/part", writerSynthesisParagraphs),
+                labelled("Report: sentences ≥", writerSynthesisMinSentences),
+                labelled("One-source share ≤", writerSynthesisMaxShare)));
         writer.row("Topic drift", group(labelled("Term letters ≥", driftMinTermLength),
                 labelled("Sentences ≥", driftMinSentences), driftNounsOnly));
 
@@ -611,6 +619,21 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SHARE,
                 "Repeat check: the share (0..1) of a sentence's content words that one sentence the book already "
                         + "has must contain for the new sentence to count as a repeat. Lower values take out more.");
+        bindLimit(writerSynthesisMinSources, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_MIN_SOURCES,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SOURCES,
+                "Synthesis: how many different sources one paragraph combines (at least 2). The writer is asked "
+                        + "for such paragraphs, and the book report counts a paragraph with fewer as retelling.");
+        bindNonNegativeLimit(writerSynthesisParagraphs, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_PARAGRAPHS,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_PARAGRAPHS_PER_PART,
+                "Synthesis: paragraphs that combine sources the writer must write in each key-point part of a "
+                        + "section (0 = no such instruction).");
+        bindLimit(writerSynthesisMinSentences, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_MIN_SENTENCES,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SENTENCES,
+                "Book report: a paragraph with fewer sentences (a transition) is not counted as retelling.");
+        bindDecimal(writerSynthesisMaxShare, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_MAX_SHARE,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MAX_SINGLE_SOURCE_SHARE,
+                "Book report: when more than this share (0..1) of a section's paragraphs cite one source only, the "
+                        + "report notes the section as retelling instead of synthesis (a note, never blocking).");
         refreshBackendStatus();
         // The "Browser" tab changes the channel: the status follows whenever this tab is shown again.
         addHierarchyListener(new java.awt.event.HierarchyListener() {

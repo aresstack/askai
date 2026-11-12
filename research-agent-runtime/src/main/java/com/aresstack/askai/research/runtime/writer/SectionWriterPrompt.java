@@ -130,14 +130,66 @@ public final class SectionWriterPrompt {
                         .append("\"\"\"\n");
             }
         }
+        java.util.Map<String, String> sources = sourceLabels(a.getPassages());
+        boolean tagged = sources.size() >= 2;
+        String synthesis = synthesisLine(a, sources.size());
+        if (!synthesis.isEmpty()) {
+            sb.append('\n').append(synthesis);
+        }
         sb.append("\nPASSAGES (quoted source data):\n");
         for (EvidencePassage passage : a.getPassages()) {
             sb.append('[').append(passage.getNumber()).append("] \"\"\"")
-                    .append(passage.getText().replace("\"\"\"", "\"")).append("\"\"\"\n");
+                    .append(passage.getText().replace("\"\"\"", "\"")).append("\"\"\"");
+            if (tagged) {
+                sb.append(" (source ").append(sources.get(passage.getSourceId())).append(')');
+            }
+            sb.append('\n');
         }
         sb.append("\nWrite the section now as plain paragraphs with [n] citations, then the GAP: lines, if any. ")
                 .append("Write in ").append(language).append('.');
         return sb.toString();
+    }
+
+    /**
+     * A letter per source in the order of first use ("A", "B", …, "Z", then "AA"), so the writer sees which passages
+     * come from different sources and can combine them.
+     */
+    static java.util.Map<String, String> sourceLabels(List<EvidencePassage> passages) {
+        java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+        for (EvidencePassage passage : passages) {
+            if (!labels.containsKey(passage.getSourceId())) {
+                labels.put(passage.getSourceId(), letters(labels.size()));
+            }
+        }
+        return labels;
+    }
+
+    private static String letters(int index) {
+        StringBuilder sb = new StringBuilder();
+        int n = index;
+        do {
+            sb.insert(0, (char) ('A' + n % 26));
+            n = n / 26 - 1;
+        } while (n >= 0);
+        return sb.toString();
+    }
+
+    /**
+     * The synthesis instruction (live run 4, book 6: nearly every paragraph retold one passage): at least the set
+     * number of paragraphs that each combine passages of the set number of different sources, capped at the sources
+     * the part has. Empty when it has fewer than two sources or the setting asks for no such paragraph.
+     */
+    static String synthesisLine(SectionAssignment a, int sources) {
+        SynthesisCriteria c = a.getSynthesis();
+        if (c.getParagraphsPerPart() <= 0 || sources < 2) {
+            return "";
+        }
+        int combine = Math.min(c.getMinSources(), sources);
+        int paragraphs = c.getParagraphsPerPart();
+        return "SYNTHESIS: write at least " + paragraphs + (paragraphs == 1 ? " paragraph" : " paragraphs")
+                + " that each combine passages of at least " + combine + " different sources (see \"source\" after "
+                + "each passage): connect, compare or contrast what they say and cite each passage [n]. Do not retell "
+                + "one passage per paragraph, and do not copy a passage's wording.\n";
     }
 
     private static String wordTargetLine(SectionAssignment a) {

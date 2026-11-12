@@ -16,6 +16,7 @@ import com.aresstack.askai.research.manuscript.SectionStatus;
 import com.aresstack.askai.research.outline.OutlineChapter;
 import com.aresstack.askai.research.outline.OutlineSection;
 import com.aresstack.askai.research.runtime.writer.ClaimCarryCheck;
+import com.aresstack.askai.research.runtime.writer.SynthesisCriteria;
 import com.aresstack.askai.research.runtime.writer.VoiceCheck;
 
 import java.text.SimpleDateFormat;
@@ -61,6 +62,7 @@ public final class BookAssembler {
     private final ClaimCarryCheck carry;
     private final VoiceCheck voice = new VoiceCheck();
     private final TopicDriftCheck.Criteria drift;
+    private final SynthesisCriteria synthesis;
 
     public BookAssembler() {
         this(SentenceSegmenter.splitter(), ClaimCarryCheck.Criteria.defaults(), TopicDriftCheck.Criteria.defaults());
@@ -71,12 +73,24 @@ public final class BookAssembler {
         this(SentenceSegmenter.splitter(), carry, drift);
     }
 
+    /** With the claim-check stage 2, topic-drift and synthesis thresholds of the settings. */
+    public BookAssembler(ClaimCarryCheck.Criteria carry, TopicDriftCheck.Criteria drift,
+                         SynthesisCriteria synthesis) {
+        this(SentenceSegmenter.splitter(), carry, drift, synthesis);
+    }
+
     public BookAssembler(SentenceSegmenter sentences) {
         this(sentences, ClaimCarryCheck.Criteria.defaults(), TopicDriftCheck.Criteria.defaults());
     }
 
     public BookAssembler(SentenceSegmenter sentences, ClaimCarryCheck.Criteria carry,
                          TopicDriftCheck.Criteria drift) {
+        this(sentences, carry, drift, SynthesisCriteria.defaults());
+    }
+
+    public BookAssembler(SentenceSegmenter sentences, ClaimCarryCheck.Criteria carry,
+                         TopicDriftCheck.Criteria drift, SynthesisCriteria synthesis) {
+        this.synthesis = synthesis == null ? SynthesisCriteria.defaults() : synthesis;
         this.sentences = sentences;
         this.acronymExtractor = new AcronymExtractor(sentences);
         this.carry = new ClaimCarryCheck(carry);
@@ -267,6 +281,8 @@ public final class BookAssembler {
         String id = section.getId();
         int paragraphNo = 0;
         List<String> sectionSentences = new ArrayList<String>();
+        List<Integer> singleSource = new ArrayList<Integer>();
+        int counted = 0;
         for (String paragraph : PARAGRAPH_BREAK.split(text)) {
             if (paragraph.trim().isEmpty()) {
                 continue;
@@ -303,6 +319,17 @@ public final class BookAssembler {
             if (cited.isEmpty()) {
                 findings.add(new Finding(Kind.UNCITED_PARAGRAPH, id, label + ", paragraph " + paragraphNo));
             }
+            if (parts.size() >= synthesis.getMinSentences() && !cited.isEmpty()) {
+                counted++;
+                Set<String> sources = new HashSet<String>();
+                for (ManuscriptCitation citation : cited) {
+                    sources.add(citation.getSourceId().isEmpty() ? "marker:" + citation.getMarker()
+                            : citation.getSourceId());
+                }
+                if (sources.size() < synthesis.getMinSources()) {
+                    singleSource.add(paragraphNo);
+                }
+            }
             List<String> words = words(QUOTED.matcher(stripMarkers(paragraph)).replaceAll(" "));
             Set<ManuscriptCitation> distinct = new LinkedHashSet<ManuscriptCitation>(cited);
             for (ManuscriptCitation citation : distinct) {
@@ -327,6 +354,11 @@ public final class BookAssembler {
             } else if (lower.startsWith("unsupported quote")) {
                 findings.add(new Finding(Kind.UNSUPPORTED_QUOTE, id, label + ": " + detail(flag)));
             }
+        }
+        if (counted > 0 && singleSource.size() > synthesis.getMaxSingleSourceShare() * counted) {
+            findings.add(new Finding(Kind.SINGLE_SOURCE_PARAGRAPHS, id, label + ": " + singleSource.size() + " of "
+                    + counted + " paragraphs cite fewer than " + synthesis.getMinSources() + " sources (paragraphs "
+                    + join(toStrings(singleSource)) + ")"));
         }
         for (String subject : topics.foreignSubjects(sectionSentences)) {
             findings.add(new Finding(Kind.TOPIC_DRIFT, id, label + ": " + subject));
@@ -549,6 +581,14 @@ public final class BookAssembler {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT);
         format.setTimeZone(input.getTimeZone());
         return format.format(new Date(millis));
+    }
+
+    private static List<String> toStrings(List<Integer> numbers) {
+        List<String> out = new ArrayList<String>();
+        for (Integer n : numbers) {
+            out.add(String.valueOf(n));
+        }
+        return out;
     }
 
     private static String join(Iterable<String> values) {

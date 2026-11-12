@@ -256,6 +256,42 @@ public class SectionWriterTest {
                 + "Die Rate stieg auf 15,5 % [2].", draft.getText());
     }
 
+    /** Live run 4, book 6: nearly every paragraph retold one passage; the prompt now asks for synthesis. */
+    @Test
+    public void thePromptAsksEachPartToCombineSourcesAndNamesTheSourceOfEachPassage() {
+        List<EvidencePassage> pack = Arrays.asList(
+                new EvidencePassage(1, "dguv", "c1", "p1", "Helme mit Sensoren melden Stürze."),
+                new EvidencePassage(2, "baua", "c2", "p2", "Die Gefährdungsbeurteilung nennt Sturzgefahren."),
+                new EvidencePassage(3, "dguv", "c1", "p3", "Sensoren erfassen auch Hitze."));
+        SectionAssignment a = assignment(1).toBuilder().passages(pack)
+                .synthesis(new SynthesisCriteria(3, 2, 2, 0.5)).build();
+        String prompt = SectionWriterPrompt.userPrompt(a);
+        assertTrue(prompt, prompt.contains("SYNTHESIS: write at least 2 paragraphs that each combine passages of at "
+                + "least 2 different sources"));
+        assertTrue("capped at the sources the part has", prompt.contains("[1] \"\"\"Helme mit Sensoren melden "
+                + "Stürze.\"\"\" (source A)"));
+        assertTrue(prompt.contains("(source B)"));
+        assertTrue(prompt.contains("[3] \"\"\"Sensoren erfassen auch Hitze.\"\"\" (source A)"));
+        assertTrue("the repair carries it too", SectionWriterPrompt.repair(a, new ArrayList<ClaimFlag>()).get(1)
+                .getContent().contains("SYNTHESIS:"));
+
+        SectionAssignment oneSource = assignment(3);
+        assertFalse("one source: nothing to combine, no letters",
+                SectionWriterPrompt.userPrompt(oneSource.toBuilder().passages(Arrays.asList(pack.get(0),
+                        pack.get(2))).build()).contains("SYNTHESIS"));
+        assertFalse("0 paragraphs per part leaves it out", SectionWriterPrompt.userPrompt(a.toBuilder()
+                .synthesis(new SynthesisCriteria(2, 0, 2, 0.5)).build()).contains("SYNTHESIS"));
+        assertEquals("AA", SectionWriterPrompt.sourceLabels(manySources(27)).get("s26"));
+    }
+
+    private static List<EvidencePassage> manySources(int n) {
+        List<EvidencePassage> out = new ArrayList<EvidencePassage>();
+        for (int i = 0; i < n; i++) {
+            out.add(new EvidencePassage(i + 1, "s" + i, "c", "p" + i, "Text " + i + "."));
+        }
+        return out;
+    }
+
     @Test
     public void longSectionIsSplitByKeyPoints() {
         SectionAssignment a = SectionAssignment.builder("s1").title("T")
