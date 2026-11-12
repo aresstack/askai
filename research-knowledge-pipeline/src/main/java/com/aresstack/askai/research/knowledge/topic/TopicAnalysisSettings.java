@@ -28,10 +28,11 @@ public final class TopicAnalysisSettings {
      * ... and, when the book frame (the prefix every anchor path shares) is known, only when it points this far in
      * the direction the node adds to the frame: the passage's cosine with the unit vector from the frame to the node.
      * Unrelated passages scatter around 0; the bare frame is no evidence. Live outline acceptance 2026-11-12 (bge-m3):
-     * all 24 passages of four other areas lay above the threshold 0.35 for "Training apprentices", their raw lead over
-     * the frame stayed at or below 0.061.
+     * all 24 passages of four other areas lay above the threshold 0.35 for "Training apprentices"; their lead in this
+     * direction was at most 0.092, two sentences that do treat training reached 0.155 and 0.160. The default lies
+     * halfway between, so neither side sits at the edge (0.15 left real evidence 0.005 above it).
      */
-    public static final double DEFAULT_CONCEPT_FRAME_LEAD = 0.15;
+    public static final double DEFAULT_CONCEPT_FRAME_LEAD = 0.12;
     /** Material: a topic, sub-topic or concept node needs this many DISTINCT passages (near duplicates count once). */
     public static final int DEFAULT_MINIMUM_PASSAGES = 3;
     /** Confirmation: a topic or concept node needs this many distinct sources ... */
