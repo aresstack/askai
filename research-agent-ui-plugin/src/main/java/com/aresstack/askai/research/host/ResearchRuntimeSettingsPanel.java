@@ -46,6 +46,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerProseMinWords = ComicControls.textField(4);
     private final JTextField writerProseMinSentences = ComicControls.textField(4);
     private final JTextField writerProseMaxRun = ComicControls.textField(4);
+    private final JTextField writerProseCaptionMaxWords = ComicControls.textField(4);
+    private final JTextField writerProseCaptionPageShare = ComicControls.textField(4);
     private final JTextField writerCarryMinWordLength = ComicControls.textField(4);
     private final JTextField writerCarryStemLength = ComicControls.textField(4);
     private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
@@ -220,6 +222,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
                 labelled("Sentences ≥", writerProseMinSentences),
                 labelled("Unpunctuated run ≤", writerProseMaxRun)));
+        writer.row("Captions", group(labelled("Words ≤", writerProseCaptionMaxWords),
+                labelled("Page prose <", writerProseCaptionPageShare)));
         writer.row("Evidence relevance", group(labelled("Similarity ≥", writerMinBriefSimilarity),
                 labelled("Below best ≤", writerBriefSimilarityMargin)));
         writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
@@ -578,6 +582,16 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                         .DEFAULT_MAX_UNPUNCTUATED_RUN,
                 "Evidence pack and topic analysis: navigation menus and footers run on for dozens of words "
                         + "without a comma or full stop; a passage with a longer run is left out.");
+        bindNonNegativeLimit(writerProseCaptionMaxWords, ResearchRuntimeSettings.KEY_WRITER_PROSE_CAPTION_MAX_WORDS,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_CAPTION_MAX_WORDS,
+                "Topic analysis: on a page that is almost no prose (a shop or listing page), a sentence of at most "
+                        + "this many words standing alone between product lines or links is a caption or slogan "
+                        + "and no topic material.");
+        bindDecimal(writerProseCaptionPageShare, ResearchRuntimeSettings.KEY_WRITER_PROSE_CAPTION_PAGE_SHARE,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                        .DEFAULT_CAPTION_PAGE_PROSE_SHARE,
+                "Topic analysis: a page where less than this share (0..1) of the passages is prose counts as a "
+                        + "listing page for the caption rule; 0 turns the rule off.");
         bindLimit(writerWordsPerCall, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
                 ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL,
                 "Section writer: words one call aims for; a section with a larger word target is split by its key "

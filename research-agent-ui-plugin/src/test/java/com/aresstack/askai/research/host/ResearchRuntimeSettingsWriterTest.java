@@ -24,7 +24,9 @@ public class ResearchRuntimeSettingsWriterTest {
         store.put(ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_WORDS, "12");
         store.put(ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_SENTENCES, "0");
         store.put(ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_RUN, "40");
-        assertEquals(new ProsePassageFilter.Criteria(12, 0, 40),
+        store.put(ResearchRuntimeSettings.KEY_WRITER_PROSE_CAPTION_MAX_WORDS, "15");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_PROSE_CAPTION_PAGE_SHARE, "0.1");
+        assertEquals(new ProsePassageFilter.Criteria(12, 0, 40, 15, 0.1),
                 ResearchRuntimeSettings.loadWriterProseCriteria(store));
     }
 

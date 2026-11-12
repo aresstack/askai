@@ -844,6 +844,10 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_WRITER_PROSE_MIN_SENTENCES = "research.writer.prose.minSentences";
     /** Longest run of words without punctuation a passage may contain (menus and footers exceed it). */
     public static final String KEY_WRITER_PROSE_MAX_RUN = "research.writer.prose.maxUnpunctuatedRun";
+    /** Most words of a lone passage that counts as a caption on a page that is almost no prose. */
+    public static final String KEY_WRITER_PROSE_CAPTION_MAX_WORDS = "research.writer.prose.captionMaxWords";
+    /** Share of prose passages below which a page is a listing (shop, index) whose lone sentences are captions. */
+    public static final String KEY_WRITER_PROSE_CAPTION_PAGE_SHARE = "research.writer.prose.captionPageProseShare";
 
     /**
      * The prose criteria of the evidence pack (live run 3, fix 2), read for every section: navigation, footer and
@@ -859,7 +863,13 @@ public final class ResearchRuntimeSettings {
                                 .DEFAULT_MIN_SENTENCES),
                 loadPositiveInt(store, KEY_WRITER_PROSE_MAX_RUN,
                         com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
-                                .DEFAULT_MAX_UNPUNCTUATED_RUN));
+                                .DEFAULT_MAX_UNPUNCTUATED_RUN),
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_CAPTION_MAX_WORDS,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_CAPTION_MAX_WORDS),
+                loadUnitInterval(store, KEY_WRITER_PROSE_CAPTION_PAGE_SHARE,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_CAPTION_PAGE_PROSE_SHARE));
     }
 
     /** Claim check stage 2: fewest letters of a content word. */

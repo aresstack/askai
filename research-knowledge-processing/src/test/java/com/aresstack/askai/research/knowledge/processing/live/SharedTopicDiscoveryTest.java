@@ -158,4 +158,36 @@ public class SharedTopicDiscoveryTest {
         assertTrue("a changed embedding fingerprint invalidates the snapshot",
                 otherWorld.isStale());
     }
+
+    /** The page rule sees each capture's passages in page order: the ordinal in the id, not the id's text order. */
+    @Test
+    public void aPageRuleSeesThePassagesInPageOrder() {
+        java.util.List<com.aresstack.askai.research.domain.Passage> passages =
+                new java.util.ArrayList<com.aresstack.askai.research.domain.Passage>();
+        for (String id : new String[]{"cap-1#p10@v", "cap-1#p9~001@v", "cap-1#p9@v", "cap-1#p2@v", "cap-2#p1@v"}) {
+            passages.add(new com.aresstack.askai.research.domain.Passage(id, id.substring(0, id.indexOf('#')),
+                    java.util.Collections.<String>emptyList(), "", id, "fp", "v", "de"));
+        }
+        final java.util.List<java.util.List<String>> pages = new java.util.ArrayList<java.util.List<String>>();
+        TopicAnalysisRequest.PassageFilter firstOfEachPage = new TopicAnalysisRequest.PassageFilter() {
+            public boolean accepts(String text) {
+                return true;
+            }
+
+            public java.util.Set<Integer> rejectedOnPage(java.util.List<String> page) {
+                pages.add(page);
+                return java.util.Collections.singleton(0);
+            }
+
+            public String key() {
+                return "first";
+            }
+        };
+
+        java.util.Set<String> rejected = SharedTopicDiscovery.rejectedOnPage(passages, firstOfEachPage);
+
+        assertEquals(java.util.Arrays.asList("cap-1#p2@v", "cap-1#p9@v", "cap-1#p9~001@v", "cap-1#p10@v"),
+                pages.get(0));
+        assertEquals(new java.util.HashSet<String>(java.util.Arrays.asList("cap-1#p2@v", "cap-2#p1@v")), rejected);
+    }
 }

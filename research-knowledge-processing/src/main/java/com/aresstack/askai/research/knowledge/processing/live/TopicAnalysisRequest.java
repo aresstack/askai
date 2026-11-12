@@ -38,6 +38,15 @@ public final class TopicAnalysisRequest {
 
         boolean accepts(String text);
 
+        /**
+         * The passages of one page (indices into {@code page}, its texts in page order) that are no material
+         * although each passes {@link #accepts} on its own: a rule that needs the page, such as a caption between
+         * product lines of a shop page. None by default.
+         */
+        default java.util.Set<Integer> rejectedOnPage(List<String> page) {
+            return Collections.emptySet();
+        }
+
         /** The rule's values, for the snapshot id: a changed rule is a new state. */
         String key();
     }
