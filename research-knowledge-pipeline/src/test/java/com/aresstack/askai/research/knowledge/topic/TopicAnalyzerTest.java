@@ -446,5 +446,11 @@ public class TopicAnalyzerTest {
         assertFalse("the centroid lies between the two nodes", merged.isConceptAligned());
         assertEquals(Arrays.asList("c-helmets", "c-training"), merged.getConceptMaterialNodeIds());
         assertFalse("the concept's own material is no new topic", merged.isNovel());
+        assertEquals("the coverage's node assignment gives the topic one aspect per concept area", 2,
+                merged.getSubtopics().size());
+        assertEquals(6, merged.getSubtopics().get(0).getDistinctPassageCount());
+        assertEquals(6, merged.getSubtopics().get(1).getDistinctPassageCount());
+        assertTrue(merged.getSubtopics().get(0).getTitle().contains("helmets"));
+        assertTrue(merged.getSubtopics().get(1).getTitle().contains("training"));
     }
 }

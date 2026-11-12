@@ -114,6 +114,11 @@ public final class TopicAnalyzer {
             }
             Draft draft = draft(topic, byId, vectors, duplicateGroupOf, subtopicCut, groupRootOf, nodes, fence);
             draft.conceptMaterial = conceptMaterial(topic.getMemberPassageIds(), nodeOf, duplicateGroupOf, nodes);
+            List<Subtopic> parts = conceptParts(topic.getMemberPassageIds(), draft.conceptMaterial, nodeOf, nodes,
+                    byId, vectors, duplicateGroupOf);
+            if (parts != null) {
+                draft.subtopics = parts;
+            }
             drafts.add(draft);
         }
         int significantDistinct = 0;
@@ -298,6 +303,95 @@ public final class TopicAnalyzer {
         return draft;
     }
 
+    /** One aspect of a topic from a passage group, or {@code null} below the minimum of distinct passages. */
+    private Subtopic subtopic(List<String> group, Map<String, AnalysisPassage> byId,
+                              Map<String, EmbeddingPort.EmbeddingVector> vectors, Map<String, String> duplicateGroupOf) {
+        Set<String> groupsSeen = new HashSet<String>();
+        Set<String> sources = new TreeSet<String>();
+        List<EmbeddingPort.EmbeddingVector> unitVectors = new ArrayList<EmbeddingPort.EmbeddingVector>();
+        for (String id : group) {
+            String duplicate = duplicateGroupOf.get(id);
+            groupsSeen.add(duplicate == null ? id : duplicate);
+            AnalysisPassage passage = byId.get(id);
+            if (passage != null && !passage.getSourceId().isEmpty()) {
+                sources.add(passage.getSourceId());
+            }
+            unitVectors.add(unit(vectors.get(id)));
+        }
+        if (!settings.isMaterialCovered(groupsSeen.size())) {
+            return null; // a sub-topic needs distinct material too, repeated copies are no aspect
+        }
+        EmbeddingPort.EmbeddingVector centre = VectorMath.mean(unitVectors);
+        String representative = group.get(0);
+        double best = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < group.size(); i++) {
+            double score = VectorMath.cosine(unitVectors.get(i), centre);
+            if (score > best) {
+                best = score;
+                representative = group.get(i);
+            }
+        }
+        AnalysisPassage passage = byId.get(representative);
+        String title = TopicClusterer.suggestedTitle(passage == null ? "" : passage.getText());
+        String id = "subtopic-" + LiveTopicProjection.deterministicClusterId(group).substring("topic-".length());
+        return new Subtopic(id, title, representative, group, groupsSeen.size(), sources.size());
+    }
+
+    /**
+     * The concept parts of a topic that carries the own material of two concept nodes of independent lineage (see
+     * {@link #conceptMaterial}): one aspect per such node, made of the topic's passages assigned to that node, in
+     * concept order; passages assigned to no node are the topic's rest. {@code null} when the topic carries no two
+     * independent concept areas, so its aspects stay the sub-topic cut.
+     * <p>
+     * Live run 4 (2026-11-12): with an embedding model whose passages lie close together, one topic held the material
+     * of four concept nodes with no sub-topic above the sub-topic distance. The outline planned four chapters on that
+     * one topic, and three were dropped as repeated material although the coverage had assigned 392, 251, 341 and 5
+     * passages to the four nodes. The parts use the coverage's own assignment: one analysis, one truth.
+     */
+    private List<Subtopic> conceptParts(List<String> members, List<String> conceptMaterial,
+                                        Map<String, Integer> nodeOf, List<ConceptAnchor> nodes,
+                                        Map<String, AnalysisPassage> byId,
+                                        Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                        Map<String, String> duplicateGroupOf) {
+        Map<String, String> parentOf = new HashMap<String, String>();
+        Map<String, Integer> indexOf = new HashMap<String, Integer>();
+        for (int i = 0; i < nodes.size(); i++) {
+            parentOf.put(nodes.get(i).getId(), nodes.get(i).getParentId());
+            indexOf.put(nodes.get(i).getId(), i);
+        }
+        if (!independentAreas(conceptMaterial, parentOf)) {
+            return null;
+        }
+        List<Subtopic> parts = new ArrayList<Subtopic>();
+        for (String nodeId : conceptMaterial) {
+            Integer index = indexOf.get(nodeId);
+            List<String> group = new ArrayList<String>();
+            for (String id : members) {
+                if (index.equals(nodeOf.get(id))) {
+                    group.add(id);
+                }
+            }
+            Subtopic part = subtopic(group, byId, vectors, duplicateGroupOf);
+            if (part != null) {
+                parts.add(part);
+            }
+        }
+        return parts.size() < 2 ? null : parts;
+    }
+
+    /** Whether two of the nodes lie in independent lineages (neither below the other). */
+    private static boolean independentAreas(List<String> nodeIds, Map<String, String> parentOf) {
+        for (int a = 0; a < nodeIds.size(); a++) {
+            for (int b = a + 1; b < nodeIds.size(); b++) {
+                if (!descends(nodeIds.get(a), nodeIds.get(b), parentOf)
+                        && !descends(nodeIds.get(b), nodeIds.get(a), parentOf)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private List<Subtopic> subtopics(List<String> members, Map<String, AnalysisPassage> byId,
                                      Map<String, EmbeddingPort.EmbeddingVector> vectors,
                                      Map<String, String> duplicateGroupOf, List<List<String>> subtopicCut) {
@@ -307,35 +401,10 @@ public final class TopicAnalyzer {
             if (group.isEmpty() || !inside.contains(group.get(0))) {
                 continue;
             }
-            Set<String> groupsSeen = new HashSet<String>();
-            Set<String> sources = new TreeSet<String>();
-            List<EmbeddingPort.EmbeddingVector> unitVectors = new ArrayList<EmbeddingPort.EmbeddingVector>();
-            for (String id : group) {
-                String duplicate = duplicateGroupOf.get(id);
-                groupsSeen.add(duplicate == null ? id : duplicate);
-                AnalysisPassage passage = byId.get(id);
-                if (passage != null && !passage.getSourceId().isEmpty()) {
-                    sources.add(passage.getSourceId());
-                }
-                unitVectors.add(unit(vectors.get(id)));
+            Subtopic subtopic = subtopic(group, byId, vectors, duplicateGroupOf);
+            if (subtopic != null) {
+                result.add(subtopic);
             }
-            if (!settings.isMaterialCovered(groupsSeen.size())) {
-                continue; // a sub-topic needs distinct material too, repeated copies are no aspect
-            }
-            EmbeddingPort.EmbeddingVector centre = VectorMath.mean(unitVectors);
-            String representative = group.get(0);
-            double best = Double.NEGATIVE_INFINITY;
-            for (int i = 0; i < group.size(); i++) {
-                double score = VectorMath.cosine(unitVectors.get(i), centre);
-                if (score > best) {
-                    best = score;
-                    representative = group.get(i);
-                }
-            }
-            AnalysisPassage passage = byId.get(representative);
-            String title = TopicClusterer.suggestedTitle(passage == null ? "" : passage.getText());
-            String id = "subtopic-" + LiveTopicProjection.deterministicClusterId(group).substring("topic-".length());
-            result.add(new Subtopic(id, title, representative, group, groupsSeen.size(), sources.size()));
         }
         if (result.size() < 2) {
             return Collections.emptyList(); // one aspect is the topic itself, not a sub-topic
@@ -552,16 +621,7 @@ public final class TopicAnalyzer {
                         assigned.put(id, node);
                     }
                 }
-                List<String> covered = conceptMaterial(members, assigned, duplicateGroupOf, nodes);
-                for (int a = 0; a < covered.size(); a++) {
-                    for (int b = a + 1; b < covered.size(); b++) {
-                        if (!descends(covered.get(a), covered.get(b), parentOf)
-                                && !descends(covered.get(b), covered.get(a), parentOf)) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
+                return independentAreas(conceptMaterial(members, assigned, duplicateGroupOf, nodes), parentOf);
             }
 
             private int nodeOf(String passageId) {
