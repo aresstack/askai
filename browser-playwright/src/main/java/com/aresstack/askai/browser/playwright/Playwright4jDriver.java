@@ -58,6 +58,12 @@ final class Playwright4jDriver implements PlaywrightDriver {
     private final com.aresstack.askai.browser.search.CaptchaHandlingSettings captcha;
     /** The structured-page capture is a separate collaborator; this driver only delegates to it. */
     private RenderedPageDocumentCapture renderedCapture;
+    /**
+     * The PDF document the tab shows in the browser's viewer, or null. The viewer runs no page script (and no
+     * add-on read), so {@link #current()} reports it as a document for the session to read instead of waiting for
+     * a page read that never answers.
+     */
+    private PlaywrightPageState viewedDocument;
     private Page page;
     /** The parked manual-challenge page (kept open for the user), or null. At most one at a time. */
     private Page challengePage;
@@ -398,11 +404,14 @@ final class Playwright4jDriver implements PlaywrightDriver {
             // ad/tracking subresource stall the whole visit for the full navigation timeout. Never
             // NETWORKIDLE. With this, navigationCommitTimeoutMillis finally bounds roughly what its
             // name promises.
-            page.navigate(url, new Page.NavigateOptions()
+            return pageOrDocument(page.navigate(url, new Page.NavigateOptions()
                     .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
-                    .setTimeout(navigationTimeoutMillis));
-            return state();
+                    .setTimeout(navigationTimeoutMillis)));
         } catch (PlaywrightException ex) {
+            if (startedDownload(ex)) {
+                // The tab keeps its page; the session reads the document (a PDF, or it says what it is instead).
+                return PlaywrightPageState.downloadedDocument(url, page.url());
+            }
             throw asBrowserException("Navigation failed", ex);
         }
     }
@@ -412,9 +421,23 @@ final class Playwright4jDriver implements PlaywrightDriver {
         owner.check();
         requireOpen();
         try {
+            if (viewedDocument != null && viewedDocument.url.equals(page.url())) {
+                return viewedDocument;
+            }
             return state();
         } catch (PlaywrightException ex) {
             throw asBrowserException("Reading the current page failed", ex);
+        }
+    }
+
+    @Override
+    public String currentUrl() throws BrowserException {
+        owner.check();
+        requireOpen();
+        try {
+            return page.url();
+        } catch (PlaywrightException ex) {
+            throw asBrowserException("Reading the current URL failed", ex);
         }
     }
 
@@ -424,15 +447,55 @@ final class Playwright4jDriver implements PlaywrightDriver {
         requireOpen();
         try {
             // Same navigation semantics as open(): the document suffices, readiness judges the rest.
-            if (page.goBack(new Page.GoBackOptions()
+            com.microsoft.playwright.Response response = page.goBack(new Page.GoBackOptions()
                     .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
-                    .setTimeout(navigationTimeoutMillis)) == null) {
+                    .setTimeout(navigationTimeoutMillis));
+            if (response == null) {
                 throw new BrowserException("No previous page in history.");
             }
-            return state();
+            return pageOrDocument(response);
         } catch (PlaywrightException ex) {
             throw asBrowserException("Going back failed", ex);
         }
+    }
+
+    /**
+     * Playwright's navigation error when the URL answers with a download instead of a page (Firefox and so
+     * Camoufox, WebKit). Chromium reports {@code net::ERR_ABORTED}, which other aborted navigations share, so it
+     * is not taken as a download.
+     */
+    static final String DOWNLOAD_STARTED_MESSAGE = "Download is starting";
+    /** The Content-Types of a PDF response; the second is the legacy one some servers still send. */
+    private static final java.util.Set<String> PDF_CONTENT_TYPES = java.util.Collections.unmodifiableSet(
+            new java.util.HashSet<String>(java.util.Arrays.asList("application/pdf", "application/x-pdf")));
+
+    /**
+     * The tab after a navigation: a PDF response is shown in the browser's document viewer, where no page script
+     * and no add-on read runs, so it is reported as a document the session reads itself; anything else is read
+     * as a page.
+     */
+    private PlaywrightPageState pageOrDocument(com.microsoft.playwright.Response response) {
+        String contentType = response == null ? null : response.headers().get("content-type");
+        if (isPdf(contentType)) {
+            viewedDocument = PlaywrightPageState.viewedDocument(response.url(), contentType);
+            return viewedDocument;
+        }
+        viewedDocument = null;
+        return state();
+    }
+
+    static boolean isPdf(String contentType) {
+        if (contentType == null) {
+            return false;
+        }
+        int parameters = contentType.indexOf(';');
+        String base = (parameters >= 0 ? contentType.substring(0, parameters) : contentType).trim();
+        return PDF_CONTENT_TYPES.contains(base.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    static boolean startedDownload(PlaywrightException ex) {
+        String message = ex.getMessage();
+        return message != null && message.contains(DOWNLOAD_STARTED_MESSAGE);
     }
 
     /** Hand in the capture collaborator (built from the analysis settings by the factory). */

@@ -30,6 +30,9 @@ public final class ResearchAgentPluginExtension implements AgentPluginExtension 
         // The search browser download (about 1.3 GB) goes through AskAI's proxy and certificates.
         com.aresstack.askai.browser.playwright.camoufox.CamoufoxInstaller.useConnector(
                 com.aresstack.askai.plugin.api.service.HostNetwork::open);
+        // PDF search hits the research browser cannot show as a page are fetched the same way.
+        com.aresstack.askai.browser.playwright.PdfPageReader.useConnector(
+                com.aresstack.askai.plugin.api.service.HostNetwork::open);
     }
 
     @Override

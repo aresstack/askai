@@ -33,6 +33,13 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
     private WebSearchProvider searchProvider;
     private List<BrowserLink> currentLinks = Collections.emptyList();
     private boolean hasPage;
+    /** Reads the PDF documents the browser reaches but cannot read as pages. */
+    private final PdfPageReader documents;
+    /**
+     * The current page when it is a read PDF document (the tab shows its viewer, or kept its page for a download),
+     * else null. Every navigation drops it, and so does a tab that shows something else since ({@link #shownDocument}).
+     */
+    private PlaywrightPageState currentDocument;
     /** MANUAL_CHALLENGE_PENDING: the domain family whose parked challenge waits for the user, or null. */
     private String challengeFamily;
     private String challengeUrl;
@@ -58,6 +65,7 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
         this.driver = driver;
         this.policy = policy;
         this.limits = limits;
+        this.documents = new PdfPageReader(limits, policy);
         this.settings = settings;
         this.searchUrlTemplate = searchUrlTemplate == null || searchUrlTemplate.trim().isEmpty()
                 ? null : searchUrlTemplate.trim();
@@ -789,29 +797,34 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
 
     public BrowserPageSnapshot open(String url) throws BrowserException {
         checkPolicy(url);
-        return checkedSnapshot(driver.open(url));
+        currentDocument = null; // superseded by this navigation, whatever it brings
+        return checkedSnapshot(readDocument(driver.open(url)));
     }
 
     public BrowserPageSnapshot currentPage() throws BrowserException {
         requirePage();
-        return checkedSnapshot(driver.current());
+        return checkedSnapshot(current());
     }
 
     @Override
     public BrowserPageReadiness probe(String url) throws BrowserException {
         checkPolicy(url);
-        return readinessFrom(checkedSnapshot(driver.open(url)));
+        currentDocument = null; // superseded by this navigation, whatever it brings
+        return readinessFrom(checkedSnapshot(readDocument(driver.open(url))));
     }
 
     @Override
     public BrowserPageReadiness probeCurrent() throws BrowserException {
         requirePage();
-        return readinessFrom(checkedSnapshot(driver.current()));
+        return readinessFrom(checkedSnapshot(current()));
     }
 
     @Override
     public String dismissConsent() throws BrowserException {
         requirePage();
+        if (shownDocument() != null) {
+            return "none"; // a PDF document has no consent banner to click
+        }
         return driver.tryDismissConsent();
     }
 
@@ -827,8 +840,16 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
         return driver.pollHudCommands();
     }
 
-    /** Compose a readability probe from a snapshot plus the driver's consent/challenge guards. */
+    /**
+     * Compose a readability probe from a snapshot plus the driver's consent/challenge guards. A read PDF document
+     * has neither, and asking the driver would only wait for page scripts that never run in its viewer.
+     */
     private BrowserPageReadiness readinessFrom(BrowserPageSnapshot s) {
+        if (currentDocument != null) {
+            int len = s.getText() == null ? 0 : s.getText().length();
+            return new BrowserPageReadiness(s.getUrl(), s.getTitle(), len,
+                    BrowserPageReadiness.excerptOf(s.getText()), false, false, "", false, "");
+        }
         String marker = driver.challengeMarker(); // 'visible:…' | 'hidden:…' | 'none'
         boolean present = marker != null && !marker.isEmpty() && !"none".equals(marker);
         boolean visible = marker != null && marker.startsWith("visible");
@@ -859,7 +880,13 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
 
     public BrowserPageSnapshot back() throws BrowserException {
         requirePage();
-        return checkedSnapshot(driver.back());
+        PlaywrightPageState document = shownDocument();
+        currentDocument = null; // superseded by this navigation, whatever it brings
+        if (document != null && !document.documentInTab) {
+            // The download never replaced the tab's page: going back means the page the tab still shows.
+            return checkedSnapshot(readDocument(driver.current()));
+        }
+        return checkedSnapshot(readDocument(driver.back()));
     }
 
     /**
@@ -889,8 +916,12 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
         driver.close();
     }
 
-    /** EMERGENCY teardown from a foreign thread (stuck owner): see {@link PlaywrightDriver#terminate()}. */
+    /**
+     * EMERGENCY teardown from a foreign thread (stuck owner): see {@link PlaywrightDriver#terminate()}. A PDF
+     * download in progress runs outside the driver, so it is cut first ({@link PdfPageReader#terminate()}).
+     */
     void terminate() {
+        documents.terminate();
         driver.terminate();
     }
 
@@ -945,19 +976,44 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
         System.err.println("[browser-worker] " + refused.getMessage());
     }
 
-    /** The post-redirect gate: the FINAL url must pass the policy or the page is abandoned. */
-    private BrowserPageSnapshot checkedSnapshot(PlaywrightPageState state) throws BrowserException {
+    /** The current page: the read PDF document, or what the driver's tab shows (a document there is read). */
+    private PlaywrightPageState current() throws BrowserException {
+        PlaywrightPageState document = shownDocument();
+        return document != null ? document : readDocument(driver.current());
+    }
+
+    /**
+     * The read PDF document while the tab still shows it (its viewer, or the page the tab kept for a download),
+     * else null: a tab that shows something else since (the user navigated the visible window) has left it.
+     */
+    private PlaywrightPageState shownDocument() throws BrowserException {
+        if (currentDocument != null && !currentDocument.tabUrl.equals(driver.currentUrl())) {
+            currentDocument = null;
+        }
+        return currentDocument;
+    }
+
+    /**
+     * A PDF the browser reached but cannot read as a page (its viewer runs no page script, an attachment only
+     * starts a download) is read by the {@link PdfPageReader}: the browser's final URL passes the same gate as a
+     * page's, every redirect of the reader's own fetch is checked again. Every other state passes unchanged.
+     */
+    private PlaywrightPageState readDocument(PlaywrightPageState state) throws BrowserException {
+        if (!state.isDocument()) {
+            return state;
+        }
+        requireAllowedFinalUrl(state.url);
         try {
-            policy.check(state.url);
+            return documents.read(state);
         } catch (com.aresstack.askai.browser.EngineHostRefusedException engine) {
-            abandonPage();
             logEngineRefusal(engine);
             throw engine;
-        } catch (BrowserException blocked) {
-            abandonPage();
-            throw new BrowserException("Blocked after redirect — final URL is not allowed: "
-                    + blocked.getMessage());
         }
+    }
+
+    /** The post-redirect gate: the FINAL url must pass the policy or the page is abandoned. */
+    private BrowserPageSnapshot checkedSnapshot(PlaywrightPageState state) throws BrowserException {
+        requireAllowedFinalUrl(state.url);
         String text = state.text;
         boolean truncated = false;
         if (text.length() > limits.getMaxTextChars()) {
@@ -979,13 +1035,29 @@ final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSessi
         }
         currentLinks = Collections.unmodifiableList(links);
         hasPage = true;
+        currentDocument = state.isDocument() ? state : null;
         return new BrowserPageSnapshot(state.url, state.title, text, truncated);
+    }
+
+    private void requireAllowedFinalUrl(String url) throws BrowserException {
+        try {
+            policy.check(url);
+        } catch (com.aresstack.askai.browser.EngineHostRefusedException engine) {
+            abandonPage();
+            logEngineRefusal(engine);
+            throw engine;
+        } catch (BrowserException blocked) {
+            abandonPage();
+            throw new BrowserException("Blocked after redirect — final URL is not allowed: "
+                    + blocked.getMessage());
+        }
     }
 
     /** After a blocked redirect the offending page must not stay current. */
     private void abandonPage() {
         currentLinks = Collections.emptyList();
         hasPage = false;
+        currentDocument = null;
         try {
             driver.back();
         } catch (BrowserException ignored) {
