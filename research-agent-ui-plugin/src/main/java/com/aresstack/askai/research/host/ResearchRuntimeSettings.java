@@ -839,14 +839,19 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_WRITER_WORDS_PER_CALL = "research.writer.wordsPerCall";
     /** Answer token budget of one writer call. */
     public static final String KEY_WRITER_ANSWER_TOKENS = "research.writer.answerTokens";
-    /** Passages in one section's evidence pack. */
+    /** Passages one writer call gets; a section written in key-point parts gets this many for each part. */
     public static final String KEY_WRITER_PASSAGES = "research.writer.passages";
     /** Tokens each evidence passage may take. */
     public static final String KEY_WRITER_PASSAGE_TOKENS = "research.writer.passageTokens";
     /** Passages one source may contribute to a pack. */
     public static final String KEY_WRITER_PASSAGES_PER_SOURCE = "research.writer.passagesPerSource";
-    /** The writer preset the Document phase used before it became a setting (live run 3: 1,100 words, 3,072). */
-    public static final int DEFAULT_WRITER_WORDS_PER_CALL = 1100;
+    /**
+     * Words per call: the plan's small preset (450). Live run 4 measured {@code llama3.1:8b} at 148 to 425 words per
+     * call in all 14 section revisions against the old target of 1,100, so a section of 1,100 words came out at a
+     * fifth of its length; at 450, such a section is written in three key-point parts of about 370 words each.
+     */
+    public static final int DEFAULT_WRITER_WORDS_PER_CALL = 450;
+    /** The answer budget of live run 3 (3,072 tokens): room for a part and its GAP lines without a continuation. */
     public static final int DEFAULT_WRITER_ANSWER_TOKENS = 3072;
 
     /**

@@ -5,11 +5,11 @@ import com.aresstack.askai.research.runtime.writer.ProsePassageFilter;
 import java.util.Locale;
 
 /**
- * The evidence pack size of the Document row's writer settings (plan D8, PR 27): how many passages a section gets
- * and how many tokens each may take. The host presets them by model: 8 x 300 for {@code llama3.1:8b} and
- * {@code gpt-oss:20b}, 6 x 250 for {@code gemma4:e2b} and every other model. The {@linkplain
- * ProsePassageFilter.Criteria prose criteria} keep navigation, footer and heading passages out of the pack (live
- * run 3: section 1.3 cited the hexagon.com footer for every sentence).
+ * The evidence pack size of the Document row's writer settings (plan D8, PR 27): how many passages one writer call
+ * gets and how many tokens each may take; a section written in parts gets that many for each part. The host presets
+ * them by model: 8 x 300 for {@code llama3.1:8b} and {@code gpt-oss:20b}, 6 x 250 for {@code gemma4:e2b} and every
+ * other model. The {@linkplain ProsePassageFilter.Criteria prose criteria} keep navigation, footer and heading
+ * passages out of the pack (live run 3: section 1.3 cited the hexagon.com footer for every sentence).
  */
 public final class WriterPackSettings {
 
@@ -53,6 +53,14 @@ public final class WriterPackSettings {
     /** How many passages one source may contribute. */
     public int getPassagesPerSource() {
         return passagesPerSource;
+    }
+
+    /**
+     * The same pack with {@code count} passages: a section written in several key-point parts gets this pack's
+     * passages for each part ({@code EvidenceAssignments}).
+     */
+    public WriterPackSettings withPassageCount(int count) {
+        return new WriterPackSettings(count, passageTokens, prose, passagesPerSource);
     }
 
     /** The host preset for a writer model id. */

@@ -22,8 +22,10 @@ import java.util.regex.Pattern;
  * without a marker, and a paragraph made only of such words, is a label the writer echoed (its key points, run
  * together into one line); a sentence the answer, or an earlier part of the same section, already contains is a
  * repeat; a paragraph of uncited questions holds the writer's open questions, which become open points like
- * {@code GAP:} lines. A finding about a claim is still only a flag: no claim is removed. Stateless and
- * deterministic.</p>
+ * {@code GAP:} lines. A {@code GAP:} line that repeats a sentence of the text (or of an earlier part) or another
+ * {@code GAP:} line is no open point (live run 4, book 5: 12 of 23 gap lines were sentences of the section's own
+ * text, and each became a search query); it is dropped and reported. A finding about a claim is still only a flag:
+ * no claim is removed. Stateless and deterministic.</p>
  */
 public final class CitationValidator {
 
@@ -115,6 +117,7 @@ public final class CitationValidator {
         private final List<String> labelLines;
         private final List<String> repeatedSentences;
         private final List<String> questions;
+        private final List<String> droppedGaps;
 
         Result(List<Paragraph> paragraphs, List<String> strippedMarkers, List<String> gaps, List<ClaimFlag> flags) {
             this(paragraphs, strippedMarkers, gaps, flags, Collections.<String>emptyList(),
@@ -123,6 +126,13 @@ public final class CitationValidator {
 
         Result(List<Paragraph> paragraphs, List<String> strippedMarkers, List<String> gaps, List<ClaimFlag> flags,
                List<String> labelLines, List<String> repeatedSentences, List<String> questions) {
+            this(paragraphs, strippedMarkers, gaps, flags, labelLines, repeatedSentences, questions,
+                    Collections.<String>emptyList());
+        }
+
+        Result(List<Paragraph> paragraphs, List<String> strippedMarkers, List<String> gaps, List<ClaimFlag> flags,
+               List<String> labelLines, List<String> repeatedSentences, List<String> questions,
+               List<String> droppedGaps) {
             this.paragraphs = Collections.unmodifiableList(paragraphs);
             this.strippedMarkers = Collections.unmodifiableList(strippedMarkers);
             this.gaps = Collections.unmodifiableList(gaps);
@@ -130,6 +140,33 @@ public final class CitationValidator {
             this.labelLines = Collections.unmodifiableList(new ArrayList<String>(labelLines));
             this.repeatedSentences = Collections.unmodifiableList(new ArrayList<String>(repeatedSentences));
             this.questions = Collections.unmodifiableList(new ArrayList<String>(questions));
+            this.droppedGaps = Collections.unmodifiableList(new ArrayList<String>(droppedGaps));
+        }
+
+        /**
+         * {@code GAP:} lines that are no open point: a sentence of the text, another {@code GAP:} line, or what
+         * {@link #withoutGaps} took out (the writer's word target, a sentence the repair asked to leave out).
+         */
+        public List<String> getDroppedGaps() {
+            return droppedGaps;
+        }
+
+        /** A copy without the open points that {@code drop} accepts; they join {@link #getDroppedGaps()}. */
+        Result withoutGaps(java.util.function.Predicate<String> drop) {
+            List<String> kept = new ArrayList<String>();
+            List<String> dropped = new ArrayList<String>(droppedGaps);
+            for (String point : gaps) {
+                if (drop.test(point)) {
+                    dropped.add(point);
+                } else {
+                    kept.add(point);
+                }
+            }
+            if (dropped.size() == droppedGaps.size()) {
+                return this;
+            }
+            return new Result(paragraphs, strippedMarkers, kept, flags, labelLines, repeatedSentences, questions,
+                    dropped);
         }
 
         /** Headings, key points and list items without a sentence end or a marker; removed from the text. */
@@ -209,7 +246,8 @@ public final class CitationValidator {
      */
     public Result validate(String answer, int passageCount, Set<String> written) {
         List<String> stripped = new ArrayList<String>();
-        List<String> gaps = new ArrayList<String>();
+        List<String> gapLines = new ArrayList<String>();
+        List<String> questionPoints = new ArrayList<String>();
         List<String> labelLines = new ArrayList<String>();
         List<String> repeated = new ArrayList<String>();
         List<String> questions = new ArrayList<String>();
@@ -221,7 +259,7 @@ public final class CitationValidator {
             if (gap.matches()) {
                 String point = gap.group(1).trim();
                 if (!point.isEmpty()) {
-                    gaps.add(point);
+                    gapLines.add(point);
                 }
                 current = null;
                 continue;
@@ -246,9 +284,10 @@ public final class CitationValidator {
             current.append(line);
         }
         Set<String> seen = new HashSet<String>(written == null ? Collections.<String>emptySet() : written);
+        Set<String> prose = new HashSet<String>(seen); // what the text says: no open point
         Set<String> openPoints = new HashSet<String>();
-        for (String point : gaps) {
-            openPoints.add(key(point));
+        for (String point : gapLines) {
+            openPoints.add(pointKey(point));
         }
         for (StringBuilder block : blocks) {
             String text = stripUnknown(block.toString(), passageCount, stripped);
@@ -276,13 +315,28 @@ public final class CitationValidator {
                     String point = question.plainText();
                     questions.add(point);
                     if (openPoints.add(key(point))) {
-                        gaps.add(point);
+                        questionPoints.add(point);
                     }
                 }
                 continue;
             }
+            for (Sentence sentence : kept) {
+                prose.add(key(sentence.plainText()));
+            }
             paragraphs.add(new Paragraph(kept));
         }
+        List<String> gaps = new ArrayList<String>();
+        List<String> droppedGaps = new ArrayList<String>();
+        Set<String> gapKeys = new HashSet<String>();
+        for (String point : gapLines) {
+            String key = pointKey(point);
+            if (prose.contains(key) || !gapKeys.add(key)) {
+                droppedGaps.add(point); // a sentence of the text, or the same gap again
+            } else {
+                gaps.add(point);
+            }
+        }
+        gaps.addAll(questionPoints);
         List<ClaimFlag> flags = new ArrayList<ClaimFlag>();
         for (int p = 0; p < paragraphs.size(); p++) {
             Paragraph paragraph = paragraphs.get(p);
@@ -295,7 +349,12 @@ public final class CitationValidator {
                 }
             }
         }
-        return new Result(paragraphs, stripped, gaps, flags, labelLines, repeated, questions);
+        return new Result(paragraphs, stripped, gaps, flags, labelLines, repeated, questions, droppedGaps);
+    }
+
+    /** The {@linkplain #key(String) key} of an open point or a listed sentence, its markers left out. */
+    static String pointKey(String text) {
+        return key(new Sentence(text == null ? "" : text, Collections.<Integer>emptySet()).plainText());
     }
 
     /**

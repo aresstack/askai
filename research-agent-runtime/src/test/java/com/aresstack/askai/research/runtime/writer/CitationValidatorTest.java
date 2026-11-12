@@ -110,6 +110,29 @@ public class CitationValidatorTest {
         assertTrue(r.getFlags().toString(), r.getFlags().isEmpty());
     }
 
+    /** Live run 4, section 2.1 of book 5: seven of ten gap lines were sentences of the section's own text. */
+    @Test
+    public void aGapLineThatRepeatsTheTextOrAnotherGapLineIsNoOpenPoint() {
+        CitationValidator.Result r = validator.validate("Ein weiterer wichtiger Aspekt ist die Gesundheit der "
+                + "Arbeiter [2]. Sensoren messen den Puls [1].\n"
+                + "GAP: Ein weiterer wichtiger Aspekt ist die Gesundheit der Arbeiter.\n"
+                + "GAP: Grenzwerte für Hitzestress\n"
+                + "GAP: grenzwerte für hitzestress\n"
+                + "GAP: Sensoren messen den Puls [1]", 3);
+        assertEquals(Arrays.asList("Grenzwerte für Hitzestress"), r.getGaps());
+        assertEquals(Arrays.asList("Ein weiterer wichtiger Aspekt ist die Gesundheit der Arbeiter.",
+                "grenzwerte für hitzestress", "Sensoren messen den Puls [1]"), r.getDroppedGaps());
+        assertEquals("the text stays as written", 2, r.getParagraphs().get(0).getSentences().size());
+    }
+
+    @Test
+    public void aGapLineThatRepeatsAnEarlierPartIsNoOpenPoint() {
+        CitationValidator.Result r = validator.validate("Teil zwei [2].\nGAP: Teil eins sagt das.\nGAP: Normen", 3,
+                CitationValidator.sentenceKeys("Teil eins sagt das [1]."));
+        assertEquals(Arrays.asList("Normen"), r.getGaps());
+        assertEquals(Arrays.asList("Teil eins sagt das."), r.getDroppedGaps());
+    }
+
     @Test
     public void aQuestionWithItsCitedAnswerStaysProse() {
         CitationValidator.Result r = validator.validate("Was kostet ein Sensor? Die Studie nennt 500 Euro [1].", 3);

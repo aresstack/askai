@@ -45,10 +45,10 @@ public class ResearchRuntimeSettingsWriterTest {
     }
 
     @Test
-    public void theWriterTargetsDefaultToThePresetThatWasHardCoded() {
+    public void theWriterTargetsDefaultToThePresetAndThreePartsForASectionOf1100Words() {
         com.aresstack.askai.research.drafting.EvidenceAssignments.Targets t =
                 ResearchRuntimeSettings.loadWriterTargets(new MemoryStore());
-        assertEquals(1100, t.getWordsPerCall());
+        assertEquals(450, t.getWordsPerCall());
         assertEquals(3072, t.getAnswerTokens());
         assertEquals(8, t.getPack().getPassageCount());
         assertEquals(300, t.getPack().getPassageTokens());

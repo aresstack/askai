@@ -52,9 +52,27 @@ public class WriterGapsTest {
 
             public void run() {
             }
-        }, preference).research("s1", "Sensorik", "Vibration Grenzwerte");
+        }, preference, "Wearables auf Baustellen", Arrays.asList("Hersteller")).research("s1", "Sensorik",
+                "Vibration Grenzwerte der Hersteller");
         assertEquals(ids.get(0), id);
-        assertEquals(Arrays.asList("Sensorik Vibration Grenzwerte", "Sensorik Vibration Grenzwerte site:baua.de"),
-                queries);
+        assertEquals(Arrays.asList("Vibration Grenzwerte Wearables Baustellen",
+                "Vibration Grenzwerte Wearables Baustellen site:baua.de"), queries);
+    }
+
+    /** Live run 4, book 5: a gap line made only of stopwords searched nothing useful. */
+    @Test
+    public void aGapWithoutContentWordsIsNotSearched() throws Exception {
+        final List<String> queries = new ArrayList<String>();
+        String result = new GapResearch(new GapResearch.Queue() {
+            public String addPriority(String entryId, String phase, String query, String label) {
+                queries.add(query);
+                return entryId;
+            }
+
+            public void run() {
+            }
+        }).research("s1", "Sensorik", "und die von der");
+        assertTrue(result, result.startsWith("Nothing"));
+        assertTrue(queries.isEmpty());
     }
 }

@@ -8,9 +8,13 @@ import java.util.List;
  * What the section writer gets for one section (plan PR 28): the section of the approved outline with its brief and
  * key points, the evidence pack of PR 27 (numbered passages, book synopsis, previous-section digest, glossary), the
  * book language of the Phase-1 record and the writer settings of the Document row (word target and answer budget
- * per call). Immutable; build it with {@link #builder(String)}.
+ * per call). A section written in several key-point parts carries a pack for all of them and the number of passages
+ * one call gets ({@link #getPassagesPerCall()}). Immutable; build it with {@link #builder(String)}.
  */
 public final class SectionAssignment {
+
+    /** The smallest word target of one call; a lower setting would ask the model for a sentence or two. */
+    public static final int MIN_WORDS_PER_CALL = 50;
 
     private final String sectionId;
     private final String title;
@@ -27,6 +31,7 @@ public final class SectionAssignment {
     private final String rewriteComment;
     private final String currentText;
     private final ClaimCarryCheck.Criteria carry;
+    private final int passagesPerCall;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -38,12 +43,27 @@ public final class SectionAssignment {
         this.previousDigest = b.previousDigest;
         this.glossary = Collections.unmodifiableList(new ArrayList<String>(b.glossary));
         this.bookLanguage = b.bookLanguage;
-        this.wordsPerCall = Math.max(50, b.wordsPerCall);
+        this.wordsPerCall = Math.max(MIN_WORDS_PER_CALL, b.wordsPerCall);
         this.sectionWords = b.sectionWords > 0 ? b.sectionWords : this.wordsPerCall;
         this.answerTokens = Math.max(0, b.answerTokens);
         this.rewriteComment = b.rewriteComment;
         this.currentText = b.currentText;
         this.carry = b.carry;
+        this.passagesPerCall = Math.max(0, b.passagesPerCall);
+    }
+
+    /**
+     * How many key-point parts, one writer call each, a section is written in: its words over the words per call,
+     * at least one and at most one per key point. {@code EvidenceAssignments} sizes the evidence pack with it.
+     *
+     * @param sectionWords words the section aims for (0 = one call's target)
+     * @param wordsPerCall the word target of one call (at least {@link #MIN_WORDS_PER_CALL})
+     * @param keyPoints    the number of key points
+     */
+    public static int partCount(int sectionWords, int wordsPerCall, int keyPoints) {
+        int per = Math.max(MIN_WORDS_PER_CALL, wordsPerCall);
+        int words = sectionWords > 0 ? sectionWords : per;
+        return Math.max(1, Math.min((words + per - 1) / per, keyPoints));
     }
 
     public static Builder builder(String sectionId) {
@@ -117,17 +137,37 @@ public final class SectionAssignment {
         return carry;
     }
 
+    /**
+     * How many passages of the pack one writer call gets; 0 = every passage. A section written in parts gives
+     * each part the passages that fit its key points best (live run 4: three parts of one section saw the same
+     * eight passages and repeated each other).
+     */
+    public int getPassagesPerCall() {
+        return passagesPerCall;
+    }
+
     public boolean isRewrite() {
         return !rewriteComment.isEmpty() || !currentText.isEmpty();
     }
 
     /** A copy for one key-point part of the section, with that part's key points, words and digest. */
     SectionAssignment part(List<String> partKeyPoints, int words, String digest) {
+        return part(partKeyPoints, passages, words, digest);
+    }
+
+    /** A copy for one key-point part with that part's passages; the part's calls get all of them. */
+    SectionAssignment part(List<String> partKeyPoints, List<EvidencePassage> partPassages, int words, String digest) {
+        return part(partKeyPoints, partPassages, words, digest, currentText);
+    }
+
+    /** As above, with the part's share of a rewrite's current text (empty: the part is written as a first draft). */
+    SectionAssignment part(List<String> partKeyPoints, List<EvidencePassage> partPassages, int words, String digest,
+                           String partText) {
         Builder b = new Builder(sectionId);
         b.title = title;
         b.brief = brief;
         b.keyPoints = partKeyPoints;
-        b.passages = passages;
+        b.passages = partPassages;
         b.synopsis = synopsis;
         b.previousDigest = digest;
         b.glossary = glossary;
@@ -136,7 +176,7 @@ public final class SectionAssignment {
         b.sectionWords = words;
         b.answerTokens = answerTokens;
         b.rewriteComment = rewriteComment;
-        b.currentText = currentText;
+        b.currentText = partText == null ? "" : partText.trim();
         b.carry = carry;
         return new SectionAssignment(b);
     }
@@ -157,6 +197,7 @@ public final class SectionAssignment {
         private String rewriteComment = "";
         private String currentText = "";
         private ClaimCarryCheck.Criteria carry = ClaimCarryCheck.Criteria.defaults();
+        private int passagesPerCall;
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -233,6 +274,12 @@ public final class SectionAssignment {
         /** Claim-check stage 2 thresholds (settings); the defaults when {@code null}. */
         public Builder carry(ClaimCarryCheck.Criteria value) {
             this.carry = value == null ? ClaimCarryCheck.Criteria.defaults() : value;
+            return this;
+        }
+
+        /** Passages one writer call gets (the pack size setting); 0 = every passage of the pack. */
+        public Builder passagesPerCall(int value) {
+            this.passagesPerCall = value;
             return this;
         }
 

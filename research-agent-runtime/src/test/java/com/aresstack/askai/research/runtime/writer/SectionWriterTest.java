@@ -162,11 +162,53 @@ public class SectionWriterTest {
                 .rewriteComment("kürzer").currentText("Alter Text des Teils [1].").bookLanguage("German").build();
         ScriptedChat chat = new ScriptedChat().cutOff("Neu [1]. Abgeschn").answer("Weiter [2].");
         SectionDraft draft = new SectionWriter(chat, null).write(a);
-        assertTrue(chat.requests.get(0).get(1).getContent().contains("Alter Text des Teils"));
+        assertTrue(chat.requests.get(0).get(1).getContent().contains("Alter Text des Teils."));
+        assertFalse("the old text's markers numbered an earlier pack",
+                chat.requests.get(0).get(1).getContent().contains("Teils [1]"));
         assertTrue(chat.requests.get(0).get(1).getContent().contains("kürzer"));
         assertFalse(chat.requests.get(1).get(1).getContent().contains("Alter Text des Teils"));
         assertTrue(chat.requests.get(1).get(1).getContent().contains("kürzer"));
         assertEquals("Neu [1]. Weiter [2].", draft.getText());
+    }
+
+    /** Live run 4: every part of a rewrite got the whole old section and copied sentences of the other parts. */
+    @Test
+    public void eachPartOfARewriteGetsItsShareOfTheCurrentText() {
+        SectionAssignment a = SectionAssignment.builder("s1").title("T")
+                .keyPoints(Arrays.asList("k1", "k2", "k3", "k4")).passages(pack(6)).wordsPerCall(450)
+                .sectionWords(900).answerTokens(1200)
+                .currentText("Erster alter Satz des Abschnitts [1]. Zweiter alter Satz des Abschnitts [2].\n\n"
+                        + "Dritter alter Satz des Abschnitts [3]. Vierter alter Satz des Abschnitts [4].")
+                .build();
+        ScriptedChat chat = new ScriptedChat().answer("Teil eins [1].").answer("Teil zwei [2].");
+        new SectionWriter(chat, null).write(a);
+        String first = chat.requests.get(0).get(1).getContent();
+        String second = chat.requests.get(1).get(1).getContent();
+        assertTrue(first, first.contains("CURRENT TEXT OF THIS PART"));
+        assertTrue(first.contains("Erster alter Satz des Abschnitts. Zweiter alter Satz des Abschnitts."));
+        assertFalse(first.contains("Dritter alter Satz"));
+        assertTrue(second.contains("Dritter alter Satz des Abschnitts. Vierter alter Satz des Abschnitts."));
+        assertFalse(second.contains("Zweiter alter Satz"));
+    }
+
+    @Test
+    public void theCurrentTextIsSharedInOrderAndCappedAtThePartTarget() {
+        String text = "Eins zwei drei vier [1]. Fünf sechs sieben acht.\n\n"
+                + "Neun zehn elf zwölf [2]. Dreizehn vierzehn fünfzehn sechzehn.";
+        assertEquals(Arrays.asList("Eins zwei drei vier [1]. Fünf sechs sieben acht.",
+                "Neun zehn elf zwölf [2]. Dreizehn vierzehn fünfzehn sechzehn."),
+                SectionWriter.currentTextShares(text, 2, 50));
+        assertEquals("paragraph breaks stay within a share",
+                Arrays.asList("Eins zwei drei vier [1]. Fünf sechs sieben acht.\n\nNeun zehn elf zwölf [2]. "
+                        + "Dreizehn vierzehn fünfzehn sechzehn."), SectionWriter.currentTextShares(text, 1, 50));
+        assertEquals("no sentence beyond the part's target",
+                Arrays.asList("Eins zwei drei vier [1].", "Neun zehn elf zwölf [2]."),
+                SectionWriter.currentTextShares(text, 2, 6));
+        assertEquals("a first draft has empty shares", Arrays.asList("", ""),
+                SectionWriter.currentTextShares("", 2, 50));
+        assertEquals("more parts than sentences: a sentence goes to the part its middle lies in, others get none",
+                Arrays.asList("", "Eins zwei drei vier.", ""),
+                SectionWriter.currentTextShares("Eins zwei drei vier.", 3, 50));
     }
 
     @Test
@@ -182,6 +224,70 @@ public class SectionWriterTest {
         assertTrue(chat.requests.get(1).get(1).getContent().contains("- k3"));
         assertEquals("Teil eins [1].\n\nTeil zwei [2].", draft.getText());
         assertEquals(2, draft.getCitations().size());
+    }
+
+    /**
+     * Live run 4, book 5: the three parts of a section saw the same eight passages, and up to 13 repeated sentences
+     * per part had to be taken out. Each part now gets the passages that cover its key points, numbered [1]..[m] in
+     * its prompt and renumbered to the pack's numbers in the section.
+     */
+    @Test
+    public void eachPartGetsThePassagesOfItsKeyPoints() {
+        List<EvidencePassage> pack = Arrays.asList(
+                new EvidencePassage(1, "a", "ca", "pa",
+                        "Vibrationen von Bohrhämmern belasten Hände und Arme der Beschäftigten auf Baustellen."),
+                new EvidencePassage(2, "b", "cb", "pb",
+                        "Lärm auf Baustellen schädigt das Gehör der Beschäftigten ohne geeigneten Gehörschutz."),
+                new EvidencePassage(3, "c", "cc", "pc",
+                        "Vibrationen werden mit Sensoren am Handgelenk der Beschäftigten bei der Arbeit gemessen."),
+                new EvidencePassage(4, "d", "cd", "pd",
+                        "Lärmpegel über 85 Dezibel verlangen nach der Verordnung einen geeigneten Gehörschutz."));
+        SectionAssignment a = SectionAssignment.builder("s1").title("Belastungen")
+                .keyPoints(Arrays.asList("Vibrationen messen", "Lärm und Gehörschutz")).passages(pack)
+                .passagesPerCall(2).wordsPerCall(450).sectionWords(900).answerTokens(1200).build();
+        ScriptedChat chat = new ScriptedChat().answer("Vibrationen belasten die Arme [1]. Sensoren messen sie [2].")
+                .answer("Lärm schädigt das Gehör [1]. Ab 85 Dezibel braucht es Gehörschutz [2].");
+        SectionDraft draft = new SectionWriter(chat, null).write(a);
+        assertEquals("no repair", 2, chat.requests.size());
+        String first = chat.requests.get(0).get(1).getContent();
+        String second = chat.requests.get(1).get(1).getContent();
+        assertTrue(first, first.contains("[1] \"\"\"Vibrationen von Bohrhämmern"));
+        assertTrue(first, first.contains("[2] \"\"\"Vibrationen werden mit Sensoren"));
+        assertFalse(first, first.contains("Lärm auf Baustellen"));
+        assertTrue(second, second.contains("[1] \"\"\"Lärm auf Baustellen"));
+        assertTrue(second, second.contains("[2] \"\"\"Lärmpegel über 85"));
+        assertFalse(second, second.contains("Bohrhämmern"));
+        assertEquals("Vibrationen belasten die Arme [1]. Sensoren messen sie [3].\n\n"
+                + "Lärm schädigt das Gehör [2]. Ab 85 Dezibel braucht es Gehörschutz [4].", draft.getText());
+        assertEquals("pc", draft.getCitations().get(3).getPassageId());
+        assertEquals("pd", draft.getCitations().get(4).getPassageId());
+        assertTrue(draft.getFlags().toString(), draft.getFlags().isEmpty());
+    }
+
+    @Test
+    public void aSectionIsWrittenInOnePartPerCallTargetAndAtMostOnePerKeyPoint() {
+        assertEquals(3, SectionAssignment.partCount(1100, 450, 4));
+        assertEquals(2, SectionAssignment.partCount(1100, 450, 2));
+        assertEquals(1, SectionAssignment.partCount(0, 450, 4));
+        assertEquals(1, SectionAssignment.partCount(1100, 450, 0));
+        assertEquals(1, SectionAssignment.partCount(450, 450, 4));
+    }
+
+    /** Live run 4, book 5, section 1.3: the repair of a part with one error came back without any text. */
+    @Test
+    public void aRepairThatKeepsFewerSupportedWordsLeavesTheFirstAnswer() {
+        ScriptedChat chat = new ScriptedChat()
+                .answer("Die Rate stieg auf 15,5 % [1]. Danach kam ein Rückgang [2]. Das war wichtig.")
+                .answer("GAP: Zahlen nach 2021");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(assignment(6));
+        assertEquals(2, chat.requests.size());
+        assertEquals("Die Rate stieg auf 15,5 % [1]. Danach kam ein Rückgang [2]. Das war wichtig.",
+                draft.getText());
+        assertTrue(log.toString(), log.toString().contains("repaired answer of 0 words, 0 citation errors"));
+        assertTrue(log.toString(),
+                log.toString().contains("kept the first answer (12 words without an error, the repaired one 0)"));
+        assertEquals(1, draft.flagsOf(ClaimFlag.Kind.UNCITED_SENTENCE).size());
     }
 
     /** Live run 4, book 3, section 2.2: the second half repeated sentences the first half had written. */
@@ -224,6 +330,55 @@ public class SectionWriterTest {
         assertTrue(last, last.contains("first-person voice of a source \"Unsere\": Unsere Rate stieg weiter [1]."));
         assertEquals("Die Rate stieg weiter [1].", draft.getText());
         assertTrue(draft.getFlags().toString(), draft.getFlags().isEmpty());
+    }
+
+    /** Live run 4, book 5, section 1.2: "GAP: Gesamtlänge des Textes, Zielwert von 1100 Wörtern, …". */
+    @Test
+    public void aGapLineThatNamesTheWordTargetIsNoOpenPoint() {
+        ScriptedChat chat = new ScriptedChat().answer("Die Rate stieg weiter [1].\n"
+                + "GAP: Gesamtlänge des Textes, Zielwert von 450 Wörtern\nGAP: Zahlen nach 2021");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(assignment(6));
+        assertEquals(Arrays.asList("Zahlen nach 2021"), draft.getGaps());
+        assertTrue(log.toString(), log.toString().contains("dropped 1 gap lines that are no open point"));
+        assertTrue(log.toString(), log.toString().contains("(target 450), 0 citation errors"));
+        assertTrue(SectionWriter.namesNumber("Zielwert von 1.100 Wörtern", 1100));
+        assertTrue(SectionWriter.namesNumber("Zielwert: 1 100 Wörter", 1100));
+        assertTrue(SectionWriter.namesNumber("1100 Wörter.", 1100));
+        assertFalse(SectionWriter.namesNumber("ISO 11000 und Seite 21100", 1100));
+        assertFalse(SectionWriter.namesNumber("Version 1.1003", 1100));
+    }
+
+    /** Codex on #214: a gap whose number the material names too is an open point, even when it is the target. */
+    @Test
+    public void aGapLineWithANumberOfTheMaterialStaysAnOpenPoint() {
+        List<EvidencePassage> passages = new ArrayList<EvidencePassage>(pack(5));
+        passages.add(new EvidencePassage(6, "src-6", "sha-6", "p-6", "Eine Studie begleitete 450 Beschäftigte auf "
+                + "zwölf Baustellen über drei Monate und maß dabei Puls, Hauttemperatur und Schrittzahl."));
+        SectionAssignment a = SectionAssignment.builder("s1").title("Rates").brief("How the rate developed")
+                .keyPoints(Arrays.asList("growth")).passages(passages).bookLanguage("German")
+                .wordsPerCall(450).answerTokens(1200).build();
+        ScriptedChat chat = new ScriptedChat().answer("Die Rate stieg weiter [1].\n"
+                + "GAP: Langzeitdaten für 450 Beschäftigte\nGAP: Zahlen nach 2021");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(a);
+        assertEquals(Arrays.asList("Langzeitdaten für 450 Beschäftigte", "Zahlen nach 2021"), draft.getGaps());
+        assertFalse(log.toString(), log.toString().contains("gap lines that are no open point"));
+    }
+
+    /** Live run 4, book 5, section 2.1: the repair moved the listed uncited sentences into GAP lines. */
+    @Test
+    public void aSentenceTheRepairListedIsNoOpenPointOfTheRepairedAnswer() {
+        ScriptedChat chat = new ScriptedChat().answer("Die Rate stieg weiter [1]. Effizienz ist entscheidend.")
+                .answer("Die Rate stieg weiter [1].\nGAP: Effizienz ist entscheidend.\nGAP: Zahlen nach 2021");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(assignment(6));
+        assertEquals(2, chat.requests.size());
+        assertEquals("Die Rate stieg weiter [1].", draft.getText());
+        assertEquals(Arrays.asList("Zahlen nach 2021"), draft.getGaps());
+        assertTrue(log.toString(), log.toString().contains("one repair for"));
+        assertTrue(log.toString(), log.toString().contains("repaired answer of 5 words, 0 citation errors"));
+        assertFalse("the log names counts, never text", log.toString().contains("Effizienz"));
     }
 
     @Test

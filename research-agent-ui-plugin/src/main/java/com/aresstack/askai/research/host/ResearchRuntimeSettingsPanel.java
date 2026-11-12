@@ -550,14 +550,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(writerWordsPerCall, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
                 ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL,
                 "Section writer: words one call aims for; a section with a larger word target is split by its key "
-                        + "points. With too little evidence the writer stays below it and the book report says so.");
+                        + "points. A local model writes about 150 to 450 words per call whatever the target, so a "
+                        + "higher value gives shorter sections. With too little evidence the writer stays below it and "
+                        + "the book report says so.");
         bindLimit(writerAnswerTokens, ResearchRuntimeSettings.KEY_WRITER_ANSWER_TOKENS,
                 ResearchRuntimeSettings.DEFAULT_WRITER_ANSWER_TOKENS,
                 "Section writer: answer token budget of one call (keep it above the words per call).");
         bindLimit(writerPassages, ResearchRuntimeSettings.KEY_WRITER_PASSAGES,
                 com.aresstack.askai.research.writer.WriterPackSettings.LARGE.getPassageCount(),
-                "Evidence pack: passages one section gets. More passages give the writer more to say, and a "
-                        + "longer prompt.");
+                "Evidence pack: passages one writer call gets. A section written in parts gets this many for "
+                        + "each part, chosen by the part's key points. More passages give the writer more to say, "
+                        + "and a longer prompt.");
         bindLimit(writerPassageTokens, ResearchRuntimeSettings.KEY_WRITER_PASSAGE_TOKENS,
                 com.aresstack.askai.research.writer.WriterPackSettings.LARGE.getPassageTokens(),
                 "Evidence pack: tokens each passage may take (cut at a sentence end; at least "

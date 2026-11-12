@@ -3216,8 +3216,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
-     * "Research this gap": one priority entry of the search plan with the section title and the gap, run in
-     * {@code draft/running} without a phase change. @return the entry id or why not
+     * "Research this gap": one priority entry of the search plan, labelled with the section, whose query is the
+     * gap's content words and the book's subject without the blacklist terms ({@code ConceptPlanNodes.gapQuery}),
+     * run in {@code draft/running} without a phase change. @return the entry id or why not
      */
     public String researchGap(String sectionId, String sectionTitle, String gap) {
         final com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
@@ -3252,10 +3253,43 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                     productiveResources.currentState().getPhaseId(), job);
                             queue.run();
                         }
-                    }, sourcePreference()).research(sectionId, sectionTitle, gap);
+                    }, sourcePreference(), gapSubject(), gapBlacklist()).research(sectionId, sectionTitle, gap);
         } catch (Exception failed) {
             return "Not possible: the plan entry was not saved (" + failed.getMessage() + ")";
         }
+    }
+
+    /** The book's subject for a gap query: the book title, else the mission; empty without a frozen concept. */
+    private String gapSubject() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen == null) {
+                return "";
+            }
+            String title = frozen.getBookTitle();
+            return title == null || title.trim().isEmpty() ? frozen.getMission() : title;
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            return "";
+        }
+    }
+
+    /** The recorded blacklist of the frozen concept and the current one, as every plan query leaves them out. */
+    private java.util.List<String> gapBlacklist() {
+        java.util.List<String> blacklist = new java.util.ArrayList<String>();
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = frozenConcept();
+            if (frozen != null) {
+                blacklist.addAll(frozen.getPin().getBlacklist());
+            }
+        } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+            // the current blacklist still applies
+        }
+        for (String term : currentBlacklistTerms()) {
+            if (!blacklist.contains(term)) {
+                blacklist.add(term);
+            }
+        }
+        return blacklist;
     }
 
 

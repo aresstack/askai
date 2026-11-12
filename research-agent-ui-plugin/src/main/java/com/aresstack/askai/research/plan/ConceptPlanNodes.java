@@ -210,8 +210,8 @@ public final class ConceptPlanNodes {
     }
 
     /**
-     * The content words of the mission, in order, without stopwords and blacklist terms: the words of a quoted
-     * title first (the live run of 2026-11-09 queried "kompaktes vollständig belegtes" — the three content words
+     * The content words of the mission, in order, without stopwords and blacklist terms (a content word has four
+     * letters or more, or is a short acronym such as "KI" or "IoT"): the words of a quoted title first (the live run of 2026-11-09 queried "kompaktes vollständig belegtes" — the three content words
      * before the title — on every first-level card), then the rest of the mission.
      */
     static List<String> missionKeywords(String mission, List<String> blacklist) {
@@ -245,15 +245,48 @@ public final class ConceptPlanNodes {
         return null;
     }
 
+    /**
+     * The search query of a writer gap (plan PR 29, live run 4): the gap's content words, without the stopwords and
+     * blacklist terms of the plan queries, and up to {@value #MISSION_KEYWORDS} content words of the book's subject
+     * (its title, else the mission), as a first-level card's base query takes them. A gap names what a section lacks
+     * ("Recht auf informationelle Selbstbestimmung"), not the book it belongs to; the section title did not help
+     * either: "Technologien und Herausforderungen" said nothing about wearables on building sites. Empty when the
+     * gap itself has no content word ("und die von der"): the subject alone is the book's first search again, no
+     * open point.
+     *
+     * @param gap       the open point
+     * @param subject   the book title, or the mission when there is none
+     * @param blacklist the blacklist terms to keep out of the query
+     */
+    public static String gapQuery(String gap, String subject, List<String> blacklist) {
+        List<String> words = new ArrayList<String>();
+        addKeywords(removeTerms(gap, blacklist), words, new HashSet<String>());
+        if (words.isEmpty()) {
+            return "";
+        }
+        return baseQuery(join(words), "", missionKeywords(subject, blacklist), blacklist);
+    }
+
     private static void addKeywords(String cleaned, List<String> keywords, Set<String> seen) {
         for (String raw : cleaned.split("[^\\p{L}\\p{N}\\-]+")) {
             String word = raw.replaceAll("^-+|-+$", "");
             String lower = word.toLowerCase(Locale.ROOT);
-            if (word.length() < 4 || STOPWORDS.contains(lower) || !seen.add(lower)) {
+            if ((word.length() < 4 && !isAcronym(word)) || STOPWORDS.contains(lower) || !seen.add(lower)) {
                 continue;
             }
             keywords.add(word);
         }
+    }
+
+    /** "KI", "IoT", "GPS": a short word with two capitals names a thing, unlike "für" or "mit". */
+    private static boolean isAcronym(String word) {
+        int capitals = 0;
+        for (int i = 0; i < word.length(); i++) {
+            if (Character.isUpperCase(word.charAt(i))) {
+                capitals++;
+            }
+        }
+        return capitals >= 2;
     }
 
     /** Remove every blacklist term (whole words, case-insensitive) and squeeze the spaces. */

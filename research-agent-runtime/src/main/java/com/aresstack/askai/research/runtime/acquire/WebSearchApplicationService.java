@@ -384,9 +384,13 @@ public final class WebSearchApplicationService {
 
     /**
      * The page workers' new queries pass the same fence as everything else in this run: the typed blacklist, then
-     * the scope control against the Weidezaun. Every dropped query is reported with its reason, never swallowed.
+     * the scope control against the Weidezaun. A page the worker judged not useful suggests nothing (live run 4: a
+     * drinking-water PDF and a vendor page fed their own terms into the gap research). Every dropped query is
+     * reported with its reason, never swallowed.
+     *
+     * @param useful whether the worker judged the page useful (yes or partly)
      */
-    private void vetSuggestions(List<String> queries, String pageUrl) {
+    private void vetSuggestions(List<String> queries, String pageUrl, boolean useful) {
         SuggestionSink sink = suggestionSink;
         if (sink == null || queries == null || queries.isEmpty()) {
             return;
@@ -395,7 +399,9 @@ public final class WebSearchApplicationService {
         java.util.Map<String, String> rejected = new java.util.LinkedHashMap<String, String>();
         for (String query : queries) {
             String hit = blacklist.firstMatch(query, "", "");
-            if (hit != null) {
+            if (!useful) {
+                rejected.put(query, "the page was not useful");
+            } else if (hit != null) {
                 rejected.put(query, "blacklist \"" + hit + "\"");
             } else {
                 items.add(new SearchScopeControlPort.Item(query, query));
@@ -977,7 +983,7 @@ public final class WebSearchApplicationService {
                             return ResearchStopReason.USER_CANCELLED;
                         }
                         if (verdict != null) {
-                            vetSuggestions(verdict.getSearches(), effectiveUrl);
+                            vetSuggestions(verdict.getSearches(), effectiveUrl, verdict.isUseful());
                         }
                         if (verdict != null && !verdict.isUseful()) {
                             listener.status("page worker: not useful url=" + effectiveUrl + " reason=\""
