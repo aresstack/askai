@@ -2,7 +2,6 @@ package com.aresstack.askai.research.outline.synthesis;
 
 import com.aresstack.askai.research.knowledge.topic.ConceptCoverage;
 import com.aresstack.askai.research.knowledge.topic.TopicAnalysis;
-import com.aresstack.askai.research.knowledge.topic.TopicAnalysisSettings;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -35,6 +34,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
     public static final String MAJOR_TOPIC_FLAT = "major-topic-flat";
     public static final String DUPLICATE_TITLES = "duplicate-titles";
     public static final String THIN_CHAPTER = "thin-chapter";
+    public static final String ONE_CHAPTER = "one-chapter";
     public static final String NO_SECTIONS = "no-sections";
     public static final String TOO_MANY_SECTIONS = "too-many-sections";
     public static final String TOO_FEW_SECTIONS = "too-few-sections";
@@ -114,6 +114,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             chapterEvidence(chapter, index, brief, warnings);
             sections(chapter, index, brief, warnings);
         }
+        oneChapter(plan, brief, blocking);
         lengthFit(plan, brief, warnings);
         List<PlanFinding> all = new ArrayList<PlanFinding>(blocking);
         all.addAll(warnings);
@@ -220,14 +221,47 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         }
     }
 
+    /**
+     * The whole book in one chapter although several parts of its material carry a chapter each (the measure of
+     * {@link #THIN_CHAPTER}). Live outline acceptance 2026-11-12 (gemma4:e2b): one run planned a single chapter for
+     * four independent areas that the analysis had joined in one topic, and both revisions kept it, because no
+     * finding named the problem; with one chapter there is nothing to divide.
+     */
+    private static void oneChapter(OutlinePlan plan, SynthesisBrief brief, List<PlanFinding> blocking) {
+        if (plan.getChapters().size() != 1) {
+            return;
+        }
+        List<String> parts = new ArrayList<String>();
+        for (String key : plan.getChapters().get(0).getMaterialKeys()) {
+            for (String unit : units(brief, key)) {
+                if (carriesAChapter(Collections.singletonList(unit), brief)) {
+                    parts.add(describe(brief, unit));
+                }
+            }
+        }
+        if (parts.size() > 1) {
+            blocking.add(PlanFinding.blocking(ONE_CHAPTER, "The whole book is one chapter, although " + parts.size()
+                    + " parts of its material each carry a chapter: " + String.join("; ", parts) + ". Plan several "
+                    + "chapters and name in each the sub-topics it covers; parts that belong together may share "
+                    + "one."));
+        }
+    }
+
+    /** Whether material holds enough distinct passages and sources for a chapter of its own. */
+    private static boolean carriesAChapter(List<String> keys, SynthesisBrief brief) {
+        TopicAnalysis analysis = brief.getAnalysis();
+        Set<String> passages = passagesOf(keys, brief);
+        return analysis.getSettings().isMaterialCovered(analysis.distinctCount(passages))
+                && analysis.sourceCount(passages) >= analysis.getSettings().getMinimumSources();
+    }
+
     private static void chapterEvidence(PlannedChapter chapter, int index, SynthesisBrief brief,
                                         List<PlanFinding> warnings) {
         TopicAnalysis analysis = brief.getAnalysis();
-        TopicAnalysisSettings settings = analysis.getSettings();
         Set<String> passages = passagesOf(chapter.getMaterialKeys(), brief);
         int distinct = analysis.distinctCount(passages);
         int sources = analysis.sourceCount(passages);
-        if (!settings.isMaterialCovered(distinct) || sources < settings.getMinimumSources()) {
+        if (!carriesAChapter(chapter.getMaterialKeys(), brief)) {
             warnings.add(PlanFinding.warning(THIN_CHAPTER, "Chapter " + index + " \"" + chapter.getTitle()
                     + "\" rests on " + distinct + " distinct passages from " + sources + " sources."));
         }
@@ -287,13 +321,33 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
      * first chapter and dropped the other three as "only repeated material".
      */
     static Map<String, Integer> owners(OutlinePlan plan, SynthesisBrief brief) {
-        Map<String, Integer> owner = conceptOwners(plan, brief);
+        Map<String, Integer> owner = claimedOwners(plan, brief);
         for (int i = 0; i < plan.getChapters().size(); i++) {
             for (String key : plan.getChapters().get(i).getMaterialKeys()) {
                 for (String unit : units(brief, key)) {
                     if (!owner.containsKey(unit)) {
                         owner.put(unit, i);
                     }
+                }
+            }
+        }
+        return owner;
+    }
+
+    /**
+     * The units placed before first-come: the concept parts ({@link #conceptOwners}), then every sub-topic a chapter
+     * names by its own key; a chapter naming the whole topic keeps only the sub-topics no chapter claims.
+     * <p>
+     * Live outline acceptance 2026-11-12 (gemma4:e2b): both revisions let chapter 1 name all of T1 while chapters 2 to
+     * 5 named T1.2, T1.3, T1.5 and T1.4; first-come ownership gave everything to chapter 1 and dropped the other four
+     * as "only repeated material", so the book had one chapter.
+     */
+    static Map<String, Integer> claimedOwners(OutlinePlan plan, SynthesisBrief brief) {
+        Map<String, Integer> owner = conceptOwners(plan, brief);
+        for (int i = 0; i < plan.getChapters().size(); i++) {
+            for (String key : plan.getChapters().get(i).getMaterialKeys()) {
+                if (brief.subtopic(key) != null && !owner.containsKey(key)) {
+                    owner.put(key, i);
                 }
             }
         }

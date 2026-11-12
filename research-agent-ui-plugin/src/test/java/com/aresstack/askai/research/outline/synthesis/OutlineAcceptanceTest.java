@@ -280,13 +280,17 @@ public class OutlineAcceptanceTest {
                 // The model claims the unsupported requirement in a chapter and lists no gap.
                 .then(plan(NONE, chapter("Safety and training", keys("T1"), keys("C1", "C2"))))
                 .then(sections("T1.1", "T1.2"))
-                // The review blocks; the revision still claims it (the fix moves it).
-                .then(plan(NONE, chapter("Safety and training", keys("T1"), keys("C1", "C2"))))
-                .then(plan(NONE, chapter("Safety and training", keys("T1"), keys("C1", "C2"))));
+                // The review blocks (the requirement, and a book of one chapter although both helmet parts carry
+                // a chapter); the revisions split the book but still claim the requirement (the fix moves it).
+                .then(plan(NONE, chapter("Safety and training", keys("T1.1"), keys("C1", "C2")),
+                        chapter("Helmet fit", keys("T1.2"), NONE)))
+                .then(sections("T1.1")).then(sections("T1.2"))
+                .then(plan(NONE, chapter("Safety and training", keys("T1.1"), keys("C1", "C2")),
+                        chapter("Helmet fit", keys("T1.2"), NONE)));
 
         Outline outline = propose(corpus, chat);
 
-        assertEquals(1, outline.getChapters().size());
+        assertEquals(2, outline.getChapters().size());
         assertEquals(1, outline.getReport().getGaps().size());
         OutlineReport.Gap gap = outline.getReport().getGaps().get(0);
         assertEquals("Training", gap.getRequirement());

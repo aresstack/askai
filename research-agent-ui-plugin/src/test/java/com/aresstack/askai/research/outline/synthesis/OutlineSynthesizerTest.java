@@ -368,6 +368,10 @@ public class OutlineSynthesizerTest {
         assertTrue(division.prompt(), division.prompt().contains("1 \"Helmets\""));
         assertTrue(division.prompt().contains("T1.4 "));
         assertTrue(division.schema, division.schema.contains("\"enum\":[1,2,3]"));
+        // live 2026-11-12: gemma4:e2b copied an example with real numbers in turn instead of dividing by fit
+        assertTrue(division.prompt(), division.prompt().contains("{\"T1.1\":N,\"T1.2\":N,\"T1.3\":N,\"T1.4\":N}"));
+        assertTrue(division.prompt(), division.prompt().contains("(1, 2 or 3)"));
+        assertFalse(division.prompt(), division.prompt().contains("\"T1.1\":1"));
         List<PlannedChapter> chapters = result.getPlan().getChapters();
         assertEquals(3, chapters.size());
         assertEquals(Collections.singletonList("T1.1"), chapters.get(0).getMaterialKeys());
@@ -392,5 +396,57 @@ public class OutlineSynthesizerTest {
         assertEquals(2, result.getPlan().getChapters().size());
         assertEquals("Law", result.getPlan().getChapters().get(1).getTitle());
         assertTrue(String.join("\n", result.getNotes()).contains("\"Location\" got no part of T1"));
+    }
+
+    /**
+     * Live outline acceptance 2026-11-12 (gemma4:e2b): chapter 1 named all of T1, the other chapters named its
+     * sub-topics; first-come ownership kept everything in chapter 1 and dropped the others. A sub-topic named by key
+     * belongs to that chapter; the chapter naming the whole topic keeps the rest, without a division call.
+     */
+    @Test
+    public void aChapterNamingTheWholeTopicKeepsOnlyTheSubtopicsNoOtherChapterNames() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.diverse("sites", 4, 6, 3);
+        SynthesisBrief brief = corpus.brief();
+        ScriptedChat chat = new ScriptedChat().then("{\"chapters\":["
+                + "{\"title\":\"Safety systems\",\"purpose\":\"Overview.\",\"topics\":[\"T1\"],\"concepts\":[]},"
+                + "{\"title\":\"Location\",\"purpose\":\"Location.\",\"topics\":[\"T1.2\"],\"concepts\":[]},"
+                + "{\"title\":\"Heat\",\"purpose\":\"Heat.\",\"topics\":[\"T1.3\"],\"concepts\":[]},"
+                + "{\"title\":\"Costs\",\"purpose\":\"Costs.\",\"topics\":[\"T1.4\"],\"concepts\":[]}],"
+                + "\"gaps\":[]}")
+                .then(sections("T1.1")).then(sections("T1.2")).then(sections("T1.3")).then(sections("T1.4"));
+
+        OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 0).synthesize(brief, null);
+
+        assertEquals("plan and four section calls, no division", 5, chat.calls.size());
+        String first = chat.calls.get(1).prompt();
+        assertTrue(first, first.contains("T1.1"));
+        assertFalse(first, first.contains("T1.2 "));
+        OutlinePlan fixed = new OutlineQualityCheck(OutlineLengthSettings.defaults()).fix(result.getPlan(), brief)
+                .getPlan();
+        assertEquals(4, fixed.getChapters().size());
+        assertEquals(Collections.singletonList("T1.1"), fixed.getChapters().get(0).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.2"), fixed.getChapters().get(1).getMaterialKeys());
+    }
+
+    /**
+     * Live 2026-11-12: a closing chapter named T1.1 to T1.5 by key, took as five claims the sub-topic the whole-topic
+     * chapter kept, and that chapter was dropped. A chapter naming every part names the whole topic.
+     */
+    @Test
+    public void aChapterNamingEverySubtopicNamesTheWholeTopic() throws Exception {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.diverse("sites", 4, 6, 3);
+        SynthesisBrief brief = corpus.brief();
+
+        OutlinePlan plan = ChapterPlanContract.read("{\"chapters\":["
+                + "{\"title\":\"Proximity\",\"purpose\":\"P.\",\"topics\":[\"T1\"],\"concepts\":[]},"
+                + "{\"title\":\"Law\",\"purpose\":\"L.\",\"topics\":[\"T1.1\"],\"concepts\":[]},"
+                + "{\"title\":\"Gaps\",\"purpose\":\"G.\",\"topics\":[\"T1.1\",\"T1.2\",\"T1.3\",\"T1.4\"],"
+                + "\"concepts\":[]}],\"gaps\":[]}", brief);
+
+        assertEquals(Collections.singletonList("T1"), plan.getChapters().get(2).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.1"), plan.getChapters().get(1).getMaterialKeys());
+        assertEquals(2, SharedTopicContract.shared(plan, brief).get(0).chapters.size());
     }
 }
