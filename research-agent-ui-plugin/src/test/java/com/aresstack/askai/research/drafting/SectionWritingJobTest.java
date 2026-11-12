@@ -266,8 +266,8 @@ public class SectionWritingJobTest {
         });
         String id = gaps.research("s3", "Soil moisture", "no field data for 2024");
         assertTrue(id.startsWith("gap-s3-"));
-        assertEquals(Collections.singletonList("draft|Soil moisture no field data for 2024|Section: Soil moisture"),
-                added);
+        assertEquals("the gap's content words; the section names the entry",
+                Collections.singletonList("draft|field data 2024|Section: Soil moisture"), added);
         assertEquals(1, runs[0]);
     }
 

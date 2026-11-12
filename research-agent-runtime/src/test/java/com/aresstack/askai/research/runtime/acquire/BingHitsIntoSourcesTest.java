@@ -172,6 +172,64 @@ public class BingHitsIntoSourcesTest {
     }
 
     /**
+     * Live run 4: a drinking-water PDF and vendor pages, all judged not useful, still fed their own terms into the
+     * plan. Only a page the worker calls useful may suggest a search; the others' suggestions are reported dropped.
+     */
+    @Test
+    public void onlyAUsefulPageSuggestsASearch() throws Exception {
+        RenderedPageDocument serp = new Gson().fromJson(
+                new String(Files.readAllBytes(CAPTURES.resolve("answer-card-run-1.capture.json")),
+                        StandardCharsets.UTF_8), RenderedPageDocument.class);
+        ScriptedBrowser browser = new ScriptedBrowser(new SearchLayoutRepairTools(
+                LegacyBrowserSearchDefaults.create(), new CapturedBing(serp), () -> 0L));
+        final RecordingAcceptance acceptance = new RecordingAcceptance();
+        WebSearchApplicationService service = new WebSearchApplicationService(browser, ResearchRunBudget.defaults(),
+                new ResearchRunProgress(), new SteppingClock(), new RecordingListener(new ArrayList<String>()),
+                new AtomicBoolean(false),
+                new LegacyBrowserSearchStrategy(new McpLayoutRepairClient(browser, null), () -> 0L),
+                null, new Bm25CandidateReranker(),
+                new com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver(),
+                acceptance, 0L, 1L,
+                new WebSearchApplicationService.AcceptedSourceListener() {
+                    public ResearchStopReason onAccepted(
+                            WebSearchApplicationService.AcceptedSource source,
+                            WebSearchApplicationService.ToolBudget toolBudget) {
+                        acceptance.acceptedUrls.add(source.getPageUrl());
+                        return null;
+                    }
+                },
+                false, 2, 200);
+        service.setCompletionPolicy(new FixedAcceptedSourceCountPolicy(2));
+        final List<String> judged = new ArrayList<String>();
+        service.setPageJudge(new PageJudge() {
+            public Verdict judge(Page page) {
+                judged.add(page.getUrl());
+                boolean useful = judged.size() % 2 == 0;
+                return new Verdict(useful, "every second page", Collections.<Integer>emptyList(),
+                        Collections.singletonList((useful ? "useful " : "useless ") + judged.size()));
+            }
+        });
+        final List<String> passed = new ArrayList<String>();
+        final List<String> dropped = new ArrayList<String>();
+        service.setSuggestionSink(new WebSearchApplicationService.SuggestionSink() {
+            public void suggested(String query, String pageUrl, String rejectedReason) {
+                if (rejectedReason == null) {
+                    passed.add(query);
+                } else {
+                    dropped.add(query + " (" + rejectedReason + ")");
+                }
+            }
+        });
+
+        service.execute(QUERY);
+
+        assertEquals(4, judged.size());
+        assertEquals(Arrays.asList("useful 2", "useful 4"), passed);
+        assertEquals(Arrays.asList("useless 1 (the page was not useful)", "useless 3 (the page was not useful)"),
+                dropped);
+    }
+
+    /**
      * Plan T4, the research team: ONE search, its hits read side by side in three tabs. Every hit is opened once,
      * the tabs really overlap, every lane's worker judges the pages of its own tab, and the workers' new queries
      * reach the plan.

@@ -226,6 +226,38 @@ public class SectionWriterTest {
         assertTrue(draft.getFlags().toString(), draft.getFlags().isEmpty());
     }
 
+    /** Live run 4, book 5, section 1.2: "GAP: Gesamtlänge des Textes, Zielwert von 1100 Wörtern, …". */
+    @Test
+    public void aGapLineThatNamesTheWordTargetIsNoOpenPoint() {
+        ScriptedChat chat = new ScriptedChat().answer("Die Rate stieg weiter [1].\n"
+                + "GAP: Gesamtlänge des Textes, Zielwert von 450 Wörtern\nGAP: Zahlen nach 2021");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(assignment(6));
+        assertEquals(Arrays.asList("Zahlen nach 2021"), draft.getGaps());
+        assertTrue(log.toString(), log.toString().contains("dropped 1 gap lines that are no open point"));
+        assertTrue(log.toString(), log.toString().contains("(target 450), 0 citation errors"));
+        assertTrue(SectionWriter.namesNumber("Zielwert von 1.100 Wörtern", 1100));
+        assertTrue(SectionWriter.namesNumber("Zielwert: 1 100 Wörter", 1100));
+        assertTrue(SectionWriter.namesNumber("1100 Wörter.", 1100));
+        assertFalse(SectionWriter.namesNumber("ISO 11000 und Seite 21100", 1100));
+        assertFalse(SectionWriter.namesNumber("Version 1.1003", 1100));
+    }
+
+    /** Live run 4, book 5, section 2.1: the repair moved the listed uncited sentences into GAP lines. */
+    @Test
+    public void aSentenceTheRepairListedIsNoOpenPointOfTheRepairedAnswer() {
+        ScriptedChat chat = new ScriptedChat().answer("Die Rate stieg weiter [1]. Effizienz ist entscheidend.")
+                .answer("Die Rate stieg weiter [1].\nGAP: Effizienz ist entscheidend.\nGAP: Zahlen nach 2021");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(assignment(6));
+        assertEquals(2, chat.requests.size());
+        assertEquals("Die Rate stieg weiter [1].", draft.getText());
+        assertEquals(Arrays.asList("Zahlen nach 2021"), draft.getGaps());
+        assertTrue(log.toString(), log.toString().contains("one repair for"));
+        assertTrue(log.toString(), log.toString().contains("repaired answer of 5 words, 0 citation errors"));
+        assertFalse("the log names counts, never text", log.toString().contains("Effizienz"));
+    }
+
     @Test
     public void continuationStartingWithGapKeepsItOnItsOwnLine() {
         assertEquals("The rate rose [1].\nGAP: Later figures", SectionWriter.join("The rate rose [1].", "GAP: Later figures"));

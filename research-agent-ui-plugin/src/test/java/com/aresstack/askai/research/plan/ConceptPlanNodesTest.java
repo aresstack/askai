@@ -96,6 +96,29 @@ public class ConceptPlanNodesTest {
         }
     }
 
+    /** Live run 4, book 5: the gap queries searched a generic section title and whole sentences. */
+    @Test
+    public void aGapQueryIsTheGapsContentWordsAndTheBooksSubject() {
+        String subject = "Wearables auf Baustellen: Sicherheit, Sensorik und Datenschutz";
+        assertEquals("Recht informationelle Selbstbestimmung Wearables Baustellen Sicherheit",
+                ConceptPlanNodes.gapQuery("Recht auf informationelle Selbstbestimmung", subject,
+                        Collections.<String>emptyList()));
+        assertEquals("an acronym is a content word", "Generative KI Risikobewertung Wearables Baustellen Sicherheit",
+                ConceptPlanNodes.gapQuery("Generative KI für Risikobewertung", subject,
+                        Collections.<String>emptyList()));
+        assertEquals("the subject's words count once", "Datenschutz Wearables Baustellen Sicherheit Sensorik",
+                ConceptPlanNodes.gapQuery("Datenschutz bei Wearables", subject, Collections.<String>emptyList()));
+        assertEquals("no blacklist term", "Ortung Baustellen Sicherheit Sensorik",
+                ConceptPlanNodes.gapQuery("Ortung per GPS", subject, Arrays.asList("GPS", "Wearables")));
+        assertEquals("", ConceptPlanNodes.gapQuery("", "", Collections.<String>emptyList()));
+        StringBuilder sentence = new StringBuilder("Die Überwachung von Vitaldaten und Umgebungsbedingungen");
+        for (int i = 0; i < 20; i++) {
+            sentence.append(" ermöglicht Reaktion").append(i);
+        }
+        assertTrue(ConceptPlanNodes.gapQuery(sentence.toString(), subject, Collections.<String>emptyList())
+                .length() <= ConceptQueryPlan.MAX_QUERY_LENGTH);
+    }
+
     @Test
     public void aBaseQueryNeverExceedsTheLimit() {
         StringBuilder label = new StringBuilder();

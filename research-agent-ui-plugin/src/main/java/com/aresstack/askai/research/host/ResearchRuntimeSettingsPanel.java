@@ -550,7 +550,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(writerWordsPerCall, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
                 ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL,
                 "Section writer: words one call aims for; a section with a larger word target is split by its key "
-                        + "points. With too little evidence the writer stays below it and the book report says so.");
+                        + "points. A local model writes about 150 to 450 words per call whatever the target, so a "
+                        + "higher value gives shorter sections. With too little evidence the writer stays below it and "
+                        + "the book report says so.");
         bindLimit(writerAnswerTokens, ResearchRuntimeSettings.KEY_WRITER_ANSWER_TOKENS,
                 ResearchRuntimeSettings.DEFAULT_WRITER_ANSWER_TOKENS,
                 "Section writer: answer token budget of one call (keep it above the words per call).");

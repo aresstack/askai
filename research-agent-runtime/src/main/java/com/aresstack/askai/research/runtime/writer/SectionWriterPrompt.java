@@ -34,7 +34,9 @@ public final class SectionWriterPrompt {
                     + "manufacturer, an authority): name the author instead of taking the word over.\n"
                     + "- Aim for the word target.\n"
                     + "- When the passages do not cover a key point, do not invent it. After the text, write one line "
-                    + "per missing point that starts with GAP: and names what is missing.";
+                    + "per missing point that starts with GAP: and names what is missing in a few words, like a key "
+                    + "point. A GAP line never repeats a sentence of your text and never talks about the text itself, "
+                    + "its length or its word target.";
 
     private SectionWriterPrompt() {
     }

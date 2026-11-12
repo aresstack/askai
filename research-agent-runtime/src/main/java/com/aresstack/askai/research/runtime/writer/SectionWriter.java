@@ -9,9 +9,11 @@ import com.aresstack.askai.research.runtime.team.MainModelChatResult;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -27,6 +29,12 @@ import java.util.function.Consumer;
  * unsupported numbers or quotes gets exactly one repair, which sends the error list and never the failed answer. The
  * repaired answer is stored with whatever flags remain. A section longer than the word target of one call is split
  * by its key points, one call per part. {@code WriterWorker} stays for the orchestrated path until PR 37.</p>
+ *
+ * <p>An open point names what the passages lack, never the writing itself (live run 4, book 5): a {@code GAP:} line
+ * that names the call's word target ("Zielwert von 1100 Wörtern"), and a {@code GAP:} line of a repaired answer that
+ * repeats a sentence the repair listed (the writer moved its uncited sentences there), are dropped like the gap lines
+ * that repeat the text ({@link CitationValidator}). One log line per answer gives its words and errors, so a live run
+ * shows what each call and each repair delivered.</p>
  */
 public final class SectionWriter {
 
@@ -124,11 +132,24 @@ public final class SectionWriter {
         }
         Checked checked = check(answer, a, written);
         List<ClaimFlag> errors = checked.repairable();
+        log.accept("section " + a.getSectionId() + ": answer of " + checked.result.wordCount() + " words (target "
+                + a.getWordsPerCall() + "), " + errors.size() + " citation errors");
         if (!errors.isEmpty()) {
             log.accept("section " + a.getSectionId() + ": one repair for " + errors.size() + " citation errors");
             String repaired = answer(a, SectionWriterPrompt.repair(a, errors), calls, model);
             if (repaired != null) {
-                checked = check(repaired, a, written);
+                final Set<String> listed = new HashSet<String>();
+                for (ClaimFlag error : errors) {
+                    listed.add(CitationValidator.pointKey(error.getSentence()));
+                }
+                Checked again = check(repaired, a, written);
+                checked = new Checked(again.result.withoutGaps(new java.util.function.Predicate<String>() {
+                    public boolean test(String point) {
+                        return listed.contains(CitationValidator.pointKey(point));
+                    }
+                }), again.unsupported);
+                log.accept("section " + a.getSectionId() + ": repaired answer of " + checked.result.wordCount()
+                        + " words, " + checked.repairable().size() + " citation errors");
             }
         }
         for (String marker : checked.result.getStrippedMarkers()) {
@@ -252,7 +273,13 @@ public final class SectionWriter {
     }
 
     private Checked check(String answer, SectionAssignment a, java.util.Set<String> written) {
-        CitationValidator.Result result = validator.validate(answer, a.getPassages().size(), written);
+        final int target = a.getWordsPerCall();
+        CitationValidator.Result result = validator.validate(answer, a.getPassages().size(), written)
+                .withoutGaps(new java.util.function.Predicate<String>() {
+                    public boolean test(String point) {
+                        return namesNumber(point, target);
+                    }
+                });
         List<ClaimFlag> unsupported = new ArrayList<ClaimFlag>(claims.check(result, a.getPassages()));
         unsupported.addAll(new ClaimCarryCheck(a.getCarry()).check(result, a.getPassages()));
         unsupported.addAll(voice.check(result));
@@ -264,11 +291,33 @@ public final class SectionWriter {
         int labels = result.getLabelLines().size();
         int repeats = result.getRepeatedSentences().size();
         int questions = result.getQuestions().size();
-        if (labels + repeats + questions > 0) {
+        int gaps = result.getDroppedGaps().size();
+        if (labels + repeats + questions + gaps > 0) {
             log.accept("section " + a.getSectionId() + ": removed " + labels + " label lines and " + repeats
-                    + " repeated sentences, moved " + questions + " uncited questions to the open points");
+                    + " repeated sentences, moved " + questions + " uncited questions to the open points, dropped "
+                    + gaps + " gap lines that are no open point");
         }
     }
+
+    /**
+     * Whether a text names {@code number} as a number of its own ("1100", "1.100", "1 100"): an open point that
+     * names the call's word target talks about the writing, not about what the passages lack.
+     */
+    static boolean namesNumber(String text, int number) {
+        java.util.regex.Matcher m = NUMBER.matcher(text == null ? "" : text);
+        while (m.find()) {
+            String digits = m.group().replaceAll("[^0-9]", "");
+            if (digits.length() <= 9 && Integer.parseInt(digits) == number) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A number with optional thousands separators (dot, comma, apostrophe, plain or narrow no-break space). */
+    private static final java.util.regex.Pattern NUMBER = java.util.regex.Pattern.compile(
+            "(?<![\\p{L}\\p{N}])\\d{1,3}(?:[.,'\u00a0\u202f ]\\d{3})+(?![\\p{L}\\p{N}])"
+                    + "|(?<![\\p{L}\\p{N}.,])\\d+(?![\\p{L}\\p{N}])");
 
     private static EvidencePassage byNumber(SectionAssignment a, int n) {
         for (EvidencePassage p : a.getPassages()) {
