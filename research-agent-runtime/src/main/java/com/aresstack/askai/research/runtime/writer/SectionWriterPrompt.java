@@ -30,6 +30,8 @@ public final class SectionWriterPrompt {
                     + "- Copy numbers, years, percentages and quotations exactly as the cited passage states them.\n"
                     + "- Write plain paragraphs: no headings, no lists, no title, no JSON, no Markdown.\n"
                     + "- Write in the book language named in the request.\n"
+                    + "- Write in a neutral third person. A passage's \"we\" or \"our\" is the voice of its author (a "
+                    + "manufacturer, an authority): name the author instead of taking the word over.\n"
                     + "- Aim for the word target.\n"
                     + "- When the passages do not cover a key point, do not invent it. After the text, write one line "
                     + "per missing point that starts with GAP: and names what is missing.";
@@ -66,7 +68,7 @@ public final class SectionWriterPrompt {
     public static List<ChatMessage> repair(SectionAssignment a, List<ClaimFlag> errors) {
         List<ChatMessage> messages = first(a);
         StringBuilder sb = new StringBuilder();
-        sb.append("A previous answer to this request broke the citation rules:\n");
+        sb.append("A previous answer to this request broke the writing rules:\n");
         int shown = 0;
         for (ClaimFlag flag : errors) {
             if (flag.getKind() == ClaimFlag.Kind.UNCITED_PARAGRAPH) {
@@ -80,7 +82,7 @@ public final class SectionWriterPrompt {
         }
         sb.append("Write the section again. Cite a passage [n] after every claim, cite only a passage that "
                 + "states that claim, and use only numbers and quotations that the cited passage contains; leave out "
-                + "what no passage supports. Write in ")
+                + "what no passage supports. Never speak with a passage author's \"we\" or \"our\". Write in ")
                 .append(a.getBookLanguage()).append('.');
         messages.add(ChatMessage.user(sb.toString()));
         return messages;

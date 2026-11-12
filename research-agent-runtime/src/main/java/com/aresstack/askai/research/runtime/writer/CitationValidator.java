@@ -1,9 +1,12 @@
 package com.aresstack.askai.research.runtime.writer;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
@@ -13,7 +16,14 @@ import java.util.regex.Pattern;
  * Checks the markers of a writer answer (plan D8, stage 1, PR 28). It strips markers that name no passage of the
  * pack and reports them, splits the text into paragraphs and sentences, keeps the cited numbers per sentence,
  * flags uncited sentences and paragraphs and turns {@code GAP:} lines into open points. Headings and list bullets,
- * which the writer must not produce, are reduced to plain text. Stateless and deterministic.
+ * which the writer must not produce, are reduced to plain text.
+ *
+ * <p>What is no prose leaves the text (live run 4, books 2 and 3): a heading or list line without a sentence end and
+ * without a marker, and a paragraph made only of such words, is a label the writer echoed (its key points, run
+ * together into one line); a sentence the answer, or an earlier part of the same section, already contains is a
+ * repeat; a paragraph of uncited questions holds the writer's open questions, which become open points like
+ * {@code GAP:} lines. A finding about a claim is still only a flag: no claim is removed. Stateless and
+ * deterministic.</p>
  */
 public final class CitationValidator {
 
@@ -30,6 +40,13 @@ public final class CitationValidator {
             "(?:^|\\s)(?:\\p{L}|ca|dr|nr|vgl|bzw|usw|etc|prof|abb|kap|mio|mrd|jh|evtl|ggf|inkl|tab|e\\.g|i\\.e|vs)\\.$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern LEADING_MARKERS = Pattern.compile("^((?:\\s*" + MARKER.pattern() + ")+)\\s*");
+    /** A sentence end anywhere: prose has one, a label (a heading, a key point, a list item) has none. */
+    private static final Pattern ANY_SENTENCE_END = Pattern.compile("[.!?]");
+    /** Closing quotes and brackets after a question mark: {@code "Wer zahlt?“}. */
+    private static final Pattern TRAILING_CLOSERS = Pattern.compile("[\"'“”»«’)]+$");
+    /** The closing punctuation of a sentence, with its quotes and brackets: no part of what it says. */
+    private static final Pattern SENTENCE_CLOSE = Pattern.compile("[\\s.!?…\"'“”»«’)]+$");
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     /** One sentence with the passage numbers it cites. */
     public static final class Sentence {
@@ -95,12 +112,39 @@ public final class CitationValidator {
         private final List<String> strippedMarkers;
         private final List<String> gaps;
         private final List<ClaimFlag> flags;
+        private final List<String> labelLines;
+        private final List<String> repeatedSentences;
+        private final List<String> questions;
 
         Result(List<Paragraph> paragraphs, List<String> strippedMarkers, List<String> gaps, List<ClaimFlag> flags) {
+            this(paragraphs, strippedMarkers, gaps, flags, Collections.<String>emptyList(),
+                    Collections.<String>emptyList(), Collections.<String>emptyList());
+        }
+
+        Result(List<Paragraph> paragraphs, List<String> strippedMarkers, List<String> gaps, List<ClaimFlag> flags,
+               List<String> labelLines, List<String> repeatedSentences, List<String> questions) {
             this.paragraphs = Collections.unmodifiableList(paragraphs);
             this.strippedMarkers = Collections.unmodifiableList(strippedMarkers);
             this.gaps = Collections.unmodifiableList(gaps);
             this.flags = Collections.unmodifiableList(flags);
+            this.labelLines = Collections.unmodifiableList(new ArrayList<String>(labelLines));
+            this.repeatedSentences = Collections.unmodifiableList(new ArrayList<String>(repeatedSentences));
+            this.questions = Collections.unmodifiableList(new ArrayList<String>(questions));
+        }
+
+        /** Headings, key points and list items without a sentence end or a marker; removed from the text. */
+        public List<String> getLabelLines() {
+            return labelLines;
+        }
+
+        /** Sentences the answer or an earlier part of the section already contained; removed from the text. */
+        public List<String> getRepeatedSentences() {
+            return repeatedSentences;
+        }
+
+        /** The uncited questions of question-only paragraphs; removed from the text, kept as open points. */
+        public List<String> getQuestions() {
+            return questions;
         }
 
         public List<Paragraph> getParagraphs() {
@@ -154,8 +198,21 @@ public final class CitationValidator {
      * @param passageCount k, the number of passages in the pack: valid markers are {@code [1]..[k]}
      */
     public Result validate(String answer, int passageCount) {
+        return validate(answer, passageCount, Collections.<String>emptySet());
+    }
+
+    /**
+     * @param answer       the writer's plain-text answer
+     * @param passageCount k, the number of passages in the pack: valid markers are {@code [1]..[k]}
+     * @param written      the {@linkplain #sentenceKeys(String) sentence keys} of the section's earlier parts: a
+     *                     sentence of this answer that repeats one of them is removed like a repeat within it
+     */
+    public Result validate(String answer, int passageCount, Set<String> written) {
         List<String> stripped = new ArrayList<String>();
         List<String> gaps = new ArrayList<String>();
+        List<String> labelLines = new ArrayList<String>();
+        List<String> repeated = new ArrayList<String>();
+        List<String> questions = new ArrayList<String>();
         List<Paragraph> paragraphs = new ArrayList<Paragraph>();
         List<StringBuilder> blocks = new ArrayList<StringBuilder>();
         StringBuilder current = null;
@@ -169,8 +226,14 @@ public final class CitationValidator {
                 current = null;
                 continue;
             }
+            boolean structured = HEADING.matcher(raw).find() || BULLET.matcher(raw).find();
             String line = BULLET.matcher(HEADING.matcher(raw).replaceFirst("")).replaceFirst("").trim();
             if (line.isEmpty()) {
+                current = null;
+                continue;
+            }
+            if (structured && isLabel(line)) {
+                labelLines.add(line); // a heading or list item ends the paragraph it would have been glued to
                 current = null;
                 continue;
             }
@@ -182,12 +245,43 @@ public final class CitationValidator {
             }
             current.append(line);
         }
+        Set<String> seen = new HashSet<String>(written == null ? Collections.<String>emptySet() : written);
+        Set<String> openPoints = new HashSet<String>();
+        for (String point : gaps) {
+            openPoints.add(key(point));
+        }
         for (StringBuilder block : blocks) {
             String text = stripUnknown(block.toString(), passageCount, stripped);
-            List<Sentence> sentences = sentences(text);
-            if (!sentences.isEmpty()) {
-                paragraphs.add(new Paragraph(sentences));
+            if (text.isEmpty()) {
+                continue;
             }
+            if (isLabel(text)) {
+                labelLines.add(text); // key points written as plain lines: one line of words without a sentence
+                continue;
+            }
+            List<Sentence> kept = new ArrayList<Sentence>();
+            for (Sentence sentence : sentences(text)) {
+                String key = key(sentence.plainText());
+                if (!key.isEmpty() && !seen.add(key)) {
+                    repeated.add(sentence.getText());
+                    continue;
+                }
+                kept.add(sentence);
+            }
+            if (kept.isEmpty()) {
+                continue;
+            }
+            if (onlyUncitedQuestions(kept)) {
+                for (Sentence question : kept) {
+                    String point = question.plainText();
+                    questions.add(point);
+                    if (openPoints.add(key(point))) {
+                        gaps.add(point);
+                    }
+                }
+                continue;
+            }
+            paragraphs.add(new Paragraph(kept));
         }
         List<ClaimFlag> flags = new ArrayList<ClaimFlag>();
         for (int p = 0; p < paragraphs.size(); p++) {
@@ -201,7 +295,48 @@ public final class CitationValidator {
                 }
             }
         }
-        return new Result(paragraphs, stripped, gaps, flags);
+        return new Result(paragraphs, stripped, gaps, flags, labelLines, repeated, questions);
+    }
+
+    /**
+     * The keys of a written text's sentences (case, spacing, closing punctuation and markers ignored), so a later
+     * part of the same section can leave out what this text already says.
+     */
+    public static Set<String> sentenceKeys(String text) {
+        Set<String> keys = new HashSet<String>();
+        for (String paragraph : (text == null ? "" : text).split("\\n\\s*\\n")) {
+            for (Sentence sentence : sentences(paragraph.replace('\n', ' ').trim())) {
+                String key = key(sentence.plainText());
+                if (!key.isEmpty()) {
+                    keys.add(key);
+                }
+            }
+        }
+        return keys;
+    }
+
+    /** A line or paragraph without any sentence end and without a marker: a label, not prose. */
+    static boolean isLabel(String text) {
+        return !ANY_SENTENCE_END.matcher(text).find() && !MARKER.matcher(text).find();
+    }
+
+    private static boolean onlyUncitedQuestions(List<Sentence> sentences) {
+        for (Sentence sentence : sentences) {
+            if (!sentence.getCited().isEmpty()
+                    || !TRAILING_CLOSERS.matcher(sentence.plainText()).replaceAll("").endsWith("?")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * What a repeat is found by: case, spacing and the closing punctuation are ignored, every other character counts,
+     * so "-20 °C" and "20 °C", or "5 %" and "5 ‰", stay two claims.
+     */
+    private static String key(String text) {
+        String n = Normalizer.normalize(text == null ? "" : text, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
+        return SENTENCE_CLOSE.matcher(WHITESPACE.matcher(n).replaceAll(" ").trim()).replaceAll("");
     }
 
     /** Removes the numbers of a marker outside 1..k; a marker left empty disappears with its leading space. */

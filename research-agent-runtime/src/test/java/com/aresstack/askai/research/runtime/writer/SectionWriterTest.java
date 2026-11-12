@@ -184,6 +184,48 @@ public class SectionWriterTest {
         assertEquals(2, draft.getCitations().size());
     }
 
+    /** Live run 4, book 3, section 2.2: the second half repeated sentences the first half had written. */
+    @Test
+    public void aLaterPartLeavesOutWhatAnEarlierPartSaid() {
+        SectionAssignment a = SectionAssignment.builder("s1").title("T")
+                .keyPoints(Arrays.asList("k1", "k2", "k3", "k4")).passages(pack(6)).wordsPerCall(450)
+                .sectionWords(900).answerTokens(1200).build();
+        ScriptedChat chat = new ScriptedChat().answer("Die Rate stieg weiter [1].")
+                .answer("Die Rate stieg weiter [2]. Danach kam ein Rückgang [3].");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(a);
+        assertEquals("Die Rate stieg weiter [1].\n\nDanach kam ein Rückgang [3].", draft.getText());
+        assertTrue(log.toString(), log.toString().contains("removed 0 label lines and 1 repeated sentences"));
+        assertFalse("the log names counts, never text", log.toString().contains("Rate stieg"));
+    }
+
+    /** Live run 4, books 2 and 3: echoed key points and a closing list of questions stood in the book as prose. */
+    @Test
+    public void labelLinesAndOpenQuestionsLeaveTheProse() {
+        ScriptedChat chat = new ScriptedChat()
+                .answer("Die Rate stieg weiter [1].\n\n- growth\n- Rückgang\n\nWie hoch war die Rate 2021?");
+        SectionDraft draft = new SectionWriter(chat, null).write(assignment(6));
+        assertEquals("Die Rate stieg weiter [1].", draft.getText());
+        assertEquals(Arrays.asList("Wie hoch war die Rate 2021?"), draft.getGaps());
+        assertEquals("nothing is left to repair", 1, chat.requests.size());
+        assertTrue(draft.getFlags().toString(), draft.getFlags().isEmpty());
+    }
+
+    /** Live run 4, books 2 and 3: "unsere tragbaren Geräte", "implementieren wir" (a manufacturer's voice). */
+    @Test
+    public void aSourcesWeGetsTheOneRepair() {
+        ScriptedChat chat = new ScriptedChat().answer("Unsere Rate stieg weiter [1].")
+                .answer("Die Rate stieg weiter [1].");
+        SectionDraft draft = new SectionWriter(chat, null).write(assignment(6));
+        assertTrue(chat.requests.get(0).get(0).getContent().contains("neutral third person"));
+        assertEquals(2, chat.requests.size());
+        List<ChatMessage> repair = chat.requests.get(1);
+        String last = repair.get(repair.size() - 1).getContent();
+        assertTrue(last, last.contains("first-person voice of a source \"Unsere\": Unsere Rate stieg weiter [1]."));
+        assertEquals("Die Rate stieg weiter [1].", draft.getText());
+        assertTrue(draft.getFlags().toString(), draft.getFlags().isEmpty());
+    }
+
     @Test
     public void continuationStartingWithGapKeepsItOnItsOwnLine() {
         assertEquals("The rate rose [1].\nGAP: Later figures", SectionWriter.join("The rate rose [1].", "GAP: Later figures"));

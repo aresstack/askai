@@ -31,7 +31,91 @@ public class CitationValidatorTest {
     public void gapsHeadingsAndBulletsAreHandled() {
         CitationValidator.Result r = validator.validate("## Titel\nText [1].\n\n- Punkt [2].\nGAP: Daten fehlen\nGAP:", 3);
         assertEquals(Arrays.asList("Daten fehlen"), r.getGaps());
-        assertEquals("Titel Text [1].\n\nPunkt [2].", r.text());
+        assertEquals("a heading without a sentence is a label, not the start of the paragraph",
+                "Text [1].\n\nPunkt [2].", r.text());
+        assertEquals(Arrays.asList("Titel"), r.getLabelLines());
+    }
+
+    /** Live run 4, section 1.1 of books 2 and 3: the key points of the prompt came back as the last "paragraph". */
+    @Test
+    public void echoedKeyPointsAreNoProse() {
+        String prose = "Die Datenschutzkonferenz empfiehlt Datensparsamkeit [1].";
+        CitationValidator.Result listed = validator.validate(prose + "\n\n- Beispiel für IoT-Architekturen\n"
+                + "- Risiken für das Persönlichkeitsrecht\n- Datensicherheit als primäre Anforderung", 3);
+        assertEquals(prose, listed.text());
+        assertEquals(Arrays.asList("Beispiel für IoT-Architekturen", "Risiken für das Persönlichkeitsrecht",
+                "Datensicherheit als primäre Anforderung"), listed.getLabelLines());
+        assertTrue(listed.getFlags().toString(), listed.getFlags().isEmpty());
+
+        CitationValidator.Result runTogether = validator.validate(prose + "\n\nBeispiel für IoT-Architekturen "
+                + "Risiken für das Persönlichkeitsrecht Datensicherheit als primäre Anforderung Stand der Technik im "
+                + "Baubereich", 3);
+        assertEquals(prose, runTogether.text());
+        assertEquals(1, runTogether.getLabelLines().size());
+        assertTrue("no uncited paragraph is left to flag", runTogether.getFlags().isEmpty());
+    }
+
+    @Test
+    public void aCitedSentenceWithoutFullStopStaysProse() {
+        CitationValidator.Result r = validator.validate("Die DGUV empfiehlt Schulungen [1]", 3);
+        assertEquals("Die DGUV empfiehlt Schulungen [1]", r.text());
+        assertTrue(r.getLabelLines().isEmpty());
+    }
+
+    /** Live run 4, section 2.2 of book 3: one passage, and the writer filled the word target by repeating itself. */
+    @Test
+    public void repeatedSentencesAreRemoved() {
+        CitationValidator.Result r = validator.validate(
+                "Sensoren verbessern die Sicherheit [1]. Warnsysteme sind wichtig.\n\n"
+                        + "Warnsysteme sind wichtig. Projektleiter optimieren Abläufe [1].\n\n"
+                        + "Sensoren verbessern die Sicherheit [1]. Projektleiter  optimieren Abläufe [1].", 3);
+        assertEquals("Sensoren verbessern die Sicherheit [1]. Warnsysteme sind wichtig.\n\n"
+                + "Projektleiter optimieren Abläufe [1].", r.text());
+        assertEquals(3, r.getRepeatedSentences().size());
+        assertEquals("flags point into the text as it stays", 1, r.getFlags().size());
+        assertEquals(ClaimFlag.Kind.UNCITED_SENTENCE, r.getFlags().get(0).getKind());
+        assertEquals(0, r.getFlags().get(0).getParagraph());
+    }
+
+    /** A sign, a unit or another symbol makes another claim, not a repeat; case, spacing and the end do not. */
+    @Test
+    public void sentencesThatDifferInASymbolAreNoRepeat() {
+        CitationValidator.Result r = validator.validate("Die Temperatur beträgt -20 °C [1]. "
+                + "Die Temperatur beträgt 20 °C [2]. Der Anteil liegt bei 5 % [1]. Der Anteil liegt bei 5 ‰ [2]. "
+                + "Die temperatur  beträgt -20 °C [2]!", 3);
+        assertEquals("Die Temperatur beträgt -20 °C [1]. Die Temperatur beträgt 20 °C [2]. "
+                + "Der Anteil liegt bei 5 % [1]. Der Anteil liegt bei 5 ‰ [2].", r.text());
+        assertEquals(Arrays.asList("Die temperatur beträgt -20 °C [2]!"), r.getRepeatedSentences());
+    }
+
+    @Test
+    public void aSentenceAnEarlierPartWroteIsRemoved() {
+        java.util.Set<String> written = CitationValidator.sentenceKeys("Teil eins [1].\n\nSensoren warnen früh [2].");
+        CitationValidator.Result r = validator.validate("Sensoren warnen früh [3]. Teil zwei [2].", 3, written);
+        assertEquals("Teil zwei [2].", r.text());
+        assertEquals(Arrays.asList("Sensoren warnen früh [3]."), r.getRepeatedSentences());
+    }
+
+    /** Live run 4, section 2.2 of book 3: the writer closed with a paragraph of nine questions, some twice. */
+    @Test
+    public void uncitedQuestionsBecomeOpenPoints() {
+        CitationValidator.Result r = validator.validate("Sensoren warnen früh [1].\n\n"
+                + "Wie genau überwachen IoT-Sensoren die Arbeitsbedingungen? Wie prüft man Warnsysteme? "
+                + "Wie genau überwachen IoT-Sensoren die Arbeitsbedingungen?\nGAP: Wie prüft man Warnsysteme?", 3);
+        assertEquals("Sensoren warnen früh [1].", r.text());
+        assertEquals(Arrays.asList("Wie prüft man Warnsysteme?",
+                "Wie genau überwachen IoT-Sensoren die Arbeitsbedingungen?"), r.getGaps());
+        assertEquals(2, r.getQuestions().size());
+        assertEquals(1, r.getRepeatedSentences().size());
+        assertTrue(r.getFlags().toString(), r.getFlags().isEmpty());
+    }
+
+    @Test
+    public void aQuestionWithItsCitedAnswerStaysProse() {
+        CitationValidator.Result r = validator.validate("Was kostet ein Sensor? Die Studie nennt 500 Euro [1].", 3);
+        assertEquals("Was kostet ein Sensor? Die Studie nennt 500 Euro [1].", r.text());
+        assertTrue(r.getQuestions().isEmpty());
+        assertTrue(r.getGaps().isEmpty());
     }
 
     @Test
