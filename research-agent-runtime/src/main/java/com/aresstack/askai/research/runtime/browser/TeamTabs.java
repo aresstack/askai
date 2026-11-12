@@ -93,10 +93,17 @@ public final class TeamTabs {
             try {
                 return acquireNow(taskId);
             } catch (BrowserCapacityException full) {
-                if (!tabLimitReached()) {
-                    throw full;
-                }
                 long left = deadline - System.currentTimeMillis();
+                synchronized (this) {
+                    if (released != seen && left > 0) {
+                        // A tab came back while this try ran, perhaps the last one, which closes the user context: the
+                        // state alone no longer says whether waiting is worth it, the next try finds out.
+                        continue;
+                    }
+                    if (lease == null || open == 0) {
+                        throw full; // without an open team user context nothing of ours can come free
+                    }
+                }
                 if (left <= 0) {
                     throw new BrowserCapacityException(full.getMessage() + (waited
                             ? " No tab came free within " + (pool.acquireTimeoutMillis() / 1000L) + " s."
@@ -120,61 +127,65 @@ public final class TeamTabs {
         }
     }
 
-    /** Whether a refused acquisition failed at the tab limit (worth a wait) rather than for want of a browser. */
-    private synchronized boolean tabLimitReached() {
-        return lease != null && open > 0; // without an open team user context nothing of ours can come free
-    }
-
     private Tab acquireNow(String taskId) throws BrowserCapacityException, InterruptedException {
-        BrowserUserContextLease current;
-        boolean opener = false;
-        synchronized (this) {
-            // one worker opens the user context; the others wait here, interruptibly, instead of on the monitor
-            while (opening) {
-                wait();
-            }
-            if (lease != null && !lease.isOpen()) {
-                lease = null; // the worker browser was lost: the next worker opens a fresh user context
-            }
-            if (lease == null) {
-                opening = true;
-                opener = true;
-            }
-        }
-        if (opener) {
-            BrowserUserContextLease opened = null;
-            try {
-                opened = pool.acquire(BrowserUserContextRequest.of(WORKER_ID, taskId));
-            } finally {
-                synchronized (this) {
-                    if (opened != null) {
-                        lease = opened;
-                        firstTabFree = true;
+        while (true) {
+            BrowserUserContextLease current = null;
+            synchronized (this) {
+                // one worker opens the user context; the others wait here, interruptibly, instead of on the monitor
+                while (opening) {
+                    wait();
+                }
+                if (lease != null && !lease.isOpen()) {
+                    lease = null; // the worker browser was lost: the next worker opens a fresh user context
+                }
+                if (lease == null) {
+                    opening = true;
+                } else {
+                    current = lease;
+                    // Counted in the same step that saw the context open: the last tab given back meanwhile can never
+                    // close it under this worker. Live run 4 (2026-11-12): a search that waited at the tab limit woke
+                    // when the running search gave its tabs back, saw the context still open, and found it closed a
+                    // moment later ("the team's user context is not open"), so the plan went on without the team.
+                    open++;
+                    if (firstTabFree) {
+                        firstTabFree = false;
+                        return new Tab(current.browser(), null, current);
                     }
-                    opening = false;
-                    notifyAll();
                 }
             }
-        }
-        synchronized (this) {
-            if (lease == null) {
-                throw new BrowserCapacityException("the team's user context is not open");
+            if (current == null) {
+                openUserContext(taskId);
+                continue; // take the tab in the fresh user context (another worker may take its first tab first)
             }
-            current = lease;
-            open++; // counted before the tab opens, so a worker giving its tab back meanwhile never closes the context
-            if (firstTabFree) {
-                firstTabFree = false;
-                return new Tab(current.browser(), null, current);
+            BrowsingContextLease tab;
+            try {
+                tab = current.openBrowsingContext();
+            } catch (BrowserCapacityException | RuntimeException failed) {
+                giveBack(); // the slot counted above
+                throw failed;
             }
+            return new Tab(tab.tools(), tab, current);
         }
-        BrowsingContextLease tab;
+    }
+
+    /** Opens the team's user context (this worker set {@code opening}); the waiting workers go on when it is done. */
+    private void openUserContext(String taskId) throws BrowserCapacityException, InterruptedException {
+        BrowserUserContextLease opened = null;
         try {
-            tab = current.openBrowsingContext();
-        } catch (BrowserCapacityException | RuntimeException failed) {
-            giveBack(); // the slot counted above
-            throw failed;
+            opened = pool.acquire(BrowserUserContextRequest.of(WORKER_ID, taskId));
+        } finally {
+            synchronized (this) {
+                if (opened != null) {
+                    lease = opened;
+                    firstTabFree = true;
+                }
+                opening = false;
+                notifyAll();
+            }
         }
-        return new Tab(tab.tools(), tab, current);
+        if (opened == null) {
+            throw new BrowserCapacityException("the team's user context is not open");
+        }
     }
 
     /**

@@ -4,8 +4,11 @@ import com.aresstack.askai.research.runtime.loop.ToolInvoker;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -159,6 +162,82 @@ public class TeamTabsTest {
         }
     }
 
+    /**
+     * Live run 4 (2026-11-12): a search at the tab limit was refused while the running search gave its tabs back; the
+     * last one closed the user context, so "nothing of ours can come free" looked true and the search failed instead
+     * of opening the context again. A try that misses tabs coming back tries again.
+     */
+    @Test(timeout = 10_000)
+    public void aTryThatMissesTheLastTabsComingBackTriesAgainInsteadOfFailing() throws Exception {
+        FakePool pool = new FakePool(2, 5_000L);
+        TeamTabs tabs = new TeamTabs(pool);
+        final TeamTabs.Tab first = tabs.acquire("q1");
+        final TeamTabs.Tab second = tabs.acquire("q2");
+        pool.leases.get(0).beforeRefusal = new Runnable() {
+            public void run() { // the other search ends right while this one is refused at the limit
+                second.close();
+                first.close();
+            }
+        };
+        TeamTabs.Tab mine = tabs.acquire("q3");
+        assertEquals(1, tabs.openTabs());
+        assertFalse(pool.leases.get(0).open); // the last tab closed the old context
+        assertEquals(2, pool.leases.size()); // the search opened a fresh one instead of failing
+        assertSame(pool.leases.get(1).firstTab, mine.tools());
+        mine.close();
+        assertFalse(pool.leases.get(1).open);
+    }
+
+    /**
+     * Live run 4 (2026-11-12): a search that waited at the tab limit woke when the running search gave its tabs back,
+     * found the user context still open and a moment later closed by the last tab: "the team's user context is not
+     * open", and the plan went on without the team. Searches that come and go never fail while tabs come back.
+     */
+    @Test(timeout = 60_000)
+    public void searchesThatComeAndGoNeverFailWhileTabsComeBack() throws Exception {
+        final FakePool pool = new FakePool(2, 30_000L);
+        final TeamTabs tabs = new TeamTabs(pool);
+        final int searches = 4;
+        final int rounds = 300;
+        final AtomicReference<Throwable> failed = new AtomicReference<Throwable>();
+        final CountDownLatch go = new CountDownLatch(1);
+        List<Thread> threads = new ArrayList<Thread>();
+        for (int s = 0; s < searches; s++) {
+            final String name = "search-" + s;
+            Thread thread = new Thread(new Runnable() {
+                public void run() {
+                    try {
+                        go.await();
+                        for (int round = 0; round < rounds && failed.get() == null; round++) {
+                            List<TeamTabs.Tab> mine = tabs.acquireUpTo(name + "-" + round, 2);
+                            Thread.yield();
+                            for (TeamTabs.Tab tab : mine) {
+                                tab.close();
+                            }
+                        }
+                    } catch (Throwable e) {
+                        failed.compareAndSet(null, e);
+                    }
+                }
+            }, name);
+            threads.add(thread);
+            thread.start();
+        }
+        go.countDown();
+        for (Thread thread : threads) {
+            thread.join();
+        }
+        if (failed.get() != null) {
+            throw new AssertionError("a search failed while tabs came back: " + failed.get(), failed.get());
+        }
+        assertEquals(0, tabs.openTabs());
+        synchronized (pool.leases) {
+            for (FakeLease lease : pool.leases) {
+                assertFalse("every user context is closed with its last tab", lease.open);
+            }
+        }
+    }
+
     @Test
     public void withoutWorkerBrowsersTheTeamIsNotAvailable() {
         assertFalse(new TeamTabs(BrowserUserContextPool.unavailable("none")).available());
@@ -173,8 +252,9 @@ public class TeamTabsTest {
         };
     }
 
+    /** Thread-safe: the stress test calls it from several searches at once. */
     private static final class FakePool implements BrowserUserContextPool {
-        final List<FakeLease> leases = new ArrayList<FakeLease>();
+        final List<FakeLease> leases = Collections.synchronizedList(new ArrayList<FakeLease>());
         final int tabsPerContext;
         final long waitMillis;
 
@@ -192,7 +272,7 @@ public class TeamTabsTest {
             return waitMillis;
         }
 
-        public BrowserUserContextLease acquire(BrowserUserContextRequest request) {
+        public synchronized BrowserUserContextLease acquire(BrowserUserContextRequest request) {
             FakeLease lease = new FakeLease("uc-" + (leases.size() + 1), request, tabsPerContext);
             leases.add(lease);
             return lease;
@@ -203,14 +283,17 @@ public class TeamTabsTest {
         }
     }
 
+    /** Thread-safe like the worker browsers' user context it stands for. */
     private static final class FakeLease implements BrowserUserContextLease {
         final String id;
         final BrowserUserContextRequest request;
         final int limit;
         final ToolInvoker firstTab = tools();
-        int extraTabs;
-        int closedTabs;
-        boolean open = true;
+        volatile int extraTabs;
+        volatile int closedTabs;
+        volatile boolean open = true;
+        /** Runs once when the tab limit refuses a tab, before the refusal is thrown. */
+        volatile Runnable beforeRefusal;
 
         FakeLease(String id, BrowserUserContextRequest request, int limit) {
             this.id = id;
@@ -230,8 +313,13 @@ public class TeamTabsTest {
             return firstTab;
         }
 
-        public BrowsingContextLease openBrowsingContext() throws BrowserCapacityException {
+        public synchronized BrowsingContextLease openBrowsingContext() throws BrowserCapacityException {
             if (1 + extraTabs - closedTabs >= limit) {
+                Runnable hook = beforeRefusal;
+                beforeRefusal = null;
+                if (hook != null) {
+                    hook.run();
+                }
                 throw new BrowserCapacityException("tab limit reached");
             }
             extraTabs++;
@@ -247,7 +335,9 @@ public class TeamTabsTest {
                 }
 
                 public void close() {
-                    closedTabs++;
+                    synchronized (FakeLease.this) {
+                        closedTabs++;
+                    }
                 }
             };
         }
@@ -256,7 +346,7 @@ public class TeamTabsTest {
             return open;
         }
 
-        public void close() {
+        public synchronized void close() {
             open = false;
         }
     }
