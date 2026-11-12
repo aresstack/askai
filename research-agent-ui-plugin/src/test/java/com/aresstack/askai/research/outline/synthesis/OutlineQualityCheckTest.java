@@ -217,4 +217,39 @@ public class OutlineQualityCheckTest {
         assertEquals("every passage of the topic once", brief.passagesOf("T1").size(), used.size());
         assertEquals(brief.passagesOf("T1").size(), new java.util.HashSet<String>(used).size());
     }
+
+    /**
+     * Live run 4 after #204: one aspect per concept node gave every chapter one section, also the chapter of 809
+     * passages. A node's material that the sub-topic cut separates gives several aspects of that node; a used
+     * concept part treats its requirement even when no chapter names it.
+     */
+    @Test
+    public void aConceptNodesMaterialKeepsItsSubtopicsAndAUsedPartTreatsItsRequirement() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int perAspect = 6;
+        int base = corpus.diverse("sites", 4, perAspect, 3);
+        int step = perAspect + 1;
+        corpus.conceptAlong("c-sensors", "Sensors", base + 1, base + 1 + step);
+        corpus.conceptAlong("c-safety", "Safety", base + 1 + 2 * step, base + 1 + 3 * step);
+        SynthesisBrief brief = corpus.brief();
+        List<SynthesisBrief.SubtopicEntry> parts = brief.getTopics().get(0).getSubtopics();
+        assertEquals("two aspects per concept node", 4, parts.size());
+        assertEquals("C1", parts.get(0).getConceptKey());
+        assertEquals("C1", parts.get(1).getConceptKey());
+        assertEquals("C2", parts.get(2).getConceptKey());
+        assertEquals("C2", parts.get(3).getConceptKey());
+
+        OutlinePlan plan = new OutlinePlan(Collections.singletonList(
+                chapter("Sensors", Collections.singletonList("T1"), Collections.singletonList("C1"),
+                        section("A", "T1.1", "T1.2"), section("B", "T1.3", "T1.4"))),
+                Collections.<String>emptyList(), false);
+
+        OutlinePlan fixed = CHECK.fix(plan, brief).getPlan();
+
+        assertTrue("the safety parts are used, so safety is treated: " + fixed.getGapKeys(),
+                fixed.getGapKeys().isEmpty());
+        for (PlanFinding finding : CHECK.review(fixed, brief)) {
+            assertFalse(finding.toString(), finding.getCode().equals(OutlineQualityCheck.REQUIREMENT_LOST));
+        }
+    }
 }

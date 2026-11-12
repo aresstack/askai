@@ -101,8 +101,23 @@ public class EvidenceReportTest {
                 "eine Datenschutz eine Recht eine werden eine oder");
         KeyTerms terms = new KeyTerms(corpus);
         List<String> best = terms.of(corpus.subList(0, 2), 5);
-        assertEquals("\"daten\" is as common in the set as in the corpus", Arrays.asList("sensoren", "akku"), best);
+        assertEquals("\"daten\" is as common in the set as in the corpus", Arrays.asList("akku", "sensoren"), best);
         assertTrue("no word sets the whole corpus apart", terms.of(corpus, 5).isEmpty());
+    }
+
+    /**
+     * Live run 4 after #203: "diese" and "nach" led nodes whose sources were more often German. A common word the set
+     * uses only somewhat more often ranks below a rare word that sets the material apart.
+     */
+    @Test
+    public void aCommonWordSlightlyMoreFrequentInTheSetRanksBelowARareOne() {
+        List<String> corpus = Arrays.asList(
+                "diese Helmpflicht gilt", "diese Helmpflicht gilt", "diese Regel gilt", "diese Regel gilt",
+                "diese Regel gilt", "diese Norm", "diese Norm", "andere Norm", "andere Norm", "andere Norm");
+        KeyTerms terms = new KeyTerms(corpus);
+        List<String> best = terms.of(corpus.subList(0, 5), 3);
+        assertTrue(best + "", best.contains("helmpflicht"));
+        assertTrue(best + "", !best.contains("diese"));
     }
 
     private static EvidenceReport.NodeEvidence node(EvidenceReport report, String id) {
