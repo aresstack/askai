@@ -274,13 +274,16 @@ public final class BookAssembler {
             paragraphNo++;
             counts.paragraphs++;
             List<ManuscriptCitation> cited = new ArrayList<ManuscriptCitation>();
-            for (String sentence : sentences.sentences(paragraph.trim())) {
+            List<String> parts = sentences.sentences(paragraph.trim());
+            List<String> voices = voice.firstPersonWords(parts); // a quotation can span sentences
+            for (int s = 0; s < parts.size(); s++) {
+                String sentence = parts.get(s);
                 if (sentence.trim().isEmpty()) {
                     continue;
                 }
                 counts.sentences++;
                 sectionSentences.add(stripMarkers(sentence).trim());
-                String we = voice.firstPersonWord(sentence);
+                String we = voices.get(s);
                 if (!we.isEmpty()) {
                     findings.add(new Finding(Kind.FIRST_PERSON_VOICE, id, label + ": "
                             + stripMarkers(sentence).trim() + " (" + we + ")"));

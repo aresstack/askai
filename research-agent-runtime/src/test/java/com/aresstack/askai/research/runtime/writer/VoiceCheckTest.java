@@ -2,6 +2,7 @@ package com.aresstack.askai.research.runtime.writer;
 
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -35,6 +36,17 @@ public class VoiceCheckTest {
         assertEquals("", voice.firstPersonWord("Der Hersteller schreibt: „Wir schützen jede Messung.“ [2]"));
         assertEquals("", voice.firstPersonWord("The vendor states \"we never sell data\" [1]."));
         assertEquals("", voice.firstPersonWord("Die BAuA nennt das »unser gemeinsames Ziel« [3]."));
+    }
+
+    @Test
+    public void aQuotationOverSeveralSentencesKeepsItsAuthorsVoice() {
+        assertEquals(Arrays.asList("", "", "Wir"), voice.firstPersonWords(Arrays.asList(
+                "Der Hersteller schreibt: „Wir schützen Daten [1].", "Unsere Geräte sind sicher [1].“",
+                "Wir prüfen das [2].")));
+        List<ClaimFlag> flags = voice.check(new CitationValidator().validate("Der Hersteller schreibt: "
+                + "„Wir schützen Daten [1]. Unsere Geräte sind sicher [1].“ Wir prüfen das [2].", 3));
+        assertEquals(1, flags.size());
+        assertEquals("Wir prüfen das [2].", flags.get(0).getSentence());
     }
 
     @Test

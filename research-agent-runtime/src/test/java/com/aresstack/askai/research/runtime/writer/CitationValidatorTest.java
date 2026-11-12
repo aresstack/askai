@@ -77,6 +77,17 @@ public class CitationValidatorTest {
         assertEquals(0, r.getFlags().get(0).getParagraph());
     }
 
+    /** A sign, a unit or another symbol makes another claim, not a repeat; case, spacing and the end do not. */
+    @Test
+    public void sentencesThatDifferInASymbolAreNoRepeat() {
+        CitationValidator.Result r = validator.validate("Die Temperatur beträgt -20 °C [1]. "
+                + "Die Temperatur beträgt 20 °C [2]. Der Anteil liegt bei 5 % [1]. Der Anteil liegt bei 5 ‰ [2]. "
+                + "Die temperatur  beträgt -20 °C [2]!", 3);
+        assertEquals("Die Temperatur beträgt -20 °C [1]. Die Temperatur beträgt 20 °C [2]. "
+                + "Der Anteil liegt bei 5 % [1]. Der Anteil liegt bei 5 ‰ [2].", r.text());
+        assertEquals(Arrays.asList("Die temperatur beträgt -20 °C [2]!"), r.getRepeatedSentences());
+    }
+
     @Test
     public void aSentenceAnEarlierPartWroteIsRemoved() {
         java.util.Set<String> written = CitationValidator.sentenceKeys("Teil eins [1].\n\nSensoren warnen früh [2].");

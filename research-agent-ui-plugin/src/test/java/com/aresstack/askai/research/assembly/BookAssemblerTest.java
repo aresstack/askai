@@ -260,10 +260,12 @@ public class BookAssemblerTest {
                         "Our battery storage shifts surplus energy into the evening [1].",
                         cite("1", "c", TEXT_C, "p-c-1")))
                 .section(written("s22", "c2"), revision(
-                        "The vendor says \"we lead the market\" while lithium cells dominate [1].",
+                        "The vendor says \"we lead the market\" while lithium cells dominate [1]. It adds: "
+                                + "\"We test every cell [1]. Our warranty covers ten years [1].\"",
                         cite("1", "c", TEXT_C, "p-c-2")))
                 .build());
-        assertEquals("a quoted we is the quoted author's", 1, book.getReport().count(Kind.FIRST_PERSON_VOICE));
+        assertEquals("a quoted we is the quoted author's, also over several sentences", 1,
+                book.getReport().count(Kind.FIRST_PERSON_VOICE));
         assertEquals("2.1 Batteries: Our battery storage shifts surplus energy into the evening. (Our)",
                 book.getReport().findings(Kind.FIRST_PERSON_VOICE).get(0).getDetail());
         assertEquals(BookQualityReport.Status.INCOMPLETE_DRAFT, book.getReport().getStatus());

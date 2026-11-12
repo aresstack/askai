@@ -1,10 +1,12 @@
 package com.aresstack.askai.research.runtime.writer;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
@@ -42,6 +44,9 @@ public final class CitationValidator {
     private static final Pattern ANY_SENTENCE_END = Pattern.compile("[.!?]");
     /** Closing quotes and brackets after a question mark: {@code "Wer zahlt?“}. */
     private static final Pattern TRAILING_CLOSERS = Pattern.compile("[\"'“”»«’)]+$");
+    /** The closing punctuation of a sentence, with its quotes and brackets: no part of what it says. */
+    private static final Pattern SENTENCE_CLOSE = Pattern.compile("[\\s.!?…\"'“”»«’)]+$");
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     /** One sentence with the passage numbers it cites. */
     public static final class Sentence {
@@ -294,8 +299,8 @@ public final class CitationValidator {
     }
 
     /**
-     * The keys of a written text's sentences (case, punctuation and markers ignored), so a later part of the same
-     * section can leave out what this text already says.
+     * The keys of a written text's sentences (case, spacing, closing punctuation and markers ignored), so a later
+     * part of the same section can leave out what this text already says.
      */
     public static Set<String> sentenceKeys(String text) {
         Set<String> keys = new HashSet<String>();
@@ -325,8 +330,13 @@ public final class CitationValidator {
         return true;
     }
 
+    /**
+     * What a repeat is found by: case, spacing and the closing punctuation are ignored, every other character counts,
+     * so "-20 °C" and "20 °C", or "5 %" and "5 ‰", stay two claims.
+     */
     private static String key(String text) {
-        return ClaimSupportCheck.normaliseText(text);
+        String n = Normalizer.normalize(text == null ? "" : text, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
+        return SENTENCE_CLOSE.matcher(WHITESPACE.matcher(n).replaceAll(" ").trim()).replaceAll("");
     }
 
     /** Removes the numbers of a marker outside 1..k; a marker left empty disappears with its leading space. */
