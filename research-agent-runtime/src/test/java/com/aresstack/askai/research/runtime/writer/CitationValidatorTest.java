@@ -46,6 +46,16 @@ public class CitationValidatorTest {
     }
 
     @Test
+    public void aBracketAfterAnAbbreviationOrBeforeALowercaseWordOrACommaIsProse() {
+        String text = "Die Werte, z. B. [Puls und Temperatur], gehen an die Leitstelle [1]. Sie misst etwa alle 5 "
+                + "min. [im Mittel] und speichert die Werte [2]. Puls, d. h. [Herzfrequenz] und Rhythmus, zählt [3]. "
+                + "Helme warnen [1]. [Puls und Temperatur], so die Leitstelle, genügen [2].";
+        CitationValidator.Result r = validator.validate(text, 3);
+        assertTrue(r.getStrippedMarkers().toString(), r.getStrippedMarkers().isEmpty());
+        assertEquals(text, r.text());
+    }
+
+    @Test
     public void markerAfterFullStopBelongsToSentenceBefore() {
         CitationValidator.Result r = validator.validate("Erster Satz. [1] Zweiter Satz. [2]", 6);
         assertTrue(r.getFlags().toString(), r.getFlags().isEmpty());
