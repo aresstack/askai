@@ -98,6 +98,18 @@ public final class SearchPlanQueue {
             return workers();
         }
 
+        /**
+         * The worker searches (the queries page workers suggest while reading) one node may add per research cycle
+         * (setting). Their own budget beside the planner's queries per node: the planned angles never use it up,
+         * and the worker searches never push a planned angle out.
+         */
+        default int workerQueriesPerNode() {
+            return DEFAULT_WORKER_QUERIES_PER_NODE;
+        }
+
+        /** The default of {@link #workerQueriesPerNode()}. */
+        int DEFAULT_WORKER_QUERIES_PER_NODE = 4;
+
         /** No team: one entry at a time. */
         Team OFF = new Team() {
             public int workers() {
@@ -464,8 +476,8 @@ public final class SearchPlanQueue {
 
     /**
      * Plan T4: a page worker read a hit and suggested a new search. One the Weidezaun and the blacklist let through
-     * becomes a WORKER entry of the same node that runs before every planned entry, unless the node's query budget
-     * of this cycle is spent or the query is already in the plan; every other outcome stays visible on the entry
+     * becomes a WORKER entry of the same node that runs before every planned entry, unless the node's worker search
+     * budget of this cycle ({@link Team#workerQueriesPerNode()}) is spent or the query is already in the plan; every other outcome stays visible on the entry
      * that found it.
      */
     public void onTeamQuery(String requestId, String query, String rejected) {
@@ -511,12 +523,15 @@ public final class SearchPlanQueue {
             if (entry.getQuery().equalsIgnoreCase(query)) {
                 return "search \"" + query + "\" dropped: already in the plan";
             }
-            if (from.getNodeId().equals(entry.getNodeId()) && entry.getStatus() != SearchPlanEntry.Status.SKIPPED) {
+            if (from.getNodeId().equals(entry.getNodeId()) && entry.getOrigin() == SearchPlanEntry.Origin.WORKER
+                    && entry.getStatus() != SearchPlanEntry.Status.SKIPPED) {
                 ofNode++;
             }
         }
-        if (!from.getNodeId().isEmpty() && ofNode >= caps.queriesUpTo(record.getCycle())) {
-            return "search \"" + query + "\" dropped: the node's query budget of this cycle is spent";
+        int workerBudget = Math.max(0, team.workerQueriesPerNode()) * Math.max(1, record.getCycle());
+        if (!from.getNodeId().isEmpty() && ofNode >= workerBudget) {
+            return "search \"" + query + "\" dropped: the node's worker search budget of this cycle is spent ("
+                    + workerBudget + ")";
         }
         SearchPlanEntry added = SearchPlanEntry.submit(newId(), from.getPhase(), from.getNodeId(), from.getNodeLabel(),
                 query, SearchPlanEntry.Origin.WORKER, clock.now());
@@ -851,8 +866,10 @@ public final class SearchPlanQueue {
                                 skip(entries, entry, NODE_COVERED);
                                 continue;
                             }
-                            // running entries are saved as RUNNING and already count in getQueriesRun()
-                            if (node.getQueriesRun() >= c.queriesUpTo(record.getCycle())) {
+                            // running entries are saved as RUNNING and already count in getQueriesRun(); a worker
+                            // search was checked against its own budget when it was added
+                            if (entry.getOrigin() != SearchPlanEntry.Origin.WORKER
+                                    && node.getQueriesRun() >= c.queriesUpTo(record.getCycle())) {
                                 skip(entries, entry, NODE_BUDGET); // the budget of this cycle
                                 continue;
                             }

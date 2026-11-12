@@ -1962,6 +1962,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 return com.aresstack.askai.research.host.ResearchRuntimeSettings
                         .loadTeamNextSearchBelow(hostStateStore);
             }
+
+            public int workerQueriesPerNode() {
+                return com.aresstack.askai.research.host.ResearchRuntimeSettings
+                        .loadTeamWorkerQueriesPerNode(hostStateStore);
+            }
         });
         // plan T4 gap review: at every cycle boundary the shared topic analysis of the material read so far
         // decides which nodes are thin, redundant or missing and which new topics lie inside the Weidezaun

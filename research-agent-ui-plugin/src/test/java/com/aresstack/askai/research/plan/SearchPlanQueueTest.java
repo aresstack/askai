@@ -946,9 +946,17 @@ public class SearchPlanQueueTest {
     // ---- plan T5: the research team -------------------------------------------------------------------
 
     private static SearchPlanQueue.Team team(final int workers) {
+        return team(workers, SearchPlanQueue.Team.DEFAULT_WORKER_QUERIES_PER_NODE);
+    }
+
+    private static SearchPlanQueue.Team team(final int workers, final int workerQueries) {
         return new SearchPlanQueue.Team() {
             public int workers() {
                 return workers;
+            }
+
+            public int workerQueriesPerNode() {
+                return workerQueries;
             }
         };
     }
@@ -1024,19 +1032,42 @@ public class SearchPlanQueueTest {
     }
 
     @Test
-    public void aWorkerQueryBeyondTheNodesBudgetIsDropped() throws Exception {
+    public void aWorkerQueryBeyondTheNodesWorkerBudgetIsDropped() throws Exception {
         fourQueriesOverTwoNodes();
         SearchPlanQueue queue = queue(caps(3, 2, 60));
-        queue.setTeam(team(4));
+        queue.setTeam(team(4, 1));
         queue.run();
         queue.onTeamQuery("req-1", "Classloader Metaspace", "");
+        queue.onTeamQuery("req-1", "Classloader Leak Heap Dump", "");
         SearchPlanEntry first = null;
         for (SearchPlanEntry entry : store.loadEntries().values()) {
             if (entry.getQuery().equals("Classloader Java")) {
                 first = entry;
             }
         }
-        assertTrue(first.getTeamNotes().get(0).contains("query budget"));
+        assertTrue(first.getTeamNotes().toString(), first.getTeamNotes().get(0).contains("added"));
+        assertTrue(first.getTeamNotes().toString(), first.getTeamNotes().get(1).contains("worker search budget"));
+    }
+
+    @Test
+    public void workerSearchesKeepTheirOwnBudgetBesideThePlannedAngles() throws Exception {
+        // live run 4: the planned angles filled the node's budget, so every worker search was dropped, and worker
+        // searches that did get in pushed planned angles out as over budget
+        fourQueriesOverTwoNodes();
+        SearchPlanQueue queue = queue(caps(3, 2, 60));
+        queue.setTeam(team(1, 2));
+        queue.run();
+        queue.onTeamQuery("req-1", "Classloader Metaspace", "");
+        queue.onTeamQuery("req-1", "Classloader Heap Dump", "");
+        for (int i = 1; i <= 6; i++) {
+            port.completeRequest("req-" + i);
+        }
+        assertEquals(port.searched.toString(), 6, port.searched.size());
+        assertTrue(port.searched.contains("Classloader Leck")); // the planned angle still runs
+        assertTrue(port.searched.contains("Classloader Heap Dump"));
+        for (SearchPlanEntry entry : store.loadEntries().values()) {
+            assertTrue(entry.getQuery() + " " + entry.getStatus(), entry.getStatus() != SearchPlanEntry.Status.SKIPPED);
+        }
     }
 
     @Test
