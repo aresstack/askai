@@ -1129,16 +1129,22 @@ public final class WebSearchApplicationService {
                         // The selected hit keeps its identity: the entry names the candidate it came from
                         // and carries what the SERP promised (the Layer 2 semantic readiness net) instead
                         // of parking that promise in a side map keyed by URL.
+                        // Park the candidate with its reranker score BEFORE it is visited, so every hit is
+                        // in the store immediately (score visible) and its full text is filled only on a
+                        // successful visit. Best-effort: a park failure never aborts the search. A hit whose
+                        // page is ALREADY a captured source (read in an earlier search or before a restart)
+                        // is not read again: a second read only produced a second capture of the same source.
+                        if (parkCandidate(ranked)) {
+                            progress.noteVisitedAlias(WebAcquisitionText.canonicalish(navigationUrl));
+                            listener.status("skipped already captured source: " + navigationUrl);
+                            continue;
+                        }
                         String candidateId = candidateIdFor(navigationUrl);
                         // An UNRESOLVED hit is opened through its provider URL; the browser follows the redirect
                         // and the page loop judges the FINAL URL it lands on (never the redirect itself).
                         frontier.add(FrontierEntry.fromSearchResult(navigationUrl,
                                 candidateId,
                                 (ranked.candidate.title + " " + ranked.candidate.snippet).trim()));
-                        // Park the candidate with its reranker score BEFORE it is visited, so every hit is
-                        // in the store immediately (score visible) and its full text is filled only on a
-                        // successful visit. Best-effort: a park failure never aborts the search.
-                        parkCandidate(ranked);
                     }
                 }
                 if (!serpVerdicts.isEmpty()) {
@@ -1561,22 +1567,26 @@ public final class WebSearchApplicationService {
         return minted;
     }
 
-    private void parkCandidate(com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate ranked) {
+    /** Park the hit; {@code true} when its page is already a captured source (then it is not read again). */
+    private boolean parkCandidate(
+            com.aresstack.askai.research.runtime.rerank.RerankedSearchResultCandidate ranked) {
         if (!ranked.candidate.hasVerifiedTarget()) {
             // askai #41: parking stores the hit under its target address; an unresolved redirect has none yet.
             // It is still in the frontier, and only the page the browser lands on can be accepted as a source.
             listener.status("not parked (redirect not resolved yet, opened via browser): "
                     + ranked.candidate.title);
-            return;
+            return false;
         }
         try {
-            sourceAcceptancePort.park(ranked.candidate.resolvedTargetUrl, ranked.candidate.title,
-                    ranked.candidate.snippet, ranked.score);
+            String result = sourceAcceptancePort.parkReporting(ranked.candidate.resolvedTargetUrl,
+                    ranked.candidate.title, ranked.candidate.snippet, ranked.score);
+            return result != null && result.trim().startsWith(SourceAcceptancePort.ALREADY_CAPTURED);
         } catch (ToolInvoker.ToolFailure ex) {
             listener.status("park failed: " + ex.getMessage());
         } catch (ToolInvoker.EndpointUnavailable ex) {
             listener.status("park skipped (endpoint unavailable)");
         }
+        return false;
     }
 
     /**

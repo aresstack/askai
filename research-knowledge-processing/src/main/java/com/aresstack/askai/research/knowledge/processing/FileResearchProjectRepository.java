@@ -38,6 +38,8 @@ import java.util.TreeMap;
  *        sentences.properties                       the generation's sentences
  *        passages.properties                        the generation's passages
  *   active/&lt;h(captureId)&gt;.properties                captureId + the ACTIVE processingKey
+ *                                                   + sourceId + capturedAtMillis (one active capture per source)
+ *   superseded/&lt;h(captureId)&gt;.properties            captureId + sourceId + the capture that replaced it
  * </pre>
  *
  * <p>Per capture, {@link #save} writes the WHOLE new generation first (sentences + passages + manifest) and only
@@ -46,6 +48,16 @@ import java.util.TreeMap;
  * simply ignored because {@code active} still points elsewhere. {@link #load} reconstructs ONLY each capture's
  * ACTIVE generation via the domain record-ops; historical generations stay on disk but are not in the active
  * aggregate. Lucene/vector indexes remain rebuildable projections and are NOT stored here.</p>
+ *
+ * <p>ONE ACTIVE CAPTURE PER SOURCE: a source that was captured again (a re-read page, a new revision of the same
+ * source) keeps exactly one active capture — the NEWEST ({@code capturedAtMillis}, ties broken by capture id).
+ * {@link #save} never activates a capture that is older than the source's active one, and removes the active
+ * pointer of every older capture of the same source; the replaced capture is noted under {@code superseded/} so
+ * its passages can also leave the rebuildable indexes ({@link #supersededCaptureIds()}). {@link #load} enforces
+ * the same invariant on projects written before it (newest wins) and never puts a superseded capture into the
+ * aggregate, so its passages count nowhere: not in the topic analysis, not in the evidence, not in coverage.
+ * Captures without a source id are never grouped. Superseded captures and their generations stay on disk as
+ * history, like every older generation.</p>
  */
 public final class FileResearchProjectRepository implements ResearchProjectRepository {
 
@@ -77,16 +89,29 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
             }
         }
         ResearchProject project = new ResearchProject(projectId, IdSequence.counting());
-        // Captures first (sentences/passages require a known capture).
+        // One active capture per source, also for projects written before the invariant: newest wins.
+        List<ActivePointer> active = enforceOneActiveCapturePerSource(readActivePointers());
+        Map<String, ActivePointer> activeByCapture = new TreeMap<String, ActivePointer>();
+        for (ActivePointer pointer : active) {
+            activeByCapture.put(pointer.captureId, pointer);
+        }
+        java.util.Set<String> superseded = supersededCaptureIds();
+        // Captures first (sentences/passages require a known capture) — a superseded capture stays history.
         for (File f : sortedPropertyFiles(new File(root, "captures"))) {
-            project.recordSourceCapture(readCapture(read(f)));
+            SourceCapture capture = readCapture(read(f));
+            if (superseded.contains(capture.getCaptureId())
+                    && !activeByCapture.containsKey(capture.getCaptureId())) {
+                continue;
+            }
+            project.recordSourceCapture(capture);
         }
         // Then ONLY each capture's ACTIVE generation.
-        for (File pointer : sortedPropertyFiles(new File(root, "active"))) {
-            Properties active = read(pointer);
-            String captureId = active.getProperty("captureId", "");
-            String processingKey = active.getProperty("processingKey", "");
-            File genDir = new File(new File(new File(root, "derived"), hash(captureId)), processingKey);
+        for (ActivePointer pointer : active) {
+            if (!project.captures().containsKey(pointer.captureId)) {
+                continue; // a pointer without its capture file: nothing to attach the generation to
+            }
+            File genDir = new File(new File(new File(root, "derived"), hash(pointer.captureId)),
+                    pointer.processingKey);
             File sentencesFile = new File(genDir, "sentences.properties");
             File passagesFile = new File(genDir, "passages.properties");
             if (sentencesFile.isFile()) {
@@ -106,6 +131,7 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
 
         Map<String, List<Sentence>> sentencesByCapture = groupSentencesByCapture(project);
         Map<String, List<Passage>> passagesByCapture = groupPassagesByCapture(project);
+        Map<String, ActivePointer> newestActiveBySource = newestBySource(readActivePointers());
 
         for (SourceCapture capture : project.captures().values()) {
             String captureId = capture.getCaptureId();
@@ -117,8 +143,150 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
             if ((passages == null || passages.isEmpty()) && (sentences == null || sentences.isEmpty())) {
                 continue; // a recorded capture without processed knowledge yet: no generation, no pointer
             }
+            ActivePointer newest = newestActiveBySource.get(capture.getSourceId());
+            if (newest != null && !newest.captureId.equals(captureId)
+                    && newest.isNewerThan(capture.getCapturedAtMillis(), captureId)) {
+                // The source already has a NEWER active capture: this older one never becomes active again.
+                markSuperseded(captureId, capture.getSourceId(), newest.captureId);
+                continue;
+            }
             commitGeneration(capture, sentences, passages);
+            if (!capture.getSourceId().isEmpty()) {
+                newestActiveBySource.put(capture.getSourceId(), new ActivePointer(null, captureId, "",
+                        capture.getSourceId(), capture.getCapturedAtMillis()));
+            }
         }
+        // The newest capture replaces every older active capture of its source.
+        enforceOneActiveCapturePerSource(readActivePointers());
+    }
+
+    /**
+     * The ids of every capture that a newer capture of the same source replaced — their passages are no longer
+     * active and must leave the rebuildable indexes too.
+     */
+    public java.util.Set<String> supersededCaptureIds() {
+        java.util.Set<String> ids = new java.util.TreeSet<String>();
+        for (File f : sortedPropertyFiles(new File(root, "superseded"))) {
+            String captureId = read(f).getProperty("captureId", "");
+            if (!captureId.isEmpty()) {
+                ids.add(captureId);
+            }
+        }
+        return ids;
+    }
+
+    /** The ids of the captures of ONE source that a newer capture of that source replaced. */
+    @Override
+    public java.util.Set<String> supersededCaptureIds(String sourceId) {
+        java.util.Set<String> ids = new java.util.TreeSet<String>();
+        if (sourceId == null || sourceId.isEmpty()) {
+            return ids;
+        }
+        for (File f : sortedPropertyFiles(new File(root, "superseded"))) {
+            Properties p = read(f);
+            String captureId = p.getProperty("captureId", "");
+            if (!captureId.isEmpty() && sourceId.equals(p.getProperty("sourceId", ""))) {
+                ids.add(captureId);
+            }
+        }
+        return ids;
+    }
+
+    // ------------------------------------------------------------------ one active capture per source
+
+    /** One {@code active/} pointer with the identity the per-source invariant needs. */
+    private static final class ActivePointer {
+        final File file;
+        final String captureId;
+        final String processingKey;
+        final String sourceId;
+        final long capturedAtMillis;
+
+        ActivePointer(File file, String captureId, String processingKey, String sourceId, long capturedAtMillis) {
+            this.file = file;
+            this.captureId = captureId;
+            this.processingKey = processingKey;
+            this.sourceId = sourceId == null ? "" : sourceId;
+            this.capturedAtMillis = capturedAtMillis;
+        }
+
+        /** Newest wins: the later capture time, and on a tie the greater capture id (deterministic). */
+        boolean isNewerThan(long otherCapturedAtMillis, String otherCaptureId) {
+            if (capturedAtMillis != otherCapturedAtMillis) {
+                return capturedAtMillis > otherCapturedAtMillis;
+            }
+            return captureId.compareTo(otherCaptureId) > 0;
+        }
+    }
+
+    /**
+     * Every active pointer. Pointers written before the invariant carry only capture id + processing key; their
+     * source id and capture time come from the capture file.
+     */
+    private List<ActivePointer> readActivePointers() {
+        List<ActivePointer> pointers = new ArrayList<ActivePointer>();
+        for (File f : sortedPropertyFiles(new File(root, "active"))) {
+            Properties p = read(f);
+            String captureId = p.getProperty("captureId", "");
+            String sourceId = p.getProperty("sourceId");
+            String capturedAt = p.getProperty("capturedAtMillis");
+            if (sourceId == null || capturedAt == null) {
+                File captureFile = new File(new File(root, "captures"), hash(captureId) + ".properties");
+                Properties capture = captureFile.isFile() ? read(captureFile) : new Properties();
+                sourceId = capture.getProperty("sourceId", "");
+                capturedAt = capture.getProperty("capturedAtMillis");
+            }
+            pointers.add(new ActivePointer(f, captureId, p.getProperty("processingKey", ""), sourceId,
+                    parseLong(capturedAt)));
+        }
+        return pointers;
+    }
+
+    /** The newest active pointer of every source (pointers without a source id are never grouped). */
+    private static Map<String, ActivePointer> newestBySource(List<ActivePointer> pointers) {
+        Map<String, ActivePointer> newest = new TreeMap<String, ActivePointer>();
+        for (ActivePointer pointer : pointers) {
+            if (pointer.sourceId.isEmpty()) {
+                continue;
+            }
+            ActivePointer known = newest.get(pointer.sourceId);
+            if (known == null || pointer.isNewerThan(known.capturedAtMillis, known.captureId)) {
+                newest.put(pointer.sourceId, pointer);
+            }
+        }
+        return newest;
+    }
+
+    /**
+     * Keep exactly one active capture per source — the newest — and retire the active pointer of every older one
+     * (noted under {@code superseded/}). Returns the pointers that stay active.
+     */
+    private List<ActivePointer> enforceOneActiveCapturePerSource(List<ActivePointer> pointers) {
+        Map<String, ActivePointer> newest = newestBySource(pointers);
+        List<ActivePointer> kept = new ArrayList<ActivePointer>();
+        for (ActivePointer pointer : pointers) {
+            ActivePointer winner = newest.get(pointer.sourceId);
+            if (winner == null || winner == pointer) {
+                kept.add(pointer);
+                continue;
+            }
+            markSuperseded(pointer.captureId, pointer.sourceId, winner.captureId);
+            try {
+                Files.deleteIfExists(pointer.file.toPath());
+            } catch (IOException ex) {
+                throw new IllegalStateException("Cannot retire the active pointer of capture "
+                        + pointer.captureId, ex);
+            }
+            System.err.println("[research-knowledge] capture " + pointer.captureId + " of source "
+                    + pointer.sourceId + " superseded by the newer capture " + winner.captureId);
+        }
+        return kept;
+    }
+
+    private void markSuperseded(String captureId, String sourceId, String supersededBy) {
+        writeIfChanged(new File(new File(root, "superseded"), hash(captureId) + ".properties"),
+                "captureId=" + escape(captureId) + "\nsourceId=" + escape(sourceId)
+                        + "\nsupersededBy=" + escape(supersededBy) + "\n");
     }
 
     /**
@@ -161,7 +329,17 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
 
         // 2. ONLY now: atomically activate this generation (a crash before this keeps the previous one active).
         atomicWrite(new File(new File(root, "active"), hash(capture.getCaptureId()) + ".properties"),
-                "captureId=" + escape(capture.getCaptureId()) + "\nprocessingKey=" + processingKey + "\n");
+                "captureId=" + escape(capture.getCaptureId()) + "\nprocessingKey=" + processingKey
+                        + "\nsourceId=" + escape(capture.getSourceId())
+                        + "\ncapturedAtMillis=" + capture.getCapturedAtMillis() + "\n");
+        // A capture that becomes active again (it is the source's newest) is no longer superseded.
+        try {
+            Files.deleteIfExists(new File(new File(root, "superseded"), hash(capture.getCaptureId())
+                    + ".properties").toPath());
+        } catch (IOException ex) {
+            throw new IllegalStateException("Cannot clear the superseded note of capture "
+                    + capture.getCaptureId(), ex);
+        }
     }
 
     // ------------------------------------------------------------------ serialization (write)

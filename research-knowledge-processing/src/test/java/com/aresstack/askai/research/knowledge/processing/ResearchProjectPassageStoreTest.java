@@ -34,7 +34,8 @@ public class ResearchProjectPassageStoreTest {
     private static SourceCapture capture(String captureId, String url) {
         SourceCapture.StructuralBlock b = new SourceCapture.StructuralBlock("b1",
                 SourceCapture.BlockKind.PARAGRAPH, "Root", "Alpha one. Beta two.");
-        return new SourceCapture(captureId, "src-1", url, 7L, "h-" + captureId, "T", "A",
+        // one page = one source: a capture of another address belongs to another source
+        return new SourceCapture(captureId, "src-" + url, url, 7L, "h-" + captureId, "T", "A",
                 Collections.singletonList(b));
     }
 

@@ -177,6 +177,7 @@ final class KnowledgeProcessingSessionFactory {
         SemanticKnowledgeIndex index = new CompositeSemanticKnowledgeIndex(projectDir, projectId);
         RepositoryIndexableGenerationSource generations =
                 new RepositoryIndexableGenerationSource(repository, vectorStore, projectId);
+        retireSupersededCaptures(repository, index, projectId, documentFingerprint);
 
         // The DURABLE fallback (issue #29): when the bounded in-memory capture store no longer holds the
         // capture (restart, eviction), the reader rebuilds it from the persisted source record's full text —
@@ -391,6 +392,32 @@ final class KnowledgeProcessingSessionFactory {
         session.projectId = projectId;
         session.embeddingFingerprint = fingerprint;
         return session;
+    }
+
+    /**
+     * One active capture per source: loading the project retires every older capture of a source that was
+     * captured again (also in projects written before the rule), and their passages leave the semantic index
+     * here, so the writer's evidence never sees a source twice. A failure never blocks the session start.
+     */
+    private static void retireSupersededCaptures(FileResearchProjectRepository repository,
+                                                 SemanticKnowledgeIndex index, String projectId,
+                                                 String documentFingerprint) {
+        try {
+            repository.load(projectId);
+            java.util.Set<String> superseded = repository.supersededCaptureIds();
+            for (String captureId : superseded) {
+                index.replacePassagesForCapture(projectId, documentFingerprint, captureId,
+                        java.util.Collections.<com.aresstack.askai.research.knowledge.processing.index
+                                .PassageIndexDocument>emptyList());
+            }
+            if (!superseded.isEmpty()) {
+                System.err.println("[research-knowledge] " + superseded.size()
+                        + " superseded capture(s) kept out of the active corpus and the index");
+            }
+        } catch (RuntimeException failed) {
+            System.err.println("[research-knowledge] retiring superseded captures failed: "
+                    + failed.getMessage());
+        }
     }
 
     /** Wrap the diagnostics listener so a COMPLETED job NOTIFIES the UI (staleness re-check) — no rebuild. */

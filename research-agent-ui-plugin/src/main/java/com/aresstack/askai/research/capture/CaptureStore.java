@@ -12,10 +12,16 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Per-session, in-memory store of visited captures with a BOUNDED lifecycle: at most {@code maxCaptures}
  * are kept, oldest evicted first — captures are temporary working material, never silently persisted.
+ * Capture ids stay unique across restarts: the store continues AFTER the highest capture number the project
+ * already knows (its processing jobs and knowledge captures are keyed by capture id, so a reissued
+ * {@code cap-8} would collide with the {@code cap-8} of an earlier session).
  * Recording computes the canonical URL (lowercased scheme/host, default ports and fragments dropped,
  * tracking parameters removed) and a SHA-256 content hash of the cleaned text.
  */
 public final class CaptureStore {
+
+    /** The prefix of every capture id this store issues ({@code cap-1}, {@code cap-2}, …). */
+    public static final String ID_PREFIX = "cap-";
 
     private final int maxCaptures;
     private final Map<String, VisitedCapture> byId = new LinkedHashMap<String, VisitedCapture>();
@@ -27,13 +33,45 @@ public final class CaptureStore {
     }
 
     public CaptureStore(int maxCaptures, long fixedNow) {
+        this(maxCaptures, fixedNow, 0L);
+    }
+
+    /**
+     * @param idSeed the highest capture number the project already used; the first new capture is
+     *               {@code idSeed + 1} (restart-safe ids, never a reissued id)
+     */
+    public CaptureStore(int maxCaptures, long fixedNow, long idSeed) {
         this.maxCaptures = Math.max(1, maxCaptures);
         this.fixedNow = fixedNow;
+        this.ids.set(Math.max(0L, idSeed));
+    }
+
+    /** The number of a capture id this store issued ({@code cap-12} → 12), or -1 for any other id. */
+    public static long captureNumber(String captureId) {
+        if (captureId == null || !captureId.startsWith(ID_PREFIX)) {
+            return -1L;
+        }
+        try {
+            return Long.parseLong(captureId.substring(ID_PREFIX.length()));
+        } catch (NumberFormatException foreign) {
+            return -1L;
+        }
+    }
+
+    /** The highest capture number among {@code captureIds} (0 when none was issued by a capture store). */
+    public static long highestCaptureNumber(Iterable<String> captureIds) {
+        long highest = 0L;
+        if (captureIds != null) {
+            for (String captureId : captureIds) {
+                highest = Math.max(highest, captureNumber(captureId));
+            }
+        }
+        return highest;
     }
 
     /** Record a visit (VISITED). Never creates a source and never touches the index. */
     public synchronized VisitedCapture record(String url, String title, String cleanedText) {
-        String id = "cap-" + ids.incrementAndGet();
+        String id = ID_PREFIX + ids.incrementAndGet();
         VisitedCapture capture = new VisitedCapture(id, url, canonicalize(url), title, cleanedText,
                 sha256(cleanedText == null ? "" : cleanedText),
                 fixedNow >= 0 ? fixedNow : System.currentTimeMillis(), null, null, null);

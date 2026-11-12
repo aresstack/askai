@@ -482,7 +482,14 @@ public final class ProductiveResearchBackendFactory {
                     + metadataResult.getStatus() + "): " + metadataResult.getReason()
                     + " - repair or remove " + new File(projectDir, "project.properties"));
         }
-        CaptureStore captures = new CaptureStore(200);
+        // The project-scoped, persistent knowledge processing queue (§3) — opened first, because its jobs name
+        // every capture id this project already used: the capture store continues after the highest one, so a
+        // restarted session never reissues "cap-8" for a different page (jobs and knowledge are keyed by it).
+        final com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue processingQueue =
+                new com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue(
+                        new File(projectContext.getProjectDirectory(), "processing"));
+        CaptureStore captures = new CaptureStore(200, -1L,
+                CaptureStore.highestCaptureNumber(processingQueue.knownCaptureIds()));
         final FileResearchSourceRepository repository = projectContext.getFileSourceRepository();
         ResearchSearchIndex.InMemory index = new ResearchSearchIndex.InMemory();
         final com.aresstack.askai.research.capture.SourceImportService[] sourceImport = {null};
@@ -510,9 +517,6 @@ public final class ProductiveResearchBackendFactory {
         // productive worker (real OpenNLP/embedding, C3) is not started here yet; jobs persist until it runs.
         final com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledgeSettings =
                 com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings.defaults();
-        final com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue processingQueue =
-                new com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue(
-                        new File(projectContext.getProjectDirectory(), "processing"));
         processingQueue.recoverStrandedJobs();
         // The SESSION resolves ONE authoritative embedding world (host descriptor) and stamps every job with
         // its fingerprint. This is done once, at session build — never re-looked-up per capture — so a later

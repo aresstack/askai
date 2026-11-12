@@ -159,6 +159,18 @@ public final class FileSourceProcessingQueue implements SourceProcessingQueue {
     }
 
     /**
+     * The capture id of every persisted job, in any state — the ids this project already used, so a capture store
+     * of a new session never reissues one of them.
+     */
+    public synchronized java.util.Set<String> knownCaptureIds() {
+        java.util.Set<String> captureIds = new java.util.TreeSet<String>();
+        for (SourceProcessingJob job : loadAll()) {
+            captureIds.add(job.getRequest().getCaptureId());
+        }
+        return captureIds;
+    }
+
+    /**
      * Capture ids with a non-superseded job in ONE vector world (PR 04: a changed prompt scheme moves the world, so
      * captures processed in the old one are re-derived unless the new world already knows them).
      */
