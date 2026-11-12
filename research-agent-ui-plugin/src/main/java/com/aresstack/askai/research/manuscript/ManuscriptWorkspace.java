@@ -15,7 +15,8 @@ import java.util.Set;
  * The one way content reaches the manuscript (plan PR 26, D4): the write guard allows content writes (section
  * text, restore, skip and unskip) only while the workflow is in {@code draft/running}, so the manuscript is
  * read-only after {@code finish-document} until "Request changes". The stale and orphan marks of the transition
- * hooks are exempt ({@link #reconcileOutline}, {@link #markCitingOutside}). The listener is told after every
+ * hooks are exempt ({@link #reconcileOutline}, {@link #markCitingOutside}), and so is the mark after a gap search
+ * ({@link #markGapsResearched}). The listener is told after every
  * change so {@code document.md} and open views follow.
  */
 public final class ManuscriptWorkspace {
@@ -205,6 +206,41 @@ public final class ManuscriptWorkspace {
                     break;
                 }
             }
+        }
+        if (!marked.isEmpty()) {
+            listener.manuscriptChanged();
+        }
+        return marked;
+    }
+
+    /**
+     * The mark after the research of writer gaps (live run 4, fix 5), exempt from the guard like the other stale
+     * marks: a written section whose current revision is older than the newest source its gap research accepted
+     * becomes stale, so {@code rewrite-stale} writes it again with the new sources in its evidence pack. A section
+     * without text (pending, failed), skipped, orphaned or already stale keeps its status: {@code write-sections}
+     * writes a failed one with the new sources anyway. Idempotent: once the section is rewritten, its revision is
+     * newer than the sources and nothing is marked again.
+     * @return section id -> the reason of each new stale mark
+     */
+    public Map<String, String> markGapsResearched(List<GapSources> researched, long nowMillis) {
+        Map<String, String> marked = new LinkedHashMap<String, String>();
+        for (GapSources gap : researched) {
+            if (gap.getSourceIds().isEmpty()) {
+                continue;
+            }
+            ManuscriptSection state = store.section(gap.getSectionId());
+            if (state == null || !state.hasText() || state.getStatus() != SectionStatus.WRITTEN) {
+                continue;
+            }
+            SectionRevision current = store.revision(state.getSectionId(), state.getRevision());
+            if (current == null || current.getCreatedAt() >= gap.getLastSourceAtMillis()) {
+                continue;
+            }
+            int count = gap.getSourceIds().size();
+            String reason = "Gap research found " + count + (count == 1 ? " new source" : " new sources")
+                    + (gap.getQueries().isEmpty() ? "" : " for \"" + gap.getQueries().get(0) + "\"");
+            store.mark(state.getSectionId(), null, SectionStatus.STALE, reason, nowMillis);
+            marked.put(state.getSectionId(), reason);
         }
         if (!marked.isEmpty()) {
             listener.manuscriptChanged();

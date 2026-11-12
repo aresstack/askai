@@ -152,6 +152,17 @@ public final class SearchPlanEntry {
         return Collections.unmodifiableList(new ArrayList<String>(ids));
     }
 
+    /** When the newest of its accepted sources was accepted, 0 without one. */
+    public long getLastSourceAtMillis() {
+        long last = 0;
+        for (TaskArtifact artifact : task.getArtifacts()) {
+            if (artifact.getKind() == TaskArtifact.Kind.SOURCE_REFERENCE) {
+                last = Math.max(last, artifact.getCreatedAtMillis());
+            }
+        }
+        return last;
+    }
+
     /** The last search request id of this entry ("" before its first run). */
     public String getRequestId() {
         return lastReceipt(REQUEST);

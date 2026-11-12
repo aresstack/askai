@@ -38,6 +38,7 @@ public class SearchPlanQueueTest {
     private FakeSources sources;
     private boolean busy;
     private final List<SearchPlanQueue.Outcome> outcomes = new ArrayList<SearchPlanQueue.Outcome>();
+    private final List<SearchPlanEntry> ended = new ArrayList<SearchPlanEntry>();
     private long now = 1_000L;
     private int ids;
 
@@ -76,6 +77,11 @@ public class SearchPlanQueueTest {
 
             public void finished(SearchPlanQueue.Outcome outcome) {
                 outcomes.add(outcome);
+            }
+
+            @Override
+            public void entryEnded(SearchPlanEntry entry) {
+                ended.add(entry);
             }
         }, direct, new SearchPlanQueue.Clock() {
             public long now() {
@@ -547,6 +553,22 @@ public class SearchPlanQueueTest {
         assertEquals(1, queue.entriesInOrder().size());
         queue.addPriority("priority-t1", "research", query, "replay");
         assertEquals("priority-t1", queue.entriesInOrder().get(0).getId());
+    }
+
+    /** Live run 4, fix 5: the session hears of every ended entry with the sources it accepted. */
+    @Test
+    public void theListenerHearsOfAnEndedEntryWithItsAcceptedSources() throws Exception {
+        build(Arrays.asList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.addPriority("gap-sec-1-abc", "draft", "Funkortung Helm Baustelle", "Section: Ortung");
+        sources.next = Arrays.asList("s-new");
+        sources.domains.put("s-new", "dguv.example");
+        queue.run();
+        port.complete(false);
+        assertEquals(1, ended.size());
+        assertEquals("gap-sec-1-abc", ended.get(0).getId());
+        assertEquals(Collections.singletonList("s-new"), ended.get(0).getAcceptedSourceIds());
+        assertTrue("the acceptance time is kept", ended.get(0).getLastSourceAtMillis() > 0);
     }
 
     @Test

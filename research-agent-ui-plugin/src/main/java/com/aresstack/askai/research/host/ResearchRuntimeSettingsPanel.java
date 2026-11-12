@@ -86,6 +86,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField preferenceCues = ComicControls.textField(16);
     // Document: the writer's gaps go to research on their own.
     private final JCheckBox writerGapResearch = ComicControls.checkBox("Research writer gaps after writing", true);
+    private final JCheckBox staleAfterGapResearch = ComicControls.checkBox("Mark section stale on new sources", true);
     private final JTextField writerGapMax = ComicControls.textField(3);
     private final JTextField writerGapWords = ComicControls.textField(16);
     private final JTextField gapWaitSeconds = ComicControls.textField(3);
@@ -240,6 +241,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         preference.row("Vendor URL parts", preferenceDemoted);
         preference.row("Preference words", preferenceCues);
         preference.row("Writer gaps", group(writerGapResearch, labelled("Per job", writerGapMax)));
+        preference.row("", staleAfterGapResearch);
         preference.row("Evidence failure words", writerGapWords);
 
         // Orchestrated research (ADR 0001 lane F/G): the plan of work packages, its limits and the worker browsers.
@@ -793,6 +795,15 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             public void actionPerformed(ActionEvent event) {
                 ResearchRuntimeSettings.saveWriterGapResearch(ResearchRuntimeSettingsPanel.this.store,
                         writerGapResearch.isSelected());
+            }
+        });
+        staleAfterGapResearch.setSelected(ResearchRuntimeSettings.loadStaleAfterGapResearch(store));
+        staleAfterGapResearch.setToolTipText("When the search for a writer gap accepts new sources, the written "
+                + "section becomes stale, so \"Rewrite stale sections\" (rewrite-stale) writes it again with them.");
+        staleAfterGapResearch.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveStaleAfterGapResearch(ResearchRuntimeSettingsPanel.this.store,
+                        staleAfterGapResearch.isSelected());
             }
         });
         bindNonNegativeLimit(writerGapMax, ResearchRuntimeSettings.KEY_WRITER_GAP_MAX,

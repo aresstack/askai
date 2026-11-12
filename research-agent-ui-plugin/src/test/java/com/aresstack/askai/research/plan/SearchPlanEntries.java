@@ -32,4 +32,14 @@ public final class SearchPlanEntries {
         }
         return entry;
     }
+
+    /** A writer gap's entry of the Document phase, done, with sources accepted at {@code atMillis}. */
+    public static SearchPlanEntry gap(String id, String query, long atMillis, String... sourceIds) {
+        SearchPlanEntry entry = SearchPlanEntry.submit(id, "draft", "", "Section", query,
+                SearchPlanEntry.Origin.PRIORITY, AT).started("request-" + id, AT);
+        for (String sourceId : sourceIds) {
+            entry = entry.withSource(sourceId, atMillis);
+        }
+        return entry.done(atMillis);
+    }
 }

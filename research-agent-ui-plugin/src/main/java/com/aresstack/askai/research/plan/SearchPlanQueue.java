@@ -118,6 +118,13 @@ public final class SearchPlanQueue {
 
         /** The plan ended; {@code outcome} says why and names the uncovered nodes. */
         void finished(Outcome outcome);
+
+        /**
+         * One run of an entry ended (completed, failed or back to pending); {@code entry} carries the sources it
+         * accepted. A writer gap's entry with new sources makes its section stale (live run 4, fix 5).
+         */
+        default void entryEnded(SearchPlanEntry entry) {
+        }
     }
 
     /**
@@ -679,6 +686,7 @@ public final class SearchPlanQueue {
             return;
         }
         Outcome paused = null;
+        SearchPlanEntry recorded;
         synchronized (this) {
             SearchPlanEntry ended = requestId == null ? null : runningEntries.get(requestId);
             if (ended == null) {
@@ -745,8 +753,14 @@ public final class SearchPlanQueue {
             if (!gotNoTab || runningEntries.isEmpty()) {
                 waitForTabs = false; // the tabs of the ended search are free for the next one
             }
+            recorded = entry;
         }
         listener.changed();
+        try {
+            listener.entryEnded(recorded);
+        } catch (RuntimeException failed) {
+            System.err.println("[search-plan] entry " + recorded.getId() + " end not handled: " + failed.getMessage());
+        }
         if (paused != null) {
             finish(paused);
             return;
