@@ -49,6 +49,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerCarryMinWordLength = ComicControls.textField(4);
     private final JTextField writerCarryStemLength = ComicControls.textField(4);
     private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
+    private final JTextField writerMinBriefSimilarity = ComicControls.textField(4);
+    private final JTextField writerBriefSimilarityMargin = ComicControls.textField(4);
     private final JTextField writerWordsPerCall = ComicControls.textField(5);
     private final JTextField writerAnswerTokens = ComicControls.textField(5);
     private final JTextField writerPassages = ComicControls.textField(4);
@@ -209,6 +211,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
                 labelled("Sentences ≥", writerProseMinSentences),
                 labelled("Unpunctuated run ≤", writerProseMaxRun)));
+        writer.row("Evidence relevance", group(labelled("Similarity ≥", writerMinBriefSimilarity),
+                labelled("Below best ≤", writerBriefSimilarityMargin)));
         writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
                 labelled("Stem letters", writerCarryStemLength), labelled("Overlap ≥", writerCarryMinOverlap)));
         writer.row("Topic drift", group(labelled("Term letters ≥", driftMinTermLength),
@@ -568,6 +572,16 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(writerPassagesPerSource, ResearchRuntimeSettings.KEY_WRITER_PASSAGES_PER_SOURCE,
                 com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE,
                 "Evidence pack: passages one source may contribute, so one page cannot fill a section.");
+        bindDecimal(writerMinBriefSimilarity, ResearchRuntimeSettings.KEY_WRITER_MIN_BRIEF_SIMILARITY,
+                com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MIN_SIMILARITY,
+                "Evidence pack: a passage needs at least this similarity (0..1) to the section's brief, otherwise "
+                        + "it treats another subject and stays out (0 = off). Depends on the embedding model: the "
+                        + "default is calibrated for bge-m3; nomic-embed-text scores higher and closer together.");
+        bindDecimal(writerBriefSimilarityMargin, ResearchRuntimeSettings.KEY_WRITER_BRIEF_SIMILARITY_MARGIN,
+                com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MARGIN,
+                "Evidence pack: a passage may lie at most this far (0..1) below the section's best passage; "
+                        + "further down the search only finds neighbouring subjects (0 = off). Depends on the "
+                        + "embedding model: the default is calibrated for bge-m3; with nomic-embed-text use less.");
         bindLimit(driftMinTermLength, ResearchRuntimeSettings.KEY_DRIFT_MIN_TERM_LENGTH,
                 com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_TERM_LENGTH,
                 "Book report: a term this long that a section repeats but the concept and outline never mention "

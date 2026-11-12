@@ -30,8 +30,12 @@ import java.util.Set;
  * {@link EvidenceSourceSet} admits count, and only prose: navigation, footer and heading passages fail the pack's
  * {@linkplain WriterPackSettings#getProse() prose criteria} and never reach the writer; passages are deduplicated by
  * id and by text, at most {@linkplain WriterPackSettings#getPassagesPerSource() passages per source} each, cut at
- * sentence boundaries to the preset's passage size, and numbered {@code [1]..[k]} in that order. The same store
- * state always gives the same pack.
+ * sentence boundaries to the preset's passage size, and numbered {@code [1]..[k]} in that order. With a
+ * {@linkplain WriterPackSettings.BriefRelevance brief relevance} only passages close enough to the brief count, so a
+ * pack of several parts is no longer filled up with another subject's passages from the tail of the search (live run
+ * 4, book 6: Apple Watch VO2max in 1.2, predictive maintenance and study design in 4.1, DGUV "Funkstandorte" and BAuA
+ * "Flexible Arbeitszeiten" in 2.1); the pack then stays smaller, and the writer reports the missing evidence as a
+ * gap. The same store state always gives the same pack.
  */
 public final class SectionContextBuilder {
 
@@ -67,6 +71,7 @@ public final class SectionContextBuilder {
 
     public EvidencePack build(SectionContextRequest request, WriterPackSettings settings) {
         WriterPackSettings pack = settings == null ? WriterPackSettings.SMALL : settings;
+        WriterPackSettings.BriefRelevance relevance = pack.getRelevance();
         OutlineSection section = request.getSection();
         EvidenceSourceSet sources = request.getSources();
 
@@ -78,20 +83,25 @@ public final class SectionContextBuilder {
             }
         }
         // Several provenance passages compete for the pack's few places, so every one of them needs its score: the
-        // first window then covers the whole index (the vector index scores every passage anyway).
-        boolean rank = provenance.size() > 1;
-        List<EvidencePassage> chosen = select(weighed(provenance, sources), sources, pack);
-        float[] query = rank || chosen.size() < pack.getPassageCount() ? embedBrief(request) : null;
+        // first window then covers the whole index (the vector index scores every passage anyway). A brief
+        // relevance needs the score of every provenance passage too, even of a single one.
+        boolean rank = provenance.size() > 1 || (relevance.isActive() && !provenance.isEmpty());
+        List<EvidencePassage> chosen = select(weighed(provenance, sources), sources, pack, null, 0);
+        float[] query = rank || relevance.isActive() || chosen.size() < pack.getPassageCount()
+                ? embedBrief(request) : null;
         // Admission, deduplication and the per-source cap apply after retrieval, so the window grows until the
-        // pack is full or the index has no further hits.
+        // pack is full or the index has no further hits (or none close enough to the brief).
         for (int limit = rank ? MAX_SEARCH_WINDOW : pack.getPassageCount() * SEARCH_FACTOR;
-             query != null && (rank || chosen.size() < pack.getPassageCount()); limit *= 2) {
+             query != null && (rank || relevance.isActive() || chosen.size() < pack.getPassageCount());
+             limit *= 2) {
             List<PassageSearchHit> hits = search(request, query, limit);
+            double floor = relevance.isActive() ? relevance.floorFor(best(hits, sources, pack)) : 0;
             List<PassageSearchHit> candidates = weighed(byScore(provenance, hits), sources);
             candidates.addAll(weighed(outside(hits, provenance), sources));
-            chosen = select(candidates, sources, pack);
+            chosen = select(candidates, sources, pack, relevance.isActive() ? scores(hits) : null, floor);
             rank = false;
-            if (hits.size() < limit || limit >= MAX_SEARCH_WINDOW) {
+            if (chosen.size() >= pack.getPassageCount() || hits.size() < limit || limit >= MAX_SEARCH_WINDOW
+                    || (relevance.isActive() && hits.get(hits.size() - 1).getScore() < floor)) {
                 break;
             }
         }
@@ -102,8 +112,41 @@ public final class SectionContextBuilder {
                 glossaryWithAcronyms(request.getGlossary(), chosen, sources), request.getBookLanguage());
     }
 
+    /**
+     * The similarity of the best hit the pack could take: of an admitted source, and prose after the cut to the
+     * passage size; 0 when the hits have none (hits best first). A heading or menu that scores high but never enters
+     * the pack must not raise the floor above the usable prose.
+     */
+    static double best(List<PassageSearchHit> hits, EvidenceSourceSet sources, WriterPackSettings pack) {
+        ProsePassageFilter prose = new ProsePassageFilter(pack.getProse());
+        for (PassageSearchHit hit : hits) {
+            if (!sources.admits(hit.getSourceId())) {
+                continue;
+            }
+            String text = TokenBudget.cutAtSentence(hit.getText(), pack.getPassageTokens());
+            if (!text.isEmpty() && prose.isProse(text)) {
+                return hit.getScore();
+            }
+        }
+        return 0;
+    }
+
+    private static Map<String, Double> scores(List<PassageSearchHit> hits) {
+        Map<String, Double> scores = new HashMap<String, Double>();
+        for (PassageSearchHit hit : hits) {
+            scores.put(hit.getPassageId(), hit.getScore());
+        }
+        return scores;
+    }
+
+    /**
+     * The pack from the candidates in their order. With {@code scores}, a candidate counts only when its similarity
+     * to the brief reaches {@code floor}; a provenance passage the search did not score lies beyond the whole
+     * window and is held back too.
+     */
     private static List<EvidencePassage> select(List<PassageSearchHit> candidates, EvidenceSourceSet sources,
-                                                WriterPackSettings pack) {
+                                                WriterPackSettings pack, Map<String, Double> scores,
+                                                double floor) {
         List<EvidencePassage> chosen = new ArrayList<EvidencePassage>();
         Set<String> seenIds = new HashSet<String>();
         Set<String> seenTexts = new HashSet<String>();
@@ -116,6 +159,12 @@ public final class SectionContextBuilder {
             String sourceId = hit.getSourceId();
             if (!sources.admits(sourceId) || !seenIds.add(hit.getPassageId())) {
                 continue;
+            }
+            if (scores != null) {
+                Double score = scores.get(hit.getPassageId());
+                if (score == null || score < floor) {
+                    continue;
+                }
             }
             Integer used = perSource.get(sourceId);
             if (used != null && used >= pack.getPassagesPerSource()) {
