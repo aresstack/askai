@@ -161,6 +161,22 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
     }
 
     /**
+     * The immutable capture exactly as this project persisted it (also a superseded one), or {@code null} when the
+     * project never stored it — the original input of a re-derivation, independent of later source revisions.
+     */
+    public SourceCapture persistedCapture(String captureId) {
+        if (captureId == null || captureId.isEmpty()) {
+            return null;
+        }
+        File f = new File(new File(root, "captures"), hash(captureId) + ".properties");
+        if (!f.isFile()) {
+            return null;
+        }
+        SourceCapture capture = readCapture(read(f));
+        return captureId.equals(capture.getCaptureId()) ? capture : null;
+    }
+
+    /**
      * The ids of every capture that a newer capture of the same source replaced — their passages are no longer
      * active and must leave the rebuildable indexes too.
      */

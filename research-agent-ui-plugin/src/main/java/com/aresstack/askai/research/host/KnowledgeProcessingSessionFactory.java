@@ -182,8 +182,11 @@ final class KnowledgeProcessingSessionFactory {
         // The DURABLE fallback (issue #29): when the bounded in-memory capture store no longer holds the
         // capture (restart, eviction), the reader rebuilds it from the persisted source record's full text —
         // a delayed, user-triggered segmentation never depends on in-memory state.
-        SourceCaptureReader reader = new CaptureStoreSourceCaptureReader(captures,
-                new CanonicalUrlSourceIdResolver(sourceRepository), sourceRepository);
+        // The knowledge project's own persisted capture comes FIRST: a re-read page refreshes its source record in
+        // place, so only the persisted original still holds an older capture's exact input.
+        SourceCaptureReader reader = new com.aresstack.askai.research.knowledge.processing
+                .PersistedFirstSourceCaptureReader(repository, new CaptureStoreSourceCaptureReader(captures,
+                        new CanonicalUrlSourceIdResolver(sourceRepository), sourceRepository));
 
         // One-time readiness line for the live gate: language, the resolved segmenter (model id/version/artifact
         // name — never an absolute path — or the regex reason), and the embedding world.
