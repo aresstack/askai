@@ -88,6 +88,23 @@ public class EvidenceReportTest {
         assertEquals(Arrays.asList("Book", "Safety", "Helmets"), KeyTerms.labelWords("Book > Safety > Helmets"));
     }
 
+    /**
+     * Live run 4: in a topic of 1681 passages the key terms were "werden, oder, eine". A word every topic uses alike
+     * is no key term however often it occurs; a set holding the whole corpus has none.
+     */
+    @Test
+    public void wordsSpreadEvenlyOverTheCorpusAreNoKeyTerms() {
+        List<String> corpus = Arrays.asList(
+                "eine Sensoren eine Daten eine werden eine oder",
+                "eine Sensoren eine Akku eine werden eine oder",
+                "eine Datenschutz eine Daten eine werden eine oder",
+                "eine Datenschutz eine Recht eine werden eine oder");
+        KeyTerms terms = new KeyTerms(corpus);
+        List<String> best = terms.of(corpus.subList(0, 2), 5);
+        assertEquals("\"daten\" is as common in the set as in the corpus", Arrays.asList("sensoren", "akku"), best);
+        assertTrue("no word sets the whole corpus apart", terms.of(corpus, 5).isEmpty());
+    }
+
     private static EvidenceReport.NodeEvidence node(EvidenceReport report, String id) {
         for (EvidenceReport.NodeEvidence node : report.getNodes()) {
             if (node.getAnchorId().equals(id)) {

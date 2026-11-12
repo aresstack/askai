@@ -112,7 +112,9 @@ public final class TopicAnalyzer {
             if (m.isCancelled()) {
                 throw new ClusteringMonitor.ClusteringCancelledException();
             }
-            drafts.add(draft(topic, byId, vectors, duplicateGroupOf, subtopicCut, groupRootOf, nodes, fence));
+            Draft draft = draft(topic, byId, vectors, duplicateGroupOf, subtopicCut, groupRootOf, nodes, fence);
+            draft.conceptMaterial = conceptMaterial(topic.getMemberPassageIds(), nodeOf, duplicateGroupOf, nodes);
+            drafts.add(draft);
         }
         int significantDistinct = 0;
         for (Draft draft : drafts) {
@@ -155,7 +157,8 @@ public final class TopicAnalyzer {
                     draft.domains, draft.materialChars, draft.dispersion, draft.subtopics,
                     groupId(draft.groupRoot, drafts), related, draft.anchorId, draft.anchorSimilarity,
                     draft.aligned, draft.materialCovered, draft.sourceConfirmed, share,
-                    draft.significant && share >= settings.getMajorTopicShare(), draft.scope));
+                    draft.significant && share >= settings.getMajorTopicShare(), draft.scope,
+                    draft.conceptMaterial));
         }
         Collections.sort(profiles, new Comparator<TopicProfile>() {
             public int compare(TopicProfile a, TopicProfile b) {
@@ -191,6 +194,42 @@ public final class TopicAnalyzer {
         boolean sourceConfirmed;
         boolean significant;
         ScopeAlignment scope = ScopeAlignment.UNKNOWN;
+        List<String> conceptMaterial = Collections.emptyList();
+    }
+
+    /**
+     * The concept nodes whose own material lies in the topic: nodes to which at least the minimum of the topic's
+     * DISTINCT passages are assigned (nearest node above threshold and margin, the assignment of the coverage), in
+     * concept order. A topic carrying such material is the concept's research even when its centroid lies between
+     * several nodes and so aligns with none.
+     * <p>
+     * Live run 4 (2026-11-12): one topic held 99.5 % of the passages and the covered material of four concept nodes;
+     * its centroid aligned with no node, so the topic counted as new and the gap review reported the whole research
+     * as one "new topic" to search for.
+     */
+    private List<String> conceptMaterial(List<String> members, Map<String, Integer> nodeOf,
+                                         Map<String, String> duplicateGroupOf, List<ConceptAnchor> nodes) {
+        Map<Integer, Set<String>> distinctByNode = new TreeMap<Integer, Set<String>>();
+        for (String id : members) {
+            Integer node = nodeOf.get(id);
+            if (node == null) {
+                continue;
+            }
+            Set<String> distinct = distinctByNode.get(node);
+            if (distinct == null) {
+                distinct = new HashSet<String>();
+                distinctByNode.put(node, distinct);
+            }
+            String group = duplicateGroupOf.get(id);
+            distinct.add(group == null ? id : group);
+        }
+        List<String> result = new ArrayList<String>();
+        for (Map.Entry<Integer, Set<String>> entry : distinctByNode.entrySet()) {
+            if (settings.isMaterialCovered(entry.getValue().size())) {
+                result.add(nodes.get(entry.getKey()).getId());
+            }
+        }
+        return result;
     }
 
     private Draft draft(LiveTopicProjection topic, Map<String, AnalysisPassage> byId,
@@ -506,26 +545,14 @@ public final class TopicAnalyzer {
                         }
                     }
                 }
-                Map<Integer, Set<String>> distinctByNode = new TreeMap<Integer, Set<String>>();
+                Map<String, Integer> assigned = new HashMap<String, Integer>();
                 for (String id : members) {
                     int node = nodeOf(id);
-                    if (node < 0) {
-                        continue;
-                    }
-                    Set<String> distinct = distinctByNode.get(node);
-                    if (distinct == null) {
-                        distinct = new HashSet<String>();
-                        distinctByNode.put(node, distinct);
-                    }
-                    String group = duplicateGroupOf.get(id);
-                    distinct.add(group == null ? id : group);
-                }
-                List<String> covered = new ArrayList<String>();
-                for (Map.Entry<Integer, Set<String>> entry : distinctByNode.entrySet()) {
-                    if (settings.isMaterialCovered(entry.getValue().size())) {
-                        covered.add(nodes.get(entry.getKey()).getId());
+                    if (node >= 0) {
+                        assigned.put(id, node);
                     }
                 }
+                List<String> covered = conceptMaterial(members, assigned, duplicateGroupOf, nodes);
                 for (int a = 0; a < covered.size(); a++) {
                     for (int b = a + 1; b < covered.size(); b++) {
                         if (!descends(covered.get(a), covered.get(b), parentOf)
