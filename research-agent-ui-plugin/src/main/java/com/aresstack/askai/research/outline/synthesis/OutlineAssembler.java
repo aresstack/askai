@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -197,8 +199,8 @@ public final class OutlineAssembler {
     }
 
     /**
-     * The rest of a topic that no section names as a whole goes, once, to the section of its largest sub-topic over
-     * all chapters: concept parts of one topic may lie in different chapters, the rest is still used only once. The
+     * The rest of a topic that no section names as a whole is used once, each passage in the section of its nearest
+     * sub-topic over all chapters: concept parts of one topic may lie in different chapters, the rest is still used only once. The
      * sections decide, not the chapters: live outline acceptance 2026-11-12, a chapter named the whole topic, its
      * sections named the sub-topics, and the 8 passages of the topic's rest were in no section.
      */
@@ -224,21 +226,36 @@ public final class OutlineAssembler {
             if (rest.isEmpty()) {
                 continue;
             }
-            Draft target = null;
+            Draft largest = null;
             int best = -1;
+            Map<String, Draft> sectionOf = new HashMap<String, Draft>();
             for (ChapterDraft chapter : chapters) {
                 for (Draft section : chapter.sections) {
                     for (SynthesisBrief.SubtopicEntry subtopic : brief.topic(topicKey).getSubtopics()) {
+                        String id = subtopic.getSubtopic().getSubtopicId();
+                        if (!section.ids.contains(id)) {
+                            continue;
+                        }
+                        sectionOf.put(id, section);
                         int distinct = subtopic.getSubtopic().getDistinctPassageCount();
-                        if (section.ids.contains(subtopic.getSubtopic().getSubtopicId()) && distinct > best) {
-                            target = section;
+                        if (distinct > best) {
+                            largest = section;
                             best = distinct;
                         }
                     }
                 }
             }
-            if (target != null) {
-                target.passages.addAll(rest);
+            // Each rest passage goes to the section of its nearest sub-topic (the analysis' rest home); a passage
+            // whose home is in no section goes to the section of the largest sub-topic.
+            Map<String, String> home = brief.topic(topicKey).getProfile().getRestSubtopicOf();
+            for (String passage : rest) {
+                Draft target = sectionOf.get(home.get(passage));
+                if (target == null) {
+                    target = largest;
+                }
+                if (target != null) {
+                    target.passages.add(passage);
+                }
             }
         }
     }

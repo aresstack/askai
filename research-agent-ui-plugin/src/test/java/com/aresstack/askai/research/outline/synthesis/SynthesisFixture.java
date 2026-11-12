@@ -76,6 +76,17 @@ final class SynthesisFixture {
         }
     }
 
+    /**
+     * {@code count} rest passages of a topic leaning towards the aspect with direction {@code aspect}, but beyond the
+     * sub-topic cut: in no sub-topic, nearest to that aspect's sub-topic.
+     */
+    void leaningRest(String topic, int base, int aspect, int count, int sources) {
+        for (int i = 0; i < count; i++) {
+            add(topic + " rest", topic, i % sources, new int[]{base, aspect, direction()},
+                    new double[]{1.2, 0.3, 1.4});
+        }
+    }
+
     /** {@code count} copies of one statement; returns the base. */
     int redundant(String topic, int count, int sources) {
         int base = direction();

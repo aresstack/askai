@@ -27,6 +27,7 @@ public class ConceptFrameTest {
 
         assertTrue(frame.hasFrame());
         assertEquals("Wearables on sites", frame.getFrameLabel());
+        assertEquals("the prefix every path shares", "The Smart Site > Wearables on sites", frame.getFramePath());
         assertEquals("the root itself is no theme", 5, frame.nodes().size());
         ConceptFrame.Node safety = frame.nodes().get(0);
         assertEquals("a", safety.getId());
@@ -46,6 +47,7 @@ public class ConceptFrameTest {
 
         assertFalse(frame.hasFrame());
         assertEquals("", frame.getFrameLabel());
+        assertEquals("Book", frame.getFramePath());
         assertEquals(2, frame.nodes().size());
         assertEquals("Book > Safety", frame.nodes().get(0).getPath());
         assertEquals(1, frame.nodes().get(1).getDepth());
@@ -55,5 +57,6 @@ public class ConceptFrameTest {
     public void withoutATitleThePathStartsAtTheFirstLabel() {
         ConceptFrame frame = ConceptFrame.of("", Collections.singletonList(node("r", "Root", node("a", "A"))));
         assertEquals("Root > A", frame.nodes().get(0).getPath());
+        assertEquals("Root", frame.getFramePath());
     }
 }

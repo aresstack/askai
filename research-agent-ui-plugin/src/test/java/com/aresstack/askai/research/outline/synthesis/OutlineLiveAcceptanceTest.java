@@ -60,6 +60,18 @@ public class OutlineLiveAcceptanceTest {
     static final String DEFAULT_MODEL = "gemma4:e2b";
     static final String DEFAULT_EMBEDDING = "bge-m3";
     static final int DEFAULT_NUM_CTX = 32768;
+    static final String FRAME = "Wearables on construction sites";
+
+    /**
+     * Not part of the corpus: sentences that DO treat the requirement, to show how far real evidence points from the
+     * frame towards the node (the calibration of the concept frame lead).
+     */
+    private static final String[] TRAINING_CONTROL = {
+            "Apprentices practise with smart helmets and sensor vests in the training workshop before their first "
+                    + "day on site.",
+            "Vocational schools teach trainees how to wear, charge and read the alarms of safety wearables.",
+            "A two-day course shows new construction apprentices how proximity tags and gas monitors work."
+    };
 
     /** Four areas, two aspects each, three passages per aspect from three websites. */
     private static final String[][][] AREAS = {
@@ -158,16 +170,19 @@ public class OutlineLiveAcceptanceTest {
         }
         // ONE concept root (the book frame) with one requirement that the research does not cover.
         float[] training = embed(url, embedding, Collections.singletonList(
-                "Wearables on construction sites > Training apprentices to use wearables")).get(0);
+                FRAME + " > Training apprentices to use wearables")).get(0);
         List<ConceptAnchor> anchors = Collections.singletonList(new ConceptAnchor("c-training",
                 "Training apprentices", "Wearables on construction sites > Training apprentices", 1, "",
                 new EmbeddingPort.EmbeddingVector(embedding, "live", training)));
 
         LiveTopicTree tree = new LiveOutlineProjectionBuilder().discoverTopicTree(passages, byId,
                 ClusteringMonitor.NONE);
-        TopicAnalysis analysis = new TopicAnalyzer(TopicAnalysisSettings.defaults()).analyze(analysisPassages, byId,
-                tree, anchors, null, ClusteringMonitor.NONE);
-        diagnose(url, embedding, passages, vectors, training, analysis, out);
+        // The book frame, the prefix of the anchor path: like the host, the analysis knows it.
+        float[] frame = embed(url, embedding, Collections.singletonList(FRAME)).get(0);
+        TopicAnalysis analysis = new TopicAnalyzer(TopicAnalysisSettings.defaults(),
+                new EmbeddingPort.EmbeddingVector(embedding, "live", frame)).analyze(analysisPassages, byId, tree,
+                anchors, null, ClusteringMonitor.NONE);
+        diagnose(url, embedding, passages, vectors, training, frame, analysis, out);
         SynthesisBrief brief = SynthesisBrief.of(new SynthesisContext("Wearables on construction sites",
                 "Explain how wearables make construction sites safer and what stands in their way",
                 "about 60 pages", "English", Collections.<String>emptyList()), analysis, new SynthesisBrief.Texts() {
@@ -228,13 +243,23 @@ public class OutlineLiveAcceptanceTest {
      * four areas formed one topic and the requirement without evidence counted as covered.
      */
     private static void diagnose(String url, String embedding, List<Passage> passages, List<float[]> vectors,
-                                 float[] requirement, TopicAnalysis analysis, File out) throws Exception {
-        float[] frame = embed(url, embedding, Collections.singletonList("Wearables on construction sites")).get(0);
+                                 float[] requirement, float[] frame, TopicAnalysis analysis, File out)
+            throws Exception {
+        float[] direction = direction(requirement, frame);
         StringBuilder text = new StringBuilder("embedding " + embedding + "\n");
-        text.append("passage  area  sim(requirement)  sim(frame)\n");
+        text.append(String.format(java.util.Locale.ROOT, "sim(requirement, frame) %.3f; frame lead setting %.3f%n",
+                cosine(requirement, frame), TopicAnalysisSettings.DEFAULT_CONCEPT_FRAME_LEAD));
+        text.append("passage  area  sim(requirement)  sim(frame)  frame lead\n");
         for (int i = 0; i < passages.size(); i++) {
-            text.append(String.format(java.util.Locale.ROOT, "%s  %d  %.3f  %.3f%n", passages.get(i).getPassageId(),
-                    i / 6, cosine(vectors.get(i), requirement), cosine(vectors.get(i), frame)));
+            text.append(String.format(java.util.Locale.ROOT, "%s  %d  %.3f  %.3f  %.3f%n",
+                    passages.get(i).getPassageId(), i / 6, cosine(vectors.get(i), requirement),
+                    cosine(vectors.get(i), frame), cosine(vectors.get(i), direction)));
+        }
+        List<float[]> control = embed(url, embedding, java.util.Arrays.asList(TRAINING_CONTROL));
+        for (int i = 0; i < control.size(); i++) {
+            text.append(String.format(java.util.Locale.ROOT, "control%d  -  %.3f  %.3f  %.3f%n", i,
+                    cosine(control.get(i), requirement), cosine(control.get(i), frame),
+                    cosine(control.get(i), direction)));
         }
         text.append("mean similarity between areas (row x column)\n");
         for (int a = 0; a < AREAS.length; a++) {
@@ -268,6 +293,21 @@ public class OutlineLiveAcceptanceTest {
         }
         System.out.print(text.toString().replaceAll("(?m)^", "[outline-live] "));
         Files.write(new File(out, "analysis.txt").toPath(), text.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** The unit vector from the frame to the node (both normalised first), as the analysis computes it. */
+    private static float[] direction(float[] node, float[] frame) {
+        double nn = 0;
+        double nf = 0;
+        for (int i = 0; i < node.length; i++) {
+            nn += node[i] * node[i];
+            nf += frame[i] * frame[i];
+        }
+        float[] difference = new float[node.length];
+        for (int i = 0; i < node.length; i++) {
+            difference[i] = (float) (node[i] / Math.sqrt(nn) - frame[i] / Math.sqrt(nf));
+        }
+        return difference;
     }
 
     private static double cosine(float[] a, float[] b) {

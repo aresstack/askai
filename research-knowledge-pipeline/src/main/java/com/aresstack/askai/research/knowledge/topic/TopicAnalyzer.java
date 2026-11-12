@@ -33,9 +33,23 @@ import java.util.TreeSet;
 public final class TopicAnalyzer {
 
     private final TopicAnalysisSettings settings;
+    private final EmbeddingPort.EmbeddingVector frame;
+    private final Map<ConceptAnchor, EmbeddingPort.EmbeddingVector> directionOf =
+            new java.util.IdentityHashMap<ConceptAnchor, EmbeddingPort.EmbeddingVector>();
 
+    /** An analysis without a known book frame. */
     public TopicAnalyzer(TopicAnalysisSettings settings) {
+        this(settings, null);
+    }
+
+    /**
+     * @param frame the vector of the book frame, the prefix every anchor path shares (title and frame node); a passage
+     *              belongs to a node only when it points in the direction the node adds to it. {@code null} = no
+     *              frame, the anchor paths share no prefix.
+     */
+    public TopicAnalyzer(TopicAnalysisSettings settings, EmbeddingPort.EmbeddingVector frame) {
         this.settings = settings == null ? TopicAnalysisSettings.defaults() : settings;
+        this.frame = frame == null ? null : unit(frame);
     }
 
     /**
@@ -163,7 +177,8 @@ public final class TopicAnalyzer {
                     groupId(draft.groupRoot, drafts), related, draft.anchorId, draft.anchorSimilarity,
                     draft.aligned, draft.materialCovered, draft.sourceConfirmed, share,
                     draft.significant && share >= settings.getMajorTopicShare(), draft.scope,
-                    draft.conceptMaterial));
+                    draft.conceptMaterial, restSubtopicOf(draft.topic.getMemberPassageIds(), draft.subtopics,
+                            vectors)));
         }
         Collections.sort(profiles, new Comparator<TopicProfile>() {
             public int compare(TopicProfile a, TopicProfile b) {
@@ -297,8 +312,8 @@ public final class TopicAnalyzer {
             double bestScore = scores[best];
             draft.anchorId = nodes.get(best).getId();
             draft.anchorSimilarity = bestScore;
-            draft.aligned = bestScore >= settings.getConceptThreshold()
-                    && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin();
+            // the same rule as for a single passage: a topic near only the book frame is aligned to no node
+            draft.aligned = assigned(nodes, scores, best, draft.centroid);
         }
         return draft;
     }
@@ -463,6 +478,54 @@ public final class TopicAnalyzer {
             }
         });
         return result;
+    }
+
+    /**
+     * Each passage of the topic in none of its sub-topics, mapped to the sub-topic with the nearest centroid. Live
+     * outline acceptance 2026-11-12 (bge-m3): the rest of one topic came from three different areas and went as a
+     * whole to the section of the largest sub-topic, which got 8200 instead of 2450 words.
+     */
+    private static Map<String, String> restSubtopicOf(List<String> members, List<Subtopic> subtopics,
+                                                      Map<String, EmbeddingPort.EmbeddingVector> vectors) {
+        Map<String, String> home = new LinkedHashMap<String, String>();
+        if (subtopics.isEmpty()) {
+            return home;
+        }
+        Set<String> inSubtopics = new HashSet<String>();
+        List<EmbeddingPort.EmbeddingVector> centroids = new ArrayList<EmbeddingPort.EmbeddingVector>();
+        for (Subtopic subtopic : subtopics) {
+            inSubtopics.addAll(subtopic.getPassageIds());
+            List<EmbeddingPort.EmbeddingVector> memberVectors = new ArrayList<EmbeddingPort.EmbeddingVector>();
+            for (String id : subtopic.getPassageIds()) {
+                EmbeddingPort.EmbeddingVector vector = vectors.get(id);
+                if (vector != null) {
+                    memberVectors.add(unit(vector));
+                }
+            }
+            centroids.add(memberVectors.isEmpty() ? null : unit(VectorMath.mean(memberVectors)));
+        }
+        for (String id : members) {
+            EmbeddingPort.EmbeddingVector vector = vectors.get(id);
+            if (inSubtopics.contains(id) || vector == null) {
+                continue;
+            }
+            int best = -1;
+            double bestSimilarity = -2;
+            for (int i = 0; i < centroids.size(); i++) {
+                if (centroids.get(i) == null) {
+                    continue;
+                }
+                double similarity = VectorMath.cosine(vector, centroids.get(i));
+                if (similarity > bestSimilarity) {
+                    best = i;
+                    bestSimilarity = similarity;
+                }
+            }
+            if (best >= 0) {
+                home.put(id, subtopics.get(best).getSubtopicId());
+            }
+        }
+        return home;
     }
 
     private List<String> representatives(LiveTopicProjection topic) {
@@ -683,13 +746,55 @@ public final class TopicAnalyzer {
         };
     }
 
-    /** The index of the nearest node above threshold and margin, or -1. */
+    /** The index of the nearest node above threshold, margin and frame lead, or -1. */
     private int nearest(List<ConceptAnchor> nodes, EmbeddingPort.EmbeddingVector vector) {
         double[] scores = scores(nodes, vector);
         int best = best(scores);
+        return assigned(nodes, scores, best, vector) ? best : -1;
+    }
+
+    /** Whether {@code vector} belongs to its nearest node {@code best}: threshold, margin and frame lead. */
+    private boolean assigned(List<ConceptAnchor> nodes, double[] scores, int best,
+                             EmbeddingPort.EmbeddingVector vector) {
         double bestScore = scores[best];
         return bestScore >= settings.getConceptThreshold()
-                && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin() ? best : -1;
+                && bestScore - nearestOfAnotherLineage(nodes, scores, best) >= settings.getConceptMargin()
+                && frameLead(nodes.get(best), vector) >= settings.getConceptFrameLead();
+    }
+
+    /**
+     * How far {@code vector} points in the direction {@code node} adds to the book frame: its cosine with the unit
+     * vector from the frame to the node. The raw difference of the two similarities shrinks with the frame's share of
+     * the anchor path (live run 3: a long prefix left about 0.01 between nodes); the direction does not. Without a
+     * frame, or for a node equal to it, every passage passes.
+     */
+    double frameLead(ConceptAnchor node, EmbeddingPort.EmbeddingVector vector) {
+        if (frame == null) {
+            return Double.POSITIVE_INFINITY;
+        }
+        EmbeddingPort.EmbeddingVector direction;
+        synchronized (directionOf) {
+            direction = directionOf.containsKey(node) ? directionOf.get(node) : direction(node);
+            directionOf.put(node, direction);
+        }
+        return direction == null ? Double.POSITIVE_INFINITY : VectorMath.cosine(vector, direction);
+    }
+
+    /** The unit vector from the frame to {@code node}, or {@code null} when they are equal. */
+    private EmbeddingPort.EmbeddingVector direction(ConceptAnchor node) {
+        float[] anchor = unit(node.getVector()).getValues();
+        float[] base = frame.getValues();
+        if (anchor.length != base.length) {
+            return null;
+        }
+        float[] difference = new float[anchor.length];
+        double norm = 0;
+        for (int i = 0; i < anchor.length; i++) {
+            difference[i] = anchor[i] - base[i];
+            norm += difference[i] * difference[i];
+        }
+        return norm == 0 ? null : unit(new EmbeddingPort.EmbeddingVector(frame.getModelId(),
+                frame.getModelFingerprint(), difference));
     }
 
     private static double[] scores(List<ConceptAnchor> nodes, EmbeddingPort.EmbeddingVector vector) {
