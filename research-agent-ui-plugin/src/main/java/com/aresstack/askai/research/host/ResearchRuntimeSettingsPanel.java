@@ -83,6 +83,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField teamAnswerTokens = ComicControls.textField(5);
     private final JTextField teamSearchesPerPage = ComicControls.textField(3);
     private final JTextField teamNextSearchBelow = ComicControls.textField(3);
+    private final JTextField teamWorkerQueries = ComicControls.textField(3);
     private final JTextField teamSeedQueries = ComicControls.textField(3);
     // The mission's source preference: publisher queries per node and cycle, ranking weights (all settings).
     private final JCheckBox preferMissionSources = ComicControls.checkBox("Prefer the sources the mission names", true);
@@ -245,6 +246,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Page characters", teamPageCharacters), labelled("Answer tokens", teamAnswerTokens)));
         team.row("New searches", group(labelled("Per page", teamSearchesPerPage),
                 labelled("Next search below open pages", teamNextSearchBelow),
+                labelled("Worker searches per node", teamWorkerQueries),
                 labelled("Seed queries per node", teamSeedQueries)));
         team.row("Gap review", group(labelled("Wait for analysis (s)", gapWaitSeconds),
                 labelled("Recheck (s)", gapRecheckSeconds),
@@ -507,6 +509,10 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_TEAM_WORKERS,
                 "The next search starts when fewer pages than this are still open in the running one, so the "
                         + "workers never wait at the end of a search. Usually the worker count.");
+        bindNonNegativeLimit(teamWorkerQueries, ResearchRuntimeSettings.KEY_TEAM_WORKER_QUERIES_PER_NODE,
+                ResearchRuntimeSettings.DEFAULT_TEAM_WORKER_QUERIES_PER_NODE,
+                "How many of the page workers' new searches one concept node may add per research cycle. Their "
+                        + "own budget beside Queries per node, so they never push a planned query out; 0 = none.");
         bindSourcePreference();
         bindLimit(teamSeedQueries, ResearchRuntimeSettings.KEY_TEAM_SEED_QUERIES_PER_NODE,
                 ResearchRuntimeSettings.DEFAULT_TEAM_SEED_QUERIES_PER_NODE,

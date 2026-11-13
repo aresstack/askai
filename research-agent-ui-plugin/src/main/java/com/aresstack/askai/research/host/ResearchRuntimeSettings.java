@@ -553,6 +553,18 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_TEAM_NEXT_SEARCH_BELOW = "research.team.nextSearchBelow";
 
     /**
+     * Plan T4: the worker searches (queries the page workers suggest while reading) one concept node may add per
+     * research cycle, beside the planner's queries per node; 0 = none.
+     */
+    public static final String KEY_TEAM_WORKER_QUERIES_PER_NODE = "research.team.workerQueriesPerNode";
+    public static final int DEFAULT_TEAM_WORKER_QUERIES_PER_NODE =
+            com.aresstack.askai.research.plan.SearchPlanQueue.Team.DEFAULT_WORKER_QUERIES_PER_NODE;
+
+    public static int loadTeamWorkerQueriesPerNode(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_TEAM_WORKER_QUERIES_PER_NODE, DEFAULT_TEAM_WORKER_QUERIES_PER_NODE);
+    }
+
+    /**
      * Plan T4: the queries per concept node the seed plan starts with when the research team runs (the base query
      * and the planner's variants). Default 1: the concept's breadth first, one query per node; the deeper queries
      * come from what the team reads.

@@ -179,8 +179,10 @@ public final class SearchPlanCoverage {
                     continue;
                 }
                 SearchPlanEntry.Status status = entry.getStatus();
-                if (status == SearchPlanEntry.Status.DONE || status == SearchPlanEntry.Status.FAILED
-                        || status == SearchPlanEntry.Status.RUNNING) {
+                // the planner's queries only: worker searches have their own budget (SearchPlanQueue.Team)
+                if (entry.getOrigin() != SearchPlanEntry.Origin.WORKER
+                        && (status == SearchPlanEntry.Status.DONE || status == SearchPlanEntry.Status.FAILED
+                        || status == SearchPlanEntry.Status.RUNNING)) {
                     run++;
                 }
                 if (status == SearchPlanEntry.Status.PENDING || status == SearchPlanEntry.Status.RUNNING) {
