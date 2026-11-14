@@ -44,7 +44,10 @@ public final class PostSearchReview {
             return com.aresstack.askai.research.domain.search.PostSearchReviewOutcome.SUCCEEDED;
         }
         // No silent disappearance: the sources are saved either way, say so visibly.
-        emitter.emitVisible(fallbackMessage(languageCode));
+        // A review cut at the output budget names that cause: the review is the longest contracted answer.
+        emitter.emitVisible(fallbackMessage(languageCode) + (result.isTruncated()
+                ? " " + TeamAgentReply.truncated(result.getTruncatedAtTokens(), "de".equalsIgnoreCase(languageCode))
+                : ""));
         emitter.emitLog("source review turn not ok: " + result.getStatus()
                 + (result.getDetail() == null || result.getDetail().isEmpty()
                         ? "" : " (" + result.getDetail() + ")"));

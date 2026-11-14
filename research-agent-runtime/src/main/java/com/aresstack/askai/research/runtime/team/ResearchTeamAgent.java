@@ -42,7 +42,7 @@ public final class ResearchTeamAgent {
      * write; short turns stay short. The EFFECTIVE value is the user's setting
      * ("Agent-Antwortbudget (Tokens)", handed to the process at launch), never a hidden constant.
      */
-    public static final int DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+    public static final int DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 
     private int maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS;
 
@@ -303,10 +303,21 @@ public final class ResearchTeamAgent {
             return Parsed.ok(parsed.getOutput(), call.getText());
         }
         traceParseFailure("first", parsed.getError(), call.getText());
+        if (call.isTruncated()) {
+            // The provider cut the answer at the output budget: a repair would be cut at the same place.
+            return Parsed.fail(truncated(parsed.getError()));
+        }
         List<ChatMessage> repair = new ArrayList<ChatMessage>(messages);
         repair.add(ChatMessage.assistant(call.getText()));
         repair.add(ChatMessage.user(TeamAgentPlaybook.repairNudge()));
         return callParseOnce(repair, contract, requiredActionType);
+    }
+
+    /** The typed failure of an answer the provider cut at the output budget (finish reason {@code length}). */
+    private TeamAgentResult truncated(String parseError) {
+        System.err.println("[team-agent] answer truncated at the output budget (finish reason length), "
+                + "maxOutputTokens=" + maxOutputTokens);
+        return TeamAgentResult.truncatedAnswer(parseError, maxOutputTokens);
     }
 
     /**
@@ -355,7 +366,8 @@ public final class ResearchTeamAgent {
         PhaseParseResult parsed = contract.parse(call.getText());
         if (!parsed.isOk()) {
             traceParseFailure("repair", parsed.getError(), call.getText());
-            return Parsed.fail(TeamAgentResult.unusableAnswer(parsed.getError()));
+            return Parsed.fail(call.isTruncated() ? truncated(parsed.getError())
+                    : TeamAgentResult.unusableAnswer(parsed.getError()));
         }
         if (!VisibleAssistantMessageValidator.isCleanBusinessMessage(parsed.getOutput().getAssistantMessage())) {
             traceParseFailure("repair-meta-talk", "visible message is not a business message",
