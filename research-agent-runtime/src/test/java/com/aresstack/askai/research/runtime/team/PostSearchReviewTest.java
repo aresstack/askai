@@ -105,6 +105,18 @@ public class PostSearchReviewTest {
     }
 
     @Test
+    public void aReviewCutAtTheOutputBudgetNamesTheTokenLimit() {
+        RecordingModel model = new RecordingModel(TeamAgentResult.truncatedAnswer("cut", 8192));
+        RecordingEmitter emitter = new RecordingEmitter();
+        PostSearchReview.run(view("research"), model, emitter, "de");
+
+        assertEquals(1, emitter.visible.size());
+        assertTrue(emitter.visible.get(0).contains("Auswertung"));
+        assertTrue(emitter.visible.get(0).contains("Token-Limit (8192 Tokens)"));
+        assertTrue(emitter.visible.get(0).contains("Answer budget (tokens)"));
+    }
+
+    @Test
     public void theFallbackFollowsTheSessionLanguage() {
         assertTrue(PostSearchReview.fallbackMessage("de").contains("Quellen"));
         assertTrue(PostSearchReview.fallbackMessage("en").contains("sources"));

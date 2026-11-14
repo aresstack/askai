@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.runtime.team;
 
 import com.aresstack.askai.agent.model.port.ChatRequest;
+import com.aresstack.askai.agent.model.port.ChatResult;
 import com.aresstack.askai.agent.model.port.ModelFailure;
 import com.aresstack.askai.agent.model.port.ModelMessage;
 import com.aresstack.askai.agent.model.port.ModelPort;
@@ -118,7 +119,10 @@ public final class PortMainModelChat implements MainModelChat {
         }
         BlockingModelCall.Outcome outcome = calls.run(request.build());
         if (outcome.isOk()) {
-            return MainModelChatResult.ok(outcome.result.getContent());
+            // finish reason "length": the answer ended at the output budget, not because the model was done
+            return outcome.result.getFinishReason() == ChatResult.FinishReason.LENGTH
+                    ? MainModelChatResult.okTruncated(outcome.result.getContent())
+                    : MainModelChatResult.ok(outcome.result.getContent());
         }
         return MainModelChatResult.failure(statusOf(outcome.failure.getKind()),
                 "main-model call failed: " + outcome.failure);

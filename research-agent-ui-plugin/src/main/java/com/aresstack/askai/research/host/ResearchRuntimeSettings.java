@@ -449,7 +449,7 @@ public final class ResearchRuntimeSettings {
 
     static final String KEY_AGENT_MAX_OUTPUT_TOKENS = "research.runtime.agentMaxOutputTokens";
     /** The default answer budget per agent model turn — generous enough for the longest contract (review). */
-    public static final int DEFAULT_AGENT_MAX_OUTPUT_TOKENS = 4096;
+    public static final int DEFAULT_AGENT_MAX_OUTPUT_TOKENS = 8192;
 
     /**
      * The output-token budget the agent grants the model PER TURN (the longest contracted answer is the
