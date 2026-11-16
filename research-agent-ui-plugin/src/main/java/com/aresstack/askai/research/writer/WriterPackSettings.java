@@ -134,9 +134,8 @@ public final class WriterPackSettings {
      * acceptance on #217: 24 construction passages against the uncovered requirement "Training apprentices", mean
      * 0.52), and sentences of another subject 0.43 and 0.53 against a section brief (live run 3, section 1.4);
      * the floor of 0.45 holds back what is clearly of another subject, the margin of 0.15 what lies in that band
-     * while the section has clearly closer passages. {@code nomic-embed-text} compresses distances: its
-     * similarities lie higher and closer together, so the floor filters almost nothing and the margin must be
-     * smaller; recalibrate both after a change of the embedding model.</p>
+     * while the section has clearly closer passages. bge-m3 is the embedding model of AskAI (decision
+     * 2026-11-16); another embedding model needs both recalibrated.</p>
      */
     public static final class BriefRelevance {
 

@@ -48,8 +48,8 @@ public final class TopicAnalysisSettings {
     /** Representative passages listed per topic. */
     public static final int DEFAULT_REPRESENTATIVES = TopicClusterer.DEFAULT_REPRESENTATIVES;
     /**
-     * Passages joined at or below this distance form one topic (the clusterer's topic cutoff). It depends on the
-     * embedding model: live run 4 (2026-11-12, nomic-embed-text) merged the whole corpus below 0.55 into one topic.
+     * Passages joined at or below this distance form one topic (the clusterer's topic cutoff). Calibrated, like every
+     * distance here, for bge-m3, the embedding model of AskAI (decision 2026-11-16).
      */
     public static final double DEFAULT_TOPIC_DISTANCE = TopicClusterer.DEFAULT_TOPIC_DISTANCE;
 

@@ -1228,8 +1228,8 @@ public final class SetupWizardPanel extends JPanel {
         busy = true; // filling the lists is no user change
         try {
             setChoices(chatModel, models.chat(), preferred(text(chatModel), models.chat()), false);
-            setChoices(embeddingModel, models.embeddings(), preferred(text(embeddingModel), models.embeddings()),
-                    false);
+            setChoices(embeddingModel, models.embeddings(),
+                    preferredEmbedding(text(embeddingModel), models.embeddings()), false);
             setChoices(rerankerModel, models.rerankers(), text(rerankerModel), true);
             setChoices(sentenceGerman, models.sentenceGerman(),
                     preferred(text(sentenceGerman), models.sentenceGerman()), true);
@@ -1241,9 +1241,6 @@ public final class SetupWizardPanel extends JPanel {
         int count = models.chat().size();
         if (text(chatModel).isEmpty() && count == 0) {
             chatModel.setSelectedItem(SetupActions.RECOMMENDED_CHAT_MODEL); // a suggestion, downloaded on request
-        }
-        if (text(embeddingModel).isEmpty() && models.embeddings().isEmpty()) {
-            embeddingModel.setSelectedItem(SetupActions.RECOMMENDED_EMBEDDING_MODEL);
         }
         installedChat = models.chat();
         installedEmbeddings = models.embeddings();
@@ -1264,6 +1261,27 @@ public final class SetupWizardPanel extends JPanel {
             return current.trim();
         }
         return available == null || available.isEmpty() ? "" : available.get(0);
+    }
+
+    /**
+     * The embedding model to show when nothing is chosen yet: always the recommended one, under the name it is
+     * installed with, or as a suggestion to download even when other embedding models are installed. Every
+     * embedding-dependent default is calibrated for it, and it is the embedding model the planned private cloud
+     * offers too. A model already chosen stays.
+     */
+    static String preferredEmbedding(String current, List<String> available) {
+        if (current != null && !current.trim().isEmpty()) {
+            return current.trim();
+        }
+        String recommended = SetupActions.RECOMMENDED_EMBEDDING_MODEL;
+        if (available != null) {
+            for (String model : available) {
+                if (model != null && (model.equals(recommended) || model.equals(recommended + ":latest"))) {
+                    return model;
+                }
+            }
+        }
+        return recommended;
     }
 
     private void measureDimension() {

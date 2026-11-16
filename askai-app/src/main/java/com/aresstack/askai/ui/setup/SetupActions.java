@@ -167,7 +167,9 @@ public interface SetupActions {
     /** The stronger alternative offered beside the recommended chat model (needs more memory). */
     String ALTERNATIVE_CHAT_MODEL = "llama3.1:8b";
     /**
-     * Suggested when no embedding model is installed yet. The embedding model is required (Q12, PR 12).
+     * The embedding model of AskAI: suggested whenever none is chosen yet, also beside other installed embedding
+     * models, because every embedding-dependent default (topic analysis, writer packs) is calibrated for it and the
+     * planned private cloud offers it too (decision 2026-11-16). The embedding model is required (Q12, PR 12).
      * Chosen by the retrieval benchmark of PR 04 (rule 5.4 point 7, run of 2026-11-09 on an RTX 5080):
      * bge-m3 reached Recall@10 1.000 German to German, German to English and English to English (MRR
      * 0.766 / 0.713 / 0.780), 2899 MiB, 8192 tokens context, raw prompts. Numbers in
