@@ -10,4 +10,13 @@ public interface ResearchProjectRepository {
     ResearchProject load(String projectId);
 
     void save(ResearchProject project);
+
+    /**
+     * The captures of {@code sourceId} that a newer capture of the same source replaced (one active capture per
+     * source, the newest wins). Their passages are no longer active, so rebuildable views drop them too. An
+     * adapter without capture history has none.
+     */
+    default java.util.Set<String> supersededCaptureIds(String sourceId) {
+        return java.util.Collections.emptySet();
+    }
 }

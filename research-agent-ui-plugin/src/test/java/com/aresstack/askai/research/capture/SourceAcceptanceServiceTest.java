@@ -103,12 +103,64 @@ public class SourceAcceptanceServiceTest {
         assertTrue(dup.duplicate);
         assertEquals(SourceStatus.DUPLICATE, fx.repo.get(dup.sourceId).getStatus());
 
-        // Same URL, different hash → changed page → a fresh source.
+        // Same URL, different hash → changed page → the SAME source, refreshed as its next revision.
+        String original = fx.service.accept(a.getCaptureId()).sourceId;
         VisitedCapture changed = fx.captures.record("https://example.com/a", "Alpha v2", "New content.");
         SourceAcceptanceService.Result fresh = fx.service.accept(changed.getCaptureId());
         assertEquals(SourceAcceptanceService.Status.ACCEPTED, fresh.status);
         assertFalse(fresh.duplicate);
-        assertEquals(3, fx.repo.find(SourceQuery.all()).size());
+        assertEquals("one address stays one source", original, fresh.sourceId);
+        assertEquals(2, fx.repo.find(SourceQuery.all()).size());
+        ResearchSourceRecord revised = fx.repo.get(original);
+        assertEquals("New content.", revised.getFullText());
+        assertEquals(changed.getContentHash(), revised.getChecksum());
+        assertEquals(2L, revised.getRevision());
+        assertEquals("Alpha v2", revised.getTitle());
+    }
+
+    @Test
+    public void aReReadPageRefreshesItsSourceAndKeepsTheUsersDecisions() {
+        Fx fx = new Fx();
+        final java.util.List<String> jobs = new java.util.ArrayList<String>();
+        fx.service.setKnowledgeProcessingScheduler(
+                new com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler() {
+                    public void enqueue(String captureId, String sourceId) {
+                        jobs.add(captureId + "->" + sourceId);
+                    }
+                });
+        VisitedCapture first = fx.captures.record("https://example.com/news", "News", "Monday edition.");
+        SourceAcceptanceService.Result accepted = fx.service.accept(first.getCaptureId(), "q", true);
+        fx.repo.put(fx.repo.get(accepted.sourceId).toBuilder().status(SourceStatus.REVIEWED).build());
+
+        VisitedCapture reread = fx.captures.record("https://example.com/news", "News", "Tuesday edition.");
+        SourceAcceptanceService.Result refreshed = fx.service.accept(reread.getCaptureId());
+        assertEquals(accepted.sourceId, refreshed.sourceId);
+        ResearchSourceRecord record = fx.repo.get(accepted.sourceId);
+        assertEquals("the review decision stays", SourceStatus.REVIEWED, record.getStatus());
+        assertTrue("the ⭐ stays", record.isUserRelevant());
+        assertEquals("Tuesday edition.", record.getFullText());
+        // The knowledge store gets the NEW capture under the SAME source: the newest replaces the older one there.
+        assertEquals(java.util.Arrays.asList(first.getCaptureId() + "->" + accepted.sourceId,
+                reread.getCaptureId() + "->" + accepted.sourceId), jobs);
+    }
+
+    @Test
+    public void parkingAnAddressWhosePageIsAlreadyCapturedSaysSo() {
+        Fx fx = new Fx();
+        VisitedCapture read = fx.captures.record("https://example.com/read", "Read", "Already read body.");
+        String sourceId = fx.service.accept(read.getCaptureId()).sourceId;
+        SourceAcceptanceService.ParkResult again = fx.service.park("https://example.com/read?utm_source=x",
+                "Read", "snippet", 1.0, "q");
+        assertFalse(again.created);
+        assertTrue(again.captured);
+        assertEquals("status=ALREADY_CAPTURED source_id=" + sourceId, again.render());
+
+        // A parked (not yet read) address is only ALREADY_PRESENT: the search still has to read it.
+        fx.service.park("https://example.com/unread", "Unread", "snippet", 1.0, "q");
+        SourceAcceptanceService.ParkResult parked = fx.service.park("https://example.com/unread", "Unread",
+                "snippet", 1.0, "q");
+        assertFalse(parked.captured);
+        assertTrue(parked.render().startsWith("status=ALREADY_PRESENT"));
     }
 
     @Test

@@ -33,9 +33,8 @@ public class ResearchArtifactsCatalogTest {
 
     @Test
     public void theCatalogContainsExactlyTheMvpArtifacts() {
-        // Sources BEFORE the document: the concept already yields first sources and the outline (the
-        // Document tab's drawer) is generated from them — the tab order mirrors that flow.
-        assertEquals(Arrays.asList("research-brief", "sources", "document", "state"), ids());
+        // Plan PR 23: the Outline tab sits between Sources and Document, mirroring the phase order.
+        assertEquals(Arrays.asList("research-brief", "sources", "outline", "document", "state"), ids());
     }
 
     @Test

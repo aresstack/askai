@@ -26,6 +26,8 @@ public final class AskAiApp {
         holdDevPluginRunLock();
         // askai #51: the data of the former .askai-java8 folder moves into .askai before anything reads it.
         com.aresstack.askai.settings.AppDirectoryMigration.run();
+        // Plan PR 03: every Ollama call sends the context of its model, read from the model-port settings.
+        com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory();
         final AppConfigurationRepository configurationRepository = new AppConfigurationRepository();
         // BASIC proxy credentials for HTTPS tunnels; the JDK reads this once, before the first HTTP connection.
         com.aresstack.askai.net.ConfiguredConnections.allowBasicProxyTunneling();

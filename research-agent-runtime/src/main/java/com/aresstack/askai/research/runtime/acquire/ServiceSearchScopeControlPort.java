@@ -25,7 +25,44 @@ public final class ServiceSearchScopeControlPort implements SearchScopeControlPo
     @Override
     public Session begin() throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
         String reply = service.call("search_scope_begin", new HashMap<String, Object>());
-        String line = reply == null ? "" : reply.trim();
+        String all = reply == null ? "" : reply.trim();
+        // PR 12: an optional second line "BLACKLIST [json]" carries the typed entries.
+        String line = all;
+        com.aresstack.askai.research.domain.scope.TypedBlacklist typed =
+                com.aresstack.askai.research.domain.scope.TypedBlacklist.empty();
+        int newline = all.indexOf('\n');
+        if (newline >= 0) {
+            line = all.substring(0, newline).trim();
+            for (String extra : all.substring(newline + 1).split("\r?\n")) {
+                String trimmed = extra.trim();
+                if (trimmed.startsWith(BLACKLIST_PREFIX)) {
+                    typed = parseBlacklist(trimmed.substring(BLACKLIST_PREFIX.length()));
+                }
+            }
+        }
+        return beginSession(line).withBlacklist(typed);
+    }
+
+    /** The second line of a begin reply that carries the typed blacklist as a JSON array. */
+    public static final String BLACKLIST_PREFIX = "BLACKLIST ";
+
+    static com.aresstack.askai.research.domain.scope.TypedBlacklist parseBlacklist(String json)
+            throws ToolInvoker.ToolFailure {
+        try {
+            com.google.gson.JsonArray array = com.google.gson.JsonParser.parseString(json)
+                    .getAsJsonArray();
+            List<String> entries = new ArrayList<String>();
+            for (com.google.gson.JsonElement element : array) {
+                entries.add(element.getAsString());
+            }
+            return com.aresstack.askai.research.domain.scope.TypedBlacklist.of(entries);
+        } catch (RuntimeException broken) {
+            // the blacklist must never silently vanish: a broken line ends the run fail-closed
+            throw new ToolInvoker.ToolFailure("search_scope_begin: unreadable blacklist " + json);
+        }
+    }
+
+    private Session beginSession(String line) throws ToolInvoker.ToolFailure {
         if (line.startsWith("ACTIVE handle=")) {
             int space = line.indexOf(' ', "ACTIVE handle=".length());
             String handle = space < 0 ? line.substring("ACTIVE handle=".length())

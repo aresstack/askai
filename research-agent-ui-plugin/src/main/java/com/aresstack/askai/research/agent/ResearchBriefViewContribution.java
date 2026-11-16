@@ -38,6 +38,12 @@ public final class ResearchBriefViewContribution implements ArtifactViewContribu
         final ResearchAgentSession research = (ResearchAgentSession) session;
         final UiExecutor uiExecutor = context.getUiExecutor();
         view.setVisualizeButton(ResearchVisualizeButtons.concept(research, context));
+        // PR 07: the mission is one editable row above the tree; the write guard refuses it outside Concept.
+        view.setMissionSaver(new ConceptPaperView.MissionSaver() {
+            public String save(String mission) {
+                return research.editMission(mission);
+            }
+        });
         // The user's manual edit + rollback path — the SAME validating pipeline as every agent
         // write (strict parse, envelope check, CAS against the shown revision, atomic commit).
         view.setEditActions(new ConceptPaperView.SaveHandler() {
@@ -183,8 +189,11 @@ public final class ResearchBriefViewContribution implements ArtifactViewContribu
                         service == null ? null
                                 : com.aresstack.askai.research.concept.ConceptProjection
                                         .of(service.snapshot());
+                final String mission = research.currentMission();
+                final String mode = research.conceptModeMessage();
                 uiExecutor.execute(new Runnable() {
                     public void run() {
+                        view.renderMission(mission, mode);
                         view.render(projection);
                     }
                 });

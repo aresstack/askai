@@ -55,4 +55,10 @@ public interface SourceProcessingQueue {
      * mutates the queue.
      */
     java.util.Set<String> sourceIdsWithKnownProcessing();
+
+    /**
+     * D6: the sources whose processing is still pending (queued, running or due for a retry): their passages are not
+     * in the knowledge store yet, so the evidence analysis must not report their material as missing.
+     */
+    java.util.Set<String> pendingSourceIds();
 }

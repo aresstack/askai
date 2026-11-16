@@ -30,7 +30,8 @@ public final class ResearchChatCommands {
         // ONE synchronized command surface: the TEXT adapters — /search (user web search) and /open
         // (artifact navigation) — plus a slash TWIN for exactly the red DECISION tags the user sees
         // ("Fragestellung freigeben & weiter" → /submit-scope, "Neue Quellen auswerten" →
-        // /review-sources, approve/changes/continue). NOTHING more: the domain's interruption
+        // /review-sources, approve/changes/continue) and for the reopen of an earlier phase, which the
+        // phase pill offers as a click. NOTHING more: the domain's interruption
         // machinery (pause/resume/retry/cancel, block/fail) stays out of the user surface — those
         // states exist for the agent/runtime, not as user furniture. Every twin executes through
         // the session's ONE structured command processor — exactly what a red-tag click runs.
@@ -38,28 +39,75 @@ public final class ResearchChatCommands {
         commands.add(new OpenCommand());
         commands.add(new SearchCommand());
         commands.add(new MapCommand());
+        // D1: every phase's exit and gate decision, with the labels of the red tags.
         commands.add(new ProcessorCommand("submit-scope",
-                "Approve the research brief and continue into the research phase"));
+                "Approve concept & start search"));
+        commands.add(new ProcessorCommand("finish-sources",
+                "Finish sources: make the sources read-only for review"));
+        commands.add(new ProcessorCommand("finish-outline",
+                "Finish outline: make the outline read-only for review"));
+        commands.add(new ProcessorCommand("finish-document",
+                "Finish document: make the document read-only for review"));
         commands.add(new ProcessorCommand("approve",
-                "Approve the pending review gate (outline/evidence/draft/final)"));
+                "Approve the pending review gate (sources/outline/final book)"));
         commands.add(new ProcessorCommand("request-changes",
-                "Request changes at the pending review gate"));
+                "Request changes at the pending review gate, with an optional comment"));
         commands.add(new ProcessorCommand("continue",
-                "Continue with the next step (start research/drafting)"));
+                "Start search or start writing when the chained start was refused"));
         commands.add(new ProcessorCommand("review-sources",
                 "Review the newly captured sources (Neue Quellen auswerten)"));
         commands.add(new ProcessorCommand("check-scope",
                 "Check the negotiated topic space for gaps (Themenraum pr\u00fcfen)"));
         commands.add(new ProcessorCommand("discover-topics",
                 "Show topic areas discovered in the sources as concept suggestions"));
+        // The way back (D10): a typed reopen is the person's explicit decision, so it dispatches without
+        // the dialog the phase pill shows for a click; the description carries the same warning.
+        commands.add(new ProcessorCommand("reopen-concept",
+                "Reopen Concept: " + ReopenConfirmation.messageFor("reopen-concept")));
+        commands.add(new ProcessorCommand("reopen-sources",
+                "Reopen Sources: " + ReopenConfirmation.messageFor("reopen-sources")));
+        commands.add(new ProcessorCommand("reopen-outline",
+                "Reopen Outline: " + ReopenConfirmation.messageFor("reopen-outline")));
         return commands;
+    }
+
+    /**
+     * THE dispatcher for a typed slash line outside the composer (MCP clients): the same contributions,
+     * the same parse the host applies (name, then whitespace-separated arguments), the same processor.
+     * {@code UNKNOWN} when no contribution owns the name.
+     */
+    public static CommandExecutionResult execute(String slashLine, AgentSessionContext context) {
+        String body = slashLine == null ? "" : slashLine.trim();
+        body = body.startsWith("/") ? body.substring(1).trim() : body;
+        if (body.isEmpty()) {
+            return CommandExecutionResult.rejected("a slash command name is required");
+        }
+        String[] tokens = body.split("\\s+");
+        String name = tokens[0].toLowerCase(java.util.Locale.ROOT);
+        List<String> arguments = new ArrayList<String>(java.util.Arrays.asList(tokens).subList(1, tokens.length));
+        for (ChatCommandContribution contribution : all()) {
+            if (contribution.getDescriptor().getName().equals(name)) {
+                return contribution.execute(new CommandInvocation(name, arguments, slashLine), context);
+            }
+        }
+        return CommandExecutionResult.unknown();
+    }
+
+    /** Every slash command name, for an honest rejection. */
+    public static String names() {
+        StringBuilder sb = new StringBuilder();
+        for (ChatCommandContribution contribution : all()) {
+            sb.append(sb.length() == 0 ? "/" : ", /").append(contribution.getDescriptor().getName());
+        }
+        return sb.toString();
     }
 
     /** The red-tag twins exposed as slash commands (the test guards the sync). */
     static List<String> processorCommandNames() {
         return java.util.Arrays.asList(
-                "submit-scope", "approve", "request-changes", "continue", "review-sources",
-                "check-scope", "discover-topics");
+                "submit-scope", "finish-sources", "finish-outline", "finish-document", "approve",
+                "request-changes", "continue", "review-sources",
+                "check-scope", "discover-topics", "reopen-concept", "reopen-sources", "reopen-outline");
     }
 
     private static ResearchAgentSession research(AgentSessionContext context) {
@@ -119,6 +167,11 @@ public final class ResearchChatCommands {
         }
 
         public ChatCommandDescriptor getDescriptor() {
+            if ("request-changes".equals(name)) {
+                return ChatCommandDescriptor.of(name, description, "/request-changes [comment]",
+                        new CommandArgumentDescriptor("comment", "What should change (optional)",
+                                false));
+            }
             return ChatCommandDescriptor.of(name, description);
         }
 

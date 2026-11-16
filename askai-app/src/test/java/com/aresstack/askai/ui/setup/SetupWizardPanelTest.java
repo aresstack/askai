@@ -109,7 +109,8 @@ public class SetupWizardPanelTest {
                 SetupWizardPanel.STEP_RUNTIME), wizard.mascotOf(SetupWizardPanel.STEP_RUNTIME).art().resource());
         assertTrue(wizard.ollamaStatusText().contains("0.9.0"));
         assertEquals("llama3.2", wizard.draft().chatModel());
-        assertEquals("nomic-embed-text", wizard.draft().embeddingModel());
+        assertEquals("the recommended embedding model even beside another installed one",
+                SetupActions.RECOMMENDED_EMBEDDING_MODEL, wizard.draft().embeddingModel());
         assertEquals("a reranker stays optional", "", wizard.draft().rerankerModel());
     }
 
@@ -398,6 +399,18 @@ public class SetupWizardPanelTest {
 
         assertEquals(Collections.singletonList("mistral"), fake.pulled);
         assertEquals("the name Ollama lists it under", "mistral:latest", wizard.draft().chatModel());
+    }
+
+    @Test
+    public void theEmbeddingModelOfAskAiIsPreferredUnderItsInstalledName() {
+        assertEquals("installed under its tag", "bge-m3:latest", SetupWizardPanel.preferredEmbedding("",
+                Arrays.asList("nomic-embed-text:latest", "bge-m3:latest")));
+        assertEquals("suggested for download beside another model", "bge-m3",
+                SetupWizardPanel.preferredEmbedding(null, Collections.singletonList("nomic-embed-text:latest")));
+        assertEquals("suggested when nothing is installed", "bge-m3",
+                SetupWizardPanel.preferredEmbedding(" ", Collections.<String>emptyList()));
+        assertEquals("a chosen model stays", "mxbai-embed-large",
+                SetupWizardPanel.preferredEmbedding(" mxbai-embed-large ", Collections.singletonList("bge-m3")));
     }
 
     @Test

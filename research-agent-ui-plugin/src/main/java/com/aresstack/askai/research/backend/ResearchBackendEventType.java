@@ -23,12 +23,6 @@ public enum ResearchBackendEventType {
     /** The user's manual input is required (or no longer required), e.g. a CAPTCHA in the browser. */
     USER_ATTENTION,
     /**
-     * A VALIDATED workflow proposal from the model-backed TeamAgent (title=command, text=question,
-     * technicalDetail=newline-joined aspects). The host re-validates it against its own state machine and
-     * executes it — the runtime never transitions state.
-     */
-    SCOPE_PROPOSAL,
-    /**
      * The model-backed greeting was delivered successfully. The host advances the scope state one step so the
      * greeting (which depends only on the state) is never repeated on a restart.
      */
@@ -72,5 +66,11 @@ public enum ResearchBackendEventType {
      * surface): title = request id, text = the decision payload JSON. Routed to the waiting
      * chooser port on the backend callback thread, never rendered as chat by the mapper.
      */
-    ADVICE_DECISION
+    ADVICE_DECISION,
+
+    /**
+     * Plan PR 14: the typed answer to a host-initiated {@code plan_queries} command (internal wire): title = request
+     * id, text = the plan payload JSON. Routed to the waiting query planner on the backend callback thread.
+     */
+    QUERY_PLAN
 }

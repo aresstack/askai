@@ -45,6 +45,11 @@ public final class ResearchStateViewContribution implements ArtifactViewContribu
                 if (semantic == null) {
                     return research.dispatch(command, null); // not user vocabulary — plain dispatch
                 }
+                if (!ReopenConfirmation.confirm(view, semantic)) {
+                    return com.aresstack.askai.research.backend.ResearchCommandDispatchResult.of(
+                            com.aresstack.askai.research.backend.ResearchCommandDispatchResult
+                                    .Status.REFUSED, "Reopen cancelled.");
+                }
                 String outcome = research.executeCommand(semantic, "");
                 if (outcome != null && outcome.startsWith("handled")) {
                     return com.aresstack.askai.research.backend.ResearchCommandDispatchResult

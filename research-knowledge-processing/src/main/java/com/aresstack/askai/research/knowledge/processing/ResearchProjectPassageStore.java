@@ -55,4 +55,10 @@ public final class ResearchProjectPassageStore implements PassageStore {
         project.recordPassages(passages);
         repository.save(project);
     }
+
+    @Override
+    public java.util.Set<String> supersededCaptureIds(String sourceId) {
+        // Includes a capture just stored when it lost against a newer active capture of its source.
+        return repository.supersededCaptureIds(sourceId);
+    }
 }

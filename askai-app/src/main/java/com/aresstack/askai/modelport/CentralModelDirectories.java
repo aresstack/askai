@@ -21,9 +21,8 @@ import java.util.List;
  *   <li>endpoint {@code ollama}: the configured Ollama base URL, read per call;</li>
  *   <li>endpoint {@code local-runtime}: AskAI's local model runtime, started on demand, serving
  *       {@code local/...} models (only when a runtime manager exists);</li>
- *   <li>a slot resolves to the model configured for it in the model-port settings, otherwise to the central
- *       main model (the chat-window selection), so every role behaves as before until the user splits
- *       them;</li>
+ *   <li>a slot resolves to the model configured for it, else its parent slot's, else the {@code default}
+ *       slot's (plan 5.1); the chat-window selection is never used;</li>
  *   <li>the default call timeout is the user's main-model timeout setting.</li>
  * </ul>
  */
@@ -79,12 +78,12 @@ public final class CentralModelDirectories {
                                                       final ModelPortSettingsRepository settings) {
         return new OllamaModelPort.SlotDirectory() {
             public String modelFor(ModelSlot slot) {
-                String configured = settings.load().slotModel(slot.getName());
-                if (!configured.isEmpty()) {
-                    return configured;
-                }
-                String main = central.load().getAiModelSelections().getMainModel();
-                return main == null ? "" : main.trim();
+                // exact -> parent -> default (plan 5.1); never the chat model (ai.mainModel)
+                return settings.load().resolveModel(slot.getName());
+            }
+
+            public boolean checksInstalledModels() {
+                return true;
             }
 
             public String endpointFor(String model) {

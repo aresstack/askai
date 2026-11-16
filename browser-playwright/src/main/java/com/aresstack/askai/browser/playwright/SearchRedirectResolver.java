@@ -17,6 +17,11 @@ import java.util.Locale;
  * ({@link #isOpaqueWrapper}); its treatment is an {@link OpaqueRedirectStrategy}, shipped as
  * {@link OpaqueRedirectStrategy#DISCARD}: {@code UNRESOLVED}. The wrapper URL itself is never a result link.</li>
  * <li>DuckDuckGo: {@code /l/?uddg=<target>}</li>
+ * <li>Yahoo: {@code r.search.yahoo.com/_ylt=…/RV=2/RE=…/RO=10/RU=<url-encoded target>/RK=2/RS=…}</li>
+ * <li>Baidu: {@code www.baidu.com/link?url=<opaque token>}: the token is never decoded, but Baidu prints the target
+ * itself on the result block ({@link #BAIDU_TARGET_ATTRIBUTE}); the capture hands that value in as the link's
+ * target hint, so the wrapper resolves offline without any request to Baidu. Without a hint it is
+ * {@code DISCARDED}: nothing resolves it later, so it is never a result.</li>
  * <li>Google: {@code /goto?url=CAES...} — an opaque token, never decoded: always {@code UNRESOLVED}
  * (issue #41). Its HTTP resolution happens in Serp4J for API providers, not in the browser capture.</li>
  * </ul>
@@ -25,6 +30,12 @@ import java.util.Locale;
  */
 final class SearchRedirectResolver {
 
+    /**
+     * The attribute on Baidu's result block ({@code <div class="result c-container" mu="https://…">}) that carries the
+     * hit's real target: part of Baidu's page format, like a selector, not a tunable value.
+     */
+    static final String BAIDU_TARGET_ATTRIBUTE = "mu";
+
     /** The outcome of one resolution attempt. */
     enum Status {
         /** The URL is no known redirect wrapper — use it as-is. */
@@ -32,7 +43,9 @@ final class SearchRedirectResolver {
         /** The wrapper's target was extracted; {@link Resolution#getTargetUrl()} carries it. */
         RESOLVED,
         /** A known wrapper whose target could not be extracted — discard, never classify by wrapper host. */
-        UNRESOLVED
+        UNRESOLVED,
+        /** A known wrapper that nothing resolves, now or later (Baidu without its block's target): never a result. */
+        DISCARDED
     }
 
     static final class Resolution {
@@ -67,6 +80,18 @@ final class SearchRedirectResolver {
     }
 
     static Resolution resolve(String url, OpaqueRedirectStrategy opaqueWrappers) {
+        return resolve(url, opaqueWrappers, "");
+    }
+
+    /**
+     * Resolution with the target the page itself prints next to the link ({@code targetHint}, the result block's
+     * {@link #BAIDU_TARGET_ATTRIBUTE}); only Baidu's wrapper uses it, every other link ignores it.
+     */
+    static Resolution resolve(String url, String targetHint) {
+        return resolve(url, OpaqueRedirectStrategy.DISCARD, targetHint);
+    }
+
+    static Resolution resolve(String url, OpaqueRedirectStrategy opaqueWrappers, String targetHint) {
         String lower = url == null ? "" : url.toLowerCase(Locale.ROOT);
         if (lower.isEmpty() || !lower.startsWith("http")) {
             return new Resolution(Status.NOT_A_REDIRECT, url);
@@ -97,20 +122,58 @@ final class SearchRedirectResolver {
             return target != null && target.startsWith("http")
                     ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
         }
+        if (host.equals("r.search.yahoo.com") || host.endsWith(".r.search.yahoo.com")) {
+            String target = yahooTarget(url);
+            return target != null && (target.startsWith("http://") || target.startsWith("https://"))
+                    ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.UNRESOLVED, "");
+        }
+        if (isBaiduLink(host, path, url)) {
+            String target = targetHint == null ? "" : targetHint.trim();
+            String lowerTarget = target.toLowerCase(Locale.ROOT);
+            return (lowerTarget.startsWith("http://") || lowerTarget.startsWith("https://"))
+                    && !isOpaqueWrapper(target)
+                    && !com.aresstack.askai.browser.search.engine.SearchEngineHosts.isEngineHost(target)
+                    ? new Resolution(Status.RESOLVED, target) : new Resolution(Status.DISCARDED, "");
+        }
         return new Resolution(Status.NOT_A_REDIRECT, url);
     }
 
+    /** Baidu's result wrapper {@code (www.|m.)baidu.com/link?url=<token>}. */
+    private static boolean isBaiduLink(String host, String path, String url) {
+        String token = queryParameter(url, "url");
+        return com.aresstack.askai.browser.search.engine.SearchEngineHosts.isBaiduSearchHost(host)
+                && (path.equals("/link") || path.startsWith("/link?")) && token != null && !token.isEmpty();
+    }
+
+    /** Yahoo's wrapper carries the target URL-encoded in the {@code /RU=…/} path segment. */
+    private static String yahooTarget(String url) {
+        int start = url.indexOf("/RU=");
+        if (start < 0) {
+            return null;
+        }
+        start += "/RU=".length();
+        int end = url.indexOf('/', start);
+        String encoded = end < 0 ? url.substring(start) : url.substring(start, end);
+        try {
+            return URLDecoder.decode(encoded, StandardCharsets.UTF_8.name());
+        } catch (UnsupportedEncodingException | IllegalArgumentException malformed) {
+            return null;
+        }
+    }
+
     /**
-     * Whether the URL is Google's opaque result wrapper {@code /goto?url=<token>} (2026 SERPs): its target is not in the
-     * URL and is never decoded or guessed from the page.
+     * Whether the URL is an opaque result wrapper whose target is not in the URL: Google's {@code /goto?url=<token>}
+     * (2026 SERPs; never decoded or guessed from the page) or Baidu's {@code /link?url=<token>} (resolved only from the
+     * target Baidu prints on the result block).
      */
     static boolean isOpaqueWrapper(String url) {
         String lower = url == null ? "" : url.toLowerCase(Locale.ROOT);
         if (!lower.startsWith("http")) {
             return false;
         }
-        return isGoogleGoto(com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver.hostOf(lower),
-                pathOf(lower), url);
+        String host = com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver.hostOf(lower);
+        String path = pathOf(lower);
+        return isGoogleGoto(host, path, url) || isBaiduLink(host, path, url);
     }
 
     private static boolean isGoogleGoto(String host, String path, String url) {

@@ -17,6 +17,7 @@ public final class DefaultLegacyBrowserSearchSettingsValidator
 
         // --- navigation
         atLeast(v, "navigation.maximumEngineAttempts", s.navigation.maximumEngineAttempts, 1);
+        atLeast(v, "navigation.minimumUsableResults", s.navigation.minimumUsableResults, 1);
         positive(v, "navigation.navigationCommitTimeoutMillis",
                 s.navigation.navigationCommitTimeoutMillis);
         atLeast(v, "navigation.maximumRedirectUrlLength", s.navigation.maximumRedirectUrlLength, 256);

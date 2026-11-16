@@ -6,8 +6,6 @@ import com.aresstack.winproxy.ProxyResult;
 import com.aresstack.winproxy.WindowsProxyResolver;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 
@@ -237,39 +235,16 @@ public final class ProxyConfiguration {
     }
 
     private ProxyResult resolveByMode(String url) throws IOException {
-        // PAC_URL_WSCRIPT runs the discovery script inside win-proxy-java (since 0.2.0), so the PAC URL and script
-        // are cached like in every other PAC mode instead of starting cscript.exe for each request.
+        if (PAC_URL_WSCRIPT.equals(mode)) {
+            String discoveredPacUrl = new PacUrlDiscoveryService().discoverWithScript(pacUrlDiscoveryScript);
+            return resolveWithConfiguration(toWinProxyConfiguration(ProxyMode.PAC_URL_MANUAL, discoveredPacUrl), url);
+        }
+
         return resolveWithConfiguration(toWinProxyConfiguration(), url);
     }
 
-    /**
-     * One {@link WindowsProxyResolver} per configuration: since win-proxy-java 0.3.0 it keeps the PAC URL and the PAC
-     * script (lifetime from the PAC server's cache headers, otherwise 12 h; the last good script on failure). A new
-     * resolver per request would download the PAC file for every request again.
-     */
-    private static final Map<String, WindowsProxyResolver> RESOLVERS = new LinkedHashMap<String, WindowsProxyResolver>(8, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<String, WindowsProxyResolver> eldest) {
-            return size() > 8;
-        }
-    };
-
     private ProxyResult resolveWithConfiguration(com.aresstack.winproxy.ProxyConfiguration configuration, String url) {
-        return resolverFor(configuration).resolve(url);
-    }
-
-    static WindowsProxyResolver resolverFor(com.aresstack.winproxy.ProxyConfiguration configuration) {
-        String key = configuration.getMode() + "\n" + configuration.getPacUrl() + "\n"
-                + configuration.getPacUrlDiscoveryScript() + "\n" + configuration.getManualProxyHost() + "\n"
-                + configuration.getManualProxyPort() + "\n" + configuration.getTestUrl();
-        synchronized (RESOLVERS) {
-            WindowsProxyResolver resolver = RESOLVERS.get(key);
-            if (resolver == null) {
-                resolver = new WindowsProxyResolver(configuration);
-                RESOLVERS.put(key, resolver);
-            }
-            return resolver;
-        }
+        return new WindowsProxyResolver(configuration).resolve(url);
     }
 
     public void validateForUse() throws IOException {
@@ -298,6 +273,10 @@ public final class ProxyConfiguration {
     }
 
     private ProxyMode toWinProxyMode(String configuredMode) {
+        if (PAC_URL_WSCRIPT.equals(configuredMode)) {
+            return ProxyMode.PAC_URL_MANUAL;
+        }
+
         return ProxyMode.valueOf(configuredMode);
     }
 

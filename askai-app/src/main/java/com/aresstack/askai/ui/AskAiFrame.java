@@ -313,8 +313,10 @@ public final class AskAiFrame extends JFrame {
         // Swing components (surfaces, fields, tables, tabs, …), the comic button/scrollbar
         // delegates, and the menu/popup contours (issue #36).
         this.titleBar = new AskAiTitleBar(getTitle(),
-                () -> setState(java.awt.Frame.ICONIFIED),
-                () -> dispatchEvent(new java.awt.event.WindowEvent(this, java.awt.event.WindowEvent.WINDOW_CLOSING)));
+                // Click on the ✕ hides into the tray; holding it exits AskAI like the tray's "Exit".
+                MainWindowCloseActions.minimize(() -> mainWindowTray.hideToTray(),
+                        () -> setState(java.awt.Frame.ICONIFIED)),
+                MainWindowCloseActions.exit(this::exitApplication));
         // Title bar ABOVE the menu bar, both inside the frameless window's ink contour.
         JPanel header = new JPanel();
         header.setLayout(new javax.swing.BoxLayout(header, javax.swing.BoxLayout.Y_AXIS));
@@ -851,14 +853,15 @@ public final class AskAiFrame extends JFrame {
                 agentRuntimeServices.shutdown();
             }
         }, "agent-runtime-services-shutdown"));
-        // Central model change → re-publish the running research sessions' descriptors (no direct UI→research
-        // coupling: the event flows AskAiModel → this listener → the host session registry).
+        // Reranker/embedding change → re-publish the running research sessions' descriptors (no direct
+        // UI→research coupling: the event flows AskAiModel → this listener → the host session registry).
         final com.aresstack.askai.localmodels.LocalActiveResearchSessionRegistry activeResearchSessions =
                 agentRuntimeServices.activeSessionRegistry();
         if (activeResearchSessions != null) {
             model.addAiModelSelectionListener(new com.aresstack.askai.AiModelSelectionListener() {
                 public void onMainModelChanged() {
-                    activeResearchSessions.refreshInference();
+                    // The chat model is not a research model (plan 5.1): research sessions resolve their
+                    // phase slots on the model port, so a chat model change touches no research request.
                 }
 
                 public void onRerankerOrEmbeddingsChanged() {
@@ -1480,9 +1483,10 @@ public final class AskAiFrame extends JFrame {
                 (VirtualOllamaContainerService) ollamaService);
         // The read-aloud voices (Piper) are installed under Models > Setup > Voices (one section for the whole
         // application); every chat's voice selector follows installs/removals there.
-        // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
+        // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5). A slot's
+        // model is picked from the installed chat-capable models (the same catalog as the chat's model list).
         aiModelsPanel.addSection(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
-                .inConfigurationDirectory()));
+                .inConfigurationDirectory(), ((VirtualOllamaContainerService) ollamaService)::loadChatModelNamesNow));
         // The built-in local runtime (ONNX Runtime on the CPU) and the sentence-embedding slot.
         aiModelsPanel.addSection(new LocalRuntimeSettingsPanel(com.aresstack.askai.localmodels
                 .LocalRuntimeSettingsRepository.inConfigurationDirectory()));

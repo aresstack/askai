@@ -34,7 +34,8 @@ public final class ResearchLoop {
     /** From the CAPTCHA settings (single default origin: LegacyBrowserSearchDefaults). */
     private final long challengeProbeIntervalMillis;
     /** From the CAPTCHA settings: wait for the user on a challenge (true) or skip it (false). Uniform. */
-    private final boolean challengeWaitForUser;
+    private boolean challengeWaitForUser;
+    private com.aresstack.askai.research.runtime.acquire.OpaqueRedirectResolver redirectResolver;
     /** Public-suffix aware domain families; tests may inject a fake (e.g. host:port for local worlds). */
     private com.aresstack.askai.browser.domain.DomainKeyResolver domainKeys =
             new com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver();
@@ -93,6 +94,19 @@ public final class ResearchLoop {
     }
 
     /** Inject the mandatory reranker (productive runtime, and reranking integration tests). */
+    /** The search-browser resolver for engine redirect wrappers (Google /goto); without one such hits are dropped. */
+    public void setRedirectResolver(com.aresstack.askai.research.runtime.acquire.OpaqueRedirectResolver resolver) {
+        this.redirectResolver = resolver;
+    }
+
+    /**
+     * Whether a page's CAPTCHA/consent wall waits for the user. A headless research browser has no window anyone
+     * could solve it in, so the host turns this off there whatever the setting says.
+     */
+    public void setChallengeWaitForUser(boolean wait) {
+        this.challengeWaitForUser = wait;
+    }
+
     public void setReranker(com.aresstack.askai.research.runtime.rerank.CandidateReranker reranker) {
         if (reranker != null) {
             this.reranker = reranker;
@@ -241,6 +255,7 @@ public final class ResearchLoop {
             // search uses — one filter truth for both acquisition paths.
             acquisition.setScopeControl(scopeControl);
         }
+        acquisition.setRedirectResolver(redirectResolver);
         ResearchStopReason reason = acquisition.execute(task);
         listener.status("run stopped: " + reason
                 + " (pages=" + progress.getPagesVisited()

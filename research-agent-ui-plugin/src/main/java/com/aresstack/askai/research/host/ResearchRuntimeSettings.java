@@ -29,6 +29,37 @@ public final class ResearchRuntimeSettings {
     static final String KEY_SEARCH_BROWSER_HEADLESS = WorkspaceStateStore.GLOBAL_KEY_PREFIX
             + "research.runtime.searchBrowserHeadless";
 
+    /** The search engines' first pause after a challenge, in seconds (app-wide: one search browser). */
+    static final String KEY_ENGINE_PAUSE_SECONDS = WorkspaceStateStore.GLOBAL_KEY_PREFIX
+            + "research.runtime.enginePauseSeconds";
+    /** The longest pause the doubling may reach, in minutes. */
+    static final String KEY_ENGINE_PAUSE_CAP_MINUTES = WorkspaceStateStore.GLOBAL_KEY_PREFIX
+            + "research.runtime.enginePauseCapMinutes";
+    public static final int DEFAULT_ENGINE_PAUSE_SECONDS = 60;
+    public static final int DEFAULT_ENGINE_PAUSE_CAP_MINUTES = 30;
+
+    public static int loadEnginePauseSeconds(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_ENGINE_PAUSE_SECONDS, DEFAULT_ENGINE_PAUSE_SECONDS);
+    }
+
+    public static void saveEnginePauseSeconds(WorkspaceStateStore store, int seconds) {
+        saveNonNegativeInt(store, KEY_ENGINE_PAUSE_SECONDS, seconds);
+    }
+
+    public static int loadEnginePauseCapMinutes(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_ENGINE_PAUSE_CAP_MINUTES, DEFAULT_ENGINE_PAUSE_CAP_MINUTES);
+    }
+
+    public static void saveEnginePauseCapMinutes(WorkspaceStateStore store, int minutes) {
+        saveNonNegativeInt(store, KEY_ENGINE_PAUSE_CAP_MINUTES, minutes);
+    }
+
+    /** Hands the stored engine pause to the one search browser of this AskAI. */
+    public static void applyEnginePause(WorkspaceStateStore store) {
+        com.aresstack.askai.research.runtime.ResearchRuntimeShared.process().setEnginePause(
+                loadEnginePauseSeconds(store) * 1000L, loadEnginePauseCapMinutes(store) * 60_000L);
+    }
+
     /** Whether the search browser runs headless (default {@code true}). */
     public static boolean loadSearchBrowserHeadless(WorkspaceStateStore store) {
         return store == null || store.getBoolean(KEY_SEARCH_BROWSER_HEADLESS, true);
@@ -51,20 +82,6 @@ public final class ResearchRuntimeSettings {
 
     public static int policyNoveltyTurns() {
         return envOverride("ASKAI_POLICY_NOVELTY_TURNS", DEFAULT_POLICY_NOVELTY_TURNS);
-    }
-
-    /**
-     * #42: background topic discovery over the prepared corpus (pure CPU over persisted
-     * vectors — it never calls the embedding endpoint, so it cannot compete with the
-     * foreground GPU/LLM path). Default OFF, deliberately: no hidden background analysis
-     * until the user opts in; a settings-UI row can layer on later.
-     */
-    public static boolean backgroundTopicDiscovery() {
-        try {
-            return "true".equalsIgnoreCase(System.getenv("ASKAI_BACKGROUND_TOPIC_DISCOVERY"));
-        } catch (RuntimeException noEnv) {
-            return false;
-        }
     }
 
     /** scope_probe (AP3): the max terms one probe judges — a bound, never hidden magic. */
@@ -447,33 +464,587 @@ public final class ResearchRuntimeSettings {
                         d.choiceTimeoutSeconds));
     }
 
-    static final String KEY_AGENT_MAX_OUTPUT_TOKENS = "research.runtime.agentMaxOutputTokens";
-    /** The default answer budget per agent model turn — generous enough for the longest contract (review). */
-    public static final int DEFAULT_AGENT_MAX_OUTPUT_TOKENS = 8192;
+    // ---- plan PR 14: the caps of the search plan (Search tab, "Search plan") -------------------------
+
+    public static final String KEY_PLAN_SOURCES_PER_NODE = "research.plan.sourcesPerNode";
+    public static final String KEY_PLAN_QUERIES_PER_NODE = "research.plan.queriesPerNode";
+    public static final String KEY_PLAN_PHASE_SOURCES = "research.plan.phaseSources";
+    /** Accepted sources (from at least two domains) that make a concept node covered. */
+    public static final int DEFAULT_PLAN_SOURCES_PER_NODE = 3;
+    /** Queries per node: the base query and up to three planner variants. */
+    public static final int DEFAULT_PLAN_QUERIES_PER_NODE = 4;
+    /**
+     * Accepted sources the whole Sources phase may collect through the plan; 0 = automatic, what the node budgets
+     * allow ({@link com.aresstack.askai.research.plan.SearchPlanCoverage.Caps#phaseSourcesFor}). Live run 4
+     * (2026-11-12): a fixed 60 was spent in the first research cycle of a five-node concept (every node runs all its
+     * planned angles, each may add "Sources per node" sources), the last node starved and the plan never reached a
+     * second cycle for its gaps.
+     */
+    public static final int DEFAULT_PLAN_PHASE_SOURCES = 0;
+    public static final String KEY_PLAN_CYCLES = "research.plan.cycles";
+    /**
+     * Research cycles: after each cycle the still uncovered nodes are planned again from another angle (M2). Three
+     * cycles give a node up to three times "Queries per node" queries before the plan reports it as a gap.
+     */
+    public static final int DEFAULT_PLAN_CYCLES = 3;
 
     /**
-     * The output-token budget the agent grants the model PER TURN (the longest contracted answer is the
-     * post-search source review). A budget, not a target: short turns stay short. Configurable so a too
-     * small value never has to be fixed in code again; an unparsable or non-positive persisted value falls
-     * back to the default. Applies to NEW sessions.
+     * Whether every search skips shop, marketplace and document re-upload sites
+     * ({@link com.aresstack.askai.research.domain.scope.NonSourceHosts#DEFAULT}) as a host filter next to the
+     * user's blacklist. Default ON: a listing of a book is never a source of what the book says.
      */
-    public static int loadAgentMaxOutputTokens(WorkspaceStateStore store) {
-        if (store == null) {
-            return DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
-        }
-        try {
-            int value = Integer.parseInt(store.get(KEY_AGENT_MAX_OUTPUT_TOKENS,
-                    String.valueOf(DEFAULT_AGENT_MAX_OUTPUT_TOKENS)).trim());
-            return value > 0 ? value : DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
-        } catch (NumberFormatException invalid) {
-            return DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
+    public static final String KEY_SKIP_NON_SOURCE_HOSTS = "research.search.skipNonSourceHosts";
+
+    public static boolean loadSkipNonSourceHosts(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_SKIP_NON_SOURCE_HOSTS, true);
+    }
+
+    public static void saveSkipNonSourceHosts(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_SKIP_NON_SOURCE_HOSTS, enabled);
         }
     }
 
-    public static void saveAgentMaxOutputTokens(WorkspaceStateStore store, int tokens) {
-        if (store != null && tokens > 0) {
-            store.put(KEY_AGENT_MAX_OUTPUT_TOKENS, String.valueOf(tokens));
+    /**
+     * The research team of the Sources phase (plan T5): the planned queries run side by side, each with a page
+     * worker in a worker browser of its own; the searches still go one after another through the one web search
+     * tool. Default ON: one tab and one model call at a time leave the GPU idle most of the time.
+     */
+    public static final String KEY_TEAM_ENABLED = "research.team.enabled";
+    /**
+     * How many page workers run at the same time, one tab each in the team's page browser. Default 4: the worker
+     * browsers' default tabs per user context; the 2026-10-30 benchmark scales {@code gemma4:e2b} up to about 20.
+     */
+    public static final String KEY_TEAM_WORKERS = "research.team.workers";
+    public static final int DEFAULT_TEAM_WORKERS = 4;
+
+    /** Plan T4: how many of a page's candidate links a page worker may pick to open (depth 1). */
+    public static final String KEY_TEAM_FOLLOW_LINKS = "research.team.followLinks";
+    public static final int DEFAULT_TEAM_FOLLOW_LINKS = 2;
+    /**
+     * Plan T4: how much page text one page worker reads (characters). Default 12000: about 3000 tokens, a page
+     * turn of {@code gemma4:e2b} stays far inside its 32768-token context also with 20 parallel workers.
+     */
+    public static final String KEY_TEAM_PAGE_CHARACTERS = "research.team.pageCharacters";
+    public static final int DEFAULT_TEAM_PAGE_CHARACTERS = 12_000;
+
+    /**
+     * Plan T4: the longest answer of one page worker turn (tokens). Default 512: the labelled lines (a summary of
+     * two to five sentences, the verdict, the links and an optional message) fit with room to spare.
+     */
+    public static final String KEY_TEAM_ANSWER_TOKENS = "research.team.answerTokens";
+    public static final int DEFAULT_TEAM_ANSWER_TOKENS = 512;
+
+    public static int loadTeamAnswerTokens(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_ANSWER_TOKENS, DEFAULT_TEAM_ANSWER_TOKENS);
+    }
+
+    /**
+     * Plan T4: how many new search queries a page worker may suggest per page it reads. Default 2: enough to follow
+     * a named standard or study, few enough that one search does not flood the plan.
+     */
+    public static final String KEY_TEAM_SEARCHES_PER_PAGE = "research.team.searchesPerPage";
+    public static final int DEFAULT_TEAM_SEARCHES_PER_PAGE = 2;
+
+    /**
+     * Plan T4: the next search starts when fewer pages than this are still open in the running one, so the team
+     * never runs dry. Default: the worker count.
+     */
+    public static final String KEY_TEAM_NEXT_SEARCH_BELOW = "research.team.nextSearchBelow";
+
+    /**
+     * Plan T4: the queries per concept node the seed plan starts with when the research team runs (the base query
+     * and the planner's variants). Default 1: the concept's breadth first, one query per node; the deeper queries
+     * come from what the team reads.
+     */
+    public static final String KEY_TEAM_SEED_QUERIES_PER_NODE = "research.team.seedQueriesPerNode";
+    public static final int DEFAULT_TEAM_SEED_QUERIES_PER_NODE = 1;
+
+    /**
+     * Plan T4 gap review: how long the cycle boundary waits for the shared evidence analysis to hold the material
+     * read so far (no source waiting for processing, the corpus analysed); after it the cycle plans from the source
+     * counts.
+     */
+    public static final String KEY_GAP_WAIT_SECONDS = "research.gaps.waitSeconds";
+    public static final int DEFAULT_GAP_WAIT_SECONDS = 180;
+
+    /** Plan T4 gap review: how often the waiting review looks again at the analysis (seconds). */
+    public static final String KEY_GAP_RECHECK_SECONDS = "research.gaps.recheckSeconds";
+    public static final int DEFAULT_GAP_RECHECK_SECONDS = 5;
+
+    public static int loadGapRecheckSeconds(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_GAP_RECHECK_SECONDS, DEFAULT_GAP_RECHECK_SECONDS);
+    }
+
+    /** Plan T4 gap review: the most new topics of the material (inside the Weidezaun) handed to the planner. */
+    public static final String KEY_GAP_NEW_TOPICS = "research.gaps.newTopics";
+    public static final int DEFAULT_GAP_NEW_TOPICS = 3;
+
+    /** Plan T4 gap review: the most queries that found nothing named per gap node. */
+    public static final String KEY_GAP_FAILED_QUERIES = "research.gaps.failedQueries";
+    public static final int DEFAULT_GAP_FAILED_QUERIES = 3;
+
+    /**
+     * The search plan's own bar for "covered" at a cycle boundary, evidence quality: a concept node the analysis calls
+     * OK stays WEAK, and the next research cycle plans it again, while it has fewer distinct passages than this.
+     * Default 16: two writer calls' evidence packs (8 passages each, the "Passages" of the large writer preset) of
+     * different material; live run 4 (2026-11-12) stopped after cycle 1 with "Implementierung mit Kosten und Grenzen"
+     * at 5 to 12 passages, and the analysis' own minimum (3 distinct passages) only says that a topic exists. 0 = off.
+     */
+    public static final String KEY_GAP_MIN_DISTINCT_PASSAGES = "research.gaps.minDistinctPassages";
+    public static final int DEFAULT_GAP_MIN_DISTINCT_PASSAGES = 16;
+
+    /**
+     * The search plan's own bar for "covered", the mission's source preference: when the mission names preferred
+     * sources ("Bevorzuge … DGUV, BAuA …"), a node stays WEAK while fewer than this share of its passages come from
+     * the preferred hosts (the mission's publisher domains and the authority hosts of Source preference); without
+     * a settled analysis the share of its accepted sources counts. The next cycle then searches those publishers
+     * ({@code site:}). Default 0.2, one passage in five: the book of live run 4 cited 15 of 65 sources (23 %) from
+     * authorities, insurers and laws, while nodes read only from vendor pages counted as covered with none. 0 = off.
+     */
+    public static final String KEY_GAP_MIN_PREFERRED_SHARE = "research.gaps.minPreferredShare";
+    public static final double DEFAULT_GAP_MIN_PREFERRED_SHARE = 0.2;
+
+    public static int loadGapMinDistinctPassages(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_GAP_MIN_DISTINCT_PASSAGES, DEFAULT_GAP_MIN_DISTINCT_PASSAGES);
+    }
+
+    /** The preferred-share bar in [0, 1]; a value outside falls back to the default. */
+    public static double loadGapMinPreferredShare(WorkspaceStateStore store) {
+        double share = loadDouble(store, KEY_GAP_MIN_PREFERRED_SHARE, DEFAULT_GAP_MIN_PREFERRED_SHARE);
+        return share >= 0 && share <= 1 ? share : DEFAULT_GAP_MIN_PREFERRED_SHARE;
+    }
+
+    /** The search plan's bar for "covered" under the mission's source preference, read at each queue start. */
+    public static com.aresstack.askai.research.plan.CoverageQuality loadCoverageQuality(
+            WorkspaceStateStore store, com.aresstack.askai.research.plan.SourcePreference preference) {
+        return com.aresstack.askai.research.plan.CoverageQuality.of(loadGapMinDistinctPassages(store),
+                loadGapMinPreferredShare(store), preference);
+    }
+
+    public static int loadGapWaitSeconds(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_GAP_WAIT_SECONDS, DEFAULT_GAP_WAIT_SECONDS);
+    }
+
+    public static int loadGapNewTopics(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_GAP_NEW_TOPICS, DEFAULT_GAP_NEW_TOPICS);
+    }
+
+    public static int loadGapFailedQueries(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_GAP_FAILED_QUERIES, DEFAULT_GAP_FAILED_QUERIES);
+    }
+
+    public static int loadTeamSearchesPerPage(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_TEAM_SEARCHES_PER_PAGE, DEFAULT_TEAM_SEARCHES_PER_PAGE);
+    }
+
+    public static int loadTeamNextSearchBelow(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_NEXT_SEARCH_BELOW, Math.max(1, loadTeamWorkers(store)));
+    }
+
+    public static int loadTeamSeedQueriesPerNode(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_SEED_QUERIES_PER_NODE, DEFAULT_TEAM_SEED_QUERIES_PER_NODE);
+    }
+
+    public static int loadTeamFollowLinks(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_TEAM_FOLLOW_LINKS, DEFAULT_TEAM_FOLLOW_LINKS);
+    }
+
+    public static int loadTeamPageCharacters(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_TEAM_PAGE_CHARACTERS, DEFAULT_TEAM_PAGE_CHARACTERS);
+    }
+
+    public static boolean loadTeamEnabled(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_TEAM_ENABLED, true);
+    }
+
+    public static void saveTeamEnabled(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_TEAM_ENABLED, enabled);
         }
+    }
+
+    /**
+     * The page workers that may run at once, 0 when the research team is switched off. Each worker has its own tab
+     * in the team's one user context, so the "Tabs/user context" setting of the worker browsers bounds the count.
+     */
+    public static int loadTeamWorkers(WorkspaceStateStore store) {
+        if (!loadTeamEnabled(store)) {
+            return 0;
+        }
+        return Math.min(loadPositiveInt(store, KEY_TEAM_WORKERS, DEFAULT_TEAM_WORKERS),
+                loadPositiveInt(store, KEY_WORKER_TABS_PER_USER_CONTEXT, DEFAULT_WORKER_TABS_PER_USER_CONTEXT));
+    }
+
+    /** The caps of the search plan, read at each queue start. */
+    public static com.aresstack.askai.research.plan.SearchPlanCoverage.Caps loadSearchPlanCaps(
+            WorkspaceStateStore store) {
+        return new com.aresstack.askai.research.plan.SearchPlanCoverage.Caps(
+                loadPositiveInt(store, KEY_PLAN_SOURCES_PER_NODE, DEFAULT_PLAN_SOURCES_PER_NODE),
+                loadPositiveInt(store, KEY_PLAN_QUERIES_PER_NODE, DEFAULT_PLAN_QUERIES_PER_NODE),
+                loadNonNegativeInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES),
+                loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES))
+                .withPreferenceQueries(loadSourcePreferenceEnabled(store)
+                        ? loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_QUERIES, DEFAULT_SOURCE_PREFERENCE_QUERIES)
+                        : 0);
+    }
+
+    // ------------------------------------------------------------------ Sources: the mission's source preference
+    /**
+     * Whether the mission's source preference ("Bevorzuge … (DGUV, BAuA, EU-OSHA, Gesetze, Studien)") steers the
+     * search plan: publisher queries per node and cycle and a ranking that moves preferred hosts up and vendor pages
+     * down. Default ON: the 2026-11-10 live run cited no single preferred source although the mission named five.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_ENABLED = "research.sources.preferMissionSources";
+    /** The words that open the preference clause of a mission. */
+    public static final String KEY_SOURCE_PREFERENCE_CUES = "research.sources.preferenceCues";
+    public static final String DEFAULT_SOURCE_PREFERENCE_CUES =
+            "bevorzuge, bevorzugt, vorzugsweise, vorrangig, prefer, preferably, favour, favor";
+    /**
+     * Publisher name → domain, for the {@code site:} queries and the ranking. The defaults are the German and
+     * European authorities, insurers and standards bodies a German non-fiction book cites most; the user edits the
+     * list for other fields. A domain written in the mission itself needs no entry.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_PUBLISHERS = "research.sources.publisherDomains";
+    public static final String DEFAULT_SOURCE_PREFERENCE_PUBLISHERS = "DGUV=dguv.de, BAuA=baua.de, "
+            + "EU-OSHA=osha.europa.eu, Gesetze=gesetze-im-internet.de, Gesetz=gesetze-im-internet.de, "
+            + "EUR-Lex=eur-lex.europa.eu, DIN=din.de, ISO=iso.org, BSI=bsi.bund.de, Destatis=destatis.de, "
+            + "Eurostat=ec.europa.eu, RKI=rki.de, BfDI=bfdi.bund.de, EDPB=edpb.europa.eu";
+    /** Host suffixes of authorities that move up in the ranking whatever the mission says. */
+    public static final String KEY_SOURCE_PREFERENCE_AUTHORITY_HOSTS = "research.sources.authorityHosts";
+    public static final String DEFAULT_SOURCE_PREFERENCE_AUTHORITY_HOSTS =
+            ".bund.de, .europa.eu, .gv.at, .admin.ch, .gov, .gov.uk, .edu";
+    /** URL parts of vendor pages (blog, product, solution, shop) that move down in the ranking, never out. */
+    public static final String KEY_SOURCE_PREFERENCE_DEMOTED = "research.sources.demotedUrlParts";
+    public static final String DEFAULT_SOURCE_PREFERENCE_DEMOTED = "/blog, /news/, /produkt, /product, /loesung, "
+            + "/lösung, /solution, /shop, /kontakt, /contact, /demo";
+    /**
+     * The publisher queries per node and research cycle, on top of "Queries per node". Default 1: each cycle asks
+     * the next preferred publisher for every node, so three cycles reach three publishers without doubling the plan.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_QUERIES = "research.sources.preferenceQueriesPerNode";
+    public static final int DEFAULT_SOURCE_PREFERENCE_QUERIES = 1;
+    /**
+     * The places a preferred hit moves up and a vendor page moves down among the selected hits of a planned query,
+     * and a passage of such a source in the evidence pack of a section. Default 3: a guideline ranked fifth opens
+     * before a vendor blog ranked second, the clearly best hit stays first.
+     */
+    public static final String KEY_SOURCE_PREFERENCE_RANK_SHIFT = "research.sources.preferenceRankShift";
+    public static final int DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT = 3;
+
+    public static boolean loadSourcePreferenceEnabled(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_SOURCE_PREFERENCE_ENABLED, true);
+    }
+
+    public static void saveSourcePreferenceEnabled(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_SOURCE_PREFERENCE_ENABLED, enabled);
+        }
+    }
+
+    /** A comma-separated list setting; the default when unset. */
+    public static String loadText(WorkspaceStateStore store, String key, String fallback) {
+        if (store == null) {
+            return fallback;
+        }
+        String value = store.get(key, null);
+        return value == null ? fallback : value;
+    }
+
+    public static void saveText(WorkspaceStateStore store, String key, String value) {
+        if (store != null) {
+            store.put(key, value == null ? "" : value.trim());
+        }
+    }
+
+    /** The items of a comma-separated list. */
+    public static java.util.List<String> items(String text) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (text != null) {
+            for (String part : text.split(",")) {
+                if (!part.trim().isEmpty()) {
+                    out.add(part.trim());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The settings of the mission's source preference. */
+    public static com.aresstack.askai.research.plan.SourcePreference.Settings loadSourcePreference(
+            WorkspaceStateStore store) {
+        java.util.Map<String, String> publishers = new java.util.LinkedHashMap<String, String>();
+        for (String pair : items(loadText(store, KEY_SOURCE_PREFERENCE_PUBLISHERS,
+                DEFAULT_SOURCE_PREFERENCE_PUBLISHERS))) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                publishers.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+            }
+        }
+        return new com.aresstack.askai.research.plan.SourcePreference.Settings(
+                loadSourcePreferenceEnabled(store),
+                items(loadText(store, KEY_SOURCE_PREFERENCE_CUES, DEFAULT_SOURCE_PREFERENCE_CUES)),
+                publishers,
+                items(loadText(store, KEY_SOURCE_PREFERENCE_AUTHORITY_HOSTS, DEFAULT_SOURCE_PREFERENCE_AUTHORITY_HOSTS)),
+                items(loadText(store, KEY_SOURCE_PREFERENCE_DEMOTED, DEFAULT_SOURCE_PREFERENCE_DEMOTED)),
+                loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_QUERIES, DEFAULT_SOURCE_PREFERENCE_QUERIES),
+                loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_RANK_SHIFT, DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT));
+    }
+
+    // ------------------------------------------------------------------ Document: writer gaps → research
+    /**
+     * Whether the gaps the writer left (its {@code GAP:} lines, sections it could not write for lack of evidence)
+     * are researched on their own after a writing job, as "Research this gap" entries of the search plan. Default
+     * ON: M2 asks the app to research its own gaps without a human; live run 3 ended with four open points nobody
+     * searched for.
+     */
+    public static final String KEY_WRITER_GAP_RESEARCH = "research.document.researchWriterGaps";
+    /**
+     * The most gaps one writing job sends to research. Default 6: one or two per section of a short book, few enough
+     * that the search plan's phase budget is not spent on a single job's open points.
+     */
+    public static final String KEY_WRITER_GAP_MAX = "research.document.writerGapsPerJob";
+    public static final int DEFAULT_WRITER_GAP_MAX = 6;
+    /** Words in a writer failure that mean "not enough evidence" (the failed section becomes a gap). */
+    public static final String KEY_WRITER_GAP_EVIDENCE_WORDS = "research.document.evidenceFailureWords";
+    public static final String DEFAULT_WRITER_GAP_EVIDENCE_WORDS =
+            "evidence, passage, source, beleg, quelle, citation";
+
+    public static boolean loadWriterGapResearch(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_WRITER_GAP_RESEARCH, true);
+    }
+
+    public static void saveWriterGapResearch(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_WRITER_GAP_RESEARCH, enabled);
+        }
+    }
+
+    /**
+     * Whether a written section becomes stale when the research of its writer gaps accepted new sources, so
+     * {@code rewrite-stale} writes it again with them. Default ON: in live run 4 the gap searches ran, and nothing
+     * was written again with what they found.
+     */
+    public static final String KEY_STALE_AFTER_GAP_RESEARCH = "research.document.staleAfterGapResearch";
+
+    public static boolean loadStaleAfterGapResearch(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_STALE_AFTER_GAP_RESEARCH, true);
+    }
+
+    public static void saveStaleAfterGapResearch(WorkspaceStateStore store, boolean enabled) {
+        if (store != null) {
+            store.putBoolean(KEY_STALE_AFTER_GAP_RESEARCH, enabled);
+        }
+    }
+
+    // ------------------------------------------------------------------ Document: evidence pack
+    /** Fewest words a passage needs to enter a writer's evidence pack. */
+    public static final String KEY_WRITER_PROSE_MIN_WORDS = "research.writer.prose.minWords";
+    /** Fewest finished sentences a passage needs to enter a writer's evidence pack. */
+    public static final String KEY_WRITER_PROSE_MIN_SENTENCES = "research.writer.prose.minSentences";
+    /** Longest run of words without punctuation a passage may contain (menus and footers exceed it). */
+    public static final String KEY_WRITER_PROSE_MAX_RUN = "research.writer.prose.maxUnpunctuatedRun";
+    /** Most words of a lone passage that counts as a caption on a page that is almost no prose. */
+    public static final String KEY_WRITER_PROSE_CAPTION_MAX_WORDS = "research.writer.prose.captionMaxWords";
+    /** Share of prose passages below which a page is a listing (shop, index) whose lone sentences are captions. */
+    public static final String KEY_WRITER_PROSE_CAPTION_PAGE_SHARE = "research.writer.prose.captionPageProseShare";
+
+    /**
+     * The prose criteria of the evidence pack (live run 3, fix 2), read for every section: navigation, footer and
+     * heading passages fail them and never reach the writer.
+     */
+    public static com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria loadWriterProseCriteria(
+            WorkspaceStateStore store) {
+        return new com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria(
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_MIN_WORDS,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_WORDS),
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_MIN_SENTENCES,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MIN_SENTENCES),
+                loadPositiveInt(store, KEY_WRITER_PROSE_MAX_RUN,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MAX_UNPUNCTUATED_RUN),
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_CAPTION_MAX_WORDS,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_CAPTION_MAX_WORDS),
+                loadUnitInterval(store, KEY_WRITER_PROSE_CAPTION_PAGE_SHARE,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_CAPTION_PAGE_PROSE_SHARE));
+    }
+
+    /** Claim check stage 2: fewest letters of a content word. */
+    public static final String KEY_WRITER_CARRY_MIN_WORD_LENGTH = "research.writer.carry.minWordLength";
+    /** Claim check stage 2: letters two words must share to count as the same word. */
+    public static final String KEY_WRITER_CARRY_STEM_LENGTH = "research.writer.carry.stemLength";
+    /** Claim check stage 2: share of a sentence's content words a cited passage must contain. */
+    public static final String KEY_WRITER_CARRY_MIN_OVERLAP = "research.writer.carry.minOverlap";
+
+    /**
+     * The thresholds of claim check stage 2 (live run 3, fix 3) for the section writer and the book's quality
+     * report; the prose criteria are the evidence pack's.
+     */
+    public static com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria loadWriterCarryCriteria(
+            WorkspaceStateStore store) {
+        double overlap = loadDouble(store, KEY_WRITER_CARRY_MIN_OVERLAP,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_OVERLAP);
+        if (overlap < 0 || overlap > 1) {
+            overlap = com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_OVERLAP;
+        }
+        return new com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria(
+                loadPositiveInt(store, KEY_WRITER_CARRY_MIN_WORD_LENGTH,
+                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria
+                                .DEFAULT_MIN_WORD_LENGTH),
+                loadPositiveInt(store, KEY_WRITER_CARRY_STEM_LENGTH,
+                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH),
+                overlap, loadWriterProseCriteria(store));
+    }
+
+    // ------------------------------------------------------------------ Document: writer preset
+    /** Words the section writer aims for in one call; a longer section is split by its key points. */
+    public static final String KEY_WRITER_WORDS_PER_CALL = "research.writer.wordsPerCall";
+    /** Repeat check: fewest content words a sentence needs before a near repeat of the book takes it out. */
+    public static final String KEY_WRITER_REPEAT_MIN_WORDS = "research.writer.repeat.minWords";
+    /** Repeat check: share (0..1) of a sentence's content words an earlier sentence of the book must hold. */
+    public static final String KEY_WRITER_REPEAT_MIN_SHARE = "research.writer.repeat.minShare";
+
+    /**
+     * The section writer's repeat check (live run 4, book 6): a sentence that another written section or an earlier
+     * part already says, nearly word for word, leaves the text; the word and stem lengths are the claim check's.
+     */
+    public static com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria loadWriterRepeatCriteria(
+            WorkspaceStateStore store) {
+        double share = loadDouble(store, KEY_WRITER_REPEAT_MIN_SHARE,
+                com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SHARE);
+        if (share <= 0 || share > 1) {
+            share = com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SHARE;
+        }
+        return new com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria(
+                loadPositiveInt(store, KEY_WRITER_REPEAT_MIN_WORDS,
+                        com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_WORDS),
+                share);
+    }
+
+    /** Synthesis: different sources one synthesis paragraph combines (writer prompt and book report). */
+    public static final String KEY_WRITER_SYNTHESIS_MIN_SOURCES = "research.writer.synthesis.minSources";
+    /** Synthesis: paragraphs combining sources the writer prompt asks of each key-point part (0 = none). */
+    public static final String KEY_WRITER_SYNTHESIS_PARAGRAPHS = "research.writer.synthesis.paragraphsPerPart";
+    /** Synthesis: sentences a paragraph needs before the book report counts it. */
+    public static final String KEY_WRITER_SYNTHESIS_MIN_SENTENCES = "research.writer.synthesis.minSentences";
+    /** Synthesis: share (0..1) of single-source paragraphs above which the book report notes a section. */
+    public static final String KEY_WRITER_SYNTHESIS_MAX_SHARE = "research.writer.synthesis.maxSingleSourceShare";
+
+    /**
+     * Synthesis instead of retelling (live run 4, book 6): what the writer prompt asks of each part, and when the
+     * book's quality report notes a section whose paragraphs each retell one source (a note, never blocking).
+     */
+    public static com.aresstack.askai.research.runtime.writer.SynthesisCriteria loadWriterSynthesisCriteria(
+            WorkspaceStateStore store) {
+        int sources = loadPositiveInt(store, KEY_WRITER_SYNTHESIS_MIN_SOURCES,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SOURCES);
+        if (sources < 2) {
+            sources = com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SOURCES;
+        }
+        double share = loadDouble(store, KEY_WRITER_SYNTHESIS_MAX_SHARE,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MAX_SINGLE_SOURCE_SHARE);
+        if (share < 0 || share > 1) {
+            share = com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MAX_SINGLE_SOURCE_SHARE;
+        }
+        return new com.aresstack.askai.research.runtime.writer.SynthesisCriteria(sources,
+                loadNonNegativeInt(store, KEY_WRITER_SYNTHESIS_PARAGRAPHS,
+                        com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_PARAGRAPHS_PER_PART),
+                loadPositiveInt(store, KEY_WRITER_SYNTHESIS_MIN_SENTENCES,
+                        com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SENTENCES),
+                share);
+    }
+
+    /** Answer token budget of one writer call. */
+    public static final String KEY_WRITER_ANSWER_TOKENS = "research.writer.answerTokens";
+    /** Passages one writer call gets; a section written in key-point parts gets this many for each part. */
+    public static final String KEY_WRITER_PASSAGES = "research.writer.passages";
+    /** Tokens each evidence passage may take. */
+    public static final String KEY_WRITER_PASSAGE_TOKENS = "research.writer.passageTokens";
+    /** Passages one source may contribute to a pack. */
+    public static final String KEY_WRITER_PASSAGES_PER_SOURCE = "research.writer.passagesPerSource";
+    /**
+     * Least similarity of a passage to the section's brief (cosine, 0..1, 0 = off). Embedding-dependent: the default
+     * is calibrated for {@code bge-m3} ({@link com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance}).
+     */
+    public static final String KEY_WRITER_MIN_BRIEF_SIMILARITY = "research.writer.minBriefSimilarity";
+    /**
+     * How far a passage may lie below the section's best passage (cosine, 0..1, 0 = off). Embedding-dependent: the
+     * default is calibrated for {@code bge-m3}.
+     */
+    public static final String KEY_WRITER_BRIEF_SIMILARITY_MARGIN = "research.writer.briefSimilarityMargin";
+    /**
+     * Words per call: the plan's small preset (450). Live run 4 measured {@code llama3.1:8b} at 148 to 425 words per
+     * call in all 14 section revisions against the old target of 1,100, so a section of 1,100 words came out at a
+     * fifth of its length; at 450, such a section is written in three key-point parts of about 370 words each.
+     */
+    public static final int DEFAULT_WRITER_WORDS_PER_CALL = 450;
+    /** The answer budget of live run 3 (3,072 tokens): room for a part and its GAP lines without a continuation. */
+    public static final int DEFAULT_WRITER_ANSWER_TOKENS = 3072;
+
+    /**
+     * The section writer's targets (live run 3, fix 4), read for every section: words and answer budget per call,
+     * evidence pack size and per-source cap, prose criteria and claim-check thresholds. The defaults are the values
+     * that were hard-coded before.
+     */
+    public static com.aresstack.askai.research.drafting.EvidenceAssignments.Targets loadWriterTargets(
+            WorkspaceStateStore store) {
+        com.aresstack.askai.research.writer.WriterPackSettings large =
+                com.aresstack.askai.research.writer.WriterPackSettings.LARGE;
+        int passageTokens = loadPositiveInt(store, KEY_WRITER_PASSAGE_TOKENS, large.getPassageTokens());
+        if (passageTokens < com.aresstack.askai.research.writer.WriterPackSettings.MIN_PASSAGE_TOKENS) {
+            passageTokens = large.getPassageTokens();
+        }
+        return new com.aresstack.askai.research.drafting.EvidenceAssignments.Targets(
+                new com.aresstack.askai.research.writer.WriterPackSettings(
+                        loadPositiveInt(store, KEY_WRITER_PASSAGES, large.getPassageCount()), passageTokens,
+                        loadWriterProseCriteria(store),
+                        loadPositiveInt(store, KEY_WRITER_PASSAGES_PER_SOURCE,
+                                com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE),
+                        loadWriterBriefRelevance(store)),
+                loadPositiveInt(store, KEY_WRITER_WORDS_PER_CALL, DEFAULT_WRITER_WORDS_PER_CALL),
+                loadPositiveInt(store, KEY_WRITER_ANSWER_TOKENS, DEFAULT_WRITER_ANSWER_TOKENS),
+                loadWriterCarryCriteria(store), loadWriterRepeatCriteria(store), loadWriterSynthesisCriteria(store));
+    }
+
+    /**
+     * How close an evidence passage must be to its section's brief (live run 4, book 6: passages of another subject
+     * filled the packs of 1.1, 1.2, 2.1 and 4.1). A value outside 0..1 falls back to its default.
+     */
+    public static com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance loadWriterBriefRelevance(
+            WorkspaceStateStore store) {
+        return new com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance(
+                loadUnitInterval(store, KEY_WRITER_MIN_BRIEF_SIMILARITY,
+                        com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MIN_SIMILARITY),
+                loadUnitInterval(store, KEY_WRITER_BRIEF_SIMILARITY_MARGIN,
+                        com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MARGIN));
+    }
+
+    private static double loadUnitInterval(WorkspaceStateStore store, String key, double fallback) {
+        double value = loadDouble(store, key, fallback);
+        return value >= 0 && value <= 1 ? value : fallback;
+    }
+
+    // ------------------------------------------------------------------ Document: topic drift in the book report
+    public static final String KEY_DRIFT_MIN_TERM_LENGTH = "research.book.drift.minTermLength";
+    public static final String KEY_DRIFT_MIN_SENTENCES = "research.book.drift.minSentences";
+    public static final String KEY_DRIFT_NOUNS_ONLY = "research.book.drift.nounsOnly";
+
+    /** The topic-drift thresholds of the book's quality report; the stem is the claim check's. */
+    public static com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria loadTopicDriftCriteria(
+            WorkspaceStateStore store) {
+        boolean nounsOnly = store == null
+                ? com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_NOUNS_ONLY
+                : store.getBoolean(KEY_DRIFT_NOUNS_ONLY,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_NOUNS_ONLY);
+        return new com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria(
+                loadPositiveInt(store, KEY_DRIFT_MIN_TERM_LENGTH,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_TERM_LENGTH),
+                loadPositiveInt(store, KEY_DRIFT_MIN_SENTENCES,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_SENTENCES),
+                loadWriterCarryCriteria(store).getStemLength(), nounsOnly);
     }
 
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";

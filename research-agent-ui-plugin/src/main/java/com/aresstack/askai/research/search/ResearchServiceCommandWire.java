@@ -7,7 +7,8 @@ package com.aresstack.askai.research.search;
  * any model/TeamAgent/state logic. Encoded {@code key=value} with URL-encoded free-text values, so no field
  * ever contains a space. The runtime's parser of the same name is the ONLY consumer.
  *
- * <pre>#RSC1# manual_search request_id=&lt;uuid&gt; query=&lt;urlenc&gt;
+ * <pre>#RSC1# manual_search request_id=&lt;uuid&gt; query=&lt;urlenc&gt; [ranking=bm25|reranker visit_limit=N source_cap=N]
+ *        [team=1 node=&lt;urlenc&gt; book=&lt;urlenc&gt; follow=N page_chars=N answer_tokens=N workers=N searches=N scope=<urlenc>]
  * #RSC1# set_language language=de|en
  * #RSC1# review_sources request_id=&lt;uuid&gt;</pre>
  */
@@ -30,6 +31,90 @@ public final class ResearchServiceCommandWire {
         appendEncoded(sb, "query", query);
         if (languageCode != null && !languageCode.isEmpty()) {
             sb.append(" language=").append("de".equalsIgnoreCase(languageCode) ? "de" : "en");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Plan PR 14: a manual search with the ranking choice, the visit limit (top N of the ranked hits) and the
+     * per-query source cap of a planned query. {@code ranking} is {@code bm25} or {@code reranker}; an empty ranking
+     * or a limit of 0 is left out, so the runtime keeps the typed-search defaults for it.
+     */
+    public static String manualSearch(String requestId, String query, String languageCode, String ranking,
+                                      int visitLimit, int sourceCap) {
+        StringBuilder sb = new StringBuilder(manualSearch(requestId, query, languageCode));
+        if (ranking != null && !ranking.trim().isEmpty()) {
+            sb.append(" ranking=").append("reranker".equalsIgnoreCase(ranking.trim()) ? "reranker" : "bm25");
+        }
+        if (visitLimit > 0) {
+            sb.append(" visit_limit=").append(visitLimit);
+        }
+        if (sourceCap > 0) {
+            sb.append(" source_cap=").append(sourceCap);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Plan T5: a planned query run by the research team. Same search as {@link #manualSearch(String, String, String,
+     * String, int, int)} through the one web search tool; {@code team=1} tells the runtime to read its pages in a
+     * worker browser of their own, beside the other team queries, and {@code node}/{@code book} are the brief of the
+     * page worker.
+     */
+    public static String teamSearch(String requestId, String query, String languageCode, String ranking,
+                                    int visitLimit, int sourceCap, String nodeLabel, String bookTitle,
+                                    int followLinks, int pageCharacters, int answerTokens, int workers,
+                                    int searches, String area) {
+        StringBuilder sb = new StringBuilder(manualSearch(requestId, query, languageCode, ranking, visitLimit,
+                sourceCap));
+        sb.append(" team=1");
+        appendEncoded(sb, "node", nodeLabel);
+        appendEncoded(sb, "book", bookTitle);
+        sb.append(" follow=").append(Math.max(0, followLinks)); // 0 = the worker opens no further link
+        if (pageCharacters > 0) {
+            sb.append(" page_chars=").append(pageCharacters);
+        }
+        if (answerTokens > 0) {
+            sb.append(" answer_tokens=").append(answerTokens);
+        }
+        sb.append(" workers=").append(Math.max(1, workers)).append(" searches=").append(Math.max(0, searches));
+        appendEncoded(sb, "scope", area); // the Weidezaun: the page workers' new queries stay inside it
+        return sb.toString();
+    }
+
+    /**
+     * The mission's source preference appended to a search envelope: {@code prefer} (preferred hosts and host
+     * suffixes), {@code demote} (URL parts of vendor pages), both comma-joined and URL-encoded, and
+     * {@code prefer_shift} (the places they move). Nothing is appended without a shift or without any host or part.
+     */
+    public static String withSourcePreference(String envelope, java.util.List<String> preferredHosts,
+                                              java.util.List<String> demotedMarkers, int shift) {
+        boolean hosts = preferredHosts != null && !preferredHosts.isEmpty();
+        boolean parts = demotedMarkers != null && !demotedMarkers.isEmpty();
+        if (envelope == null || shift <= 0 || (!hosts && !parts)) {
+            return envelope;
+        }
+        StringBuilder sb = new StringBuilder(envelope);
+        if (hosts) {
+            appendEncoded(sb, "prefer", join(preferredHosts));
+        }
+        if (parts) {
+            appendEncoded(sb, "demote", join(demotedMarkers));
+        }
+        sb.append(" prefer_shift=").append(shift);
+        return sb.toString();
+    }
+
+    private static String join(java.util.List<String> values) {
+        StringBuilder sb = new StringBuilder();
+        for (String value : values) {
+            if (value == null || value.trim().isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(value.trim().replace(",", ""));
         }
         return sb.toString();
     }
@@ -73,6 +158,18 @@ public final class ResearchServiceCommandWire {
      */
     public static String generateProbes(String requestId, String requestJson) {
         StringBuilder sb = new StringBuilder(MARKER).append("generate_probes")
+                .append(" request_id=").append(requestId == null ? "" : requestId);
+        appendEncoded(sb, "req", requestJson);
+        return sb.toString();
+    }
+
+    /**
+     * Plan PR 13: encode a concept query plan request (the JSON built by {@code QueryPlanWireCodec}). Internal
+     * seam like generate_probes: the runtime plans every node, one typed {@code #RSX1# query_plan} answer comes
+     * back on this request id — no chat turn, no state change.
+     */
+    public static String planQueries(String requestId, String requestJson) {
+        StringBuilder sb = new StringBuilder(MARKER).append("plan_queries")
                 .append(" request_id=").append(requestId == null ? "" : requestId);
         appendEncoded(sb, "req", requestJson);
         return sb.toString();

@@ -74,7 +74,7 @@ public final class KnowledgeProcessingSettings {
                 1,       // minimumDistinctSourcesPerTopic (C5)
                 750L,    // projectionDebounceMillis (C7)
                 6,       // topicLabelRepresentativePassageCount (C6)
-                "seg-v1",   // segmentationPipelineVersion (the embedding world fingerprint is session-injected)
+                "seg-v2",   // segmentationPipelineVersion (PR 20: passages split to the embedding budget) (the embedding world fingerprint is session-injected)
                 3);      // maxProcessingAttempts
     }
 }

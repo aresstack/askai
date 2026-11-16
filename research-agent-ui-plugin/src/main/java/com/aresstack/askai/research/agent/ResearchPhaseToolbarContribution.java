@@ -174,11 +174,14 @@ public final class ResearchPhaseToolbarContribution implements AgentToolbarContr
         if (semantic == null) {
             return; // the domain withdrew the transition since the popup opened
         }
+        if (!ReopenConfirmation.confirm(pill, semantic)) {
+            return; // D10: Cancel dispatches nothing
+        }
         String outcome = session.executeCommand(semantic, "");
         if (outcome != null && !outcome.startsWith("handled")) {
             JOptionPane.showMessageDialog(pill,
                     outcome.replaceFirst("^rejected:\\s*", ""),
-                    "Phasenwechsel abgelehnt", JOptionPane.WARNING_MESSAGE);
+                    "Phase change refused", JOptionPane.WARNING_MESSAGE);
         }
         // Accepted commands need no handling: the session fires its state change and the ordinary
         // listener re-renders the pill from the new domain state.

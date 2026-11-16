@@ -82,6 +82,20 @@ public class FakeResearchSessionBackendTest {
             backend.submitPrompt(handle, new ResearchPrompt("investigate pf4j", ""));
         }
 
+        /** The user's command (PR 05: the fake never switches phases by itself). */
+        void user(ResearchCommandType command) {
+            backend.executeCommand(handle, command);
+            scheduler.runUntilIdle();
+        }
+
+        /** The user's way to the Sources gate: submit-scope, the chained start, finish-sources. */
+        void toSourcesGate() {
+            scheduler.runUntilIdle();
+            user(ResearchCommandType.SUBMIT_SCOPE);
+            user(ResearchCommandType.START_RESEARCH);
+            user(ResearchCommandType.REQUEST_EVIDENCE_REVIEW);
+        }
+
         /** Approve the currently pending approval (if any) and let the run advance to the next gate. */
         void approveLatestAndRun() {
             ResearchBackendEvent approval = listener.last(ResearchBackendEventType.APPROVAL_REQUESTED);
@@ -115,15 +129,17 @@ public class FakeResearchSessionBackendTest {
     // 2
     @Test
     public void happyPathReachesCompletionThroughThreeApprovals() {
-        // C5: scoping goes STRAIGHT to research (the live outline is a mobile projection, not a gate) —
-        // the first approval is the evidence gate.
+        // PR 05: every phase change is the user's command; the fake only shows the phase's work.
         Fixture f = new Fixture("s1");
-        f.scheduler.runUntilIdle(); // → Sources approval gate (approval 1)
+        f.toSourcesGate(); // → Sources approval gate (approval 1)
         assertEquals(ResearchPhase.RESEARCH, f.listener.lastState().getPhase());
         assertEquals(ResearchRunState.WAITING_FOR_USER, f.listener.lastState().getRunState());
 
-        f.approveLatestAndRun(); // evidence → outline gate
-        f.approveLatestAndRun(); // outline → document review gate
+        f.approveLatestAndRun(); // evidence → outline/running
+        f.user(ResearchCommandType.PROPOSE_OUTLINE); // finish-outline
+        f.approveLatestAndRun(); // outline → document/waiting
+        f.user(ResearchCommandType.START_DRAFTING);
+        f.user(ResearchCommandType.REQUEST_DRAFT_REVIEW); // finish-document
         f.approveLatestAndRun(); // final → completed
 
         assertEquals(3, f.listener.ofType(ResearchBackendEventType.APPROVAL_REQUESTED).size());
@@ -131,11 +147,24 @@ public class FakeResearchSessionBackendTest {
         assertEquals(1, f.listener.ofType(ResearchBackendEventType.COMPLETED).size());
     }
 
+    @Test
+    public void theFakeNeverSwitchesPhasesByItself() {
+        Fixture f = new Fixture("s1");
+        f.scheduler.runUntilIdle();
+        assertEquals(ResearchPhase.SCOPING, f.listener.lastState().getPhase());
+        assertEquals(ResearchRunState.RUNNING, f.listener.lastState().getRunState());
+        f.user(ResearchCommandType.SUBMIT_SCOPE);
+        f.user(ResearchCommandType.START_RESEARCH);
+        f.scheduler.runUntilIdle();
+        assertEquals(ResearchPhase.RESEARCH, f.listener.lastState().getPhase());
+        assertEquals(ResearchRunState.RUNNING, f.listener.lastState().getRunState());
+    }
+
     // 3
     @Test
     public void sequenceNumbersAreMonotonicAndContiguousPerSession() {
         Fixture f = new Fixture("s1");
-        f.scheduler.runUntilIdle();
+        f.toSourcesGate();
         f.approveLatestAndRun();
         long expected = 1;
         for (ResearchBackendEvent e : f.listener.events) {
@@ -170,7 +199,7 @@ public class FakeResearchSessionBackendTest {
     @Test
     public void approvalGateStopsAutomaticProgress() {
         Fixture f = new Fixture("s1");
-        f.scheduler.runUntilIdle();
+        f.toSourcesGate();
         int countAtGate = f.listener.events.size();
         f.scheduler.runUntilIdle(); // nothing more should happen without an approval
         assertEquals(countAtGate, f.listener.events.size());
@@ -181,19 +210,19 @@ public class FakeResearchSessionBackendTest {
     @Test
     public void approveAdvancesPastTheGate() {
         Fixture f = new Fixture("s1");
-        f.scheduler.runUntilIdle();
+        f.toSourcesGate();
         assertEquals(ResearchPhase.RESEARCH, f.listener.lastState().getPhase());
         f.approveLatestAndRun();
-        // After approving the evidence the run auto-proposes the outline and stops at its gate.
+        // After approving the evidence the Outline phase runs until the user finishes it.
         assertEquals(ResearchPhase.OUTLINE, f.listener.lastState().getPhase());
-        assertEquals(ResearchRunState.WAITING_FOR_USER, f.listener.lastState().getRunState());
+        assertEquals(ResearchRunState.RUNNING, f.listener.lastState().getRunState());
     }
 
     // 7
     @Test
     public void rejectReturnsToTheWorkingPhase() {
         Fixture f = new Fixture("s1");
-        f.scheduler.runUntilIdle();
+        f.toSourcesGate();
         ResearchBackendEvent approval = f.listener.last(ResearchBackendEventType.APPROVAL_REQUESTED);
         f.backend.reject(f.handle, approval.getApprovalId(), "needs more detail");
         // Immediately after the rejection (before auto-advance) we are back in RESEARCH/RUNNING.
@@ -206,7 +235,7 @@ public class FakeResearchSessionBackendTest {
     @Test
     public void wrongApprovalIdEmitsErrorAndDoesNotAdvance() {
         Fixture f = new Fixture("s1");
-        f.scheduler.runUntilIdle();
+        f.toSourcesGate();
         ResearchPhase before = f.listener.lastState().getPhase();
         ResearchRunState beforeRun = f.listener.lastState().getRunState();
         f.backend.approve(f.handle, "not-a-real-approval");
@@ -219,7 +248,7 @@ public class FakeResearchSessionBackendTest {
     @Test
     public void duplicateApproveIsIdempotent() {
         Fixture f = new Fixture("s1");
-        f.scheduler.runUntilIdle();
+        f.toSourcesGate();
         ResearchBackendEvent approval = f.listener.last(ResearchBackendEventType.APPROVAL_REQUESTED);
         f.backend.approve(f.handle, approval.getApprovalId());
         f.scheduler.runUntilIdle();
@@ -257,7 +286,8 @@ public class FakeResearchSessionBackendTest {
             }
         }
         assertEquals(2, thinkingStarts);
-        assertEquals(ResearchPhase.RESEARCH, f.listener.lastState().getPhase());
+        assertEquals("the fake never leaves the phase by itself", ResearchPhase.SCOPING,
+                f.listener.lastState().getPhase());
     }
 
     // 12
@@ -329,7 +359,8 @@ public class FakeResearchSessionBackendTest {
         assertEquals(ResearchRunState.BLOCKED, f.listener.lastState().getRunState());
         f.backend.executeCommand(f.handle, ResearchCommandType.UNBLOCK);
         f.scheduler.runUntilIdle();
-        assertEquals(ResearchPhase.RESEARCH, f.listener.lastState().getPhase());
+        assertEquals(ResearchPhase.SCOPING, f.listener.lastState().getPhase());
+        assertEquals(ResearchRunState.RUNNING, f.listener.lastState().getRunState());
     }
 
     // 18
@@ -343,7 +374,8 @@ public class FakeResearchSessionBackendTest {
         assertEquals("HTTP 503 from upstream", error.getTechnicalDetail());
         f.backend.executeCommand(f.handle, ResearchCommandType.RETRY);
         f.scheduler.runUntilIdle();
-        assertEquals(ResearchPhase.RESEARCH, f.listener.lastState().getPhase());
+        assertEquals(ResearchPhase.SCOPING, f.listener.lastState().getPhase());
+        assertEquals(ResearchRunState.RUNNING, f.listener.lastState().getRunState());
     }
 
     // 19

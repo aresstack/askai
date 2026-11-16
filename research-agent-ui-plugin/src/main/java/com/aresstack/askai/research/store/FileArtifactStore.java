@@ -72,12 +72,7 @@ public final class FileArtifactStore implements AgentArtifactStore {
         }
         try {
             Properties props = new Properties();
-            java.io.InputStream in = new java.io.FileInputStream(meta);
-            try {
-                props.load(in);
-            } finally {
-                in.close();
-            }
+            props.putAll(StoreIo.loadUtf8Properties(meta));
             return Long.parseLong(props.getProperty("revision", "1"));
         } catch (Exception corruptOrMissing) {
             return 1L; // isolate a corrupt meta; never lose the Markdown

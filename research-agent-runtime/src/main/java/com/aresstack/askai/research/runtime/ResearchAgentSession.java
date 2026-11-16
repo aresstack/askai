@@ -93,6 +93,13 @@ public final class ResearchAgentSession {
     /** Whether the HOST offers the Konzeptpapier tools (detected from the MCP tool list at startup). */
     private boolean conceptToolsAvailable;
     /** Tool-round / repair budgets for the concept loop — the user's settings via env hand-off. */
+    /**
+     * The answer budget of one orchestrator decision and of a worker answer (planner, verifier, web researcher;
+     * the writer has its own setting): the 4,096 these roles always had, now their own value instead of the
+     * removed global "Answer budget" setting (plan PR 03).
+     */
+    static final int WORKER_ANSWER_TOKENS = 4096;
+
     private int conceptMaxToolRounds =
             com.aresstack.askai.research.runtime.team.ConceptToolRounds.DEFAULT_MAX_TOOL_ROUNDS;
     private int conceptMaxRepairAttempts =
@@ -228,7 +235,9 @@ public final class ResearchAgentSession {
         // The model-backed TeamAgent is created for EVERY session, BEFORE (and independent of) the browser:
         // the conversation runs on the central main model even while the browser stays STOPPED. It must NOT
         // live under hasBrowser() or the research loop.
-        this.mainModelChat = roleChat(com.aresstack.askai.research.runtime.role.ResearchRoles.CONVERSATION);
+        // Each phase runs on its own slot (phase.<id>, plan 5.1); the Concept transport is created up front.
+        this.mainModelChat = phaseChat(com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry
+                .SCOPING_PHASE_ID);
         for (com.aresstack.askai.research.runtime.role.ResearchRole worker
                 : com.aresstack.askai.research.runtime.role.ResearchRoles.workers()) {
             // The layout repair runs over its own structured-inference transport (buildInferencePort).
@@ -238,7 +247,12 @@ public final class ResearchAgentSession {
         }
         // The assembler reads the session's LIVE working language per turn: a set_language between turns
         // changes the next turn's context, never the history.
-        this.teamAgent = new com.aresstack.askai.research.runtime.team.ResearchTeamAgent(mainModelChat,
+        this.teamAgent = new com.aresstack.askai.research.runtime.team.ResearchTeamAgent(
+                new com.aresstack.askai.research.runtime.team.PhaseChats() {
+                    public com.aresstack.askai.research.runtime.team.MainModelChat chatFor(String phaseId) {
+                        return phaseChat(phaseId);
+                    }
+                },
                 com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry.defaults(
                         // Settings checkbox "Immer Suchvorschläge anbieten" (host env hand-off, default off).
                         "true".equalsIgnoreCase(environment.get("ASKAI_SCOPING_ALWAYS_SUGGEST")),
@@ -275,24 +289,40 @@ public final class ResearchAgentSession {
                             public String rendered() {
                                 return scopeFence.rendered();
                             }
+                        }).withCurrentConceptSummary(
+                        new com.aresstack.askai.research.runtime.team.PhaseContextAssembler
+                                .CurrentConceptSummary() {
+                            public String rendered() {
+                                // Plan PR 16: later phases see the frozen concept read-only, never
+                                // the live concept with its edit rules. Best effort, like the concept.
+                                return hostBlock("concept_summary", "No approved concept.");
+                            }
+                        }).withCurrentChangeRequest(
+                        new com.aresstack.askai.research.runtime.team.PhaseContextAssembler
+                                .CurrentChangeRequest() {
+                            public String forPhase(String phaseId) {
+                                // The host answers for its live phase, which is the turn's phase.
+                                return hostBlock("phase_change_request", "No change request.");
+                            }
+                        }).withPhaseArtifact(
+                        new com.aresstack.askai.research.runtime.team.PhaseContextAssembler
+                                .PhaseArtifact() {
+                            public String rendered(String phaseId) {
+                                // Plan PR 15: the Sources block (search plan, coverage per node); plan PR 21: the
+                                // Outline block (ids, titles, coverage per chapter). Document follows in PR 29.
+                                String phase = phaseId == null ? "" : phaseId.trim();
+                                if (com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry
+                                        .RESEARCH_PHASE_ID.equalsIgnoreCase(phase)) {
+                                    return hostBlock("search_plan_overview", "No search plan.");
+                                }
+                                return "outline".equalsIgnoreCase(phase) ? hostBlock("outline_read", "No outline.") : "";
+                            }
                         }));
-        // The user's "Agent-Antwortbudget (Tokens)" setting (host env hand-off): the per-turn output
-        // budget is configuration, never a hidden constant. Unset/invalid → the documented default.
-        String outputBudget = environment.get("ASKAI_AGENT_MAX_OUTPUT_TOKENS");
-        if (outputBudget != null && !outputBudget.trim().isEmpty()) {
-            try {
-                teamAgent.setMaxOutputTokens(Integer.parseInt(outputBudget.trim()));
-            } catch (NumberFormatException invalid) {
-                System.err.println("[research-agent] ignoring invalid ASKAI_AGENT_MAX_OUTPUT_TOKENS="
-                        + outputBudget.trim());
-            }
-        }
         // Konzeptpapier loop budgets (host env hand-off): tool rounds ≠ repair attempts — one is the
         // WORK budget, the other the ERROR tolerance; both are settings, never hidden constants.
         conceptMaxToolRounds = envInt("ASKAI_CONCEPT_TOOL_ROUNDS", conceptMaxToolRounds);
         conceptMaxRepairAttempts = envInt("ASKAI_CONCEPT_REPAIR_ATTEMPTS", conceptMaxRepairAttempts);
         System.err.println("[research-agent] TeamAgent ready on " + mainModelChat.modelName()
-                + " outputBudget=" + teamAgent.getMaxOutputTokens()
                 + " conceptTools=" + conceptToolsAvailable
                 + (conceptToolsAvailable
                         ? " rounds=" + conceptMaxToolRounds + " repairs=" + conceptMaxRepairAttempts
@@ -313,7 +343,11 @@ public final class ResearchAgentSession {
                 if (googleEnabled(browserEngineSelection)) {
                     this.googleSearchStrategy = com.aresstack.askai.research.runtime.search
                             .GoogleSearchBrowserStrategy.create(ensureSearchBrowser(), java.util.Locale.getDefault(),
-                                    environment.get("ASKAI_GOOGLE_SEARCH_URL"));
+                                    environment.get("ASKAI_GOOGLE_SEARCH_URL"),
+                                    browserEngineSelection.resultPagesFor(com.aresstack.askai.browser.search.engine
+                                            .BrowserSearchEngineCatalog.GOOGLE),
+                                    browserEngineSelection.delayMillisFor(com.aresstack.askai.browser.search.engine
+                                            .BrowserSearchEngineCatalog.GOOGLE));
                 }
             }
             // OPTIONAL model-backed SERP layout repair over the central main model (honest fallback else).
@@ -364,17 +398,54 @@ public final class ResearchAgentSession {
         if (!useAiReranker()) {
             return bm25Reranker; // the user's default: cheap lexical scoring, model only on opt-in
         }
+        return crossEncoderFor(languageCode);
+    }
+
+
+    /**
+     * Plan PR 14 (D5): the ranking of a planned query, or {@code null} for a typed search (no ranking field).
+     * {@code reranker} ranks with the installed cross-encoder of the search language whatever "Use AI reranker"
+     * says, and falls back to BM25 per call when it is unavailable; {@code bm25} ranks lexically.
+     */
+    private com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker plannedRanking(
+            com.aresstack.askai.research.runtime.service.ResearchServiceCommand command, String languageCode) {
+        if (command.getRanking().isEmpty()) {
+            return null;
+        }
+        if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.RANKING_BM25
+                .equals(command.getRanking())) {
+            return com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker.keywords(bm25Reranker,
+                    command.getVisitLimit()).withSourcePreference(sourcePreference(command));
+        }
+        com.aresstack.askai.research.runtime.rerank.CandidateReranker crossEncoder;
+        try {
+            crossEncoder = crossEncoderFor(languageCode);
+        } catch (RuntimeException unavailable) {
+            System.err.println("[manual-search] planned query: cross-encoder unavailable, ranked by keywords: "
+                    + unavailable.getMessage());
+            crossEncoder = null;
+        }
+        return com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker.ranked(crossEncoder, bm25Reranker,
+                command.getVisitLimit()).withSourcePreference(sourcePreference(command));
+    }
+
+    /** The mission's source preference a planned query carries ({@code NONE} when it carries none). */
+    private static com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking sourcePreference(
+            com.aresstack.askai.research.runtime.service.ResearchServiceCommand command) {
+        return new com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking(command.getPreferredHosts(),
+                command.getDemotedMarkers(), command.getPreferenceShift());
+    }
+
+    /** The installed cross-encoder of a language, independent of "Use AI reranker"; {@code null} when none. */
+    private com.aresstack.askai.research.runtime.rerank.CandidateReranker crossEncoderFor(String languageCode) {
         String lang = "de".equalsIgnoreCase(languageCode) ? "de" : "en";
-        String path = "de".equals(lang) ? environment.rerankerConfigDePath
-                : environment.rerankerConfigEnPath;
+        String path = "de".equals(lang) ? environment.rerankerConfigDePath : environment.rerankerConfigEnPath;
         if (path == null) {
-            return reranker; // no per-language snapshot published → the session-start default
+            return reranker;
         }
         synchronized (rerankerByLanguage) {
-            com.aresstack.askai.research.runtime.rerank.CandidateReranker cached =
-                    rerankerByLanguage.get(lang);
+            com.aresstack.askai.research.runtime.rerank.CandidateReranker cached = rerankerByLanguage.get(lang);
             if (cached == null) {
-                // Reuse the already readiness-checked default when the language file IS the default file.
                 cached = path.equals(environment.rerankerConfigPath) && reranker != null
                         ? reranker : buildRerankerFromPath(path);
                 rerankerByLanguage.put(lang, cached);
@@ -422,9 +493,9 @@ public final class ResearchAgentSession {
 
     /**
      * Build one model role's chat transport over the host's model port (ADR 0001, 3.2): the role names its
-     * model slot, the platform resolves it (by default to the central main model). The host-published
-     * inference descriptor ({@code ASKAI_INFERENCE_CONFIG}) still gates it: it is how AskAI says that a main
-     * model is selected, and it carries the user's per-call timeout. An absent or invalid descriptor, or a
+     * model slot, the platform resolves it (exact, parent, {@code default}; never the chat model). The
+     * host-published inference descriptor ({@code ASKAI_INFERENCE_CONFIG}) still gates it: the host writes it
+     * from the {@code default} slot, and it carries the user's per-call timeout. An absent or invalid descriptor, or a
      * host without a model port, is NOT fatal and NEVER a static fake dialogue: it yields an
      * {@code UnavailableMainModelChat}, so the very first greeting is an honest, retryable
      * {@code MODEL_UNAVAILABLE}. A later valid descriptor is swapped in via {@link ReloadableMainModelChat}.
@@ -434,12 +505,11 @@ public final class ResearchAgentSession {
         com.aresstack.askai.agent.model.port.ModelSlot slot = role.getSlot();
         if (!environment.hasInference()) {
             System.err.println("[research-agent] no inference descriptor — model slot " + slot + " unavailable");
-            // Prefer the actionable reason the host passed (e.g. "No main model is selected. Choose a chat
-            // model…"); fall back to a self-explanatory default that still points the user at the selector.
+            // Prefer the actionable reason the host passed; fall back to a self-explanatory default.
             String reason = environment.inferenceUnavailableReason != null
                     ? environment.inferenceUnavailableReason
-                    : "No main (chat) model is selected. Choose one in the model selector at the top of the "
-                            + "chat, then reopen the research tab.";
+                    : "No research model is available. Set it under Research settings -> Models, then "
+                            + "reopen the research tab.";
             return new com.aresstack.askai.research.runtime.team.UnavailableMainModelChat(reason);
         }
         if (modelPort == null) {
@@ -481,6 +551,15 @@ public final class ResearchAgentSession {
             }
             return transport.chat;
         }
+    }
+
+    /**
+     * The conversation transport of a live phase: the conversation role on slot {@code phase.<id>} (plan 5.1),
+     * through the same {@link #roleChats()} factory every role uses, so a chat model change never reaches it.
+     */
+    private com.aresstack.askai.research.runtime.team.ReloadableMainModelChat phaseChat(String phaseId) {
+        return roleChat(com.aresstack.askai.research.runtime.role.ResearchRoles.CONVERSATION.withSlot(
+                com.aresstack.askai.research.runtime.inference.ResearchModelSlots.phase(phaseId)));
     }
 
     /**
@@ -693,13 +772,36 @@ public final class ResearchAgentSession {
         return false;
     }
 
-    /** The Browser (SERP) search over {@code pageEngines} (the research browser's DuckDuckGo/Bing search). */
+    /**
+     * The Browser (SERP) search over {@code pageEngines} (the research browser's engine search): the priority groups
+     * of Search → Engines, with the configured "enough results".
+     */
     private com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy browserEngines(
             com.aresstack.askai.research.runtime.search.SearchStrategy pageEngines) {
+        com.aresstack.askai.browser.search.LegacySearchNavigationSettings navigation =
+                loadBrowserSearchSettings().navigation;
         return new com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy(
-                browserEngineSelection != null ? browserEngineSelection
-                        : loadBrowserSearchSettings().navigation.engineSelection,
-                googleSearchStrategy, pageEngines);
+                browserEngineSelection != null ? browserEngineSelection : navigation.engineSelection,
+                navigation.minimumUsableResults, googleSearchStrategy, pageEngines);
+    }
+
+    /** The search progress label of the Browser (SERP) search: "Google" when it asks Google only, else none. */
+    private static String browserEnginesLabel(
+            com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy engines) {
+        return engines.isGoogleOnly() ? providerLabel(
+                com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER) : null;
+    }
+
+    /** The SERP layout repair of a worker's search: its metered port, else the session's, else none. */
+    private com.aresstack.askai.browser.search.inference.StructuredInferencePort layoutRepairPort(
+            com.aresstack.askai.browser.search.inference.StructuredInferencePort metered) {
+        if (metered != null) {
+            return metered;
+        }
+        if (inferencePort != null) {
+            return inferencePort;
+        }
+        return new com.aresstack.askai.browser.search.analysis.UnavailableStructuredInferencePort();
     }
 
     private static String providerLabel(
@@ -740,9 +842,37 @@ public final class ResearchAgentSession {
         return ResearchRuntimeShared.process().searchBrowser();
     }
 
+    /** The search-browser resolver for engine redirect wrappers; null when the search browser cannot be had. */
+    private com.aresstack.askai.research.runtime.acquire.OpaqueRedirectResolver redirectResolver() {
+        try {
+            return new com.aresstack.askai.research.runtime.search.SearchBrowserRedirectResolver(
+                    ensureSearchBrowser());
+        } catch (RuntimeException e) {
+            System.err.println("[research-agent] no search browser for redirect resolution: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Whether a CAPTCHA/consent wall on a page waits for the user: the setting, unless the research browser runs
+     * headless ({@code ASKAI_RESEARCH_BROWSER_HEADLESS=true}) — then there is no window to solve anything in, the
+     * page is skipped and nobody is asked.
+     */
+    private boolean challengeWaitForUser() {
+        boolean headless = "true".equalsIgnoreCase(
+                String.valueOf(environment.get("ASKAI_RESEARCH_BROWSER_HEADLESS")).trim());
+        return loadBrowserSearchSettings().captcha.waitForUser && !headless;
+    }
+
     public void cancel() {
         System.err.println("[research-agent] cancel");
         cancelled.set(true);
+        for (java.util.concurrent.atomic.AtomicBoolean team : teamRuns) {
+            team.set(true); // every running team query stops too (plan T5)
+        }
+        for (Thread waiting : teamWaiters) {
+            waiting.interrupt(); // a team query waiting for a tab gives up now
+        }
         // Abort any in-flight model call so a pause/cancel or a session/tab close returns promptly instead of
         // waiting out the full model timeout; the aborted call surfaces as an honest non-OK turn.
         for (RoleTransport transport : roleTransports()) {
@@ -823,7 +953,7 @@ public final class ResearchAgentSession {
         String text = input == null ? "" : input;
         // FIRST branch: a typed SERVICE COMMAND (e.g. a user-triggered web search) arrives on the
         // prompt channel but is NOT a chat turn — dispatch it before ANY readiness/model/TeamAgent/state logic,
-        // then return. No applyPendingModelReload, no readStateView, no TeamAgent, no hostIsInResearchRunning.
+        // then return. No applyPendingModelReload, no readStateView, no TeamAgent, no research-state check.
         if (com.aresstack.askai.research.runtime.service.ResearchServiceCommandWire.isServiceCommand(text)) {
             handleServiceCommand(ctx, text);
             return AgentTurnOutcome.END_TURN;
@@ -831,32 +961,17 @@ public final class ResearchAgentSession {
         if (cancelled.get()) {
             return AgentTurnOutcome.CANCELLED;
         }
-        // Autonomous web research turn: a NORMAL user question starts the loop whenever the HOST state
-        // machine (mirrored via research_status — this process owns no state) is in research/running.
-        // The legacy explicit "research:" prefix keeps working. Without a browser endpoint this is a
-        // visible, honest refusal — never a fallback.
+        // Plan PR 15: only the explicit "research:" prefix starts the autonomous loop, and only while the HOST
+        // state machine (mirrored via research_status — this process owns no state) is in research/running.
+        // A plain typed line in research/running reaches the Sources assistant like any conversation turn;
+        // the search plan queue does the acquisition. Outside research/running "research:" is refused before
+        // any browser call, with a pointer to /search.
         boolean explicitResearch = text.startsWith("research:");
-        String task = explicitResearch ? text.substring("research:".length()).trim() : text.trim();
-        if ((explicitResearch || hostIsInResearchRunning()) && !task.isEmpty()) {
-            // ADR 0001, lane F: with the orchestrated mode selected, a plain research question goes to the
-            // orchestrator (plan first, the user approves); "research:" stays the single autonomous loop.
-            if (!explicitResearch && orchestratorSettings().getMode()
-                    == com.aresstack.askai.research.runtime.orchestrator.OrchestratorSettings.Mode.ORCHESTRATED) {
-                com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun current =
-                        orchestratorSession().current();
-                if (current != null && current.getState()
-                        == com.aresstack.askai.research.runtime.orchestrator.OrchestratorRun.State.AWAITING_INPUT) {
-                    // The run asked the user a question: this message is the answer, not a new question.
-                    orchestratorTurn = ctx;
-                    try {
-                        orchestratorSession().answer(task, cancelled, orchestratorOutput(ctx));
-                    } finally {
-                        orchestratorTurn = null;
-                    }
-                } else {
-                    orchestratorStart(ctx, task);
-                }
-                return cancelled.get() ? AgentTurnOutcome.CANCELLED : AgentTurnOutcome.END_TURN;
+        String task = explicitResearch ? text.substring("research:".length()).trim() : "";
+        if (explicitResearch && !task.isEmpty()) {
+            if (!hostIsInResearchRunning()) {
+                ctx.message(researchRefusal(sessionLanguage.code()));
+                return AgentTurnOutcome.END_TURN;
             }
             if (!hasBrowser()) {
                 // An honest, STRUCTURED refusal: the host renders a readable result card from it.
@@ -883,7 +998,6 @@ public final class ResearchAgentSession {
         // authority — this only reads research_status and speaks the model's own words.
         applyPendingModelReload(ctx);
         com.aresstack.askai.research.runtime.team.TeamAgentStateView view = readStateView(ctx);
-        reconcileConfirmedScope(view);
         // No greeting turn: a fresh chat stays empty until the user writes, and the first answer replies to
         // the user's topic directly. The host starts the scoping (SCOPING/NEW → running) on the first message;
         // a host that has not yet done so gets the one-step signal here. An empty turn on a fresh state (an
@@ -898,10 +1012,91 @@ public final class ResearchAgentSession {
         if (freshState) {
             ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.greeted());
         }
-        emitTeamAgentResult(ctx, conceptAwareRespond(ctx, view, text), view.getPhaseId());
+        // The chat turn and its tool rounds hold the history lock as one unit: a review turn waits (PR 17).
+        final String turnText = text;
+        com.aresstack.askai.research.runtime.team.TeamAgentResult turn = teamAgent.exclusively(
+                new java.util.function.Supplier<com.aresstack.askai.research.runtime.team.TeamAgentResult>() {
+                    public com.aresstack.askai.research.runtime.team.TeamAgentResult get() {
+                        return conceptAwareRespond(ctx, view, turnText);
+                    }
+                });
+        emitTeamAgentResult(ctx, turn, view.getPhaseId());
+        runSourcesAction(ctx, turn, view.getPhaseId());
         return cancelled.get()
                 ? AgentTurnOutcome.CANCELLED
                 : AgentTurnOutcome.END_TURN;
+    }
+
+    /**
+     * Plan PR 15: the Sources assistant's one optional action ({@code request_research} or {@code blacklist_add})
+     * runs on the host only when the phase's action union offers it right now; the host's answer is the visible
+     * receipt. It starts no search: a plan entry runs when the user starts the plan.
+     */
+    private void runSourcesAction(AgentOutput ctx, com.aresstack.askai.research.runtime.team.TeamAgentResult turn,
+                                  String phaseId) {
+        if (turn == null || turn.getStatus() != com.aresstack.askai.research.runtime.team.TeamAgentResult.Status.OK
+                || !(turn.getOutput() instanceof com.aresstack.askai.research.runtime.team.TeamAgentTurn)) {
+            return;
+        }
+        com.aresstack.askai.research.runtime.team.TeamAgentTurn.Action action =
+                ((com.aresstack.askai.research.runtime.team.TeamAgentTurn) turn.getOutput()).getAction();
+        if (action == null) {
+            return;
+        }
+        java.util.List<String> offered = research == null ? java.util.Collections.<String>emptyList()
+                : research.toolNames();
+        if (!com.aresstack.askai.research.runtime.team.PhaseActionUnion.forPhase(phaseId, offered)
+                .contains(action.getType())) {
+            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.log(
+                    "sources action dropped: " + action.getType() + " is not offered in phase " + phaseId));
+            return;
+        }
+        java.util.Map<String, Object> args = new java.util.LinkedHashMap<String, Object>();
+        if (com.aresstack.askai.research.runtime.team.TeamAgentTurn.Action.REQUEST_RESEARCH
+                .equals(action.getType())) {
+            args.put("query", action.getQuery());
+            if (!action.getNode().isEmpty()) {
+                args.put("node", action.getNode());
+            }
+        } else {
+            args.put("entry", action.getEntry());
+        }
+        String receipt;
+        try {
+            receipt = research.call(action.getType(), args);
+        } catch (com.aresstack.askai.research.runtime.loop.ToolInvoker.ToolFailure failed) {
+            receipt = failed.getMessage();
+        } catch (com.aresstack.askai.research.runtime.loop.ToolInvoker.EndpointUnavailable gone) {
+            receipt = "The research endpoint is not available.";
+        }
+        ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.log(
+                "sources action " + action.getType() + " -> " + receipt));
+        ctx.message(sourcesActionReceipt(action, receipt, sessionLanguage.code()));
+    }
+
+    /** The visible receipt of a Sources action, from the host's answer (never the model's claim). */
+    static String sourcesActionReceipt(com.aresstack.askai.research.runtime.team.TeamAgentTurn.Action action,
+                                       String hostAnswer, String languageCode) {
+        boolean german = "de".equalsIgnoreCase(languageCode == null ? "" : languageCode.trim());
+        boolean added = hostAnswer != null && hostAnswer.startsWith("ADDED");
+        boolean research = com.aresstack.askai.research.runtime.team.TeamAgentTurn.Action.REQUEST_RESEARCH
+                .equals(action.getType());
+        if (added && research) {
+            return german
+                    ? "Zum Suchplan hinzugefügt: \"" + action.getQuery() + "\". Die Suche läuft, sobald du den "
+                            + "Suchplan startest (\"Run search plan\")."
+                    : "Added to the search plan: \"" + action.getQuery() + "\". It runs when you start the plan "
+                            + "(\"Run search plan\").";
+        }
+        if (added) {
+            return german
+                    ? "Auf die Blacklist gesetzt: \"" + action.getEntry() + "\". Künftige Suchen lassen es aus."
+                    : "Added to the blacklist: \"" + action.getEntry() + "\". Future searches skip it.";
+        }
+        String reason = hostAnswer == null ? "" : hostAnswer.replaceFirst("^Tool failed:\\s*", "").trim();
+        return german
+                ? (research ? "Der Suchplan wurde nicht geändert: " : "Die Blacklist wurde nicht geändert: ") + reason
+                : (research ? "The search plan was not changed: " : "The blacklist was not changed: ") + reason;
     }
 
     /**
@@ -937,6 +1132,9 @@ public final class ResearchAgentSession {
         } else if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_CHOOSE_ADVICE
                 .equals(command.getType())) {
             handleChooseAdvice(ctx, command.getRequestId(), command.getRequest());
+        } else if (com.aresstack.askai.research.runtime.service.ResearchServiceCommand.TYPE_PLAN_QUERIES
+                .equals(command.getType())) {
+            handlePlanQueries(ctx, command.getRequestId(), command.getRequest());
         } else if (command.getType().startsWith("orchestrator_")) {
             handleOrchestratorCommand(ctx, command);
         }
@@ -1040,9 +1238,9 @@ public final class ResearchAgentSession {
                             acquisition, research, orchestratorSettings(),
                             com.aresstack.askai.research.runtime.orchestrator.WorkerRoleSettings.from(
                                     environment.values()),
-                            teamAgent == null ? 0 : teamAgent.getMaxOutputTokens()),
+                            WORKER_ANSWER_TOKENS),
                     budget.getMinimumAcceptedSources(), budget.getMinimumDistinctHosts(),
-                    teamAgent == null ? 0 : teamAgent.getMaxOutputTokens(),
+                    WORKER_ANSWER_TOKENS,
                     new java.util.function.Supplier<com.aresstack.askai.research.runtime.orchestrator.ResearchOutline>() {
                         public com.aresstack.askai.research.runtime.orchestrator.ResearchOutline get() {
                             return readOutline();
@@ -1065,8 +1263,19 @@ public final class ResearchAgentSession {
                         boundedBy(budget, maxDurationMillis));
         com.aresstack.askai.browser.search.inference.StructuredInferencePort metered =
                 meteredInference(tokens, exhausted);
-        if (metered != null) {
-            loop.setStructuredInferencePort(metered);
+        if (searchStrategy == null) {
+            // Workers search with the concept phase's web search tool, never in their own tabs (those refuse
+            // search engines): the configured engines, Google in the search browser and the page engines in
+            // the chat browser, one search at a time across all workers and chats.
+            com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy engines =
+                    browserEngines(com.aresstack.askai.research.runtime.search.LegacyBrowserSearchStrategyFactory
+                            .createDefault(browser != null ? browser : browserLane, loadBrowserSearchSettings(),
+                                    new java.util.function.LongSupplier() {
+                                        public long getAsLong() {
+                                            return System.currentTimeMillis();
+                                        }
+                                    }, layoutRepairPort(metered)));
+            loop.setSearchStrategy(engines, browserEnginesLabel(engines));
         }
         loop.setAcceptedSourceObserver(accepted);
         com.aresstack.askai.research.runtime.loop.ResearchStopReason reason = loop.run(query);
@@ -1195,6 +1404,29 @@ public final class ResearchAgentSession {
     }
 
     /**
+     * Plan PR 13: plan the search queries of the frozen concept on {@code phase.research.planner} — one planner
+     * call per node, one repair, then the base query (the planner never throws). A malformed request is answered
+     * with an empty plan, so the host never waits into its timeout. Material only: no scope or state change.
+     */
+    private void handlePlanQueries(AgentOutput ctx, String requestId, String requestJson) {
+        com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Result result;
+        try {
+            result = com.aresstack.askai.research.runtime.orchestrator.QueryPlanner.planConcept(
+                    roleChat(com.aresstack.askai.research.runtime.orchestrator.QueryPlanner.CONCEPT_ROLE),
+                    com.aresstack.askai.research.runtime.plan.QueryPlanWire.parseRequest(requestJson),
+                    cancelled::get);
+        } catch (IllegalArgumentException malformedRequest) {
+            System.err.println("[query-plan] malformed request requestId=" + requestId + ": "
+                    + malformedRequest.getMessage());
+            result = new com.aresstack.askai.research.domain.plan.ConceptQueryPlan.Result(null);
+        }
+        System.err.println("[query-plan] runtime answering requestId=" + requestId
+                + " nodes=" + result.getNodes().size());
+        ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.queryPlan(requestId,
+                com.aresstack.askai.research.runtime.plan.QueryPlanWire.renderResult(result)));
+    }
+
+    /**
      * Z3b-3: generate scope probes on the central main model — EXACTLY ONE model call via the
      * productive {@link com.aresstack.askai.research.runtime.scope.MainModelScopeProbeGenerator},
      * then the typed result (success OR failure) goes back as ONE {@code #RSX1# probes} line. The
@@ -1299,6 +1531,17 @@ public final class ResearchAgentSession {
                     .manualSearchFailed(requestId, "SEARCH_UNAVAILABLE"));
             return;
         }
+        // Plan T5: a team query reads its pages in its own worker browser and stops with its own flag, so a later
+        // service command of this session (which clears the session flag) never revives a stopped team query.
+        java.util.List<com.aresstack.askai.research.runtime.browser.TeamTabs.Tab> teamLeases =
+                new java.util.ArrayList<com.aresstack.askai.research.runtime.browser.TeamTabs.Tab>();
+        ToolInvoker teamBrowser = null;
+        java.util.concurrent.atomic.AtomicBoolean runCancelled = cancelled;
+        java.util.List<com.aresstack.askai.research.runtime.acquire.PageWorker> pageWorkers =
+                new java.util.ArrayList<com.aresstack.askai.research.runtime.acquire.PageWorker>();
+        // the terminal line goes out only after the worker's reports and its tab are handed back, so the plan's
+        // next query finds a free tab and every report of this query reaches its still-running plan entry
+        String terminal = null;
         try {
             // Resolve the SAME strategy the loop uses: the session API-provider strategy, else the legacy
             // browser default over this browser invoker.
@@ -1331,18 +1574,54 @@ public final class ResearchAgentSession {
                         .manualSearchFailed(requestId, "SEARCH_UNAVAILABLE"));
                 return;
             }
+            if (command.isTeam()) {
+                // Plan T4: the search goes through the one web search tool (one at a time for every chat and
+                // worker); the hits of THIS search are read side by side by the page workers, one tab each in the
+                // team's page browser.
+                try {
+                    teamLeases.addAll(acquireTeamTabs(requestId, Math.max(1, command.getTeamWorkers())));
+                } catch (InterruptedException stopped) {
+                    ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                            .manualSearchFailed(requestId, "CANCELLED"));
+                    return;
+                } catch (com.aresstack.askai.research.runtime.browser.BrowserCapacityException busy) {
+                    // every tab is held by the running searches and none came free within the wait setting: the
+                    // query goes back to the plan and runs when a search ends (not a failure of the engine)
+                    System.err.println("[team] no tab for requestId=" + requestId + ": " + busy.getMessage());
+                    ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                            .manualSearchFailed(requestId, TEAM_TABS_BUSY));
+                    return;
+                }
+                if (teamLeases.isEmpty()) {
+                    ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                            .manualSearchFailed(requestId, NO_WORKER_BROWSER));
+                    return;
+                }
+                runCancelled = new java.util.concurrent.atomic.AtomicBoolean(cancelled.get());
+                teamRuns.add(runCancelled);
+                teamBrowser = teamLeases.get(0).tools();
+                System.err.println("[team] search requestId=" + requestId + ": " + teamLeases.size() + " tabs of user "
+                        + "context " + teamLeases.get(0).userContextId() + " read its hits (node \""
+                        + command.getTeamNode() + "\")");
+            }
             com.aresstack.askai.research.runtime.loop.ResearchRunProgress progress =
                     new com.aresstack.askai.research.runtime.loop.ResearchRunProgress();
             // The reranker for THIS search, resolved with the same immutable language snapshot as the SERP
             // request — the next search after a language switch gets the new language's reranker, a running
             // search keeps this instance (constructor injection below).
-            com.aresstack.askai.research.runtime.rerank.CandidateReranker searchReranker =
-                    rerankerFor(searchLanguage == null ? sessionLanguage.code() : searchLanguage);
+            // Plan PR 14: a planned query names its ranking and its visit limit; a typed search keeps the
+            // user's "Use AI reranker" setting (Q25).
+            final com.aresstack.askai.research.runtime.rerank.PlannedQueryReranker plannedRanking =
+                    plannedRanking(command, searchLanguage == null ? sessionLanguage.code() : searchLanguage);
+            com.aresstack.askai.research.runtime.rerank.CandidateReranker searchReranker = plannedRanking != null
+                    ? plannedRanking
+                    : rerankerFor(searchLanguage == null ? sessionLanguage.code() : searchLanguage);
             com.aresstack.askai.research.runtime.loop.ResearchRunBudget searchBudget =
                     com.aresstack.askai.research.runtime.loop.EnvironmentRunBudget.from(environment.values());
+            final java.util.concurrent.atomic.AtomicBoolean stopFlag = runCancelled;
             com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService acquisition =
                     new com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService(
-                            browser,
+                            teamBrowser != null ? teamBrowser : browser,
                             searchBudget,
                             progress,
                             new com.aresstack.askai.research.runtime.loop.ResearchLoopClock() {
@@ -1417,7 +1696,7 @@ public final class ResearchAgentSession {
                                             .attention(reason, domainFamily, url, resolved));
                                 }
                             },
-                            cancelled,
+                            stopFlag,
                             strategy,
                             apiLabel,
                             searchReranker,
@@ -1438,15 +1717,54 @@ public final class ResearchAgentSession {
                                     return null;
                                 }
                             },
-                            loadBrowserSearchSettings().captcha.waitForUser,
+                            // a page worker never waits for a person: nobody watches its worker browser
+                            teamBrowser == null && challengeWaitForUser(),
                             loadBrowserSearchSettings().readiness.maximumPageReadinessRetries,
                             loadBrowserSearchSettings().readiness.minimumReadableCharacters);
+            if (teamBrowser != null) {
+                acquisition.disableHud(); // the overlay and its controls belong to the chat browser
+                // Plan T4: one page worker per tab, one model call per opened page, several at the same time
+                java.util.List<com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.Lane> lanes =
+                        new java.util.ArrayList<
+                                com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.Lane>();
+                for (int lane = 0; lane < teamLeases.size(); lane++) {
+                    com.aresstack.askai.research.runtime.acquire.PageWorker worker =
+                            newPageWorker(requestId, requestId + "#" + (lane + 1), command);
+                    pageWorkers.add(worker);
+                    lanes.add(new com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.Lane(
+                            teamLeases.get(lane).tools(), relayingJudge(ctx, worker, requestId)));
+                }
+                acquisition.setPageJudge(relayingJudge(ctx, pageWorkers.get(0), requestId));
+                acquisition.setLanes(lanes);
+                final String teamRequestId = requestId;
+                acquisition.setOpenPagesListener(
+                        new com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService
+                                .OpenPagesListener() {
+                            public void openPages(int open) {
+                                ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                                        .manualSearchOpenPages(teamRequestId, open));
+                            }
+                        });
+                acquisition.setSuggestionSink(
+                        new com.aresstack.askai.research.runtime.acquire.WebSearchApplicationService.SuggestionSink() {
+                            public void suggested(String suggestion, String pageUrl, String rejectedReason) {
+                                ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                                        .manualSearchTeamQuery(teamRequestId, suggestion, pageUrl, rejectedReason));
+                            }
+                        });
+            }
+            // Engine redirect wrappers (Google /goto) are resolved in the search browser — the one client that
+            // talks to the engine; the research browser never opens an engine address.
+            acquisition.setRedirectResolver(redirectResolver());
             // The user search completes DETERMINISTICALLY: the configured accepted-source target
             // (the budget's maxAcceptedSources) and nothing else. No minimum-host heuristics, no
             // relabeled budget stops — every other ending keeps its honest reason.
+            // Plan PR 14: a planned query stops at its per-query source cap when that is lower.
             acquisition.setCompletionPolicy(
                     new com.aresstack.askai.research.runtime.acquire.FixedAcceptedSourceCountPolicy(
-                            searchBudget.getMaxAcceptedSources()));
+                            command.getSourceCap() > 0
+                                    ? Math.min(command.getSourceCap(), searchBudget.getMaxAcceptedSources())
+                                    : searchBudget.getMaxAcceptedSources()));
             // SC1: the manual search runs behind the SAME scope-control gate as the autonomous
             // loop — the internal service endpoint, never an agent tool.
             acquisition.setScopeControl(
@@ -1476,9 +1794,9 @@ public final class ResearchAgentSession {
             // The user's text IS the search query — never a term-set reconstruction of it.
             com.aresstack.askai.research.runtime.loop.ResearchStopReason reason =
                     acquisition.execute(query);
-            if (cancelled.get()) {
-                ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                        .manualSearchFailed(requestId, "CANCELLED"));
+            if (runCancelled.get()) {
+                terminal = com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                        .manualSearchFailed(requestId, "CANCELLED");
             } else if (com.aresstack.askai.research.runtime.service.ManualSearchOutcome
                     .isTechnicalFailure(reason)) {
                 // A TECHNICAL failure (SERP/browser/reranker broke, or the browser MCP endpoint was
@@ -1487,13 +1805,14 @@ public final class ResearchAgentSession {
                 // "completed" 0-hit search that leaves the turn waiting for a post-search review.
                 System.err.println("[manual-search] execute completed requestId=" + requestId + " sources="
                         + progress.getAcceptedSources() + " reason=" + reason + " -> TECHNICAL FAILURE (terminal)");
-                ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                        .manualSearchFailed(requestId, reason.name()));
+                terminal = com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                        .manualSearchFailed(requestId, reason.name());
             } else {
                 System.err.println("[manual-search] execute completed requestId=" + requestId + " sources="
                         + progress.getAcceptedSources() + " reason=" + reason);
-                ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                        .manualSearchCompleted(requestId, progress.getAcceptedSources(), reason.name()));
+                terminal = com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                        .manualSearchCompleted(requestId, progress.getAcceptedSources(), reason.name(),
+                                plannedRanking != null && plannedRanking.fellBackToKeywords());
                 // Issue #29: the derived AI review no longer runs implicitly here. The host offers an
                 // explicit "Neue Quellen auswerten" action that arrives as a review_sources service
                 // command (see handleReviewSources) — the search turn ends with 'completed'.
@@ -1505,10 +1824,165 @@ public final class ResearchAgentSession {
                     + " cause=" + failure.getClass().getName()
                     + (failure.getMessage() == null ? "" : ": " + failure.getMessage()));
             failure.printStackTrace();
-            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                    .manualSearchFailed(requestId, cancelled.get() ? "CANCELLED" : "SEARCH_FAILED"));
+            terminal = com.aresstack.askai.research.runtime.loop.ResearchRunWire
+                    .manualSearchFailed(requestId, runCancelled.get() ? "CANCELLED" : "SEARCH_FAILED");
+        } finally {
+            for (com.aresstack.askai.research.runtime.acquire.PageWorker worker : pageWorkers) {
+                worker.finish(); // the workers' summaries reach the plan before the search's end does
+                relayTeamNotes(ctx, worker.taskId(), requestId);
+            }
+            if (!teamLeases.isEmpty()) {
+                teamRuns.remove(runCancelled);
+                for (com.aresstack.askai.research.runtime.browser.TeamTabs.Tab tab : teamLeases) {
+                    tab.close(); // the tabs go back, also on cancel and failure
+                }
+            }
+            if (terminal != null) {
+                ctx.message(terminal);
+            }
         }
     }
+
+    /**
+     * Plan T4: the page worker of one team query, registered in this chat's team mailbox under the query's
+     * requestId. Its model calls go through the page worker role's own transport (slot {@code phase.research.worker},
+     * falling back to the Sources model), which the model port runs beside the other workers' calls.
+     */
+    private com.aresstack.askai.research.runtime.acquire.PageWorker newPageWorker(String requestId, String taskId,
+            com.aresstack.askai.research.runtime.service.ResearchServiceCommand command) {
+        com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox mailbox = teamMailbox();
+        mailbox.registerWorker(taskId);
+        final com.aresstack.askai.research.runtime.team.ReloadableMainModelChat chat =
+                roleChat(com.aresstack.askai.research.runtime.acquire.PageWorker.ROLE);
+        final int answerTokens = command.getTeamAnswerTokens(); // 0 = the model's own limit
+        return new com.aresstack.askai.research.runtime.acquire.PageWorker(
+                new com.aresstack.askai.research.runtime.acquire.PageWorker.Model() {
+                    public String complete(
+                            java.util.List<com.aresstack.askai.research.runtime.acquire.PageWorker.Turn> turns) {
+                        java.util.List<com.aresstack.askai.research.runtime.team.ChatMessage> messages =
+                                new java.util.ArrayList<com.aresstack.askai.research.runtime.team.ChatMessage>();
+                        for (com.aresstack.askai.research.runtime.acquire.PageWorker.Turn turn : turns) {
+                            messages.add("system".equals(turn.getRole())
+                                    ? com.aresstack.askai.research.runtime.team.ChatMessage.system(turn.getText())
+                                    : "assistant".equals(turn.getRole())
+                                    ? com.aresstack.askai.research.runtime.team.ChatMessage.assistant(turn.getText())
+                                    : com.aresstack.askai.research.runtime.team.ChatMessage.user(turn.getText()));
+                        }
+                        com.aresstack.askai.research.runtime.team.MainModelChatResult result =
+                                chat.complete(messages, 0.0, answerTokens);
+                        return result.isOk() ? result.getText() : null;
+                    }
+                },
+                mailbox, taskId, command.getTeamNode(), command.getTeamBook(), command.getTeamFollow(),
+                command.getTeamPageCharacters() > 0 ? command.getTeamPageCharacters() : Integer.MAX_VALUE,
+                command.getTeamSearches(), command.getScope(),
+                new com.aresstack.askai.research.runtime.acquire.PageWorker.Log() {
+                    public void line(String text) {
+                        System.err.println(text);
+                    }
+                });
+    }
+
+    /** The page worker as the funnel's judge; after every page its messages to the orchestrator go to the host. */
+    private com.aresstack.askai.research.runtime.acquire.PageJudge relayingJudge(final AgentOutput ctx,
+            final com.aresstack.askai.research.runtime.acquire.PageWorker worker, final String requestId) {
+        return new com.aresstack.askai.research.runtime.acquire.PageJudge() {
+            public Verdict judge(Page page) {
+                Verdict verdict = worker.judge(page);
+                relayTeamNotes(ctx, worker.taskId(), requestId);
+                return verdict;
+            }
+        };
+    }
+
+    /**
+     * Plan T4: the orchestrator's mail goes to the host as {@code manual_search_team_note} lines, each correlated
+     * with the planned query of the worker that wrote it; the plan (Java) decides what to do with it. A line that
+     * is out is delivered.
+     */
+    private void relayTeamNotes(AgentOutput ctx, String taskId, String requestId) {
+        com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox mailbox = teamMailbox();
+        // only this worker's own mail: another worker's report must not be relayed after that worker's end
+        java.util.List<com.aresstack.askai.research.runtime.team.mailbox.AgentMessage> mail =
+                mailbox.drainOrchestratorFrom(taskId, Integer.MAX_VALUE);
+        for (com.aresstack.askai.research.runtime.team.mailbox.AgentMessage message : mail) {
+            ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.manualSearchTeamNote(
+                    requestId, message.getSender().key() + ": " + message.getText()));
+        }
+        mailbox.acknowledge(mail);
+    }
+
+    private com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox teamMailbox;
+
+    /** This chat's team mailbox (plan T3), opened on first use; it lives as long as the chat's agent. */
+    private synchronized com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox teamMailbox() {
+        if (teamMailbox == null) {
+            try {
+                teamMailbox = com.aresstack.askai.research.runtime.team.mailbox.AgentMailbox.open(
+                        "team-" + Integer.toHexString(System.identityHashCode(this)),
+                        new com.aresstack.askai.research.runtime.team.mailbox.InMemoryMailboxStore());
+            } catch (java.io.IOException impossible) {
+                throw new IllegalStateException("the in-memory mailbox store cannot fail", impossible);
+            }
+        }
+        return teamMailbox;
+    }
+
+    /** The failure reason of a team query that got no worker browser: the chat has none (the plan goes on alone). */
+    static final String NO_WORKER_BROWSER = "NO_WORKER_BROWSER";
+    /**
+     * The failure reason of a team query that got no tab of the team's page browser within the worker browsers'
+     * wait setting: the running searches hold them all. The plan keeps the query pending and runs it when a
+     * search ends; the team stays on.
+     */
+    static final String TEAM_TABS_BUSY = "TEAM_TABS_BUSY";
+
+    /**
+     * A tab of its own in the team's page browser for one team query (plan T5): one user context of this chat's
+     * worker browsers holds the tabs of all page workers. Empty when the chat has no worker browsers at all, so the
+     * query fails honestly with {@link #NO_WORKER_BROWSER} and the plan goes on in the chat browser.
+     *
+     * @throws com.aresstack.askai.research.runtime.browser.BrowserCapacityException no worker browser and no tab
+     *         came free within the wait setting ({@link #TEAM_TABS_BUSY}: the query stays in the plan)
+     */
+    private java.util.List<com.aresstack.askai.research.runtime.browser.TeamTabs.Tab> acquireTeamTabs(
+            String requestId, int max) throws InterruptedException,
+            com.aresstack.askai.research.runtime.browser.BrowserCapacityException {
+        com.aresstack.askai.research.runtime.browser.TeamTabs tabs = teamTabs();
+        if (tabs == null || !tabs.available()) {
+            System.err.println("[team] no worker browsers in this chat: requestId=" + requestId);
+            return java.util.Collections.emptyList();
+        }
+        // Stop interrupts the wait for a worker browser or a free tab at once instead of after the wait setting
+        teamWaiters.add(Thread.currentThread());
+        try {
+            return tabs.acquireUpTo(requestId, max);
+        } finally {
+            teamWaiters.remove(Thread.currentThread());
+            Thread.interrupted(); // a Stop that came after the wait must not hit the query's later browser calls
+        }
+    }
+
+    private com.aresstack.askai.research.runtime.browser.TeamTabs teamTabs;
+
+    /** The team's page browser over this chat's worker browsers, made on first use. */
+    private synchronized com.aresstack.askai.research.runtime.browser.TeamTabs teamTabs() {
+        com.aresstack.askai.research.runtime.browser.BrowserUserContextPool pool = browserUserContexts;
+        if (pool == null) {
+            return null;
+        }
+        if (teamTabs == null) {
+            teamTabs = new com.aresstack.askai.research.runtime.browser.TeamTabs(pool);
+        }
+        return teamTabs;
+    }
+
+    /** The threads of team queries waiting for a tab right now; {@link #cancel()} interrupts them. */
+    private final java.util.Set<Thread> teamWaiters = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** The stop flags of the team queries running now; {@link #cancel()} sets every one of them. */
+    private final java.util.Set<java.util.concurrent.atomic.AtomicBoolean> teamRuns =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
      * The TeamAgent REVIEWS the sources it was pointed at. Issue #29: this runs ONLY from the explicit
@@ -1526,14 +2000,25 @@ public final class ResearchAgentSession {
         if (teamAgent == null) {
             return com.aresstack.askai.research.domain.search.PostSearchReviewOutcome.FAILED;
         }
-        com.aresstack.askai.research.runtime.team.TeamAgentStateView view =
+        final com.aresstack.askai.research.runtime.team.TeamAgentStateView view =
                 readStateView(ctx).withSources(readReviewContext(ctx, capturedThrough));
+        // Serialised with chat turns (PR 17): the review never interleaves with a turn's tool rounds.
+        return teamAgent.exclusively(new java.util.function.Supplier<
+                com.aresstack.askai.research.domain.search.PostSearchReviewOutcome>() {
+            public com.aresstack.askai.research.domain.search.PostSearchReviewOutcome get() {
+                return runPostSearchReview(ctx, view);
+            }
+        });
+    }
+
+    private com.aresstack.askai.research.domain.search.PostSearchReviewOutcome runPostSearchReview(
+            final AgentOutput ctx, com.aresstack.askai.research.runtime.team.TeamAgentStateView view) {
         return com.aresstack.askai.research.runtime.team.PostSearchReview.run(view,
                 new com.aresstack.askai.research.runtime.team.PostSearchReview.Model() {
                     public com.aresstack.askai.research.runtime.team.TeamAgentResult internalTurn(
                             String instruction,
                             com.aresstack.askai.research.runtime.team.TeamAgentStateView v) {
-                        return teamAgent.internalTurn(instruction, v);
+                        return teamAgent.reviewTurn(instruction, v);
                     }
                 },
                 new com.aresstack.askai.research.runtime.team.PostSearchReview.Emitter() {
@@ -1597,17 +2082,18 @@ public final class ResearchAgentSession {
             ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.log("status: " + raw));
             com.aresstack.askai.research.runtime.team.TeamAgentStateView view =
                     com.aresstack.askai.research.runtime.team.ResearchStatusView.parse(raw);
-            // Best-effort: give the agent the ACCEPTED sources (from source_list) so it can actually reference
-            // them instead of asking the user to re-describe what a web search just found. Never fatal.
+            // Best-effort: give the agent the bounded source overview (plan PR 16: counts per status and the
+            // ten newest titles, never every source) so it can reference what a web search just found
+            // instead of asking the user to re-describe it. Never fatal.
             try {
-                String sources = researchCall("source_list", Collections.<String, Object>emptyMap());
+                String sources = researchCall("source_overview", Collections.<String, Object>emptyMap());
                 if (sources != null && !sources.trim().isEmpty()
                         && !"No sources.".equals(sources.trim())) {
                     view = view.withSources(sources);
                 }
             } catch (RuntimeException sourcesUnavailable) {
                 ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
-                        .log("source_list unavailable: " + sourcesUnavailable.getMessage()));
+                        .log("source_overview unavailable: " + sourcesUnavailable.getMessage()));
             }
             return view;
         } catch (RuntimeException ex) {
@@ -1646,6 +2132,11 @@ public final class ResearchAgentSession {
             final AgentOutput ctx,
             final com.aresstack.askai.research.runtime.team.TeamAgentStateView view,
             String text) {
+        if (!com.aresstack.askai.research.runtime.team.PhaseActionUnion.conceptEditing(view.getPhaseId())) {
+            // Plan PR 16: the concept move path and the concept edit rules are Concept-only. "Move this
+            // paragraph to chapter 2" in Document is a plain turn of the Document assistant.
+            return teamAgent.respond(text, view);
+        }
         if (conceptToolsAvailable
                 && com.aresstack.askai.research.runtime.team.ConceptTurnPolicy.modeFor(text)
                         == com.aresstack.askai.research.runtime.team.ConceptTurnPolicy.Mode
@@ -1664,7 +2155,8 @@ public final class ResearchAgentSession {
             }
             com.aresstack.askai.research.runtime.team.ConceptAction move =
                     com.aresstack.askai.research.runtime.team.MoveActionGenerator.generate(
-                            mainModelChat, text, conceptContext);
+                            phaseChat(com.aresstack.askai.research.runtime.team.PhaseAssistantProfileRegistry
+                                    .SCOPING_PHASE_ID), text, conceptContext);
             String answer;
             if (move == null) {
                 conceptLog(ctx, "dedicated move generation -> unclear (no guess, no mutation)");
@@ -1709,6 +2201,19 @@ public final class ResearchAgentSession {
                 false, null);
     }
 
+    /** One read-only host block for the turn context; "" when the host has none or is unreachable. */
+    private String hostBlock(String tool, String noneAnswer) {
+        try {
+            String text = researchCall(tool, Collections.<String, Object>emptyMap());
+            if (text == null || text.trim().isEmpty() || noneAnswer.equals(text.trim())) {
+                return "";
+            }
+            return text.trim();
+        } catch (RuntimeException unavailable) {
+            return "";
+        }
+    }
+
     private static void conceptLog(AgentOutput ctx, String message) {
         ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire
                 .log("concept " + message));
@@ -1720,9 +2225,13 @@ public final class ResearchAgentSession {
             final com.aresstack.askai.research.runtime.team.TeamAgentStateView view,
             String userText, boolean seededMovedReceipt, String seededMoveOutcome) {
         if (!conceptToolsAvailable) {
+            teamAgent.completeTurn(initial, "");
             return initial;
         }
-        return com.aresstack.askai.research.runtime.team.ConceptToolRounds.run(initial,
+        // The applied actions of this turn, for the one-line receipt of its FINAL history entry (D7).
+        final java.util.List<String> applied = new java.util.ArrayList<String>();
+        com.aresstack.askai.research.runtime.team.TeamAgentResult closed =
+                com.aresstack.askai.research.runtime.team.ConceptToolRounds.run(initial,
                 new com.aresstack.askai.research.runtime.team.ConceptToolRounds.FollowUpTurn() {
                     public com.aresstack.askai.research.runtime.team.TeamAgentResult run(
                             String feedbackInstruction) {
@@ -1742,7 +2251,12 @@ public final class ResearchAgentSession {
                     public String call(com.aresstack.askai.research.runtime.team.ConceptAction action)
                             throws com.aresstack.askai.research.runtime.loop.ToolInvoker.ToolFailure,
                             com.aresstack.askai.research.runtime.loop.ToolInvoker.EndpointUnavailable {
-                        return conceptToolCall(action);
+                        String receipt = conceptToolCall(action);
+                        if (com.aresstack.askai.research.runtime.team.ConceptToolRounds
+                                .isAppliedOutcome(action, receipt)) {
+                            applied.add(action.describe());
+                        }
+                        return receipt;
                     }
                 },
                 conceptMaxToolRounds, conceptMaxRepairAttempts,
@@ -1768,6 +2282,8 @@ public final class ResearchAgentSession {
                 // A name the user wrote literally is never taken for a prompt placeholder, and a
                 // bare greeting never triggers the first-turn card nudge.
                 userText);
+        teamAgent.completeTurn(closed, String.join("; ", applied));
+        return closed;
     }
 
     /** Whether THIS session ever offered exploration tags — ends the one-shot offer nudge. */
@@ -1794,12 +2310,13 @@ public final class ResearchAgentSession {
                 }
                 break;
             case ADD:
-                // Legacy transcripts only — the loop refuses model ADDs before this funnel.
-                toolName = "concept_add";
+                // Legacy transcripts only — the loop refuses model ADDs before this funnel. The host's
+                // single-card concept_add is gone (plan PR 16): one card travels as a one-name list.
+                toolName = "concept_add_cards";
                 if (!action.getParent().isEmpty()) {
                     args.put("parent_path_json", segmentsJson(action.getParent()));
                 }
-                args.put("name", action.getName());
+                args.put("names_json", segmentsJson(java.util.Collections.singletonList(action.getName())));
                 break;
             case ADD_CARDS:
                 // The atomic list capture: ALL user-named areas in one call, one revision.
@@ -2009,18 +2526,13 @@ public final class ResearchAgentSession {
         ctx.message(com.aresstack.askai.research.runtime.loop.ResearchRunWire.log(sb.toString()));
     }
 
-    /**
-     * Promote the TeamAgent's PROPOSED scope to CONFIRMED only when the HOST's authoritative state has moved
-     * past scoping — i.e. the host actually accepted the scope. The model can never confirm its own scope;
-     * this reconciliation is driven purely by the read-only {@code research_status} the host publishes.
-     */
-    private void reconcileConfirmedScope(com.aresstack.askai.research.runtime.team.TeamAgentStateView view) {
-        String phase = view.getPhaseId();
-        boolean pastScoping = !phase.isEmpty() && !"scoping".equalsIgnoreCase(phase);
-        if (pastScoping && teamAgent.getConfirmedQuestion().isEmpty()
-                && !teamAgent.getProposedQuestion().isEmpty()) {
-            teamAgent.applyConfirmedScope(teamAgent.getProposedQuestion(), teamAgent.getProposedAspects());
-        }
+    /** The visible refusal of {@code research:} outside research/running (plan PR 15): no browser call. */
+    static String researchRefusal(String languageCode) {
+        return "de".equalsIgnoreCase(languageCode == null ? "" : languageCode.trim())
+                ? "\"research:\" startet die autonome Recherche nur, während die Quellenphase läuft. "
+                        + "Für eine einzelne Websuche nutze /search."
+                : "\"research:\" runs the autonomous research only while the Sources phase is running. "
+                        + "Use /search for a single web search.";
     }
 
     /** Mirror the host state: research phase in run state — the only condition for an autonomous turn. */
@@ -2120,6 +2632,8 @@ public final class ResearchAgentSession {
             // setting decides between BM25 (default) and the model reranker of the session language.
             if (reranker != null) {
                 loop.setReranker(rerankerFor(sessionLanguage.code()));
+                loop.setRedirectResolver(redirectResolver());
+                loop.setChallengeWaitForUser(challengeWaitForUser());
             }
             // Inject the session's chosen initial-search strategy (null → keep the default browser path).
             // On the API-provider path inference is irrelevant; on the browser path weave the productive
@@ -2133,9 +2647,7 @@ public final class ResearchAgentSession {
                 // Browser (SERP): the configured engines around the loop's own research-browser search.
                 com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy engines =
                         browserEngines(loop.searchStrategy());
-                loop.setSearchStrategy(engines, engines.isGoogleOnly() ? providerLabel(
-                        com.aresstack.askai.research.runtime.search.provider.SearchProviderId.GOOGLE_BROWSER)
-                        : null);
+                loop.setSearchStrategy(engines, browserEnginesLabel(engines));
             }
             // SC1: the autonomous loop gets the same scope-control lane (internal service
             // endpoint) — a canonical OUT is filtered identically on both acquisition paths.

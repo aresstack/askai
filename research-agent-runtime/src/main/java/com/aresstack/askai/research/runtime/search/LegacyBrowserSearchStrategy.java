@@ -13,12 +13,19 @@ import java.util.function.LongSupplier;
  * adapts the neutral {@link SearchStrategy} contract onto the unchanged repair client, so the browser-based
  * Bing/Google/DuckDuckGo discovery remains available exactly as before, now as one explicit strategy.
  */
-public final class LegacyBrowserSearchStrategy implements SearchStrategy {
+public final class LegacyBrowserSearchStrategy implements EngineGroupSearchStrategy {
 
     private final McpLayoutRepairClient repairClient;
     private final LongSupplier nowEpochMillis;
+    /** One priority group of Search → Engines, or null for the engines enabled in the browser's settings. */
+    private final java.util.List<String> engineIds;
 
     public LegacyBrowserSearchStrategy(McpLayoutRepairClient repairClient, LongSupplier nowEpochMillis) {
+        this(repairClient, nowEpochMillis, null);
+    }
+
+    private LegacyBrowserSearchStrategy(McpLayoutRepairClient repairClient, LongSupplier nowEpochMillis,
+                                        java.util.List<String> engineIds) {
         if (repairClient == null) {
             throw new IllegalArgumentException("repairClient must not be null");
         }
@@ -27,6 +34,13 @@ public final class LegacyBrowserSearchStrategy implements SearchStrategy {
         }
         this.repairClient = repairClient;
         this.nowEpochMillis = nowEpochMillis;
+        this.engineIds = engineIds == null ? null
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<String>(engineIds));
+    }
+
+    @Override
+    public SearchStrategy forEngines(java.util.List<String> groupEngineIds) {
+        return new LegacyBrowserSearchStrategy(repairClient, nowEpochMillis, groupEngineIds);
     }
 
     @Override
@@ -37,7 +51,7 @@ public final class LegacyBrowserSearchStrategy implements SearchStrategy {
         // loop's injected clock so scripted-clock tests stay faithful.
         long t0 = System.currentTimeMillis();
         McpLayoutRepairClient.Result result = repairClient.searchWithRepair(
-                request.getQuery(), cancellation, nowEpochMillis.getAsLong(),
+                request.getQuery(), engineIds, cancellation, nowEpochMillis.getAsLong(),
                 new McpLayoutRepairClient.ToolBudget() {
                     public boolean beforeToolCall() {
                         return budget.beforeToolCall();

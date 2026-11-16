@@ -34,6 +34,12 @@ final class AccessBlockSignals {
         if (text.contains("access denied") && cloudflareContext) {
             return "ACCESS_DENIED";
         }
+        // Cloudflare's "Attention Required!" interstitial (blocked request, "you have been blocked", "why have I
+        // been blocked"): a block page with ~700 characters of boilerplate — never a source, nothing to solve.
+        if (cloudflareContext && (text.contains("attention required") || text.contains("you have been blocked")
+                || text.contains("sorry, you have been blocked"))) {
+            return "CLOUDFLARE_BLOCKED";
+        }
         // Other terminal Cloudflare/edge blocks (rate-limit / banned) — no interactive step either.
         if (text.contains("error 1015") && cloudflareContext) {
             return "CLOUDFLARE_1015";

@@ -26,6 +26,14 @@ public interface BrowserUserContextPool {
     /** How many leases may be held at the same time (a settings value; at least 1 when available, else 0). */
     int capacity();
 
+    /**
+     * How long a worker waits for browser capacity before the pool fails it (the worker browsers' wait setting, in
+     * milliseconds); 0 when the pool never waits. The team's page browser waits as long for a free tab.
+     */
+    default long acquireTimeoutMillis() {
+        return 0L;
+    }
+
     /** A pool without a browser: every acquire fails readably, capacity is 0. */
     static BrowserUserContextPool unavailable(final String reason) {
         return new BrowserUserContextPool() {

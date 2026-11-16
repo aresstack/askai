@@ -1,5 +1,7 @@
 package com.aresstack.askai.research.capture;
 
+import com.aresstack.askai.research.knowledge.processing.Utf8Properties;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -217,20 +219,13 @@ public final class ImportedSourceStore {
     }
 
     private static Properties readPropsFile(File file) throws IOException {
-        Properties props = new Properties();
-        java.io.InputStream in = new java.io.FileInputStream(file);
-        try {
-            props.load(in);
-        } finally {
-            in.close();
-        }
-        return props;
+        return Utf8Properties.load(file);
     }
 
     private void writeProps(String snapshotId, Properties props) throws IOException {
-        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        java.io.StringWriter buffer = new java.io.StringWriter();
         props.store(buffer, "askai imported source snapshot");
-        atomicWrite(propsFile(snapshotId), new String(buffer.toByteArray(), "ISO-8859-1"));
+        atomicWrite(propsFile(snapshotId), buffer.toString());
     }
 
     private static void atomicWrite(File target, String content) throws IOException {

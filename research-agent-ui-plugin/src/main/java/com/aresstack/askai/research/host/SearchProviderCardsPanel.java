@@ -116,6 +116,8 @@ public final class SearchProviderCardsPanel extends JPanel {
             cardHost.add(ResearchSettingsContribution.fitted(dataForSeoCard()), PROVIDER_LABELS[3]);
             cardHost.add(ResearchSettingsContribution.fitted(serpApiCard()), PROVIDER_LABELS[4]);
             add(cardHost, BorderLayout.CENTER);
+            // Plan PR 14: the caps of the search plan apply to every provider, so they sit below the cards.
+            add(ResearchSettingsContribution.fitted(SearchPlanSettingsRows.form(store)), BorderLayout.SOUTH);
         } else {
             JPanel actions = new JPanel(new BorderLayout());
             actions.setOpaque(false);

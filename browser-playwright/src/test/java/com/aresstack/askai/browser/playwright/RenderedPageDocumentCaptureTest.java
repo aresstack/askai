@@ -83,6 +83,37 @@ public class RenderedPageDocumentCaptureTest {
     }
 
     @Test
+    public void baiduHitsTakeTheTargetFromTheirResultBlockAndDropWithoutIt() {
+        FakeRunner page = new FakeRunner("https://www.baidu.com/s?wd=x", "SERP", Arrays.asList("f1", "f1", "f1"));
+        Map<String, Object> withHint = link("link-0001", "container-0002",
+                "https://www.baidu.com/link?url=Token1");
+        withHint.put("targetHint", "https://docs.example.org/manual");
+        page.result = result(
+                Arrays.asList(
+                        container("container-0001", "", 0, "body", "sig-body"),
+                        container("container-0002", "container-0001", 0, "div", "sig-result"),
+                        container("container-0003", "container-0001", 1, "div", "sig-result")),
+                Arrays.asList(withHint,
+                        link("link-0002", "container-0003", "https://www.baidu.com/link?url=Token2")));
+        RenderedPageDocument document = capture.capture(page, new PublicSuffixDomainKeyResolver(), 1L);
+
+        RenderedLinkDescriptor resolved = document.links.get(0);
+        assertEquals(LinkRedirectResolution.RESOLVED, resolved.redirectResolutionStatus);
+        assertEquals("https://docs.example.org/manual", resolved.resolvedTargetUrl);
+        assertEquals(DomainClassification.EXTERNAL_DOMAIN, resolved.domainClassification);
+        RenderedLinkDescriptor opaque = document.links.get(1);
+        assertEquals("nothing resolves it later: never a result", LinkRedirectResolution.DISCARDED,
+                opaque.redirectResolutionStatus);
+        assertEquals("", opaque.resolvedTargetUrl);
+        assertTrue(document.captureWarnings.toString().contains("OPAQUE_REDIRECTS: 1 links"));
+    }
+
+    @Test
+    public void theCaptureScriptReadsTheResultBlockTargetAttribute() {
+        assertTrue(capture.captureScript().contains("closest('[mu]')"));
+    }
+
+    @Test
     public void domChangeThenSettledRecaptureHealsWithoutWarning() {
         // f1 → capture → f2 (mismatch) → settle → f3 → capture → f3 (stable): the recapture heals
         // the snapshot, no DOM_CHANGED warning survives into the ticket.

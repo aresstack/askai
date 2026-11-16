@@ -52,13 +52,17 @@ public class BlockingModelCallTest {
                 };
             }
 
+            public java.util.concurrent.CompletableFuture<Void> warm(com.aresstack.askai.agent.model.port.ModelSlot slot) {
+                return java.util.concurrent.CompletableFuture.completedFuture(null);
+            }
+
             public ResourceSnapshot resources() {
                 throw new UnsupportedOperationException();
             }
         };
         blocking.set(new BlockingModelCall(port));
 
-        BlockingModelCall.Outcome outcome = blocking.get().run(ChatRequest.builder(ResearchModelSlots.CONVERSATION)
+        BlockingModelCall.Outcome outcome = blocking.get().run(ChatRequest.builder(ResearchModelSlots.PHASE_SCOPING)
                 .message(ModelMessage.user("hello")).build());
 
         assertTrue("the late-registered call was cancelled", cancelled.get());

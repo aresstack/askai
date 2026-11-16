@@ -296,8 +296,9 @@ public final class FakeResearchSessionBackend implements ResearchSessionBackend 
                     if (!canAdvance(session)) {
                         return;
                     }
+                    // PR 05: the fake shows the phase's work once and never switches phases by
+                    // itself; the next step waits for the user's command.
                     advanceOneStep(session);
-                    scheduleAdvance(session);
                 }
             }
         }, stepDelayMillis);
@@ -320,42 +321,27 @@ public final class FakeResearchSessionBackend implements ResearchSessionBackend 
     private void advanceOneStep(FakeSession session) {
         ResearchPhase phase = phaseOf(session);
         ResearchRunState run = runOf(session);
+        if (run != ResearchRunState.RUNNING) {
+            return; // waiting states wait for the user's "continue"; gates for the user's decision
+        }
         switch (phase) {
             case SCOPING:
-                if (run == ResearchRunState.RUNNING) {
-                    thinking(session, "Scoping the request");
-                    dispatch(session, ResearchCommandType.SUBMIT_SCOPE, null);
-                }
+                thinking(session, "Scoping the request");
                 break;
             case RESEARCH:
-                // Sources: the evidence review raises ITS approval gate; approval opens Outline.
-                if (run == ResearchRunState.WAITING_FOR_USER
-                        && session.state.getPendingApprovalId() == null) {
-                    dispatch(session, ResearchCommandType.START_RESEARCH, null); // ready gate
-                } else if (run == ResearchRunState.RUNNING) {
-                    toolRun(session, "Search web", "Capturing sources");
-                    emit(session, ResearchBackendEvent.builder(ResearchBackendEventType.SOURCE_ADDED)
-                            .title("Captured source"), null);
-                    emit(session, ResearchBackendEvent.builder(ResearchBackendEventType.FINDING_ADDED)
-                            .title("Extracted finding"), null);
-                    dispatch(session, ResearchCommandType.REQUEST_EVIDENCE_REVIEW, null); // → WAITING_APPROVAL
-                }
+                toolRun(session, "Search web", "Capturing sources");
+                emit(session, ResearchBackendEvent.builder(ResearchBackendEventType.SOURCE_ADDED)
+                        .title("Captured source"), null);
+                emit(session, ResearchBackendEvent.builder(ResearchBackendEventType.FINDING_ADDED)
+                        .title("Extracted finding"), null);
+                assistant(session, "Sources captured. Press \"Finish sources\" when you are done.");
                 break;
             case OUTLINE:
-                if (run == ResearchRunState.RUNNING) {
-                    toolRun(session, "Draft outline", "Proposing sections");
-                    dispatch(session, ResearchCommandType.PROPOSE_OUTLINE, null); // → WAITING_APPROVAL, auto-raises
-                }
+                toolRun(session, "Draft outline", "Proposing sections");
+                assistant(session, "Outline proposed. Press \"Finish outline\" when you are done.");
                 break;
             case DRAFT:
-                // Document: drafting + review/finalization approval live inside this phase.
-                if (run == ResearchRunState.WAITING_FOR_USER
-                        && session.state.getPendingApprovalId() == null) {
-                    dispatch(session, ResearchCommandType.START_DRAFTING, null);
-                } else if (run == ResearchRunState.RUNNING) {
-                    assistant(session, "Drafting the sections.");
-                    dispatch(session, ResearchCommandType.REQUEST_DRAFT_REVIEW, null); // → WAITING_APPROVAL
-                }
+                assistant(session, "Drafting the sections. Press \"Finish document\" when you are done.");
                 break;
             default:
                 break;

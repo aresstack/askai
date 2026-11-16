@@ -65,7 +65,7 @@ public class MementoBackendEventTest {
                 backend.createSession(new ResearchProjectRequest("s", "p", "t"), listener);
         // The session no longer auto-runs on creation: the FIRST user question starts it.
         backend.submitPrompt(handle, new ResearchPrompt("investigate pf4j", ""));
-        scheduler.runUntilIdle();
+        FakeUserCommands.toSourcesGate(backend, handle, scheduler);
 
         int stateChanges = 0;
         for (ResearchBackendEvent e : listener.events) {
@@ -98,7 +98,7 @@ public class MementoBackendEventTest {
                 backend.createSession(new ResearchProjectRequest("s", "p", "t"), listener);
         // The session no longer auto-runs on creation: the FIRST user question starts it.
         backend.submitPrompt(handle, new ResearchPrompt("investigate pf4j", ""));
-        scheduler.runUntilIdle();
+        FakeUserCommands.toSourcesGate(backend, handle, scheduler);
 
         ResearchBackendEvent approval = listener.last(ResearchBackendEventType.APPROVAL_REQUESTED);
         assertNotNull("expected to reach the evidence approval gate", approval);

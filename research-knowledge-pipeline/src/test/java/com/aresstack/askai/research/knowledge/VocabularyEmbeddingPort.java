@@ -18,7 +18,7 @@ final class VocabularyEmbeddingPort implements EmbeddingPort {
     }
 
     @Override
-    public List<EmbeddingVector> embed(List<String> texts) {
+    public List<EmbeddingVector> embed(Role role, List<String> texts) {
         List<EmbeddingVector> vectors = new ArrayList<EmbeddingVector>();
         for (String text : texts) {
             String lower = text.toLowerCase(Locale.ROOT);

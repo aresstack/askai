@@ -89,6 +89,11 @@ public final class PortStructuredInferenceClient implements StructuredInferenceP
             }
         });
         if (outcome.isOk()) {
+            if (outcome.result.getFinishReason() == com.aresstack.askai.agent.model.port.ChatResult.FinishReason.LENGTH) {
+                // A JSON decision cut off at its budget is broken: fail loud (plan 4.1, rule 3).
+                return StructuredInferenceResult.of(StructuredInferenceStatus.INVALID_RESPONSE,
+                        "the answer was cut off at its budget of " + request.maximumOutputTokens + " tokens");
+            }
             return StructuredInferenceResult.success(outcome.result.getContent());
         }
         return StructuredInferenceResult.of(statusOf(outcome.failure.getKind()),

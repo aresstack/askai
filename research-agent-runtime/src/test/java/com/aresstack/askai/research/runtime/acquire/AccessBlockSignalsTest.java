@@ -27,6 +27,16 @@ public class AccessBlockSignalsTest {
     }
 
     @Test
+    public void detectsCloudflareAttentionRequiredInterstitial() {
+        // mokosmart.com, live run 2026-11-09: stored as a NEW source with 700 characters of block boilerplate.
+        assertEquals("CLOUDFLARE_BLOCKED", AccessBlockSignals.reason(page("Attention Required! | Cloudflare",
+                "Sorry, you have been blocked. You are unable to access mokosmart.com. Why have I been blocked? "
+                        + "Cloudflare Ray ID: 9c1 • Performance & security by Cloudflare")));
+        assertNull("the phrase alone, without a Cloudflare context, is an article",
+                AccessBlockSignals.reason(page("Attention required", "Attention required when working at height.")));
+    }
+
+    @Test
     public void doesNotFlagALegitimateArticleMentioningAccessDenied() {
         // A real article ABOUT access-control must not be misread as a block (no Cloudflare/1020 context).
         assertNull(AccessBlockSignals.reason(page("Understanding HTTP 403",

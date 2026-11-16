@@ -36,7 +36,7 @@ import java.util.function.Supplier;
  * for it (self-deadlock) — the HUD binding only appends to a thread-safe buffer, the route handler only
  * tests a predicate. {@link #call} executes directly when already on the owner thread for the same reason.</p>
  */
-final class BrowserSessionActor implements BrowserSession {
+final class BrowserSessionActor implements BrowserSession, EngineGroupSession {
 
     /** A unit of work executed on the owner thread against the real session. */
     interface SessionTask<T> {
@@ -187,6 +187,23 @@ final class BrowserSessionActor implements BrowserSession {
         return call(new SessionTask<T>() {
             public T run(BrowserSession session) throws BrowserException {
                 return task.run(playwrightBacked);
+            }
+        });
+    }
+
+    /**
+     * One web_search_prepare for one priority group, ENTIRELY on the owner thread: the group's engines are the
+     * session's per-call state, so they are set, used and cleared on the one thread that owns the session, and the
+     * call's own browser work runs there directly ({@link #call} on the owner thread). Live run 4 (2026-11-12): the
+     * research browser's tool set holds this actor, not the session, and refused every group search with "This
+     * browser backend does not take engines for web_search_prepare" once Google was paused after a challenge.
+     */
+    @Override
+    public <T> T withEngineGroup(final List<String> engineIds, final PlaywrightBrowserSession.BrowserCall<T> call)
+            throws BrowserException {
+        return onPlaywrightSession(new PlaywrightSessionTask<T>() {
+            public T run(PlaywrightBrowserSession session) throws BrowserException {
+                return session.withEngineGroup(engineIds, call);
             }
         });
     }

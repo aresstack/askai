@@ -49,6 +49,7 @@ public final class OllamaChatOptions {
     private final Map<String, Object> modelOptions;
     private final boolean jsonMode;
     private final BooleanSupplier abort;
+    private final Boolean truncate;
 
     /**
      * @param tools        tools offered to the model; null/empty = none
@@ -59,6 +60,13 @@ public final class OllamaChatOptions {
      */
     public OllamaChatOptions(List<Tool> tools, String schemaJson, Map<String, Object> modelOptions,
                              boolean jsonMode, BooleanSupplier abort) {
+        this(tools, schemaJson, modelOptions, jsonMode, abort, null);
+    }
+
+    /** As above, plus Ollama's top-level {@code truncate} flag (null = not sent). */
+    public OllamaChatOptions(List<Tool> tools, String schemaJson, Map<String, Object> modelOptions,
+                             boolean jsonMode, BooleanSupplier abort, Boolean truncate) {
+        this.truncate = truncate;
         this.tools = tools == null ? Collections.<Tool>emptyList()
                 : Collections.unmodifiableList(new ArrayList<Tool>(tools));
         this.schemaJson = schemaJson == null || schemaJson.trim().isEmpty() ? null : schemaJson;
@@ -87,6 +95,11 @@ public final class OllamaChatOptions {
 
     public Map<String, Object> getModelOptions() {
         return modelOptions;
+    }
+
+    /** Ollama's {@code truncate} flag, or null when it is not sent. */
+    public Boolean getTruncate() {
+        return truncate;
     }
 
     boolean isAborted() {

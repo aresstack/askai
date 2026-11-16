@@ -45,6 +45,13 @@ public final class ResearchServiceCommand {
     public static final String TYPE_CHOOSE_ADVICE = "choose_advice";
 
     /**
+     * Plan PR 13: plan the search queries of the frozen concept — per node its base query plus model variants on
+     * {@code phase.research.planner}; the typed plan goes back as one {@code #RSX1# query_plan} line. Material only:
+     * no chat turn, no state change.
+     */
+    public static final String TYPE_PLAN_QUERIES = "plan_queries";
+
+    /**
      * ADR 0001, lane F: the user starts an orchestrated research run for {@code query} (the orchestrator
      * plans; nothing runs until the user approves the plan).
      */
@@ -62,6 +69,36 @@ public final class ResearchServiceCommand {
     /** The user answers the orchestrator's question ({@code query} carries the answer). */
     public static final String TYPE_ORCHESTRATOR_ANSWER = "orchestrator_answer";
 
+    /** Plan PR 14: rank the hits lexically. */
+    public static final String RANKING_BM25 = "bm25";
+    /** Plan PR 14: rank the hits with the installed cross-encoder; BM25 when it is unavailable. */
+    public static final String RANKING_RERANKER = "reranker";
+
+    private final String ranking;
+    private final int visitLimit;
+    private final int sourceCap;
+    /** Plan T5: a planned query of the research team (its pages are read in a worker browser of their own). */
+    private final boolean team;
+    /** Plan T5: the concept node of a team query; empty otherwise. */
+    private final String teamNode;
+    /** Plan T5: the book title of a team query; empty otherwise. */
+    private final String teamBook;
+    /** Plan T4: at most this many links a page worker may pick per page (0 = none). */
+    private final int teamFollow;
+    /** Plan T4: at most this much page text goes into a page worker's prompt; 0 = the runtime's default. */
+    private final int teamPageCharacters;
+    /** Plan T4: the longest answer of one page worker turn (tokens); 0 = the runtime's default. */
+    private final int teamAnswerTokens;
+    /** Plan T4: how many tabs (page workers) read the hits of this team search side by side; 0 = one. */
+    private int teamWorkers;
+    /** Plan T4: at most this many new search queries a page worker may suggest per page. */
+    private int teamSearches;
+    /** The mission's preferred hosts and host suffixes (the ranking moves them up); empty = none. */
+    private java.util.List<String> preferredHosts = java.util.Collections.emptyList();
+    /** The URL parts of vendor pages (the ranking moves them down); empty = none. */
+    private java.util.List<String> demotedMarkers = java.util.Collections.emptyList();
+    /** The places a preferred hit moves up and a vendor page moves down; 0 = the ranking stays as it is. */
+    private int preferenceShift;
     private final String type;
     private final String requestId;
     private final String query;
@@ -95,6 +132,34 @@ public final class ResearchServiceCommand {
 
     public ResearchServiceCommand(String type, String requestId, String query, String language,
                                   String scope, long capturedThrough, String request) {
+        this(type, requestId, query, language, scope, capturedThrough, request, null, 0, 0);
+    }
+
+    /**
+     * Plan PR 14: a manual search of a planned query carries its ranking choice ({@code bm25}, {@code reranker};
+     * empty = the typed-search default), the visit limit (top N) and the per-query source cap (0 = default).
+     */
+    public ResearchServiceCommand(String type, String requestId, String query, String language,
+                                  String scope, long capturedThrough, String request, String ranking,
+                                  int visitLimit, int sourceCap) {
+        this(type, requestId, query, language, scope, capturedThrough, request, ranking, visitLimit, sourceCap,
+                false, "", "", 0, 0, 0);
+    }
+
+    private ResearchServiceCommand(String type, String requestId, String query, String language,
+                                   String scope, long capturedThrough, String request, String ranking,
+                                   int visitLimit, int sourceCap, boolean team, String teamNode, String teamBook,
+                                   int teamFollow, int teamPageCharacters, int teamAnswerTokens) {
+        this.team = team;
+        this.teamAnswerTokens = Math.max(0, teamAnswerTokens);
+        this.teamFollow = Math.max(0, teamFollow);
+        this.teamPageCharacters = Math.max(0, teamPageCharacters);
+        this.teamNode = teamNode == null ? "" : teamNode.trim();
+        this.teamBook = teamBook == null ? "" : teamBook.trim();
+        String r = ranking == null ? "" : ranking.trim().toLowerCase(java.util.Locale.ROOT);
+        this.ranking = RANKING_RERANKER.equals(r) || RANKING_BM25.equals(r) ? r : "";
+        this.visitLimit = Math.max(0, visitLimit);
+        this.sourceCap = Math.max(0, sourceCap);
         this.capturedThrough = capturedThrough;
         this.request = request == null ? "" : request;
         this.type = type == null ? "" : type;
@@ -102,6 +167,99 @@ public final class ResearchServiceCommand {
         this.query = query == null ? "" : query;
         this.language = language == null ? "" : language;
         this.scope = scope == null ? "" : scope;
+    }
+
+    /** Plan T5: this command as research-team work with the page worker's brief (node and book). */
+    public ResearchServiceCommand withTeam(boolean team, String node, String book, int follow, int pageCharacters,
+                                           int answerTokens) {
+        return new ResearchServiceCommand(type, requestId, query, language, scope, capturedThrough, request,
+                ranking, visitLimit, sourceCap, team, node, book, follow, pageCharacters, answerTokens);
+    }
+
+    /** Plan T4: this team command with its lane count and the page workers' query suggestions per page. */
+    public ResearchServiceCommand withTeamLanes(int workers, int searches) {
+        ResearchServiceCommand copy = withTeam(team, teamNode, teamBook, teamFollow, teamPageCharacters,
+                teamAnswerTokens);
+        copy.teamWorkers = Math.max(0, workers);
+        copy.teamSearches = Math.max(0, searches);
+        return copy;
+    }
+
+    /** This command with the mission's source preference for the ranking of a planned query's hits. */
+    public ResearchServiceCommand withSourcePreference(java.util.List<String> hosts, java.util.List<String> demoted,
+                                                       int shift) {
+        ResearchServiceCommand copy = withTeamLanes(teamWorkers, teamSearches);
+        copy.preferredHosts = hosts == null ? java.util.Collections.<String>emptyList()
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<String>(hosts));
+        copy.demotedMarkers = demoted == null ? java.util.Collections.<String>emptyList()
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<String>(demoted));
+        copy.preferenceShift = Math.max(0, shift);
+        return copy;
+    }
+
+    public java.util.List<String> getPreferredHosts() {
+        return preferredHosts;
+    }
+
+    public java.util.List<String> getDemotedMarkers() {
+        return demotedMarkers;
+    }
+
+    public int getPreferenceShift() {
+        return preferenceShift;
+    }
+
+    public int getTeamWorkers() {
+        return teamWorkers;
+    }
+
+    public int getTeamSearches() {
+        return teamSearches;
+    }
+
+    /** Plan T4: the longest answer of one page worker turn (tokens); 0 = the runtime's default. */
+    public int getTeamAnswerTokens() {
+        return teamAnswerTokens;
+    }
+
+    /** Plan T4: how many links a page worker may pick per page (0 = none). */
+    public int getTeamFollow() {
+        return teamFollow;
+    }
+
+    /** Plan T4: how much page text a page worker reads; 0 = the runtime's default. */
+    public int getTeamPageCharacters() {
+        return teamPageCharacters;
+    }
+
+    /** Plan T5: whether a planned query runs as research-team work. */
+    public boolean isTeam() {
+        return team;
+    }
+
+    /** Plan T5: the concept node of a team query; empty otherwise. */
+    public String getTeamNode() {
+        return teamNode;
+    }
+
+    /** Plan T5: the book title of a team query; empty otherwise. */
+    public String getTeamBook() {
+        return teamBook;
+    }
+
+    /** The ranking choice of a planned query ({@link #RANKING_BM25}, {@link #RANKING_RERANKER}); empty otherwise. */
+    public String getRanking() {
+        return ranking;
+    }
+
+    /** How many of the ranked hits a planned query visits at most; 0 = the typed-search default. */
+    public int getVisitLimit() {
+        return visitLimit;
+    }
+
+    /** How many sources a planned query accepts at most; 0 = the typed-search default. */
+    public int getSourceCap() {
+        return sourceCap;
     }
 
     public String getType() {

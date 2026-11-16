@@ -27,16 +27,25 @@ public final class LegacyBrowserSearchDefaults {
     }
 
     /**
-     * The engines a fresh installation searches with: Google first (in the search browser), DuckDuckGo behind it,
-     * and only until one of them delivers. Bing stays in the list but off — DuckDuckGo's results come from Bing.
-     * Google fetches its first result page only (the search browser does not page).
+     * The pause before each further Google request, in milliseconds — the "Delay (s)" of the Google entry under
+     * Search → Engines, as the catalog names it
+     * ({@link com.aresstack.askai.browser.search.engine.SearchEngineCatalog#GOOGLE_REQUEST_DELAY_MILLIS}).
+     */
+    public static final int GOOGLE_REQUEST_DELAY_MILLIS =
+            com.aresstack.askai.browser.search.engine.SearchEngineCatalog.GOOGLE_REQUEST_DELAY_MILLIS;
+
+    /**
+     * The engines a fresh installation searches with: Google first (in the search browser, paced by
+     * {@link #GOOGLE_REQUEST_DELAY_MILLIS}), DuckDuckGo behind it as the fallback when Google fails or is
+     * blocked, and only until one of them delivers. Bing stays in the list but off — DuckDuckGo's results come
+     * from Bing. Google fetches one result page by default; more pages are a setting ("google:on:3").
      */
     public static com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engineSelection() {
         return new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection(
                 Arrays.asList(
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
-                                        .GOOGLE, true, 1),
+                                        .GOOGLE, true, 1, GOOGLE_REQUEST_DELAY_MILLIS),
                         new com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry(
                                 com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
                                         .DUCKDUCKGO, true),
@@ -46,6 +55,13 @@ public final class LegacyBrowserSearchDefaults {
                 com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE);
     }
 
+    /**
+     * Usable results after which no further priority group of Search → Engines is searched. One result page of an
+     * engine carries about ten organic hits; after the shop, search-page and duplicate filters a group that still
+     * leaves five has answered the query, while fewer means the query is worth the next group's engines.
+     */
+    public static final int MINIMUM_USABLE_RESULTS = 5;
+
     private static LegacySearchNavigationSettings navigation() {
         return new LegacySearchNavigationSettings(
                 engineSelection(),
@@ -54,6 +70,7 @@ public final class LegacyBrowserSearchDefaults {
                 true,       // redirectResolutionEnabled
                 2_048,      // maximumRedirectUrlLength
                 20,         // searchResultLimit (previously OrganicResultSearchProvider.MAX_RESULTS)
+                MINIMUM_USABLE_RESULTS,
                 "",         // language: engine default
                 "");        // country: engine default
     }

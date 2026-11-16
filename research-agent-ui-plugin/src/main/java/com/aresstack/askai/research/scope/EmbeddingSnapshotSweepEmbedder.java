@@ -17,20 +17,28 @@ import java.util.List;
  * both roles of one snapshot: the anchor index's {@link ScopeAnchorVectorIndex.AnchorEmbedder}
  * (persistent anchor vectors) and the sweep's {@link ScopeSweepService.SweepEmbedder} (transient
  * mission/probe/control vectors) — one world, by the same object.
+ *
+ * <p>The scope fence stays RAW (PR 04): its anchors, probe terms and candidate texts are compared only with each
+ * other, its thresholds were calibrated on raw vectors, and its fingerprint is the descriptor's raw fingerprint.</p>
  */
 public final class EmbeddingSnapshotSweepEmbedder
         implements ScopeSweepService.SweepEmbedder, ScopeAnchorVectorIndex.AnchorEmbedder {
 
     private final EmbeddingEndpointDescriptor descriptor;
-    private final HttpEmbeddingPortAdapter adapter;
+    private final EmbeddingPort adapter;
 
     public EmbeddingSnapshotSweepEmbedder(EmbeddingEndpointDescriptor descriptor) {
-        if (descriptor == null) {
+        this(descriptor, descriptor == null ? null : new HttpEmbeddingPortAdapter(descriptor,
+                new UrlConnectionEmbeddingHttpTransport((int) descriptor.timeoutMillis)));
+    }
+
+    /** Test seam: the port the snapshot embeds through. */
+    EmbeddingSnapshotSweepEmbedder(EmbeddingEndpointDescriptor descriptor, EmbeddingPort port) {
+        if (descriptor == null || port == null) {
             throw new IllegalArgumentException("descriptor must not be null");
         }
         this.descriptor = descriptor;
-        this.adapter = new HttpEmbeddingPortAdapter(descriptor,
-                new UrlConnectionEmbeddingHttpTransport((int) descriptor.timeoutMillis));
+        this.adapter = port;
     }
 
     @Override
@@ -41,7 +49,7 @@ public final class EmbeddingSnapshotSweepEmbedder
     @Override
     public List<float[]> embed(List<String> texts) {
         List<float[]> vectors = new ArrayList<float[]>();
-        for (EmbeddingPort.EmbeddingVector vector : adapter.embed(texts)) {
+        for (EmbeddingPort.EmbeddingVector vector : adapter.embedRaw(texts)) {
             vectors.add(vector.getValues());
         }
         return vectors;

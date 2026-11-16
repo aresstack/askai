@@ -124,7 +124,7 @@ public class LanguageWorldTest {
             this.fingerprint = fingerprint;
         }
 
-        public List<EmbeddingVector> embed(List<String> texts) {
+        public List<EmbeddingVector> embed(Role role, List<String> texts) {
             List<EmbeddingVector> out = new ArrayList<EmbeddingVector>();
             for (int i = 0; i < texts.size(); i++) {
                 out.add(new EmbeddingVector("fake", fingerprint, new float[]{1f, 0f}));

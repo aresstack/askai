@@ -95,9 +95,8 @@ public class ProductiveModeFactorySmokeTest {
         host.services.put(com.aresstack.askai.agent.model.port.ModelPort.class, mockModel);
         mockModel.enqueueMessage("Hi! I'm your research assistant. What would you like to find out?");
         // The successful greeting advances the state SCOPING/NEW -> SCOPING/RUNNING (GREETING_DONE), where
-        // SUBMIT_SCOPE is the allowed command; the model uses it to submit its confirmed scope and the host
-        // executes the proposal (commit + auto-advance) to the outline gate.
-        mockModel.enqueueScopeProposal("Let me put together an outline for your approval.", "SUBMIT_SCOPE",
+        // SUBMIT_SCOPE is allowed; a proposed command is only a hint now (plan PR 15: no scope proposal wire).
+        mockModel.enqueueCommandProposal("Let me put together an outline for your approval.", "SUBMIT_SCOPE",
                 "pf4j plugin framework",
                 java.util.Arrays.asList("plugin isolation", "java 8 compatibility"));
         host.services.put(com.aresstack.askai.agent.model.inference.InferenceConfigurationSnapshotProvider.class,
@@ -146,7 +145,7 @@ public class ProductiveModeFactorySmokeTest {
             assumeTrue("SKIPPED (RA-P003: first-prompt/greeting response path wedged; see problems.md): "
                     + messages, host.approvalRequested.await(30, TimeUnit.SECONDS));
             assertTrue("the model port received the conversation slot", mockModel.sawSlot(
-                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.CONVERSATION));
+                    com.aresstack.askai.research.runtime.inference.ResearchModelSlots.PHASE_SCOPING));
             // Model-driven conversation: the mock was called for BOTH the greeting bootstrap turn and the
             // user turn (the outline gate above came from the model's validated scope proposal, not a static
             // host dialogue). The greeting CONTENT reaching the chat is covered non-flakily by the in-process

@@ -159,4 +159,34 @@ public class ProcessingReconciliationTest {
             assertTrue(expected.getMessage().contains("embedding"));
         }
     }
+
+    /** PR 04: captures processed only in an older vector world are re-derived once in the active world. */
+    @Test
+    public void capturesOfAnOlderWorldAreReEnqueuedUnderTheirOwnCaptureId() throws Exception {
+        FileSourceProcessingQueue queue =
+                new FileSourceProcessingQueue(tmp.newFolder("processing"));
+        final QueueBackedKnowledgeProcessingScheduler scheduler =
+                new QueueBackedKnowledgeProcessingScheduler(queue, "seg-v1", "fpNew");
+        ProcessingReconciliation.MissingJobScheduler adapter =
+                new ProcessingReconciliation.MissingJobScheduler() {
+                    public void enqueue(String captureId, String sourceId) {
+                        scheduler.enqueue(captureId, sourceId, "de");
+                    }
+                };
+        java.util.Map<String, String> captures = new java.util.LinkedHashMap<String, String>();
+        captures.put("cap-old", "source-1");      // only old-world passages → re-derive
+        captures.put("cap-current", "source-2");  // already in the new world → leave
+        captures.put("cap-excluded", "source-3"); // not eligible → leave
+        Set<String> eligible = new HashSet<String>(Arrays.asList("source-1", "source-2"));
+        Set<String> current = Collections.singleton("cap-current");
+
+        assertEquals(1, ProcessingReconciliation.reembedStale(captures, current,
+                queue.captureIdsWithKnownProcessing("fpNew"), eligible, adapter));
+        assertEquals("a restart does not enqueue it twice", 0, ProcessingReconciliation.reembedStale(captures,
+                current, queue.captureIdsWithKnownProcessing("fpNew"), eligible, adapter));
+        SourceProcessingJob job = queue.takeNext();
+        assertEquals("cap-old", job.getRequest().getCaptureId());
+        assertEquals("fpNew", job.getRequest().getEmbeddingModelFingerprint());
+        assertTrue(queue.takeNext() == null);
+    }
 }

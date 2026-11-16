@@ -24,7 +24,7 @@ import java.util.List;
  * per-snapshot stable ids {@code link-1..n}); old link ids are invalidated by the next navigation.
  * {@code web_search} navigates to the configured provider URL — without one it fails honestly.
  */
-final class PlaywrightBrowserSession implements BrowserSession {
+final class PlaywrightBrowserSession implements BrowserSession, EngineGroupSession {
 
     private final PlaywrightDriver driver;
     private final UrlSafetyPolicy policy;
@@ -33,6 +33,13 @@ final class PlaywrightBrowserSession implements BrowserSession {
     private WebSearchProvider searchProvider;
     private List<BrowserLink> currentLinks = Collections.emptyList();
     private boolean hasPage;
+    /** Reads the PDF documents the browser reaches but cannot read as pages. */
+    private final PdfPageReader documents;
+    /**
+     * The current page when it is a read PDF document (the tab shows its viewer, or kept its page for a download),
+     * else null. Every navigation drops it, and so does a tab that shows something else since ({@link #shownDocument}).
+     */
+    private PlaywrightPageState currentDocument;
     /** MANUAL_CHALLENGE_PENDING: the domain family whose parked challenge waits for the user, or null. */
     private String challengeFamily;
     private String challengeUrl;
@@ -58,6 +65,7 @@ final class PlaywrightBrowserSession implements BrowserSession {
         this.driver = driver;
         this.policy = policy;
         this.limits = limits;
+        this.documents = new PdfPageReader(limits, policy);
         this.settings = settings;
         this.searchUrlTemplate = searchUrlTemplate == null || searchUrlTemplate.trim().isEmpty()
                 ? null : searchUrlTemplate.trim();
@@ -120,6 +128,35 @@ final class PlaywrightBrowserSession implements BrowserSession {
     /** The engines named by the running web_search call, or null (then the settings' enabled engines). */
     private java.util.List<com.aresstack.askai.browser.search.engine.BrowserSearchEngine> callEngines;
 
+    /** The acquisition mode of the running call when it searches one priority group, else null (the settings'). */
+    private com.aresstack.askai.browser.search.engine.EngineAcquisitionMode callMode;
+
+    /** Work that may fail like a browser call. */
+    public interface BrowserCall<T> {
+        T run() throws BrowserException;
+    }
+
+    /**
+     * Runs {@code call} (a web_search_prepare) for ONE priority group of Search → Engines: exactly the named engines,
+     * in the order given, and every one of them ({@code ALL_ENABLED} within the group), whatever the settings' order
+     * and mode. The group's fallback to the next priority is the web search tool's business, not this browser's.
+     */
+    @Override
+    public <T> T withEngineGroup(List<String> engineIds, BrowserCall<T> call) throws BrowserException {
+        if (searchUrlTemplate != null) {
+            throw new BrowserException("This browser runtime searches only its --search-url override; "
+                    + "it does not take the engines " + engineIds + ".");
+        }
+        callEngines = selectEngines(engineIds);
+        callMode = com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.ALL_ENABLED;
+        try {
+            return call.run();
+        } finally {
+            callEngines = null;
+            callMode = null;
+        }
+    }
+
     /**
      * web_search with its optional {@code engines} parameter (as Argos' web_search): exactly the named catalog
      * engines, in the order given, each once, for this call only; without it (null) the engines enabled in the
@@ -173,6 +210,12 @@ final class PlaywrightBrowserSession implements BrowserSession {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     public WebSearchResult search(String query) throws BrowserException {
+        if (policy.isRefusingSearchEngines()) {
+            com.aresstack.askai.browser.EngineHostRefusedException refused =
+                    new com.aresstack.askai.browser.EngineHostRefusedException("search engines", "web_search");
+            logEngineRefusal(refused);
+            throw refused;
+        }
         // web_search: run the SHARED engine navigation; the consumer extracts each captured page. With
         // per-engine result-page counts, one engine may deliver SEVERAL pages — the items accumulate
         // (deduplicated by target URL) up to the configured result limit.
@@ -291,6 +334,12 @@ final class PlaywrightBrowserSession implements BrowserSession {
      */
     EngineNavigation navigateAndCaptureSearchEngines(String query, CapturedPageConsumer consumer)
             throws BrowserException {
+        if (policy.isRefusingSearchEngines()) { // web_search and web_search_prepare both start here
+            com.aresstack.askai.browser.EngineHostRefusedException refused =
+                    new com.aresstack.askai.browser.EngineHostRefusedException("search engines", "engine search");
+            logEngineRefusal(refused);
+            throw refused;
+        }
         List<BrowserLink> linksBefore = currentLinks;
         boolean hadPage = hasPage;
         searchTabsUsed = false;
@@ -480,7 +529,8 @@ final class PlaywrightBrowserSession implements BrowserSession {
             throw new BrowserException("Empty search query.");
         }
         String encoded = encode(query.trim());
-        com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode = settings.navigation.engineSelection.getMode();
+        com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode = callMode != null ? callMode
+                : settings.navigation.engineSelection.getMode();
         // WHICH engines this search is really using, and why. A configured order that silently loses to
         // a leftover override is invisible in the result — the provider hosts only ever show what was
         // actually opened, never what was supposed to be.
@@ -746,30 +796,35 @@ final class PlaywrightBrowserSession implements BrowserSession {
     }
 
     public BrowserPageSnapshot open(String url) throws BrowserException {
-        policy.check(url);
-        return checkedSnapshot(driver.open(url));
+        checkPolicy(url);
+        currentDocument = null; // superseded by this navigation, whatever it brings
+        return checkedSnapshot(readDocument(driver.open(url)));
     }
 
     public BrowserPageSnapshot currentPage() throws BrowserException {
         requirePage();
-        return checkedSnapshot(driver.current());
+        return checkedSnapshot(current());
     }
 
     @Override
     public BrowserPageReadiness probe(String url) throws BrowserException {
-        policy.check(url);
-        return readinessFrom(checkedSnapshot(driver.open(url)));
+        checkPolicy(url);
+        currentDocument = null; // superseded by this navigation, whatever it brings
+        return readinessFrom(checkedSnapshot(readDocument(driver.open(url))));
     }
 
     @Override
     public BrowserPageReadiness probeCurrent() throws BrowserException {
         requirePage();
-        return readinessFrom(checkedSnapshot(driver.current()));
+        return readinessFrom(checkedSnapshot(current()));
     }
 
     @Override
     public String dismissConsent() throws BrowserException {
         requirePage();
+        if (shownDocument() != null) {
+            return "none"; // a PDF document has no consent banner to click
+        }
         return driver.tryDismissConsent();
     }
 
@@ -785,8 +840,16 @@ final class PlaywrightBrowserSession implements BrowserSession {
         return driver.pollHudCommands();
     }
 
-    /** Compose a readability probe from a snapshot plus the driver's consent/challenge guards. */
+    /**
+     * Compose a readability probe from a snapshot plus the driver's consent/challenge guards. A read PDF document
+     * has neither, and asking the driver would only wait for page scripts that never run in its viewer.
+     */
     private BrowserPageReadiness readinessFrom(BrowserPageSnapshot s) {
+        if (currentDocument != null) {
+            int len = s.getText() == null ? 0 : s.getText().length();
+            return new BrowserPageReadiness(s.getUrl(), s.getTitle(), len,
+                    BrowserPageReadiness.excerptOf(s.getText()), false, false, "", false, "");
+        }
         String marker = driver.challengeMarker(); // 'visible:…' | 'hidden:…' | 'none'
         boolean present = marker != null && !marker.isEmpty() && !"none".equals(marker);
         boolean visible = marker != null && marker.startsWith("visible");
@@ -817,7 +880,13 @@ final class PlaywrightBrowserSession implements BrowserSession {
 
     public BrowserPageSnapshot back() throws BrowserException {
         requirePage();
-        return checkedSnapshot(driver.back());
+        PlaywrightPageState document = shownDocument();
+        currentDocument = null; // superseded by this navigation, whatever it brings
+        if (document != null && !document.documentInTab) {
+            // The download never replaced the tab's page: going back means the page the tab still shows.
+            return checkedSnapshot(readDocument(driver.current()));
+        }
+        return checkedSnapshot(readDocument(driver.back()));
     }
 
     /**
@@ -847,8 +916,12 @@ final class PlaywrightBrowserSession implements BrowserSession {
         driver.close();
     }
 
-    /** EMERGENCY teardown from a foreign thread (stuck owner): see {@link PlaywrightDriver#terminate()}. */
+    /**
+     * EMERGENCY teardown from a foreign thread (stuck owner): see {@link PlaywrightDriver#terminate()}. A PDF
+     * download in progress runs outside the driver, so it is cut first ({@link PdfPageReader#terminate()}).
+     */
     void terminate() {
+        documents.terminate();
         driver.terminate();
     }
 
@@ -889,15 +962,58 @@ final class PlaywrightBrowserSession implements BrowserSession {
         return driver.hudInbox();
     }
 
+    /** The pre-navigation gate; an engine refusal in a worker context is logged before it propagates. */
+    private void checkPolicy(String url) throws BrowserException {
+        try {
+            policy.check(url);
+        } catch (com.aresstack.askai.browser.EngineHostRefusedException engine) {
+            logEngineRefusal(engine);
+            throw engine;
+        }
+    }
+
+    private static void logEngineRefusal(com.aresstack.askai.browser.EngineHostRefusedException refused) {
+        System.err.println("[browser-worker] " + refused.getMessage());
+    }
+
+    /** The current page: the read PDF document, or what the driver's tab shows (a document there is read). */
+    private PlaywrightPageState current() throws BrowserException {
+        PlaywrightPageState document = shownDocument();
+        return document != null ? document : readDocument(driver.current());
+    }
+
+    /**
+     * The read PDF document while the tab still shows it (its viewer, or the page the tab kept for a download),
+     * else null: a tab that shows something else since (the user navigated the visible window) has left it.
+     */
+    private PlaywrightPageState shownDocument() throws BrowserException {
+        if (currentDocument != null && !currentDocument.tabUrl.equals(driver.currentUrl())) {
+            currentDocument = null;
+        }
+        return currentDocument;
+    }
+
+    /**
+     * A PDF the browser reached but cannot read as a page (its viewer runs no page script, an attachment only
+     * starts a download) is read by the {@link PdfPageReader}: the browser's final URL passes the same gate as a
+     * page's, every redirect of the reader's own fetch is checked again. Every other state passes unchanged.
+     */
+    private PlaywrightPageState readDocument(PlaywrightPageState state) throws BrowserException {
+        if (!state.isDocument()) {
+            return state;
+        }
+        requireAllowedFinalUrl(state.url);
+        try {
+            return documents.read(state);
+        } catch (com.aresstack.askai.browser.EngineHostRefusedException engine) {
+            logEngineRefusal(engine);
+            throw engine;
+        }
+    }
+
     /** The post-redirect gate: the FINAL url must pass the policy or the page is abandoned. */
     private BrowserPageSnapshot checkedSnapshot(PlaywrightPageState state) throws BrowserException {
-        try {
-            policy.check(state.url);
-        } catch (BrowserException blocked) {
-            abandonPage();
-            throw new BrowserException("Blocked after redirect — final URL is not allowed: "
-                    + blocked.getMessage());
-        }
+        requireAllowedFinalUrl(state.url);
         String text = state.text;
         boolean truncated = false;
         if (text.length() > limits.getMaxTextChars()) {
@@ -919,13 +1035,29 @@ final class PlaywrightBrowserSession implements BrowserSession {
         }
         currentLinks = Collections.unmodifiableList(links);
         hasPage = true;
+        currentDocument = state.isDocument() ? state : null;
         return new BrowserPageSnapshot(state.url, state.title, text, truncated);
+    }
+
+    private void requireAllowedFinalUrl(String url) throws BrowserException {
+        try {
+            policy.check(url);
+        } catch (com.aresstack.askai.browser.EngineHostRefusedException engine) {
+            abandonPage();
+            logEngineRefusal(engine);
+            throw engine;
+        } catch (BrowserException blocked) {
+            abandonPage();
+            throw new BrowserException("Blocked after redirect — final URL is not allowed: "
+                    + blocked.getMessage());
+        }
     }
 
     /** After a blocked redirect the offending page must not stay current. */
     private void abandonPage() {
         currentLinks = Collections.emptyList();
         hasPage = false;
+        currentDocument = null;
         try {
             driver.back();
         } catch (BrowserException ignored) {

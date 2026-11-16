@@ -43,6 +43,16 @@ public class ManualSearchMapperTest {
         assertEquals("Websuche nicht verfügbar.", e.getText());
     }
 
+    /** The search plan decides by the reason token, not by the German chat line (live run 4, 2026-11-10). */
+    @Test
+    public void aFailedSearchKeepsItsReasonTokenForThePlan() {
+        String line = "#RSX1# manual_search_failed request_id=R1 reason=TEAM_TABS_BUSY";
+        ResearchBackendEvent e = ResearchAgentEventMapper.mapMessage("p1", line).build();
+        assertEquals("failed", e.getTitle());
+        assertEquals("TEAM_TABS_BUSY", e.getPublicMessage());
+        assertEquals("Websuche fehlgeschlagen.", e.getText());
+    }
+
     /**
      * A TECHNICAL search failure (browser/SERP/reranker) now arrives as a {@code failed} event — NOT a
      * {@code completed} 0-hit search — so the host runs its terminal path (composer released, problem shown)

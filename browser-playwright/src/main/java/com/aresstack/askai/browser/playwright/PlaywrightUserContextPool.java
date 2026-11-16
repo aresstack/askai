@@ -73,7 +73,8 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
 
     public PlaywrightUserContextPool(WorkerBrowserLimits limits) {
         this.limits = limits == null ? WorkerBrowserLimits.defaults() : limits;
-        this.sites = new SiteConcurrencyGate(this.limits.maxConcurrentPerSite);
+        this.sites = new SiteConcurrencyGate(this.limits.maxConcurrentPerSite, this.limits.sites,
+                SiteConcurrencyGate.SYSTEM_CLOCK);
     }
 
     /** Apply changed settings; running worker browsers and leases stay, new placements follow the new limits. */
@@ -86,6 +87,7 @@ public final class PlaywrightUserContextPool implements AutoCloseable {
             notifyAll();
         }
         sites.setLimit(changed.maxConcurrentPerSite);
+        sites.setPolicy(changed.sites);
     }
 
     public WorkerBrowserLimits limits() {

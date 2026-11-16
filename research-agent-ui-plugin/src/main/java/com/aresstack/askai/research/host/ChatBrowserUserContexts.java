@@ -73,6 +73,11 @@ final class ChatBrowserUserContexts implements BrowserUserContextPool, AutoClose
         return closed ? 0 : chat.pool().capacity();
     }
 
+    @Override
+    public long acquireTimeoutMillis() {
+        return chat.pool().limits().acquireTimeoutMillis;
+    }
+
     /** Leases currently held in this chat (diagnostics, tests). */
     synchronized int openLeases() {
         return open.size();

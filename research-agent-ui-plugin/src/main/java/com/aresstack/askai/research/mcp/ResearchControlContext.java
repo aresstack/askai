@@ -71,7 +71,8 @@ public interface ResearchControlContext {
      * Park a reranked search candidate as a scored source BEFORE the page is visited (empty full text, status
      * PARKED). Backed by the same {@code SourceAcceptanceService} as acceptance. The default is a no-op
      * (agent path / test fakes); the productive context overrides it.
-     * @return a compact park result line ({@code status=PARKED|ALREADY_PRESENT source_id=…}), or {@code null}.
+     * @return a compact park result line ({@code status=PARKED|ALREADY_PRESENT|ALREADY_CAPTURED source_id=…}),
+     *         or {@code null}; ALREADY_CAPTURED = the page was read before, the search does not read it again.
      */
     default String parkCandidate(String url, String title, String excerpt, double rerankScore,
                                  String searchQuery) {
@@ -185,6 +186,72 @@ public interface ResearchControlContext {
     }
 
     default String searchScopeEnd(String handle) {
+        return null;
+    }
+
+    /**
+     * The read-only summary of the effective frozen concept (plan PR 16), or {@code null} before the first
+     * committed {@code SUBMIT_SCOPE} / without a book record. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String frozenConceptSummary() {
+        return null;
+    }
+
+    /**
+     * The latest change request of the CURRENT phase until its next Finish (plan PR 16), {@code ""} when none.
+     * DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String latestChangeRequest() {
+        return "";
+    }
+
+    /**
+     * Plan PR 15: the Sources assistant's {@code request_research} adds one plan entry for a concept node (id or
+     * label; blank = a free entry). Returns {@code null} when unsupported. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String requestResearch(String query, String node) {
+        return null;
+    }
+
+    /**
+     * Plan PR 15: the Sources assistant's {@code blacklist_add} on the add-only path of PR 07 (an entry after
+     * {@code SUBMIT_SCOPE}; a term also becomes an excluded facet for the semantic gate, like
+     * {@code exclude_topic}). Returns {@code null} when unsupported. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String blacklistAdd(String entry) {
+        return null;
+    }
+
+    /**
+     * Plan PR 29: the Document assistant's {@code section_rewrite} reruns the section writer for one section (id or
+     * title) with the user's comment. Returns {@code null} when unsupported. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String sectionRewrite(String section, String comment) {
+        return null;
+    }
+
+    /**
+     * Plan PR 15: the Sources block (search plan, coverage per node), {@code null} without a plan.
+     * DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String searchPlanOverview() {
+        return null;
+    }
+
+    /**
+     * The Outline block (plan PR 21): ids, titles and coverage per chapter of the stored working outline, or
+     * {@code null} when this session has no outline store. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String outlineRead() {
+        return null;
+    }
+
+    /**
+     * Plan PR 24: regenerate one chapter of the working outline ({@code sections} 0 = brief again, 2 to 6 =
+     * re-split a sub-cluster chapter; the comment steers labels and briefs). Returns the outcome line, or
+     * {@code null} when this session cannot regenerate chapters. DELEGATING WRAPPERS MUST FORWARD THIS.
+     */
+    default String outlineRegenerateChapter(String chapterId, int sections, String comment) {
         return null;
     }
 }

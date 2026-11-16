@@ -7,7 +7,10 @@ package com.aresstack.askai.agent.model.port;
  * models that only know on/off treat the levels as on.
  */
 public enum ThinkingMode {
-    /** Do not send a thinking setting; the model's own default applies. */
+    /**
+     * The caller leaves it to the platform: the slot's setting applies, and the slot's default Auto resolves
+     * per model (off for a thinking model that accepts it, low for a level-only model, no field otherwise).
+     */
     DEFAULT,
     OFF,
     ON,

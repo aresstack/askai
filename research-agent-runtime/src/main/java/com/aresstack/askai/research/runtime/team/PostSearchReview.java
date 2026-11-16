@@ -11,7 +11,7 @@ package com.aresstack.askai.research.runtime.team;
 public final class PostSearchReview {
 
     /**
-     * The model turn — productive: {@code ResearchTeamAgent.internalTurn}. NOT {@code respond}: a button
+     * The model turn — productive: {@code ResearchTeamAgent.reviewTurn}. NOT {@code respond}: a button
      * press is not a sentence the user wrote, and it must not enter the conversation as one.
      */
     public interface Model {
@@ -44,10 +44,7 @@ public final class PostSearchReview {
             return com.aresstack.askai.research.domain.search.PostSearchReviewOutcome.SUCCEEDED;
         }
         // No silent disappearance: the sources are saved either way, say so visibly.
-        // A review cut at the output budget names that cause: the review is the longest contracted answer.
-        emitter.emitVisible(fallbackMessage(languageCode) + (result.isTruncated()
-                ? " " + TeamAgentReply.truncated(result.getTruncatedAtTokens(), "de".equalsIgnoreCase(languageCode))
-                : ""));
+        emitter.emitVisible(fallbackMessage(languageCode));
         emitter.emitLog("source review turn not ok: " + result.getStatus()
                 + (result.getDetail() == null || result.getDetail().isEmpty()
                         ? "" : " (" + result.getDetail() + ")"));

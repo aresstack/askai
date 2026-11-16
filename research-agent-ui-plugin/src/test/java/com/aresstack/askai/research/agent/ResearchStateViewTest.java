@@ -140,9 +140,8 @@ public class ResearchStateViewTest {
                 java.util.Map<String, ResearchCommandType> clickable = view.clickablePhasesForTest();
                 assertTrue(clickable.get(ResearchStateIds.OUTLINE)
                         == ResearchCommandType.APPROVE_EVIDENCE);
-                assertTrue("clicking the current phase means request revision",
-                        clickable.get(ResearchStateIds.RESEARCH)
-                                == ResearchCommandType.REQUEST_REVISION);
+                assertTrue("PR 05: the current phase's plate never dispatches",
+                        clickable.get(ResearchStateIds.RESEARCH) == null);
             }
         });
     }
