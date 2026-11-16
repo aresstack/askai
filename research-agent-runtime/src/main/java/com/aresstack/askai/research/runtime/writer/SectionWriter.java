@@ -307,8 +307,11 @@ public final class SectionWriter {
         return cut + (newParagraph ? "\n\n" : " ") + more;
     }
 
-    private Checked check(String answer, SectionAssignment a, java.util.Set<String> written,
+    private Checked check(String rawAnswer, SectionAssignment a, java.util.Set<String> written,
                           RepeatCheck.Memory book) {
+        // a writer citing sentence tags (SUI-1) is read as [n] markers, so every check below stays one path
+        String answer = a.getCitationFormat() == CitationFormat.SENTENCE_TAGS
+                ? SentenceTags.of(a.getPassages()).toNumbered(rawAnswer) : rawAnswer;
         final int target = a.getWordsPerCall();
         // the target echoed back is no open point; a number the material names too may be one ("450 Beschäftigte")
         final boolean onlyTheTargetNamesIt = !namesNumber(SectionWriterPrompt.withoutWordTarget(a), target);

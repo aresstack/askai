@@ -223,14 +223,14 @@ public final class ModelPortSettings {
 
     /**
      * The writer settings of the Document slot, preset by its model (plan 4.x, D8): about 1,100 words per call
-     * and 8 passages of 300 tokens for {@code llama3.1:8b} and {@code gpt-oss:20b}; about 450 words and 6 x 250
+     * and 8 passages of 300 tokens for {@code llama3.1:8b}, {@code gpt-oss:20b} and ellamind {@code sui-1-24b}; about 450 words and 6 x 250
      * for {@code gemma4:e2b} and every other model. The answer budget follows the word target (3,072 / 1,200),
      * plus about 1,000 reasoning tokens on {@code gpt-oss}.
      */
     public static WriterPreset writerPreset(String model) {
         String name = model == null ? "" : model.trim().toLowerCase(java.util.Locale.ROOT);
         boolean gptOss = name.startsWith("gpt-oss");
-        if (gptOss || name.startsWith("llama3.1:8b")) {
+        if (gptOss || name.startsWith("llama3.1:8b") || name.contains("sui-1")) {
             return new WriterPreset(1100, 8, 300, gptOss ? 4072 : 3072);
         }
         return new WriterPreset(450, 6, 250, 1200);

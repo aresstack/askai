@@ -143,4 +143,14 @@ public class WriterAbTest {
         r.put(WriterAbDecision.CHAPTER, chapter);
         return r;
     }
+
+    @Test
+    public void armsComeFromThePropertyOrThePlan() {
+        java.util.List<WriterAbArm> arms = WriterAbArm.parse("gemma4:12b|450|, gpt-oss:20b|1100|low");
+        org.junit.Assert.assertEquals(2, arms.size());
+        org.junit.Assert.assertEquals("gemma4:12b", arms.get(0).getModel());
+        org.junit.Assert.assertEquals(450, arms.get(0).getWordsPerCall());
+        org.junit.Assert.assertEquals(1100, arms.get(1).getWordsPerCall());
+        org.junit.Assert.assertEquals(WriterAbArm.planArms().size(), WriterAbArm.parse("").size());
+    }
 }

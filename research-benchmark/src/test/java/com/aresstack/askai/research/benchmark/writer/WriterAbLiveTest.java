@@ -52,6 +52,8 @@ import java.util.Random;
 public class WriterAbLiveTest {
 
     private static final String P = "askai.benchmark.";
+    /** {@code num_ctx} of every arm ({@code -Daskai.benchmark.writerAb.contextTokens}): the writer preset of 4.1. */
+    static final int DEFAULT_CONTEXT_TOKENS = 16384;
 
     @Test
     public void decideFromTheOwnersRanking() throws IOException {
@@ -80,12 +82,16 @@ public class WriterAbLiveTest {
         List<WriterAbSample> samples = new ArrayList<WriterAbSample>();
         List<String> models = new ArrayList<String>();
         try (OllamaTokenMeter meter = OllamaTokenMeter.start(ollama, timeout)) {
-            for (WriterAbArm arm : WriterAbArm.planArms()) {
+            int contextTokens = Integer.getInteger(P + "writerAb.contextTokens", DEFAULT_CONTEXT_TOKENS);
+            for (WriterAbArm arm : WriterAbArm.parse(System.getProperty(P + "writerAb.arms", ""))) {
                 if (!only.isEmpty() && !only.contains(arm.getModel())) {
                     continue;
                 }
                 models.add(arm.getModel());
                 File settings = Files.createTempDirectory("writer-ab").toFile();
+                // the same context for every arm, so a large evidence pack is never cut for one model only
+                write(new File(settings, "model-port.properties"),
+                        "model." + arm.getModel() + ".contextTokens=" + contextTokens + "\n");
                 OllamaModelPort port = BenchmarkModelPortAccess.open(arm.getModel(), meter.baseUrl(), timeout,
                         settings);
                 SectionWriter writer = SectionWriter.onPort(port, Duration.ofMillis(timeout), null);

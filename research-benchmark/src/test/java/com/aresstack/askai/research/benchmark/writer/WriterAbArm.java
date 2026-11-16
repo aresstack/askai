@@ -35,6 +35,26 @@ public final class WriterAbArm {
                 new WriterAbArm(GPT_OSS, 1100, "low")));
     }
 
+    /**
+     * The arms of {@code -Daskai.benchmark.writerAb.arms}: comma-separated {@code model|words|thinking} entries
+     * ({@code gemma4:12b|450|,gpt-oss:20b|450|low}); empty = the {@linkplain #planArms plan's arms}.
+     */
+    public static List<WriterAbArm> parse(String spec) {
+        if (spec == null || spec.trim().isEmpty()) {
+            return planArms();
+        }
+        List<WriterAbArm> arms = new java.util.ArrayList<WriterAbArm>();
+        for (String entry : spec.split(",")) {
+            if (entry.trim().isEmpty()) {
+                continue;
+            }
+            String[] parts = entry.trim().split("\\|", -1);
+            arms.add(new WriterAbArm(parts[0], parts.length > 1 && !parts[1].trim().isEmpty()
+                    ? Integer.parseInt(parts[1].trim()) : 450, parts.length > 2 ? parts[2].trim() : ""));
+        }
+        return Collections.unmodifiableList(arms);
+    }
+
     public String getModel() {
         return model;
     }

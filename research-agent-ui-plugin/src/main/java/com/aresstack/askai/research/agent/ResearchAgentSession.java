@@ -3074,7 +3074,19 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }),
                 new com.aresstack.askai.research.drafting.EvidenceAssignments(packs, contexts,
                         () -> com.aresstack.askai.research.host.ResearchRuntimeSettings
-                                .loadWriterTargets(hostStateStore)));
+                                .loadWriterTargets(hostStateStore),
+                        () -> writerModelOf(port)));
+    }
+
+    /** The model the writer slot resolves to (empty when the port does not tell), for the citation format. */
+    private static String writerModelOf(com.aresstack.askai.agent.model.port.ModelPort port) {
+        try {
+            return port.resources()
+                    .bindingOf(com.aresstack.askai.research.runtime.inference.ResearchModelSlots.PHASE_DRAFT_WRITER)
+                    .map(com.aresstack.askai.agent.model.port.resource.SlotBinding::getModelLabel).orElse("");
+        } catch (RuntimeException unavailable) {
+            return "";
+        }
     }
 
     private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,

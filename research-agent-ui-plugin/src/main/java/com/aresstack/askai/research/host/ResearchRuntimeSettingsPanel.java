@@ -61,6 +61,12 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerBriefSimilarityMargin = ComicControls.textField(4);
     private final JTextField writerWordsPerCall = ComicControls.textField(5);
     private final JTextField writerAnswerTokens = ComicControls.textField(5);
+    /** The writer's citation format: Auto (by writer model), Numbered, Sentence tags. */
+    private final javax.swing.JComboBox<String> writerCitationFormat = ComicControls.comboBox(
+            new String[]{CITATION_AUTO, CITATION_NUMBERED, CITATION_SENTENCE_TAGS});
+    private static final String CITATION_AUTO = "Auto (by writer model)";
+    private static final String CITATION_NUMBERED = "Numbered [n]";
+    private static final String CITATION_SENTENCE_TAGS = "Sentence tags (SUI-1)";
     private final JTextField writerPassages = ComicControls.textField(4);
     private final JTextField writerPassageTokens = ComicControls.textField(4);
     private final JTextField writerPassagesPerSource = ComicControls.textField(4);
@@ -219,6 +225,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         writer.row("Writer preset", group(labelled("Words/call", writerWordsPerCall),
                 labelled("Answer tokens", writerAnswerTokens), labelled("Passages", writerPassages),
                 labelled("Tokens/passage", writerPassageTokens), labelled("Per source", writerPassagesPerSource)));
+        writer.row("Citation format", writerCitationFormat);
         writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
                 labelled("Sentences ≥", writerProseMinSentences),
                 labelled("Unpunctuated run ≤", writerProseMaxRun)));
@@ -598,6 +605,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                         + "points. A local model writes about 150 to 450 words per call whatever the target, so a "
                         + "higher value gives shorter sections. With too little evidence the writer stays below it and "
                         + "the book report says so.");
+        bindCitationFormat();
         bindLimit(writerAnswerTokens, ResearchRuntimeSettings.KEY_WRITER_ANSWER_TOKENS,
                 ResearchRuntimeSettings.DEFAULT_WRITER_ANSWER_TOKENS,
                 "Section writer: answer token budget of one call (keep it above the words per call).");
@@ -1065,6 +1073,30 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         box.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 ResearchRuntimeSettings.saveWorkerRole(ResearchRuntimeSettingsPanel.this.store, key, box.isSelected());
+            }
+        });
+    }
+
+    /** Binds the citation format combo to {@link ResearchRuntimeSettings#KEY_WRITER_CITATION_FORMAT}. */
+    private void bindCitationFormat() {
+        final String[] ids = {com.aresstack.askai.research.runtime.writer.CitationFormat.AUTO,
+                com.aresstack.askai.research.runtime.writer.CitationFormat.NUMBERED.id(),
+                com.aresstack.askai.research.runtime.writer.CitationFormat.SENTENCE_TAGS.id()};
+        String stored = ResearchRuntimeSettings.loadWriterCitationFormat(store);
+        int index = 0;
+        for (int i = 0; i < ids.length; i++) {
+            if (ids[i].equals(stored)) {
+                index = i;
+            }
+        }
+        writerCitationFormat.setSelectedIndex(index);
+        writerCitationFormat.setToolTipText("Section writer: how it sees and cites its passages. Auto uses sentence "
+                + "tags [<tag>] for ellamind SUI-1, which was trained on them, and numbered passages [n] for every "
+                + "other model. Both end in the same [n] citations of the book.");
+        writerCitationFormat.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                int selected = writerCitationFormat.getSelectedIndex();
+                ResearchRuntimeSettings.saveWriterCitationFormat(store, ids[selected < 0 ? 0 : selected]);
             }
         });
     }
