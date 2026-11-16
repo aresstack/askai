@@ -943,7 +943,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindDecimal(scopeCheckNearSimilarity,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEAR_SIMILARITY,
                 d.fenceThresholds.nearSimilarity, "Z2 hint: from this cosine on a topic counts as "
-                        + "\u201cnear a post\u201d" + spike);
+                        + "\u201cnear a post\u201d; depends on the embedding model, the default is calibrated for "
+                        + "bge-m3" + spike);
         bindDecimal(scopeCheckHintBoundaryMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_HINT_BOUNDARY_MARGIN,
                 d.fenceThresholds.boundaryMargin, "Z2 hint boundary margin" + spike);
@@ -954,7 +955,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindDecimal(scopeCheckMissionMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MISSION_MARGIN,
                 d.calibrationParameters.missionRelevanceMargin,
-                "Slack below the mission quantile" + spike);
+                "Slack below the mission quantile; depends on the embedding model, the default is "
+                        + "calibrated for bge-m3" + spike);
         bindDecimal(scopeCheckNeighborQuantile,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEIGHBOR_QUANTILE,
                 d.calibrationParameters.neighborSimilarityQuantile,

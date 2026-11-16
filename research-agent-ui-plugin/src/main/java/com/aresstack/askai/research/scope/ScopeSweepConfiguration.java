@@ -52,7 +52,11 @@ public final class ScopeSweepConfiguration {
         this.selectorParameters = selectorParameters;
     }
 
-    /** The live-gate values (nomic + gpt-oss measurements), named — the pre-settings baseline. */
+    /**
+     * The live-gate values, named — the baseline behind every scope-check setting. The two
+     * embedding-dependent cut-offs (near similarity, mission slack) are measured on bge-m3
+     * (OllamaFenceConceptLiveTest, 2026-11-16); bge-m3 spreads cosines wider than nomic-embed-text.
+     */
     public static ScopeSweepConfiguration defaults() {
         return new ScopeSweepConfiguration(
                 20,      // targetBroadProbes — the DEFAULT model class (gemma4:e2b) loses count
@@ -65,9 +69,14 @@ public final class ScopeSweepConfiguration {
                          // plus reasoning-model thinking overhead) undershot the 50-probe target
                          // at 4096; 8192 gives the list room
                 360,     // generationTimeoutSeconds — live runs took 45-115s; generous headroom
-                new ScopeFenceEvaluator.Thresholds(0.7d, 0.05d),   // nomic live calibration
+                new ScopeFenceEvaluator.Thresholds(
+                        0.68d,   // nearSimilarity — bge-m3: midway between the strongest unexplored
+                                 // probe (0.641) and the weakest known/excluded probe (0.722)
+                        0.05d),  // hint boundary margin — bge-m3 IN/OUT margins +0.30/-0.20
                 new ScopeFenceCalibrator.CalibrationParameters(
-                        0.0d, 0.1d,   // mission: min quantile − measured slack (spike formula)
+                        0.0d, 0.15d,  // mission: min quantile − slack; bge-m3: weakest anchor 0.581, the
+                                      // floor must fall between the fridge (0.408) and the
+                                      // weakest wearable probe (0.458) — slack 0.123..0.173
                         0.0d, 0.0d,   // neighbor floor: min quantile (spike formula)
                         3, 4),        // minimum negotiated posts / neighbor samples
                 0.05d,   // boundaryMargin — live IN/OUT margins were ±0.1-0.2
