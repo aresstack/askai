@@ -52,7 +52,7 @@ dependencies {
     // lookup. Research classes themselves stay out of the fat jar (the agent runs inside the plugin).
     implementation project(':mcp-runtime-api')
     implementation project(':mcp-solon-runtime')
-    implementation 'com.aresstack:win-proxy-java:0.1.0-beta.4'
+    implementation 'com.aresstack:win-proxy-java:0.3.0'
     // HTML parsing for the Ollama Library scraper (Jerry/Lagarto). Java 8 bytecode, pulls
     // jodd-core transitively; only used to parse ollama.com HTML, the HTTP fetch goes through
     // the app's own proxy/TLS plumbing.
