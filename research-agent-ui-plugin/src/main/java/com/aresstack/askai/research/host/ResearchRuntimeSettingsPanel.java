@@ -343,7 +343,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         updateMcpFieldsEnabled();
         agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
         agentMaxTokens.setToolTipText("The agent's answer budget in tokens per model turn (the longest "
-                + "answer is the source review). Too small a value truncates answers. "
+                + "answer is the source review). Default "
+                + ResearchRuntimeSettings.DEFAULT_AGENT_MAX_OUTPUT_TOKENS + ". Too small a value truncates "
+                + "answers; the assistant then says so instead of showing a cut-off answer. "
                 + "Applies to new sessions.");
         agentMaxTokens.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {

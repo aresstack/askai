@@ -31,6 +31,10 @@ public final class TeamAgentReply {
                         : "I cannot reach the research assistant model right now"
                                 + detailSuffix(result.getDetail()) + ". Please try again in a moment.";
             case UNUSABLE_ANSWER:
+                if (result.isTruncated()) {
+                    // A known cause gets its own honest line: rephrasing does not help, a larger budget does.
+                    return truncated(result.getTruncatedAtTokens(), german);
+                }
                 return german
                         ? "Ich konnte gerade keine klare Antwort bilden. Formulierst du es anders, oder "
                                 + "versuchen wir es noch einmal?"
@@ -42,6 +46,21 @@ public final class TeamAgentReply {
             default:
                 return "";
         }
+    }
+
+    /**
+     * The line for an answer the provider cut at the output token limit: what happened, at which budget, and
+     * the setting that fixes it (the budget is handed to the agent at launch, hence "new session").
+     */
+    static String truncated(int budgetTokens, boolean german) {
+        return german
+                ? "Die Antwort des Modells wurde am Token-Limit (" + budgetTokens
+                        + " Tokens) abgeschnitten und ist deshalb unvollständig. Erhöhe unter "
+                        + "Einstellungen das „Answer budget (tokens)“ und versuche es in einer "
+                        + "neuen Sitzung noch einmal."
+                : "The model's answer was cut off at the token limit (" + budgetTokens
+                        + " tokens) and is therefore incomplete. Raise the \"Answer budget "
+                        + "(tokens)\" setting and try again in a new session.";
     }
 
     private static String detailSuffix(String detail) {

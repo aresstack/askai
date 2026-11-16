@@ -28,13 +28,20 @@ public final class TeamAgentResult {
     private final PhaseAssistantOutput output;
     private final String validatedCommand;
     private final String detail;
+    private final int truncatedAtTokens;
 
     private TeamAgentResult(Status status, PhaseAssistantOutput output, String validatedCommand,
                             String detail) {
+        this(status, output, validatedCommand, detail, 0);
+    }
+
+    private TeamAgentResult(Status status, PhaseAssistantOutput output, String validatedCommand,
+                            String detail, int truncatedAtTokens) {
         this.status = status;
         this.output = output;
         this.validatedCommand = validatedCommand;
         this.detail = detail == null ? "" : detail;
+        this.truncatedAtTokens = Math.max(0, truncatedAtTokens);
     }
 
     public static TeamAgentResult ok(PhaseAssistantOutput output, String validatedCommand) {
@@ -47,6 +54,27 @@ public final class TeamAgentResult {
 
     public static TeamAgentResult unusableAnswer(String detail) {
         return new TeamAgentResult(Status.UNUSABLE_ANSWER, null, null, detail);
+    }
+
+    /**
+     * An {@link Status#UNUSABLE_ANSWER} with a KNOWN cause: the provider cut the answer at the output token
+     * limit (finish reason {@code length}), so it could not be read. The user is told exactly that and which
+     * setting to raise, instead of the generic "no clear answer" line that invites a pointless retry.
+     *
+     * @param budgetTokens the output budget the turn was granted (the "Answer budget (tokens)" setting)
+     */
+    public static TeamAgentResult truncatedAnswer(String detail, int budgetTokens) {
+        return new TeamAgentResult(Status.UNUSABLE_ANSWER, null, null, detail, Math.max(1, budgetTokens));
+    }
+
+    /** True when the answer was unusable because it ended at the output token limit. */
+    public boolean isTruncated() {
+        return truncatedAtTokens > 0;
+    }
+
+    /** The output budget the truncated turn was granted; 0 when the turn was not truncated. */
+    public int getTruncatedAtTokens() {
+        return truncatedAtTokens;
     }
 
     /**
