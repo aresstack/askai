@@ -10,7 +10,13 @@ apply plugin: 'java-library'
 // mavenLocal() to the root repositories. No sources are copied into AskAI.
 ext.directmlVersion = '0.2.1'
 
+// ONNX Runtime (CPU) runs the embedding and reranker models (bge-m3, e5, cross-encoders) straight from the
+// Hugging Face ONNX exports; the tokenizer is pure Java (ported from enterprise-ai-client text-local).
+ext.onnxRuntimeVersion = '1.30.0'
+
 dependencies {
+    implementation "com.microsoft.onnxruntime:onnxruntime:${onnxRuntimeVersion}"
+    implementation "com.google.code.gson:gson:${gsonVersion}"
     implementation "com.aresstack:directml-runtime:${directmlVersion}"
     implementation "com.aresstack:directml-encoder:${directmlVersion}"
     // The wdmlpack/lifecycle contract (ModelPackageLifecycle, ModelConversionResult, …).

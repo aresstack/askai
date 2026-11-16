@@ -1,5 +1,7 @@
 package com.aresstack.askai.localruntime;
 
+import com.aresstack.askai.localruntime.onnx.OnnxModelCatalog;
+import com.aresstack.askai.localruntime.onnx.OnnxModelDescriptor;
 import com.aresstack.windirectml.catalog.InstalledModelManifest;
 import com.aresstack.windirectml.catalog.LocalModelCatalog;
 import com.aresstack.windirectml.catalog.LocalRuntimeModelDescriptor;
@@ -23,6 +25,19 @@ record LocalModel(InstalledModelManifest manifest, Path directory) {
         return manifest.getRuntimeModelId();
     }
 
+    /** The runtime package token of models served by ONNX Runtime. */
+    static final String ONNX_PACKAGE = "onnx";
+
+    /** Whether ONNX Runtime serves this model (instead of the win-directml package runtime). */
+    boolean isOnnx() {
+        return ONNX_PACKAGE.equals(manifest.getRuntimePackage());
+    }
+
+    /** The ONNX catalog entry of this model, or {@code null} for a win-directml model. */
+    OnnxModelDescriptor onnx() {
+        return isOnnx() ? OnnxModelCatalog.findByRepositoryId(manifest.getHuggingFaceRepository()) : null;
+    }
+
     /** The runtime family token; a v1 reranker manifest carries none, so fall back to the catalog. */
     String runtimeFamily() {
         String family = manifest.getRuntimeFamily();
@@ -35,6 +50,11 @@ record LocalModel(InstalledModelManifest manifest, Path directory) {
     }
 
     boolean hasCapability(ModelCapability capability) {
+        if (isOnnx()) {
+            OnnxModelDescriptor descriptor = onnx();
+            return descriptor != null && manifest.getCapabilities().contains(capability.token())
+                    && descriptor.capability().token().equals(capability.token());
+        }
         return manifest.hasCapability(capability);
     }
 

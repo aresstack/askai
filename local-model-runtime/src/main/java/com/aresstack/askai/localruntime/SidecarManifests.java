@@ -39,6 +39,14 @@ final class SidecarManifests {
         if (manifest == null) {
             return null;
         }
+        if (OnnxManifests.ONNX.equals(manifest.getRuntimePackage())) {
+            String rejection = OnnxManifests.rejection(manifest, modelDirectory);
+            if (rejection != null) {
+                System.err.println("[local-runtime] rejecting ONNX manifest in " + modelDirectory + ": " + rejection);
+                return null;
+            }
+            return new LocalModel(manifest, modelDirectory);
+        }
         ManifestValidation validation = manifest.validate(manifest.getSchemaVersion());
         if (validation != ManifestValidation.VALID) {
             System.err.println("[local-runtime] rejecting manifest in " + modelDirectory + ": "

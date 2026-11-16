@@ -1,5 +1,8 @@
 package com.aresstack.askai.localruntime;
 
+import com.aresstack.askai.localruntime.onnx.OnnxCrossEncoder;
+import com.aresstack.askai.localruntime.onnx.OnnxRuntimeOptions;
+import com.aresstack.askai.localruntime.onnx.OnnxTextEmbedder;
 import com.aresstack.windirectml.runtime.api.Backend;
 import com.aresstack.windirectml.runtime.api.EmbeddingConfig;
 import com.aresstack.windirectml.runtime.api.EmbeddingModelHandle;
@@ -30,8 +33,12 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 final class LocalModelEngine implements AutoCloseable {
 
+    /** One scored document by its original index. */
+    record Ranked(int index, double score) {
+    }
+
     /** One rerank invocation result: scores plus the durations the Ollama API reports. */
-    record Reranked(List<RerankResult> results, long loadDurationNanos, long totalDurationNanos) {
+    record Reranked(List<Ranked> results, long loadDurationNanos, long totalDurationNanos) {
     }
 
     /** How a per-request E5 prefix is applied; RAW leaves the text untouched. */
@@ -47,15 +54,33 @@ final class LocalModelEngine implements AutoCloseable {
         String apply(String text) {
             return prefix.isEmpty() ? text : prefix + text;
         }
+
+        OnnxTextEmbedder.Role role() {
+            return switch (this) {
+                case QUERY -> OnnxTextEmbedder.Role.QUERY;
+                case PASSAGE -> OnnxTextEmbedder.Role.PASSAGE;
+                default -> OnnxTextEmbedder.Role.RAW;
+            };
+        }
     }
 
     private final Backend backend;
+    private final OnnxRuntimeOptions onnxOptions;
     private final Object lock = new Object();
     private final Map<String, LoadedHandle> handles = new LinkedHashMap<>();
     private MlRuntime runtime;
 
     LocalModelEngine(Backend backend) {
+        this(backend, OnnxRuntimeOptions.defaults());
+    }
+
+    LocalModelEngine(Backend backend, OnnxRuntimeOptions onnxOptions) {
         this.backend = backend;
+        this.onnxOptions = onnxOptions == null ? OnnxRuntimeOptions.defaults() : onnxOptions;
+    }
+
+    OnnxRuntimeOptions onnxOptions() {
+        return onnxOptions;
     }
 
     Backend backend() {
@@ -66,10 +91,21 @@ final class LocalModelEngine implements AutoCloseable {
 
     /** Embed the (already prefix-transformed) inputs in order. */
     List<float[]> embed(LocalModel model, List<String> inputs) throws Exception {
+        return embed(model, inputs, PrefixMode.RAW);
+    }
+
+    /**
+     * Embed the inputs in order. An ONNX model applies its catalog prefix for {@code mode} itself; a win-directml
+     * model receives the inputs as given (the caller already applied the E5 prefix).
+     */
+    List<float[]> embed(LocalModel model, List<String> inputs, PrefixMode mode) throws Exception {
         LoadedHandle handle = acquireEmbedding(model);
         try {
             handle.inferenceLock.lock();
             try {
+                if (handle.handle instanceof OnnxTextEmbedder onnx) {
+                    return onnx.embed(inputs, mode.role());
+                }
                 EmbeddingModelHandle embedding = (EmbeddingModelHandle) handle.handle;
                 return embedding.embedBatch(inputs);
             } finally {
@@ -83,6 +119,14 @@ final class LocalModelEngine implements AutoCloseable {
     int embeddingDimension(LocalModel model) throws Exception {
         LoadedHandle handle = acquireEmbedding(model);
         try {
+            if (handle.handle instanceof OnnxTextEmbedder onnx) {
+                handle.inferenceLock.lock();
+                try {
+                    return onnx.dimension();
+                } finally {
+                    handle.inferenceLock.unlock();
+                }
+            }
             return ((EmbeddingModelHandle) handle.handle).dimension();
         } finally {
             release(handle);
@@ -96,9 +140,18 @@ final class LocalModelEngine implements AutoCloseable {
         try {
             handle.inferenceLock.lock();
             try {
-                RerankerModelHandle reranker = (RerankerModelHandle) handle.handle;
-                List<RerankResult> results = reranker.rerank(query, documents, topN);
-                return new Reranked(results, loadNanos, System.nanoTime() - start);
+                List<Ranked> ranked = new ArrayList<>();
+                if (handle.handle instanceof OnnxCrossEncoder onnx) {
+                    for (OnnxCrossEncoder.Scored scored : onnx.rerank(query, documents, topN)) {
+                        ranked.add(new Ranked(scored.index(), scored.score()));
+                    }
+                } else {
+                    RerankerModelHandle reranker = (RerankerModelHandle) handle.handle;
+                    for (RerankResult result : reranker.rerank(query, documents, topN)) {
+                        ranked.add(new Ranked(result.originalIndex(), result.score()));
+                    }
+                }
+                return new Reranked(ranked, loadNanos, System.nanoTime() - start);
             } finally {
                 handle.inferenceLock.unlock();
             }
@@ -108,6 +161,30 @@ final class LocalModelEngine implements AutoCloseable {
     }
 
     // ------------------------------------------------------------------ install smoke (package-backed)
+
+    /** Load an ONNX model from its installed directory and run one inference, proving it runs. */
+    String smokeLoadOnnx(LocalModel model) throws Exception {
+        if (model.isEmbedding()) {
+            try (OnnxTextEmbedder embedder = OnnxTextEmbedder.load(model.directory(), model.onnx(), onnxOptions)) {
+                float[] vector = embedder.embed(List.of("smoke"), OnnxTextEmbedder.Role.RAW).get(0);
+                if (vector.length == 0) {
+                    throw new IllegalStateException("embedding smoke produced no vector");
+                }
+                for (float value : vector) {
+                    if (!Float.isFinite(value)) {
+                        throw new IllegalStateException("embedding smoke produced a non-finite value");
+                    }
+                }
+                return embedder.executionProvider();
+            }
+        }
+        try (OnnxCrossEncoder reranker = OnnxCrossEncoder.load(model.directory(), model.onnx(), onnxOptions)) {
+            if (reranker.rerank("smoke", List.of("a", "b"), 0).isEmpty()) {
+                throw new IllegalStateException("reranker smoke produced no scores");
+            }
+            return reranker.executionProvider();
+        }
+    }
 
     /** Load an encoder STRICTLY from the compiled encoder.wdmlpack, embed a token, verify a finite vector. */
     void smokeLoadEncoder(Path modelDirectory, EmbeddingModelId modelId) throws Exception {
@@ -245,6 +322,14 @@ final class LocalModelEngine implements AutoCloseable {
     }
 
     private LoadedHandle load(LocalModel model, boolean embedding) throws Exception {
+        if (model.isOnnx()) {
+            long start = System.nanoTime();
+            AutoCloseable onnx = embedding
+                    ? OnnxTextEmbedder.load(model.directory(), model.onnx(), onnxOptions)
+                    : OnnxCrossEncoder.load(model.directory(), model.onnx(), onnxOptions);
+            System.err.println("[local-runtime] loaded " + model.virtualName() + " on ONNX Runtime " + onnxOptions);
+            return new LoadedHandle(model.virtualName(), onnx, System.nanoTime() - start);
+        }
         synchronized (lock) {
             if (runtime == null) {
                 runtime = MlRuntime.builder().backend(backend).build();

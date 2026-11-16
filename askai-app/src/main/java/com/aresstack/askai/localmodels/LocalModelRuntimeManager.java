@@ -1,5 +1,7 @@
 package com.aresstack.askai.localmodels;
 
+import com.aresstack.askai.localruntime.onnx.OnnxRuntimeOptions;
+
 import com.aresstack.askai.localruntime.LocalModelRuntime;
 
 import java.io.File;
@@ -21,15 +23,32 @@ public final class LocalModelRuntimeManager {
     private static final long START_RETRY_BACKOFF_MILLIS = 15_000L;
 
     private final File modelRoot;
+    private final LocalRuntimeSettingsRepository settings;
     private LocalModelRuntime runtime;
     private long lastStartFailureMillis;
 
     public LocalModelRuntimeManager() {
-        this(LocalModelNames.localModelRoot());
+        this(LocalModelNames.localModelRoot(), LocalRuntimeSettingsRepository.inConfigurationDirectory());
     }
 
+    /** A manager with default ONNX settings (tests, tools). */
     public LocalModelRuntimeManager(File modelRoot) {
+        this(modelRoot, null);
+    }
+
+    public LocalModelRuntimeManager(File modelRoot, LocalRuntimeSettingsRepository settings) {
         this.modelRoot = modelRoot;
+        this.settings = settings;
+    }
+
+    /** The ONNX Runtime settings for the next start (defaults without a settings file). */
+    public OnnxRuntimeOptions onnxOptions() {
+        return settings == null ? OnnxRuntimeOptions.defaults() : settings.load().getOnnx();
+    }
+
+    /** The settings repository, or {@code null} when this manager runs on defaults. */
+    public LocalRuntimeSettingsRepository settings() {
+        return settings;
     }
 
     public File getModelRoot() {
@@ -78,7 +97,7 @@ public final class LocalModelRuntimeManager {
             throw new IOException("local model runtime start failed recently; retry postponed");
         }
         try {
-            runtime = LocalModelRuntime.start(modelRoot.toPath(), BACKEND);
+            runtime = LocalModelRuntime.start(modelRoot.toPath(), BACKEND, onnxOptions());
         } catch (IOException | RuntimeException failed) {
             lastStartFailureMillis = System.currentTimeMillis();
             throw new IOException("The local model runtime could not be started (model root "

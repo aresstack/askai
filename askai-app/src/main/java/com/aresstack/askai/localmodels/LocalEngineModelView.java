@@ -1,6 +1,9 @@
 package com.aresstack.askai.localmodels;
 
 import com.aresstack.windirectml.catalog.InstalledModelManifest;
+import com.aresstack.askai.localruntime.OnnxManifests;
+import com.aresstack.askai.localruntime.onnx.OnnxModelCatalog;
+import com.aresstack.askai.localruntime.onnx.OnnxModelDescriptor;
 import com.aresstack.windirectml.catalog.LocalModelCatalog;
 import com.aresstack.windirectml.catalog.LocalRuntimeModelDescriptor;
 import com.aresstack.windirectml.catalog.ModelCapability;
@@ -51,11 +54,15 @@ public final class LocalEngineModelView {
 
     /** Whether this virtual model is catalogued at all (fail-closed gate for the UI). */
     public static boolean hasLocalMetadata(String virtualName) {
-        return descriptorOf(virtualName) != null;
+        return descriptorOf(virtualName) != null || OnnxModelCatalog.findByVirtualName(virtualName) != null;
     }
 
     /** Whether this virtual model advertises a capability, per the catalog (never per its name). */
     public static boolean hasCapability(String virtualName, ModelCapability capability) {
+        OnnxModelDescriptor onnx = OnnxModelCatalog.findByVirtualName(virtualName);
+        if (onnx != null && onnx.capability().token().equals(capability.token())) {
+            return true;
+        }
         LocalRuntimeModelDescriptor descriptor = descriptorOf(virtualName);
         return descriptor != null && descriptor.hasCapability(capability);
     }
@@ -83,6 +90,18 @@ public final class LocalEngineModelView {
     public static String installedDetailLine(InstalledModelManifest manifest, boolean generationLinked) {
         if (manifest == null) {
             return METADATA_UNAVAILABLE;
+        }
+        if (OnnxManifests.ONNX.equals(manifest.getRuntimePackage())) {
+            StringBuilder line = new StringBuilder("Family: ").append(manifest.getRuntimeFamily())
+                    .append(" · Capability: ").append(join(manifest.getCapabilities()))
+                    .append(" · Backend: ").append(join(manifest.getSupportedBackends()));
+            if (!manifest.getResolvedRevision().isEmpty()) {
+                line.append(" · Revision: ").append(shortRevision(manifest.getResolvedRevision()));
+            }
+            if (manifest.getInstalledAt() > 0) {
+                line.append(" · Installed: ").append(installedDate(manifest.getInstalledAt()));
+            }
+            return line.append(" · Runtime: ONNX Runtime").toString();
         }
         LocalRuntimeModelDescriptor descriptor =
                 LocalModelCatalog.findByRepositoryId(manifest.getHuggingFaceRepository());
@@ -113,6 +132,11 @@ public final class LocalEngineModelView {
      * active backend mode (the local runtime does not report one) and does not invent one from the catalog.
      */
     public static String runningDetailLine(String virtualName) {
+        OnnxModelDescriptor onnx = OnnxModelCatalog.findByVirtualName(virtualName);
+        if (onnx != null && onnx.isRunnable()) {
+            return "Family: " + onnx.architecture() + " · Capability: " + onnx.capability().token()
+                    + " · Runtime: ONNX Runtime";
+        }
         LocalRuntimeModelDescriptor descriptor = descriptorOf(virtualName);
         if (descriptor == null) {
             return METADATA_UNAVAILABLE;
