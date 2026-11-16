@@ -134,7 +134,7 @@ public final class LocalEngineModelView {
     public static String runningDetailLine(String virtualName) {
         OnnxModelDescriptor onnx = OnnxModelCatalog.findByVirtualName(virtualName);
         if (onnx != null && onnx.isRunnable()) {
-            return "Family: " + onnx.architecture() + " · Capability: " + onnx.capability().token()
+            return "Family: " + onnxFamily(onnx) + " · Capability: " + onnx.capability().token()
                     + " · Runtime: ONNX Runtime";
         }
         LocalRuntimeModelDescriptor descriptor = descriptorOf(virtualName);
@@ -147,6 +147,13 @@ public final class LocalEngineModelView {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /** The family a person recognises: what the model does, with its encoder architecture. */
+    private static String onnxFamily(OnnxModelDescriptor onnx) {
+        String role = onnx.capability() == OnnxModelDescriptor.Capability.RERANK
+                ? "Cross-encoder reranker" : "Sentence embedding encoder";
+        return role + " (" + onnx.architecture() + ")";
+    }
 
     private static String familyDisplay(InstalledModelManifest manifest,
                                         LocalRuntimeModelDescriptor descriptor) {
