@@ -616,13 +616,13 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindDecimal(writerMinBriefSimilarity, ResearchRuntimeSettings.KEY_WRITER_MIN_BRIEF_SIMILARITY,
                 com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MIN_SIMILARITY,
                 "Evidence pack: a passage needs at least this similarity (0..1) to the section's brief, otherwise "
-                        + "it treats another subject and stays out (0 = off). Depends on the embedding model: the "
-                        + "default is calibrated for bge-m3; nomic-embed-text scores higher and closer together.");
+                        + "it treats another subject and stays out (0 = off). Calibrated for the embedding "
+                        + "model bge-m3; another embedding model needs its own value.");
         bindDecimal(writerBriefSimilarityMargin, ResearchRuntimeSettings.KEY_WRITER_BRIEF_SIMILARITY_MARGIN,
                 com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MARGIN,
                 "Evidence pack: a passage may lie at most this far (0..1) below the section's best passage; "
-                        + "further down the search only finds neighbouring subjects (0 = off). Depends on the "
-                        + "embedding model: the default is calibrated for bge-m3; with nomic-embed-text use less.");
+                        + "further down the search only finds neighbouring subjects (0 = off). Calibrated for the "
+                        + "embedding model bge-m3; another embedding model needs its own value.");
         bindLimit(driftMinTermLength, ResearchRuntimeSettings.KEY_DRIFT_MIN_TERM_LENGTH,
                 com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_TERM_LENGTH,
                 "Book report: a term this long that a section repeats but the concept and outline never mention "
