@@ -200,6 +200,22 @@ public final class ProductiveResearchSessionResources {
         this.outlineKnowledgeSettings = settings;
     }
 
+    /** The sentence-embedding slot; null = the main embedding port ({@link #sentenceEmbeddings()}). */
+    private volatile com.aresstack.askai.research.knowledge.EmbeddingPort sentenceEmbeddings;
+
+    void setSentenceEmbeddings(com.aresstack.askai.research.knowledge.EmbeddingPort embeddings) {
+        this.sentenceEmbeddings = embeddings;
+    }
+
+    /**
+     * The port the writer checks compare sentences with: the sentence-embedding slot, else the main embedding port;
+     * null without either.
+     */
+    public com.aresstack.askai.research.knowledge.EmbeddingPort sentenceEmbeddings() {
+        com.aresstack.askai.research.knowledge.EmbeddingPort own = sentenceEmbeddings;
+        return own != null ? own : outlineEmbeddings;
+    }
+
     public com.aresstack.askai.research.knowledge.EmbeddingPort outlineEmbeddings() {
         return outlineEmbeddings;
     }

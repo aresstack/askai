@@ -53,6 +53,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
     private final JTextField writerRepeatMinWords = ComicControls.textField(4);
     private final JTextField writerRepeatMinShare = ComicControls.textField(4);
+    private final JTextField writerRepeatMinSimilarity = ComicControls.textField(4);
+    private final JTextField writerCarryMinSimilarity = ComicControls.textField(4);
+    private final JTextField driftMinFrameSimilarity = ComicControls.textField(4);
     private final JTextField writerSynthesisMinSources = ComicControls.textField(4);
     private final JTextField writerSynthesisParagraphs = ComicControls.textField(4);
     private final JTextField writerSynthesisMinSentences = ComicControls.textField(4);
@@ -234,15 +237,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         writer.row("Evidence relevance", group(labelled("Similarity ≥", writerMinBriefSimilarity),
                 labelled("Below best ≤", writerBriefSimilarityMargin)));
         writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
-                labelled("Stem letters", writerCarryStemLength), labelled("Overlap ≥", writerCarryMinOverlap)));
+                labelled("Stem letters", writerCarryStemLength), labelled("Overlap ≥", writerCarryMinOverlap),
+                labelled("Meaning ≥", writerCarryMinSimilarity)));
         writer.row("Repeat check", group(labelled("Words ≥", writerRepeatMinWords),
-                labelled("Share ≥", writerRepeatMinShare)));
+                labelled("Share ≥", writerRepeatMinShare), labelled("Meaning ≥", writerRepeatMinSimilarity)));
         writer.row("Synthesis", group(labelled("Sources ≥", writerSynthesisMinSources),
                 labelled("Paragraphs/part", writerSynthesisParagraphs),
                 labelled("Report: sentences ≥", writerSynthesisMinSentences),
                 labelled("One-source share ≤", writerSynthesisMaxShare)));
         writer.row("Topic drift", group(labelled("Term letters ≥", driftMinTermLength),
-                labelled("Sentences ≥", driftMinSentences), driftNounsOnly));
+                labelled("Sentences ≥", driftMinSentences), driftNounsOnly,
+                labelled("Meaning ≥", driftMinFrameSimilarity)));
 
         // Plan T5: the research team of the Sources phase and the worker browsers its page workers read in.
         com.aresstack.comiccontrols.control.ComicForm team =
@@ -670,6 +675,20 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SHARE,
                 "Repeat check: the share (0..1) of a sentence's content words that one sentence the book already "
                         + "has must contain for the new sentence to count as a repeat. Lower values take out more.");
+        String slot = " Uses the sentence-embedding model (Settings → AI models → Local runtime; falls back to the main "
+                + "embedding model). 0 = words only.";
+        bindDecimal(writerRepeatMinSimilarity, ResearchRuntimeSettings.KEY_WRITER_REPEAT_MIN_SIMILARITY,
+                com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SIMILARITY,
+                "Repeat check: a sentence whose meaning is this close (cosine 0..1) to one the book already has "
+                        + "leaves the section even when the words differ." + slot);
+        bindDecimal(writerCarryMinSimilarity, ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_SIMILARITY,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_SIMILARITY,
+                "Claim check: a cited prose passage with a sentence this close in meaning (cosine 0..1) carries "
+                        + "the claim even when it shares too few words." + slot);
+        bindDecimal(driftMinFrameSimilarity, ResearchRuntimeSettings.KEY_DRIFT_MIN_FRAME_SIMILARITY,
+                com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_FRAME_SIMILARITY,
+                "Book report: a candidate foreign term is not reported when every sentence it stands in is this "
+                        + "close in meaning (cosine 0..1) to the title, outline or glossary." + slot);
         bindLimit(writerSynthesisMinSources, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_MIN_SOURCES,
                 com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SOURCES,
                 "Synthesis: how many different sources one paragraph combines (at least 2). The writer is asked "

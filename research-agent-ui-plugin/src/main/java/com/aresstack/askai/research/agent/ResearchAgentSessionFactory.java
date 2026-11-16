@@ -144,6 +144,9 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 // selection is published as a per-session snapshot; the agent's implementation is ready.
                 ResearchRuntimeSettings.loadSearchStrategy(hostContext.getStateStore()),
                 embeddingSnapshots);
+        // OPTIONAL sentence-embedding slot for the writer checks; absent → the main embedding model.
+        factory.setSentenceEmbeddingSnapshots(hostContext.getService(
+                com.aresstack.askai.agent.model.embedding.SentenceEmbeddingConfigurationSnapshotProvider.class));
         // The shared search browser follows the persisted window setting (Search → Browser (SERP)).
         com.aresstack.askai.research.runtime.ResearchRuntimeShared.process().setSearchBrowserHeadless(
                 ResearchRuntimeSettings.loadSearchBrowserHeadless(hostContext.getStateStore()));

@@ -37,25 +37,44 @@ public final class ClaimCarryCheck {
          * sentences of live run 3 is above it, every sentence of section 1.3 (cited to a footer) is below it.
          */
         public static final double DEFAULT_MIN_OVERLAP = 0.3;
+        /**
+         * Default cosine (sentence-embedding slot) between the sentence and its best sentence of a cited prose passage
+         * from which the passage carries it although the words differ (the writer paraphrased, translated or
+         * inflected beyond the stem rule); 0 turns the semantic rule off. Not yet calibrated on a live run.
+         */
+        public static final double DEFAULT_MIN_SIMILARITY = 0.85;
 
         private final int minWordLength;
         private final int stemLength;
         private final double minOverlap;
         private final ProsePassageFilter.Criteria prose;
+        private final double minSimilarity;
 
         public Criteria(int minWordLength, int stemLength, double minOverlap, ProsePassageFilter.Criteria prose) {
-            if (minWordLength < 1 || stemLength < 1 || minOverlap < 0 || minOverlap > 1) {
-                throw new IllegalArgumentException("lengths must be >= 1 and the overlap within 0..1");
+            this(minWordLength, stemLength, minOverlap, prose, DEFAULT_MIN_SIMILARITY);
+        }
+
+        public Criteria(int minWordLength, int stemLength, double minOverlap, ProsePassageFilter.Criteria prose,
+                        double minSimilarity) {
+            if (minWordLength < 1 || stemLength < 1 || minOverlap < 0 || minOverlap > 1 || minSimilarity < 0
+                    || minSimilarity > 1) {
+                throw new IllegalArgumentException("lengths must be >= 1, the overlap and similarity within 0..1");
             }
             this.minWordLength = minWordLength;
             this.stemLength = stemLength;
             this.minOverlap = minOverlap;
             this.prose = prose == null ? ProsePassageFilter.Criteria.defaults() : prose;
+            this.minSimilarity = minSimilarity;
         }
 
         public static Criteria defaults() {
             return new Criteria(DEFAULT_MIN_WORD_LENGTH, DEFAULT_STEM_LENGTH, DEFAULT_MIN_OVERLAP,
-                    ProsePassageFilter.Criteria.defaults());
+                    ProsePassageFilter.Criteria.defaults(), DEFAULT_MIN_SIMILARITY);
+        }
+
+        /** The semantic carry bound; 0 = lexical only. */
+        public double getMinSimilarity() {
+            return minSimilarity;
         }
 
         public int getMinWordLength() {
@@ -81,22 +100,33 @@ public final class ClaimCarryCheck {
             }
             Criteria c = (Criteria) o;
             return c.minWordLength == minWordLength && c.stemLength == stemLength
-                    && Double.compare(c.minOverlap, minOverlap) == 0 && c.prose.equals(prose);
+                    && Double.compare(c.minOverlap, minOverlap) == 0 && c.prose.equals(prose)
+                    && Double.compare(c.minSimilarity, minSimilarity) == 0;
         }
 
         @Override
         public int hashCode() {
             return ((minWordLength * 31 + stemLength) * 31 + Double.valueOf(minOverlap).hashCode()) * 31
-                    + prose.hashCode();
+                    + prose.hashCode() + Double.valueOf(minSimilarity).hashCode();
         }
     }
 
     private final Criteria criteria;
     private final ProsePassageFilter prose;
+    private final SentenceSimilarity similarity;
 
     public ClaimCarryCheck(Criteria criteria) {
+        this(criteria, SentenceSimilarity.none());
+    }
+
+    /**
+     * @param similarity the sentence-embedding slot: a prose passage whose best sentence reaches
+     *                   {@link Criteria#getMinSimilarity()} carries the sentence even below the word overlap
+     */
+    public ClaimCarryCheck(Criteria criteria, SentenceSimilarity similarity) {
         this.criteria = criteria == null ? Criteria.defaults() : criteria;
         this.prose = new ProsePassageFilter(this.criteria.getProse());
+        this.similarity = similarity == null ? SentenceSimilarity.none() : similarity;
     }
 
     /** The uncarried-claim flags of a validated answer, in text order. */
@@ -145,6 +175,7 @@ public final class ClaimCarryCheck {
         }
         double best = 0;
         String why = "";
+        List<String> proseSentences = new ArrayList<String>();
         for (int i = 0; i < texts.size(); i++) {
             String text = texts.get(i);
             if (text == null) {
@@ -156,8 +187,16 @@ public final class ClaimCarryCheck {
                 continue;
             }
             best = Math.max(best, overlap(words, stemsOf(text)));
+            for (CitationValidator.Sentence passageSentence
+                    : CitationValidator.sentences(text.replace('\n', ' ').trim())) {
+                proseSentences.add(passageSentence.plainText());
+            }
         }
         if (best >= criteria.getMinOverlap()) {
+            return "";
+        }
+        double bound = criteria.getMinSimilarity();
+        if (bound > 0 && similarity.best(sentence, proseSentences) >= bound) {
             return "";
         }
         return !why.isEmpty() && best == 0 ? why

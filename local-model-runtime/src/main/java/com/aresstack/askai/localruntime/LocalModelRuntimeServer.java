@@ -1,5 +1,7 @@
 package com.aresstack.askai.localruntime;
 
+import com.aresstack.askai.localruntime.onnx.OnnxModelCatalog;
+import com.aresstack.askai.localruntime.onnx.OnnxModelDescriptor;
 import com.aresstack.windirectml.catalog.CatalogBackend;
 import com.aresstack.windirectml.catalog.CatalogModelFamily;
 import com.aresstack.windirectml.catalog.InstalledModelManifest;
@@ -17,7 +19,6 @@ import com.aresstack.windirectml.encoder.pack.EncoderPackageLifecycle;
 import com.aresstack.windirectml.modelpack.ModelConversionResult;
 import com.aresstack.windirectml.runtime.api.Backend;
 import com.aresstack.windirectml.runtime.api.EmbeddingModelId;
-import com.aresstack.windirectml.runtime.api.RerankResult;
 import com.aresstack.windirectml.runtime.api.RerankerModelId;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -215,8 +216,8 @@ final class LocalModelRuntimeServer {
             return;
         }
         List<Object> results = new ArrayList<>();
-        for (RerankResult result : reranked.results()) {
-            results.add(Map.of("index", result.originalIndex(), "score", result.score()));
+        for (LocalModelEngine.Ranked result : reranked.results()) {
+            results.add(Map.of("index", result.index(), "score", result.score()));
         }
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("model", model.virtualName());
@@ -251,19 +252,20 @@ final class LocalModelRuntimeServer {
             typed(exchange, 400, INVALID_INPUT_TYPE, unknown.getMessage());
             return;
         }
-        if (mode != LocalModelEngine.PrefixMode.RAW && !model.isE5()) {
+        if (mode != LocalModelEngine.PrefixMode.RAW && !model.isE5() && !model.isOnnx()) {
             typed(exchange, 400, INVALID_INPUT_TYPE, "model '" + model.virtualName()
                     + "' does not use query/passage prefixes; use input_type=raw");
             return;
         }
-        // E5 prefixes are applied ONLY per request (the handle is loaded prefix-neutral); RAW is identity.
+        // E5 prefixes are applied ONLY per request (the handle is loaded prefix-neutral); RAW is identity. An ONNX
+        // model applies its catalog prefix for the role itself (an empty prefix means raw text for every role).
         List<String> transformed = new ArrayList<>(inputs.size());
         for (String text : inputs) {
-            transformed.add(model.isE5() ? mode.apply(text) : text);
+            transformed.add(model.isE5() && !model.isOnnx() ? mode.apply(text) : text);
         }
         List<float[]> vectors;
         try {
-            vectors = engine.embed(model, transformed);
+            vectors = model.isOnnx() ? engine.embed(model, transformed, mode) : engine.embed(model, transformed);
         } catch (EmbeddingException notLoadable) {
             typed(exchange, 500, MODEL_NOT_LOADABLE, "embedding model not loadable: "
                     + notLoadable.getMessage());
@@ -477,6 +479,11 @@ final class LocalModelRuntimeServer {
                     "install needs 'repositoryId' and 'modelDirectory'"));
             return;
         }
+        OnnxModelDescriptor onnx = OnnxModelCatalog.findByRepositoryId(repositoryId);
+        if (onnx != null) {
+            installOnnx(exchange, onnx, Path.of(modelDir));
+            return;
+        }
         // The sidecar re-resolves the repository against the catalog ITSELF; it never trusts a host-claimed
         // family or capability set.
         LocalRuntimeModelDescriptor descriptor = LocalModelCatalog.findByRepositoryId(repositoryId);
@@ -559,6 +566,43 @@ final class LocalModelRuntimeServer {
         }
     }
 
+    /**
+     * Install step for an ONNX catalog model: the host already placed {@code model.onnx}, {@code tokenizer.json} and
+     * {@code config.json}; the runtime re-resolves the catalog entry itself, loads the graph with ONNX Runtime and runs
+     * one inference. No package compile.
+     */
+    private void installOnnx(HttpExchange exchange, OnnxModelDescriptor descriptor, Path directory)
+            throws IOException {
+        if (!descriptor.isRunnable()) {
+            respond(exchange, 200, installError("MODEL_NOT_RUNNABLE", "'" + descriptor.repositoryId()
+                    + "' has no ONNX export yet: " + descriptor.exportNote()));
+            return;
+        }
+        String provider;
+        try {
+            LocalModel candidate = new LocalModel(OnnxManifests.forInstall(descriptor,
+                    engine.onnxOptions().executionProvider().token(), "install", System.currentTimeMillis()),
+                    directory);
+            provider = engine.smokeLoadOnnx(candidate);
+        } catch (Exception smokeFailure) {
+            respond(exchange, 200, installError("MODEL_SMOKE_FAILED",
+                    "ONNX smoke inference failed: " + smokeFailure.getMessage()));
+            return;
+        }
+        Map<String, Object> ok = new LinkedHashMap<>();
+        ok.put("ok", true);
+        ok.put("status", "READY");
+        ok.put("repositoryId", descriptor.repositoryId());
+        ok.put("virtualName", descriptor.virtualModelName());
+        ok.put("runtimeModelId", descriptor.repositoryId());
+        ok.put("runtimeFamily", descriptor.architecture());
+        ok.put("runtimePackage", OnnxManifests.ONNX);
+        ok.put("capabilities", List.of(descriptor.capability().token()));
+        ok.put("backend", provider);
+        ok.put("packagePath", directory.resolve(OnnxModelDescriptor.LOCAL_GRAPH).toString());
+        respond(exchange, 200, ok);
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static boolean backendSupported(LocalRuntimeModelDescriptor descriptor, Backend backend) {
@@ -637,12 +681,12 @@ final class LocalModelRuntimeServer {
 
     private Map<String, Object> details(LocalModel model) {
         Map<String, Object> details = new LinkedHashMap<>();
-        details.put("format", "wdmlpack");
+        details.put("format", model.isOnnx() ? "onnx" : "wdmlpack");
         details.put("family", model.runtimeFamily());
         details.put("families", List.of(model.runtimeFamily()));
         details.put("capabilities", model.manifest().getCapabilities());
         details.put("backends", model.manifest().getSupportedBackends());
-        details.put("runtime", "win-directml-java");
+        details.put("runtime", model.isOnnx() ? "onnxruntime" : "win-directml-java");
         return details;
     }
 

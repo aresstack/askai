@@ -1,5 +1,7 @@
 package com.aresstack.askai.localmodels;
 
+import com.aresstack.askai.localruntime.OnnxManifests;
+
 import com.aresstack.windirectml.catalog.InstalledModelManifest;
 import com.aresstack.windirectml.catalog.ManifestValidation;
 
@@ -58,6 +60,10 @@ public final class LocalInstalledModels {
         }
         if (manifest == null) {
             return null;
+        }
+        if (OnnxManifests.ONNX.equals(manifest.getRuntimePackage())) {
+            // ONNX models are trusted against the ONNX catalog (same rule the local runtime applies).
+            return OnnxManifests.isValid(manifest, manifestFile.getParentFile().toPath()) ? manifest : null;
         }
         return manifest.validate(manifest.getSchemaVersion()) == ManifestValidation.VALID ? manifest : null;
     }

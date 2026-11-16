@@ -90,6 +90,32 @@ public class TopicDriftCheckTest {
     }
 
     @Test
+    public void theSentenceModelClearsACandidateOnlyWhenEverySentenceIsCloseToTheFrame() {
+        // Fake model: alarm sentences point away from every frame line, all other texts point the same way.
+        com.aresstack.askai.research.runtime.writer.SentenceVectors model =
+                new com.aresstack.askai.research.runtime.writer.SentenceVectors() {
+                    public java.util.List<float[]> embed(java.util.List<String> texts) {
+                        java.util.List<float[]> out = new java.util.ArrayList<float[]>();
+                        for (String text : texts) {
+                            out.add(text.contains("Funkalarm") ? new float[]{0, 1} : new float[]{1, 0});
+                        }
+                        return out;
+                    }
+                };
+        TopicDriftCheck semantic = new TopicDriftCheck(TopicDriftCheck.Criteria.defaults(), MISSION, outline(),
+                Collections.<String>emptyList(),
+                new com.aresstack.askai.research.runtime.writer.SentenceSimilarity(model, null));
+        assertEquals(Arrays.asList("Funkalarmanlagen (2 sentences)"), semantic.foreignSubjects(SECTION_1_4));
+        assertEquals(Collections.<String>emptyList(), semantic.foreignSubjects(Arrays.asList(
+                "Die Echtzeitlokalisierung der Arbeiter hilft.", "Mit Echtzeitlokalisierung sinkt das Risiko.")));
+        TopicDriftCheck lexical = new TopicDriftCheck(TopicDriftCheck.Criteria.defaults(), MISSION, outline(),
+                Collections.<String>emptyList());
+        assertEquals(1, lexical.foreignSubjects(Arrays.asList(
+                "Die Echtzeitlokalisierung der Arbeiter hilft.", "Mit Echtzeitlokalisierung sinkt das Risiko."))
+                .size());
+    }
+
+    @Test
     public void aSubjectOfTheOutlineIsNeverForeign() {
         TopicDriftCheck check = new TopicDriftCheck(TopicDriftCheck.Criteria.defaults(), MISSION, outline(),
                 Collections.<String>emptyList());

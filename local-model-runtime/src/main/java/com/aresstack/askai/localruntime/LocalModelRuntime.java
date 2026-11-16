@@ -1,5 +1,6 @@
 package com.aresstack.askai.localruntime;
 
+import com.aresstack.askai.localruntime.onnx.OnnxRuntimeOptions;
 import com.aresstack.windirectml.runtime.api.Backend;
 
 import java.io.IOException;
@@ -37,9 +38,19 @@ public final class LocalModelRuntime implements AutoCloseable {
      *                  unknown names fall back to {@code cpu}
      */
     public static LocalModelRuntime start(Path modelRoot, String backend) throws IOException {
+        return start(modelRoot, backend, OnnxRuntimeOptions.defaults());
+    }
+
+    /**
+     * Start the container with explicit ONNX Runtime settings (threads, execution provider, quantized graphs). Embedding
+     * and reranker models installed from the ONNX catalog run through ONNX Runtime; win-directml packages keep running
+     * on {@code backend}.
+     */
+    public static LocalModelRuntime start(Path modelRoot, String backend, OnnxRuntimeOptions onnxOptions)
+            throws IOException {
         Backend resolved = resolveBackend(backend);
         LocalModelStore store = new LocalModelStore(modelRoot);
-        LocalModelEngine engine = new LocalModelEngine(resolved);
+        LocalModelEngine engine = new LocalModelEngine(resolved, onnxOptions);
         // The productive win-directml generation runtime (directml-inference), linked behind the AskAI
         // port: /api/version reports features.generation=true and /api/chat + /api/generate run real
         // local generation through it.

@@ -39,20 +39,39 @@ public final class RepeatCheck {
          * ("Die Arbeitgeber müssen auch sicherstellen, …") shares 0.69.
          */
         public static final double DEFAULT_MIN_SHARE = 0.75;
+        /**
+         * Default cosine (sentence-embedding slot) from which a sentence that shares too few words is still a near
+         * repeat: a paraphrase of a sentence the book already has. High on purpose, a paraphrase model scores
+         * restatements above it and related but new statements below; 0 turns the semantic rule off. Not yet
+         * calibrated on a live run.
+         */
+        public static final double DEFAULT_MIN_SIMILARITY = 0.93;
 
         private final int minWords;
         private final double minShare;
+        private final double minSimilarity;
 
         public Criteria(int minWords, double minShare) {
-            if (minWords < 1 || minShare <= 0 || minShare > 1) {
-                throw new IllegalArgumentException("min words must be >= 1 and the share within (0, 1]");
+            this(minWords, minShare, DEFAULT_MIN_SIMILARITY);
+        }
+
+        public Criteria(int minWords, double minShare, double minSimilarity) {
+            if (minWords < 1 || minShare <= 0 || minShare > 1 || minSimilarity < 0 || minSimilarity > 1) {
+                throw new IllegalArgumentException("min words must be >= 1, the share within (0, 1] and the "
+                        + "similarity within 0..1");
             }
             this.minWords = minWords;
             this.minShare = minShare;
+            this.minSimilarity = minSimilarity;
         }
 
         public static Criteria defaults() {
-            return new Criteria(DEFAULT_MIN_WORDS, DEFAULT_MIN_SHARE);
+            return new Criteria(DEFAULT_MIN_WORDS, DEFAULT_MIN_SHARE, DEFAULT_MIN_SIMILARITY);
+        }
+
+        /** The semantic near-repeat bound; 0 = lexical only. */
+        public double getMinSimilarity() {
+            return minSimilarity;
         }
 
         public int getMinWords() {
@@ -69,17 +88,20 @@ public final class RepeatCheck {
                 return false;
             }
             Criteria c = (Criteria) o;
-            return c.minWords == minWords && Double.compare(c.minShare, minShare) == 0;
+            return c.minWords == minWords && Double.compare(c.minShare, minShare) == 0
+                    && Double.compare(c.minSimilarity, minSimilarity) == 0;
         }
 
         @Override
         public int hashCode() {
-            return minWords * 31 + Double.valueOf(minShare).hashCode();
+            return (minWords * 31 + Double.valueOf(minShare).hashCode()) * 31
+                    + Double.valueOf(minSimilarity).hashCode();
         }
 
         @Override
         public String toString() {
-            return String.format(Locale.ROOT, "RepeatCheck.Criteria[minWords=%d, minShare=%.2f]", minWords, minShare);
+            return String.format(Locale.ROOT, "RepeatCheck.Criteria[minWords=%d, minShare=%.2f, minSimilarity=%.2f]",
+                    minWords, minShare, minSimilarity);
         }
     }
 
@@ -89,14 +111,25 @@ public final class RepeatCheck {
 
     private final Criteria criteria;
     private final ClaimCarryCheck words;
+    private final SentenceSimilarity similarity;
 
     /**
      * @param criteria the near-repeat bounds; the defaults when {@code null}
      * @param carry    the claim check's word and stem lengths; the defaults when {@code null}
      */
     public RepeatCheck(Criteria criteria, ClaimCarryCheck.Criteria carry) {
+        this(criteria, carry, SentenceSimilarity.none());
+    }
+
+    /**
+     * @param similarity the sentence-embedding slot; a sentence with enough content words whose cosine to a remembered
+     *                   sentence reaches {@link Criteria#getMinSimilarity()} is a near repeat even with few shared
+     *                   words (a paraphrase). {@link SentenceSimilarity#none()} keeps the check lexical.
+     */
+    public RepeatCheck(Criteria criteria, ClaimCarryCheck.Criteria carry, SentenceSimilarity similarity) {
         this.criteria = criteria == null ? Criteria.defaults() : criteria;
         this.words = new ClaimCarryCheck(carry);
+        this.similarity = similarity == null ? SentenceSimilarity.none() : similarity;
     }
 
     /** A check that finds no near repeat: only exact repeats leave the text. */
@@ -132,10 +165,12 @@ public final class RepeatCheck {
 
     /** One remembered sentence: the stems of its words and its numbers; immutable. */
     private static final class Remembered {
+        final String text;
         final Set<String> stems;
         final Set<String> numbers;
 
-        Remembered(Set<String> stems, Set<String> numbers) {
+        Remembered(String text, Set<String> stems, Set<String> numbers) {
+            this.text = text;
             this.stems = Collections.unmodifiableSet(stems);
             this.numbers = Collections.unmodifiableSet(numbers);
         }
@@ -169,7 +204,8 @@ public final class RepeatCheck {
         /**
          * Whether {@code sentence} (without markers) is a near repeat of a remembered one: it has at least
          * {@link Criteria#getMinWords() min words} content words and a remembered sentence holds at least
-         * {@link Criteria#getMinShare() min share} of them and every number it states.
+         * {@link Criteria#getMinShare() min share} of them and every number it states, or (sentence-embedding slot) a
+         * remembered sentence with every number it states reaches {@link Criteria#getMinSimilarity() min similarity}.
          */
         public boolean repeats(String sentence) {
             if (!enabled) {
@@ -180,20 +216,25 @@ public final class RepeatCheck {
                 return false;
             }
             Set<String> numbers = numbers(sentence);
+            List<String> sameNumbers = new ArrayList<String>();
             for (Remembered earlier : sentences) {
-                if (earlier.numbers.containsAll(numbers)
-                        && check.words.overlap(content, earlier.stems) >= check.criteria.getMinShare()) {
+                if (!earlier.numbers.containsAll(numbers)) {
+                    continue;
+                }
+                if (check.words.overlap(content, earlier.stems) >= check.criteria.getMinShare()) {
                     return true;
                 }
+                sameNumbers.add(earlier.text);
             }
-            return false;
+            double bound = check.criteria.getMinSimilarity();
+            return bound > 0 && check.similarity.best(sentence, sameNumbers) >= bound;
         }
 
         /** Adds one sentence (without markers). */
         public void remember(String sentence) {
             Set<String> stems = check.words.stemsOf(sentence);
             if (!stems.isEmpty()) {
-                sentences.add(new Remembered(stems, numbers(sentence)));
+                sentences.add(new Remembered(sentence, stems, numbers(sentence)));
             }
         }
 

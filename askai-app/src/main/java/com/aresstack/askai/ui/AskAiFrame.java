@@ -1487,6 +1487,9 @@ public final class AskAiFrame extends JFrame {
         // model is picked from the installed chat-capable models (the same catalog as the chat's model list).
         aiModelsPanel.addSection(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
                 .inConfigurationDirectory(), ((VirtualOllamaContainerService) ollamaService)::loadChatModelNamesNow));
+        // The built-in local runtime (ONNX Runtime on the CPU) and the sentence-embedding slot.
+        aiModelsPanel.addSection(new LocalRuntimeSettingsPanel(com.aresstack.askai.localmodels
+                .LocalRuntimeSettingsRepository.inConfigurationDirectory()));
         chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsPanel));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
         chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,
