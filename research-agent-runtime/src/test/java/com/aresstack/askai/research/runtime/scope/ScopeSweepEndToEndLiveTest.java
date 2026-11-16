@@ -54,7 +54,7 @@ import static org.junit.Assert.assertTrue;
  * bound to (revision, fingerprint). This is the ResearchAgentSession.runScopeSweep() chain minus
  * only the Swing session shell (same backend, same wire client, same service, same assembler).
  * <p>
- * Skips itself without the staged agent jar, a local Ollama, a chat model, or nomic-embed-text.
+ * Skips itself without the staged agent jar, a local Ollama, a chat model, or the embedding model (bge-m3 unless -Daskai.live.embed.model names another).
  */
 public class ScopeSweepEndToEndLiveTest {
 
@@ -62,12 +62,13 @@ public class ScopeSweepEndToEndLiveTest {
     private static final String PREFERRED_MODEL = com.aresstack.askai.modelport.ModelPortSettings.DEFAULT_MODEL;
 
     private static final String OLLAMA = "http://127.0.0.1:11434";
-    private static final String EMBED_MODEL = "nomic-embed-text:latest";
+    private static final String EMBED_MODEL = System.getProperty("askai.live.embed.model", "bge-m3:latest");
 
     @Test
     public void oneRealSweepRoundTripEndsReadyBoundToItsSnapshot() throws Exception {
         String tags = getOrSkip(OLLAMA + "/api/tags");
-        Assume.assumeTrue("nomic-embed-text not installed", tags.contains("nomic-embed-text"));
+        Assume.assumeTrue(EMBED_MODEL + " not installed",
+                tags.contains(EMBED_MODEL.replace(":latest", "")));
         String chatModel = chatModelOrSkip(tags);
         System.err.println("[sweep-live] chat model=" + chatModel);
 
