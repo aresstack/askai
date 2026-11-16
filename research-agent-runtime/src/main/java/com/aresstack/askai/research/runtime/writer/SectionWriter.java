@@ -52,12 +52,17 @@ public final class SectionWriter {
     private final ClaimSupportCheck claims = new ClaimSupportCheck();
     private final VoiceCheck voice = new VoiceCheck();
     private final Consumer<String> log;
+    private final SentenceSimilarity similarity;
 
     /**
      * @param chat the transport of the {@code phase.draft.writer} slot ({@code ResearchModelSlots.PHASE_DRAFT_WRITER})
      * @param log  receives one line per stripped marker and per extra call; never source text
      */
     public SectionWriter(MainModelChat chat, Consumer<String> log) {
+        this(chat, log, null);
+    }
+
+    private SectionWriter(MainModelChat chat, Consumer<String> log, SentenceVectors sentences) {
         if (chat == null) {
             throw new IllegalArgumentException("chat must not be null");
         }
@@ -66,6 +71,16 @@ public final class SectionWriter {
             public void accept(String line) {
             }
         } : log;
+        this.similarity = sentences == null ? SentenceSimilarity.none() : new SentenceSimilarity(sentences, this.log);
+    }
+
+    /**
+     * The same writer with the sentence-embedding slot: the repeat check also takes out paraphrases of sentences the
+     * book has ({@link RepeatCheck.Criteria#getMinSimilarity()}), and claim-check stage 2 counts a cited passage whose
+     * sentence says the same in other words as carrying ({@link ClaimCarryCheck.Criteria#getMinSimilarity()}).
+     */
+    public SectionWriter withSentenceVectors(SentenceVectors sentences) {
+        return new SectionWriter(chat, log, sentences);
     }
 
     /** A writer on the host's model port, bound to {@code phase.draft.writer} (falls back to {@code phase.draft}). */
@@ -81,7 +96,7 @@ public final class SectionWriter {
         for (String text : assignment.getWrittenSections()) {
             written.addAll(CitationValidator.sentenceKeys(text));
         }
-        RepeatCheck.Memory book = new RepeatCheck(assignment.getRepeats(), assignment.getCarry())
+        RepeatCheck.Memory book = new RepeatCheck(assignment.getRepeats(), assignment.getCarry(), similarity)
                 .memory(assignment.getWrittenSections());
         if (!assignment.getWrittenSections().isEmpty()) {
             log.accept("section " + assignment.getSectionId() + ": repeat check against " + book.size()
@@ -319,7 +334,7 @@ public final class SectionWriter {
                     }
                 });
         List<ClaimFlag> unsupported = new ArrayList<ClaimFlag>(claims.check(result, a.getPassages()));
-        unsupported.addAll(new ClaimCarryCheck(a.getCarry()).check(result, a.getPassages()));
+        unsupported.addAll(new ClaimCarryCheck(a.getCarry(), similarity).check(result, a.getPassages()));
         unsupported.addAll(voice.check(result));
         return new Checked(result, unsupported);
     }

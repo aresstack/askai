@@ -3071,10 +3071,33 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                             public void accept(String line) {
                                 technicalLog(line);
                             }
-                        }),
+                        }).withSentenceVectors(sentenceVectors(resources)),
                 new com.aresstack.askai.research.drafting.EvidenceAssignments(packs, contexts,
                         () -> com.aresstack.askai.research.host.ResearchRuntimeSettings
                                 .loadWriterTargets(hostStateStore)));
+    }
+
+    /**
+     * The sentence-embedding slot as the writer checks use it (both sides embedded as documents, so they are
+     * comparable); null without any embedding port.
+     */
+    private static com.aresstack.askai.research.runtime.writer.SentenceVectors sentenceVectors(
+            com.aresstack.askai.research.host.ProductiveResearchSessionResources resources) {
+        final com.aresstack.askai.research.knowledge.EmbeddingPort port =
+                resources == null ? null : resources.sentenceEmbeddings();
+        if (port == null) {
+            return null;
+        }
+        return new com.aresstack.askai.research.runtime.writer.SentenceVectors() {
+            public java.util.List<float[]> embed(java.util.List<String> sentences) {
+                java.util.List<float[]> out = new java.util.ArrayList<float[]>(sentences.size());
+                for (com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector vector
+                        : port.embed(com.aresstack.askai.research.knowledge.EmbeddingPort.Role.DOCUMENT, sentences)) {
+                    out.add(vector.getValues());
+                }
+                return out;
+            }
+        };
     }
 
     private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,
@@ -3552,7 +3575,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return new com.aresstack.askai.research.assembly.BookAssembler(
                 com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterCarryCriteria(hostStateStore),
                 com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTopicDriftCriteria(hostStateStore),
-                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterSynthesisCriteria(hostStateStore))
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadWriterSynthesisCriteria(hostStateStore),
+                new com.aresstack.askai.research.runtime.writer.SentenceSimilarity(sentenceVectors(productiveResources),
+                        new java.util.function.Consumer<String>() {
+                            public void accept(String line) {
+                                technicalLog(line);
+                            }
+                        }))
                 .assemble(input);
     }
 

@@ -1,5 +1,7 @@
 package com.aresstack.askai.research.assembly;
 
+import com.aresstack.askai.research.runtime.writer.SentenceSimilarity;
+
 import com.aresstack.askai.research.assembly.BookQualityReport.Finding;
 import com.aresstack.askai.research.assembly.BookQualityReport.Kind;
 import com.aresstack.askai.research.knowledge.processing.acronym.AcronymDefinition;
@@ -64,6 +66,7 @@ public final class BookAssembler {
     private final VoiceCheck voice = new VoiceCheck();
     private final TopicDriftCheck.Criteria drift;
     private final SynthesisCriteria synthesis;
+    private final SentenceSimilarity similarity;
 
     public BookAssembler() {
         this(SentenceSegmenter.splitter(), ClaimCarryCheck.Criteria.defaults(), TopicDriftCheck.Criteria.defaults());
@@ -91,10 +94,25 @@ public final class BookAssembler {
 
     public BookAssembler(SentenceSegmenter sentences, ClaimCarryCheck.Criteria carry,
                          TopicDriftCheck.Criteria drift, SynthesisCriteria synthesis) {
+        this(sentences, carry, drift, synthesis, SentenceSimilarity.none());
+    }
+
+    /**
+     * With the sentence-embedding slot: claim-check stage 2 and the topic-drift warning also judge by meaning
+     * ({@link ClaimCarryCheck.Criteria#getMinSimilarity()}, {@link TopicDriftCheck.Criteria#getMinFrameSimilarity()}).
+     */
+    public BookAssembler(ClaimCarryCheck.Criteria carry, TopicDriftCheck.Criteria drift,
+                         SynthesisCriteria synthesis, SentenceSimilarity similarity) {
+        this(SentenceSegmenter.splitter(), carry, drift, synthesis, similarity);
+    }
+
+    public BookAssembler(SentenceSegmenter sentences, ClaimCarryCheck.Criteria carry,
+                         TopicDriftCheck.Criteria drift, SynthesisCriteria synthesis, SentenceSimilarity similarity) {
         this.synthesis = synthesis == null ? SynthesisCriteria.defaults() : synthesis;
         this.sentences = sentences;
         this.acronymExtractor = new AcronymExtractor(sentences);
-        this.carry = new ClaimCarryCheck(carry);
+        this.similarity = similarity == null ? SentenceSimilarity.none() : similarity;
+        this.carry = new ClaimCarryCheck(carry, this.similarity);
         this.drift = drift == null ? TopicDriftCheck.Criteria.defaults() : drift;
     }
 
@@ -110,7 +128,7 @@ public final class BookAssembler {
         Map<String, String> chapterPlain = new LinkedHashMap<String, String>();
         Counts counts = new Counts();
         TopicDriftCheck topics = new TopicDriftCheck(drift, input.getTitle(), input.getOutline(),
-                input.getGlossaryTerms());
+                input.getGlossaryTerms(), similarity);
 
         int chapterNo = 0;
         for (OutlineChapter chapter : input.getOutline().getChapters()) {

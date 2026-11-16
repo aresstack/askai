@@ -1,5 +1,7 @@
 package com.aresstack.askai.research.assembly;
 
+import com.aresstack.askai.research.runtime.writer.SentenceSimilarity;
+
 import com.aresstack.askai.research.outline.Outline;
 import com.aresstack.askai.research.outline.OutlineBrief;
 import com.aresstack.askai.research.outline.OutlineChapter;
@@ -28,7 +30,10 @@ import java.util.Set;
  * warns: on live run 3 it names "Funkalarmanlagen" in 1.4 and also "Echtzeitüberwachung" in 1.2 and "Intelligenz"
  * and "Revolution" in 1.1, subjects the outline never mentions.
  * Embedding similarity to the section brief was measured on live run 3 with bge-m3 and does not separate the alarm
- * sentences from on-topic ones (0.43 / 0.53 against 0.42–0.82), so it is not used.
+ * sentences from on-topic ones (0.43 / 0.53 against 0.42–0.82), so it never RAISES a finding. It only takes one back:
+ * with the sentence-embedding slot, a lexical candidate whose every sentence reaches
+ * {@link Criteria#getMinFrameSimilarity() min frame similarity} to a line of the book's frame (title, outline titles,
+ * purposes, key points, glossary) is no foreign subject; the default lies above the alarm sentences (0.53).
  */
 public final class TopicDriftCheck {
 
@@ -45,23 +50,43 @@ public final class TopicDriftCheck {
         private final int minSentences;
         private final int stemLength;
         private final boolean nounsOnly;
+        private final double minFrameSimilarity;
 
         public Criteria(int minTermLength, int minSentences, int stemLength, boolean nounsOnly) {
+            this(minTermLength, minSentences, stemLength, nounsOnly, DEFAULT_MIN_FRAME_SIMILARITY);
+        }
+
+        public Criteria(int minTermLength, int minSentences, int stemLength, boolean nounsOnly,
+                        double minFrameSimilarity) {
             if (minTermLength < 1 || minSentences < 1 || stemLength < 1) {
                 throw new IllegalArgumentException("topic drift thresholds must be >= 1");
+            }
+            if (minFrameSimilarity < 0 || minFrameSimilarity > 1) {
+                throw new IllegalArgumentException("frame similarity must be within 0..1");
             }
             this.minTermLength = minTermLength;
             this.minSentences = minSentences;
             this.stemLength = stemLength;
             this.nounsOnly = nounsOnly;
+            this.minFrameSimilarity = minFrameSimilarity;
         }
 
         /** Default: German capitalises nouns, so capitalisation inside a sentence marks a subject. */
         public static final boolean DEFAULT_NOUNS_ONLY = true;
+        /**
+         * Default cosine (sentence-embedding slot) of every sentence of a candidate to the frame from which the
+         * candidate is on topic after all; above the live-run-3 alarm sentences (0.43, 0.53). 0 = lexical only.
+         */
+        public static final double DEFAULT_MIN_FRAME_SIMILARITY = 0.70;
+
 
         public static Criteria defaults() {
             return new Criteria(DEFAULT_MIN_TERM_LENGTH, DEFAULT_MIN_SENTENCES, DEFAULT_STEM_LENGTH,
                     DEFAULT_NOUNS_ONLY);
+        }
+
+        public double getMinFrameSimilarity() {
+            return minFrameSimilarity;
         }
 
         public boolean isNounsOnly() {
@@ -84,7 +109,8 @@ public final class TopicDriftCheck {
         public boolean equals(Object o) {
             return o instanceof Criteria && ((Criteria) o).minTermLength == minTermLength
                     && ((Criteria) o).minSentences == minSentences && ((Criteria) o).stemLength == stemLength
-                    && ((Criteria) o).nounsOnly == nounsOnly;
+                    && ((Criteria) o).nounsOnly == nounsOnly
+                    && Double.compare(((Criteria) o).minFrameSimilarity, minFrameSimilarity) == 0;
         }
 
         @Override
@@ -95,10 +121,19 @@ public final class TopicDriftCheck {
 
     private final Criteria criteria;
     private final Set<String> frame;
+    private final List<String> frameLines = new ArrayList<String>();
+    private final SentenceSimilarity similarity;
 
     /** @param title the book title (the mission); with the outline and the glossary it is the book's frame */
     public TopicDriftCheck(Criteria criteria, String title, Outline outline, List<String> glossary) {
+        this(criteria, title, outline, glossary, SentenceSimilarity.none());
+    }
+
+    /** @param similarity the sentence-embedding slot; {@link SentenceSimilarity#none()} keeps the check lexical */
+    public TopicDriftCheck(Criteria criteria, String title, Outline outline, List<String> glossary,
+                           SentenceSimilarity similarity) {
         this.criteria = criteria == null ? Criteria.defaults() : criteria;
+        this.similarity = similarity == null ? SentenceSimilarity.none() : similarity;
         StringBuilder text = new StringBuilder(title == null ? "" : title);
         if (outline != null) {
             for (OutlineChapter chapter : outline.getChapters()) {
@@ -111,6 +146,11 @@ public final class TopicDriftCheck {
         if (glossary != null) {
             for (String term : glossary) {
                 text.append('\n').append(term == null ? "" : term);
+            }
+        }
+        for (String line : text.toString().split("\n")) {
+            if (!line.trim().isEmpty()) {
+                frameLines.add(line.trim());
             }
         }
         Set<String> stems = new HashSet<String>();
@@ -138,6 +178,7 @@ public final class TopicDriftCheck {
     public List<String> foreignSubjects(List<String> sentences) {
         Map<String, String> firstForm = new LinkedHashMap<String, String>();
         Map<String, Integer> count = new LinkedHashMap<String, Integer>();
+        Map<String, List<String>> where = new LinkedHashMap<String, List<String>>();
         for (String sentence : sentences) {
             Set<String> seen = new LinkedHashSet<String>();
             List<String> words = rawWords(sentence);
@@ -159,15 +200,30 @@ public final class TopicDriftCheck {
                 }
                 Integer n = count.get(stem);
                 count.put(stem, n == null ? 1 : n + 1);
+                where.computeIfAbsent(stem, k -> new ArrayList<String>()).add(sentence);
             }
         }
         List<String> out = new ArrayList<String>();
         for (Map.Entry<String, Integer> entry : count.entrySet()) {
-            if (entry.getValue() >= criteria.minSentences) {
+            if (entry.getValue() >= criteria.minSentences && !onTopic(where.get(entry.getKey()))) {
                 out.add(firstForm.get(entry.getKey()) + " (" + entry.getValue() + " sentences)");
             }
         }
         return out;
+    }
+
+    /** Every sentence of the candidate is close to a frame line (sentence-embedding slot); false without it. */
+    private boolean onTopic(List<String> candidateSentences) {
+        double bound = criteria.getMinFrameSimilarity();
+        if (bound <= 0 || !similarity.isAvailable() || frameLines.isEmpty() || candidateSentences == null) {
+            return false;
+        }
+        for (String sentence : candidateSentences) {
+            if (similarity.best(sentence, frameLines) < bound) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String stem(String word) {

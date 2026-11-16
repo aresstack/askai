@@ -896,7 +896,21 @@ public final class ResearchRuntimeSettings {
                                 .DEFAULT_MIN_WORD_LENGTH),
                 loadPositiveInt(store, KEY_WRITER_CARRY_STEM_LENGTH,
                         com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH),
-                overlap, loadWriterProseCriteria(store));
+                overlap, loadWriterProseCriteria(store),
+                loadUnit(store, KEY_WRITER_CARRY_MIN_SIMILARITY, com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_SIMILARITY));
+    }
+
+    /** Claim check stage 2: cosine (sentence-embedding slot) from which a cited passage carries a paraphrase. */
+    public static final String KEY_WRITER_CARRY_MIN_SIMILARITY = "research.writer.carry.minSimilarity";
+    /** Repeat check: cosine (sentence-embedding slot) from which a paraphrase of the book is a near repeat. */
+    public static final String KEY_WRITER_REPEAT_MIN_SIMILARITY = "research.writer.repeat.minSimilarity";
+    /** Topic drift: cosine (sentence-embedding slot) of every sentence to the frame that clears a candidate. */
+    public static final String KEY_DRIFT_MIN_FRAME_SIMILARITY = "research.book.drift.minFrameSimilarity";
+
+    /** A value within 0..1 (0 turns a semantic rule off); the default when absent or out of range. */
+    static double loadUnit(WorkspaceStateStore store, String key, double fallback) {
+        double value = loadDouble(store, key, fallback);
+        return value < 0 || value > 1 ? fallback : value;
     }
 
     // ------------------------------------------------------------------ Document: writer preset
@@ -921,7 +935,8 @@ public final class ResearchRuntimeSettings {
         return new com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria(
                 loadPositiveInt(store, KEY_WRITER_REPEAT_MIN_WORDS,
                         com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_WORDS),
-                share);
+                share, loadUnit(store, KEY_WRITER_REPEAT_MIN_SIMILARITY,
+                        com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SIMILARITY));
     }
 
     /** Synthesis: different sources one synthesis paragraph combines (writer prompt and book report). */
@@ -1044,7 +1059,9 @@ public final class ResearchRuntimeSettings {
                         com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_TERM_LENGTH),
                 loadPositiveInt(store, KEY_DRIFT_MIN_SENTENCES,
                         com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_SENTENCES),
-                loadWriterCarryCriteria(store).getStemLength(), nounsOnly);
+                loadWriterCarryCriteria(store).getStemLength(), nounsOnly,
+                loadUnit(store, KEY_DRIFT_MIN_FRAME_SIMILARITY,
+                        com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_FRAME_SIMILARITY));
     }
 
     static final String KEY_CONCEPT_TOOL_ROUNDS = "research.runtime.conceptToolRounds";

@@ -57,6 +57,8 @@ public final class ProductiveResearchBackendFactory {
      */
     private final com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshotProvider
             embeddingSnapshots;
+    private volatile com.aresstack.askai.agent.model.embedding.SentenceEmbeddingConfigurationSnapshotProvider
+            sentenceEmbeddingSnapshots;
     /** The initial-search strategy selection; legacy browser publishes NO snapshot (today's behavior). */
     private final SearchStrategySelection searchStrategy;
     /** The session's research language ISO code ("en"/"de") for the OpenNLP sentence resolver; default English. */
@@ -956,6 +958,7 @@ public final class ProductiveResearchBackendFactory {
             // it is available even without an embedding/knowledge runner; such an import
             // simply stays "not yet processed" until a knowledge world exists.
             resources.setSourceImportService(sourceImport[0]);
+            resources.setSentenceEmbeddings(sentenceEmbeddings(sessionKey, projectDir));
             // Start the continuous knowledge worker LAST, once everything else is wired: it drains the
             // recovered persistent FIFO and processes newly accepted sources until the session closes.
             if (knowledge != null) {
@@ -997,6 +1000,36 @@ public final class ProductiveResearchBackendFactory {
         }
     }
 
+
+    /**
+     * The sentence-embedding slot for the writer checks (near repetitions, claim check stage 2, topic drift): the host
+     * resolves "Sentence embedding model" with fallback to the main embedding model. {@code null} when the host publishes
+     * no such provider or the model is unusable; the session then uses the main embedding port.
+     */
+    private com.aresstack.askai.research.knowledge.EmbeddingPort sentenceEmbeddings(String sessionKey, File projectDir) {
+        if (sentenceEmbeddingSnapshots == null) {
+            return null;
+        }
+        try {
+            com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor descriptor =
+                    sentenceEmbeddingSnapshots.prepareForSession(sessionKey + "-sentences", projectDir, "")
+                            .descriptor;
+            return descriptor == null ? null
+                    : new com.aresstack.askai.research.knowledge.processing.embedding.HttpEmbeddingPortAdapter(
+                            descriptor, new com.aresstack.askai.research.knowledge.processing.embedding
+                                    .UrlConnectionEmbeddingHttpTransport((int) descriptor.timeoutMillis));
+        } catch (com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException unusable) {
+            System.err.println("[research-knowledge] sentence embedding unavailable (" + unusable.getReason()
+                    + "): " + unusable.getMessage() + " — the writer checks use the main embedding model.");
+            return null;
+        }
+    }
+
+    /** The host's sentence-embedding slot; optional (absent = the main embedding model). */
+    public void setSentenceEmbeddingSnapshots(
+            com.aresstack.askai.agent.model.embedding.SentenceEmbeddingConfigurationSnapshotProvider provider) {
+        this.sentenceEmbeddingSnapshots = provider;
+    }
 
     /** Start the continuous knowledge worker and hand its parts to the session (last step of the wiring). */
     private static void attachKnowledge(ProductiveResearchSessionResources resources,
