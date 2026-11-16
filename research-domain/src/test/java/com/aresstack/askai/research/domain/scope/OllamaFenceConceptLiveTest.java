@@ -22,7 +22,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * The Weidezaun concept against REAL embeddings (local Ollama, nomic-embed-text — the same model
+ * The Weidezaun concept against REAL embeddings (local Ollama, bge-m3 unless {@code -Daskai.live.embed.model} names another — the same model
  * the knowledge worker runs on). Anchors carry ONLY the positive semantic text (never membership or
  * rationale — the negotiated decision must not leak into the embedding space). All assertions are
  * ORDINAL (which probe is closer to what), never absolute cosine thresholds: those are a later
@@ -33,7 +33,7 @@ import static org.junit.Assert.assertTrue;
 public class OllamaFenceConceptLiveTest {
 
     private static final String ENDPOINT = "http://127.0.0.1:11434/api/embed";
-    private static final String MODEL = "nomic-embed-text:latest";
+    private static final String MODEL = System.getProperty("askai.live.embed.model", "bge-m3:latest");
 
     @Test
     public void realEmbeddingsReproduceTheFenceGeometry() {
