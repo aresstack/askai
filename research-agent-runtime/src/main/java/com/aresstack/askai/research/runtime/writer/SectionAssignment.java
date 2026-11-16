@@ -35,6 +35,7 @@ public final class SectionAssignment {
     private final List<String> writtenSections;
     private final RepeatCheck.Criteria repeats;
     private final SynthesisCriteria synthesis;
+    private final CitationFormat citationFormat;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -56,6 +57,7 @@ public final class SectionAssignment {
         this.writtenSections = Collections.unmodifiableList(new ArrayList<String>(b.writtenSections));
         this.repeats = b.repeats;
         this.synthesis = b.synthesis;
+        this.citationFormat = b.citationFormat;
     }
 
     /**
@@ -167,6 +169,11 @@ public final class SectionAssignment {
     }
 
     /** How many paragraphs of each part combine how many sources ({@link SynthesisCriteria}, settings). */
+    /** How the writer sees and cites its passages ({@link CitationFormat#NUMBERED} by default). */
+    public CitationFormat getCitationFormat() {
+        return citationFormat;
+    }
+
     public SynthesisCriteria getSynthesis() {
         return synthesis;
     }
@@ -196,6 +203,7 @@ public final class SectionAssignment {
         b.writtenSections = writtenSections;
         b.repeats = repeats;
         b.synthesis = synthesis;
+        b.citationFormat = citationFormat;
         return b;
     }
 
@@ -230,6 +238,7 @@ public final class SectionAssignment {
         b.writtenSections = writtenSections;
         b.repeats = repeats;
         b.synthesis = synthesis;
+        b.citationFormat = citationFormat;
         return new SectionAssignment(b);
     }
 
@@ -253,12 +262,19 @@ public final class SectionAssignment {
         private List<String> writtenSections = new ArrayList<String>();
         private RepeatCheck.Criteria repeats = RepeatCheck.Criteria.defaults();
         private SynthesisCriteria synthesis = SynthesisCriteria.defaults();
+        private CitationFormat citationFormat = CitationFormat.NUMBERED;
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
                 throw new IllegalArgumentException("sectionId must not be blank");
             }
             this.sectionId = sectionId.trim();
+        }
+
+        /** The writer model's citation format; {@link CitationFormat#NUMBERED} when {@code null}. */
+        public Builder citationFormat(CitationFormat value) {
+            this.citationFormat = value == null ? CitationFormat.NUMBERED : value;
+            return this;
         }
 
         public Builder title(String value) {

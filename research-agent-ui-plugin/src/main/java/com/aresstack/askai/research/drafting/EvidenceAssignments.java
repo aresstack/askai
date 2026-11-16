@@ -41,11 +41,27 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         final com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry;
         final com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats;
         final com.aresstack.askai.research.runtime.writer.SynthesisCriteria synthesis;
+        final String citationFormat;
 
+        /** With the citation format chosen by the writer model ({@code CitationFormat.AUTO}). */
         public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens,
                        com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry,
                        com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats,
                        com.aresstack.askai.research.runtime.writer.SynthesisCriteria synthesis) {
+            this(pack, wordsPerCall, answerTokens, carry, repeats, synthesis,
+                    com.aresstack.askai.research.runtime.writer.CitationFormat.AUTO);
+        }
+
+        /**
+         * @param citationFormat the citation format setting: {@code auto} follows the writer model, a format id
+         *                       ({@code numbered}, {@code sentence-tags}) forces it
+         */
+        public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens,
+                       com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria carry,
+                       com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats,
+                       com.aresstack.askai.research.runtime.writer.SynthesisCriteria synthesis,
+                       String citationFormat) {
+            this.citationFormat = citationFormat == null ? "" : citationFormat;
             this.synthesis = synthesis;
             this.pack = pack;
             this.wordsPerCall = wordsPerCall;
@@ -65,18 +81,34 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         public int getAnswerTokens() {
             return answerTokens;
         }
+
+        public String getCitationFormat() {
+            return citationFormat;
+        }
     }
 
     private final SectionContextBuilder packs;
     private final Contexts contexts;
     private final java.util.function.Supplier<Targets> targetSettings;
+    private final java.util.function.Supplier<String> writerModel;
 
     /** @param targets read for every section, so a changed setting applies to the next section written */
     public EvidenceAssignments(SectionContextBuilder packs, Contexts contexts,
                                java.util.function.Supplier<Targets> targets) {
+        this(packs, contexts, targets, () -> "");
+    }
+
+    /**
+     * @param writerModel the model the writer slot resolves to, read for every section; it chooses the citation
+     *                    format while the setting is {@code auto}
+     */
+    public EvidenceAssignments(SectionContextBuilder packs, Contexts contexts,
+                               java.util.function.Supplier<Targets> targets,
+                               java.util.function.Supplier<String> writerModel) {
         this.packs = packs;
         this.contexts = contexts;
         this.targetSettings = targets;
+        this.writerModel = writerModel == null ? () -> "" : writerModel;
     }
 
     public SectionAssignment assignmentFor(SectionWriteRequest request) throws Exception {
@@ -90,7 +122,9 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
                 request.getSection().getBrief().getWordTarget(), targets.wordsPerCall, targets.answerTokens,
                 targets.carry, targets.pack.getPassageCount());
         SectionAssignment.Builder assignment = base.toBuilder().writtenSections(contexts.writtenSections(request))
-                .repeats(targets.repeats).synthesis(targets.synthesis);
+                .repeats(targets.repeats).synthesis(targets.synthesis)
+                .citationFormat(com.aresstack.askai.research.runtime.writer.CitationFormat.resolve(
+                        targets.citationFormat, writerModel.get()));
         if (request.isRewrite()) {
             assignment.rewriteComment(request.getComment()).currentText(request.getCurrentText());
         }

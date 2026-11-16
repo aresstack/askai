@@ -957,6 +957,24 @@ public final class ResearchRuntimeSettings {
                 share);
     }
 
+    /**
+     * How the section writer sees and cites its passages: {@code auto} (default) lets the writer model choose
+     * (sentence tags for ellamind SUI-1, numbered passages for every other model), {@code numbered} or
+     * {@code sentence-tags} force a format.
+     */
+    public static final String KEY_WRITER_CITATION_FORMAT = "research.writer.citationFormat";
+
+    public static String loadWriterCitationFormat(WorkspaceStateStore store) {
+        String value = store == null ? null : store.get(KEY_WRITER_CITATION_FORMAT, "");
+        return value == null || value.trim().isEmpty()
+                ? com.aresstack.askai.research.runtime.writer.CitationFormat.AUTO : value.trim();
+    }
+
+    public static void saveWriterCitationFormat(WorkspaceStateStore store, String value) {
+        store.put(KEY_WRITER_CITATION_FORMAT, value == null || value.trim().isEmpty()
+                ? com.aresstack.askai.research.runtime.writer.CitationFormat.AUTO : value.trim());
+    }
+
     /** Answer token budget of one writer call. */
     public static final String KEY_WRITER_ANSWER_TOKENS = "research.writer.answerTokens";
     /** Passages one writer call gets; a section written in key-point parts gets this many for each part. */
@@ -1006,7 +1024,8 @@ public final class ResearchRuntimeSettings {
                         loadWriterBriefRelevance(store)),
                 loadPositiveInt(store, KEY_WRITER_WORDS_PER_CALL, DEFAULT_WRITER_WORDS_PER_CALL),
                 loadPositiveInt(store, KEY_WRITER_ANSWER_TOKENS, DEFAULT_WRITER_ANSWER_TOKENS),
-                loadWriterCarryCriteria(store), loadWriterRepeatCriteria(store), loadWriterSynthesisCriteria(store));
+                loadWriterCarryCriteria(store), loadWriterRepeatCriteria(store), loadWriterSynthesisCriteria(store),
+                loadWriterCitationFormat(store));
     }
 
     /**

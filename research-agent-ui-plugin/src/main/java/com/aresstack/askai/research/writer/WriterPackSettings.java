@@ -81,7 +81,8 @@ public final class WriterPackSettings {
     /** The host preset for a writer model id. */
     public static WriterPackSettings presetFor(String modelId) {
         String m = modelId == null ? "" : modelId.trim().toLowerCase(Locale.ROOT);
-        return m.startsWith("llama3.1:8b") || m.startsWith("gpt-oss:20b") ? LARGE : SMALL;
+        return m.startsWith("llama3.1:8b") || m.startsWith("gpt-oss:20b")
+                || m.contains(com.aresstack.askai.research.runtime.writer.CitationFormat.SUI_MODEL_STEM) ? LARGE : SMALL;
     }
 
     public int getPassageCount() {
