@@ -452,6 +452,43 @@ public class ProductiveBookJourneyTest {
                 journalCommands(fx, "USER"));
     }
 
+    /**
+     * Live run 5: over the bot-control endpoint /finish-sources was refused while the plan ran ("stop the search
+     * plan first"), and no MCP surface could stop the plan: "Stop search plan" was a button on the Sources
+     * checklist only. /stop-search-plan is its typed twin, and the refusal names it.
+     */
+    @Test
+    public void aBotStopsTheRunningPlanWithASlashCommandAndThenFinishesSources() throws Exception {
+        Fx fx = new Fx();
+        firstMessage(fx, "A book about plugin isolation in Java");
+        ConceptTestSupport.makeSubmittable(fx.session);
+        assertHandled(fx.session.executeCommand("submit-scope", ""));
+        assertEquals("research/running", phase(fx));
+        com.aresstack.askai.research.plan.SearchPlanQueue queue = fx.session.searchPlanQueue();
+        long deadline = System.currentTimeMillis() + 3000;
+        while (!queue.hasRunningEntry() && System.currentTimeMillis() < deadline) {
+            Thread.yield();
+        }
+        com.aresstack.askai.research.state.CommandSurface bot =
+                com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL;
+
+        String refused = fx.session.executeBotCommand(bot, "", "/finish-sources");
+        assertTrue(refused, refused.startsWith("rejected") && refused.contains("/stop-search-plan"));
+
+        assertHandled(fx.session.executeBotCommand(bot, "", "/stop-search-plan"));
+        assertFalse(fx.session.searchPlanRunning());
+        // the cancelled search ends as the browser ends it: its query goes back to pending
+        for (com.aresstack.askai.research.plan.SearchPlanEntry entry : queue.entriesInOrder()) {
+            if (entry.getStatus() == com.aresstack.askai.research.plan.SearchPlanEntry.Status.RUNNING) {
+                queue.onSearchEvent(entry.getRequestId(), "failed", "Cancelled", false);
+            }
+        }
+        assertTrue(fx.session.executeBotCommand(bot, "", "/stop-search-plan").startsWith("rejected"));
+
+        assertHandled(fx.session.executeBotCommand(bot, "", "/finish-sources"));
+        assertEquals("research/waiting_approval", phase(fx));
+    }
+
     @Test
     public void slashInvocationsOnEveryMcpSurfaceUseTheSameUserCommandProcessorAsTheUi() throws Exception {
         Fx fx = new Fx();

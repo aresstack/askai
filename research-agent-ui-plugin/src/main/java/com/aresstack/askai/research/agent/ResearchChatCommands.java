@@ -31,7 +31,10 @@ public final class ResearchChatCommands {
         // (artifact navigation) — plus a slash TWIN for exactly the red DECISION tags the user sees
         // ("Fragestellung freigeben & weiter" → /submit-scope, "Neue Quellen auswerten" →
         // /review-sources, approve/changes/continue) and for the reopen of an earlier phase, which the
-        // phase pill offers as a click. NOTHING more: the domain's interruption
+        // phase pill offers as a click. Besides them two button twins: /map ("Quellen visualisieren") and
+        // /stop-search-plan ("Stop search plan" on the Sources checklist), which the refusal of
+        // /finish-sources under a running plan names, so a client without the checklist can act on it.
+        // NOTHING more: the domain's interruption
         // machinery (pause/resume/retry/cancel, block/fail) stays out of the user surface — those
         // states exist for the agent/runtime, not as user furniture. Every twin executes through
         // the session's ONE structured command processor — exactly what a red-tag click runs.
@@ -39,6 +42,7 @@ public final class ResearchChatCommands {
         commands.add(new OpenCommand());
         commands.add(new SearchCommand());
         commands.add(new MapCommand());
+        commands.add(new StopSearchPlanCommand());
         // D1: every phase's exit and gate decision, with the labels of the red tags.
         commands.add(new ProcessorCommand("submit-scope",
                 "Approve concept & start search"));
@@ -222,6 +226,32 @@ public final class ResearchChatCommands {
                 }
             });
             return CommandExecutionResult.handled("");
+        }
+    }
+
+    /**
+     * {@code /stop-search-plan} — the typed twin of "Stop search plan" on the Sources checklist: the SAME
+     * {@link ResearchAgentSession#stopSearchPlan()} (the running query is cancelled and stays pending, the queue
+     * stops). Live run 5: {@code /finish-sources} over the bot-control endpoint was refused with "stop the search
+     * plan first", and no MCP surface could stop it.
+     */
+    private static final class StopSearchPlanCommand extends Base {
+        public ChatCommandDescriptor getDescriptor() {
+            return ChatCommandDescriptor.of("stop-search-plan",
+                    "Stop the search plan (Stop search plan on the Sources checklist)");
+        }
+
+        public CommandExecutionResult execute(CommandInvocation invocation, AgentSessionContext context) {
+            ResearchAgentSession session = research(context);
+            if (session == null) {
+                return CommandExecutionResult.unknown();
+            }
+            if (!session.searchPlanRunning()) {
+                return CommandExecutionResult.rejected("The search plan is not running.");
+            }
+            session.stopSearchPlan();
+            return CommandExecutionResult.handled("Search plan stopped: the running query is cancelled and "
+                    + "stays pending with the other planned queries.");
         }
     }
 

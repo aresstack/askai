@@ -1635,10 +1635,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         if (pending == 0 && queue.isReplanning()) {
             return "the search plan is planning its next research cycle for the uncovered nodes. Let it finish, "
-                    + "or stop the search plan first.";
+                    + "or stop the search plan first (/stop-search-plan).";
         }
         return "the search plan is still running (" + pending + " planned "
-                + (pending == 1 ? "query" : "queries") + " left). Let it finish, or stop the search plan first.";
+                + (pending == 1 ? "query" : "queries") + " left). Let it finish, or stop the search plan first "
+                + "(/stop-search-plan).";
     }
 
     /** The pending (never run) entries of the plan. */

@@ -24,6 +24,8 @@ public class ResearchChatCommandsTest {
         assertTrue(names.contains("search"));
         assertTrue(names.contains("open"));
         assertTrue("the mindmap overlay's typed twin", names.contains("map"));
+        assertTrue("the typed twin of Stop search plan, which the refusal of /finish-sources names",
+                names.contains("stop-search-plan"));
         // …and the red DECISION tags' twins — "Fragestellung freigeben & weiter" (submit-scope)
         // and "Neue Quellen auswerten" (review-sources) were tag-only once, never again.
         for (String command : ResearchChatCommands.processorCommandNames()) {
