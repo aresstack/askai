@@ -811,6 +811,15 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             if (missing.isEmpty()) {
                 continue;
             }
+            // A novel topic (no concept node) the chapter plan and the placement left out serves no chapter: the
+            // model saw it and placed it nowhere. Live retest of #249: a leftover chapter of footers, photo credits
+            // and teasers ("WWW: https://www", "© PeopleImages/istockphoto", "Zurücklehnen und entspannen").
+            if (topic.getProfile().isNovel() && topic.getConceptKey().isEmpty()) {
+                notes.add(describe(brief, topic.getKey()) + " is a novel topic no chapter took; it stays out of "
+                        + "the outline.");
+                used.addAll(missing);
+                continue;
+            }
             List<String> keys = missing.size() == units(brief, topic.getKey()).size()
                     ? Collections.singletonList(topic.getKey()) : missing;
             int target = chapterOfFit(chapters, brief, topic, keys);
