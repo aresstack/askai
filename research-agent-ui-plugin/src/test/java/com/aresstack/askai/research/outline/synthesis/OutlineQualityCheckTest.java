@@ -36,7 +36,7 @@ public class OutlineQualityCheckTest {
     @Test
     public void aGoodPlanHasNoBlockingFinding() {
         SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
-        OutlinePlan plan = FallbackOutlinePlan.plan(brief, OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER);
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults());
         for (PlanFinding finding : CHECK.review(plan, brief)) {
             assertFalse(finding.toString(), finding.isBlocking());
         }
@@ -95,12 +95,12 @@ public class OutlineQualityCheckTest {
         SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
         corpus.deliverable = "120 pages";
         SynthesisBrief brief = corpus.brief();
-        List<PlanFinding> findings = CHECK.review(FallbackOutlinePlan.plan(brief, OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER), brief);
+        List<PlanFinding> findings = CHECK.review(FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults()), brief);
         assertTrue("36000 words over 8 sections", has(findings, OutlineQualityCheck.TOO_FEW_SECTIONS, false));
 
         corpus.deliverable = "2000 words";
         brief = corpus.brief();
-        assertTrue(has(CHECK.review(FallbackOutlinePlan.plan(brief, OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER), brief), OutlineQualityCheck.TOO_MANY_SECTIONS,
+        assertTrue(has(CHECK.review(FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults()), brief), OutlineQualityCheck.TOO_MANY_SECTIONS,
                 false));
     }
 
@@ -457,8 +457,8 @@ public class OutlineQualityCheckTest {
                         section("One", "T1"), section("Two", "T2"), section("Three", "T3")),
                 chapter("Rest", Collections.singletonList("T4"), Collections.<String>emptyList(),
                         section("Four", "T4"))), Collections.<String>emptyList(), false);
-        OutlineQualityCheck strict = new OutlineQualityCheck(new OutlineLengthSettings(300, 400, 1100, 100, 50, 12,
-                1.0));
+        OutlineQualityCheck strict = new OutlineQualityCheck(new OutlineLengthSettings(300, 400, 1100, 100, 50, 4, 24,
+                1.0, 0, 1.0, 450));
 
         List<PlanFinding> findings = strict.review(plan, brief);
 
@@ -484,5 +484,61 @@ public class OutlineQualityCheckTest {
         assertEquals(Arrays.asList("T1", "T3", "T4"), fixed.getPlan().getChapters().get(0).getMaterialKeys());
         assertTrue(fixed.getPlan().getChapters().get(0).getSections().size() >= 3);
         assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.CONCEPT_TWICE, true));
+    }
+
+    /** Live retest of #240: a fixed limit of 12 capped a book of four chapters at 48 sections. */
+    @Test
+    public void theSectionLimitFollowsTheBookLength() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        assertEquals("120 pages = 36000 words / 450 per call / 4 chapters", 20, length.sectionLimit("120 pages", 4));
+        assertEquals("bounded below", OutlineLengthSettings.DEFAULT_MIN_SECTIONS_PER_CHAPTER,
+                length.sectionLimit("2000 words", 4));
+        assertEquals("bounded above", OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER,
+                length.sectionLimit("100000 words", 2));
+        assertEquals("no length: the maximum", OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER,
+                length.sectionLimit("a book", 4));
+    }
+
+    /** Live retest of #240: two sections of one chapter were both called "Kosten und Praxisbeispiele". */
+    @Test
+    public void nearDuplicateSectionTitlesAreMergedOrRenamed() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("One", Collections.singletonList("T1"), Collections.<String>emptyList(),
+                        section("Kosten und Praxisbeispiele", "T1.1"), section("Praxisbeispiele und Kosten", "T1.2")),
+                chapter("Two", Collections.singletonList("T2"), Collections.<String>emptyList(),
+                        section("Kosten und Praxisbeispiele im Betrieb", "T2.1"), section("Datenschutz", "T2.2"))),
+                Collections.<String>emptyList(), false);
+
+        assertTrue(has(CHECK.review(plan, brief), OutlineQualityCheck.SIMILAR_TITLES, false));
+        OutlinePlan fixed = CHECK.fix(plan, brief).getPlan();
+
+        PlannedChapter one = fixed.getChapters().get(0);
+        assertEquals("merged in one chapter", 1, one.getSections().size());
+        assertEquals(Arrays.asList("T1.1", "T1.2"), one.getSections().get(0).getMaterialKeys());
+        assertTrue("renamed in a later chapter", fixed.getChapters().get(1).getSections().get(0).isUntitled());
+        assertFalse(fixed.getChapters().get(1).getSections().get(1).isUntitled());
+        assertFalse("numbers tell titles apart", CHECK.similarTitles("Part 1", "Part 2"));
+    }
+
+    /** Live retest of #240: sections of chapter 4 rested on 3 to 4 passages. */
+    @Test
+    public void thinSectionsAreFoldedIntoTheirNeighbour() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Collections.singletonList(chapter("All", Arrays.asList("T1", "T2"),
+                Collections.<String>emptyList(), section("Alpha", "T1"), section("Beta", "T2"))),
+                Collections.<String>emptyList(), false);
+        int distinct = brief.getAnalysis().distinctCount(OutlineQualityCheck.passagesOf(
+                Collections.singletonList("T2"), brief));
+        OutlineQualityCheck strict = new OutlineQualityCheck(new OutlineLengthSettings(300, 400, 1100, 100, 50, 4,
+                24, 2.5, distinct + 1, 0.75, 450));
+
+        OutlinePlan fixed = strict.fix(plan, brief).getPlan();
+
+        assertEquals(1, fixed.getChapters().get(0).getSections().size());
+        List<String> all = new java.util.ArrayList<String>(OutlineQualityCheck.units(brief, "T1"));
+        all.addAll(OutlineQualityCheck.units(brief, "T2"));
+        assertEquals(new java.util.TreeSet<String>(all), new java.util.TreeSet<String>(
+                fixed.getChapters().get(0).getSections().get(0).getMaterialKeys()));
     }
 }

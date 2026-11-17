@@ -23,11 +23,29 @@ public final class OutlineLengthSettings {
     /** Word targets are rounded to this step. */
     public static final int DEFAULT_WORD_STEP = 50;
     /**
-     * Sections code makes at most for one chapter when it splits the chapter by its material (no valid section plan,
-     * or material placed by code); more material is packed into that many sections. Live run 5: one chapter got a
+     * The section limit of one chapter when code splits it by its material follows the book length: target words /
+     * words per writer call / chapters, kept between this minimum and {@link #DEFAULT_MAX_SECTIONS_PER_CHAPTER}.
+     * Live retest of #240: a fixed limit of 12 capped a book of four chapters at 48 sections.
+     */
+    public static final int DEFAULT_MIN_SECTIONS_PER_CHAPTER = 4;
+    /**
+     * The upper bound of the section limit (and the limit without a book length). Live run 5: one chapter got a
      * section per material key, 63 of the book's 81.
      */
-    public static final int DEFAULT_MAX_SECTIONS_PER_CHAPTER = 12;
+    public static final int DEFAULT_MAX_SECTIONS_PER_CHAPTER = 24;
+    /** Words one writer call aims for; the host passes the writer's "Words per call" setting (its default). */
+    public static final int DEFAULT_WORDS_PER_CALL = 450;
+    /**
+     * A section with fewer distinct passages is folded into its neighbour. Live retest of #240: three sections of
+     * chapter 4 had 3 to 4 passages.
+     */
+    public static final int DEFAULT_MIN_SECTION_PASSAGES = 4;
+    /**
+     * Two section titles whose content words overlap at least this share (of the shorter title) are near
+     * duplicates, the share of the writer's repeat check (#221). Live retest of #240: two sections of one chapter were
+     * both called "Kosten und Praxisbeispiele". 1 = only identical titles.
+     */
+    public static final double DEFAULT_MAX_TITLE_OVERLAP = 0.75;
     /**
      * How many times an even share of the sections or of the distinct material one chapter may hold before the plan
      * counts as unbalanced (a blocking finding). With n chapters the limit is factor / n; live run 5 had one chapter
@@ -43,12 +61,17 @@ public final class OutlineLengthSettings {
     private final int maxSectionWords;
     private final int wordsPerDistinctPassage;
     private final int wordStep;
+    private final int minSectionsPerChapter;
     private final int maxSectionsPerChapter;
     private final double chapterBalanceFactor;
+    private final int minSectionPassages;
+    private final double maxTitleOverlap;
+    private final int wordsPerCall;
 
     public OutlineLengthSettings(int wordsPerPage, int minSectionWords, int maxSectionWords,
-                                 int wordsPerDistinctPassage, int wordStep, int maxSectionsPerChapter,
-                                 double chapterBalanceFactor) {
+                                 int wordsPerDistinctPassage, int wordStep, int minSectionsPerChapter,
+                                 int maxSectionsPerChapter, double chapterBalanceFactor, int minSectionPassages,
+                                 double maxTitleOverlap, int wordsPerCall) {
         if (minSectionWords > maxSectionWords) {
             throw new IllegalArgumentException("the minimum section length exceeds the maximum");
         }
@@ -57,14 +80,19 @@ public final class OutlineLengthSettings {
         this.maxSectionWords = Math.max(1, maxSectionWords);
         this.wordsPerDistinctPassage = Math.max(0, wordsPerDistinctPassage);
         this.wordStep = Math.max(1, wordStep);
-        this.maxSectionsPerChapter = Math.max(1, maxSectionsPerChapter);
+        this.minSectionsPerChapter = Math.max(1, minSectionsPerChapter);
+        this.maxSectionsPerChapter = Math.max(this.minSectionsPerChapter, maxSectionsPerChapter);
+        this.minSectionPassages = Math.max(0, minSectionPassages);
+        this.maxTitleOverlap = Math.min(1.0, Math.max(0.0, maxTitleOverlap));
+        this.wordsPerCall = Math.max(1, wordsPerCall);
         this.chapterBalanceFactor = Math.max(1.0, chapterBalanceFactor);
     }
 
     public static OutlineLengthSettings defaults() {
         return new OutlineLengthSettings(DEFAULT_WORDS_PER_PAGE, DEFAULT_MIN_SECTION_WORDS, DEFAULT_MAX_SECTION_WORDS,
-                DEFAULT_WORDS_PER_DISTINCT_PASSAGE, DEFAULT_WORD_STEP, DEFAULT_MAX_SECTIONS_PER_CHAPTER,
-                DEFAULT_CHAPTER_BALANCE_FACTOR);
+                DEFAULT_WORDS_PER_DISTINCT_PASSAGE, DEFAULT_WORD_STEP, DEFAULT_MIN_SECTIONS_PER_CHAPTER,
+                DEFAULT_MAX_SECTIONS_PER_CHAPTER, DEFAULT_CHAPTER_BALANCE_FACTOR, DEFAULT_MIN_SECTION_PASSAGES,
+                DEFAULT_MAX_TITLE_OVERLAP, DEFAULT_WORDS_PER_CALL);
     }
 
     /**
@@ -118,8 +146,37 @@ public final class OutlineLengthSettings {
         return wordStep;
     }
 
+    public int getMinSectionsPerChapter() {
+        return minSectionsPerChapter;
+    }
+
     public int getMaxSectionsPerChapter() {
         return maxSectionsPerChapter;
+    }
+
+    public int getMinSectionPassages() {
+        return minSectionPassages;
+    }
+
+    public double getMaxTitleOverlap() {
+        return maxTitleOverlap;
+    }
+
+    public int getWordsPerCall() {
+        return wordsPerCall;
+    }
+
+    /**
+     * The most sections code makes for one of {@code chapters} chapters: the book's target words / words per call /
+     * chapters, between the minimum and the maximum; the maximum without a book length.
+     */
+    public int sectionLimit(String deliverable, int chapters) {
+        int target = targetWords(deliverable);
+        if (target <= 0 || chapters <= 0) {
+            return maxSectionsPerChapter;
+        }
+        long limit = (long) Math.ceil((double) target / wordsPerCall / chapters);
+        return (int) Math.max(minSectionsPerChapter, Math.min(maxSectionsPerChapter, limit));
     }
 
     public double getChapterBalanceFactor() {

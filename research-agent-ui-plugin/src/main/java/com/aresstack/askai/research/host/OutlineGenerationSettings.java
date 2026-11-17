@@ -27,7 +27,10 @@ public final class OutlineGenerationSettings {
     public static final String KEY_WORDS_PER_DISTINCT_PASSAGE = "research.outline.wordsPerDistinctPassage";
     public static final String KEY_WORD_STEP = "research.outline.wordStep";
     public static final String KEY_MAX_FURNITURE_REDUNDANCY = "research.outline.maxFurnitureRedundancy";
+    public static final String KEY_MIN_SECTIONS_PER_CHAPTER = "research.outline.minSectionsPerChapter";
     public static final String KEY_MAX_SECTIONS_PER_CHAPTER = "research.outline.maxSectionsPerChapter";
+    public static final String KEY_MIN_SECTION_PASSAGES = "research.outline.minSectionPassages";
+    public static final String KEY_MAX_TITLE_OVERLAP = "research.outline.maxTitleOverlap";
     public static final String KEY_CHAPTER_BALANCE_FACTOR = "research.outline.chapterBalanceFactor";
     public static final String KEY_MERGE_OVERLAP = "research.outline.mergeOverlap";
 
@@ -81,10 +84,18 @@ public final class OutlineGenerationSettings {
                             OutlineLengthSettings.DEFAULT_WORDS_PER_DISTINCT_PASSAGE),
                     ResearchRuntimeSettings.loadPositiveInt(store, KEY_WORD_STEP,
                             OutlineLengthSettings.DEFAULT_WORD_STEP),
+                    ResearchRuntimeSettings.loadPositiveInt(store, KEY_MIN_SECTIONS_PER_CHAPTER,
+                            OutlineLengthSettings.DEFAULT_MIN_SECTIONS_PER_CHAPTER),
                     ResearchRuntimeSettings.loadPositiveInt(store, KEY_MAX_SECTIONS_PER_CHAPTER,
                             OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER),
                     ResearchRuntimeSettings.loadDouble(store, KEY_CHAPTER_BALANCE_FACTOR,
-                            OutlineLengthSettings.DEFAULT_CHAPTER_BALANCE_FACTOR));
+                            OutlineLengthSettings.DEFAULT_CHAPTER_BALANCE_FACTOR),
+                    ResearchRuntimeSettings.loadNonNegativeInt(store, KEY_MIN_SECTION_PASSAGES,
+                            OutlineLengthSettings.DEFAULT_MIN_SECTION_PASSAGES),
+                    ResearchRuntimeSettings.loadDouble(store, KEY_MAX_TITLE_OVERLAP,
+                            OutlineLengthSettings.DEFAULT_MAX_TITLE_OVERLAP),
+                    ResearchRuntimeSettings.loadPositiveInt(store, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
+                            ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL));
         } catch (IllegalArgumentException inconsistent) {
             System.err.println("[outline-settings] length settings ignored: " + inconsistent.getMessage());
             length = OutlineLengthSettings.defaults();

@@ -128,7 +128,7 @@ public final class OutlineSynthesizer {
         }
         if (chat == null) {
             notes.add("No model is available; this outline comes from the topic analysis only.");
-            OutlinePlan plan = FallbackOutlinePlan.plan(given, length.getMaxSectionsPerChapter());
+            OutlinePlan plan = FallbackOutlinePlan.plan(given, length);
             return new Result(plan, review.review(plan, given), 0, notes, given);
         }
         SynthesisBrief brief = given;
@@ -138,7 +138,7 @@ public final class OutlineSynthesizer {
         OutlinePlan plan = askChapters(ChapterPlanContract.prompt(planning), planning, "plan", m);
         if (plan == null) {
             notes.add("The model gave no valid chapter plan; this outline comes from the topic analysis only.");
-            plan = FallbackOutlinePlan.plan(brief, length.getMaxSectionsPerChapter());
+            plan = FallbackOutlinePlan.plan(brief, length);
             return new Result(plan, review.review(plan, brief), 0, notes, brief);
         }
         plan = placeRemaining(plan, brief, notes, m);
@@ -288,7 +288,7 @@ public final class OutlineSynthesizer {
             if (own.isEmpty()) {
                 // Only material of earlier chapters: the quality check drops the chapter; no section call for it.
                 chapters.add(chapter.withSections(FallbackOutlinePlan.sections(brief, chapter,
-                        length.getMaxSectionsPerChapter())));
+                        limit(brief, plan))));
                 continue;
             }
             PlannedChapter kept = previous == null ? null : sameMaterial(previous, previousOwner, own, brief);
@@ -298,11 +298,11 @@ public final class OutlineSynthesizer {
             }
             PlannedChapter owning = new PlannedChapter(chapter.getTitle(), chapter.getPurpose(), own,
                     chapter.getConceptKeys(), null, chapter.isUntitled());
-            List<PlannedSection> sections = askSections(brief, owning, monitor);
+            List<PlannedSection> sections = askSections(brief, owning, limit(brief, plan), monitor);
             if (sections == null) {
                 notes.add("The sections of \"" + chapter.getTitle() + "\" were not generated; code split the chapter "
                         + "by its material.");
-                sections = FallbackOutlinePlan.sections(brief, owning, length.getMaxSectionsPerChapter());
+                sections = FallbackOutlinePlan.sections(brief, owning, limit(brief, plan));
             }
             chapters.add(chapter.withSections(sections));
         }
@@ -424,7 +424,13 @@ public final class OutlineSynthesizer {
         return null;
     }
 
-    private List<PlannedSection> askSections(SynthesisBrief brief, PlannedChapter chapter, ClusteringMonitor monitor) {
+    /** The section limit of one chapter of {@code plan} (see {@link OutlineLengthSettings#sectionLimit}). */
+    private int limit(SynthesisBrief brief, OutlinePlan plan) {
+        return length.sectionLimit(brief.getContext().getDeliverable(), plan.getChapters().size());
+    }
+
+    private List<PlannedSection> askSections(SynthesisBrief brief, PlannedChapter chapter, int sectionLimit,
+                                             ClusteringMonitor monitor) {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(SectionPlanContract.SYSTEM));
         messages.add(ChatMessage.user(SectionPlanContract.prompt(brief, chapter)));
@@ -440,7 +446,7 @@ public final class OutlineSynthesizer {
             }
             try {
                 List<PlannedSection> sections = SectionPlanContract.read(result.getText(), brief, chapter,
-                        length.getMaxSectionsPerChapter());
+                        sectionLimit);
                 telemetry.call("sections", chat.modelName(), settings.getSectionAnswerTokens(), attempt, true,
                         sections.size() + " sections for \"" + chapter.getTitle() + "\"");
                 return sections;
