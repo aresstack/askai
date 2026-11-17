@@ -266,6 +266,10 @@ public class OutlineBriefWorkerTest {
                 "Wearables im Betrieb", 3);
         assertEquals("Sensorweste, Unterweisung und Akkulaufzeit", title);
         assertEquals("", KeyTermTitle.of(Arrays.asList("nur kleine wörter hier"), "", 3));
+        // Live retest of #245: "Erste Hilfe" stays one term, "Ihnen" is none.
+        assertEquals("Erste Hilfe, Dokumentation und Leistungen", KeyTermTitle.of(Arrays.asList(
+                "Die Leistungen der Erste Hilfe werden mit Dokumentation erfasst. Wir zeigen Ihnen die Erste Hilfe.",
+                "Jede Erste Hilfe braucht eine Dokumentation, sagen wir Ihnen."), "Arbeitsschutz", 3));
     }
 
     @Test

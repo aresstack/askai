@@ -267,7 +267,9 @@ public final class ProsePassageFilter {
     private static final Pattern PROMOTION = Pattern.compile("(?iu)\\b(?:jetzt\\s+(?:kaufen|bestellen|sichern|"
             + "anmelden|buchen|testen|registrieren|entdecken)|kostenlos\\s+(?:bestellen|testen|anmelden|herunterladen)"
             + "|weiterlesen|mehr\\s+erfahren|mehr\\s+lesen|zum\\s+shop|warenkorb|newsletter|abonnieren"
-            + "|jederzeit\\s+(?:formlos\\s+)?(?:zu\\s+)?(?:sofort\\s+)?kündbar|kündbar|gratis|gutschein|rabatt"
+            + "|jederzeit\\s+(?:formlos\\s+)?(?:zu\\s+)?(?:sofort\\s+)?kündbar|kündbar|gratis|\\w*gutschein\\w*|\\w*rabatt\\w*|jetzt\\s+profitieren|geschenk\\s+erhalten"
+            + "|produkt\\s+kaufen|(?:schützen|sichern|optimieren|steigern)\\s+sie\\s+ihre|unsere\\s+(?:zertifizierten\\s+)?lösungen"
+            + "|zertifizierten\\s+\\S+-?lösungen|einlösbar|versandkostenfrei"
             + "|alle\\s+akzeptieren|war\\s+der\\s+artikel\\s+hilfreich|vorheriger|katalog\\s+kostenlos"
             + "|weihnachtseinkäufe\\w*|buy\\s+now|sign\\s+up|subscribe|read\\s+more|learn\\s+more|add\\s+to\\s+cart"
             + "|free\\s+trial|accept\\s+all|shop\\s+now|contact\\s+us|request\\s+a\\s+quote"
@@ -276,7 +278,7 @@ public final class ProsePassageFilter {
             + "|wir\\s+beraten\\s+sie|fordern\\s+sie|jetzt\\s+anfragen|angebot\\s+anfordern|per\\s+e-?mail\\s+teilen"
             + "|teilen|quicklinks|filtern\\s+sie|durchsuchen\\s+sie|unser\\s+team)\\b|®"
             + "|\\d+(?:[.,]\\d+)?\\s?(?:€|eur\\b|euro\\b|chf\\b|\\$|usd\\b)|(?:€|\\$)\\s?\\d"
-            + "|\\b(?:pro|je)\\s+monat\\b|/\\s?monat\\b|\\bper\\s+month\\b");
+            + "|-\\s?\\d+\\s?%|\\b(?:pro|je)\\s+monat\\b|/\\s?monat\\b|\\bper\\s+month\\b");
     private static final Pattern SITE_NOTICE = Pattern.compile("(?iu)\\b(?:(?:verwendet|verwenden|nutzt|nutzen|"
             + "setzt|setzen|benutzt|benutzen)\\s+(?:\\S+\\s+){0,3}cookies|cookie-?(?:einstellungen|richtlinie|hinweis|banner)"
             + "|(?:we|this\\s+(?:web)?site)\\s+uses?\\s+cookies|cookie\\s+(?:settings|policy)"
