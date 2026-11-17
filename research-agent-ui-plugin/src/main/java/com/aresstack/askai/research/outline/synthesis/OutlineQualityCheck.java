@@ -564,8 +564,12 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                 chapters.add(chapter);
                 continue;
             }
+            // The code-made sections keep their proportional share of the limit, at least what the model's sections
+            // leave free. Live retest of #240: 11 model sections left one slot, and 21 code sections (29 clusters,
+            // 363 passages) were packed into one grab-bag section.
+            int share = (int) Math.ceil((double) limit * untitled.size() / chapter.getSections().size());
             List<PlannedSection> packed = FallbackOutlinePlan.packed(brief, untitled,
-                    Math.max(1, limit - titled.size()));
+                    Math.max(1, Math.max(limit - titled.size(), share)));
             List<PlannedSection> sections = new ArrayList<PlannedSection>(titled);
             sections.addAll(packed);
             chapters.add(chapter.withSections(sections));
