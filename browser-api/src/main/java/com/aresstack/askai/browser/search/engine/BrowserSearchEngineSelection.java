@@ -45,7 +45,6 @@ public final class BrowserSearchEngineSelection {
         private final int delayMillis;
         private final int priority;
         private final List<String> languages;
-        private final boolean furtherLanguagesEnabled;
         private final List<String> furtherLanguages;
 
         /** A row with the catalog's result pages and delay for the engine. */
@@ -61,17 +60,16 @@ public final class BrowserSearchEngineSelection {
         /** A row without priority and languages: priority from its list position, languages from the catalog. */
         public Entry(String engineId, boolean enabled, int resultPages, int delayMillis) {
             this(engineId, enabled, resultPages, delayMillis, UNSET_PRIORITY,
-                    SearchEngineCatalog.defaultLanguages(engineId), false, Collections.<String>emptyList());
+                    SearchEngineCatalog.defaultLanguages(engineId), Collections.<String>emptyList());
         }
 
         /**
          * @param priority                0 = first group; {@link #UNSET_PRIORITY} = take the list position
          * @param languages               the row's picked search languages (normalised, duplicates dropped)
-         * @param furtherLanguagesEnabled whether the free "further languages" codes take part
-         * @param furtherLanguages        free language codes beyond the picker (kept while switched off)
+         * @param furtherLanguages        free language codes beyond the picker; empty = none
          */
         public Entry(String engineId, boolean enabled, int resultPages, int delayMillis, int priority,
-                     List<String> languages, boolean furtherLanguagesEnabled, List<String> furtherLanguages) {
+                     List<String> languages, List<String> furtherLanguages) {
             if (engineId == null || engineId.trim().isEmpty()) {
                 throw new IllegalArgumentException("engine id must not be empty");
             }
@@ -82,7 +80,6 @@ public final class BrowserSearchEngineSelection {
             this.priority = priority >= 0 ? priority : UNSET_PRIORITY;
             this.languages = Collections.unmodifiableList(new ArrayList<String>(
                     SearchLanguages.parse(languages).getCodes()));
-            this.furtherLanguagesEnabled = furtherLanguagesEnabled;
             this.furtherLanguages = Collections.unmodifiableList(new ArrayList<String>(
                     SearchLanguages.parse(furtherLanguages).getCodes()));
         }
@@ -90,7 +87,7 @@ public final class BrowserSearchEngineSelection {
         /** The same row with another priority. */
         public Entry withPriority(int newPriority) {
             return new Entry(engineId, enabled, resultPages, delayMillis, newPriority, languages,
-                    furtherLanguagesEnabled, furtherLanguages);
+                    furtherLanguages);
         }
 
         public String getEngineId() {
@@ -121,21 +118,15 @@ public final class BrowserSearchEngineSelection {
             return languages;
         }
 
-        public boolean isFurtherLanguagesEnabled() {
-            return furtherLanguagesEnabled;
-        }
-
-        /** The free further codes as entered (normalised), whether or not they are switched on. */
+        /** The free further codes as entered (normalised); empty = none. */
         public List<String> getFurtherLanguages() {
             return furtherLanguages;
         }
 
-        /** The languages this row searches in: the picked ones, plus the further ones when switched on. */
+        /** The languages this row searches in: the picked ones plus the further ones. */
         public List<String> effectiveLanguages() {
             List<String> all = new ArrayList<String>(languages);
-            if (furtherLanguagesEnabled) {
-                all.addAll(furtherLanguages);
-            }
+            all.addAll(furtherLanguages);
             return SearchLanguages.parse(all).getCodes();
         }
     }
@@ -236,9 +227,9 @@ public final class BrowserSearchEngineSelection {
     // ------------------------------------------------------------------ flat-string form (settings codec)
 
     /**
-     * One row per comma-separated piece: {@code id:on|off:pages:delay:priority:languages:further-on|off:further}.
+     * One row per comma-separated piece: {@code id:on|off:pages:delay:priority:languages:further}.
      * The delay is in seconds (up to three decimals), languages are joined with {@code +}:
-     * {@code "google:on:1:15:0:de+en:off:,duckduckgo:on:3:0:1:de+en:on:pl+uk"}. The rows are written in table
+     * {@code "google:on:1:15:0:de+en:,duckduckgo:on:3:0:1:de+en:pl+uk"}. The rows are written in table
      * order (priority, name).
      */
     public String encodeEntries() {
@@ -252,7 +243,6 @@ public final class BrowserSearchEngineSelection {
                     .append(':').append(formatDelaySeconds(entry.getDelayMillis()))
                     .append(':').append(entry.getPriority())
                     .append(':').append(joinCodes(entry.getLanguages()))
-                    .append(':').append(entry.isFurtherLanguagesEnabled() ? "on" : "off")
                     .append(':').append(joinCodes(entry.getFurtherLanguages()));
         }
         return sb.toString();
@@ -359,10 +349,19 @@ public final class BrowserSearchEngineSelection {
             }
             List<String> languages = parts.length >= 6 ? splitCodes(parts[5])
                     : SearchEngineCatalog.defaultLanguages(id);
-            boolean furtherOn = parts.length >= 7 && "on".equalsIgnoreCase(parts[6].trim());
-            List<String> further = parts.length >= 8 ? splitCodes(parts[7]) : Collections.<String>emptyList();
-            entries.add(new Entry(id, enabled, pages, delayMillis, priority, languages, furtherOn, further));
+            entries.add(new Entry(id, enabled, pages, delayMillis, priority, languages, furtherLanguages(parts)));
         }
         return entries;
+    }
+
+    /**
+     * The further-languages field of a row. A row stored while the table still had a separate on/off switch
+     * ({@code ...:languages:on|off:codes}) keeps its codes only when they were switched on, so it searches as before.
+     */
+    private static List<String> furtherLanguages(String[] parts) {
+        if (parts.length >= 8) {
+            return "on".equalsIgnoreCase(parts[6].trim()) ? splitCodes(parts[7]) : Collections.<String>emptyList();
+        }
+        return parts.length >= 7 ? splitCodes(parts[6]) : Collections.<String>emptyList();
     }
 }

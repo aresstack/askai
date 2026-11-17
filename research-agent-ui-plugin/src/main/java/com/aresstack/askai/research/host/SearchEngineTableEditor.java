@@ -35,13 +35,13 @@ import java.util.List;
 
 /**
  * The engine table of Search → Engines: one row per engine CONFIGURATION, any number of rows, the same engine as
- * often as wanted. Columns: Active · Engine · Priority · Delay (s) · Pages · Languages · More · Further languages.
+ * often as wanted. Columns: Active · Engine · Priority · Delay (s) · Pages · Languages · Further languages.
  * <p>
  * Priority 0 runs first; rows with the same priority form one group. The table shows the stored order (priority
  * ascending, the stored order within a priority, which is also the order the search uses); a committed priority edit
  * (Enter or leaving the cell, never while typing) or an added row re-sorts it by priority, then engine name, then the
- * order the rows came in. Languages are picked from a check-box menu (click the cell); "More" switches on the
- * free "Further languages" codes ({@code pl, uk, id}), which are validated and normalised on commit — a piece that
+ * order the rows came in. Languages are picked from a check-box menu (click the cell); the free
+ * "Further languages" codes (empty = none) ({@code pl, uk, id}), which are validated and normalised on commit — a piece that
  * is not a language code is named below the table and not stored.
  * <p>
  * "Add engine…" offers the whole {@link SearchEngineCatalog}; engines AskAI cannot search with yet are listed but
@@ -56,14 +56,13 @@ final class SearchEngineTableEditor extends JPanel {
     static final int COL_DELAY = 3;
     static final int COL_PAGES = 4;
     static final int COL_LANGUAGES = 5;
-    static final int COL_MORE = 6;
-    static final int COL_FURTHER = 7;
+    static final int COL_FURTHER = 6;
 
     private static final String[] COLUMNS = {
-            "Active", "Engine", "Priority", "Delay (s)", "Pages", "Languages", "More", "Further languages"};
+            "Active", "Engine", "Priority", "Delay (s)", "Pages", "Languages", "Further languages"};
 
     /** Preferred column widths (pixels) — the table still shrinks to the dialog width, never scrolls sideways. */
-    private static final int[] WIDTHS = {44, 110, 50, 56, 44, 110, 40, 100};
+    private static final int[] WIDTHS = {44, 110, 50, 56, 44, 110, 120};
 
     /** One configuration row as the table edits it. */
     static final class Row {
@@ -73,7 +72,6 @@ final class SearchEngineTableEditor extends JPanel {
         int delayMillis;
         int resultPages;
         List<String> languages;
-        boolean furtherOn;
         List<String> further;
 
         Row(BrowserSearchEngineSelection.Entry entry) {
@@ -83,13 +81,12 @@ final class SearchEngineTableEditor extends JPanel {
             this.delayMillis = entry.getDelayMillis();
             this.resultPages = entry.getResultPages();
             this.languages = new ArrayList<String>(entry.getLanguages());
-            this.furtherOn = entry.isFurtherLanguagesEnabled();
             this.further = new ArrayList<String>(entry.getFurtherLanguages());
         }
 
         BrowserSearchEngineSelection.Entry toEntry() {
             return new BrowserSearchEngineSelection.Entry(engineId, enabled, resultPages, delayMillis, priority,
-                    languages, furtherOn, further);
+                    languages, further);
         }
     }
 
@@ -116,7 +113,7 @@ final class SearchEngineTableEditor extends JPanel {
         }
         table.getColumnModel().getColumn(COL_ENGINE).setMinWidth(70);
         table.setToolTipText("Priority 0 runs first; rows with the same priority are searched together. "
-                + "Click Languages to pick, tick More to add further language codes.");
+                + "Click Languages to pick, type further language codes in the last column.");
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent event) {
@@ -198,7 +195,7 @@ final class SearchEngineTableEditor extends JPanel {
         Row row = new Row(new BrowserSearchEngineSelection.Entry(engineId, true,
                 BrowserSearchEngineSelection.Entry.DEFAULT_RESULT_PAGES,
                 SearchEngineCatalog.defaultDelayMillis(engineId), priority,
-                SearchEngineCatalog.defaultLanguages(engineId), false, Collections.<String>emptyList()));
+                SearchEngineCatalog.defaultLanguages(engineId), Collections.<String>emptyList()));
         rows.add(row);
         resortKeeping(row);
     }
@@ -365,7 +362,7 @@ final class SearchEngineTableEditor extends JPanel {
 
         @Override
         public Class<?> getColumnClass(int column) {
-            return column == COL_ACTIVE || column == COL_MORE ? Boolean.class : String.class;
+            return column == COL_ACTIVE ? Boolean.class : String.class;
         }
 
         @Override
@@ -388,8 +385,6 @@ final class SearchEngineTableEditor extends JPanel {
                     return String.valueOf(row.resultPages);
                 case COL_LANGUAGES:
                     return row.languages.isEmpty() ? "—" : SearchLanguages.join(row.languages);
-                case COL_MORE:
-                    return row.furtherOn;
                 default:
                     return SearchLanguages.join(row.further);
             }
@@ -434,15 +429,9 @@ final class SearchEngineTableEditor extends JPanel {
                     }
                     row.resultPages = pages;
                     break;
-                case COL_MORE:
-                    row.furtherOn = Boolean.TRUE.equals(value);
-                    break;
                 case COL_FURTHER:
                     SearchLanguages.Parsed parsed = SearchLanguages.parse(String.valueOf(value));
                     row.further = new ArrayList<String>(parsed.getCodes());
-                    if (!parsed.getCodes().isEmpty()) {
-                        row.furtherOn = true; // typing codes means wanting them
-                    }
                     status.setText(parsed.getRejected().isEmpty() ? " "
                             : "Not a language code, not stored: " + SearchLanguages.join(parsed.getRejected()));
                     break;

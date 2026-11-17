@@ -47,9 +47,9 @@ public class StartpageEngineTest {
     public void aWebSearchMayNameStartpage() {
         BrowserSearchEngineSelection selection = new BrowserSearchEngineSelection(java.util.Arrays.asList(
                 new BrowserSearchEngineSelection.Entry("startpage", true, 1, 0, 0,
-                        java.util.Arrays.asList("de", "en"), false, java.util.Collections.<String>emptyList()),
+                        java.util.Arrays.asList("de", "en"), java.util.Collections.<String>emptyList()),
                 new BrowserSearchEngineSelection.Entry("duckduckgo", true, 1, 0, 1,
-                        java.util.Arrays.asList("de"), false, java.util.Collections.<String>emptyList())), null);
+                        java.util.Arrays.asList("de"), java.util.Collections.<String>emptyList())), null);
         assertEquals("startpage", selection.resolvedEnabledEngines().get(0).getId());
         assertEquals(2, selection.resolvedEnabledEngines().size());
     }

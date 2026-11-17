@@ -15,8 +15,8 @@ import static org.junit.Assert.assertTrue;
  */
 public class SearchEngineTableEditorTest {
 
-    private static final String DEFAULTS = "google:on:1:15:0:de+en+fr+es+it:off:,duckduckgo:on:3:0:1:de+en:off:,"
-            + "bing:off:3:0:2:de+en+fr+es:off:";
+    private static final String DEFAULTS = "google:on:1:15:0:de+en+fr+es+it:,duckduckgo:on:3:0:1:de+en:,"
+            + "bing:off:3:0:2:de+en+fr+es:";
 
     @Test
     public void aStoredTableRoundTripsUnchanged() throws Exception {
@@ -43,7 +43,7 @@ public class SearchEngineTableEditorTest {
             assertEquals("DuckDuckGo", model.getValueAt(0, SearchEngineTableEditor.COL_ENGINE));
             assertEquals("same priority: by name", "Google", model.getValueAt(1, SearchEngineTableEditor.COL_ENGINE));
             assertEquals(0, editor.table().getSelectedRow());
-            assertTrue(editor.get().startsWith("duckduckgo:on:3:0:0:de+en:off:,google:on:1:15:0:"));
+            assertTrue(editor.get().startsWith("duckduckgo:on:3:0:0:de+en:,google:on:1:15:0:"));
         });
     }
 
@@ -54,10 +54,10 @@ public class SearchEngineTableEditorTest {
             editor.addEngine("google");
             assertEquals(4, editor.table().getRowCount());
             assertTrue("a new Google row starts with the catalog's delay",
-                    editor.get().endsWith(",google:on:3:15:3:de+en+fr+es+it:off:"));
+                    editor.get().endsWith(",google:on:3:15:3:de+en+fr+es+it:"));
             editor.toggleLanguage(3, "es");
             editor.toggleLanguage(3, "ru");
-            assertTrue(editor.get(), editor.get().endsWith(",google:on:3:15:3:de+en+fr+it+ru:off:"));
+            assertTrue(editor.get(), editor.get().endsWith(",google:on:3:15:3:de+en+fr+it+ru:"));
             editor.removeRow(3);
             assertEquals(DEFAULTS, editor.get());
         });
@@ -69,11 +69,10 @@ public class SearchEngineTableEditorTest {
             SearchEngineTableEditor editor = new SearchEngineTableEditor(DEFAULTS);
             TableModel model = editor.table().getModel();
             model.setValueAt("PL, uk; polish, pl", 2, SearchEngineTableEditor.COL_FURTHER);
-            assertEquals(Boolean.TRUE, model.getValueAt(2, SearchEngineTableEditor.COL_MORE));
-            assertTrue(editor.get().endsWith("bing:off:3:0:2:de+en+fr+es:on:pl+uk"));
+            assertTrue(editor.get().endsWith("bing:off:3:0:2:de+en+fr+es:pl+uk"));
             assertTrue(editor.statusText(), editor.statusText().contains("polish"));
-            model.setValueAt(Boolean.FALSE, 2, SearchEngineTableEditor.COL_MORE);
-            assertTrue("switched off, the codes are kept", editor.get().endsWith(":off:pl+uk"));
+            model.setValueAt("", 2, SearchEngineTableEditor.COL_FURTHER);
+            assertTrue("emptied, no further languages", editor.get().endsWith("bing:off:3:0:2:de+en+fr+es:"));
         });
     }
 
@@ -94,7 +93,7 @@ public class SearchEngineTableEditorTest {
     @Test
     public void unknownAndNotImplementedRowsAreKeptAndShownAsSuch() throws Exception {
         onEdt(() -> {
-            String stored = "mojeek:on:3:0:0:de:off:,mystery:on:3:0:1:en:off:," + "duckduckgo:on:3:0:2:de:off:";
+            String stored = "mojeek:on:3:0:0:de:,mystery:on:3:0:1:en:," + "duckduckgo:on:3:0:2:de:";
             SearchEngineTableEditor editor = new SearchEngineTableEditor(stored);
             TableModel model = editor.table().getModel();
             assertEquals("Mojeek  (not implemented)", model.getValueAt(0, SearchEngineTableEditor.COL_ENGINE));
