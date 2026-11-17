@@ -11,7 +11,7 @@ import java.util.function.ToIntFunction;
  * different {@code num_ctx} makes Ollama reload the runner.
  *
  * <p>The app installs its settings-backed lookup at start ({@link #install}); until then, and in tests, the
- * presets apply: {@code gemma4:e2b} 32,768, {@code llama3.1:8b} 16,384, {@code gpt-oss:20b} 16,384, {@code sui-1-24b} 16,384, every
+ * presets apply: {@code gemma4:e2b} 32,768, {@code llama3.1:8b} 16,384, {@code gpt-oss:20b} 16,384, {@code gemma4:12b} 16,384, {@code sui-1-24b} 16,384, every
  * other model 8,192.</p>
  */
 public final class ModelContextSizes {
@@ -27,6 +27,8 @@ public final class ModelContextSizes {
         presets.put("gemma4:e2b", 32768);
         presets.put("llama3.1:8b", 16384);
         presets.put("gpt-oss:20b", 16384);
+        // the Document writer's default model; 16,384 is the context of the writer blind comparison
+        presets.put("gemma4:12b", 16384);
         // ellamind SUI-1 (Mistral Small 3.2 24B, 128k native): 16,384 keeps a 24B Q4 model and its KV cache near
         // the 16 GB of an RTX 5080; the private cloud can raise it per model
         presets.put("sui-1-24b", 16384);
