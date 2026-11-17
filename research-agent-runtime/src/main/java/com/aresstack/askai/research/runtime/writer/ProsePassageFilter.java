@@ -71,6 +71,8 @@ public final class ProsePassageFilter {
          * Default most site notices (cookie consent, FAQ headers, "War der Artikel hilfreich", "Nachfolgend finden
          * Sie eine Auswahl interner Fundstellen") a passage may carry. A cookie banner is long, finished prose with a
          * single notice, so one is enough. Live retest of #243: two cookie banners and an FAQ header became sections.
+         * "Einwilligung", "zustimmen" or "ablehnen" alone are no notice: a book on workplace data protection discusses
+         * consent; only the consent buttons ("Zustimmen Ablehnen", "Einwilligung verwalten") count.
          */
         public static final int DEFAULT_MAX_SITE_NOTICES = 0;
 
@@ -281,7 +283,9 @@ public final class ProsePassageFilter {
             + "|häufig\\s+gestellte\\s+fragen|frequently\\s+asked\\s+questions|faq"
             + "|war\\s+(?:der|dieser|diese)\\s+(?:artikel|beitrag|seite)\\s+hilfreich|was\\s+this\\s+(?:article|page)\\s+helpful"
             + "|nachfolgend\\s+finden\\s+sie\\s+eine\\s+auswahl|interne[nr]?\\s+fundstellen|zum\\s+inhalt\\s+springen"
-            + "|skip\\s+to\\s+(?:main\\s+)?content|seite\\s+drucken|print\\s+this\\s+page)\\b");
+            + "|skip\\s+to\\s+(?:main\\s+)?content|cookies?|datenschutzeinstellungen|privatsphäre-?einstellungen"
+            + "|(?:zustimmen|akzeptieren|annehmen)\\s*(?:und|oder|/|\\|)?\\s*ablehnen|einwilligung\\s+(?:verwalten|widerrufen|"
+            + "anpassen)|alle\\s+akzeptieren|consent\\s+(?:settings|preferences)|privacy\\s+settings|seite\\s+drucken|print\\s+this\\s+page)\\b");
     private static final Pattern LINK = Pattern.compile("(?i)https?://|www\\.|\\bwww\\b");
 
     /**

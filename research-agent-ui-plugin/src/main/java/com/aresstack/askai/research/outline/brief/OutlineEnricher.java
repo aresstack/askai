@@ -39,9 +39,26 @@ public final class OutlineEnricher {
     private final OutlineBriefWorker worker;
     private final OutlinePassages passages;
 
+    /**
+     * Default number of key terms a fallback title is made of when the label call gives no title. A section title
+     * never comes from a passage sentence (live retest of #243: 19 sections kept cut raw sentences).
+     */
+    public static final int DEFAULT_FALLBACK_TITLE_TERMS = 3;
+
+    private final int fallbackTitleTerms;
+
     public OutlineEnricher(OutlineBriefWorker worker, OutlinePassages passages) {
+        this(worker, passages, DEFAULT_FALLBACK_TITLE_TERMS);
+    }
+
+    /** @param fallbackTitleTerms key terms of a title made when the label call fails (setting) */
+    public OutlineEnricher(OutlineBriefWorker worker, OutlinePassages passages, int fallbackTitleTerms) {
+        if (fallbackTitleTerms < 1) {
+            throw new IllegalArgumentException("fallbackTitleTerms must be >= 1");
+        }
         this.worker = worker;
         this.passages = passages;
+        this.fallbackTitleTerms = fallbackTitleTerms;
     }
 
     public Result enrich(Outline generated, BriefContext context, BooleanSupplier cancelled) {
@@ -90,6 +107,13 @@ public final class OutlineEnricher {
                     if (label != null) {
                         labelled = section.withTitle(label.getTitle()).withUntitled(false);
                         taken.add(label.getTitle());
+                    } else {
+                        String fallback = KeyTermTitle.of(ChapterRegenerator.texts(view, ids), chapter.getTitle(),
+                                fallbackTitleTerms);
+                        if (!fallback.isEmpty()) {
+                            labelled = section.withTitle(fallback);
+                            taken.add(fallback);
+                        }
                     }
                 }
                 sections.add(labelled);

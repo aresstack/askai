@@ -257,6 +257,17 @@ public class OutlineBriefWorkerTest {
                 "Technologien und Sensoren", "Wearables: Technologien, Sensoren und Einsatzfelder"));
     }
 
+    /** Live retest of #243: a section the label call could not name is titled by key terms, not a raw sentence. */
+    @Test
+    public void aFallbackTitleIsMadeOfKeyTermsNotOfAPassageSentence() {
+        String title = KeyTermTitle.of(Arrays.asList(
+                "Die Unterweisung zur Sensorweste erfolgt jährlich. Die Akkulaufzeit der Sensorweste ist kurz.",
+                "Bei der Unterweisung wird die Sensorweste vorgeführt und die Akkulaufzeit erklärt."),
+                "Wearables im Betrieb", 3);
+        assertEquals("Sensorweste, Unterweisung und Akkulaufzeit", title);
+        assertEquals("", KeyTermTitle.of(Arrays.asList("nur kleine wörter hier"), "", 3));
+    }
+
     @Test
     public void regeneratingASubClusterChapterWithFourSectionsChangesOnlyThatChapter() {
         Outline stored = stored();

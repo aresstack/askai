@@ -110,6 +110,11 @@ public class ProsePassageFilterTest {
                 + "des Betriebsrats bei der Einführung."));
         assertFalse(filter.isProse("Nachfolgend finden Sie eine Auswahl interner Fundstellen zum Thema Arbeitsschutz "
                 + "und Digitalisierung in der Pflege."));
+        assertFalse(filter.isProse("Mit Ihrer Einwilligung nutzen wir Daten für Statistiken und Marketing. Sie können "
+                + "die Datenschutzeinstellungen jederzeit ändern. Zustimmen Ablehnen"));
+        assertTrue("consent as a subject stays", filter.isProse("Die Einwilligung der Beschäftigten ist im "
+                + "Arbeitsverhältnis nur wirksam, wenn sie freiwillig erteilt wird; wer sie ablehnt, darf keine "
+                + "Nachteile erleiden."));
         assertTrue(filter.isProse("Die Studie zeigt, dass Beschäftigte die Daten ihrer Sensorwesten nur dann "
                 + "akzeptieren, wenn der Zweck vorab festgelegt und die Auswertung anonymisiert ist."));
         ProsePassageFilter off = new ProsePassageFilter(new ProsePassageFilter.Criteria(10, 1, 30, 22, 0.05, 1,

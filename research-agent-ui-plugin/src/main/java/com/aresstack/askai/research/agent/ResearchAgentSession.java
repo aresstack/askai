@@ -2699,7 +2699,14 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     }
                     com.aresstack.askai.research.outline.brief.OutlineEnricher.Result result =
                             new com.aresstack.askai.research.outline.brief.OutlineEnricher(outlineBriefWorker,
-                                    outlinePassages).enrich(generated, briefContext(), cancelled);
+                                    outlinePassages, hostStateStore == null
+                                    ? com.aresstack.askai.research.outline.brief.OutlineEnricher
+                                            .DEFAULT_FALLBACK_TITLE_TERMS
+                                    : com.aresstack.askai.research.host.ResearchRuntimeSettings.loadPositiveInt(
+                                            hostStateStore, com.aresstack.askai.research.host
+                                                    .OutlineGenerationSettings.KEY_FALLBACK_TITLE_TERMS,
+                                            com.aresstack.askai.research.outline.brief.OutlineEnricher
+                                                    .DEFAULT_FALLBACK_TITLE_TERMS)).enrich(generated, briefContext(), cancelled);
                     if (!result.getBriefFailures().isEmpty()) {
                         System.err.println("[outline-brief] brief not generated for "
                                 + result.getBriefFailures().size() + " chapter(s)");
