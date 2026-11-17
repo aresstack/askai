@@ -738,10 +738,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return;
         }
         disposed = true;
-        java.util.Timer progressTimer = planProgressTimer;
-        if (progressTimer != null) {
-            progressTimer.cancel();
-        }
+        planProgress.close();
+        outlineProgress.close();
+        writingProgress.close();
         com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
         if (runner != null) {
             runner.shutdown();
@@ -2636,6 +2635,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }
                     },
                     resources.outlineRun(), outlineGenerationExecutor);
+            final com.aresstack.askai.research.host.OutlineClusteringRun clustering = resources.outlineRun();
+            clustering.addListener(new Runnable() {
+                public void run() {
+                    uiExecutor.execute(new Runnable() {
+                        public void run() {
+                            showOutlineProgress(clustering.status());
+                        }
+                    });
+                }
+            });
             outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
                 public String refusal() {
                     // Issue #152: a mis-declared label/brief role must refuse the start, not fail in the
@@ -2966,6 +2975,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                 technicalLog("write_sections -> " + text);
                                 uiExecutor.execute(new Runnable() {
                                     public void run() {
+                                        writingProgress.note(text);
+                                        writingProgress.refresh(WRITING_PROGRESS_TEXT);
                                         fireStateChanged();
                                     }
                                 });
@@ -2979,6 +2990,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                 final String gapLine = researchWriterGaps(outcome);
                                 uiExecutor.execute(new Runnable() {
                                     public void run() {
+                                        writingProgress.finish(firstLine(outcome.text()));
                                         if (sink != null) {
                                             String id = "writing-outcome-" + System.currentTimeMillis();
                                             sink.appendInfoMessage(id, outcome.text()
@@ -8022,15 +8034,70 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     // ------------------------------------------------------------------ search plan progress bubble
-    /** The open progress bubble of the running search plan ({@code null} while none is shown). */
-    private String planProgressBubbleId;
-    private final java.util.concurrent.atomic.AtomicLong planProgressSequence =
-            new java.util.concurrent.atomic.AtomicLong();
-    /** The latest activity lines of the planned searches and the team, oldest first (bounded by a setting). */
-    private final java.util.ArrayDeque<String> planActivity = new java.util.ArrayDeque<String>();
-    private long planProgressShownAt;
-    private boolean planProgressFlushPending;
-    private java.util.Timer planProgressTimer;
+    /** The ONE progress bubble of each long phase job: search plan, outline clustering, section writer. */
+    private final PhaseProgressBubble planProgress = progressBubble("search-plan-progress-");
+    private final PhaseProgressBubble outlineProgress = progressBubble("outline-progress-");
+    private final PhaseProgressBubble writingProgress = progressBubble("writing-progress-");
+
+    private PhaseProgressBubble progressBubble(String idPrefix) {
+        return new PhaseProgressBubble(idPrefix,
+                new java.util.function.Supplier<AgentConversationSink>() {
+                    public AgentConversationSink get() {
+                        return sink;
+                    }
+                },
+                new java.util.concurrent.Executor() {
+                    public void execute(Runnable command) {
+                        uiExecutor.execute(command);
+                    }
+                },
+                new java.util.function.IntSupplier() {
+                    public int getAsInt() {
+                        return com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                .loadProgressRefreshMillis(hostStateStore);
+                    }
+                },
+                new java.util.function.IntSupplier() {
+                    public int getAsInt() {
+                        return com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                .loadProgressActivityLines(hostStateStore);
+                    }
+                });
+    }
+
+    /** The section writer's bubble shows its own progress lines; the title stays fixed. */
+    private static final java.util.function.Supplier<PhaseProgressBubble.Text> WRITING_PROGRESS_TEXT =
+            new java.util.function.Supplier<PhaseProgressBubble.Text>() {
+                public PhaseProgressBubble.Text get() {
+                    return new PhaseProgressBubble.Text("Writing sections …", "");
+                }
+            };
+
+    /** UI thread: mirrors the outline clustering run onto its bubble; a run that ended closes it. */
+    private void showOutlineProgress(
+            final com.aresstack.askai.research.host.OutlineClusteringRun.Status status) {
+        if (status == null) {
+            return;
+        }
+        if (status.state == com.aresstack.askai.research.host.OutlineClusteringRun.State.RUNNING) {
+            outlineProgress.refresh(new java.util.function.Supplier<PhaseProgressBubble.Text>() {
+                public PhaseProgressBubble.Text get() {
+                    return new PhaseProgressBubble.Text("Building the outline …", status.describe());
+                }
+            });
+        } else if (outlineProgress.isOpen()) {
+            outlineProgress.finish(status.describe());
+        }
+    }
+
+    /** The first line of a multi-line text ("" for none). */
+    static String firstLine(String text) {
+        if (text == null) {
+            return "";
+        }
+        int newline = text.indexOf('\n');
+        return (newline < 0 ? text : text.substring(0, newline)).trim();
+    }
 
     /** The visible line of a planned query's lifecycle event ("" for none). */
     static String planActivityLine(ResearchBackendEvent event) {
@@ -8051,73 +8118,28 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
     /** Remembers one activity line and refreshes the bubble. */
     private void notePlanActivity(String line) {
-        if (line != null && !line.trim().isEmpty()) {
-            String clean = line.replaceAll("\\s+", " ").trim();
-            if (!clean.equals(planActivity.peekLast())) {
-                planActivity.addLast(clean);
-            }
-            int keep = com.aresstack.askai.research.host.ResearchRuntimeSettings
-                    .loadProgressActivityLines(hostStateStore);
-            while (planActivity.size() > keep) {
-                planActivity.removeFirst();
-            }
-        }
+        planProgress.note(line);
         refreshPlanProgress();
     }
 
-    /**
-     * UI thread: opens or updates the ONE thought bubble of the running plan, at most once per configured refresh
-     * interval; a change inside the interval is shown when it ends, never dropped.
-     */
+    /** UI thread: opens or updates the plan's bubble while the plan runs. */
     private void refreshPlanProgress() {
-        com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
-        if (sink == null || planQueue == null || !planQueue.isRunning()) {
+        final com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
+        if (planQueue == null || !planQueue.isRunning()) {
             return;
         }
-        long interval = com.aresstack.askai.research.host.ResearchRuntimeSettings
-                .loadProgressRefreshMillis(hostStateStore);
-        long now = System.currentTimeMillis();
-        if (planProgressBubbleId != null && now - planProgressShownAt < interval) {
-            schedulePlanProgressFlush(interval - (now - planProgressShownAt));
-            return;
-        }
-        com.aresstack.askai.research.plan.SearchPlanProgress progress =
-                planQueue.progress(new java.util.ArrayList<String>(planActivity));
-        if (planProgressBubbleId == null) {
-            planProgressBubbleId = "search-plan-progress-" + planProgressSequence.incrementAndGet();
-            sink.startThinking(planProgressBubbleId, progress.title());
-        }
-        sink.updateThinking(planProgressBubbleId, progress.title() + "\n" + progress.body());
-        planProgressShownAt = now;
-    }
-
-    private void schedulePlanProgressFlush(long delayMillis) {
-        if (planProgressFlushPending) {
-            return;
-        }
-        planProgressFlushPending = true;
-        if (planProgressTimer == null) {
-            planProgressTimer = new java.util.Timer("search-plan-progress", true);
-        }
-        planProgressTimer.schedule(new java.util.TimerTask() {
-            public void run() {
-                uiExecutor.execute(new Runnable() {
-                    public void run() {
-                        planProgressFlushPending = false;
-                        refreshPlanProgress();
-                    }
-                });
+        planProgress.refresh(new java.util.function.Supplier<PhaseProgressBubble.Text>() {
+            public PhaseProgressBubble.Text get() {
+                com.aresstack.askai.research.plan.SearchPlanProgress progress = planQueue.progress(
+                        java.util.Collections.<String>emptyList());
+                return new PhaseProgressBubble.Text(progress.title(), progress.body());
             }
-        }, Math.max(1L, delayMillis));
+        });
     }
 
     /** UI thread: closes the plan's bubble with a short summary of the ended plan. */
     private void finishPlanProgress(com.aresstack.askai.research.plan.SearchPlanQueue.Outcome outcome) {
-        if (planProgressBubbleId != null && sink != null) {
-            sink.finishThinking(planProgressBubbleId, planProgressSummary(outcome));
-        }
-        planProgressBubbleId = null;
-        planActivity.clear();
+        planProgress.finish(planProgressSummary(outcome));
     }
 
     /** The bubble's closing line, e.g. "12 queries · 17 sources from 9 domains · 2 cycles". */
