@@ -268,6 +268,12 @@ public final class WebSearchApplicationService {
     private volatile boolean skipNextInterPageDelay;
     /** Research HUD: the user marked the CURRENT page relevant (⭐ toggle). Reset per page; applied at acceptance. */
     private volatile boolean hudRelevantCurrentPage;
+    /**
+     * The research team's lanes accept sources side by side, so the gate (target and budgets) and the accept are one
+     * step under this lock: two lanes that pass the gate at the last free slot cannot both become sources (a run
+     * with the target 8 ended with 9).
+     */
+    private final Object acceptGate = new Object();
     /** Soft cap for an in-page user-wait (consent/challenge) so a stuck wait self-parks; Skip is the immediate escape. */
     private static final long HUD_USER_WAIT_TIMEOUT_MILLIS = 180_000L;
     /**
@@ -2101,22 +2107,26 @@ public final class WebSearchApplicationService {
             return null;
         }
         try {
-            ResearchStopReason gate = beforeToolCall();
-            if (gate != null) {
-                return gate;
+            String sourceId;
+            boolean duplicate;
+            synchronized (acceptGate) {
+                ResearchStopReason gate = beforeToolCall();
+                if (gate != null) {
+                    return gate;
+                }
+                String accepted = sourceAcceptancePort.accept(captureId, hudRelevantCurrentPage,
+                        searchLanguage == null ? "" : searchLanguage);
+                progress.success();
+                sourceId = WebAcquisitionText.field(accepted, "source_id");
+                duplicate = accepted.contains("duplicate=true");
+                if (sourceId == null || "-".equals(sourceId)) {
+                    return null;
+                }
+                if (accepted.contains("ALREADY_ACCEPTED")) {
+                    return null; // idempotent outcome, no new source, no repeated claim
+                }
+                progress.sourceAccepted();
             }
-            String accepted = sourceAcceptancePort.accept(captureId, hudRelevantCurrentPage,
-                    searchLanguage == null ? "" : searchLanguage);
-            progress.success();
-            String sourceId = WebAcquisitionText.field(accepted, "source_id");
-            boolean duplicate = accepted.contains("duplicate=true");
-            if (sourceId == null || "-".equals(sourceId)) {
-                return null;
-            }
-            if (accepted.contains("ALREADY_ACCEPTED")) {
-                return null; // idempotent outcome, no new source, no repeated claim
-            }
-            progress.sourceAccepted();
             listener.status("accepted " + sourceId + (duplicate ? " (duplicate content)" : ""));
             listener.progress(progress, ResearchRunActivity.sourceAccepted(pageUrl, pageHost, pageTitle));
             // Research-specific per-source work happens in the caller's listener at THIS exact point,

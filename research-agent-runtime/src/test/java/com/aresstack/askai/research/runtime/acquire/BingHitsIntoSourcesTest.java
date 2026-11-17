@@ -390,12 +390,13 @@ public class BingHitsIntoSourcesTest {
         }
     }
 
+    /** The research team's lanes accept side by side: every call is synchronized, like the productive store. */
     private static final class RecordingAcceptance implements SourceAcceptancePort {
         final List<String> parked = new ArrayList<String>();
         final List<String> acceptedUrls = new ArrayList<String>();
         private final Map<String, String> sourceByCapture = new LinkedHashMap<String, String>();
 
-        public String accept(String captureId) {
+        public synchronized String accept(String captureId) {
             String sourceId = sourceByCapture.get(captureId);
             if (sourceId == null) {
                 sourceId = "source-" + (sourceByCapture.size() + 1);
@@ -404,23 +405,28 @@ public class BingHitsIntoSourcesTest {
             return "accepted source_id=" + sourceId;
         }
 
-        public void park(String url, String title, String excerpt, double score) {
+        public synchronized void park(String url, String title, String excerpt, double score) {
             parked.add(url);
         }
     }
 
+    /** Read and advanced by every lane of the research team. */
     private static final class SteppingClock implements ResearchLoopClock {
         private long now;
 
-        public long currentTimeMillis() {
+        public synchronized long currentTimeMillis() {
             return now;
         }
 
-        public void sleepMillis(long millis) {
+        public synchronized void sleepMillis(long millis) {
             now += Math.max(1L, millis);
         }
     }
 
+    /**
+     * The research team's lanes report side by side, like the productive listeners (stderr, the session's wire). A
+     * plain list lost entries or threw inside a lane, and the lane then dropped that page's suggestion or source.
+     */
     private static final class RecordingListener implements ResearchLoopListener {
         private final List<String> status;
 
@@ -429,7 +435,9 @@ public class BingHitsIntoSourcesTest {
         }
 
         public void status(String message) {
-            status.add(message);
+            synchronized (status) {
+                status.add(message);
+            }
         }
 
         public void progress(ResearchRunProgress p, ResearchRunActivity activity) {
