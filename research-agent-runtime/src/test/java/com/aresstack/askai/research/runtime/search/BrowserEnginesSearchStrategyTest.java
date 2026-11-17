@@ -197,7 +197,7 @@ public class BrowserEnginesSearchStrategyTest {
         for (String row : rows) {
             String[] parts = row.split("@");
             list.add(new BrowserSearchEngineSelection.Entry(parts[0], true, 1, 0, Integer.parseInt(parts[1]),
-                    Collections.singletonList("de"), false, Collections.<String>emptyList()));
+                    Collections.singletonList("de"), Collections.<String>emptyList()));
         }
         return new BrowserSearchEngineSelection(list, null);
     }
@@ -210,7 +210,7 @@ public class BrowserEnginesSearchStrategyTest {
             List<String> languages = parts[2].isEmpty() ? Collections.<String>emptyList()
                     : Arrays.asList(parts[2].split("\\+"));
             list.add(new BrowserSearchEngineSelection.Entry(parts[0], true, 1, 0, Integer.parseInt(parts[1]),
-                    languages, false, Collections.<String>emptyList()));
+                    languages, Collections.<String>emptyList()));
         }
         return new BrowserSearchEngineSelection(list, null);
     }
