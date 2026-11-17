@@ -100,6 +100,17 @@ public class ProsePassageFilterTest {
                 + "kostenlos bestellen und die Termine sichern."));
     }
 
+    /** Live retest of #245: shop coupons and product teasers became topics. */
+    @Test
+    public void couponsAndProductTeasersAreAdvertising() {
+        ProsePassageFilter filter = new ProsePassageFilter(ProsePassageFilter.Criteria.defaults());
+        assertFalse(filter.isProse("-10 % Sofortrabatt mit dem Code DS26AD8 auf alle Messgeräte. Der Gutschein ist "
+                + "mehrfach einlösbar und gilt bis Ende des Monats."));
+        assertFalse(filter.isProse("Schützen Sie Ihre Mitarbeitenden mit den zertifizierten TWIG-Lösungen für "
+                + "Alleinarbeit."));
+        assertFalse(filter.isProse("Fluke Produkt kaufen und Geschenk erhalten, so lange der Vorrat reicht."));
+    }
+
     /** Live retest of #243: cookie banners, an FAQ header and a list of internal references became sections. */
     @Test
     public void siteNoticesAreNoProse() {
