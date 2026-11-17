@@ -31,6 +31,8 @@ public final class OutlineGenerationSettings {
     public static final String KEY_MAX_SECTIONS_PER_CHAPTER = "research.outline.maxSectionsPerChapter";
     public static final String KEY_MIN_SECTION_PASSAGES = "research.outline.minSectionPassages";
     public static final String KEY_MAX_TITLE_OVERLAP = "research.outline.maxTitleOverlap";
+    /** Key terms of a section title made when the label call fails. */
+    public static final String KEY_FALLBACK_TITLE_TERMS = "research.outline.fallbackTitleTerms";
     public static final String KEY_CHAPTER_BALANCE_FACTOR = "research.outline.chapterBalanceFactor";
     public static final String KEY_MERGE_OVERLAP = "research.outline.mergeOverlap";
 

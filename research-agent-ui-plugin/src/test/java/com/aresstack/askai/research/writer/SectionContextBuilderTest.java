@@ -181,7 +181,9 @@ public class SectionContextBuilderTest {
         assertEquals("p-prose", pack.getPassages().get(0).getPassageId());
 
         WriterPackSettings lenient = new WriterPackSettings(6, 250,
-                new com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria(0, 0, 500));
+                new com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria(0, 0, 500,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_CAPTION_MAX_WORDS, 0, 0, 1.0, 1.0, Integer.MAX_VALUE));
         EvidencePack all = new SectionContextBuilder(new RecordingEmbeddings(), corpus, corpus).build(
                 request(new EvidenceSourceSet(accepted, null, null)), lenient);
         assertEquals("the criteria are settings", 3, all.getPassages().size());

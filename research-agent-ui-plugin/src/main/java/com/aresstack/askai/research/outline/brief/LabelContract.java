@@ -79,6 +79,42 @@ final class LabelContract {
 
     /** @param taken titles the answer must not nearly repeat */
     static OutlineLabel read(String answer, String chapterTitle, List<String> taken) throws BriefAnswerException {
+        return read(answer, chapterTitle, taken, java.util.Collections.<String>emptyList());
+    }
+
+    /**
+     * @param taken     titles of the same chapter the answer must not nearly repeat
+     * @param bookTaken titles elsewhere in the book (and the chapter titles) the answer must not repeat word for word
+     *                  or stem for stem. Live retest of #243: the near-repeat rule against all 90 titles of the book
+     *                  refused 58 answers and left 19 sections with raw passage sentences.
+     */
+    static OutlineLabel read(String answer, String chapterTitle, List<String> taken, List<String> bookTaken)
+            throws BriefAnswerException {
+        OutlineLabel label = readShape(answer, chapterTitle);
+        List<String> errors = new ArrayList<String>();
+        String title = label.getTitle();
+        for (String used : taken == null ? java.util.Collections.<String>emptyList() : taken) {
+            if (com.aresstack.askai.research.outline.OutlineTitles.similar(title, used,
+                    com.aresstack.askai.research.outline.OutlineTitles.DEFAULT_MAX_OVERLAP)) {
+                errors.add("the title nearly repeats \"" + used + "\", which this chapter already uses; name "
+                        + "what is different about these passages");
+                break;
+            }
+        }
+        for (String used : bookTaken == null ? java.util.Collections.<String>emptyList() : bookTaken) {
+            if (errors.isEmpty() && com.aresstack.askai.research.outline.OutlineTitles.similar(title, used, 1.0)) {
+                errors.add("the title repeats \"" + used + "\", which the book already uses; name what is "
+                        + "different about these passages");
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw new BriefAnswerException(errors);
+        }
+        return label;
+    }
+
+    /** The answer checked for shape only (title form, chapter title, summary), without the repeat rules. */
+    static OutlineLabel readShape(String answer, String chapterTitle) throws BriefAnswerException {
         JsonObject root;
         try {
             JsonElement parsed = JsonParser.parseString(answer == null ? "" : answer.trim());
@@ -104,14 +140,6 @@ final class LabelContract {
             }
             if (OutlineChapter.repeatsChapterTitle(title, chapterTitle)) {
                 errors.add("the title repeats the chapter title; name this group's part of the chapter");
-            }
-            for (String used : taken == null ? java.util.Collections.<String>emptyList() : taken) {
-                if (com.aresstack.askai.research.outline.OutlineTitles.similar(title, used,
-                        com.aresstack.askai.research.outline.OutlineTitles.DEFAULT_MAX_OVERLAP)) {
-                    errors.add("the title nearly repeats \"" + used + "\", which the book already uses; name "
-                            + "what is different about these passages");
-                    break;
-                }
             }
         }
         if (summary.isEmpty()) {

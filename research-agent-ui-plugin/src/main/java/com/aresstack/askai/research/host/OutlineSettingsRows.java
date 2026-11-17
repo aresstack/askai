@@ -136,6 +136,10 @@ final class OutlineSettingsRows {
                 OutlineLengthSettings.DEFAULT_MAX_TITLE_OVERLAP,
                 "Section titles sharing this share (0 to 1) of their content words are near duplicates: merged "
                         + "in one chapter, renamed across chapters."));
+        length.row("Fallback title terms", positive(store, OutlineGenerationSettings.KEY_FALLBACK_TITLE_TERMS,
+                com.aresstack.askai.research.outline.brief.OutlineEnricher.DEFAULT_FALLBACK_TITLE_TERMS,
+                "When the label call names no title, the section is titled with this many of its most frequent "
+                        + "key terms, never with a passage sentence."));
         length.row("Chapter balance factor", decimal(store, OutlineGenerationSettings.KEY_CHAPTER_BALANCE_FACTOR,
                 OutlineLengthSettings.DEFAULT_CHAPTER_BALANCE_FACTOR,
                 "A chapter may hold this many times an even share of the sections and distinct material; more "

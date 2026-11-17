@@ -35,7 +35,8 @@ public class ProsePassageFilterTest {
 
     @Test
     public void theCriteriaAreSettings() {
-        ProsePassageFilter lenient = new ProsePassageFilter(new ProsePassageFilter.Criteria(0, 0, 200));
+        ProsePassageFilter lenient = new ProsePassageFilter(new ProsePassageFilter.Criteria(0, 0, 200,
+                ProsePassageFilter.Criteria.DEFAULT_CAPTION_MAX_WORDS, 0, 0, 1.0, 1.0, Integer.MAX_VALUE));
         assertTrue(lenient.isProse(LiveRun3Fixtures.HEXAGON_NAVIGATION));
         ProsePassageFilter strict = new ProsePassageFilter(new ProsePassageFilter.Criteria(20, 1, 30));
         assertFalse("12 words", strict.isProse(LiveRun3Fixtures.HEXAGON_GNSS));
@@ -97,5 +98,28 @@ public class ProsePassageFilterTest {
                 1.0));
         assertTrue("the rules can be turned off", off.isProse("Seminare für Betriebsräte im ganzen Land: Katalog "
                 + "kostenlos bestellen und die Termine sichern."));
+    }
+
+    /** Live retest of #243: cookie banners, an FAQ header and a list of internal references became sections. */
+    @Test
+    public void siteNoticesAreNoProse() {
+        ProsePassageFilter filter = new ProsePassageFilter(ProsePassageFilter.Criteria.defaults());
+        assertFalse(filter.isProse("Die Website der EU-OSHA verwendet Cookies, um Informationen zu sammeln, die für "
+                + "die Navigation auf der Website erforderlich sind und die uns helfen, sie zu verbessern."));
+        assertFalse(filter.isProse("FAQ Häufig gestellte Fragen zu Wearables am Arbeitsplatz und zur Beteiligung "
+                + "des Betriebsrats bei der Einführung."));
+        assertFalse(filter.isProse("Nachfolgend finden Sie eine Auswahl interner Fundstellen zum Thema Arbeitsschutz "
+                + "und Digitalisierung in der Pflege."));
+        assertFalse(filter.isProse("Mit Ihrer Einwilligung nutzen wir Daten für Statistiken und Marketing. Sie können "
+                + "die Datenschutzeinstellungen jederzeit ändern. Zustimmen Ablehnen"));
+        assertTrue("consent as a subject stays", filter.isProse("Die Einwilligung der Beschäftigten ist im "
+                + "Arbeitsverhältnis nur wirksam, wenn sie freiwillig erteilt wird; wer sie ablehnt, darf keine "
+                + "Nachteile erleiden."));
+        assertTrue(filter.isProse("Die Studie zeigt, dass Beschäftigte die Daten ihrer Sensorwesten nur dann "
+                + "akzeptieren, wenn der Zweck vorab festgelegt und die Auswertung anonymisiert ist."));
+        ProsePassageFilter off = new ProsePassageFilter(new ProsePassageFilter.Criteria(10, 1, 30, 22, 0.05, 1,
+                0.4, 0.05, 5));
+        assertTrue("a higher limit lets a notice pass", off.isProse("Die Website der EU-OSHA verwendet Cookies, um "
+                + "Informationen zu sammeln, die für die Navigation auf der Website erforderlich sind."));
     }
 }
