@@ -71,7 +71,7 @@ public class BrowserSearchEngineTableTest {
                 "yandex:on:3:0:4:ru:off:uk+be,google:on:1:15:0:de:on:pl");
         assertEquals(Collections.<String>emptyList(), rows.get(0).getFurtherLanguages());
         assertEquals(Arrays.asList("pl"), rows.get(1).getFurtherLanguages());
-        assertEquals("yandex:on:3:0:4:ru:,google:on:1:15:0:de:pl",
+        assertEquals("google:on:1:15:0:de:pl,yandex:on:3:0:4:ru:",
                 new BrowserSearchEngineSelection(rows, null).encodeEntries());
     }
 
