@@ -162,10 +162,14 @@ public final class ProductiveResearchBackendFactory {
     private volatile int workerTabsPerUserContext = ResearchRuntimeSettings.DEFAULT_WORKER_TABS_PER_USER_CONTEXT;
     private volatile int workerPerSite = ResearchRuntimeSettings.DEFAULT_WORKER_PER_SITE;
     private volatile int workerAcquireTimeoutSeconds = ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS;
+    private volatile int workerSiteGapSeconds = ResearchRuntimeSettings.DEFAULT_WORKER_SITE_GAP_SECONDS;
 
     /** The worker-browser limits: processes, user contexts per process, tabs, per-site and acquire wait. */
     public void setWorkerBrowserLimits(int processes, int userContextsPerProcess, int tabsPerUserContext,
-                                       int perSite, int acquireTimeoutSeconds) {
+                                       int perSite, int acquireTimeoutSeconds, int siteGapSeconds) {
+        if (siteGapSeconds >= 0) {
+            this.workerSiteGapSeconds = siteGapSeconds;
+        }
         if (processes > 0) {
             this.workerBrowserProcesses = processes;
         }
@@ -188,7 +192,9 @@ public final class ProductiveResearchBackendFactory {
         return new com.aresstack.askai.browser.playwright.WorkerBrowserLimits(workerBrowserProcesses,
                 workerUserContextsPerProcess, workerTabsPerUserContext, workerPerSite,
                 workerAcquireTimeoutSeconds * 1000L, browserToolTimeoutSeconds * 1000L,
-                browserIdleStopSeconds * 1000L);
+                browserIdleStopSeconds * 1000L,
+                com.aresstack.askai.browser.playwright.SiteLeasePolicy.defaults()
+                        .withDefaultSpacing(workerSiteGapSeconds * 1000L));
     }
 
     /**

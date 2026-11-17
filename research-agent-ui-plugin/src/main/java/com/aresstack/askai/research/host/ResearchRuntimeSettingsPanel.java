@@ -118,6 +118,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField workerTabs = ComicControls.textField(3);
     private final JTextField workerPerSite = ComicControls.textField(3);
     private final JTextField workerAcquireTimeout = ComicControls.textField(4);
+    private final JTextField workerSiteGap = ComicControls.textField(3);
     // Review-context bounds: how many sources one review reads, and how much of each.
     private final JTextField reviewMaxSources = ComicControls.textField(4);
     private final JTextField reviewMaxChars = ComicControls.textField(6);
@@ -290,6 +291,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("User contexts/process", workerUserContexts),
                 labelled("Tabs/user context", workerTabs), labelled("Per site", workerPerSite),
                 labelled("Wait (s)", workerAcquireTimeout)));
+        orchestrator.row("Same site", group(labelled("Gap (s)", workerSiteGap)));
         orchestrator.row("Worker roles", group(workerSearchPlanner, labelled("Queries", workerPlannerQueries),
                 workerSourceVerifier, labelled("Sources", workerVerifierSources),
                 workerWriter, labelled("Sources", workerWriterSources)));
@@ -568,6 +570,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(workerAcquireTimeout, ResearchRuntimeSettings.KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS,
                 ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS,
                 "How long a worker waits for a free user context before its task fails.");
+        bindNonNegativeLimit(workerSiteGap, ResearchRuntimeSettings.KEY_WORKER_SITE_GAP_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_WORKER_SITE_GAP_SECONDS,
+                "Minimum seconds between two page loads on the same site, over all worker tabs and chats "
+                        + "(0 = none). Sites with a rule of their own keep it; search engines keep their own delay. "
+                        + "A tab never waits longer than the lease wait deadline.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
                 "How many sources one review reads at most (newest first).");

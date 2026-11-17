@@ -85,6 +85,38 @@ public class SiteConcurrencyGateTest {
     }
 
     @Test
+    public void defaultSpacingStaggersTwoTabsOnTheSameSiteButNotOtherSitesOrEngines() throws Exception {
+        SiteConcurrencyGate gate = new SiteConcurrencyGate(2, new SiteLeasePolicy(90_000L, 60_000L,
+                SiteLeasePolicy.parseOverrides(""), 3_000L), clock);
+        SiteConcurrencyGate.Lease first = gate.enter("example.org", 0L);
+        Future<SiteConcurrencyGate.Lease> second = pool.submit(() -> gate.enter("example.org", 0L));
+        awaitWaiting(gate, "example.org", 1);
+        assertEquals(1, gate.active("example.org")); // a free permit, but the gap holds the second tab
+        assertTrue(gate.enter("other.org", 1_000L) != null);
+        assertTrue(gate.enter(SiteConcurrencyGate.SEARCH_KEY, 1_000L) != null);
+        assertTrue(gate.enter(SiteConcurrencyGate.SEARCH_KEY, 1_000L) != null);
+        advance(gate, 3_000L);
+        SiteConcurrencyGate.Lease lease = second.get(2, TimeUnit.SECONDS);
+        assertTrue(lease.acquiredAt - first.acquiredAt >= 3_000L);
+    }
+
+    @Test
+    public void theSameSiteGapEndsTypedAtTheCallersTimeout() throws Exception {
+        SiteConcurrencyGate gate = new SiteConcurrencyGate(2, new SiteLeasePolicy(90_000L, 60_000L,
+                SiteLeasePolicy.parseOverrides(""), 10_000L), clock);
+        gate.enter("example.org", 0L);
+        Future<SiteConcurrencyGate.Lease> second = pool.submit(() -> gate.enter("example.org", 1_000L));
+        awaitWaiting(gate, "example.org", 1);
+        advance(gate, 1_000L);
+        try {
+            second.get(2, TimeUnit.SECONDS);
+            fail("expected SITE_BUSY");
+        } catch (java.util.concurrent.ExecutionException expected) {
+            assertTrue(expected.getCause().getMessage().startsWith(SiteConcurrencyGate.SITE_BUSY));
+        }
+    }
+
+    @Test
     public void strictSiteNeverOverlapsAndKeepsSpacing() throws Exception {
         SiteConcurrencyGate gate = gate(2, "researchgate.net=1@10s");
         SiteConcurrencyGate.Lease first = gate.enter("researchgate.net", 0L);

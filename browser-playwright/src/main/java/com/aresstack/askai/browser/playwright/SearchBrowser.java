@@ -361,8 +361,17 @@ public final class SearchBrowser implements AutoCloseable {
         // target and is aborted (a redirect hop is observed, not intercepted — the page is closed at once).
         final AtomicReference<String> target = new AtomicReference<>();
         final AtomicBoolean obstacle = new AtomicBoolean();
-        Page page = context.newPage();
+        final boolean ownPage = context.pages().isEmpty();
+        Page page = ownPage ? context.newPage() : context.pages().get(0);
         String landed = "";
+        java.util.function.Consumer<Request> watcher = request -> {
+            String url = request.url();
+            if (SearchEngineHosts.isGoogleObstacleUrl(url)) {
+                obstacle.set(true);
+            } else if ("document".equals(request.resourceType()) && !SearchEngineHosts.isEngineHost(url)) {
+                target.compareAndSet(null, url);
+            }
+        };
         try {
             page.setDefaultTimeout(timeoutMillis);
             page.route("**/*", route -> {
@@ -380,14 +389,7 @@ public final class SearchBrowser implements AutoCloseable {
                 }
                 route.abort();
             });
-            page.onRequest(request -> {
-                String url = request.url();
-                if (SearchEngineHosts.isGoogleObstacleUrl(url)) {
-                    obstacle.set(true);
-                } else if ("document".equals(request.resourceType()) && !SearchEngineHosts.isEngineHost(url)) {
-                    target.compareAndSet(null, url);
-                }
-            });
+            page.onRequest(watcher);
             try {
                 page.navigate(wrapperUrl, new Page.NavigateOptions().setTimeout((double) timeoutMillis)
                         .setWaitUntil(WaitUntilState.COMMIT));
@@ -407,11 +409,7 @@ public final class SearchBrowser implements AutoCloseable {
         } catch (PlaywrightException e) {
             return RedirectResolution.unresolved(step1 + "; navigation failed: " + firstLine(e.getMessage()));
         } finally {
-            try {
-                page.close();
-            } catch (RuntimeException ignored) {
-                // already gone
-            }
+            releaseHopPage(page, ownPage, watcher);
         }
         if (target.get() != null) {
             return RedirectResolution.resolved(target.get());
@@ -452,6 +450,23 @@ public final class SearchBrowser implements AutoCloseable {
     }
 
     /** How often the browser was started (1 after the first search, +1 per restart). */
+    /**
+     * Ends a redirect hop: a page opened for the hop is closed; the search tab stays open and only loses the hop's
+     * route and request watcher, so the next search finds it unchanged.
+     */
+    private static void releaseHopPage(Page page, boolean ownPage, java.util.function.Consumer<Request> watcher) {
+        try {
+            if (ownPage) {
+                page.close();
+            } else {
+                page.offRequest(watcher);
+                page.unroute("**/*");
+            }
+        } catch (RuntimeException ignored) {
+            // already gone
+        }
+    }
+
     public int getLaunchCount() {
         try {
             return owner.submit(() -> launches).get();
@@ -500,11 +515,13 @@ public final class SearchBrowser implements AutoCloseable {
                 browser = playwright.chromium().launch(chromium);
             }
             browserHeadless = wantHeadless;
-            // The one context of this browser: the provider opens its pages here, cookies stay between searches.
-            browser.newContext(camoufox
+            // The one context of this browser with its one search tab: every search and every redirect hop runs
+            // in this tab (one window, also when visible), cookies stay between searches.
+            BrowserContext searchContext = browser.newContext(camoufox
                     ? new Browser.NewContextOptions().setAcceptDownloads(false).setViewportSize(null)
                             .setColorScheme(null).setReducedMotion(null).setForcedColors(null).setContrast(null)
                     : new Browser.NewContextOptions().setAcceptDownloads(false));
+            searchContext.newPage();
             launches++;
             System.err.println("[search-browser] started " + channel + (wantHeadless ? " headless" : " visible")
                     + " (start " + launches + ")");
