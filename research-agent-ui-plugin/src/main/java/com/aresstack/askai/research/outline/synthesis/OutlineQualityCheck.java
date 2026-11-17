@@ -515,9 +515,35 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
     private static OutlinePlan mergeConceptTwins(OutlinePlan plan, SynthesisBrief brief, List<String> notes) {
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
         Map<String, Integer> indexOfLead = new LinkedHashMap<String, Integer>();
+        Set<String> leads = new LinkedHashSet<String>();
         for (PlannedChapter chapter : plan.getChapters()) {
+            leads.add(leadConcept(chapter));
+        }
+        for (PlannedChapter each : plan.getChapters()) {
+            PlannedChapter chapter = each;
             String lead = leadConcept(chapter);
             Integer target = lead.isEmpty() ? null : indexOfLead.get(lead);
+            // A twin that also names a concept requirement no chapter leads is that requirement's chapter, not a
+            // duplicate (live retest of #251: "Implementierung von IoT und Smart Construction" carried the
+            // technology node first and the implementation node second, was merged, and the implementation node
+            // lost its chapter).
+            if (target != null) {
+                for (String key : chapter.getConceptKeys()) {
+                    if (!leads.contains(key)) {
+                        List<String> concepts = new ArrayList<String>(chapter.getConceptKeys());
+                        concepts.remove(key);
+                        concepts.add(0, key);
+                        chapter = new PlannedChapter(chapter.getTitle(), chapter.getPurpose(),
+                                chapter.getMaterialKeys(), concepts, chapter.getSections(), chapter.isUntitled());
+                        lead = key;
+                        leads.add(key);
+                        target = null;
+                        notes.add("\"" + chapter.getTitle() + "\" shared its first concept requirement with an "
+                                + "earlier chapter; it leads its second requirement, which no chapter led.");
+                        break;
+                    }
+                }
+            }
             if (target == null) {
                 if (!lead.isEmpty()) {
                     indexOfLead.put(lead, chapters.size());

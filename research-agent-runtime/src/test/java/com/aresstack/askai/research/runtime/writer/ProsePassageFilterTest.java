@@ -100,6 +100,20 @@ public class ProsePassageFilterTest {
                 + "kostenlos bestellen und die Termine sichern."));
     }
 
+    /** Live retest of #251: photo credits, licence texts, order hints and link stubs reached sections. */
+    @Test
+    public void creditsLicencesAndOrderHintsAreSiteNotices() {
+        ProsePassageFilter filter = new ProsePassageFilter(ProsePassageFilter.Criteria.defaults());
+        assertFalse(filter.isProse("Bauarbeiter mit Sensorweste auf dem Gerüst einer Großbaustelle in der Stadt. "
+                + "© PeopleImages/istockphoto"));
+        assertFalse(filter.isProse("Dieser Beitrag steht unter der Lizenz Creative Commons CC BY-SA 4.0 und darf "
+                + "unter Nennung der Quelle weiterverwendet werden."));
+        assertFalse(filter.isProse("Für Bestellungen bis zum 22. Dezember garantieren wir die Lieferung vor den "
+                + "Feiertagen an alle Adressen."));
+        assertFalse(filter.isProse("Weitere Informationen zur Studie finden Sie online. WWW: https://www.example.org "
+                + "mit allen Anhängen und Tabellen."));
+    }
+
     /** Live retest of #247: a footer, a figure caption, a reference entry and a law header became topics. */
     @Test
     public void footersCaptionsAndReferencesAreSiteNotices() {

@@ -288,7 +288,11 @@ public final class ProsePassageFilter {
             + "|skip\\s+to\\s+(?:main\\s+)?content|cookies?|datenschutzeinstellungen|privatsphäre-?einstellungen"
             + "|(?:zustimmen|akzeptieren|annehmen)\\s*(?:und|oder|/|\\|)?\\s*ablehnen|einwilligung\\s+(?:verwalten|widerrufen|"
             + "anpassen)|alle\\s+akzeptieren|consent\\s+(?:settings|preferences)|privacy\\s+settings|seite\\s+drucken|print\\s+this\\s+page"
-            + "|startseite|impressum|wie\\s+gefällt\\s+ihnen|rate\\s+this|ausfertigungsdatum)\\b"
+            + "|startseite|impressum|wie\\s+gefällt\\s+ihnen|rate\\s+this|ausfertigungsdatum"
+            + "|istockphoto|shutterstock|adobe\\s*stock|getty\\s+images|bildnachweis|bildquelle|fotonachweis"
+            + "|creative\\s+commons|cc[\\s-]by(?:-\\S+)?|licensed\\s+under|lizenziert\\s+unter|unter\\s+der\\s+lizenz"
+            + "|(?:für\\s+)?bestellungen\\s+bis|lieferung\\s+bis\\s+(?:zum|weihnachten))\\b|©"
+            + "|www:\\s*https?"
             + "|^\\s*(?:abb|abbildung|fig|figure|tab|tabelle)\\.?\\s*\\d|^\\s*\\p{Lu}\\p{Ll}+,\\s+\\p{Lu}\\.(?:\\s|,|$)");
     private static final Pattern LINK = Pattern.compile("(?i)https?://|www\\.|\\bwww\\b");
 
