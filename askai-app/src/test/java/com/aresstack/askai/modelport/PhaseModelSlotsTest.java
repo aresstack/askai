@@ -111,6 +111,17 @@ public class PhaseModelSlotsTest {
     }
 
     @Test
+    public void theDocumentWriterShipsWithGemma4TwelveBUnlessItOrItsPhaseIsSet() throws Exception {
+        ModelPortSettings none = ModelPortSettings.defaults();
+        assertEquals("gemma4:12b", none.resolveModel("phase.draft.writer"));
+        assertEquals("the phase itself keeps the default", ModelPortSettings.DEFAULT_MODEL,
+                none.resolveModel("phase.draft"));
+        slots("default", "llama3.1:8b");
+        assertEquals("the app-wide default slot does not replace the shipped writer", "gemma4:12b",
+                settings.load().resolveModel("phase.draft.writer"));
+    }
+
+    @Test
     public void onlyTheOutlinePhaseSetUsesItForAnOutlineTurn() throws Exception {
         slots("phase.outline", "llama3.1:8b");
         assertEquals("llama3.1:8b", call("phase.outline"));

@@ -46,6 +46,13 @@ public final class ModelPortSettings {
     public static final String DEFAULT_SLOT = "default";
     /** The model of the {@link #DEFAULT_SLOT} while the user has not set one (plan 5.2). */
     public static final String DEFAULT_MODEL = "gemma4:e2b";
+    /**
+     * The shipped model of a slot that is not set in the settings file: the Document writer runs on
+     * {@code gemma4:12b} (writer blind comparison, docs/writer-model-blind-comparison.md). A model set for the
+     * slot or its phase always wins; only the app-wide {@code default} slot does not override it.
+     */
+    public static final Map<String, String> DEFAULT_SLOT_MODELS = Collections.singletonMap(
+            "phase.draft.writer", "gemma4:12b");
     /** The prefix of the research phase slots ({@code phase.<phase id>}, plan 5.1). */
     public static final String PHASE_PREFIX = "phase.";
     /**
@@ -151,14 +158,21 @@ public final class ModelPortSettings {
     /**
      * The model a slot resolves to (plan 5.1): the slot's own model, else its parent's (the last
      * {@code .segment} stripped, repeatedly), else the {@link #DEFAULT_SLOT}'s, else {@link #DEFAULT_MODEL}.
-     * Never the chat model.
+     * A slot with a shipped model ({@link #DEFAULT_SLOT_MODELS}) uses it instead of the default slot's. Never the chat model.
      */
     public String resolveModel(String slot) {
+        String shipped = slot == null ? null : DEFAULT_SLOT_MODELS.get(slot);
         for (String name : chain(slot)) {
+            if (shipped != null && DEFAULT_SLOT.equals(name)) {
+                return shipped;
+            }
             String value = slotModels.get(name);
             if (value != null) {
                 return value;
             }
+        }
+        if (shipped != null) {
+            return shipped;
         }
         return DEFAULT_MODEL;
     }
