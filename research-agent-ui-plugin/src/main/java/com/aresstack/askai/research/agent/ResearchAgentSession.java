@@ -1615,12 +1615,18 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     /**
      * The search plan's REQUEST_EVIDENCE_REVIEW refusal while planned queries still run, or {@code null}. The Sources
      * phase is finished by the user, never by a bot (Q13), but not under a running plan: the live run of 2026-11-09
-     * finished Sources with 17 planned queries still queued and an empty source set.
+     * finished Sources with 17 planned queries still queued and an empty source set. After a stop, the refusal says
+     * that the plan is stopping until the cancelled queries have ended.
      */
     private String searchPlanStillRunningRefusal() {
         com.aresstack.askai.research.plan.SearchPlanQueue queue = searchPlanQueue;
         if (queue == null || !(queue.isRunning() || queue.hasRunningEntry())) {
             return null;
+        }
+        if (!queue.isRunning()) {
+            // stopped: only the cancelled queries are still ending (live run 5 read "still running" here)
+            return "the search plan is stopping: its cancelled queries are still ending and go back to pending. "
+                    + "Try again in a moment.";
         }
         int pending = 0;
         try {
@@ -1635,10 +1641,11 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         if (pending == 0 && queue.isReplanning()) {
             return "the search plan is planning its next research cycle for the uncovered nodes. Let it finish, "
-                    + "or stop the search plan first.";
+                    + "or stop the search plan first (/stop-search-plan).";
         }
         return "the search plan is still running (" + pending + " planned "
-                + (pending == 1 ? "query" : "queries") + " left). Let it finish, or stop the search plan first.";
+                + (pending == 1 ? "query" : "queries") + " left). Let it finish, or stop the search plan first "
+                + "(/stop-search-plan).";
     }
 
     /** The pending (never run) entries of the plan. */

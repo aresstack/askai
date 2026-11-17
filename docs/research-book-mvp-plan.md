@@ -469,7 +469,9 @@ them, and outcomes that carry an old run token or another phase are dropped. Eac
   that meets the number alone does not cover the node). A node whose query budget is spent before that is exhausted:
   the plan runs no more automatic queries for it in this cycle, but it stays uncovered. Uncovered nodes, exhausted or not, are named on the checklist, in the run outcome and at the review
   gate. Caps per query, per node and for the phase keep the run bounded.
-- **Control.** "Stop search plan" cancels the current query, leaves it pending and stops the queue. At session start
+- **Control.** "Stop search plan" cancels the current query, leaves it pending and stops the queue. Its typed twin
+  `/stop-search-plan` does the same on every surface, so an MCP client can stop the plan as well; the refusal of
+  `/finish-sources` under a running plan names it. At session start
   the store's resume pass (`resumeAfterInterruption`) makes an interrupted entry pending again; the plan runs again
   only on "Run search plan". Any phase change stops the queue. Two acquisitions never overlap: a `/search` or a
   `research:` loop turn started while the plan runs waits until the current entry ends. While the plan runs, the
