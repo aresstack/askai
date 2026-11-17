@@ -469,6 +469,7 @@ public class ProductiveBookJourneyTest {
         while (!queue.hasRunningEntry() && System.currentTimeMillis() < deadline) {
             Thread.yield();
         }
+        assertTrue("a planned query runs", queue.hasRunningEntry());
         com.aresstack.askai.research.state.CommandSurface bot =
                 com.aresstack.askai.research.state.CommandSurface.BOT_CONTROL;
 
@@ -477,6 +478,10 @@ public class ProductiveBookJourneyTest {
 
         assertHandled(fx.session.executeBotCommand(bot, "", "/stop-search-plan"));
         assertFalse(fx.session.searchPlanRunning());
+        // live run 5: until the cancelled query has ended, the refusal says so instead of "still running"
+        String stopping = fx.session.executeBotCommand(bot, "", "/finish-sources");
+        assertTrue(stopping, stopping.startsWith("rejected") && stopping.contains("stopping")
+                && !stopping.contains("still running"));
         // the cancelled search ends as the browser ends it: its query goes back to pending
         for (com.aresstack.askai.research.plan.SearchPlanEntry entry : queue.entriesInOrder()) {
             if (entry.getStatus() == com.aresstack.askai.research.plan.SearchPlanEntry.Status.RUNNING) {

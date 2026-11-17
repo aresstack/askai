@@ -251,7 +251,7 @@ public final class ResearchChatCommands {
             }
             session.stopSearchPlan();
             return CommandExecutionResult.handled("Search plan stopped: the running query is cancelled and "
-                    + "stays pending with the other planned queries.");
+                    + "stays pending with the other planned queries. /finish-sources works once it has ended.");
         }
     }
 
