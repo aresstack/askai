@@ -120,10 +120,22 @@ final class OutlineSettingsRows {
                 "Without a book length: words per distinct passage on top of the base."));
         length.row("Word step", positive(store, OutlineGenerationSettings.KEY_WORD_STEP,
                 OutlineLengthSettings.DEFAULT_WORD_STEP, "Word targets are rounded to this step."));
-        length.row("Sections per split chapter", positive(store,
+        length.row("Sections per chapter, minimum", positive(store,
+                OutlineGenerationSettings.KEY_MIN_SECTIONS_PER_CHAPTER,
+                OutlineLengthSettings.DEFAULT_MIN_SECTIONS_PER_CHAPTER,
+                "Lower bound of the section limit: book words / words per writer call / chapters."));
+        length.row("Sections per chapter, maximum", positive(store,
                 OutlineGenerationSettings.KEY_MAX_SECTIONS_PER_CHAPTER,
                 OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER,
-                "When code splits a chapter by its material, it makes at most this many sections."));
+                "Upper bound of the section limit, and the limit when the book names no length."));
+        length.row("Minimum section passages", nonNegative(store,
+                OutlineGenerationSettings.KEY_MIN_SECTION_PASSAGES,
+                OutlineLengthSettings.DEFAULT_MIN_SECTION_PASSAGES,
+                "A section with fewer distinct passages is folded into its neighbour; 0 = off."));
+        length.row("Similar section titles", decimal(store, OutlineGenerationSettings.KEY_MAX_TITLE_OVERLAP,
+                OutlineLengthSettings.DEFAULT_MAX_TITLE_OVERLAP,
+                "Section titles sharing this share (0 to 1) of their content words are near duplicates: merged "
+                        + "in one chapter, renamed across chapters."));
         length.row("Chapter balance factor", decimal(store, OutlineGenerationSettings.KEY_CHAPTER_BALANCE_FACTOR,
                 OutlineLengthSettings.DEFAULT_CHAPTER_BALANCE_FACTOR,
                 "A chapter may hold this many times an even share of the sections and distinct material; more "

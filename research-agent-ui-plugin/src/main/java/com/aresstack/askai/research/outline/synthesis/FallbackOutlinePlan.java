@@ -18,7 +18,9 @@ final class FallbackOutlinePlan {
     private FallbackOutlinePlan() {
     }
 
-    static OutlinePlan plan(SynthesisBrief brief, int maxSections) {
+    static OutlinePlan plan(SynthesisBrief brief, OutlineLengthSettings length) {
+        int maxSections = length.sectionLimit(brief.getContext().getDeliverable(),
+                brief.getGroupTopicKeys().size());
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
         for (Map.Entry<String, List<String>> group : brief.getGroupTopicKeys().entrySet()) {
             List<String> keys = group.getValue();

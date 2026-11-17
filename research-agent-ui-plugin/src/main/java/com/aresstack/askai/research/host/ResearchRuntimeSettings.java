@@ -882,6 +882,12 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_WRITER_PROSE_CAPTION_MAX_WORDS = "research.writer.prose.captionMaxWords";
     /** Share of prose passages below which a page is a listing (shop, index) whose lone sentences are captions. */
     public static final String KEY_WRITER_PROSE_CAPTION_PAGE_SHARE = "research.writer.prose.captionPageProseShare";
+    /** Most promotion signals (calls to action, prices, subscription terms) a passage may carry. */
+    public static final String KEY_WRITER_PROSE_MAX_PROMOTION = "research.writer.prose.maxPromotionSignals";
+    /** Largest share of words in capitals a passage may have. */
+    public static final String KEY_WRITER_PROSE_MAX_CAPITALS = "research.writer.prose.maxUppercaseShare";
+    /** Most links per word a passage may have. */
+    public static final String KEY_WRITER_PROSE_MAX_LINKS = "research.writer.prose.maxLinkDensity";
 
     /**
      * The prose criteria of the evidence pack (live run 3, fix 2), read for every section: navigation, footer and
@@ -903,7 +909,16 @@ public final class ResearchRuntimeSettings {
                                 .DEFAULT_CAPTION_MAX_WORDS),
                 loadUnitInterval(store, KEY_WRITER_PROSE_CAPTION_PAGE_SHARE,
                         com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
-                                .DEFAULT_CAPTION_PAGE_PROSE_SHARE));
+                                .DEFAULT_CAPTION_PAGE_PROSE_SHARE),
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_MAX_PROMOTION,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MAX_PROMOTION_SIGNALS),
+                loadUnitInterval(store, KEY_WRITER_PROSE_MAX_CAPITALS,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MAX_UPPERCASE_SHARE),
+                loadUnitInterval(store, KEY_WRITER_PROSE_MAX_LINKS,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MAX_LINK_DENSITY));
     }
 
     /** Claim check stage 2: fewest letters of a content word. */

@@ -56,12 +56,26 @@ public final class ProsePassageFilter {
          * 0.1 and 0.11 (bgetem.de, pbvi.de). The default lies between.
          */
         public static final double DEFAULT_CAPTION_PAGE_PROSE_SHARE = 0.05;
+        /**
+         * Default most promotion signals (call-to-action phrases, prices, subscription terms) a passage may carry;
+         * one more and it is advertising or navigation (a passage of caption length needs only one). Live retest of #240: "JETZT TICKET SICHERN! Zurück
+         * Vorheriger", "Bei Weihnachtseinkäufen ab dem 16", "Sie gehen kein Risiko ein: Jederzeit formlos zu sofort
+         * kündbar" reached the outline as topics. 0 turns the rule off.
+         */
+        public static final int DEFAULT_MAX_PROMOTION_SIGNALS = 1;
+        /** Default largest share of words (three letters or more) written in capitals; 1 turns the rule off. */
+        public static final double DEFAULT_MAX_UPPERCASE_SHARE = 0.4;
+        /** Default most links (URLs, "www") per word; "WWW: https://www" reached the outline. 1 turns it off. */
+        public static final double DEFAULT_MAX_LINK_DENSITY = 0.05;
 
         private final int minWords;
         private final int minSentences;
         private final int maxUnpunctuatedRun;
         private final int captionMaxWords;
         private final double captionPageProseShare;
+        private final int maxPromotionSignals;
+        private final double maxUppercaseShare;
+        private final double maxLinkDensity;
 
         public Criteria(int minWords, int minSentences, int maxUnpunctuatedRun) {
             this(minWords, minSentences, maxUnpunctuatedRun, DEFAULT_CAPTION_MAX_WORDS,
@@ -74,6 +88,26 @@ public final class ProsePassageFilter {
          */
         public Criteria(int minWords, int minSentences, int maxUnpunctuatedRun, int captionMaxWords,
                         double captionPageProseShare) {
+            this(minWords, minSentences, maxUnpunctuatedRun, captionMaxWords, captionPageProseShare,
+                    DEFAULT_MAX_PROMOTION_SIGNALS, DEFAULT_MAX_UPPERCASE_SHARE, DEFAULT_MAX_LINK_DENSITY);
+        }
+
+        /**
+         * @param maxPromotionSignals most call-to-action, price and subscription signals (0 = rule off)
+         * @param maxUppercaseShare   largest share of words in capitals (1 = rule off)
+         * @param maxLinkDensity      most links per word (1 = rule off)
+         */
+        public Criteria(int minWords, int minSentences, int maxUnpunctuatedRun, int captionMaxWords,
+                        double captionPageProseShare, int maxPromotionSignals, double maxUppercaseShare,
+                        double maxLinkDensity) {
+            if (maxPromotionSignals < 0 || maxUppercaseShare < 0 || maxUppercaseShare > 1 || maxLinkDensity < 0
+                    || maxLinkDensity > 1) {
+                throw new IllegalArgumentException("promotion criteria must not be negative and the shares must lie "
+                        + "in 0..1");
+            }
+            this.maxPromotionSignals = maxPromotionSignals;
+            this.maxUppercaseShare = maxUppercaseShare;
+            this.maxLinkDensity = maxLinkDensity;
             if (minWords < 0 || minSentences < 0 || maxUnpunctuatedRun < 1 || captionMaxWords < 0
                     || captionPageProseShare < 0 || captionPageProseShare > 1) {
                 throw new IllegalArgumentException("prose criteria must not be negative, the run must be >= 1 and "
@@ -88,7 +122,20 @@ public final class ProsePassageFilter {
 
         public static Criteria defaults() {
             return new Criteria(DEFAULT_MIN_WORDS, DEFAULT_MIN_SENTENCES, DEFAULT_MAX_UNPUNCTUATED_RUN,
-                    DEFAULT_CAPTION_MAX_WORDS, DEFAULT_CAPTION_PAGE_PROSE_SHARE);
+                    DEFAULT_CAPTION_MAX_WORDS, DEFAULT_CAPTION_PAGE_PROSE_SHARE, DEFAULT_MAX_PROMOTION_SIGNALS,
+                    DEFAULT_MAX_UPPERCASE_SHARE, DEFAULT_MAX_LINK_DENSITY);
+        }
+
+        public int getMaxPromotionSignals() {
+            return maxPromotionSignals;
+        }
+
+        public double getMaxUppercaseShare() {
+            return maxUppercaseShare;
+        }
+
+        public double getMaxLinkDensity() {
+            return maxLinkDensity;
         }
 
         public int getMinWords() {
@@ -119,19 +166,25 @@ public final class ProsePassageFilter {
             Criteria c = (Criteria) o;
             return c.minWords == minWords && c.minSentences == minSentences
                     && c.maxUnpunctuatedRun == maxUnpunctuatedRun && c.captionMaxWords == captionMaxWords
-                    && Double.compare(c.captionPageProseShare, captionPageProseShare) == 0;
+                    && Double.compare(c.captionPageProseShare, captionPageProseShare) == 0
+                    && c.maxPromotionSignals == maxPromotionSignals
+                    && Double.compare(c.maxUppercaseShare, maxUppercaseShare) == 0
+                    && Double.compare(c.maxLinkDensity, maxLinkDensity) == 0;
         }
 
         @Override
         public int hashCode() {
             return (((minWords * 31 + minSentences) * 31 + maxUnpunctuatedRun) * 31 + captionMaxWords) * 31
-                    + Double.valueOf(captionPageProseShare).hashCode();
+                    + Double.valueOf(captionPageProseShare).hashCode() + 17 * maxPromotionSignals
+                    + Double.valueOf(maxUppercaseShare).hashCode() + Double.valueOf(maxLinkDensity).hashCode();
         }
 
         @Override
         public String toString() {
             return "words>=" + minWords + ", sentences>=" + minSentences + ", run<=" + maxUnpunctuatedRun
-                    + ", caption<=" + captionMaxWords + " on pages with prose<" + captionPageProseShare;
+                    + ", caption<=" + captionMaxWords + " on pages with prose<" + captionPageProseShare
+                    + ", promotion<=" + maxPromotionSignals + ", capitals<=" + maxUppercaseShare + ", links<="
+                    + maxLinkDensity;
         }
     }
 
@@ -181,6 +234,67 @@ public final class ProsePassageFilter {
         }
         if (longest > criteria.maxUnpunctuatedRun) {
             return longest + " words without punctuation > " + criteria.maxUnpunctuatedRun;
+        }
+        return promotion(t, words, count);
+    }
+
+    /** Call-to-action, navigation, price and subscription phrases (German and English). */
+    private static final Pattern PROMOTION = Pattern.compile("(?iu)\\b(?:jetzt\\s+(?:kaufen|bestellen|sichern|"
+            + "anmelden|buchen|testen|registrieren|entdecken)|kostenlos\\s+(?:bestellen|testen|anmelden|herunterladen)"
+            + "|weiterlesen|mehr\\s+erfahren|mehr\\s+lesen|zum\\s+shop|warenkorb|newsletter|abonnieren"
+            + "|jederzeit\\s+(?:formlos\\s+)?(?:zu\\s+)?(?:sofort\\s+)?kündbar|kündbar|gratis|gutschein|rabatt"
+            + "|alle\\s+akzeptieren|war\\s+der\\s+artikel\\s+hilfreich|vorheriger|katalog\\s+kostenlos"
+            + "|weihnachtseinkäufe\\w*|buy\\s+now|sign\\s+up|subscribe|read\\s+more|learn\\s+more|add\\s+to\\s+cart"
+            + "|free\\s+trial|accept\\s+all|shop\\s+now)\\b"
+            + "|\\d+(?:[.,]\\d+)?\\s?(?:€|eur\\b|euro\\b|chf\\b|\\$|usd\\b)|(?:€|\\$)\\s?\\d"
+            + "|\\b(?:pro|je)\\s+monat\\b|/\\s?monat\\b|\\bper\\s+month\\b");
+    private static final Pattern LINK = Pattern.compile("(?i)https?://|www\\.|\\bwww\\b");
+
+    /**
+     * Why a passage that passed the prose rules is advertising or navigation: too many promotion signals, too many
+     * words in capitals, or too many links; empty otherwise.
+     */
+    private String promotion(String t, String[] words, int count) {
+        if (criteria.maxPromotionSignals > 0) {
+            int signals = 0;
+            Matcher promotion = PROMOTION.matcher(t);
+            while (promotion.find()) {
+                signals++;
+            }
+            if (signals > criteria.maxPromotionSignals) {
+                return signals + " promotion signals > " + criteria.maxPromotionSignals;
+            }
+            // A short passage (caption length) with one signal is a slogan or a teaser, not a statement.
+            if (signals > 0 && count <= criteria.captionMaxWords) {
+                return signals + " promotion signal in " + count + " words";
+            }
+        }
+        if (criteria.maxUppercaseShare < 1) {
+            int long3 = 0;
+            int capitals = 0;
+            for (String word : words) {
+                String letters = word.replaceAll("[^\\p{L}]", "");
+                if (letters.length() >= 3) {
+                    long3++;
+                    if (letters.equals(letters.toUpperCase(java.util.Locale.ROOT))
+                            && !letters.equals(letters.toLowerCase(java.util.Locale.ROOT))) {
+                        capitals++;
+                    }
+                }
+            }
+            if (long3 > 0 && capitals > criteria.maxUppercaseShare * long3) {
+                return capitals + " of " + long3 + " words in capitals";
+            }
+        }
+        if (criteria.maxLinkDensity < 1 && count > 0) {
+            int links = 0;
+            Matcher link = LINK.matcher(t);
+            while (link.find()) {
+                links++;
+            }
+            if (links > criteria.maxLinkDensity * count) {
+                return links + " links in " + count + " words";
+            }
         }
         return "";
     }

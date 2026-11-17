@@ -69,4 +69,27 @@ public class ProsePassageFilterTest {
         ProsePassageFilter off = new ProsePassageFilter(new ProsePassageFilter.Criteria(10, 1, 30, 22, 0));
         assertTrue("share 0 turns the rule off", off.captions(shop).isEmpty());
     }
+
+    /** Live retest of #240: advertising, navigation and link lists that pass the sentence rules reached the outline. */
+    @Test
+    public void advertisingNavigationAndLinkListsAreNoProse() {
+        ProsePassageFilter filter = new ProsePassageFilter(ProsePassageFilter.Criteria.defaults());
+        assertFalse(filter.isProse("JETZT TICKET SICHERN! Zurück zur Übersicht, Vorheriger Beitrag, Nächster Beitrag, "
+                + "Suche und neueste Beiträge im Überblick."));
+        assertFalse(filter.isProse("Sie gehen kein Risiko ein: Jederzeit formlos zu sofort kündbar, und das erste "
+                + "Heft bekommen Sie gratis."));
+        assertFalse(filter.isProse("Seminare für Betriebsräte im ganzen Land: Katalog kostenlos bestellen und die Termine sichern."));
+        assertFalse(filter.isProse("Weitere Informationen finden Sie unter www.example.org, https://example.org/a "
+                + "und https://example.org/b sowie www.example.net."));
+        assertTrue(filter.isProse("Das Arbeitsschutzgesetz verpflichtet den Arbeitgeber, die Gefährdungen auf der "
+                + "Baustelle zu beurteilen und geeignete Schutzmaßnahmen festzulegen. Die Beurteilung ist zu "
+                + "dokumentieren und bei Änderungen zu wiederholen."));
+        assertTrue("a single price in a long statement stays", filter.isProse("Ein Sensorwestensystem kostet nach "
+                + "Herstellerangaben etwa 300 € je Beschäftigtem, wobei Wartung und Schulung in den Studien getrennt "
+                + "ausgewiesen werden und die Amortisation von der Unfallquote des Betriebs abhängt."));
+        ProsePassageFilter off = new ProsePassageFilter(new ProsePassageFilter.Criteria(10, 1, 30, 22, 0.05, 0, 1.0,
+                1.0));
+        assertTrue("the rules can be turned off", off.isProse("Seminare für Betriebsräte im ganzen Land: Katalog "
+                + "kostenlos bestellen und die Termine sichern."));
+    }
 }

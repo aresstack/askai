@@ -41,6 +41,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
     public static final String TOO_FEW_SECTIONS = "too-few-sections";
     public static final String UNBALANCED = "unbalanced-chapter";
     public static final String CONCEPT_TWICE = "concept-twice";
+    public static final String SIMILAR_TITLES = "similar-section-titles";
 
     /** A plan after the safe fixes and what they changed. */
     public static final class Fixed {
@@ -119,6 +120,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         }
         oneChapter(plan, brief, blocking);
         conceptTwice(plan, brief, blocking);
+        similarTitles(plan, warnings);
         balance(plan, brief, blocking);
         lengthFit(plan, brief, warnings);
         List<PlanFinding> all = new ArrayList<PlanFinding>(blocking);
@@ -389,6 +391,8 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         fixed = splitFlatMajorTopics(fixed, brief, notes);
         fixed = sectionsForEveryChapter(fixed, brief, notes);
         fixed = packCodeSections(fixed, brief, notes);
+        fixed = nearDuplicateTitles(fixed, notes);
+        fixed = foldThinSections(fixed, brief, notes);
         return new Fixed(fixed, notes);
     }
 
@@ -543,12 +547,162 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         return plan.withChapters(chapters);
     }
 
+    /** Content words (and numbers: "Part 1" is no "Part 2") of a title, cut to a stem, for the near-duplicate test. */
+    static Set<String> titleStems(String title) {
+        Set<String> stems = new LinkedHashSet<String>();
+        for (String word : normal(title).split(" ")) {
+            if (word.length() >= TITLE_WORD_LETTERS || word.matches(".*\\d.*")) {
+                stems.add(word.length() > TITLE_STEM_LETTERS ? word.substring(0, TITLE_STEM_LETTERS) : word);
+            }
+        }
+        return stems;
+    }
+
+    /** Letters of a content word of a title and of its stem: the claim check's defaults. */
+    private static final int TITLE_WORD_LETTERS =
+            com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_WORD_LENGTH;
+    private static final int TITLE_STEM_LETTERS =
+            com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH;
+
+    /** Whether two titles are near duplicates: identical, or content words overlapping by the setting's share. */
+    boolean similarTitles(String a, String b) {
+        if (normal(a).equals(normal(b))) {
+            return true;
+        }
+        Set<String> left = titleStems(a);
+        Set<String> right = titleStems(b);
+        if (left.isEmpty() || right.isEmpty()) {
+            return false;
+        }
+        Set<String> shared = new LinkedHashSet<String>(left);
+        shared.retainAll(right);
+        return shared.size() >= length.getMaxTitleOverlap() * Math.min(left.size(), right.size());
+    }
+
+    private void similarTitles(OutlinePlan plan, List<PlanFinding> warnings) {
+        List<String> seen = new ArrayList<String>();
+        int chapterIndex = 0;
+        for (PlannedChapter chapter : plan.getChapters()) {
+            chapterIndex++;
+            for (PlannedSection section : chapter.getSections()) {
+                if (section.isUntitled()) {
+                    continue;
+                }
+                for (String other : seen) {
+                    if (similarTitles(other, section.getTitle())) {
+                        warnings.add(PlanFinding.warning(SIMILAR_TITLES, "Section \"" + section.getTitle()
+                                + "\" in chapter " + chapterIndex + " nearly repeats \"" + other + "\"."));
+                        break;
+                    }
+                }
+                seen.add(section.getTitle());
+            }
+        }
+    }
+
+    /**
+     * Near-duplicate section titles (see {@link #similarTitles(String, String)}): within one chapter the later
+     * section is merged into the earlier; in a later chapter it loses its title, so the label call names it anew.
+     */
+    private OutlinePlan nearDuplicateTitles(OutlinePlan plan, List<String> notes) {
+        List<String> earlier = new ArrayList<String>();
+        List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
+        for (PlannedChapter chapter : plan.getChapters()) {
+            List<PlannedSection> sections = new ArrayList<PlannedSection>();
+            for (PlannedSection section : chapter.getSections()) {
+                int twin = -1;
+                for (int i = 0; i < sections.size() && !section.isUntitled(); i++) {
+                    if (!sections.get(i).isUntitled() && similarTitles(sections.get(i).getTitle(),
+                            section.getTitle())) {
+                        twin = i;
+                        break;
+                    }
+                }
+                if (twin >= 0) {
+                    PlannedSection kept = sections.get(twin);
+                    List<String> keys = new ArrayList<String>(kept.getMaterialKeys());
+                    for (String key : section.getMaterialKeys()) {
+                        if (!keys.contains(key)) {
+                            keys.add(key);
+                        }
+                    }
+                    sections.set(twin, kept.withMaterialKeys(keys));
+                    notes.add("Section \"" + section.getTitle() + "\" nearly repeated \"" + kept.getTitle()
+                            + "\" in \"" + chapter.getTitle() + "\"; they were merged.");
+                    continue;
+                }
+                boolean repeatsEarlier = false;
+                for (String title : earlier) {
+                    repeatsEarlier |= !section.isUntitled() && similarTitles(title, section.getTitle());
+                }
+                if (repeatsEarlier) {
+                    notes.add("Section \"" + section.getTitle() + "\" of \"" + chapter.getTitle() + "\" nearly "
+                            + "repeated a title of an earlier chapter; it will be named anew.");
+                    sections.add(new PlannedSection(section.getTitle(), section.getPurpose(),
+                            section.getMaterialKeys(), true));
+                    continue;
+                }
+                sections.add(section);
+            }
+            for (PlannedSection section : sections) {
+                if (!section.isUntitled()) {
+                    earlier.add(section.getTitle());
+                }
+            }
+            chapters.add(chapter.withSections(sections));
+        }
+        return plan.withChapters(chapters);
+    }
+
+    /**
+     * A section with fewer distinct passages than the setting is folded into its neighbour in the same chapter (the
+     * previous one, the next for the first); the neighbour keeps its title.
+     */
+    private OutlinePlan foldThinSections(OutlinePlan plan, SynthesisBrief brief, List<String> notes) {
+        int minimum = length.getMinSectionPassages();
+        if (minimum <= 0) {
+            return plan;
+        }
+        TopicAnalysis analysis = brief.getAnalysis();
+        List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
+        for (PlannedChapter chapter : plan.getChapters()) {
+            List<PlannedSection> sections = new ArrayList<PlannedSection>(chapter.getSections());
+            boolean folded = true;
+            while (folded && sections.size() > 1) {
+                folded = false;
+                for (int i = 0; i < sections.size(); i++) {
+                    PlannedSection thin = sections.get(i);
+                    int distinct = analysis.distinctCount(passagesOf(thin.getMaterialKeys(), brief));
+                    if (distinct >= minimum) {
+                        continue;
+                    }
+                    int into = i > 0 ? i - 1 : i + 1;
+                    PlannedSection neighbour = sections.get(into);
+                    List<String> keys = new ArrayList<String>(neighbour.getMaterialKeys());
+                    for (String key : thin.getMaterialKeys()) {
+                        if (!keys.contains(key)) {
+                            keys.add(key);
+                        }
+                    }
+                    sections.set(into, neighbour.withMaterialKeys(keys));
+                    sections.remove(i);
+                    notes.add("Section \"" + thin.getTitle() + "\" of \"" + chapter.getTitle() + "\" rested on "
+                            + distinct + " distinct passages; it was folded into \"" + neighbour.getTitle() + "\".");
+                    folded = true;
+                    break;
+                }
+            }
+            chapters.add(chapter.withSections(sections));
+        }
+        return plan.withChapters(chapters);
+    }
+
     /**
      * The sections code made (untitled) of a chapter with more sections than the limit are packed, so that the
      * chapter keeps at most the limit (the model's sections stay as they are).
      */
     private OutlinePlan packCodeSections(OutlinePlan plan, SynthesisBrief brief, List<String> notes) {
-        int limit = length.getMaxSectionsPerChapter();
+        int limit = length.sectionLimit(brief.getContext().getDeliverable(), plan.getChapters().size());
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
         for (PlannedChapter chapter : plan.getChapters()) {
             if (chapter.getSections().size() <= limit) {
@@ -564,8 +718,12 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                 chapters.add(chapter);
                 continue;
             }
+            // The code-made sections keep their proportional share of the limit, at least what the model's sections
+            // leave free. Live retest of #240: 11 model sections left one slot, and 21 code sections (29 clusters,
+            // 363 passages) were packed into one grab-bag section.
+            int share = (int) Math.ceil((double) limit * untitled.size() / chapter.getSections().size());
             List<PlannedSection> packed = FallbackOutlinePlan.packed(brief, untitled,
-                    Math.max(1, limit - titled.size()));
+                    Math.max(1, Math.max(limit - titled.size(), share)));
             List<PlannedSection> sections = new ArrayList<PlannedSection>(titled);
             sections.addAll(packed);
             chapters.add(chapter.withSections(sections));
@@ -626,7 +784,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                 PlannedChapter chapter = new PlannedChapter(topic.getProfile().getTitle(), "", keys, concepts, null,
                         true);
                 chapters.add(chapter.withSections(FallbackOutlinePlan.sections(brief, chapter,
-                        length.getMaxSectionsPerChapter())));
+                        length.sectionLimit(brief.getContext().getDeliverable(), chapters.size() + 1))));
                 notes.add(describe(brief, topic.getKey()) + " was in no chapter; it became a chapter of its own.");
             } else {
                 PlannedChapter chapter = chapters.get(target);
@@ -831,7 +989,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         for (PlannedChapter chapter : plan.getChapters()) {
             if (chapter.getSections().isEmpty()) {
                 chapters.add(chapter.withSections(FallbackOutlinePlan.sections(brief, chapter,
-                        length.getMaxSectionsPerChapter())));
+                        length.sectionLimit(brief.getContext().getDeliverable(), plan.getChapters().size()))));
                 notes.add("\"" + chapter.getTitle() + "\" had no sections; code split it by its material.");
             } else {
                 chapters.add(chapter);

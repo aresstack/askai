@@ -48,6 +48,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerProseMaxRun = ComicControls.textField(4);
     private final JTextField writerProseCaptionMaxWords = ComicControls.textField(4);
     private final JTextField writerProseCaptionPageShare = ComicControls.textField(4);
+    private final JTextField writerProseMaxPromotion = ComicControls.textField(4);
+    private final JTextField writerProseMaxCapitals = ComicControls.textField(4);
+    private final JTextField writerProseMaxLinks = ComicControls.textField(4);
     private final JTextField writerCarryMinWordLength = ComicControls.textField(4);
     private final JTextField writerCarryStemLength = ComicControls.textField(4);
     private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
@@ -237,6 +240,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Unpunctuated run ≤", writerProseMaxRun)));
         writer.row("Captions", group(labelled("Words ≤", writerProseCaptionMaxWords),
                 labelled("Page prose <", writerProseCaptionPageShare)));
+        writer.row("Advertising", group(labelled("Signals ≤", writerProseMaxPromotion),
+                labelled("Capitals ≤", writerProseMaxCapitals), labelled("Links/word ≤", writerProseMaxLinks)));
         writer.row("Evidence relevance", group(labelled("Similarity ≥", writerMinBriefSimilarity),
                 labelled("Below best ≤", writerBriefSimilarityMargin)));
         writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
@@ -627,6 +632,18 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                         .DEFAULT_CAPTION_PAGE_PROSE_SHARE,
                 "Topic analysis: a page where less than this share (0..1) of the passages is prose counts as a "
                         + "listing page for the caption rule; 0 turns the rule off.");
+        bindNonNegativeLimit(writerProseMaxPromotion, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_PROMOTION,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_PROMOTION_SIGNALS,
+                "Evidence pack and topic analysis: a passage with more calls to action, prices or subscription "
+                        + "terms than this is advertising or navigation (one is enough at caption length); 0 = off.");
+        bindDecimal(writerProseMaxCapitals, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_CAPITALS,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_UPPERCASE_SHARE,
+                "Evidence pack and topic analysis: a passage with a larger share (0..1) of words in capitals "
+                        + "(\"JETZT TICKET SICHERN\") is left out; 1 = off.");
+        bindDecimal(writerProseMaxLinks, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_LINKS,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_LINK_DENSITY,
+                "Evidence pack and topic analysis: a passage with more links per word (0..1) is a link list; "
+                        + "1 = off.");
         bindLimit(writerWordsPerCall, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
                 ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL,
                 "Section writer: words one call aims for; a section with a larger word target is split by its key "
