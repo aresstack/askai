@@ -40,6 +40,65 @@ final class SectionPlanContract {
     private SectionPlanContract() {
     }
 
+    /**
+     * Overlaps are resolved by code instead of refusing the answer (live run 5: the section plan of the largest chapter
+     * was refused twice for "T5 (section 2) and its sub-topic T5.1 (section 1) overlap", and code split the chapter
+     * into 63 sections): an item named by several sections stays with the first; a topic whose sub-topics other
+     * sections name gives that section only its sub-topics no other section names. Sections left empty are dropped
+     * by the caller.
+     */
+    static void resolveOverlaps(List<List<String>> materials, SynthesisBrief brief) {
+        Set<String> seen = new LinkedHashSet<String>();
+        for (int i = 0; i < materials.size(); i++) {
+            List<String> kept = new ArrayList<String>();
+            for (String key : materials.get(i)) {
+                if (seen.add(key)) {
+                    kept.add(key);
+                }
+            }
+            materials.set(i, kept);
+        }
+        for (int i = 0; i < materials.size(); i++) {
+            List<String> resolved = new ArrayList<String>();
+            for (String key : materials.get(i)) {
+                SynthesisBrief.TopicEntry topic = brief.topic(key);
+                if (topic == null || topic.getSubtopics().isEmpty()) {
+                    resolved.add(key);
+                    continue;
+                }
+                List<String> free = new ArrayList<String>();
+                boolean claimedElsewhere = false;
+                for (SynthesisBrief.SubtopicEntry subtopic : topic.getSubtopics()) {
+                    boolean elsewhere = false;
+                    for (int j = 0; j < materials.size(); j++) {
+                        elsewhere |= j != i && materials.get(j).contains(subtopic.getKey());
+                    }
+                    claimedElsewhere |= elsewhere;
+                    if (!elsewhere && !materials.get(i).contains(subtopic.getKey())) {
+                        free.add(subtopic.getKey());
+                    }
+                }
+                if (claimedElsewhere) {
+                    resolved.addAll(free);
+                } else {
+                    resolved.add(key);
+                }
+            }
+            // A topic and its own sub-topic in one section: the topic stands for both.
+            List<String> clean = new ArrayList<String>();
+            for (String key : resolved) {
+                SynthesisBrief.SubtopicEntry subtopic = brief.subtopic(key);
+                if (subtopic != null && resolved.contains(subtopic.getTopicKey())) {
+                    continue;
+                }
+                if (!clean.contains(key)) {
+                    clean.add(key);
+                }
+            }
+            materials.set(i, clean);
+        }
+    }
+
     /** The keys a section of {@code chapter} may name: its keys plus the sub-topics of its topic keys. */
     static List<String> allowedKeys(SynthesisBrief brief, PlannedChapter chapter) {
         Set<String> keys = new LinkedHashSet<String>();
@@ -99,7 +158,7 @@ final class SectionPlanContract {
     }
 
     /** The strict reader. */
-    static List<PlannedSection> read(String answer, SynthesisBrief brief, PlannedChapter chapter)
+    static List<PlannedSection> read(String answer, SynthesisBrief brief, PlannedChapter chapter, int maxSections)
             throws PlanAnswerException {
         JsonObject root = PlanJson.object(answer);
         JsonArray sections = PlanJson.array(root, "sections");
@@ -108,8 +167,9 @@ final class SectionPlanContract {
         }
         Set<String> allowed = new LinkedHashSet<String>(allowedKeys(brief, chapter));
         List<String> errors = new ArrayList<String>();
-        List<PlannedSection> planned = new ArrayList<PlannedSection>();
-        Map<String, Integer> usedBy = new HashMap<String, Integer>();
+        List<String> titles = new ArrayList<String>();
+        List<String> purposes = new ArrayList<String>();
+        List<List<String>> materials = new ArrayList<List<String>>();
         int index = 0;
         for (JsonElement element : sections) {
             index++;
@@ -135,27 +195,26 @@ final class SectionPlanContract {
             for (String key : material) {
                 if (!allowed.contains(key)) {
                     errors.add(what + " names " + key + ", which is not material of this chapter");
-                    continue;
-                }
-                Integer previous = usedBy.put(key, index);
-                if (previous != null && previous != index) {
-                    errors.add(key + " is named by section " + previous + " and section " + index);
                 }
             }
-            planned.add(new PlannedSection(title, purpose, material, false));
+            titles.add(title);
+            purposes.add(purpose);
+            materials.add(material);
         }
-        // A topic and one of its sub-topics in different sections overlap.
-        for (Map.Entry<String, Integer> use : usedBy.entrySet()) {
-            SynthesisBrief.SubtopicEntry subtopic = brief.subtopic(use.getKey());
-            if (subtopic == null) {
+        if (!errors.isEmpty()) {
+            throw new PlanAnswerException(errors);
+        }
+        resolveOverlaps(materials, brief);
+        List<PlannedSection> planned = new ArrayList<PlannedSection>();
+        Map<String, Integer> usedBy = new HashMap<String, Integer>();
+        for (int i = 0; i < materials.size(); i++) {
+            if (materials.get(i).isEmpty()) {
                 continue;
             }
-            Integer topicSection = usedBy.get(subtopic.getTopicKey());
-            if (topicSection != null && !topicSection.equals(use.getValue())) {
-                errors.add(subtopic.getTopicKey() + " (section " + topicSection + ") and its sub-topic "
-                        + use.getKey() + " (section " + use.getValue() + ") overlap: name either the topic or its "
-                        + "sub-topics");
+            for (String key : materials.get(i)) {
+                usedBy.put(key, i);
             }
+            planned.add(new PlannedSection(titles.get(i), purposes.get(i), materials.get(i), false));
         }
         List<String> unused = new ArrayList<String>();
         for (String key : chapter.getMaterialKeys()) {
@@ -179,8 +238,9 @@ final class SectionPlanContract {
         // Material the model left out becomes untitled sections of its own (the label call names them), as the
         // quality check places unused material; the model's sections stay. Live run 4: six of eight section answers
         // were refused for leaving out a 14-passage advertising topic, and code split the chapters by material.
+        // At most the chapter's section limit in all (the leftovers are packed; the model's sections stay).
         planned.addAll(FallbackOutlinePlan.sections(brief, new PlannedChapter(chapter.getTitle(), "", unused, null,
-                null, true)));
+                null, true), Math.max(1, maxSections - planned.size())));
         return planned;
     }
 }

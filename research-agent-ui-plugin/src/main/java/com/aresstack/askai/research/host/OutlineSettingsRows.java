@@ -98,6 +98,11 @@ final class OutlineSettingsRows {
                 OutlineSynthesisSettings.DEFAULT_CALL_TIMEOUT_SECONDS, "Timeout of one synthesis call."));
         synthesis.row("Temperature", decimal(store, OutlineGenerationSettings.KEY_TEMPERATURE,
                 OutlineSynthesisSettings.DEFAULT_TEMPERATURE, "Temperature of the synthesis calls."));
+        synthesis.row("Page furniture repetition", decimal(store,
+                OutlineGenerationSettings.KEY_MAX_FURNITURE_REDUNDANCY,
+                OutlineSynthesisSettings.DEFAULT_MAX_FURNITURE_REDUNDANCY,
+                "A topic outside the concept whose passages repeat at least this share (0 to 1) is left out as "
+                        + "page furniture (cookie banners, adverts, navigation); 1 keeps every topic."));
 
         ComicForm length = ComicForm.titled("Book length");
         length.row("Words per page", positive(store, OutlineGenerationSettings.KEY_WORDS_PER_PAGE,
@@ -115,6 +120,14 @@ final class OutlineSettingsRows {
                 "Without a book length: words per distinct passage on top of the base."));
         length.row("Word step", positive(store, OutlineGenerationSettings.KEY_WORD_STEP,
                 OutlineLengthSettings.DEFAULT_WORD_STEP, "Word targets are rounded to this step."));
+        length.row("Sections per split chapter", positive(store,
+                OutlineGenerationSettings.KEY_MAX_SECTIONS_PER_CHAPTER,
+                OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER,
+                "When code splits a chapter by its material, it makes at most this many sections."));
+        length.row("Chapter balance factor", decimal(store, OutlineGenerationSettings.KEY_CHAPTER_BALANCE_FACTOR,
+                OutlineLengthSettings.DEFAULT_CHAPTER_BALANCE_FACTOR,
+                "A chapter may hold this many times an even share of the sections and distinct material; more "
+                        + "is a blocking finding."));
         length.row("Regeneration overlap", decimal(store, OutlineGenerationSettings.KEY_MERGE_OVERLAP,
                 OutlineProvenanceMerge.DEFAULT_MIN_OVERLAP,
                 "A regenerated chapter or section takes the place of a stored one from this passage overlap on "

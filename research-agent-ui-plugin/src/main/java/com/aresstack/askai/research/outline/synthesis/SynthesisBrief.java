@@ -18,8 +18,8 @@ import java.util.Set;
  * Phase 3b: the compact, structured analysis the model works from, with short keys instead of ids: research topics
  * {@code T1, T2, ...} (largest distinct material first), their sub-topics {@code T1.1, T1.2, ...}, topic groups
  * {@code G1, ...} and concept requirements {@code C1, ...} (concept order). The brief resolves every key back to
- * topic ids and passages. Only significant topics are listed, at most the configured number; the significant topics
- * beyond that are {@link #getOmittedTopics() omitted} and placed by code. Topics the search fence reads as OUT
+ * topic ids and passages. Every significant topic is listed (the synthesis shows the model tranches of them); page
+ * furniture is {@link #getFurnitureTopics() left out} and reported. Topics the search fence reads as OUT
  * (clearly on the blacklist side) are {@link #getOutOfScopeTopics() kept out} of the outline and reported; a topic
  * that is only new to the concept stays in. Immutable.
  */
@@ -137,6 +137,7 @@ public final class SynthesisBrief {
     private final List<TopicEntry> topics;
     private final List<TopicProfile> omittedTopics;
     private final List<TopicProfile> outOfScopeTopics;
+    private final List<TopicProfile> furnitureTopics;
     private final List<RequirementEntry> requirements;
     private final Map<String, List<String>> groupTopicKeys;
     private final Map<String, TopicEntry> topicByKey = new LinkedHashMap<String, TopicEntry>();
@@ -145,12 +146,14 @@ public final class SynthesisBrief {
 
     private SynthesisBrief(SynthesisContext context, TopicAnalysis analysis, List<TopicEntry> topics,
                            List<TopicProfile> omittedTopics, List<TopicProfile> outOfScopeTopics,
-                           List<RequirementEntry> requirements, Map<String, List<String>> groupTopicKeys) {
+                           List<TopicProfile> furnitureTopics, List<RequirementEntry> requirements,
+                           Map<String, List<String>> groupTopicKeys) {
         this.context = context;
         this.analysis = analysis;
         this.topics = Collections.unmodifiableList(topics);
         this.omittedTopics = Collections.unmodifiableList(omittedTopics);
         this.outOfScopeTopics = Collections.unmodifiableList(outOfScopeTopics);
+        this.furnitureTopics = Collections.unmodifiableList(furnitureTopics);
         this.requirements = Collections.unmodifiableList(requirements);
         this.groupTopicKeys = Collections.unmodifiableMap(groupTopicKeys);
         for (TopicEntry topic : topics) {
@@ -192,6 +195,7 @@ public final class SynthesisBrief {
         List<TopicEntry> topics = new ArrayList<TopicEntry>();
         List<TopicProfile> omitted = new ArrayList<TopicProfile>();
         List<TopicProfile> outOfScope = new ArrayList<TopicProfile>();
+        List<TopicProfile> furniture = new ArrayList<TopicProfile>();
         Map<String, List<String>> groupTopicKeys = new LinkedHashMap<String, List<String>>();
         int groupCount = 0;
         for (TopicProfile profile : analysis.significantTopics()) {
@@ -199,8 +203,8 @@ public final class SynthesisBrief {
                 outOfScope.add(profile);
                 continue;
             }
-            if (topics.size() >= limits.getMaxPromptTopics()) {
-                omitted.add(profile);
+            if (isFurniture(profile, limits)) {
+                furniture.add(profile);
                 continue;
             }
             String key = "T" + (topics.size() + 1);
@@ -232,7 +236,20 @@ public final class SynthesisBrief {
             }
             topics.add(new TopicEntry(key, profile, groupKey, conceptKey, subtopics, excerpts));
         }
-        return new SynthesisBrief(context, analysis, topics, omitted, outOfScope, requirements, groupTopicKeys);
+        return new SynthesisBrief(context, analysis, topics, omitted, outOfScope, furniture, requirements,
+                groupTopicKeys);
+    }
+
+    /**
+     * Page furniture: a topic outside the concept (neither aligned nor holding concept material, while there is a
+     * concept to compare with) whose passages are mostly repeats of each other. Without a concept nothing is page
+     * furniture: repeated material is confirmation then. Every topic is listed otherwise; the prompt limit only cuts the tranches the
+     * synthesis shows the model (live run 5: 45 topics were cut from the prompt and all landed in one chapter).
+     */
+    static boolean isFurniture(TopicProfile profile, OutlineSynthesisSettings limits) {
+        return limits.getMaxFurnitureRedundancy() < 1.0 && profile.isNovel()
+                && !profile.getConceptAnchorId().isEmpty()
+                && profile.getRedundancyShare() >= limits.getMaxFurnitureRedundancy();
     }
 
     /** The requirement key of a concept node or of its nearest ancestor within the requirement depth, or "". */
@@ -274,7 +291,8 @@ public final class SynthesisBrief {
             }
             members.add(topic.getKey());
         }
-        return new SynthesisBrief(context, analysis, kept, omitted, outOfScopeTopics, requirements, groups);
+        return new SynthesisBrief(context, analysis, kept, omitted, outOfScopeTopics, furnitureTopics, requirements,
+                groups);
     }
 
     static String excerpt(Texts texts, String passageId, int chars) {
@@ -303,7 +321,7 @@ public final class SynthesisBrief {
         return topics;
     }
 
-    /** Significant topics beyond the prompt limit (placed by code, never shown to the model). */
+    /** Significant topics a shortened brief ({@link #limitedTo}) leaves out. */
     public List<TopicProfile> getOmittedTopics() {
         return omittedTopics;
     }
@@ -311,6 +329,11 @@ public final class SynthesisBrief {
     /** Significant topics the search fence reads as OUT: not in the outline, reported in its quality report. */
     public List<TopicProfile> getOutOfScopeTopics() {
         return outOfScopeTopics;
+    }
+
+    /** Topics left out as page furniture (see {@link #isFurniture}); reported, never outlined. */
+    public List<TopicProfile> getFurnitureTopics() {
+        return furnitureTopics;
     }
 
     public List<RequirementEntry> getRequirements() {

@@ -108,6 +108,11 @@ public final class OutlineAssembler {
         }
         attachRests(plan, brief, chapters);
         placeOmitted(chapters, brief, allNotes);
+        for (TopicProfile topic : brief.getFurnitureTopics()) {
+            allNotes.add("Topic \"" + topic.getTitle() + "\" is outside the concept and "
+                    + Math.round(topic.getRedundancyShare() * 100) + "% of its passages repeat each other; it was left "
+                    + "out as page furniture.");
+        }
         assignWordTargets(chapters, brief);
 
         TopicAnalysis analysis = brief.getAnalysis();

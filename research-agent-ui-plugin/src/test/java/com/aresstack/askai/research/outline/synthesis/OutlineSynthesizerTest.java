@@ -81,7 +81,7 @@ public class OutlineSynthesizerTest {
 
     private static OutlineSynthesizer synthesizer(ScriptedChat chat, OutlinePlanReview review, int rounds) {
         return new OutlineSynthesizer(chat, review, new OutlineSynthesisSettings(rounds, 40, 240, 2, 2048, 1024, 300,
-                0.2), null);
+                0.2, OutlineSynthesisSettings.DEFAULT_MAX_FURNITURE_REDUNDANCY), null, null);
     }
 
     @Test
@@ -162,7 +162,7 @@ public class OutlineSynthesizerTest {
     @Test
     public void aChapterWhoseSectionsFailIsSplitByItsMaterial() {
         ScriptedChat chat = new ScriptedChat().then(chapters("T1", "T2", "T3", "T4"))
-                .then(sections("T9.1")).then(sections("T1.1", "T1.1"));
+                .then(sections("T9.1")).then(sections("T8.2"));
         sectionsForAll(chat, "T2", "T3", "T4");
 
         OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 2).synthesize(fourAreas().brief(), null);
@@ -235,7 +235,7 @@ public class OutlineSynthesizerTest {
 
     @Test
     public void withoutAModelThePlanComesFromTheAnalysis() {
-        OutlineSynthesizer.Result result = new OutlineSynthesizer(null, NO_FINDINGS, null, null)
+        OutlineSynthesizer.Result result = new OutlineSynthesizer(null, NO_FINDINGS, null, null, null)
                 .synthesize(fourAreas().brief(), null);
         assertTrue(result.getPlan().isFromAnalysisOnly());
         assertEquals(4, result.getPlan().getChapters().size());
@@ -254,22 +254,29 @@ public class OutlineSynthesizerTest {
                 result.getPlan().getGapKeys());
     }
 
+    /**
+     * Live run 5: 45 topics did not fit the chapter prompt and all landed in one chapter. The chapter plan sees the
+     * first tranche; the rest is placed into its chapters by a further call instead of being cut off.
+     */
     @Test
-    public void aSmallContextGetsFewerTopicsAndSaysSo() {
+    public void topicsBeyondTheContextArePlacedInAFurtherTranche() {
         SynthesisBrief brief = fourAreas().brief();
         final int full = ChapterPlanContract.prompt(brief).length() / OutlineSynthesizer.CHARS_PER_TOKEN;
         final int three = ChapterPlanContract.prompt(brief.limitedTo(3)).length()
                 / OutlineSynthesizer.CHARS_PER_TOKEN;
-        ScriptedChat chat = sectionsForAll(new ScriptedChat().then(chapters("T1", "T2", "T3")), "T1", "T2", "T3");
+        ScriptedChat chat = sectionsForAll(new ScriptedChat().then(chapters("T1", "T2", "T3"))
+                .then("{\"placements\":[{\"topic\":\"T4\",\"chapter\":2}]}"), "T1", "T2", "T3");
         chat.contextTokens = (full + three) / 2 + 2048;
         chat.calls.clear();
 
         OutlineSynthesizer.Result result = synthesizer(chat, NO_FINDINGS, 2).synthesize(brief, null);
 
-        assertEquals(3, result.getBrief().getTopics().size());
-        assertEquals(1, result.getBrief().getOmittedTopics().size());
-        assertTrue(result.getNotes().get(0).contains("3 of 4 topics"));
-        assertFalse("the omitted topic is not offered to the model", chat.calls.get(0).schema.contains("\"T4\""));
+        assertEquals("every topic stays in the brief", 4, result.getBrief().getTopics().size());
+        assertTrue(result.getBrief().getOmittedTopics().isEmpty());
+        assertTrue(result.getNotes().get(0), result.getNotes().get(0).contains("3 of 4 topics"));
+        assertFalse("the chapter plan sees the first tranche", chat.calls.get(0).schema.contains("\"T4\""));
+        assertTrue("the placement call offers the rest", chat.calls.get(1).schema.contains("\"T4\""));
+        assertTrue(result.getPlan().getChapters().get(1).getMaterialKeys().contains("T4"));
     }
 
     @Test

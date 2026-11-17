@@ -22,6 +22,18 @@ public final class OutlineLengthSettings {
     public static final int DEFAULT_WORDS_PER_DISTINCT_PASSAGE = 100;
     /** Word targets are rounded to this step. */
     public static final int DEFAULT_WORD_STEP = 50;
+    /**
+     * Sections code makes at most for one chapter when it splits the chapter by its material (no valid section plan,
+     * or material placed by code); more material is packed into that many sections. Live run 5: one chapter got a
+     * section per material key, 63 of the book's 81.
+     */
+    public static final int DEFAULT_MAX_SECTIONS_PER_CHAPTER = 12;
+    /**
+     * How many times an even share of the sections or of the distinct material one chapter may hold before the plan
+     * counts as unbalanced (a blocking finding). With n chapters the limit is factor / n; live run 5 had one chapter
+     * with 63 of 81 sections in a book of seven chapters.
+     */
+    public static final double DEFAULT_CHAPTER_BALANCE_FACTOR = 2.5;
 
     private static final Pattern LENGTH = Pattern.compile(
             "(\\d+)\\s*(?:-\\s*(\\d+))?\\s*(pages?|words?|seiten|w(?:o|ö)rter)", Pattern.CASE_INSENSITIVE);
@@ -31,9 +43,12 @@ public final class OutlineLengthSettings {
     private final int maxSectionWords;
     private final int wordsPerDistinctPassage;
     private final int wordStep;
+    private final int maxSectionsPerChapter;
+    private final double chapterBalanceFactor;
 
     public OutlineLengthSettings(int wordsPerPage, int minSectionWords, int maxSectionWords,
-                                 int wordsPerDistinctPassage, int wordStep) {
+                                 int wordsPerDistinctPassage, int wordStep, int maxSectionsPerChapter,
+                                 double chapterBalanceFactor) {
         if (minSectionWords > maxSectionWords) {
             throw new IllegalArgumentException("the minimum section length exceeds the maximum");
         }
@@ -42,11 +57,14 @@ public final class OutlineLengthSettings {
         this.maxSectionWords = Math.max(1, maxSectionWords);
         this.wordsPerDistinctPassage = Math.max(0, wordsPerDistinctPassage);
         this.wordStep = Math.max(1, wordStep);
+        this.maxSectionsPerChapter = Math.max(1, maxSectionsPerChapter);
+        this.chapterBalanceFactor = Math.max(1.0, chapterBalanceFactor);
     }
 
     public static OutlineLengthSettings defaults() {
         return new OutlineLengthSettings(DEFAULT_WORDS_PER_PAGE, DEFAULT_MIN_SECTION_WORDS, DEFAULT_MAX_SECTION_WORDS,
-                DEFAULT_WORDS_PER_DISTINCT_PASSAGE, DEFAULT_WORD_STEP);
+                DEFAULT_WORDS_PER_DISTINCT_PASSAGE, DEFAULT_WORD_STEP, DEFAULT_MAX_SECTIONS_PER_CHAPTER,
+                DEFAULT_CHAPTER_BALANCE_FACTOR);
     }
 
     /**
@@ -98,5 +116,18 @@ public final class OutlineLengthSettings {
 
     public int getWordStep() {
         return wordStep;
+    }
+
+    public int getMaxSectionsPerChapter() {
+        return maxSectionsPerChapter;
+    }
+
+    public double getChapterBalanceFactor() {
+        return chapterBalanceFactor;
+    }
+
+    /** The largest share of sections or distinct material one of {@code chapters} chapters may hold. */
+    public double maxChapterShare(int chapters) {
+        return chapters <= 0 ? 1.0 : Math.min(1.0, chapterBalanceFactor / chapters);
     }
 }
