@@ -28,9 +28,9 @@ public class StartpageEngineTest {
     }
 
     @Test
-    public void itIsOfferedAsExperimentalUntilValidatedLive() {
+    public void itIsSupportedAfterTheLiveSweep() {
         SearchEngineCatalogEntry entry = SearchEngineCatalog.byId("startpage");
-        assertEquals(SearchEngineImplementationStatus.EXPERIMENTAL, entry.getStatus());
+        assertEquals(SearchEngineImplementationStatus.SUPPORTED, entry.getStatus());
         assertTrue(entry.isSearchable());
     }
 

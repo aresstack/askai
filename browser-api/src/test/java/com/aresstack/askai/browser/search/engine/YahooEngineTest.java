@@ -39,7 +39,8 @@ public class YahooEngineTest {
     public void bothAreOfferedAsExperimentalUntilValidatedLive() {
         for (String id : new String[]{"yahoo", "yahoo-japan"}) {
             SearchEngineCatalogEntry entry = SearchEngineCatalog.byId(id);
-            assertEquals(id, SearchEngineImplementationStatus.EXPERIMENTAL, entry.getStatus());
+            assertEquals(id, "yahoo".equals(id) ? SearchEngineImplementationStatus.SUPPORTED
+                    : SearchEngineImplementationStatus.EXPERIMENTAL, entry.getStatus()); // yahoo validated 2026-11-17
             assertTrue(id, entry.isSearchable());
         }
     }

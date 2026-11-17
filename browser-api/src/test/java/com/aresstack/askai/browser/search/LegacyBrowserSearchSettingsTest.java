@@ -34,13 +34,14 @@ public class LegacyBrowserSearchSettingsTest {
     }
 
     @Test
-    public void theDefaultEnginesPaceGoogleAndKeepDuckDuckGoAsTheFallback() {
+    public void theDefaultEnginesStartWithStartpageAndPaceGoogleLast() {
         com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engines =
                 LegacyBrowserSearchDefaults.create().navigation.engineSelection;
         assertEquals(com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE,
                 engines.getMode());
-        assertEquals("Google first, DuckDuckGo behind it, Bing listed but off",
-                "google:on:1:15:0:de+en+fr+es+it:,duckduckgo:on:3:0:1:de+en:,bing:off:3:0:2:de+en+fr+es:",
+        assertEquals("Startpage first, DuckDuckGo, Google last, Bing listed but off",
+                "startpage:on:3:0:0:de+en+fr:,duckduckgo:on:3:0:1:de+en:,google:on:1:15:2:de+en+fr+es+it:,"
+                        + "bing:off:3:0:3:de+en+fr+es:",
                 engines.encodeEntries());
         assertEquals(LegacyBrowserSearchDefaults.GOOGLE_REQUEST_DELAY_MILLIS,
                 engines.delayMillisFor(com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog.GOOGLE));
