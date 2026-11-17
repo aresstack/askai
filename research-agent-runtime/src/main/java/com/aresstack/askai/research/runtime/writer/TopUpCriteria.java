@@ -15,8 +15,11 @@ public final class TopUpCriteria {
      * live run 5 (0.70) and below a full answer, so a part that almost reached its target is not asked again.
      */
     public static final double DEFAULT_MIN_SHARE = 0.85;
-    /** Default: at most one top-up per part, so a section costs at most one extra call per part. */
-    public static final int DEFAULT_MAX_CALLS = 1;
+    /**
+     * Default: at most two top-ups per part. Retest of #246 (fixture 03b): with one round 33 of 129 parts stayed
+     * below the share although a round was taken.
+     */
+    public static final int DEFAULT_MAX_CALLS = 2;
 
     private final double minShare;
     private final int maxCalls;

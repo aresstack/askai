@@ -80,6 +80,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerTopUpMinShare = ComicControls.textField(4);
     private final JTextField writerTopUpMaxCalls = ComicControls.textField(4);
     private final JTextField writerWordsPerPassage = ComicControls.textField(4);
+    private final JCheckBox writerPerSourceScales = ComicControls.checkBox("Per source × parts",
+            ResearchRuntimeSettings.DEFAULT_WRITER_PER_SOURCE_SCALES);
     private final JTextField driftMinTermLength = ComicControls.textField(4);
     private final JTextField driftMinSentences = ComicControls.textField(4);
     private final JCheckBox driftNounsOnly = ComicControls.checkBox("Nouns only (capitalised)", true);
@@ -239,7 +241,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Answer tokens", writerAnswerTokens), labelled("Passages", writerPassages),
                 labelled("Tokens/passage", writerPassageTokens), labelled("Per source", writerPassagesPerSource)));
         writer.row("Writer yield", group(labelled("Top-up below share", writerTopUpMinShare),
-                labelled("Top-ups/part", writerTopUpMaxCalls), labelled("Words/passage", writerWordsPerPassage)));
+                labelled("Top-ups/part", writerTopUpMaxCalls), labelled("Words/passage", writerWordsPerPassage), writerPerSourceScales));
         writer.row("Citation format", writerCitationFormat);
         writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
                 labelled("Sentences ≥", writerProseMinSentences),
@@ -706,6 +708,20 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(driftMinSentences, ResearchRuntimeSettings.KEY_DRIFT_MIN_SENTENCES,
                 com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_SENTENCES,
                 "Book report: in how many sentences of one section the foreign term must occur.");
+        if (store != null) {
+            writerPerSourceScales.setSelected(store.getBoolean(ResearchRuntimeSettings.KEY_WRITER_PER_SOURCE_SCALES,
+                    ResearchRuntimeSettings.DEFAULT_WRITER_PER_SOURCE_SCALES));
+        }
+        writerPerSourceScales.setToolTipText("Evidence pack: multiply the per-source cap by a section's key-point "
+                + "parts like the passage count. Off keeps more sources in a section's pack.");
+        writerPerSourceScales.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                if (ResearchRuntimeSettingsPanel.this.store != null) {
+                    ResearchRuntimeSettingsPanel.this.store.putBoolean(
+                            ResearchRuntimeSettings.KEY_WRITER_PER_SOURCE_SCALES, writerPerSourceScales.isSelected());
+                }
+            }
+        });
         driftNounsOnly.setSelected(ResearchRuntimeSettings.loadTopicDriftCriteria(store).isNounsOnly());
         driftNounsOnly.setToolTipText("Book report: count only capitalised words inside a sentence (German nouns), "
                 + "so verbs and adjectives are never reported as subjects.");

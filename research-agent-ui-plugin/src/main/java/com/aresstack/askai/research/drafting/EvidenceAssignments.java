@@ -44,6 +44,7 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         final String citationFormat;
         final com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp;
         final int wordsPerPassage;
+        final boolean perSourceScales;
 
         /** With the citation format chosen by the writer model ({@code CitationFormat.AUTO}). */
         public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens,
@@ -72,10 +73,12 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
             this.repeats = repeats;
             this.topUp = com.aresstack.askai.research.runtime.writer.TopUpCriteria.off();
             this.wordsPerPassage = 0;
+            this.perSourceScales = false;
         }
 
         private Targets(Targets base, com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp,
-                        int wordsPerPassage) {
+                        int wordsPerPassage, boolean perSourceScales) {
+            this.perSourceScales = perSourceScales;
             this.citationFormat = base.citationFormat;
             this.synthesis = base.synthesis;
             this.pack = base.pack;
@@ -94,7 +97,16 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
          */
         public Targets withYield(com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp,
                                  int wordsPerPassage) {
-            return new Targets(this, topUp, wordsPerPassage);
+            return new Targets(this, topUp, wordsPerPassage, perSourceScales);
+        }
+
+        /** The same targets with the per-source cap multiplied by the parts ({@code true}) or kept ({@code false}). */
+        public Targets withPerSourceScaling(boolean scales) {
+            return new Targets(this, topUp, wordsPerPassage, scales);
+        }
+
+        public boolean isPerSourceScaling() {
+            return perSourceScales;
         }
 
         public com.aresstack.askai.research.runtime.writer.TopUpCriteria getTopUp() {
@@ -151,8 +163,9 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         int outlineTarget = request.getSection().getBrief().getWordTarget();
         int keyPoints = request.getSection().getBrief().getKeyPoints().size();
         int parts = SectionAssignment.partCount(outlineTarget, targets.wordsPerCall, keyPoints);
-        // count and per-source cap both scale with the parts (live run 5: 24 passages, still two per source)
-        EvidencePack pack = packs.build(contexts.requestFor(request), targets.pack.forParts(parts));
+        // the count scales with the parts; the per-source cap only when set (retest of #246: source breadth)
+        EvidencePack pack = packs.build(contexts.requestFor(request),
+                targets.pack.forParts(parts, targets.perSourceScales));
         int wordTarget = wordTarget(outlineTarget, pack.getPassages().size(), targets.wordsPerPassage);
         SectionAssignment base = SectionWriterInputs.of(pack, request.getSection().getTitle(),
                 request.getSection().getBrief().getPurpose(), request.getSection().getBrief().getKeyPoints(),

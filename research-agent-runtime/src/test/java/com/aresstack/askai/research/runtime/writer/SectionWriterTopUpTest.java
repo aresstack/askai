@@ -69,4 +69,20 @@ public class SectionWriterTopUpTest {
         new SectionWriter(chat, null).write(two);
         assertEquals(1, chat.requests.size());
     }
+
+    @Test
+    public void topUpSentenceWithAnUnsupportedParagraphIsLeftOut() {
+        SectionWriterTest.ScriptedChat chat = new SectionWriterTest.ScriptedChat().answer(FIRST)
+                .answer(MORE + " Nach § 99 gilt die Rate weiter [5].");
+        List<String> log = new ArrayList<String>();
+        SectionDraft draft = new SectionWriter(chat, log::add).write(assignment(new TopUpCriteria(0.85, 1)));
+        assertTrue(draft.getText(), draft.getText().contains("[4]"));
+        assertFalse(draft.getText(), draft.getText().contains("99"));
+        assertTrue(log.toString(), log.toString().contains("left out 1"));
+    }
+
+    @Test
+    public void twoTopUpRoundsByDefault() {
+        assertEquals(2, TopUpCriteria.DEFAULT_MAX_CALLS);
+    }
 }

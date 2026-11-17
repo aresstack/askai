@@ -264,6 +264,7 @@ public final class SectionWriter {
             if (more.isCutOff()) {
                 rest = upToLastFullSentence(rest);
             }
+            rest = withoutFlaggedSentences(a, text, rest, written, book);
             StringBuilder joined = new StringBuilder(join(text, rest));
             for (String gap : checked.result.getGaps()) {
                 joined.append("\nGAP: ").append(gap);
@@ -280,6 +281,31 @@ public final class SectionWriter {
             checked = again;
         }
         return checked;
+    }
+
+    /**
+     * A top-up gets no repair, so its sentences with an error (uncited, a number or paragraph or quote the cited
+     * passage lacks, a citation that does not carry the claim, a source's "we") are left out before it is joined
+     * (retest of #246: unsupported numbers 1 -> 6, all paragraph references, and uncarried claims 54 -> 67).
+     */
+    private String withoutFlaggedSentences(SectionAssignment a, String text, String rest,
+                                           java.util.Set<String> written, RepeatCheck.Memory book) {
+        java.util.Set<String> before = new java.util.HashSet<String>(written);
+        before.addAll(CitationValidator.sentenceKeys(text));
+        Checked own = check(rest, a, before, book);
+        String kept = rest;
+        int dropped = 0;
+        for (ClaimFlag error : own.repairable()) {
+            String sentence = error.getSentence();
+            if (sentence != null && !sentence.trim().isEmpty() && kept.contains(sentence)) {
+                kept = kept.replace(sentence, "");
+                dropped++;
+            }
+        }
+        if (dropped > 0) {
+            log.accept("section " + a.getSectionId() + ": top-up left out " + dropped + " sentences with errors");
+        }
+        return kept.replaceAll("[ \t]{2,}", " ").trim();
     }
 
     private String lastFailure = "";

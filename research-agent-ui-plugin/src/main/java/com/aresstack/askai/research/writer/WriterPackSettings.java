@@ -88,8 +88,17 @@ public final class WriterPackSettings {
 
     /** The same pack with count and per-source cap both multiplied by {@code parts} (at least 1). */
     public WriterPackSettings forParts(int parts) {
+        return forParts(parts, true);
+    }
+
+    /**
+     * The pack of a section in {@code parts} parts: the passage count multiplied, the per-source cap only when
+     * {@code scalePerSource} (retest of #246: scaled, sections drew on 10.6 instead of 15.1 sources).
+     */
+    public WriterPackSettings forParts(int parts, boolean scalePerSource) {
         int n = Math.max(1, parts);
-        return new WriterPackSettings(passageCount * n, passageTokens, prose, passagesPerSource * n, relevance);
+        return new WriterPackSettings(passageCount * n, passageTokens, prose,
+                scalePerSource ? passagesPerSource * n : passagesPerSource, relevance);
     }
 
     /** The host preset for a writer model id. */
