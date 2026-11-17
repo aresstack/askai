@@ -72,7 +72,9 @@ final class KeyTermTitle {
             if (chosen.size() == terms) {
                 break;
             }
-            if (used.contains(stem)) {
+            // A word met once is chance, not a key term (live retest of #249: "Arbeitsrecht, Universitäten und
+            // Arndt").
+            if (used.contains(stem) || count.get(stem) < 2) {
                 continue;
             }
             String term = form.get(stem);
