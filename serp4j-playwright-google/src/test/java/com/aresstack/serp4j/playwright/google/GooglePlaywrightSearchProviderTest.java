@@ -163,6 +163,22 @@ class GooglePlaywrightSearchProviderTest {
         assertThat(fake.browserClosed).isFalse();
     }
 
+    @Test
+    void reusesTheHostSearchTabAndLeavesItOpen() {
+        FakeBrowser fake = new FakeBrowser("https://www.google.com/search?q=serp4j", "", 200);
+        fake.hostTab = fake.page();
+
+        try {
+            provider.search(SearchRequest.builder("serp4j").build(), fake.browser());
+        } catch (SearchProviderException expected) {
+            // empty fixture: the outcome is irrelevant, only which page was used
+        }
+
+        assertThat(fake.navigated).hasSize(1);
+        assertThat(fake.pagesOpened).isZero();
+        assertThat(fake.pageClosed).isFalse();
+    }
+
     /** Scripted Playwright objects via dynamic proxies; only the methods the provider uses are answered. */
     private static final class FakeBrowser {
         final String finalUrl;
@@ -178,6 +194,8 @@ class GooglePlaywrightSearchProviderTest {
         /** Calls of the request API ({@code context.request()}, {@code page.request()}): resolution requests. */
         int apiRequests;
         RuntimeException navigationFailure;
+        /** The host's search tab, when the context already holds one. */
+        Page hostTab;
 
         FakeBrowser(String finalUrl, String html, int status) {
             this.finalUrl = finalUrl;
@@ -190,6 +208,9 @@ class GooglePlaywrightSearchProviderTest {
                 if (name.equals("newPage")) {
                     pagesOpened++;
                     return page();
+                }
+                if (name.equals("pages")) {
+                    return hostTab == null ? Collections.<Page>emptyList() : Collections.singletonList(hostTab);
                 }
                 if (name.equals("request")) {
                     apiRequests++;
@@ -211,7 +232,7 @@ class GooglePlaywrightSearchProviderTest {
             });
         }
 
-        private Page page() {
+        Page page() {
             Response response = proxy(Response.class, (name, args) -> {
                 if (name.equals("status")) {
                     return status;
