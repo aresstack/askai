@@ -18,7 +18,7 @@ final class FallbackOutlinePlan {
     private FallbackOutlinePlan() {
     }
 
-    static OutlinePlan plan(SynthesisBrief brief) {
+    static OutlinePlan plan(SynthesisBrief brief, int maxSections) {
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
         for (Map.Entry<String, List<String>> group : brief.getGroupTopicKeys().entrySet()) {
             List<String> keys = group.getValue();
@@ -32,7 +32,7 @@ final class FallbackOutlinePlan {
             }
             PlannedChapter chapter = new PlannedChapter(lead.getProfile().getTitle(), "", keys, concepts, null,
                     true);
-            chapters.add(chapter.withSections(sections(brief, chapter)));
+            chapters.add(chapter.withSections(sections(brief, chapter, maxSections)));
         }
         return new OutlinePlan(chapters, gaps(brief), true);
     }
@@ -54,6 +54,72 @@ final class FallbackOutlinePlan {
             sections.add(new PlannedSection(title, "", Collections.singletonList(key), true));
         }
         return sections;
+    }
+
+    /**
+     * {@link #sections(SynthesisBrief, PlannedChapter)}, packed into at most {@code maxSections} sections when there
+     * are more: the largest pieces first, each into the section with the least distinct material so far; the sections
+     * keep the reading order of their first piece and are titled by their largest piece (untitled, the label call
+     * names them). Live run 5: a chapter split by material got 63 sections.
+     */
+    static List<PlannedSection> sections(SynthesisBrief brief, PlannedChapter chapter, int maxSections) {
+        return packed(brief, sections(brief, chapter), maxSections);
+    }
+
+    /** {@code sections} packed into at most {@code maxSections} (see above). */
+    static List<PlannedSection> packed(SynthesisBrief brief, List<PlannedSection> sections, int maxSections) {
+        int limit = Math.max(1, maxSections);
+        if (sections.size() <= limit) {
+            return sections;
+        }
+        final int[] weight = new int[sections.size()];
+        List<Integer> order = new ArrayList<Integer>();
+        for (int i = 0; i < sections.size(); i++) {
+            weight[i] = brief.getAnalysis().distinctCount(OutlineQualityCheck.passagesOf(
+                    sections.get(i).getMaterialKeys(), brief));
+            order.add(i);
+        }
+        Collections.sort(order, new java.util.Comparator<Integer>() {
+            public int compare(Integer a, Integer b) {
+                return weight[a] != weight[b] ? weight[b] - weight[a] : a - b;
+            }
+        });
+        List<List<Integer>> buckets = new ArrayList<List<Integer>>();
+        long[] load = new long[limit];
+        for (int b = 0; b < limit; b++) {
+            buckets.add(new ArrayList<Integer>());
+        }
+        for (int index : order) {
+            int lightest = 0;
+            for (int b = 1; b < limit; b++) {
+                if (load[b] < load[lightest]) {
+                    lightest = b;
+                }
+            }
+            buckets.get(lightest).add(index);
+            load[lightest] += Math.max(1, weight[index]);
+        }
+        // The heaviest piece of each bucket names it; buckets in the reading order of their first piece.
+        Collections.sort(buckets, new java.util.Comparator<List<Integer>>() {
+            public int compare(List<Integer> a, List<Integer> b) {
+                return Collections.min(a) - Collections.min(b);
+            }
+        });
+        List<PlannedSection> result = new ArrayList<PlannedSection>();
+        for (List<Integer> bucket : buckets) {
+            if (bucket.isEmpty()) {
+                continue;
+            }
+            PlannedSection lead = sections.get(bucket.get(0));
+            List<Integer> inOrder = new ArrayList<Integer>(bucket);
+            Collections.sort(inOrder);
+            List<String> keys = new ArrayList<String>();
+            for (int index : inOrder) {
+                keys.addAll(sections.get(index).getMaterialKeys());
+            }
+            result.add(new PlannedSection(lead.getTitle(), "", keys, true));
+        }
+        return result;
     }
 
     static List<String> gaps(SynthesisBrief brief) {

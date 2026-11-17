@@ -36,7 +36,7 @@ public final class OutlineProposer {
      */
     public Outline propose(SynthesisBrief brief, String snapshotId, List<String> notes, ClusteringMonitor monitor) {
         OutlineQualityCheck check = new OutlineQualityCheck(length);
-        OutlineSynthesizer.Result result = new OutlineSynthesizer(chat, check, synthesis, telemetry)
+        OutlineSynthesizer.Result result = new OutlineSynthesizer(chat, check, synthesis, length, telemetry)
                 .synthesize(brief, monitor);
         OutlineQualityCheck.Fixed fixed = check.fix(result.getPlan(), result.getBrief());
         List<String> allNotes = new ArrayList<String>(result.getNotes());

@@ -8,7 +8,10 @@ public final class OutlineSynthesisSettings {
 
     /** Review and revise rounds after the first plan; 0 = check only, never revise. */
     public static final int DEFAULT_REVISION_ROUNDS = 2;
-    /** Research topics listed in the prompt (largest distinct material first); the rest is placed by code. */
+    /**
+     * Research topics in one prompt (largest distinct material first): the chapter plan sees the first tranche, the
+     * remaining topics are placed into the chapters in further tranches of at most this many.
+     */
     public static final int DEFAULT_MAX_PROMPT_TOPICS = 40;
     /** Characters of one excerpt in the prompt. */
     public static final int DEFAULT_EXCERPT_CHARS = 240;
@@ -22,6 +25,12 @@ public final class OutlineSynthesisSettings {
     public static final int DEFAULT_CALL_TIMEOUT_SECONDS = 300;
     /** Sampling temperature of the synthesis calls (the label and brief calls use the same). */
     public static final double DEFAULT_TEMPERATURE = 0.2;
+    /**
+     * A topic outside the concept (no concept alignment, no concept material) whose passages are repeated at least
+     * this share (near duplicates of each other) is page furniture, not material: cookie banners, shop adverts and
+     * navigation that many pages carry. Live run 5: such topics reached the outline. 1 = never left out.
+     */
+    public static final double DEFAULT_MAX_FURNITURE_REDUNDANCY = 0.8;
 
     private final int revisionRounds;
     private final int maxPromptTopics;
@@ -31,10 +40,11 @@ public final class OutlineSynthesisSettings {
     private final int sectionAnswerTokens;
     private final int callTimeoutSeconds;
     private final double temperature;
+    private final double maxFurnitureRedundancy;
 
     public OutlineSynthesisSettings(int revisionRounds, int maxPromptTopics, int excerptChars, int requirementDepth,
                                     int planAnswerTokens, int sectionAnswerTokens, int callTimeoutSeconds,
-                                    double temperature) {
+                                    double temperature, double maxFurnitureRedundancy) {
         this.revisionRounds = Math.max(0, revisionRounds);
         this.maxPromptTopics = Math.max(1, maxPromptTopics);
         this.excerptChars = Math.max(0, excerptChars);
@@ -43,13 +53,14 @@ public final class OutlineSynthesisSettings {
         this.sectionAnswerTokens = Math.max(1, sectionAnswerTokens);
         this.callTimeoutSeconds = Math.max(1, callTimeoutSeconds);
         this.temperature = Math.max(0, temperature);
+        this.maxFurnitureRedundancy = Math.min(1.0, Math.max(0.0, maxFurnitureRedundancy));
     }
 
     /** THE single default origin. */
     public static OutlineSynthesisSettings defaults() {
         return new OutlineSynthesisSettings(DEFAULT_REVISION_ROUNDS, DEFAULT_MAX_PROMPT_TOPICS, DEFAULT_EXCERPT_CHARS,
                 DEFAULT_REQUIREMENT_DEPTH, DEFAULT_PLAN_ANSWER_TOKENS, DEFAULT_SECTION_ANSWER_TOKENS,
-                DEFAULT_CALL_TIMEOUT_SECONDS, DEFAULT_TEMPERATURE);
+                DEFAULT_CALL_TIMEOUT_SECONDS, DEFAULT_TEMPERATURE, DEFAULT_MAX_FURNITURE_REDUNDANCY);
     }
 
     public int getRevisionRounds() {
@@ -82,5 +93,9 @@ public final class OutlineSynthesisSettings {
 
     public double getTemperature() {
         return temperature;
+    }
+
+    public double getMaxFurnitureRedundancy() {
+        return maxFurnitureRedundancy;
     }
 }

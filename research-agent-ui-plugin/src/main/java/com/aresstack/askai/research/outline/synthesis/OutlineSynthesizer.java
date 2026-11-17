@@ -12,6 +12,7 @@ import com.aresstack.askai.research.runtime.team.MainModelChatResult;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Phase 3b: the outline synthesis on {@code phase.outline}. Bounded, traceable steps:
@@ -98,9 +99,10 @@ public final class OutlineSynthesizer {
     private final OutlinePlanReview review;
     private final OutlineSynthesisSettings settings;
     private final Telemetry telemetry;
+    private final OutlineLengthSettings length;
 
     public OutlineSynthesizer(MainModelChat chat, OutlinePlanReview review, OutlineSynthesisSettings settings,
-                              Telemetry telemetry) {
+                              OutlineLengthSettings length, Telemetry telemetry) {
         if (review == null) {
             throw new IllegalArgumentException("a review is required");
         }
@@ -108,6 +110,7 @@ public final class OutlineSynthesizer {
         this.review = review;
         this.settings = settings == null ? OutlineSynthesisSettings.defaults() : settings;
         this.telemetry = telemetry == null ? Telemetry.NONE : telemetry;
+        this.length = length == null ? OutlineLengthSettings.defaults() : length;
     }
 
     /**
@@ -125,18 +128,20 @@ public final class OutlineSynthesizer {
         }
         if (chat == null) {
             notes.add("No model is available; this outline comes from the topic analysis only.");
-            OutlinePlan plan = FallbackOutlinePlan.plan(given);
+            OutlinePlan plan = FallbackOutlinePlan.plan(given, length.getMaxSectionsPerChapter());
             return new Result(plan, review.review(plan, given), 0, notes, given);
         }
-        SynthesisBrief brief = fitted(given, notes);
+        SynthesisBrief brief = given;
+        SynthesisBrief planning = fitted(given, notes);
 
         m.progress("Planning the chapters", 0, 1);
-        OutlinePlan plan = askChapters(ChapterPlanContract.prompt(brief), brief, "plan", m);
+        OutlinePlan plan = askChapters(ChapterPlanContract.prompt(planning), planning, "plan", m);
         if (plan == null) {
             notes.add("The model gave no valid chapter plan; this outline comes from the topic analysis only.");
-            plan = FallbackOutlinePlan.plan(brief);
+            plan = FallbackOutlinePlan.plan(brief, length.getMaxSectionsPerChapter());
             return new Result(plan, review.review(plan, brief), 0, notes, brief);
         }
+        plan = placeRemaining(plan, brief, notes, m);
         plan = withSections(divideSharedTopics(plan, brief, notes, m), null, brief, notes, m);
 
         int revisions = 0;
@@ -145,12 +150,13 @@ public final class OutlineSynthesizer {
             checkCancel(m);
             revisions++;
             m.progress("Revising the chapters (round " + revisions + ")", revisions, settings.getRevisionRounds());
-            OutlinePlan revised = askChapters(ChapterPlanContract.revisePrompt(brief, plan, blocking(findings)),
-                    brief, "revise-" + revisions, m);
+            OutlinePlan revised = askChapters(ChapterPlanContract.revisePrompt(planning, plan, blocking(findings)),
+                    planning, "revise-" + revisions, m);
             if (revised == null) {
                 notes.add("Revision round " + revisions + " gave no valid chapter plan; the previous plan stays.");
                 break;
             }
+            revised = placeRemaining(revised, brief, notes, m);
             plan = withSections(divideSharedTopics(revised, brief, notes, m), plan, brief, notes, m);
             findings = review.review(plan, brief);
         }
@@ -162,22 +168,103 @@ public final class OutlineSynthesizer {
         return new Result(plan, findings, revisions, notes, brief);
     }
 
-    /** The brief, shortened while its plan prompt would not fit the model's context. */
+    /**
+     * The first tranche the chapter plan sees: at most the prompt's topic limit, shortened while the prompt would not
+     * fit the model's context. The other topics are placed into the planned chapters in further tranches.
+     */
     private SynthesisBrief fitted(SynthesisBrief brief, List<String> notes) {
+        SynthesisBrief current = brief.limitedTo(settings.getMaxPromptTopics());
         int context = chat.contextTokens();
-        if (context <= 0) {
-            return brief;
-        }
-        SynthesisBrief current = brief;
-        while (current.getTopics().size() > 1 && ChapterPlanContract.prompt(current).length() / CHARS_PER_TOKEN
-                + settings.getPlanAnswerTokens() > context) {
+        while (context > 0 && current.getTopics().size() > 1 && ChapterPlanContract.prompt(current).length()
+                / CHARS_PER_TOKEN + settings.getPlanAnswerTokens() > context) {
             current = current.limitedTo(current.getTopics().size() - 1);
         }
         if (current != brief) {
-            notes.add("The model's context holds " + current.getTopics().size() + " of "
-                    + brief.getTopics().size() + " topics; code places the others.");
+            notes.add("The chapter plan saw the largest " + current.getTopics().size() + " of "
+                    + brief.getTopics().size() + " topics; the others were placed into its chapters in further "
+                    + "steps.");
         }
         return current;
+    }
+
+    /**
+     * Every topic the plan does not use at all is placed into a chapter, one tranche per call
+     * ({@link TopicPlacementContract}); a tranche holds at most the prompt's topic limit and fits the context. What
+     * the model does not place stays unused, and the quality check places it by fit.
+     */
+    private OutlinePlan placeRemaining(OutlinePlan plan, SynthesisBrief brief, List<String> notes,
+                                       ClusteringMonitor monitor) {
+        java.util.Set<String> used = new java.util.LinkedHashSet<String>();
+        for (PlannedChapter chapter : plan.getChapters()) {
+            for (String key : chapter.getMaterialKeys()) {
+                used.addAll(OutlineQualityCheck.units(brief, key));
+            }
+        }
+        List<String> remaining = new ArrayList<String>();
+        for (SynthesisBrief.TopicEntry topic : brief.getTopics()) {
+            boolean any = false;
+            for (String unit : OutlineQualityCheck.units(brief, topic.getKey())) {
+                any |= used.contains(unit);
+            }
+            if (!any) {
+                remaining.add(topic.getKey());
+            }
+        }
+        OutlinePlan current = plan;
+        int placed = 0;
+        int context = chat.contextTokens();
+        int start = 0;
+        while (start < remaining.size()) {
+            checkCancel(monitor);
+            int end = start + 1;
+            while (end < remaining.size() && end - start < settings.getMaxPromptTopics() && (context <= 0
+                    || TopicPlacementContract.prompt(brief, current, remaining.subList(start, end + 1)).length()
+                    / CHARS_PER_TOKEN + settings.getSectionAnswerTokens() <= context)) {
+                end++;
+            }
+            List<String> tranche = new ArrayList<String>(remaining.subList(start, end));
+            monitor.progress("Placing the remaining topics", end, remaining.size());
+            Map<String, Integer> chapterOf = askPlacement(brief, current, tranche, monitor);
+            if (chapterOf != null) {
+                current = TopicPlacementContract.apply(current, chapterOf);
+                placed += chapterOf.size();
+            }
+            start = end;
+        }
+        if (!remaining.isEmpty()) {
+            notes.add(placed + " of " + remaining.size() + " topics the chapter plan did not use were placed into "
+                    + "its chapters by the model; code places the rest by fit.");
+        }
+        return current;
+    }
+
+    private Map<String, Integer> askPlacement(SynthesisBrief brief, OutlinePlan plan, List<String> tranche,
+                                              ClusteringMonitor monitor) {
+        List<ChatMessage> messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system(TopicPlacementContract.SYSTEM));
+        messages.add(ChatMessage.user(TopicPlacementContract.prompt(brief, plan, tranche)));
+        String schema = TopicPlacementContract.schema(plan, tranche);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            checkCancel(monitor);
+            MainModelChatResult result = chat.completeJson(messages, settings.getTemperature(),
+                    settings.getSectionAnswerTokens(), schema);
+            if (!result.isOk()) {
+                telemetry.call("place", chat.modelName(), settings.getSectionAnswerTokens(), attempt, false,
+                        result.getDetail());
+                return null;
+            }
+            try {
+                Map<String, Integer> chapterOf = TopicPlacementContract.read(result.getText(), plan, tranche);
+                telemetry.call("place", chat.modelName(), settings.getSectionAnswerTokens(), attempt, true,
+                        chapterOf.size() + " of " + tranche.size() + " topics placed");
+                return chapterOf;
+            } catch (PlanAnswerException refused) {
+                telemetry.call("place", chat.modelName(), settings.getSectionAnswerTokens(), attempt, false,
+                        refused.getMessage());
+                repair(messages, result.getText(), refused);
+            }
+        }
+        return null;
     }
 
     /** Sections for every chapter; a chapter owning the same material as one of {@code previous} keeps its sections. */
@@ -200,7 +287,8 @@ public final class OutlineSynthesizer {
             List<String> own = OutlineQualityCheck.owned(chapter.getMaterialKeys(), brief, owner, index - 1);
             if (own.isEmpty()) {
                 // Only material of earlier chapters: the quality check drops the chapter; no section call for it.
-                chapters.add(chapter.withSections(FallbackOutlinePlan.sections(brief, chapter)));
+                chapters.add(chapter.withSections(FallbackOutlinePlan.sections(brief, chapter,
+                        length.getMaxSectionsPerChapter())));
                 continue;
             }
             PlannedChapter kept = previous == null ? null : sameMaterial(previous, previousOwner, own, brief);
@@ -214,7 +302,7 @@ public final class OutlineSynthesizer {
             if (sections == null) {
                 notes.add("The sections of \"" + chapter.getTitle() + "\" were not generated; code split the chapter "
                         + "by its material.");
-                sections = FallbackOutlinePlan.sections(brief, owning);
+                sections = FallbackOutlinePlan.sections(brief, owning, length.getMaxSectionsPerChapter());
             }
             chapters.add(chapter.withSections(sections));
         }
@@ -351,7 +439,8 @@ public final class OutlineSynthesizer {
                 return null;
             }
             try {
-                List<PlannedSection> sections = SectionPlanContract.read(result.getText(), brief, chapter);
+                List<PlannedSection> sections = SectionPlanContract.read(result.getText(), brief, chapter,
+                        length.getMaxSectionsPerChapter());
                 telemetry.call("sections", chat.modelName(), settings.getSectionAnswerTokens(), attempt, true,
                         sections.size() + " sections for \"" + chapter.getTitle() + "\"");
                 return sections;

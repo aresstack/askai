@@ -53,4 +53,30 @@ public class SynthesisBriefTest {
         values[direction] = 1f;
         return values;
     }
+
+    /**
+     * Live run 5: cookie banners, shop adverts and navigation reached the outline as topics. A topic outside the
+     * concept whose passages mostly repeat each other is left out as page furniture; without a concept repeated
+     * material stays (it is confirmation then).
+     */
+    @Test
+    public void repeatedTopicsOutsideTheConceptAreLeftOutAsPageFurniture() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.repeated("cookie banner", 3, 10, 10);
+        int base = corpus.diverse("helmets", 2, 4, 3);
+        corpus.concept("c-helmets", "Safety", base);
+
+        SynthesisBrief brief = corpus.brief();
+
+        org.junit.Assert.assertEquals(1, brief.getFurnitureTopics().size());
+        org.junit.Assert.assertTrue(brief.getFurnitureTopics().get(0).getTitle().contains("cookie"));
+        for (SynthesisBrief.TopicEntry topic : brief.getTopics()) {
+            org.junit.Assert.assertFalse(topic.getProfile().getTitle().contains("cookie"));
+        }
+
+        SynthesisFixture withoutConcept = new SynthesisFixture();
+        withoutConcept.repeated("cookie banner", 3, 10, 10);
+        withoutConcept.diverse("helmets", 2, 4, 3);
+        org.junit.Assert.assertTrue(withoutConcept.brief().getFurnitureTopics().isEmpty());
+    }
 }
