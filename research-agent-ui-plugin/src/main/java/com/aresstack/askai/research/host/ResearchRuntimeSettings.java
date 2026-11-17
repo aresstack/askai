@@ -1096,8 +1096,18 @@ public final class ResearchRuntimeSettings {
                 loadWriterCarryCriteria(store), loadWriterRepeatCriteria(store), loadWriterSynthesisCriteria(store),
                 loadWriterCitationFormat(store))
                 .withYield(loadWriterTopUpCriteria(store),
-                        loadNonNegativeInt(store, KEY_WRITER_WORDS_PER_PASSAGE, DEFAULT_WRITER_WORDS_PER_PASSAGE));
+                        loadNonNegativeInt(store, KEY_WRITER_WORDS_PER_PASSAGE, DEFAULT_WRITER_WORDS_PER_PASSAGE))
+                .withPerSourceScaling(store == null ? DEFAULT_WRITER_PER_SOURCE_SCALES
+                        : store.getBoolean(KEY_WRITER_PER_SOURCE_SCALES, DEFAULT_WRITER_PER_SOURCE_SCALES));
     }
+
+    /** Whether a section's per-source cap is multiplied by its key-point parts like the passage count. */
+    public static final String KEY_WRITER_PER_SOURCE_SCALES = "research.writer.passagesPerSourceScalesWithParts";
+    /**
+     * Off: the retest of #246 (fixture 03b) with the cap scaled drew on 10.6 instead of 15.1 sources per section and
+     * had more uncarried claims (54 -> 67), so the cap of the setting holds for the whole section, as before #246.
+     */
+    public static final boolean DEFAULT_WRITER_PER_SOURCE_SCALES = false;
 
     /** Top-up: share (0..1) of a part's word target below which the part gets a top-up call (0 = never). */
     public static final String KEY_WRITER_TOP_UP_MIN_SHARE = "research.writer.topUp.minShare";

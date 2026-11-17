@@ -39,4 +39,11 @@ public class EvidenceAssignmentsYieldTest {
                 com.aresstack.askai.research.manuscript.SectionRevision.builder().text("x").build(1, 1L);
         assertEquals(1100, user.wordTarget(1100));
     }
+
+    @Test
+    public void perSourceCapStaysUnlessScalingIsSet() {
+        WriterPackSettings kept = WriterPackSettings.LARGE.forParts(3, false);
+        assertEquals(WriterPackSettings.LARGE.getPassageCount() * 3, kept.getPassageCount());
+        assertEquals(WriterPackSettings.LARGE.getPassagesPerSource(), kept.getPassagesPerSource());
+    }
 }
