@@ -48,6 +48,14 @@ public final class OutlineEnricher {
         OutlinePassages view = passages.snapshot();
         List<String> failures = new ArrayList<String>();
         List<OutlineChapter> chapters = new ArrayList<OutlineChapter>();
+        List<String> taken = new ArrayList<String>();
+        for (OutlineChapter each : generated.getChapters()) {
+            for (OutlineSection section : each.getSections()) {
+                if (!section.isUntitled()) {
+                    taken.add(section.getTitle());
+                }
+            }
+        }
         int chapterNumber = 0;
         for (OutlineChapter chapter : generated.getChapters()) {
             chapterNumber++;
@@ -66,9 +74,10 @@ public final class OutlineEnricher {
                     List<String> ids = section.getProvenance().getPassageIds();
                     OutlineLabel label = worker.label(context, target, chapter.getTitle(),
                             ChapterRegenerator.texts(view, ids.subList(0,
-                                    Math.min(LabelContract.MAX_EXCERPTS, ids.size()))), "");
+                                    Math.min(LabelContract.MAX_EXCERPTS, ids.size()))), "", taken);
                     if (label != null) {
                         labelled = section.withTitle(label.getTitle()).withUntitled(false);
+                        taken.add(label.getTitle());
                     }
                 }
                 sections.add(labelled);

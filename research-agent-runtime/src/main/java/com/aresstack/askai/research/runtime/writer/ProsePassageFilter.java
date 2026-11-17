@@ -245,7 +245,11 @@ public final class ProsePassageFilter {
             + "|jederzeit\\s+(?:formlos\\s+)?(?:zu\\s+)?(?:sofort\\s+)?kündbar|kündbar|gratis|gutschein|rabatt"
             + "|alle\\s+akzeptieren|war\\s+der\\s+artikel\\s+hilfreich|vorheriger|katalog\\s+kostenlos"
             + "|weihnachtseinkäufe\\w*|buy\\s+now|sign\\s+up|subscribe|read\\s+more|learn\\s+more|add\\s+to\\s+cart"
-            + "|free\\s+trial|accept\\s+all|shop\\s+now)\\b"
+            + "|free\\s+trial|accept\\s+all|shop\\s+now|contact\\s+us|request\\s+a\\s+quote"
+            + "|nehmen\\s+sie\\s+(?:jetzt\\s+)?kontakt|kontaktieren\\s+sie\\s+uns|ihr\\s+(?:spezialist|partner|"
+            + "ansprechpartner|experte)|unsere\\s+empfehlungen|als\\s+erfahrenes\\s+unternehmen|lassen\\s+sie\\s+uns"
+            + "|wir\\s+beraten\\s+sie|fordern\\s+sie|jetzt\\s+anfragen|angebot\\s+anfordern|per\\s+e-?mail\\s+teilen"
+            + "|teilen|quicklinks|filtern\\s+sie|durchsuchen\\s+sie|unser\\s+team)\\b|®"
             + "|\\d+(?:[.,]\\d+)?\\s?(?:€|eur\\b|euro\\b|chf\\b|\\$|usd\\b)|(?:€|\\$)\\s?\\d"
             + "|\\b(?:pro|je)\\s+monat\\b|/\\s?monat\\b|\\bper\\s+month\\b");
     private static final Pattern LINK = Pattern.compile("(?i)https?://|www\\.|\\bwww\\b");
@@ -256,7 +260,7 @@ public final class ProsePassageFilter {
      */
     private String promotion(String t, String[] words, int count) {
         if (criteria.maxPromotionSignals > 0) {
-            int signals = 0;
+            int signals = repeatedWordRuns(words);
             Matcher promotion = PROMOTION.matcher(t);
             while (promotion.find()) {
                 signals++;
@@ -297,6 +301,23 @@ public final class ProsePassageFilter {
             }
         }
         return "";
+    }
+
+    /**
+     * Runs of one word written three times in a row ("teilen teilen teilen"), each a navigation signal: share buttons
+     * and menus repeat their labels, sentences do not.
+     */
+    private static int repeatedWordRuns(String[] words) {
+        int runs = 0;
+        for (int i = 2; i < words.length; i++) {
+            String w = words[i].toLowerCase(java.util.Locale.ROOT);
+            if (LETTER.matcher(w).find() && w.equals(words[i - 1].toLowerCase(java.util.Locale.ROOT))
+                    && w.equals(words[i - 2].toLowerCase(java.util.Locale.ROOT))
+                    && (i < 3 || !w.equals(words[i - 3].toLowerCase(java.util.Locale.ROOT)))) {
+                runs++;
+            }
+        }
+        return runs;
     }
 
     /** The words of a text: its white-space separated tokens that hold a letter. */

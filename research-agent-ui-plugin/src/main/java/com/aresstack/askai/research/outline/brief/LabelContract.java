@@ -31,6 +31,11 @@ final class LabelContract {
     }
 
     static String prompt(BriefContext context, String chapterTitle, List<String> excerpts, String comment) {
+        return prompt(context, chapterTitle, excerpts, comment, java.util.Collections.<String>emptyList());
+    }
+
+    static String prompt(BriefContext context, String chapterTitle, List<String> excerpts, String comment,
+                         List<String> taken) {
         StringBuilder text = new StringBuilder(context.header());
         if (chapterTitle != null && !chapterTitle.trim().isEmpty()) {
             text.append("Chapter: ").append(chapterTitle.trim())
@@ -38,6 +43,10 @@ final class LabelContract {
         }
         if (comment != null && !comment.trim().isEmpty()) {
             text.append("Author's request: ").append(comment.trim()).append('\n');
+        }
+        if (taken != null && !taken.isEmpty()) {
+            text.append("Titles already used in the book (choose a clearly different title): ")
+                    .append(String.join("; ", taken)).append('\n');
         }
         text.append("Passages:\n");
         int count = 0;
@@ -65,6 +74,11 @@ final class LabelContract {
 
     /** @param chapterTitle the chapter of the labelled section; the title must not repeat it ("" for none) */
     static OutlineLabel read(String answer, String chapterTitle) throws BriefAnswerException {
+        return read(answer, chapterTitle, java.util.Collections.<String>emptyList());
+    }
+
+    /** @param taken titles the answer must not nearly repeat */
+    static OutlineLabel read(String answer, String chapterTitle, List<String> taken) throws BriefAnswerException {
         JsonObject root;
         try {
             JsonElement parsed = JsonParser.parseString(answer == null ? "" : answer.trim());
@@ -90,6 +104,14 @@ final class LabelContract {
             }
             if (OutlineChapter.repeatsChapterTitle(title, chapterTitle)) {
                 errors.add("the title repeats the chapter title; name this group's part of the chapter");
+            }
+            for (String used : taken == null ? java.util.Collections.<String>emptyList() : taken) {
+                if (com.aresstack.askai.research.outline.OutlineTitles.similar(title, used,
+                        com.aresstack.askai.research.outline.OutlineTitles.DEFAULT_MAX_OVERLAP)) {
+                    errors.add("the title nearly repeats \"" + used + "\", which the book already uses; name "
+                            + "what is different about these passages");
+                    break;
+                }
             }
         }
         if (summary.isEmpty()) {

@@ -109,9 +109,18 @@ public final class OutlineBriefWorker {
      */
     public OutlineLabel label(BriefContext context, String target, String chapterTitle, List<String> excerpts,
                               String comment) {
+        return label(context, target, chapterTitle, excerpts, comment, Collections.<String>emptyList());
+    }
+
+    /**
+     * As above; the title must not nearly repeat one of {@code taken} (the section titles of the book so far), see
+     * {@link com.aresstack.askai.research.outline.OutlineTitles}.
+     */
+    public OutlineLabel label(BriefContext context, String target, String chapterTitle, List<String> excerpts,
+                              String comment, List<String> taken) {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(LabelContract.SYSTEM));
-        messages.add(ChatMessage.user(LabelContract.prompt(context, chapterTitle, excerpts, comment)));
+        messages.add(ChatMessage.user(LabelContract.prompt(context, chapterTitle, excerpts, comment, taken)));
         for (int attempt = 0; attempt < 2; attempt++) {
             MainModelChatResult result = labels.completeJson(messages, TEMPERATURE, LabelContract.BUDGET,
                     LabelContract.SCHEMA);
@@ -121,7 +130,7 @@ public final class OutlineBriefWorker {
                 return null;
             }
             try {
-                OutlineLabel label = LabelContract.read(result.getText(), chapterTitle);
+                OutlineLabel label = LabelContract.read(result.getText(), chapterTitle, taken);
                 telemetry.call(new BriefCallTelemetry(labels.modelName(), BriefCallTelemetry.Kind.LABEL, target,
                         LabelContract.BUDGET, attempt, true));
                 return label;
