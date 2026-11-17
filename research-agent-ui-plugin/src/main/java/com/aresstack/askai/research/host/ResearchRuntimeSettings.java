@@ -487,10 +487,24 @@ public final class ResearchRuntimeSettings {
     public static final int DEFAULT_PLAN_PHASE_SOURCES = 0;
     public static final String KEY_PLAN_CYCLES = "research.plan.cycles";
     /**
-     * Research cycles: after each cycle the still uncovered nodes are planned again from another angle (M2). Three
-     * cycles give a node up to three times "Queries per node" queries before the plan reports it as a gap.
+     * The safety cap of research cycles: after each cycle the still uncovered nodes are planned again from another
+     * angle (M2). The plan ends by itself when every node is covered, no admissible new query is left or it stalls;
+     * this cap only stops a runaway plan. 0 = no cap.
      */
-    public static final int DEFAULT_PLAN_CYCLES = 3;
+    public static final int DEFAULT_PLAN_CYCLES = 20;
+    /** The stall criterion: research cycles in a row without a new accepted source end the plan; 0 = off. */
+    public static final String KEY_PLAN_IDLE_CYCLES = "research.plan.idleCycles";
+    public static final int DEFAULT_PLAN_IDLE_CYCLES = 2;
+    /**
+     * Whether a planned query must lie near a concept node of the mind map (the IN side of the Weidezaun) to run, not
+     * only off the exclusions. Default ON: live run 5 searched "Datenschutz beim betrieblichen
+     * Wiedereingliederungsmanagement" for a book on wearables on construction sites.
+     */
+    public static final String KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS = "research.plan.queryNeedsConceptNearness";
+
+    public static boolean loadPlanQueryNeedsConceptNearness(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS, true);
+    }
 
     /**
      * Whether every search skips shop, marketplace and document re-upload sites
@@ -687,7 +701,8 @@ public final class ResearchRuntimeSettings {
                 loadPositiveInt(store, KEY_PLAN_SOURCES_PER_NODE, DEFAULT_PLAN_SOURCES_PER_NODE),
                 loadPositiveInt(store, KEY_PLAN_QUERIES_PER_NODE, DEFAULT_PLAN_QUERIES_PER_NODE),
                 loadNonNegativeInt(store, KEY_PLAN_PHASE_SOURCES, DEFAULT_PLAN_PHASE_SOURCES),
-                loadPositiveInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES))
+                loadNonNegativeInt(store, KEY_PLAN_CYCLES, DEFAULT_PLAN_CYCLES))
+                .withIdleCycles(loadNonNegativeInt(store, KEY_PLAN_IDLE_CYCLES, DEFAULT_PLAN_IDLE_CYCLES))
                 .withPreferenceQueries(loadSourcePreferenceEnabled(store)
                         ? loadNonNegativeInt(store, KEY_SOURCE_PREFERENCE_QUERIES, DEFAULT_SOURCE_PREFERENCE_QUERIES)
                         : 0);

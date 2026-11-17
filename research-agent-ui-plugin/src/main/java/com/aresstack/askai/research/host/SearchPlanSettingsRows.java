@@ -31,9 +31,10 @@ final class SearchPlanSettingsRows {
                         + "concept node covered once its planned queries of the cycle ran."));
         JTextField cycles = field(store, ResearchRuntimeSettings.KEY_PLAN_CYCLES,
                 ResearchRuntimeSettings.DEFAULT_PLAN_CYCLES,
-                "Research cycles: after each cycle the nodes without covering sources are planned again from another "
-                        + "angle, until they are covered or the cycles are spent. The outcome names the gaps that remain.");
-        JLabel cyclesLabel = new JLabel("in research cycles");
+                "Safety cap of research cycles: after each cycle the nodes without covering sources are planned again "
+                        + "from another angle. The plan ends by itself when every node is covered, no admissible new "
+                        + "query is left or it stalls; this cap only stops a runaway plan. 0 = no cap.", true);
+        JLabel cyclesLabel = new JLabel("cycle cap");
         cyclesLabel.setToolTipText(cycles.getToolTipText());
         form.row("Queries per node", field(store, ResearchRuntimeSettings.KEY_PLAN_QUERIES_PER_NODE,
                 ResearchRuntimeSettings.DEFAULT_PLAN_QUERIES_PER_NODE,

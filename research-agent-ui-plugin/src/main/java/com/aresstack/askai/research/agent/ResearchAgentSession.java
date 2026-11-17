@@ -1916,6 +1916,27 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         });
                     }
 
+                    public void queriesRejected(final java.util.Map<String, String> rejected) {
+                        final StringBuilder line = new StringBuilder("Search plan: ").append(rejected.size())
+                                .append(rejected.size() == 1 ? " query" : " queries")
+                                .append(" rejected by the scope or the blacklist:");
+                        for (java.util.Map.Entry<String, String> r : rejected.entrySet()) {
+                            technicalLog("search-plan query rejected \"" + r.getKey() + "\": " + r.getValue());
+                            line.append("\n- \"").append(r.getKey()).append("\": ").append(r.getValue());
+                        }
+                        uiExecutor.execute(new Runnable() {
+                            public void run() {
+                                if (sink != null) {
+                                    String id = "search-plan-rejected-" + System.currentTimeMillis();
+                                    sink.appendInfoMessage(id, line.toString());
+                                    journal.attribute(id, com.aresstack.askai.research.state.oo.ResearchStateIds
+                                            .RESEARCH);
+                                    persistJournalNow();
+                                }
+                            }
+                        });
+                    }
+
                     public void entryEnded(final com.aresstack.askai.research.plan.SearchPlanEntry entry) {
                         if (com.aresstack.askai.research.drafting.GapResearch.isGapEntry(entry)
                                 && !entry.getAcceptedSourceIds().isEmpty()) {
@@ -1964,6 +1985,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     }
                 });
         // plan T5: the research team runs several planned queries at once (read at every dispatch)
+        // the fence: every planned, cycle, worker and gap query passes the blacklist and the Weidezaun before it runs
+        searchPlanQueue.setQueryGate(new com.aresstack.askai.research.plan.SearchPlanQueue.QueryGate() {
+            public String rejection(String query) {
+                return planQueryRejection(query);
+            }
+        });
         searchPlanQueue.setTeam(new com.aresstack.askai.research.plan.SearchPlanQueue.Team() {
             public int workers() {
                 return com.aresstack.askai.research.host.ResearchRuntimeSettings.loadTeamWorkers(hostStateStore);
@@ -6950,6 +6977,71 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     String searchScopeEnd(String handle) {
         searchScopeSnapshots.remove(handle);
         return "ENDED";
+    }
+
+    /** The scope snapshot the plan's query gate evaluates against, and the fence it was pinned for. */
+    private volatile String planGateHandle;
+    private volatile String planGateFence = "";
+    private volatile boolean planGateInAffinity;
+
+    /**
+     * The search plan's query gate: the typed blacklist, then the Weidezaun. A query on the canonical OUT side is
+     * rejected, and with concept anchors present so is a query near no concept node at all (live run 5: "Datenschutz
+     * beim betrieblichen Wiedereingliederungsmanagement" in a book on wearables on construction sites). The second
+     * check is the setting {@code research.plan.queryNeedsConceptNearness}. {@code null} = the query may run.
+     */
+    String planQueryRejection(String query) {
+        String hit = com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft())
+                .firstMatch(query, "", "");
+        if (hit != null) {
+            return "blacklist \"" + hit + "\"";
+        }
+        String fence = fenceFingerprintNow();
+        String handle = planGateHandle;
+        if (handle == null || !fence.equals(planGateFence) || !searchScopeSnapshots.containsKey(handle)) {
+            if (handle != null) {
+                searchScopeEnd(handle);
+            }
+            String begin = searchScopeBeginLine();
+            if (!begin.startsWith("ACTIVE handle=")) {
+                planGateHandle = null;
+                technicalLog("search-plan query gate: scope check " + begin + " for \"" + query + "\"");
+                return null; // no scope system: only the blacklist applies
+            }
+            handle = begin.substring("ACTIVE handle=".length()).split(" ")[0];
+            planGateHandle = handle;
+            planGateFence = fence;
+            planGateInAffinity = begin.contains("inAffinity=true");
+        }
+        com.google.gson.JsonArray items = new com.google.gson.JsonArray();
+        com.google.gson.JsonObject item = new com.google.gson.JsonObject();
+        item.addProperty("id", "q");
+        item.addProperty("text", query);
+        items.add(item);
+        String reply = searchScopeEvaluate(handle, "plan-query", items.toString());
+        if (!reply.startsWith("EVALUATED")) {
+            return "scope check unavailable (" + reply + ")";
+        }
+        String verdict = reply.contains("\n") ? reply.substring(reply.indexOf('\n') + 1) : "";
+        if (verdict.startsWith("OUT")) {
+            return "outside scope (nearest exclusion: " + quoted(verdict, "nearest=\"") + ")";
+        }
+        if (verdict.startsWith("KEEP") && planGateInAffinity && !verdict.contains("in=NEAR")
+                && com.aresstack.askai.research.host.ResearchRuntimeSettings
+                        .loadPlanQueryNeedsConceptNearness(hostStateStore)) {
+            return "outside the Weidezaun: near no concept node of the mind map";
+        }
+        return null;
+    }
+
+    private static String quoted(String line, String key) {
+        int at = line.indexOf(key);
+        if (at < 0) {
+            return "";
+        }
+        int start = at + key.length();
+        int end = line.indexOf('"', start);
+        return end < 0 ? line.substring(start) : line.substring(start, end);
     }
 
     /** The effective-fence fingerprint: scope revision + concept epoch#revision. */

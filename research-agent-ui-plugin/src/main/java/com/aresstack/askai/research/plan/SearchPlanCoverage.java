@@ -29,6 +29,7 @@ public final class SearchPlanCoverage {
         private final int phaseSources;
         private final int cycles;
         private final int preferenceQueries;
+        private final int idleCycles;
 
         /** One research cycle: the plan ends when its queries ran. */
         public Caps(int sourcesPerNode, int queriesPerNode, int phaseSources) {
@@ -39,24 +40,44 @@ public final class SearchPlanCoverage {
          * @param queriesPerNode the query budget of a node PER research cycle
          * @param phaseSources   the accepted sources a phase may collect through the plan; 0 = automatic, what the
          *                       node budgets allow ({@link #phaseSourcesFor})
-         * @param cycles         how many research cycles the plan may run: after each cycle the still uncovered
-         *                       nodes are planned again from another angle, until they are covered or the cycles
-         *                       are spent
+         * @param cycles         the safety cap of research cycles: after each cycle the still uncovered nodes are
+         *                       planned again from another angle until they are covered or no admissible new query
+         *                       is left; the cap only stops a plan that would run away. 0 = no cap
          */
         public Caps(int sourcesPerNode, int queriesPerNode, int phaseSources, int cycles) {
-            this(sourcesPerNode, queriesPerNode, phaseSources, cycles, 0);
+            this(sourcesPerNode, queriesPerNode, phaseSources, cycles, 0, 0);
         }
 
-        private Caps(int sourcesPerNode, int queriesPerNode, int phaseSources, int cycles, int preferenceQueries) {
+        private Caps(int sourcesPerNode, int queriesPerNode, int phaseSources, int cycles, int preferenceQueries,
+                     int idleCycles) {
             this.preferenceQueries = Math.max(0, preferenceQueries);
+            this.idleCycles = Math.max(0, idleCycles);
             this.sourcesPerNode = Math.max(1, sourcesPerNode);
             this.queriesPerNode = Math.max(1, queriesPerNode);
             this.phaseSources = Math.max(0, phaseSources);
-            this.cycles = Math.max(1, cycles);
+            this.cycles = Math.max(0, cycles);
         }
 
+        /** The safety cap of research cycles; 0 = no cap (the plan ends on coverage, exhaustion or a stall). */
         public int getCycles() {
             return cycles;
+        }
+
+        /** Whether the plan may start research cycle {@code cycle} under the safety cap. */
+        public boolean allowsCycle(int cycle) {
+            return cycles == 0 || cycle <= cycles;
+        }
+
+        /**
+         * The stall criterion: the plan ends once this many research cycles in a row added no new accepted source;
+         * 0 = off.
+         */
+        public int getIdleCycles() {
+            return idleCycles;
+        }
+
+        public Caps withIdleCycles(int idle) {
+            return new Caps(sourcesPerNode, queriesPerNode, phaseSources, cycles, preferenceQueries, idle);
         }
 
         /** The query budget of a node up to and including the given cycle. */
@@ -69,7 +90,7 @@ public final class SearchPlanCoverage {
          * the planner's budget, so a preferred-source query is never skipped as over budget.
          */
         public Caps withPreferenceQueries(int perNodeAndCycle) {
-            return new Caps(sourcesPerNode, queriesPerNode, phaseSources, cycles, perNodeAndCycle);
+            return new Caps(sourcesPerNode, queriesPerNode, phaseSources, cycles, perNodeAndCycle, idleCycles);
         }
 
         /** The mission's publisher queries per node and cycle on top of {@link #getQueriesPerNode()}. */
@@ -100,6 +121,9 @@ public final class SearchPlanCoverage {
         public int phaseSourcesFor(SearchPlanRecord record) {
             if (phaseSources > 0) {
                 return phaseSources;
+            }
+            if (cycles == 0) {
+                return Integer.MAX_VALUE; // no cycle cap, no derived source cap: coverage and exhaustion end the plan
             }
             int nodes = 0;
             if (record != null) {
@@ -198,7 +222,7 @@ public final class SearchPlanCoverage {
             State state;
             if (sources.size() >= caps.getSourcesPerNode() && hosts.size() >= MIN_DOMAINS && !pending) {
                 state = State.COVERED;
-            } else if (run >= caps.queriesUpTo(caps.getCycles()) || !pending) {
+            } else if (run >= caps.queriesUpTo(Math.max(1, caps.getCycles())) || !pending) {
                 // exhausted for now: the queue plans another cycle for it while cycles are left
                 state = State.EXHAUSTED;
             } else {
