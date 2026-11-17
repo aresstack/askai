@@ -36,6 +36,7 @@ public final class SectionAssignment {
     private final RepeatCheck.Criteria repeats;
     private final SynthesisCriteria synthesis;
     private final CitationFormat citationFormat;
+    private final TopUpCriteria topUp;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -58,6 +59,7 @@ public final class SectionAssignment {
         this.repeats = b.repeats;
         this.synthesis = b.synthesis;
         this.citationFormat = b.citationFormat;
+        this.topUp = b.topUp;
     }
 
     /**
@@ -174,6 +176,11 @@ public final class SectionAssignment {
         return citationFormat;
     }
 
+    /** When a part gets a top-up call because it stayed below its word target ({@link TopUpCriteria}). */
+    public TopUpCriteria getTopUp() {
+        return topUp;
+    }
+
     public SynthesisCriteria getSynthesis() {
         return synthesis;
     }
@@ -204,6 +211,7 @@ public final class SectionAssignment {
         b.repeats = repeats;
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
+        b.topUp = topUp;
         return b;
     }
 
@@ -239,6 +247,7 @@ public final class SectionAssignment {
         b.repeats = repeats;
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
+        b.topUp = topUp;
         return new SectionAssignment(b);
     }
 
@@ -263,6 +272,7 @@ public final class SectionAssignment {
         private RepeatCheck.Criteria repeats = RepeatCheck.Criteria.defaults();
         private SynthesisCriteria synthesis = SynthesisCriteria.defaults();
         private CitationFormat citationFormat = CitationFormat.NUMBERED;
+        private TopUpCriteria topUp = TopUpCriteria.off();
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -377,6 +387,12 @@ public final class SectionAssignment {
         /** Synthesis bounds (settings); the defaults when {@code null}. */
         public Builder synthesis(SynthesisCriteria value) {
             this.synthesis = value == null ? SynthesisCriteria.defaults() : value;
+            return this;
+        }
+
+        /** Top-up bounds (settings); none when {@code null} or not set. */
+        public Builder topUp(TopUpCriteria value) {
+            this.topUp = value == null ? TopUpCriteria.off() : value;
             return this;
         }
 

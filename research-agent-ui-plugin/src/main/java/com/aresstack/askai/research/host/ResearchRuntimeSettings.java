@@ -1094,7 +1094,32 @@ public final class ResearchRuntimeSettings {
                 loadPositiveInt(store, KEY_WRITER_WORDS_PER_CALL, DEFAULT_WRITER_WORDS_PER_CALL),
                 loadPositiveInt(store, KEY_WRITER_ANSWER_TOKENS, DEFAULT_WRITER_ANSWER_TOKENS),
                 loadWriterCarryCriteria(store), loadWriterRepeatCriteria(store), loadWriterSynthesisCriteria(store),
-                loadWriterCitationFormat(store));
+                loadWriterCitationFormat(store))
+                .withYield(loadWriterTopUpCriteria(store),
+                        loadNonNegativeInt(store, KEY_WRITER_WORDS_PER_PASSAGE, DEFAULT_WRITER_WORDS_PER_PASSAGE));
+    }
+
+    /** Top-up: share (0..1) of a part's word target below which the part gets a top-up call (0 = never). */
+    public static final String KEY_WRITER_TOP_UP_MIN_SHARE = "research.writer.topUp.minShare";
+    /** Top-up: further calls per key-point part at most (0 = off). */
+    public static final String KEY_WRITER_TOP_UP_MAX_CALLS = "research.writer.topUp.maxCalls";
+    /** Words one passage of the actual evidence pack carries; caps a section's word target (0 = off). */
+    public static final String KEY_WRITER_WORDS_PER_PASSAGE = "research.writer.wordsPerPassage";
+    /**
+     * Words per passage, from live run 5 (book 2): full sections came to 780 words from 24 passages (33 per passage)
+     * without top-up; with a top-up to 85 % of the call target a full pack carries about 40, so 24 passages keep a
+     * target of about 950 words and a pack of ten a target of 400.
+     */
+    public static final int DEFAULT_WRITER_WORDS_PER_PASSAGE = 40;
+
+    /** When a key-point part below its word target gets top-up calls (live run 5); out-of-range values default. */
+    public static com.aresstack.askai.research.runtime.writer.TopUpCriteria loadWriterTopUpCriteria(
+            WorkspaceStateStore store) {
+        return new com.aresstack.askai.research.runtime.writer.TopUpCriteria(
+                loadUnitInterval(store, KEY_WRITER_TOP_UP_MIN_SHARE,
+                        com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MIN_SHARE),
+                loadNonNegativeInt(store, KEY_WRITER_TOP_UP_MAX_CALLS,
+                        com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MAX_CALLS));
     }
 
     /**

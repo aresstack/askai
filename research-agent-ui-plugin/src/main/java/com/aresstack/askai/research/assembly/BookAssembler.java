@@ -144,7 +144,10 @@ public final class BookAssembler {
                 String label = number + " " + section.getTitle();
                 contents.append("  - ").append(label).append('\n');
                 body.append("### ").append(label).append("\n\n");
-                counts.target += section.getBrief().getWordTarget();
+                SectionRevision targetRevision = input.revision(section.getId());
+                // the target the writer wrote to (from its actual pack), else the outline's
+                counts.target += targetRevision == null ? section.getBrief().getWordTarget()
+                        : targetRevision.wordTarget(section.getBrief().getWordTarget());
                 String text = sectionText(input, section, label, findings, openPoints);
                 if (text == null) {
                     continue;
@@ -383,7 +386,8 @@ public final class BookAssembler {
             findings.add(new Finding(Kind.TOPIC_DRIFT, id, label + ": " + subject));
         }
         int written = words(plain).size();
-        int target = section.getBrief().getWordTarget();
+        int target = revision == null ? section.getBrief().getWordTarget()
+                : revision.wordTarget(section.getBrief().getWordTarget());
         counts.words += written;
         if (target > 0 && (written * 2 < target || written * 2 > target * 3)) {
             findings.add(new Finding(Kind.WORDS_OFF_TARGET, id, label + ": " + written + " of " + target + " words"));

@@ -77,6 +77,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerPassages = ComicControls.textField(4);
     private final JTextField writerPassageTokens = ComicControls.textField(4);
     private final JTextField writerPassagesPerSource = ComicControls.textField(4);
+    private final JTextField writerTopUpMinShare = ComicControls.textField(4);
+    private final JTextField writerTopUpMaxCalls = ComicControls.textField(4);
+    private final JTextField writerWordsPerPassage = ComicControls.textField(4);
     private final JTextField driftMinTermLength = ComicControls.textField(4);
     private final JTextField driftMinSentences = ComicControls.textField(4);
     private final JCheckBox driftNounsOnly = ComicControls.checkBox("Nouns only (capitalised)", true);
@@ -235,6 +238,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         writer.row("Writer preset", group(labelled("Words/call", writerWordsPerCall),
                 labelled("Answer tokens", writerAnswerTokens), labelled("Passages", writerPassages),
                 labelled("Tokens/passage", writerPassageTokens), labelled("Per source", writerPassagesPerSource)));
+        writer.row("Writer yield", group(labelled("Top-up below share", writerTopUpMinShare),
+                labelled("Top-ups/part", writerTopUpMaxCalls), labelled("Words/passage", writerWordsPerPassage)));
         writer.row("Citation format", writerCitationFormat);
         writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
                 labelled("Sentences ≥", writerProseMinSentences),
@@ -673,6 +678,17 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(writerPassagesPerSource, ResearchRuntimeSettings.KEY_WRITER_PASSAGES_PER_SOURCE,
                 com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE,
                 "Evidence pack: passages one source may contribute, so one page cannot fill a section.");
+        bindDecimal(writerTopUpMinShare, ResearchRuntimeSettings.KEY_WRITER_TOP_UP_MIN_SHARE,
+                com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MIN_SHARE,
+                "Top-up: a key-point part whose answer keeps fewer than this share (0..1) of its word target, while "
+                        + "passages of its pack are uncited, gets a further call that continues it (0 = never).");
+        bindNonNegativeLimit(writerTopUpMaxCalls, ResearchRuntimeSettings.KEY_WRITER_TOP_UP_MAX_CALLS,
+                com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MAX_CALLS,
+                "Top-up: further calls one key-point part may get at most (0 = off).");
+        bindNonNegativeLimit(writerWordsPerPassage, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_PASSAGE,
+                ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_PASSAGE,
+                "Word target: words one passage of the section's actual evidence pack carries. A section's target "
+                        + "is the outline's, at most its passages times this value (0 = the outline's target).");
         bindDecimal(writerMinBriefSimilarity, ResearchRuntimeSettings.KEY_WRITER_MIN_BRIEF_SIMILARITY,
                 com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MIN_SIMILARITY,
                 "Evidence pack: a passage needs at least this similarity (0..1) to the section's brief, otherwise "

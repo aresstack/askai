@@ -42,6 +42,8 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         final com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria repeats;
         final com.aresstack.askai.research.runtime.writer.SynthesisCriteria synthesis;
         final String citationFormat;
+        final com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp;
+        final int wordsPerPassage;
 
         /** With the citation format chosen by the writer model ({@code CitationFormat.AUTO}). */
         public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens,
@@ -68,6 +70,39 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
             this.answerTokens = answerTokens;
             this.carry = carry;
             this.repeats = repeats;
+            this.topUp = com.aresstack.askai.research.runtime.writer.TopUpCriteria.off();
+            this.wordsPerPassage = 0;
+        }
+
+        private Targets(Targets base, com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp,
+                        int wordsPerPassage) {
+            this.citationFormat = base.citationFormat;
+            this.synthesis = base.synthesis;
+            this.pack = base.pack;
+            this.wordsPerCall = base.wordsPerCall;
+            this.answerTokens = base.answerTokens;
+            this.carry = base.carry;
+            this.repeats = base.repeats;
+            this.topUp = topUp == null ? com.aresstack.askai.research.runtime.writer.TopUpCriteria.off() : topUp;
+            this.wordsPerPassage = Math.max(0, wordsPerPassage);
+        }
+
+        /**
+         * The same targets with the writer's yield (live run 5): top-up calls for a part below its word target, and
+         * the words one passage of the actual pack carries, which caps the section's word target (0 = the outline's
+         * target stays).
+         */
+        public Targets withYield(com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp,
+                                 int wordsPerPassage) {
+            return new Targets(this, topUp, wordsPerPassage);
+        }
+
+        public com.aresstack.askai.research.runtime.writer.TopUpCriteria getTopUp() {
+            return topUp;
+        }
+
+        public int getWordsPerPassage() {
+            return wordsPerPassage;
         }
 
         public WriterPackSettings getPack() {
@@ -113,21 +148,36 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
 
     public SectionAssignment assignmentFor(SectionWriteRequest request) throws Exception {
         Targets targets = targetSettings.get();
-        int parts = SectionAssignment.partCount(request.getSection().getBrief().getWordTarget(),
-                targets.wordsPerCall, request.getSection().getBrief().getKeyPoints().size());
-        EvidencePack pack = packs.build(contexts.requestFor(request),
-                targets.pack.withPassageCount(targets.pack.getPassageCount() * parts));
+        int outlineTarget = request.getSection().getBrief().getWordTarget();
+        int keyPoints = request.getSection().getBrief().getKeyPoints().size();
+        int parts = SectionAssignment.partCount(outlineTarget, targets.wordsPerCall, keyPoints);
+        // count and per-source cap both scale with the parts (live run 5: 24 passages, still two per source)
+        EvidencePack pack = packs.build(contexts.requestFor(request), targets.pack.forParts(parts));
+        int wordTarget = wordTarget(outlineTarget, pack.getPassages().size(), targets.wordsPerPassage);
         SectionAssignment base = SectionWriterInputs.of(pack, request.getSection().getTitle(),
                 request.getSection().getBrief().getPurpose(), request.getSection().getBrief().getKeyPoints(),
-                request.getSection().getBrief().getWordTarget(), targets.wordsPerCall, targets.answerTokens,
+                wordTarget, targets.wordsPerCall, targets.answerTokens,
                 targets.carry, targets.pack.getPassageCount());
         SectionAssignment.Builder assignment = base.toBuilder().writtenSections(contexts.writtenSections(request))
-                .repeats(targets.repeats).synthesis(targets.synthesis)
+                .repeats(targets.repeats).synthesis(targets.synthesis).topUp(targets.topUp)
                 .citationFormat(com.aresstack.askai.research.runtime.writer.CitationFormat.resolve(
                         targets.citationFormat, writerModel.get()));
         if (request.isRewrite()) {
             assignment.rewriteComment(request.getComment()).currentText(request.getCurrentText());
         }
         return assignment.build();
+    }
+
+    /**
+     * The section's word target from the actual pack (live run 5: thin sections reached 62 % of a target set from
+     * their material in the outline): the outline's target, at most the pack's passages times the words one passage
+     * carries; never below one call's minimum. {@code wordsPerPassage} 0 keeps the outline's target.
+     */
+    static int wordTarget(int outlineTarget, int passages, int wordsPerPassage) {
+        if (wordsPerPassage <= 0 || outlineTarget <= 0) {
+            return outlineTarget;
+        }
+        long carried = Math.max(SectionAssignment.MIN_WORDS_PER_CALL, (long) passages * wordsPerPassage);
+        return (int) Math.min(outlineTarget, carried);
     }
 }

@@ -48,7 +48,7 @@ public final class RuntimeSectionWriter implements SectionWriter {
         if (!draft.isOk()) {
             throw new IllegalStateException(draft.getFailure());
         }
-        return toRevision(draft);
+        return toRevision(draft).wordTarget(assignment.getSectionWords());
     }
 
     static SectionRevision.Builder toRevision(SectionDraft draft) {
