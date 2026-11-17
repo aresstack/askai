@@ -26,13 +26,12 @@ public class BrowserEnginesSearchStrategyTest {
     private static final CancellationSignal NOT_CANCELLED = () -> false;
 
     @Test
-    public void defaultRunsGoogleFirstAndStopsWhenItDeliversEnough() throws Exception {
+    public void googleFirstStopsWhenItDeliversEnough() throws Exception {
         Fake google = new Fake("https://a.example/", "https://b.example/", "https://c.example/",
                 "https://d.example/", "https://e.example/");
         Fake pages = new Fake("https://b.example/");
         BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
-                com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create().navigation.engineSelection,
-                google, pages);
+                selection(EngineAcquisitionMode.FIRST_USABLE, "google:on", "duckduckgo:on"), google, pages);
         assertEquals(Arrays.asList("google", "page-engines"), strategy.stepNames());
         InitialSearchResult result = strategy.search(REQUEST, NOT_CANCELLED, BUDGET);
         assertEquals(1, google.calls);
@@ -431,16 +430,13 @@ public class BrowserEnginesSearchStrategyTest {
     }
 
     @Test
-    public void theCodecMigratedDefaultSearchesAsBefore() throws Exception {
-        Fake google = new Fake(urls("g", 5));
-        GroupFake pages = new GroupFake();
+    public void theDefaultTriesStartpageThenDuckDuckGoThenGoogle() {
         BrowserEnginesSearchStrategy strategy = new BrowserEnginesSearchStrategy(
                 com.aresstack.askai.browser.search.LegacyBrowserSearchDefaults.create().navigation.engineSelection,
-                google, pages);
-        assertEquals(Arrays.asList(Collections.singletonList("google"),
-                Collections.singletonList("page-engines:duckduckgo")), strategy.groupNames());
-        strategy.search(REQUEST, NOT_CANCELLED, BUDGET);
-        assertEquals(0, pages.calls.size());
+                new Fake(urls("g", 5)), new GroupFake());
+        assertEquals(Arrays.asList(Collections.singletonList("page-engines:startpage"),
+                Collections.singletonList("page-engines:duckduckgo"), Collections.singletonList("google")),
+                strategy.groupNames());
     }
 
     private static BrowserSearchEngineSelection selection(EngineAcquisitionMode mode, String... entries) {
