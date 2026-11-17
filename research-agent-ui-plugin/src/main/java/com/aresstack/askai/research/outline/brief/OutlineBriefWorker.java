@@ -118,6 +118,18 @@ public final class OutlineBriefWorker {
      */
     public OutlineLabel label(BriefContext context, String target, String chapterTitle, List<String> excerpts,
                               String comment, List<String> taken) {
+        return label(context, target, chapterTitle, excerpts, comment, taken, Collections.<String>emptyList());
+    }
+
+    /**
+     * As above with two lists: {@code taken} are the titles of the same chapter (no near repeat), {@code bookTaken}
+     * the other titles of the book and the chapter titles (no repeat word for word or stem for stem). When both
+     * attempts are refused only by the repeat rules, the last well-formed title that repeats nothing word for word is
+     * kept; a raw passage sentence is the worse title (live retest of #243: 19 sections kept one).
+     */
+    public OutlineLabel label(BriefContext context, String target, String chapterTitle, List<String> excerpts,
+                              String comment, List<String> taken, List<String> bookTaken) {
+        OutlineLabel wellFormed = null;
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(LabelContract.SYSTEM));
         messages.add(ChatMessage.user(LabelContract.prompt(context, chapterTitle, excerpts, comment, taken)));
@@ -130,17 +142,37 @@ public final class OutlineBriefWorker {
                 return null;
             }
             try {
-                OutlineLabel label = LabelContract.read(result.getText(), chapterTitle, taken);
+                OutlineLabel label = LabelContract.read(result.getText(), chapterTitle, taken, bookTaken);
                 telemetry.call(new BriefCallTelemetry(labels.modelName(), BriefCallTelemetry.Kind.LABEL, target,
                         LabelContract.BUDGET, attempt, true));
                 return label;
             } catch (BriefAnswerException refused) {
                 telemetry.call(new BriefCallTelemetry(labels.modelName(), BriefCallTelemetry.Kind.LABEL, target,
                         LabelContract.BUDGET, attempt, false));
+                wellFormed = wellFormed(result.getText(), chapterTitle, taken, bookTaken, wellFormed);
                 repair(messages, result.getText(), refused);
             }
         }
-        return null;
+        return wellFormed;
+    }
+
+    private static OutlineLabel wellFormed(String answer, String chapterTitle, List<String> taken,
+                                           List<String> bookTaken, OutlineLabel previous) {
+        OutlineLabel shaped;
+        try {
+            shaped = LabelContract.readShape(answer, chapterTitle);
+        } catch (BriefAnswerException malformed) {
+            return previous;
+        }
+        String title = com.aresstack.askai.research.outline.OutlineTitles.normal(shaped.getTitle());
+        List<String> all = new ArrayList<String>(taken);
+        all.addAll(bookTaken);
+        for (String used : all) {
+            if (com.aresstack.askai.research.outline.OutlineTitles.normal(used).equals(title)) {
+                return previous;
+            }
+        }
+        return shaped;
     }
 
     /**

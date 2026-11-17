@@ -67,6 +67,12 @@ public final class ProsePassageFilter {
         public static final double DEFAULT_MAX_UPPERCASE_SHARE = 0.4;
         /** Default most links (URLs, "www") per word; "WWW: https://www" reached the outline. 1 turns it off. */
         public static final double DEFAULT_MAX_LINK_DENSITY = 0.05;
+        /**
+         * Default most site notices (cookie consent, FAQ headers, "War der Artikel hilfreich", "Nachfolgend finden
+         * Sie eine Auswahl interner Fundstellen") a passage may carry. A cookie banner is long, finished prose with a
+         * single notice, so one is enough. Live retest of #243: two cookie banners and an FAQ header became sections.
+         */
+        public static final int DEFAULT_MAX_SITE_NOTICES = 0;
 
         private final int minWords;
         private final int minSentences;
@@ -76,6 +82,7 @@ public final class ProsePassageFilter {
         private final int maxPromotionSignals;
         private final double maxUppercaseShare;
         private final double maxLinkDensity;
+        private final int maxSiteNotices;
 
         public Criteria(int minWords, int minSentences, int maxUnpunctuatedRun) {
             this(minWords, minSentences, maxUnpunctuatedRun, DEFAULT_CAPTION_MAX_WORDS,
@@ -100,6 +107,18 @@ public final class ProsePassageFilter {
         public Criteria(int minWords, int minSentences, int maxUnpunctuatedRun, int captionMaxWords,
                         double captionPageProseShare, int maxPromotionSignals, double maxUppercaseShare,
                         double maxLinkDensity) {
+            this(minWords, minSentences, maxUnpunctuatedRun, captionMaxWords, captionPageProseShare,
+                    maxPromotionSignals, maxUppercaseShare, maxLinkDensity, DEFAULT_MAX_SITE_NOTICES);
+        }
+
+        /** @param maxSiteNotices most cookie, FAQ and site-navigation notices (a large value turns the rule off) */
+        public Criteria(int minWords, int minSentences, int maxUnpunctuatedRun, int captionMaxWords,
+                        double captionPageProseShare, int maxPromotionSignals, double maxUppercaseShare,
+                        double maxLinkDensity, int maxSiteNotices) {
+            if (maxSiteNotices < 0) {
+                throw new IllegalArgumentException("site notices must not be negative");
+            }
+            this.maxSiteNotices = maxSiteNotices;
             if (maxPromotionSignals < 0 || maxUppercaseShare < 0 || maxUppercaseShare > 1 || maxLinkDensity < 0
                     || maxLinkDensity > 1) {
                 throw new IllegalArgumentException("promotion criteria must not be negative and the shares must lie "
@@ -123,7 +142,11 @@ public final class ProsePassageFilter {
         public static Criteria defaults() {
             return new Criteria(DEFAULT_MIN_WORDS, DEFAULT_MIN_SENTENCES, DEFAULT_MAX_UNPUNCTUATED_RUN,
                     DEFAULT_CAPTION_MAX_WORDS, DEFAULT_CAPTION_PAGE_PROSE_SHARE, DEFAULT_MAX_PROMOTION_SIGNALS,
-                    DEFAULT_MAX_UPPERCASE_SHARE, DEFAULT_MAX_LINK_DENSITY);
+                    DEFAULT_MAX_UPPERCASE_SHARE, DEFAULT_MAX_LINK_DENSITY, DEFAULT_MAX_SITE_NOTICES);
+        }
+
+        public int getMaxSiteNotices() {
+            return maxSiteNotices;
         }
 
         public int getMaxPromotionSignals() {
@@ -169,14 +192,14 @@ public final class ProsePassageFilter {
                     && Double.compare(c.captionPageProseShare, captionPageProseShare) == 0
                     && c.maxPromotionSignals == maxPromotionSignals
                     && Double.compare(c.maxUppercaseShare, maxUppercaseShare) == 0
-                    && Double.compare(c.maxLinkDensity, maxLinkDensity) == 0;
+                    && Double.compare(c.maxLinkDensity, maxLinkDensity) == 0 && c.maxSiteNotices == maxSiteNotices;
         }
 
         @Override
         public int hashCode() {
             return (((minWords * 31 + minSentences) * 31 + maxUnpunctuatedRun) * 31 + captionMaxWords) * 31
                     + Double.valueOf(captionPageProseShare).hashCode() + 17 * maxPromotionSignals
-                    + Double.valueOf(maxUppercaseShare).hashCode() + Double.valueOf(maxLinkDensity).hashCode();
+                    + Double.valueOf(maxUppercaseShare).hashCode() + Double.valueOf(maxLinkDensity).hashCode() + 13 * maxSiteNotices;
         }
 
         @Override
@@ -184,7 +207,7 @@ public final class ProsePassageFilter {
             return "words>=" + minWords + ", sentences>=" + minSentences + ", run<=" + maxUnpunctuatedRun
                     + ", caption<=" + captionMaxWords + " on pages with prose<" + captionPageProseShare
                     + ", promotion<=" + maxPromotionSignals + ", capitals<=" + maxUppercaseShare + ", links<="
-                    + maxLinkDensity;
+                    + maxLinkDensity + ", notices<=" + maxSiteNotices;
         }
     }
 
@@ -252,6 +275,13 @@ public final class ProsePassageFilter {
             + "|teilen|quicklinks|filtern\\s+sie|durchsuchen\\s+sie|unser\\s+team)\\b|®"
             + "|\\d+(?:[.,]\\d+)?\\s?(?:€|eur\\b|euro\\b|chf\\b|\\$|usd\\b)|(?:€|\\$)\\s?\\d"
             + "|\\b(?:pro|je)\\s+monat\\b|/\\s?monat\\b|\\bper\\s+month\\b");
+    private static final Pattern SITE_NOTICE = Pattern.compile("(?iu)\\b(?:(?:verwendet|verwenden|nutzt|nutzen|"
+            + "setzt|setzen|benutzt|benutzen)\\s+(?:\\S+\\s+){0,3}cookies|cookie-?(?:einstellungen|richtlinie|hinweis|banner)"
+            + "|(?:we|this\\s+(?:web)?site)\\s+uses?\\s+cookies|cookie\\s+(?:settings|policy)"
+            + "|häufig\\s+gestellte\\s+fragen|frequently\\s+asked\\s+questions|faq"
+            + "|war\\s+(?:der|dieser|diese)\\s+(?:artikel|beitrag|seite)\\s+hilfreich|was\\s+this\\s+(?:article|page)\\s+helpful"
+            + "|nachfolgend\\s+finden\\s+sie\\s+eine\\s+auswahl|interne[nr]?\\s+fundstellen|zum\\s+inhalt\\s+springen"
+            + "|skip\\s+to\\s+(?:main\\s+)?content|seite\\s+drucken|print\\s+this\\s+page)\\b");
     private static final Pattern LINK = Pattern.compile("(?i)https?://|www\\.|\\bwww\\b");
 
     /**
@@ -259,6 +289,14 @@ public final class ProsePassageFilter {
      * words in capitals, or too many links; empty otherwise.
      */
     private String promotion(String t, String[] words, int count) {
+        int notices = 0;
+        Matcher notice = SITE_NOTICE.matcher(t);
+        while (notice.find()) {
+            notices++;
+        }
+        if (notices > criteria.maxSiteNotices) {
+            return notices + " site notices > " + criteria.maxSiteNotices;
+        }
         if (criteria.maxPromotionSignals > 0) {
             int signals = repeatedWordRuns(words);
             Matcher promotion = PROMOTION.matcher(t);

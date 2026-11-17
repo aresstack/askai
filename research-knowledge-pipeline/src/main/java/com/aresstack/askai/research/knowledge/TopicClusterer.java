@@ -347,12 +347,21 @@ public final class TopicClusterer {
 
     /**
      * Deterministic evidence-bound title: the representative's first sentence, trimmed. Shared with the topic
-     * analysis, which titles sub-topics the same way.
+     * analysis, which titles sub-topics the same way. Soft hyphens and line breaks are removed and a long sentence
+     * is cut at a word boundary (live retest of #243: "FAQ\nHäufig gestellte Fragen" and soft hyphens in titles).
      */
     public static String suggestedTitle(String representativeText) {
-        String text = representativeText == null ? "" : representativeText;
+        String text = representativeText == null ? "" : representativeText.replace("\u00AD", "")
+                .replaceAll("\\s+", " ").trim();
         int end = text.indexOf('.');
         String head = end > 0 ? text.substring(0, end) : text;
-        return head.length() <= 80 ? head : head.substring(0, 80);
+        if (head.length() <= MAX_SUGGESTED_TITLE_CHARS) {
+            return head;
+        }
+        int cut = head.lastIndexOf(' ', MAX_SUGGESTED_TITLE_CHARS);
+        return head.substring(0, cut > MAX_SUGGESTED_TITLE_CHARS / 2 ? cut : MAX_SUGGESTED_TITLE_CHARS);
     }
+
+    /** Longest suggested title, the label contract's title length. */
+    static final int MAX_SUGGESTED_TITLE_CHARS = 80;
 }

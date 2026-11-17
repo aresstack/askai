@@ -888,6 +888,8 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_WRITER_PROSE_MAX_CAPITALS = "research.writer.prose.maxUppercaseShare";
     /** Most links per word a passage may have. */
     public static final String KEY_WRITER_PROSE_MAX_LINKS = "research.writer.prose.maxLinkDensity";
+    /** Most site notices (cookie consent, FAQ headers, "was this helpful") a passage may carry. */
+    public static final String KEY_WRITER_PROSE_MAX_NOTICES = "research.writer.prose.maxSiteNotices";
 
     /**
      * The prose criteria of the evidence pack (live run 3, fix 2), read for every section: navigation, footer and
@@ -918,7 +920,10 @@ public final class ResearchRuntimeSettings {
                                 .DEFAULT_MAX_UPPERCASE_SHARE),
                 loadUnitInterval(store, KEY_WRITER_PROSE_MAX_LINKS,
                         com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
-                                .DEFAULT_MAX_LINK_DENSITY));
+                                .DEFAULT_MAX_LINK_DENSITY),
+                loadNonNegativeInt(store, KEY_WRITER_PROSE_MAX_NOTICES,
+                        com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                                .DEFAULT_MAX_SITE_NOTICES));
     }
 
     /** Claim check stage 2: fewest letters of a content word. */

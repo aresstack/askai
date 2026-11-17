@@ -35,8 +35,10 @@ public final class OutlineChapter extends OutlineEntry {
         String chapter = chapterTitle == null ? "" : chapterTitle.replaceAll("\\s+", " ").trim();
         // Word order does not make a new title (live retest of #242: "Grundlagen Wearables und IoT" in the chapter
         // "Wearables und IoT Grundlagen").
+        // A title made only of chapter-title words names the chapter, not a part of it (live retest of #243:
+        // "Technologien und Sensoren" in the chapter "Wearables: Technologien, Sensoren und Einsatzfelder").
         return !section.isEmpty() && (section.equalsIgnoreCase(chapter) || (!OutlineTitles.stems(section).isEmpty()
-                && OutlineTitles.stems(section).equals(OutlineTitles.stems(chapter))));
+                && OutlineTitles.stems(chapter).containsAll(OutlineTitles.stems(section))));
     }
 
     public OutlineChapter withTitle(String newTitle) {

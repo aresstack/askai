@@ -233,6 +233,30 @@ public class OutlineBriefWorkerTest {
                 "Grundlagen Wearables und IoT", "Wearables und IoT Grundlagen"));
     }
 
+    /**
+     * Live retest of #243: against the whole book the near-repeat rule refused 58 answers; elsewhere in the book only
+     * an equal title is refused, and a twice refused but well-formed title is kept instead of the raw sentence.
+     */
+    @Test
+    public void elsewhereInTheBookOnlyARepeatIsRefusedAndAWellFormedTitleIsKept() {
+        ScriptedChat labels = new ScriptedChat("labels",
+                "{\"title\":\"Sensorik und Datenschutz\",\"summary\":\"s\"}");
+        OutlineBriefWorker worker = new OutlineBriefWorker(labels, new ScriptedChat("briefs"), null);
+        OutlineLabel label = worker.label(CONTEXT, "c9", "Praxis", Arrays.asList("Text"), null,
+                Arrays.<String>asList(), Arrays.asList("Sensorik, Datenschutz und Recht"));
+        assertEquals("Sensorik und Datenschutz", label.getTitle());
+
+        ScriptedChat twice = new ScriptedChat("labels",
+                "{\"title\":\"Technologien und Sensorik\",\"summary\":\"s\"}",
+                "{\"title\":\"Sensorik der Westen und Technologien\",\"summary\":\"s\"}");
+        OutlineLabel kept = new OutlineBriefWorker(twice, new ScriptedChat("briefs"), null).label(CONTEXT, "c9",
+                "Praxis", Arrays.asList("Text"), null, Arrays.asList("Technologien und Sensorik"),
+                Arrays.<String>asList());
+        assertEquals("Sensorik der Westen und Technologien", kept.getTitle());
+        assertTrue(com.aresstack.askai.research.outline.OutlineChapter.repeatsChapterTitle(
+                "Technologien und Sensoren", "Wearables: Technologien, Sensoren und Einsatzfelder"));
+    }
+
     @Test
     public void regeneratingASubClusterChapterWithFourSectionsChangesOnlyThatChapter() {
         Outline stored = stored();

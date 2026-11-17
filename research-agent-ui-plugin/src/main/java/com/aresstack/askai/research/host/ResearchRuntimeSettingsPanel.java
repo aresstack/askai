@@ -51,6 +51,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerProseMaxPromotion = ComicControls.textField(4);
     private final JTextField writerProseMaxCapitals = ComicControls.textField(4);
     private final JTextField writerProseMaxLinks = ComicControls.textField(4);
+    private final JTextField writerProseMaxNotices = ComicControls.textField(4);
     private final JTextField writerCarryMinWordLength = ComicControls.textField(4);
     private final JTextField writerCarryStemLength = ComicControls.textField(4);
     private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
@@ -242,6 +243,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Page prose <", writerProseCaptionPageShare)));
         writer.row("Advertising", group(labelled("Signals ≤", writerProseMaxPromotion),
                 labelled("Capitals ≤", writerProseMaxCapitals), labelled("Links/word ≤", writerProseMaxLinks)));
+        writer.row("Site notices", labelled("Notices ≤", writerProseMaxNotices));
         writer.row("Evidence relevance", group(labelled("Similarity ≥", writerMinBriefSimilarity),
                 labelled("Below best ≤", writerBriefSimilarityMargin)));
         writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
@@ -644,6 +646,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_LINK_DENSITY,
                 "Evidence pack and topic analysis: a passage with more links per word (0..1) is a link list; "
                         + "1 = off.");
+        bindNonNegativeLimit(writerProseMaxNotices, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_NOTICES,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_SITE_NOTICES,
+                "Evidence pack and topic analysis: a passage with more cookie banners, FAQ headers or \"was this "
+                        + "helpful\" notices than this is site furniture; a cookie banner has one, so 0 drops it. "
+                        + "Raise it to turn the rule off.");
         bindLimit(writerWordsPerCall, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
                 ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL,
                 "Section writer: words one call aims for; a section with a larger word target is split by its key "

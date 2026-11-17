@@ -708,12 +708,27 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                     }
                 }
             }
+            // Title kinship: live retest of #243 folded "Strafbarkeit bei Gefährdung" into "Datenschutzrechtliche
+            // Grundlagen" although "Arbeitsschutzgesetz und Strafbarkeit" stood in the same chapter.
+            score = Math.max(score, titleKinship(sections.get(index).getTitle(), sections.get(j).getTitle()));
             if (score > bestScore) {
                 best = j;
                 bestScore = score;
             }
         }
         return best;
+    }
+
+    /** Share of the shorter title's stems the two titles share (0 when one has none). */
+    static double titleKinship(String a, String b) {
+        Set<String> left = com.aresstack.askai.research.outline.OutlineTitles.stems(a);
+        Set<String> right = com.aresstack.askai.research.outline.OutlineTitles.stems(b);
+        if (left.isEmpty() || right.isEmpty()) {
+            return 0;
+        }
+        Set<String> shared = new LinkedHashSet<String>(left);
+        shared.retainAll(right);
+        return (double) shared.size() / Math.min(left.size(), right.size());
     }
 
     /**
