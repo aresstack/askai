@@ -27,4 +27,16 @@ public class EvidenceAssignmentsYieldTest {
         assertEquals(1100, EvidenceAssignments.wordTarget(1100, 10, 0));
         assertEquals(0, EvidenceAssignments.wordTarget(0, 10, 40));
     }
+
+    @Test
+    public void bookReportMeasuresByTheWritersTargetWhenTheRevisionHasOne() {
+        com.aresstack.askai.research.manuscript.SectionRevision written =
+                com.aresstack.askai.research.manuscript.SectionRevision.builder().text("x").wordTarget(960)
+                        .build(1, 1L);
+        assertEquals(960, written.wordTarget(1100));
+        assertEquals(960, written.toBuilder().build(2, 2L).getWordTarget());
+        com.aresstack.askai.research.manuscript.SectionRevision user =
+                com.aresstack.askai.research.manuscript.SectionRevision.builder().text("x").build(1, 1L);
+        assertEquals(1100, user.wordTarget(1100));
+    }
 }

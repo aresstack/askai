@@ -32,6 +32,7 @@ public final class SectionRevision {
     private final int restoredFrom;
     private final long createdAt;
     private final long evidenceAt;
+    private final int wordTarget;
 
     private SectionRevision(Builder b, int number, long createdAt) {
         this.number = number;
@@ -49,6 +50,7 @@ public final class SectionRevision {
         this.restoredFrom = b.restoredFrom;
         this.createdAt = createdAt;
         this.evidenceAt = b.evidenceAt > 0 ? b.evidenceAt : createdAt;
+        this.wordTarget = Math.max(0, b.wordTarget);
         Set<String> markers = new HashSet<String>();
         for (ManuscriptCitation citation : citations) {
             if (citation == null) {
@@ -72,6 +74,7 @@ public final class SectionRevision {
                 .chapterFingerprint(chapterFingerprint);
         b.restoredFrom = restoredFrom;
         b.evidenceAt = evidenceAt;
+        b.wordTarget = wordTarget;
         return b;
     }
 
@@ -144,6 +147,19 @@ public final class SectionRevision {
         return evidenceAt;
     }
 
+    /**
+     * The word target the writer wrote this text to (live run 5: the target follows the actual evidence pack);
+     * 0 when the text was not written to a target of its own (user text, older revisions).
+     */
+    public int getWordTarget() {
+        return wordTarget;
+    }
+
+    /** The target the book report measures this text by: the writer's, else the outline's. */
+    public int wordTarget(int outlineTarget) {
+        return wordTarget > 0 ? wordTarget : outlineTarget;
+    }
+
     /** SHA-256 of the text, for the manuscript pin. */
     public String textHash() {
         return ManuscriptCitation.sha256(text);
@@ -164,6 +180,7 @@ public final class SectionRevision {
         private String chapterFingerprint = "";
         private int restoredFrom;
         private long evidenceAt;
+        private int wordTarget;
 
         private Builder() {
         }
@@ -245,6 +262,12 @@ public final class SectionRevision {
         /** When the evidence of the text was taken (before the writer's model call); 0 = the creation time. */
         public Builder evidenceAt(long value) {
             evidenceAt = value;
+            return this;
+        }
+
+        /** The word target the writer wrote to (0 = none of its own). */
+        public Builder wordTarget(int value) {
+            wordTarget = value;
             return this;
         }
 
