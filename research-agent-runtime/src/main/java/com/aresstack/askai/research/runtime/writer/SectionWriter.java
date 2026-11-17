@@ -202,6 +202,7 @@ public final class SectionWriter {
                 }
             }
         }
+        checked = topUp(a, checked, written, book, calls, model);
         for (String marker : checked.result.getStrippedMarkers()) {
             log.accept("section " + a.getSectionId() + ": stripped unknown marker " + marker + " (k = "
                     + a.getPassages().size() + ")");
@@ -217,6 +218,68 @@ public final class SectionWriter {
         return new SectionDraft(true, "", checked.result.text(), citations, checked.flags(),
                 checked.result.getGaps(), checked.result.getStrippedMarkers(), model[0], hash, calls[0],
                 checked.result.wordCount());
+    }
+
+    /**
+     * Top-ups (live run 5: 256 of 367 words per call): while the checked answer keeps fewer words than the share of
+     * the part's target ({@link TopUpCriteria}) and passages of the part are uncited, at most the set number of
+     * further calls continue it from what is written. Each joined text is checked again like the first answer; a
+     * top-up that adds no words without an error is dropped and ends the top-ups. Sentence tags (SUI-1) stay without
+     * top-up, because the written text already carries numbered markers.
+     */
+    private Checked topUp(SectionAssignment a, Checked checked, java.util.Set<String> written,
+                          RepeatCheck.Memory book, int[] calls, String[] model) {
+        TopUpCriteria criteria = a.getTopUp();
+        if (a.getCitationFormat() == CitationFormat.SENTENCE_TAGS) {
+            return checked;
+        }
+        int target = a.getWordsPerCall();
+        int minWords = criteria.minWords(target);
+        for (int round = 0; round < criteria.getMaxCalls(); round++) {
+            int have = checked.result.wordCount();
+            if (have >= minWords) {
+                break;
+            }
+            List<Integer> uncited = new ArrayList<Integer>();
+            Set<Integer> cited = checked.result.citedNumbers();
+            for (int n = 1; n <= a.getPassages().size(); n++) {
+                if (!cited.contains(n)) {
+                    uncited.add(n);
+                }
+            }
+            if (uncited.isEmpty()) {
+                break;
+            }
+            String text = checked.result.text();
+            log.accept("section " + a.getSectionId() + ": top-up " + (round + 1) + " for " + (target - have)
+                    + " missing words (" + have + " of " + target + "), " + uncited.size() + " uncited passages");
+            MainModelChatResult more = chat.complete(SectionWriterPrompt.topUp(a, text, uncited, target - have),
+                    TEMPERATURE, a.getAnswerTokens());
+            calls[0]++;
+            if (!more.isOk()) {
+                break;
+            }
+            remember(more, model);
+            String rest = more.getText() == null ? "" : more.getText();
+            if (more.isCutOff()) {
+                rest = upToLastFullSentence(rest);
+            }
+            StringBuilder joined = new StringBuilder(join(text, rest));
+            for (String gap : checked.result.getGaps()) {
+                joined.append("\nGAP: ").append(gap);
+            }
+            Checked again = check(joined.toString(), a, written, book);
+            int before = supportedWords(checked.result, checked.repairable());
+            int after = supportedWords(again.result, again.repairable());
+            if (after <= before) {
+                log.accept("section " + a.getSectionId() + ": top-up dropped (" + after + " words without an error, "
+                        + "before " + before + ")");
+                break;
+            }
+            log.accept("section " + a.getSectionId() + ": topped up to " + again.result.wordCount() + " words");
+            checked = again;
+        }
+        return checked;
     }
 
     private String lastFailure = "";

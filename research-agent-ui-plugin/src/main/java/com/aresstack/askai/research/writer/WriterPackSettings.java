@@ -78,6 +78,20 @@ public final class WriterPackSettings {
         return new WriterPackSettings(count, passageTokens, prose, passagesPerSource, relevance);
     }
 
+    /**
+     * The same pack with {@code perSource} passages per source: a section written in several parts gets this cap for
+     * each part, like the passage count (live run 5: 24 passages for three parts, but still two per source).
+     */
+    public WriterPackSettings withPassagesPerSource(int perSource) {
+        return new WriterPackSettings(passageCount, passageTokens, prose, perSource, relevance);
+    }
+
+    /** The same pack with count and per-source cap both multiplied by {@code parts} (at least 1). */
+    public WriterPackSettings forParts(int parts) {
+        int n = Math.max(1, parts);
+        return new WriterPackSettings(passageCount * n, passageTokens, prose, passagesPerSource * n, relevance);
+    }
+
     /** The host preset for a writer model id. */
     public static WriterPackSettings presetFor(String modelId) {
         String m = modelId == null ? "" : modelId.trim().toLowerCase(Locale.ROOT);

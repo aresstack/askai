@@ -82,11 +82,39 @@ public final class SectionWriterPrompt {
      * rewrite's continuation leaves out the old text of the part; the comment stays.
      */
     public static List<ChatMessage> continuation(SectionAssignment a, String cutAnswer) {
-        List<ChatMessage> messages = base(a, false);
-        messages.add(ChatMessage.assistant(cutAnswer));
-        messages.add(ChatMessage.user("Your answer was cut off. Continue directly after your last sentence, in "
+        return continuation(a, cutAnswer, "Your answer was cut off. Continue directly after your last sentence, in "
                 + a.getBookLanguage() + ". Do not repeat any sentence you already wrote. Keep citing passages "
-                + "as " + citationExample(a) + " and end with the GAP: lines, if any."));
+                + "as " + citationExample(a) + " and end with the GAP: lines, if any.");
+    }
+
+    /**
+     * A top-up (live run 5): the continuation of an answer that stayed below the part's word target while passages
+     * of its pack are uncited. The text written so far is the assistant turn ("already written"); the instruction
+     * names the missing words and the uncited passages and forbids repeating what is written. The prose rules and
+     * the citation check of the first call apply unchanged.
+     *
+     * @param written      the checked text of the part so far
+     * @param uncited      the numbers of the part's passages the text does not cite yet
+     * @param missingWords words still missing to the part's target
+     */
+    public static List<ChatMessage> topUp(SectionAssignment a, String written, List<Integer> uncited,
+                                          int missingWords) {
+        StringBuilder numbers = new StringBuilder();
+        for (Integer n : uncited) {
+            numbers.append(numbers.length() == 0 ? "" : ", ").append('[').append(n).append(']');
+        }
+        return continuation(a, written, "Your answer above is already written and stays as it is; it has about "
+                + Math.max(0, missingWords) + " words fewer than the target. Continue after its last sentence, in "
+                + a.getBookLanguage() + ", with about " + Math.max(0, missingWords) + " more words drawn from the "
+                + "passages you have not cited yet: " + numbers + ". Do not repeat or rephrase anything already "
+                + "written, and add no summary of it. Keep citing passages as " + citationExample(a)
+                + " after every claim and end with the GAP: lines, if any.");
+    }
+
+    private static List<ChatMessage> continuation(SectionAssignment a, String written, String instruction) {
+        List<ChatMessage> messages = base(a, false);
+        messages.add(ChatMessage.assistant(written));
+        messages.add(ChatMessage.user(instruction));
         return messages;
     }
 
