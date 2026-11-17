@@ -738,6 +738,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return;
         }
         disposed = true;
+        java.util.Timer progressTimer = planProgressTimer;
+        if (progressTimer != null) {
+            progressTimer.cancel();
+        }
         com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
         if (runner != null) {
             runner.shutdown();
@@ -1911,6 +1915,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     public void changed() {
                         uiExecutor.execute(new Runnable() {
                             public void run() {
+                                refreshPlanProgress();
                                 fireStateChanged();
                             }
                         });
@@ -1927,6 +1932,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         releaseSearchPlanJob();
                         uiExecutor.execute(new Runnable() {
                             public void run() {
+                                finishPlanProgress(outcome);
                                 if (sink != null) {
                                     String id = "search-plan-outcome-" + System.currentTimeMillis();
                                     sink.appendInfoMessage(id, outcome.text());
@@ -4209,10 +4215,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 return;
             }
             if ("team_query".equals(event.getTitle())) {
+                String rejected = event.getPublicMessage() == null ? "" : event.getPublicMessage().trim();
+                notePlanActivity(rejected.isEmpty()
+                        ? "Worker suggests search: " + event.getText()
+                        : "Dropped search \"" + event.getText() + "\": " + rejected);
                 planQueue.onTeamQuery(event.getTechnicalDetail(), event.getText(), event.getPublicMessage());
                 return;
             }
-            // Plan PR 14: a planned query posts no chat line; the plan checklist shows its status.
+            // Plan PR 14: a planned query posts no chat line of its own; its lifecycle feeds the ONE progress
+            // bubble of the plan instead (live run 5: the chat showed nothing for minutes).
+            notePlanActivity(planActivityLine(event));
             planQueue.onSearchEvent(event.getTechnicalDetail(), event.getTitle(), planEventDetail(event),
                     event.getPublicMessage().trim().endsWith(" keywords"));
             return;
@@ -8007,6 +8019,116 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             sink.startThinking(conceptToolBubbleId, conceptToolActivity.title(german));
         }
         sink.updateThinking(conceptToolBubbleId, conceptToolActivity.body(german));
+    }
+
+    // ------------------------------------------------------------------ search plan progress bubble
+    /** The open progress bubble of the running search plan ({@code null} while none is shown). */
+    private String planProgressBubbleId;
+    private final java.util.concurrent.atomic.AtomicLong planProgressSequence =
+            new java.util.concurrent.atomic.AtomicLong();
+    /** The latest activity lines of the planned searches and the team, oldest first (bounded by a setting). */
+    private final java.util.ArrayDeque<String> planActivity = new java.util.ArrayDeque<String>();
+    private long planProgressShownAt;
+    private boolean planProgressFlushPending;
+    private java.util.Timer planProgressTimer;
+
+    /** The visible line of a planned query's lifecycle event ("" for none). */
+    static String planActivityLine(ResearchBackendEvent event) {
+        String kind = event.getTitle() == null ? "" : event.getTitle();
+        String text = planEventDetail(event);
+        text = text == null ? "" : text.replaceAll("\\s+", " ").trim();
+        if (text.isEmpty()) {
+            return "";
+        }
+        if ("failed".equals(kind)) {
+            return "Search failed: " + text;
+        }
+        if (com.aresstack.askai.research.plan.SearchPlanQueue.TEAM_NOTE_KIND.equals(kind)) {
+            return "Worker: " + text;
+        }
+        return text;
+    }
+
+    /** Remembers one activity line and refreshes the bubble. */
+    private void notePlanActivity(String line) {
+        if (line != null && !line.trim().isEmpty()) {
+            String clean = line.replaceAll("\\s+", " ").trim();
+            if (!clean.equals(planActivity.peekLast())) {
+                planActivity.addLast(clean);
+            }
+            int keep = com.aresstack.askai.research.host.ResearchRuntimeSettings
+                    .loadProgressActivityLines(hostStateStore);
+            while (planActivity.size() > keep) {
+                planActivity.removeFirst();
+            }
+        }
+        refreshPlanProgress();
+    }
+
+    /**
+     * UI thread: opens or updates the ONE thought bubble of the running plan, at most once per configured refresh
+     * interval; a change inside the interval is shown when it ends, never dropped.
+     */
+    private void refreshPlanProgress() {
+        com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
+        if (sink == null || planQueue == null || !planQueue.isRunning()) {
+            return;
+        }
+        long interval = com.aresstack.askai.research.host.ResearchRuntimeSettings
+                .loadProgressRefreshMillis(hostStateStore);
+        long now = System.currentTimeMillis();
+        if (planProgressBubbleId != null && now - planProgressShownAt < interval) {
+            schedulePlanProgressFlush(interval - (now - planProgressShownAt));
+            return;
+        }
+        com.aresstack.askai.research.plan.SearchPlanProgress progress =
+                planQueue.progress(new java.util.ArrayList<String>(planActivity));
+        if (planProgressBubbleId == null) {
+            planProgressBubbleId = "search-plan-progress-" + planProgressSequence.incrementAndGet();
+            sink.startThinking(planProgressBubbleId, progress.title());
+        }
+        sink.updateThinking(planProgressBubbleId, progress.title() + "\n" + progress.body());
+        planProgressShownAt = now;
+    }
+
+    private void schedulePlanProgressFlush(long delayMillis) {
+        if (planProgressFlushPending) {
+            return;
+        }
+        planProgressFlushPending = true;
+        if (planProgressTimer == null) {
+            planProgressTimer = new java.util.Timer("search-plan-progress", true);
+        }
+        planProgressTimer.schedule(new java.util.TimerTask() {
+            public void run() {
+                uiExecutor.execute(new Runnable() {
+                    public void run() {
+                        planProgressFlushPending = false;
+                        refreshPlanProgress();
+                    }
+                });
+            }
+        }, Math.max(1L, delayMillis));
+    }
+
+    /** UI thread: closes the plan's bubble with a short summary of the ended plan. */
+    private void finishPlanProgress(com.aresstack.askai.research.plan.SearchPlanQueue.Outcome outcome) {
+        if (planProgressBubbleId != null && sink != null) {
+            sink.finishThinking(planProgressBubbleId, planProgressSummary(outcome));
+        }
+        planProgressBubbleId = null;
+        planActivity.clear();
+    }
+
+    /** The bubble's closing line, e.g. "12 queries · 17 sources from 9 domains · 2 cycles". */
+    static String planProgressSummary(com.aresstack.askai.research.plan.SearchPlanQueue.Outcome outcome) {
+        if (outcome == null) {
+            return "";
+        }
+        return outcome.getQueriesRun() + (outcome.getQueriesRun() == 1 ? " query" : " queries")
+                + " · " + outcome.getSources() + (outcome.getSources() == 1 ? " source" : " sources")
+                + " from " + outcome.getDomains() + (outcome.getDomains() == 1 ? " domain" : " domains")
+                + " · " + outcome.getCycles() + (outcome.getCycles() == 1 ? " cycle" : " cycles");
     }
 
     /** Close the bubble with the confirmed results — never leave it thinking past the turn. */
