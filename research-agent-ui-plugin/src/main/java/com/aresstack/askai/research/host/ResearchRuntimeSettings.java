@@ -533,6 +533,21 @@ public final class ResearchRuntimeSettings {
      * How many page workers run at the same time, one tab each in the team's page browser. Default 4: the worker
      * browsers' default tabs per user context; the 2026-10-30 benchmark scales {@code gemma4:e2b} up to about 20.
      */
+    /** How often the chat's progress bubble of a running phase is refreshed at most (milliseconds). */
+    public static final String KEY_PROGRESS_REFRESH_MILLIS = "research.progress.refreshMillis";
+    public static final int DEFAULT_PROGRESS_REFRESH_MILLIS = 1000;
+    /** How many of the latest team activity lines the chat's progress bubble shows. */
+    public static final String KEY_PROGRESS_ACTIVITY_LINES = "research.progress.activityLines";
+    public static final int DEFAULT_PROGRESS_ACTIVITY_LINES = 6;
+
+    public static int loadProgressRefreshMillis(WorkspaceStateStore store) {
+        return loadPositiveInt(store, KEY_PROGRESS_REFRESH_MILLIS, DEFAULT_PROGRESS_REFRESH_MILLIS);
+    }
+
+    public static int loadProgressActivityLines(WorkspaceStateStore store) {
+        return loadNonNegativeInt(store, KEY_PROGRESS_ACTIVITY_LINES, DEFAULT_PROGRESS_ACTIVITY_LINES);
+    }
+
     public static final String KEY_TEAM_WORKERS = "research.team.workers";
     public static final int DEFAULT_TEAM_WORKERS = 4;
 

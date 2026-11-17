@@ -738,6 +738,9 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             return;
         }
         disposed = true;
+        planProgress.close();
+        outlineProgress.close();
+        writingProgress.close();
         com.aresstack.askai.research.drafting.WritingJobRunner runner = writingRunner;
         if (runner != null) {
             runner.shutdown();
@@ -1911,6 +1914,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     public void changed() {
                         uiExecutor.execute(new Runnable() {
                             public void run() {
+                                refreshPlanProgress();
                                 fireStateChanged();
                             }
                         });
@@ -1948,6 +1952,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         releaseSearchPlanJob();
                         uiExecutor.execute(new Runnable() {
                             public void run() {
+                                finishPlanProgress(outcome);
                                 if (sink != null) {
                                     String id = "search-plan-outcome-" + System.currentTimeMillis();
                                     sink.appendInfoMessage(id, outcome.text());
@@ -2657,6 +2662,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         }
                     },
                     resources.outlineRun(), outlineGenerationExecutor);
+            final com.aresstack.askai.research.host.OutlineClusteringRun clustering = resources.outlineRun();
+            clustering.addListener(new Runnable() {
+                public void run() {
+                    uiExecutor.execute(new Runnable() {
+                        public void run() {
+                            showOutlineProgress(clustering.status());
+                        }
+                    });
+                }
+            });
             outlineGeneration.setEnrichment(new com.aresstack.askai.research.host.OutlineGeneration.Enrichment() {
                 public String refusal() {
                     // Issue #152: a mis-declared label/brief role must refuse the start, not fail in the
@@ -2987,6 +3002,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                 technicalLog("write_sections -> " + text);
                                 uiExecutor.execute(new Runnable() {
                                     public void run() {
+                                        writingProgress.note(text);
+                                        writingProgress.refresh(WRITING_PROGRESS_TEXT);
                                         fireStateChanged();
                                     }
                                 });
@@ -3000,6 +3017,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                                 final String gapLine = researchWriterGaps(outcome);
                                 uiExecutor.execute(new Runnable() {
                                     public void run() {
+                                        writingProgress.finish(firstLine(outcome.text()));
                                         if (sink != null) {
                                             String id = "writing-outcome-" + System.currentTimeMillis();
                                             sink.appendInfoMessage(id, outcome.text()
@@ -4236,10 +4254,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 return;
             }
             if ("team_query".equals(event.getTitle())) {
+                String rejected = event.getPublicMessage() == null ? "" : event.getPublicMessage().trim();
+                notePlanActivity(rejected.isEmpty()
+                        ? "Worker suggests search: " + event.getText()
+                        : "Dropped search \"" + event.getText() + "\": " + rejected);
                 planQueue.onTeamQuery(event.getTechnicalDetail(), event.getText(), event.getPublicMessage());
                 return;
             }
-            // Plan PR 14: a planned query posts no chat line; the plan checklist shows its status.
+            // Plan PR 14: a planned query posts no chat line of its own; its lifecycle feeds the ONE progress
+            // bubble of the plan instead (live run 5: the chat showed nothing for minutes).
+            notePlanActivity(planActivityLine(event));
             planQueue.onSearchEvent(event.getTechnicalDetail(), event.getTitle(), planEventDetail(event),
                     event.getPublicMessage().trim().endsWith(" keywords"));
             return;
@@ -8099,6 +8123,126 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             sink.startThinking(conceptToolBubbleId, conceptToolActivity.title(german));
         }
         sink.updateThinking(conceptToolBubbleId, conceptToolActivity.body(german));
+    }
+
+    // ------------------------------------------------------------------ search plan progress bubble
+    /** The ONE progress bubble of each long phase job: search plan, outline clustering, section writer. */
+    private final PhaseProgressBubble planProgress = progressBubble("search-plan-progress-");
+    private final PhaseProgressBubble outlineProgress = progressBubble("outline-progress-");
+    private final PhaseProgressBubble writingProgress = progressBubble("writing-progress-");
+
+    private PhaseProgressBubble progressBubble(String idPrefix) {
+        return new PhaseProgressBubble(idPrefix,
+                new java.util.function.Supplier<AgentConversationSink>() {
+                    public AgentConversationSink get() {
+                        return sink;
+                    }
+                },
+                new java.util.concurrent.Executor() {
+                    public void execute(Runnable command) {
+                        uiExecutor.execute(command);
+                    }
+                },
+                new java.util.function.IntSupplier() {
+                    public int getAsInt() {
+                        return com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                .loadProgressRefreshMillis(hostStateStore);
+                    }
+                },
+                new java.util.function.IntSupplier() {
+                    public int getAsInt() {
+                        return com.aresstack.askai.research.host.ResearchRuntimeSettings
+                                .loadProgressActivityLines(hostStateStore);
+                    }
+                });
+    }
+
+    /** The section writer's bubble shows its own progress lines; the title stays fixed. */
+    private static final java.util.function.Supplier<PhaseProgressBubble.Text> WRITING_PROGRESS_TEXT =
+            new java.util.function.Supplier<PhaseProgressBubble.Text>() {
+                public PhaseProgressBubble.Text get() {
+                    return new PhaseProgressBubble.Text("Writing sections …", "");
+                }
+            };
+
+    /** UI thread: mirrors the outline clustering run onto its bubble; a run that ended closes it. */
+    private void showOutlineProgress(
+            final com.aresstack.askai.research.host.OutlineClusteringRun.Status status) {
+        if (status == null) {
+            return;
+        }
+        if (status.state == com.aresstack.askai.research.host.OutlineClusteringRun.State.RUNNING) {
+            outlineProgress.refresh(new java.util.function.Supplier<PhaseProgressBubble.Text>() {
+                public PhaseProgressBubble.Text get() {
+                    return new PhaseProgressBubble.Text("Building the outline …", status.describe());
+                }
+            });
+        } else if (outlineProgress.isOpen()) {
+            outlineProgress.finish(status.describe());
+        }
+    }
+
+    /** The first line of a multi-line text ("" for none). */
+    static String firstLine(String text) {
+        if (text == null) {
+            return "";
+        }
+        int newline = text.indexOf('\n');
+        return (newline < 0 ? text : text.substring(0, newline)).trim();
+    }
+
+    /** The visible line of a planned query's lifecycle event ("" for none). */
+    static String planActivityLine(ResearchBackendEvent event) {
+        String kind = event.getTitle() == null ? "" : event.getTitle();
+        String text = planEventDetail(event);
+        text = text == null ? "" : text.replaceAll("\\s+", " ").trim();
+        if (text.isEmpty()) {
+            return "";
+        }
+        if ("failed".equals(kind)) {
+            return "Search failed: " + text;
+        }
+        if (com.aresstack.askai.research.plan.SearchPlanQueue.TEAM_NOTE_KIND.equals(kind)) {
+            return "Worker: " + text;
+        }
+        return text;
+    }
+
+    /** Remembers one activity line and refreshes the bubble. */
+    private void notePlanActivity(String line) {
+        planProgress.note(line);
+        refreshPlanProgress();
+    }
+
+    /** UI thread: opens or updates the plan's bubble while the plan runs. */
+    private void refreshPlanProgress() {
+        final com.aresstack.askai.research.plan.SearchPlanQueue planQueue = searchPlanQueue;
+        if (planQueue == null || !planQueue.isRunning()) {
+            return;
+        }
+        planProgress.refresh(new java.util.function.Supplier<PhaseProgressBubble.Text>() {
+            public PhaseProgressBubble.Text get() {
+                com.aresstack.askai.research.plan.SearchPlanProgress progress = planQueue.progress(
+                        java.util.Collections.<String>emptyList());
+                return new PhaseProgressBubble.Text(progress.title(), progress.body());
+            }
+        });
+    }
+
+    /** UI thread: closes the plan's bubble with a short summary of the ended plan. */
+    private void finishPlanProgress(com.aresstack.askai.research.plan.SearchPlanQueue.Outcome outcome) {
+        planProgress.finish(planProgressSummary(outcome));
+    }
+
+    /** The bubble's closing line, e.g. "12 queries · 17 sources from 9 domains · 2 cycles". */
+    static String planProgressSummary(com.aresstack.askai.research.plan.SearchPlanQueue.Outcome outcome) {
+        if (outcome == null) {
+            return "";
+        }
+        return outcome.getQueriesRun() + (outcome.getQueriesRun() == 1 ? " query" : " queries")
+                + " · " + outcome.getSources() + (outcome.getSources() == 1 ? " source" : " sources")
+                + " from " + outcome.getDomains() + (outcome.getDomains() == 1 ? " domain" : " domains")
+                + " · " + outcome.getCycles() + (outcome.getCycles() == 1 ? " cycle" : " cycles");
     }
 
     /** Close the bubble with the confirmed results — never leave it thinking past the turn. */

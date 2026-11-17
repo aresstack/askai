@@ -53,6 +53,8 @@ public final class SearchPlanQueue {
     static final String WAITS_FOR_TAB = "Every tab of the research team was taken: runs when a search ends";
     /** The sub-kind of a page worker's message to the orchestrator (plan T4). */
     static final String TEAM_NOTE = "team_note";
+    /** The event kind of a page worker's note to the orchestrator. */
+    public static final String TEAM_NOTE_KIND = TEAM_NOTE;
     /** The runtime's failure reason when the chat has no worker browser for the research team. */
     static final String NO_WORKER_BROWSER = "NO_WORKER_BROWSER";
     /**
@@ -704,6 +706,25 @@ public final class SearchPlanQueue {
     /** How many planned queries run right now (the research team runs several at once). */
     public synchronized int runningEntryCount() {
         return runningEntries.size();
+    }
+
+    /** The live progress of the plan for the chat's thought bubble; {@code activity} are the team's latest lines. */
+    public SearchPlanProgress progress(List<String> activity) {
+        int open = 0;
+        boolean replan;
+        synchronized (this) {
+            for (Integer pages : openPages.values()) {
+                open += pages == null ? 0 : pages;
+            }
+            replan = replanning;
+        }
+        SearchPlanRecord record;
+        try {
+            record = store.loadRecord();
+        } catch (CorruptProjectFileException unreadable) {
+            record = null;
+        }
+        return SearchPlanProgress.of(record, store.loadEntries(), caps, open, replan, activity);
     }
 
     /** Whether the queue waits for the planner of the next research cycle. */
