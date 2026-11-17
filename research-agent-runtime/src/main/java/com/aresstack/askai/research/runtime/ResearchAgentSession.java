@@ -336,19 +336,13 @@ public final class ResearchAgentSession {
             // Fix the initial-search strategy for the whole session here (null → unchanged browser path).
             this.searchStrategy = buildSearchStrategy();
             if (this.searchStrategy == null) {
-                // Browser (SERP): the engines configured under Search → Engines. Google runs via Serp4J in
-                // AskAI's own search browser (askai #31); DuckDuckGo/Bing run in the research browser and are
-                // combined per run (BrowserEnginesSearchStrategy), because that path needs the run's browser.
-                this.browserEngineSelection = loadBrowserSearchSettings().navigation.engineSelection;
-                if (googleEnabled(browserEngineSelection)) {
-                    this.googleSearchStrategy = com.aresstack.askai.research.runtime.search
-                            .GoogleSearchBrowserStrategy.create(ensureSearchBrowser(), java.util.Locale.getDefault(),
-                                    environment.get("ASKAI_GOOGLE_SEARCH_URL"),
-                                    browserEngineSelection.resultPagesFor(com.aresstack.askai.browser.search.engine
-                                            .BrowserSearchEngineCatalog.GOOGLE),
-                                    browserEngineSelection.delayMillisFor(com.aresstack.askai.browser.search.engine
-                                            .BrowserSearchEngineCatalog.GOOGLE));
-                }
+                // Browser (SERP): Google runs via Serp4J in AskAI's own search browser (askai #31), built for the
+                // engine table each search reads (browserEngines), so a saved change needs no restart.
+                this.googleSearch = new com.aresstack.askai.research.runtime.search.GoogleSearchForEngineTable(
+                        (resultPages, delayMillis) -> com.aresstack.askai.research.runtime.search
+                                .GoogleSearchBrowserStrategy.create(ensureSearchBrowser(),
+                                        java.util.Locale.getDefault(), environment.get("ASKAI_GOOGLE_SEARCH_URL"),
+                                        resultPages, delayMillis));
             }
             // OPTIONAL model-backed SERP layout repair over the central main model (honest fallback else).
             this.inferencePort = buildInferencePort();
@@ -753,36 +747,23 @@ public final class ResearchAgentSession {
 
     /** User-facing REST provider name for the search progress ("via DataForSEO", no browser shown). */
     private String searchProviderLabel;
-    /** Browser (SERP) path only: the configured engines and, when Google is enabled, its search-browser strategy. */
-    private com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection browserEngineSelection;
-    private com.aresstack.askai.research.runtime.search.SearchStrategy googleSearchStrategy;
-
-    private static boolean googleEnabled(
-            com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection selection) {
-        if (selection == null) {
-            return false;
-        }
-        for (com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection.Entry entry
-                : selection.getEntries()) {
-            if (entry.isEnabled() && com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog
-                    .runsInSearchBrowser(entry.getEngineId())) {
-                return true;
-            }
-        }
-        return false;
-    }
+    /** Browser (SERP) path only: Google in the search browser for the engine table of each search, else null. */
+    private com.aresstack.askai.research.runtime.search.GoogleSearchForEngineTable googleSearch;
 
     /**
      * The Browser (SERP) search over {@code pageEngines} (the research browser's engine search): the priority groups
-     * of Search → Engines, with the configured "enough results".
+     * of Search → Engines, with the configured "enough results". Every search reads the engine table from the
+     * session's search profile, which the host rewrites on each save, so a changed table reaches the next search of a
+     * running session. Google runs in the search browser; DuckDuckGo, Bing and the other engines run in the research
+     * browser and are combined per run, because that path needs the run's browser.
      */
     private com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy browserEngines(
             com.aresstack.askai.research.runtime.search.SearchStrategy pageEngines) {
         com.aresstack.askai.browser.search.LegacySearchNavigationSettings navigation =
                 loadBrowserSearchSettings().navigation;
         return new com.aresstack.askai.research.runtime.search.BrowserEnginesSearchStrategy(
-                browserEngineSelection != null ? browserEngineSelection : navigation.engineSelection,
-                navigation.minimumUsableResults, googleSearchStrategy, pageEngines);
+                navigation.engineSelection, navigation.minimumUsableResults,
+                googleSearch == null ? null : googleSearch.forSelection(navigation.engineSelection), pageEngines);
     }
 
     /** The search progress label of the Browser (SERP) search: "Google" when it asks Google only, else none. */

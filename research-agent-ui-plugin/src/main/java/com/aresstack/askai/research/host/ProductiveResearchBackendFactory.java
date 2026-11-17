@@ -329,10 +329,10 @@ public final class ProductiveResearchBackendFactory {
             throw new IOException("Research runtime configuration is not usable: " + problems);
         }
 
-        // A2c snapshot semantics: global settings are only the TEMPLATE for NEW sessions. A stored
-        // profile (session resume) is reused EXACTLY — never silently replaced by current globals;
-        // an unreadable/corrupt profile is a clear recovery error. A fresh session freezes the
-        // validated globals into one immutable snapshot persisted with the session.
+        // A2c snapshot semantics: a session searches with ONE immutable snapshot of the validated global
+        // settings, persisted with the session. A stored profile (session resume) is reused exactly while
+        // its revision is the saved one; a save rewrites the profile of every RUNNING session
+        // (RunningSearchProfiles), so its next search uses the saved settings without a restart.
         File searchConfigDir = new File(projectDir, "browser-search");
         if (!searchConfigDir.isDirectory() && !searchConfigDir.mkdirs()) {
             throw new IOException("Cannot create " + searchConfigDir);
@@ -369,34 +369,12 @@ public final class ProductiveResearchBackendFactory {
             profile = null;
         }
         if (profile == null) {
-            com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.Decoded decoded =
-                    com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec
-                            .fromValues(browserSearchValues);
-            if (!decoded.violations.isEmpty()) {
-                throw new IOException("Legacy browser search settings are invalid:\n"
-                        + new com.aresstack.askai.browser.search.SettingsValidationResult(
-                                decoded.violations).describe());
-            }
-            com.aresstack.askai.browser.search.SettingsValidationResult validation =
-                    new com.aresstack.askai.browser.search
-                            .DefaultLegacyBrowserSearchSettingsValidator().validate(decoded.settings);
-            if (!validation.isValid()) {
-                throw new IOException("Legacy browser search settings failed validation:\n"
-                        + validation.describe());
-            }
-            profile = com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot.create(
-                    sessionKey, browserSearchRevision, System.currentTimeMillis(), decoded.settings);
+            profile = buildSearchProfile(sessionKey, browserSearchRevision, browserSearchValues);
             writeUtf8(profileFile, profile.toJson());
         }
         // The browser-near SUBSET for the browser runtime is regenerated from the SNAPSHOT on every start
         // (AI/prompt/reranker settings never enter the browser process).
-        writeUtf8(browserConfigFile, new com.aresstack.askai.browser.search
-                .LegacyBrowserSearchConfigDocument(
-                        profile.schemaVersion, profile.profileRevision, profile.settingsDigest,
-                        com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
-                                .sidecarSubset(com.aresstack.askai.browser.search
-                                        .LegacyBrowserSearchSettingsCodec
-                                        .toValues(profile.settings))).toJson());
+        writeBrowserConfig(profile, browserConfigFile);
         File fullConfigFile = profileFile;
 
         // MANDATORY reranker: publish the per-session snapshot BEFORE any process is started. A missing
@@ -985,6 +963,10 @@ public final class ProductiveResearchBackendFactory {
                     return descriptor;
                 }
             });
+            // A later save of the search settings rewrites this session's profile, so its next search uses it;
+            // the resources leave again when they close.
+            RunningSearchProfiles.join(resources, sessionKey, profile.profileRevision, profileFile,
+                    browserConfigFile, resources::setSearchProfile);
             return resources;
         } catch (RuntimeException ex) {
             // The lazy browser runtime no longer starts a process here, so the only failures are endpoint
@@ -1369,13 +1351,58 @@ public final class ProductiveResearchBackendFactory {
         return Collections.unmodifiableList(config.validate());
     }
 
-    private static void writeUtf8(File file, String content) throws IOException {
-        java.io.OutputStream out = new java.io.FileOutputStream(file);
-        try {
-            out.write(content.getBytes("UTF-8"));
-        } finally {
-            out.close();
+    /**
+     * A session's search profile from the saved search settings: decoded and validated hard (an invalid set is never
+     * written, the reason is the exception's message), frozen with its settings revision.
+     */
+    static com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot buildSearchProfile(String sessionKey,
+            long revision, Map<String, String> values) throws IOException {
+        com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.Decoded decoded =
+                com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.fromValues(values);
+        if (!decoded.violations.isEmpty()) {
+            throw new IOException("Legacy browser search settings are invalid:\n"
+                    + new com.aresstack.askai.browser.search.SettingsValidationResult(
+                            decoded.violations).describe());
         }
+        com.aresstack.askai.browser.search.SettingsValidationResult validation =
+                new com.aresstack.askai.browser.search
+                        .DefaultLegacyBrowserSearchSettingsValidator().validate(decoded.settings);
+        if (!validation.isValid()) {
+            throw new IOException("Legacy browser search settings failed validation:\n"
+                    + validation.describe());
+        }
+        return com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot.create(
+                sessionKey, revision, System.currentTimeMillis(), decoded.settings);
+    }
+
+    /** The browser-near subset of {@code profile} for the browser runtime; AI, prompt and reranker settings stay out. */
+    static void writeBrowserConfig(com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot profile,
+            File browserConfigFile) throws IOException {
+        writeUtf8(browserConfigFile, new com.aresstack.askai.browser.search
+                .LegacyBrowserSearchConfigDocument(
+                        profile.schemaVersion, profile.profileRevision, profile.settingsDigest,
+                        com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
+                                .sidecarSubset(com.aresstack.askai.browser.search
+                                        .LegacyBrowserSearchSettingsCodec
+                                        .toValues(profile.settings))).toJson());
+    }
+
+    /**
+     * Rewrite a running session's search profile and browser config from the saved settings
+     * ({@link RunningSearchProfiles}). The agent reads the profile before every search, so the next search uses it.
+     */
+    static com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot rewriteSearchProfile(String sessionKey,
+            long revision, Map<String, String> values, File profileFile, File browserConfigFile) throws IOException {
+        com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot profile =
+                buildSearchProfile(sessionKey, revision, values);
+        writeUtf8(profileFile, profile.toJson());
+        writeBrowserConfig(profile, browserConfigFile);
+        return profile;
+    }
+
+    /** Temp file, then renamed over the target: a running agent reading the file sees the old or the new one whole. */
+    private static void writeUtf8(File file, String content) throws IOException {
+        com.aresstack.askai.research.transition.AtomicFiles.write(file, content);
     }
 
     private static String readUtf8(File file) throws IOException {
