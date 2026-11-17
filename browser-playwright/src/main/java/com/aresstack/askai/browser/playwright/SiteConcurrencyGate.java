@@ -18,8 +18,9 @@ import java.util.TreeMap;
  * {@code www.}; every search-engine operation shares the one key {@value #SEARCH_KEY}.
  *
  * <ul>
- *   <li>Each site has a number of permits (the pool setting, or an override of {@link SiteLeasePolicy}) and
- *       optionally a minimum spacing between two lease starts.</li>
+ *   <li>Each site has a number of permits (the pool setting, or an override of {@link SiteLeasePolicy}) and a
+ *       minimum spacing between two lease starts (the override's, else the policy's default spacing), so two
+ *       tabs never hit the same site at the same moment.</li>
  *   <li>Waiters are served in FIFO order per site; a wait is bounded by the caller's timeout and ends typed
  *       {@value #SITE_BUSY}.</li>
  *   <li>A lease past its hold deadline is expired. A waiter that waited longer than the wait deadline marks the
@@ -277,7 +278,10 @@ final class SiteConcurrencyGate {
 
     private long spacing(String key) {
         SiteLeasePolicy.SiteOverride override = SEARCH_KEY.equals(key) ? null : policy.overrideFor(key);
-        return override == null ? 0L : override.spacingMillis;
+        if (SEARCH_KEY.equals(key)) {
+            return 0L; // the search browser keeps the engines' own delay
+        }
+        return override == null ? policy.defaultSpacingMillis : override.spacingMillis;
     }
 
     private Site site(String key) {

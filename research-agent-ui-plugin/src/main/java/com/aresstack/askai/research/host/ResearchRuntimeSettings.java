@@ -297,6 +297,10 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_WORKER_PER_SITE = "research.browser.workers.maxConcurrentPerSite";
     public static final int DEFAULT_WORKER_PER_SITE =
             com.aresstack.askai.browser.playwright.WorkerBrowserLimits.DEFAULT_MAX_CONCURRENT_PER_SITE;
+    /** Minimum gap between two worker page loads on the same site, over all tabs and chats (seconds; 0 = none). */
+    public static final String KEY_WORKER_SITE_GAP_SECONDS = "research.browser.workers.sameSiteGapSeconds";
+    public static final int DEFAULT_WORKER_SITE_GAP_SECONDS = (int) (com.aresstack.askai.browser.playwright
+            .SiteLeasePolicy.DEFAULT_SITE_SPACING_MILLIS / 1000L);
     /** How long a worker waits for a free user context (seconds). */
     public static final String KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS = "research.browser.workers.acquireTimeoutSeconds";
     public static final int DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS =

@@ -17,6 +17,8 @@ public final class SiteLeasePolicy {
     public static final String DEFAULT_OVERRIDES = "researchgate.net=1@10s, sciencedirect.com=1@5s";
     public static final long DEFAULT_HOLD_DEADLINE_MILLIS = 90_000L;
     public static final long DEFAULT_WAIT_DEADLINE_MILLIS = 60_000L;
+    /** Minimum spacing between two lease starts on any site without an override (Settings: "Same site gap"). */
+    public static final long DEFAULT_SITE_SPACING_MILLIS = 2_000L;
 
     /** One override: permits and minimum spacing between two lease starts on that site. */
     public static final class SiteOverride {
@@ -43,8 +45,16 @@ public final class SiteLeasePolicy {
     public final long holdDeadlineMillis;
     public final long waitDeadlineMillis;
     public final List<SiteOverride> overrides;
+    /** Spacing between two lease starts on a site that has no override; 0 = none. */
+    public final long defaultSpacingMillis;
 
     public SiteLeasePolicy(long holdDeadlineMillis, long waitDeadlineMillis, List<SiteOverride> overrides) {
+        this(holdDeadlineMillis, waitDeadlineMillis, overrides, 0L);
+    }
+
+    public SiteLeasePolicy(long holdDeadlineMillis, long waitDeadlineMillis, List<SiteOverride> overrides,
+                           long defaultSpacingMillis) {
+        this.defaultSpacingMillis = Math.max(0L, defaultSpacingMillis);
         this.holdDeadlineMillis = Math.max(1L, holdDeadlineMillis);
         this.waitDeadlineMillis = Math.max(1L, waitDeadlineMillis);
         this.overrides = overrides == null ? Collections.<SiteOverride>emptyList()
@@ -53,7 +63,12 @@ public final class SiteLeasePolicy {
 
     public static SiteLeasePolicy defaults() {
         return new SiteLeasePolicy(DEFAULT_HOLD_DEADLINE_MILLIS, DEFAULT_WAIT_DEADLINE_MILLIS,
-                parseOverrides(DEFAULT_OVERRIDES));
+                parseOverrides(DEFAULT_OVERRIDES), DEFAULT_SITE_SPACING_MILLIS);
+    }
+
+    /** This policy with another spacing for sites without an override. */
+    public SiteLeasePolicy withDefaultSpacing(long millis) {
+        return new SiteLeasePolicy(holdDeadlineMillis, waitDeadlineMillis, overrides, millis);
     }
 
     /** The most specific override for a site key, or null. */
