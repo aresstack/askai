@@ -31,7 +31,9 @@ public class RegionalEnginesTest {
     @Test
     public void eachIsExperimentalUntilValidatedLive() {
         for (String id : IDS) {
-            assertEquals(id, SearchEngineImplementationStatus.EXPERIMENTAL, SearchEngineCatalog.byId(id).getStatus());
+            boolean validated = "yandex".equals(id) || "naver".equals(id); // live sweep 2026-11-17
+            assertEquals(id, validated ? SearchEngineImplementationStatus.SUPPORTED
+                    : SearchEngineImplementationStatus.EXPERIMENTAL, SearchEngineCatalog.byId(id).getStatus());
         }
         assertTrue("Baidu's note says how its opaque links resolve",
                 SearchEngineCatalog.byId("baidu").getStatusNote().contains("mu attribute"));

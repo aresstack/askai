@@ -82,8 +82,9 @@ public class CamoufoxEngineSearchLiveTest {
     @Test
     public void theExperimentalRunCoversEveryUnvalidatedDriverButNotGoogle() {
         List<String> ids = experimentalEnginesWithDriver();
-        org.junit.Assert.assertTrue(ids.toString(), ids.contains(BrowserSearchEngineCatalog.STARTPAGE));
-        org.junit.Assert.assertTrue(ids.toString(), ids.contains(BrowserSearchEngineCatalog.YAHOO));
+        org.junit.Assert.assertTrue(ids.toString(), ids.contains(BrowserSearchEngineCatalog.SEZNAM));
+        org.junit.Assert.assertTrue(ids.toString(), ids.contains(BrowserSearchEngineCatalog.YAHOO_JAPAN));
+        org.junit.Assert.assertFalse("validated live", ids.contains(BrowserSearchEngineCatalog.STARTPAGE));
         org.junit.Assert.assertFalse("Google is SUPPORTED and runs in the search browser",
                 ids.contains(BrowserSearchEngineCatalog.GOOGLE));
         org.junit.Assert.assertFalse(ids.contains(BrowserSearchEngineCatalog.DUCKDUCKGO));
