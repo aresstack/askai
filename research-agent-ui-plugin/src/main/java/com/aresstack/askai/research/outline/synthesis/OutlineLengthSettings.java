@@ -45,7 +45,8 @@ public final class OutlineLengthSettings {
      * duplicates, the share of the writer's repeat check (#221). Live retest of #240: two sections of one chapter were
      * both called "Kosten und Praxisbeispiele". 1 = only identical titles.
      */
-    public static final double DEFAULT_MAX_TITLE_OVERLAP = 0.75;
+    public static final double DEFAULT_MAX_TITLE_OVERLAP =
+            com.aresstack.askai.research.outline.OutlineTitles.DEFAULT_MAX_OVERLAP;
     /**
      * How many times an even share of the sections or of the distinct material one chapter may hold before the plan
      * counts as unbalanced (a blocking finding). With n chapters the limit is factor / n; live run 5 had one chapter

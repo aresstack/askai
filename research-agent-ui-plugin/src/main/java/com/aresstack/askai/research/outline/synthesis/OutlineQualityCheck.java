@@ -3,6 +3,7 @@ package com.aresstack.askai.research.outline.synthesis;
 import com.aresstack.askai.research.knowledge.topic.ConceptCoverage;
 import com.aresstack.askai.research.knowledge.topic.TopicAnalysis;
 import com.aresstack.askai.research.knowledge.topic.TopicRelation;
+import com.aresstack.askai.research.outline.OutlineTitles;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -547,36 +548,9 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         return plan.withChapters(chapters);
     }
 
-    /** Content words (and numbers: "Part 1" is no "Part 2") of a title, cut to a stem, for the near-duplicate test. */
-    static Set<String> titleStems(String title) {
-        Set<String> stems = new LinkedHashSet<String>();
-        for (String word : normal(title).split(" ")) {
-            if (word.length() >= TITLE_WORD_LETTERS || word.matches(".*\\d.*")) {
-                stems.add(word.length() > TITLE_STEM_LETTERS ? word.substring(0, TITLE_STEM_LETTERS) : word);
-            }
-        }
-        return stems;
-    }
-
-    /** Letters of a content word of a title and of its stem: the claim check's defaults. */
-    private static final int TITLE_WORD_LETTERS =
-            com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_WORD_LENGTH;
-    private static final int TITLE_STEM_LETTERS =
-            com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH;
-
-    /** Whether two titles are near duplicates: identical, or content words overlapping by the setting's share. */
+    /** Whether two titles are near duplicates at the setting's share ({@link OutlineTitles}). */
     boolean similarTitles(String a, String b) {
-        if (normal(a).equals(normal(b))) {
-            return true;
-        }
-        Set<String> left = titleStems(a);
-        Set<String> right = titleStems(b);
-        if (left.isEmpty() || right.isEmpty()) {
-            return false;
-        }
-        Set<String> shared = new LinkedHashSet<String>(left);
-        shared.retainAll(right);
-        return shared.size() >= length.getMaxTitleOverlap() * Math.min(left.size(), right.size());
+        return OutlineTitles.similar(a, b, length.getMaxTitleOverlap());
     }
 
     private void similarTitles(OutlinePlan plan, List<PlanFinding> warnings) {
@@ -676,7 +650,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                     if (distinct >= minimum) {
                         continue;
                     }
-                    int into = i > 0 ? i - 1 : i + 1;
+                    int into = foldTarget(sections, i, brief);
                     PlannedSection neighbour = sections.get(into);
                     List<String> keys = new ArrayList<String>(neighbour.getMaterialKeys());
                     for (String key : thin.getMaterialKeys()) {
@@ -695,6 +669,51 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             chapters.add(chapter.withSections(sections));
         }
         return plan.withChapters(chapters);
+    }
+
+    /**
+     * The section of {@code sections} that thin section {@code index} fits best: one holding material of the same
+     * topic, else the one holding the topic nearest to its topics (the analysis' centroid relations), else its
+     * previous (or, for the first, its next) neighbour. Live retest of #242: the positional neighbour put cost figures
+     * and a news teaser into an advertising section.
+     */
+    private static int foldTarget(List<PlannedSection> sections, int index, SynthesisBrief brief) {
+        Set<String> topics = new LinkedHashSet<String>();
+        for (String key : sections.get(index).getMaterialKeys()) {
+            topics.add(brief.topicKeyOf(key));
+        }
+        int best = index > 0 ? index - 1 : index + 1;
+        double bestScore = 0;
+        for (int j = 0; j < sections.size(); j++) {
+            if (j == index) {
+                continue;
+            }
+            double score = 0;
+            for (String key : sections.get(j).getMaterialKeys()) {
+                String other = brief.topicKeyOf(key);
+                if (topics.contains(other)) {
+                    score = Math.max(score, 2.0);
+                    continue;
+                }
+                SynthesisBrief.TopicEntry otherTopic = brief.topic(other);
+                for (String own : topics) {
+                    SynthesisBrief.TopicEntry topic = brief.topic(own);
+                    if (topic == null || otherTopic == null) {
+                        continue;
+                    }
+                    for (TopicRelation relation : topic.getProfile().getRelated()) {
+                        if (relation.getTopicId().equals(otherTopic.getProfile().getTopicId())) {
+                            score = Math.max(score, relation.getCentroidSimilarity());
+                        }
+                    }
+                }
+            }
+            if (score > bestScore) {
+                best = j;
+                bestScore = score;
+            }
+        }
+        return best;
     }
 
     /**
@@ -721,9 +740,11 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             // The code-made sections keep their proportional share of the limit, at least what the model's sections
             // leave free. Live retest of #240: 11 model sections left one slot, and 21 code sections (29 clusters,
             // 363 passages) were packed into one grab-bag section.
+            // Live retest of #242: the share alone gave 2 model + 23 code sections, one over the limit of 24; it now
+            // only fills up when the model's sections leave less than half of the limit.
             int share = (int) Math.ceil((double) limit * untitled.size() / chapter.getSections().size());
             List<PlannedSection> packed = FallbackOutlinePlan.packed(brief, untitled,
-                    Math.max(1, Math.max(limit - titled.size(), share)));
+                    Math.max(1, Math.max(limit - titled.size(), Math.min(share, limit / 2))));
             List<PlannedSection> sections = new ArrayList<PlannedSection>(titled);
             sections.addAll(packed);
             chapters.add(chapter.withSections(sections));

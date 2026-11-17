@@ -33,7 +33,10 @@ public final class OutlineChapter extends OutlineEntry {
     public static boolean repeatsChapterTitle(String sectionTitle, String chapterTitle) {
         String section = sectionTitle == null ? "" : sectionTitle.replaceAll("\\s+", " ").trim();
         String chapter = chapterTitle == null ? "" : chapterTitle.replaceAll("\\s+", " ").trim();
-        return !section.isEmpty() && section.equalsIgnoreCase(chapter);
+        // Word order does not make a new title (live retest of #242: "Grundlagen Wearables und IoT" in the chapter
+        // "Wearables und IoT Grundlagen").
+        return !section.isEmpty() && (section.equalsIgnoreCase(chapter) || (!OutlineTitles.stems(section).isEmpty()
+                && OutlineTitles.stems(section).equals(OutlineTitles.stems(chapter))));
     }
 
     public OutlineChapter withTitle(String newTitle) {

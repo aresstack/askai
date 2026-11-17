@@ -216,6 +216,23 @@ public class OutlineBriefWorkerTest {
                 .label(CONTEXT, "c9", "", Arrays.asList("Text"), null));
     }
 
+    /** Live retest of #242: the label call named two sections of one chapter "Technologien und Sensorik". */
+    @Test
+    public void aLabelNearlyRepeatingATitleOfTheBookIsRepaired() {
+        ScriptedChat labels = new ScriptedChat("labels",
+                "{\"title\":\"Sensorik und Technologien\",\"summary\":\"s\"}",
+                "{\"title\":\"Akkulaufzeit der Westen\",\"summary\":\"Wie lange Westen laufen.\"}");
+        OutlineBriefWorker worker = new OutlineBriefWorker(labels, new ScriptedChat("briefs"), null);
+
+        OutlineLabel label = worker.label(CONTEXT, "c9", "Praxis", Arrays.asList("Text"), null,
+                Arrays.asList("Technologien und Sensorik"));
+
+        assertEquals("Akkulaufzeit der Westen", label.getTitle());
+        assertEquals(2, labels.calls.size());
+        assertTrue(com.aresstack.askai.research.outline.OutlineChapter.repeatsChapterTitle(
+                "Grundlagen Wearables und IoT", "Wearables und IoT Grundlagen"));
+    }
+
     @Test
     public void regeneratingASubClusterChapterWithFourSectionsChangesOnlyThatChapter() {
         Outline stored = stored();
@@ -333,7 +350,9 @@ public class OutlineBriefWorkerTest {
                 new com.aresstack.askai.research.outline.OutlineCandidate("c7", "Förderung",
                         Arrays.asList("p30"), Arrays.asList("p30"), 2)));
         ScriptedChat labels = new ScriptedChat("labels");
-        labels.byPrompt = prompt -> "{\"title\":\"Benannt\",\"summary\":\"Kurz.\"}";
+        // Distinct titles: a label nearly repeating a title of the book is repaired.
+        final java.util.concurrent.atomic.AtomicInteger named = new java.util.concurrent.atomic.AtomicInteger();
+        labels.byPrompt = prompt -> "{\"title\":\"Benannt " + named.incrementAndGet() + "\",\"summary\":\"Kurz.\"}";
         ScriptedChat briefs = new ScriptedChat("briefs");
         briefs.byPrompt = prompt -> briefAnswer(prompt.contains("[3]") ? 3 : prompt.contains("[2]") ? 2 : 1);
 
@@ -341,13 +360,13 @@ public class OutlineBriefWorkerTest {
                 new Passages()).enrich(generated, CONTEXT, () -> false);
 
         OutlineChapter labelled = result.getOutline().getChapters().get(1);
-        assertEquals("Benannt", labelled.getSections().get(0).getTitle());
+        assertTrue(labelled.getSections().get(0).getTitle().startsWith("Benannt"));
         assertFalse(labelled.getSections().get(0).isUntitled());
         assertEquals("Grundlagen", result.getOutline().getChapters().get(0).getTitle());
         assertEquals("Physik", result.getOutline().getChapters().get(0).getSections().get(0).getTitle());
         assertEquals("Zweck 1", result.getOutline().getChapters().get(2).getSections().get(0).getBrief()
                 .getPurpose());
-        assertEquals("Benannt", result.getOutline().getCandidates().get(0).getSuggestedTitle());
+        assertTrue(result.getOutline().getCandidates().get(0).getSuggestedTitle().startsWith("Benannt"));
         assertEquals(3, labels.calls.size());
         assertEquals(3, briefs.calls.size());
         assertTrue(result.getBriefFailures().isEmpty());

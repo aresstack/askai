@@ -81,6 +81,12 @@ public class ProsePassageFilterTest {
         assertFalse(filter.isProse("Seminare für Betriebsräte im ganzen Land: Katalog kostenlos bestellen und die Termine sichern."));
         assertFalse(filter.isProse("Weitere Informationen finden Sie unter www.example.org, https://example.org/a "
                 + "und https://example.org/b sowie www.example.net."));
+        assertFalse(filter.isProse("Nehmen Sie jetzt Kontakt auf und lassen Sie uns Ihre DGUV Vorschrift 3 "
+                + "Dokumentation gemeinsam planen und umsetzen."));
+        assertFalse(filter.isProse("Unsere Empfehlungen für Sie: Ansell AlphaTec® 1500 Schutzanzug, bewährt in "
+                + "Chemie und Industrie."));
+        assertFalse(filter.isProse("teilen teilen teilen Per E-Mail teilen Info Quicklinks zum Thema Arbeitsschutz "
+                + "auf der Baustelle."));
         assertTrue(filter.isProse("Das Arbeitsschutzgesetz verpflichtet den Arbeitgeber, die Gefährdungen auf der "
                 + "Baustelle zu beurteilen und geeignete Schutzmaßnahmen festzulegen. Die Beurteilung ist zu "
                 + "dokumentieren und bei Änderungen zu wiederholen."));
