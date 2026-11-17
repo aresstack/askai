@@ -87,6 +87,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     // Research team (plan T5): the Sources phase's planned queries side by side, one page worker each.
     private final JCheckBox teamEnabled = ComicControls.checkBox("Parallel page workers in Sources", true);
     private final JTextField teamWorkers = ComicControls.textField(3);
+    private final JTextField planIdleCycles = ComicControls.textField(3);
+    private final JCheckBox planNearness = ComicControls.checkBox("Queries near the mind map", true);
     private final JTextField teamFollowLinks = ComicControls.textField(3);
     private final JTextField teamPageCharacters = ComicControls.textField(6);
     private final JTextField teamAnswerTokens = ComicControls.textField(5);
@@ -253,6 +255,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         com.aresstack.comiccontrols.control.ComicForm team =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Research team");
         team.row("Sources phase", group(teamEnabled, labelled("Workers", teamWorkers)));
+        team.row("Sources end", group(labelled("Idle cycles", planIdleCycles), planNearness));
         team.row("Page worker", group(labelled("Links to follow", teamFollowLinks),
                 labelled("Page characters", teamPageCharacters), labelled("Answer tokens", teamAnswerTokens)));
         team.row("New searches", group(labelled("Per page", teamSearchesPerPage),
@@ -495,6 +498,19 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             public void actionPerformed(ActionEvent event) {
                 ResearchRuntimeSettings.saveTeamEnabled(ResearchRuntimeSettingsPanel.this.store,
                         teamEnabled.isSelected());
+            }
+        });
+        bindNonNegativeLimit(planIdleCycles, ResearchRuntimeSettings.KEY_PLAN_IDLE_CYCLES,
+                ResearchRuntimeSettings.DEFAULT_PLAN_IDLE_CYCLES,
+                "The search plan ends by itself when every concept node is covered or no admissible new query is "
+                        + "left; it also ends after this many research cycles in a row without a new source. 0 = off.");
+        planNearness.setSelected(ResearchRuntimeSettings.loadPlanQueryNeedsConceptNearness(store));
+        planNearness.setToolTipText("Every planned query passes the blacklist and the scope. On: a query must also "
+                + "lie near a concept node of the mind map, not only away from the exclusions.");
+        planNearness.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettingsPanel.this.store.putBoolean(
+                        ResearchRuntimeSettings.KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS, planNearness.isSelected());
             }
         });
         bindLimit(teamWorkers, ResearchRuntimeSettings.KEY_TEAM_WORKERS, ResearchRuntimeSettings.DEFAULT_TEAM_WORKERS,

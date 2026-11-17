@@ -32,15 +32,21 @@ import java.util.concurrent.Executor;
  * node's angles; a node is covered only once they ran, {@link SearchPlanCoverage}); entries of nodes whose query
  * budget is spent are skipped; the phase cap stops the queue. Planned queries keep the recorded working language.</li>
  * <li>Research cycles (M2): when no pending entry is left and nodes are still uncovered, the queue asks the
- * {@link Replanner} for the queries of the next cycle ({@link SearchPlanCycles}) while cycles are left, and runs
- * them. The {@link Outcome} says why the plan ended: every node covered, the research budget spent, the phase
- * source limit reached, or no planner answer — never "covered" for a stop.</li>
+ * {@link Replanner} for the queries of the next cycle ({@link SearchPlanCycles}) and runs them. The plan ends by
+ * itself: every node covered, no admissible new query left (the planner's queries all already ran or fell at the
+ * Weidezaun or the blacklist), or a stall (cycles in a row without a new source). The cycle and source settings
+ * are safety caps only. The {@link Outcome} says why the plan ended — never "covered" for a stop.</li>
+ * <li>Every query passes the {@link QueryGate} (blacklist and Weidezaun) before it runs: the seed plan, every later
+ * cycle, the page workers' suggestions and the writer's gap searches. A rejected query is skipped with its reason on
+ * the entry and reported to the session; only the user's own queries pass unchecked.</li>
  * </ul>
  */
 public final class SearchPlanQueue {
 
     static final String NODE_COVERED = "The node is covered";
     static final String NODE_BUDGET = "The query budget of the node is spent";
+    /** The prefix of the skip reason of a query the {@link QueryGate} rejected. */
+    static final String GATE_REJECTED = "Rejected: ";
     static final String STOPPED = "Stopped by the user";
     static final String KEYWORD_FALLBACK = "Ranked by keywords, reranker unavailable";
     static final String NO_TEAM_BROWSER = "No worker browser for the research team: runs in the chat browser";
@@ -106,6 +112,21 @@ public final class SearchPlanQueue {
         };
     }
 
+    /**
+     * The fence every planned query passes before it runs: the typed blacklist and the Weidezaun (the scope check of
+     * the frozen concept). It answers {@code null} for a query that may run, otherwise why it may not.
+     */
+    public interface QueryGate {
+        String rejection(String query);
+
+        /** No fence (tests, a plan without a concept). */
+        QueryGate OPEN = new QueryGate() {
+            public String rejection(String query) {
+                return null;
+            }
+        };
+    }
+
     /** Whether another acquisition (a typed search, a review, a research turn) runs right now. */
     public interface Busy {
         boolean busy();
@@ -124,6 +145,10 @@ public final class SearchPlanQueue {
          * accepted. A writer gap's entry with new sources makes its section stale (live run 4, fix 5).
          */
         default void entryEnded(SearchPlanEntry entry) {
+        }
+
+        /** The {@link QueryGate} rejected these queries ({@code query -> reason}), in the order they were met. */
+        default void queriesRejected(Map<String, String> rejected) {
         }
     }
 
@@ -176,8 +201,12 @@ public final class SearchPlanQueue {
     public enum Reason {
         /** Every active node is covered. */
         COVERED,
-        /** Nodes are uncovered and the research budget (cycles × queries per node) is spent. */
+        /** Nodes are uncovered and the safety cap of research cycles is reached. */
         BUDGET,
+        /** Nodes are uncovered but no admissible new query is left: all were searched or fell at the fence. */
+        NO_NEW_QUERIES,
+        /** Research cycles in a row added no new accepted source (the stall setting). */
+        STALLED,
         /** The source limit of the Sources phase stopped the queue. */
         PHASE_CAP,
         /** The planner gave no usable query for the next cycle (model unavailable or an unusable answer). */
@@ -304,6 +333,16 @@ public final class SearchPlanQueue {
                             .append(covered).append(" of ").append(nodes).append(" nodes covered (").append(cost)
                             .append(").");
                     break;
+                case NO_NEW_QUERIES:
+                    sb.append("Search plan finished: no admissible new query is left (every new query was already "
+                            + "searched or lies outside the scope or on the blacklist); ").append(covered)
+                            .append(" of ").append(nodes).append(" nodes covered (").append(cost).append(").");
+                    break;
+                case STALLED:
+                    sb.append("Search plan finished: the last research cycles found no new source")
+                            .append(detail.isEmpty() ? "" : " (" + detail + ")").append("; ").append(covered)
+                            .append(" of ").append(nodes).append(" nodes covered (").append(cost).append(").");
+                    break;
                 case PLANNER_UNAVAILABLE:
                     sb.append("Search plan stopped: the planner wrote no new queries for research cycle ")
                             .append(cycles + 1).append(" (model unavailable or no usable answer); ")
@@ -312,7 +351,8 @@ public final class SearchPlanQueue {
                     break;
                 case BUDGET:
                 default:
-                    sb.append("Search plan stopped by its research budget, not because the topic is exhausted: ")
+                    sb.append("Search plan stopped by the safety cap of research cycles, not because the topic is "
+                            + "exhausted: ")
                             .append(covered).append(" of ").append(nodes).append(" nodes covered (").append(cost)
                             .append(").");
                     break;
@@ -330,6 +370,11 @@ public final class SearchPlanQueue {
                     sb.append(" Raise \"Sources for the Sources phase\" and run the plan again, or finish Sources "
                             + "with these gaps on record.");
                     break;
+                case NO_NEW_QUERIES:
+                case STALLED:
+                    sb.append(" Widen the scope, add queries for these nodes yourself, or finish Sources with these "
+                            + "gaps on record.");
+                    break;
                 case PLANNER_UNAVAILABLE:
                     sb.append(" Run the search plan again to retry, add queries for these nodes yourself, or finish "
                             + "Sources with these gaps on record.");
@@ -340,7 +385,7 @@ public final class SearchPlanQueue {
                             + "finish Sources with these gaps on record.");
                     break;
                 default:
-                    sb.append(" Add queries for these nodes, raise \"Research cycles\" and run the plan again, or "
+                    sb.append(" Add queries for these nodes, raise the safety cap \"Research cycles\" and run the plan again, or "
                             + "finish Sources with these gaps on record.");
                     break;
             }
@@ -377,6 +422,10 @@ public final class SearchPlanQueue {
     /** The mission's source preference: its publisher queries join every later research cycle. */
     private volatile SourcePreference preference = SourcePreference.NONE;
     private volatile GapReview gapReview = GapReview.NONE;
+    private volatile QueryGate gate = QueryGate.OPEN;
+    /** The plan's accepted sources at the last cycle boundary ({@code -1} = none yet) and the idle cycles since. */
+    private int sourcesAtLastBoundary = -1;
+    private int idleCycles;
     /** The plan's own bar for "covered" at a cycle boundary (evidence quality, the mission's preferred sources). */
     private volatile CoverageQuality coverageQuality = CoverageQuality.OFF;
     private volatile Executor reviewer;
@@ -450,6 +499,37 @@ public final class SearchPlanQueue {
         this.coverageQuality = quality == null ? CoverageQuality.OFF : quality;
     }
 
+    /** The fence every non-user query passes before it runs; {@code null} = {@link QueryGate#OPEN}. */
+    public void setQueryGate(QueryGate gate) {
+        this.gate = gate == null ? QueryGate.OPEN : gate;
+    }
+
+    /** The gate's reason for {@code query}, or {@code null}; a failing gate lets the query through (logged). */
+    private String gateRejection(String query) {
+        try {
+            String why = gate.rejection(query);
+            return why == null || why.trim().isEmpty() ? null : why.trim();
+        } catch (RuntimeException failed) {
+            System.err.println("[search-plan] query gate failed for \"" + query + "\": " + failed.getMessage());
+            return null;
+        }
+    }
+
+    private void reportRejected(Map<String, String> rejected) {
+        if (rejected.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, String> r : rejected.entrySet()) {
+            System.err.println("[search-plan] query \"" + r.getKey() + "\" rejected: " + r.getValue());
+        }
+        try {
+            listener.queriesRejected(java.util.Collections.unmodifiableMap(
+                    new LinkedHashMap<String, String>(rejected)));
+        } catch (RuntimeException failed) {
+            System.err.println("[search-plan] rejection report failed: " + failed.getMessage());
+        }
+    }
+
     /** The research team (plan T5); {@link Team#OFF} keeps one entry at a time. */
     public void setTeam(Team team) {
         this.team = team == null ? Team.OFF : team;
@@ -511,9 +591,9 @@ public final class SearchPlanQueue {
 
     /**
      * Plan T4: a page worker read a hit and suggested a new search. One the Weidezaun and the blacklist let through
-     * becomes a WORKER entry of the same node that runs before every planned entry, unless the node's query budget
-     * of this cycle is spent or the query is already in the plan; every other outcome stays visible on the entry
-     * that found it.
+     * becomes a WORKER entry of the same node that runs before every planned entry, unless the query is already in
+     * the plan. No query budget limits it: a query the reading produced inside the fence is exactly what the research
+     * is for. Every other outcome stays visible on the entry that found it.
      */
     public void onTeamQuery(String requestId, String query, String rejected) {
         synchronized (this) {
@@ -553,17 +633,10 @@ public final class SearchPlanQueue {
             return "search \"" + query + "\" dropped: not a usable query length";
         }
         Map<String, SearchPlanEntry> entries = store.loadEntries();
-        int ofNode = 0;
         for (SearchPlanEntry entry : entries.values()) {
             if (entry.getQuery().equalsIgnoreCase(query)) {
                 return "search \"" + query + "\" dropped: already in the plan";
             }
-            if (from.getNodeId().equals(entry.getNodeId()) && entry.getStatus() != SearchPlanEntry.Status.SKIPPED) {
-                ofNode++;
-            }
-        }
-        if (!from.getNodeId().isEmpty() && ofNode >= caps.queriesUpTo(record.getCycle())) {
-            return "search \"" + query + "\" dropped: the node's query budget of this cycle is spent";
         }
         SearchPlanEntry added = SearchPlanEntry.submit(newId(), from.getPhase(), from.getNodeId(), from.getNodeLabel(),
                 query, SearchPlanEntry.Origin.WORKER, clock.now());
@@ -861,6 +934,7 @@ public final class SearchPlanQueue {
         Boolean boundary = null;
         int boundaryGeneration = 0;
         boolean fillMore = false;
+        Map<String, String> reportLater = java.util.Collections.emptyMap();
         synchronized (this) {
             if (!running || replanning || busy.busy() || !deferred.isEmpty()
                     || runningEntries.size() >= slots() || teamStillReading()) {
@@ -875,6 +949,7 @@ public final class SearchPlanQueue {
                 Map<String, SearchPlanEntry> entries = store.loadEntries();
                 SearchPlanCoverage.Caps c = caps;
                 SearchPlanEntry next = null;
+                Map<String, String> rejectedNow = new LinkedHashMap<String, String>();
                 int perQueryCap = c.getSourcesPerNode();
                 boolean capReached = false;
                 {
@@ -900,7 +975,20 @@ public final class SearchPlanQueue {
                             skip(entries, entry, SearchPlanMerger.NODE_REMOVED);
                             continue;
                         }
-                        if (node != null && !userOwned) {
+                        if (!userOwned) {
+                            // the fence: blacklist and Weidezaun, for the seeds, every cycle, the workers' and the
+                            // writer's queries alike
+                            String why = gateRejection(entry.getQuery());
+                            if (why != null) {
+                                skip(entries, entry, GATE_REJECTED + why);
+                                rejectedNow.put(entry.getQuery(), why);
+                                continue;
+                            }
+                        }
+                        // a page worker's query came out of the reading: it runs even when the node is covered or
+                        // its planned queries of the cycle ran; only the fence and duplicates stop it
+                        boolean worker = entry.getOrigin() == SearchPlanEntry.Origin.WORKER;
+                        if (node != null && !userOwned && !worker) {
                             if (node.getState() == SearchPlanCoverage.State.COVERED) {
                                 skip(entries, entry, NODE_COVERED);
                                 continue;
@@ -941,6 +1029,7 @@ public final class SearchPlanQueue {
                     store.save(started);
                     fillMore = runningEntries.size() < slots();
                 }
+                reportLater = rejectedNow;
             } catch (CorruptProjectFileException corrupt) {
                 running = false;
                 System.err.println("[search-plan] " + corrupt.getMessage());
@@ -949,6 +1038,7 @@ public final class SearchPlanQueue {
                 System.err.println("[search-plan] the queue stopped: " + failed.getMessage());
             }
         }
+        reportRejected(reportLater);
         listener.changed();
         if (boundary != null) {
             cycleBoundary(boundaryGeneration, boundary.booleanValue());
@@ -1016,6 +1106,41 @@ public final class SearchPlanQueue {
         }
     }
 
+    /**
+     * The stall criterion at a cycle boundary: counts the cycles in a row that added no new accepted source and
+     * answers why the plan stalls once the setting is reached, otherwise {@code null}.
+     */
+    private String stall(Collection<SearchPlanEntry> entries, SearchPlanCoverage.Caps c) {
+        int now = SearchPlanCoverage.phaseSources(entries);
+        if (sourcesAtLastBoundary >= 0 && now <= sourcesAtLastBoundary) {
+            idleCycles++;
+        } else {
+            idleCycles = 0;
+        }
+        sourcesAtLastBoundary = now;
+        if (c.getIdleCycles() > 0 && idleCycles >= c.getIdleCycles()) {
+            return idleCycles + (idleCycles == 1 ? " research cycle" : " research cycles")
+                    + " in a row without a new source";
+        }
+        return null;
+    }
+
+    /** Whether every active node is covered by its sources and has no gap in the analysis. */
+    private static boolean allCovered(SearchPlanRecord record, Map<String, SearchPlanCoverage.NodeCoverage> coverage,
+                                      EvidenceGaps.Gaps gaps) {
+        for (SearchPlanRecord.Node node : record.getNodes()) {
+            if (!node.isActive()) {
+                continue;
+            }
+            SearchPlanCoverage.NodeCoverage nc = coverage.get(node.getId());
+            if (nc == null || nc.getState() != SearchPlanCoverage.State.COVERED
+                    || (gaps != null && gaps.getEvidenceByNode().containsKey(node.getId()))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** The second half of a cycle boundary, on the queue's executor: the next cycle or the plan's outcome. */
     private void planNextCycle(int generation, boolean capReached, EvidenceGaps.Gaps gaps) {
         SearchPlanRecord record;
@@ -1036,13 +1161,21 @@ public final class SearchPlanQueue {
                     // no settled analysis: the source counts decide, the mission's preferred sources still count
                     gaps = sourceGaps(record, coverage);
                 }
-                nextCycle = capReached || replanner == null || record.getCycle() >= c.getCycles() ? null
+                String stall = stall(all.values(), c);
+                boolean cycleCap = !c.allowsCycle(record.getCycle() + 1);
+                nextCycle = capReached || replanner == null || cycleCap || stall != null ? null
                         : SearchPlanCycles.nextCycleRequest(record, all.values(), coverage, c, gaps);
                 replanGaps = gaps;
                 if (nextCycle == null) {
                     replanning = false;
                     running = false;
-                    outcome = outcome(record, all, c, coverage, capReached ? Reason.PHASE_CAP : null);
+                    Reason forced = capReached ? Reason.PHASE_CAP : null;
+                    if (forced == null && stall != null && !allCovered(record, coverage, gaps)) {
+                        forced = Reason.STALLED;
+                    } else if (forced == null && replanner == null && !allCovered(record, coverage, gaps)) {
+                        forced = Reason.NO_NEW_QUERIES; // no planner: nothing can add a query
+                    }
+                    outcome = outcome(record, all, c, coverage, forced, forced == Reason.STALLED ? stall : "");
                 }
             } catch (CorruptProjectFileException | RuntimeException failed) {
                 replanning = false;
@@ -1170,6 +1303,7 @@ public final class SearchPlanQueue {
     /** The planner's answer: new entries and the next cycle, or the honest end of the plan. */
     void applyReplan(int generation, ConceptQueryPlan.Request request, ConceptQueryPlan.Result result) {
         Outcome outcome = null;
+        Map<String, String> rejected = new LinkedHashMap<String, String>();
         synchronized (this) {
             if (generation != replanGeneration || !replanning || !running) {
                 return; // stopped meanwhile: the answer is dropped, the plan stays where the user left it
@@ -1184,13 +1318,32 @@ public final class SearchPlanQueue {
                 }
                 SearchPlanCycles.Result cycle = SearchPlanCycles.apply(record, all.values(), request, result,
                         request.getBlacklist(), ids(), clock.now(), preference);
-                if (cycle.getAdded().isEmpty()) {
+                // the fence decides which of the planner's new queries may run; the rejected ones stay on record
+                List<SearchPlanEntry> admitted = new ArrayList<SearchPlanEntry>();
+                List<SearchPlanEntry> kept = new ArrayList<SearchPlanEntry>();
+                long now = clock.now();
+                for (SearchPlanEntry added : cycle.getAdded()) {
+                    String why = gateRejection(added.getQuery());
+                    if (why == null) {
+                        admitted.add(added);
+                        kept.add(added);
+                    } else {
+                        rejected.put(added.getQuery(), why);
+                        kept.add(added.skipped(GATE_REJECTED + why, now));
+                    }
+                }
+                if (admitted.isEmpty()) {
                     running = false;
+                    if (!kept.isEmpty()) {
+                        store.saveAll(kept);
+                        store.saveRecord(cycle.getRecord());
+                    }
                     SearchPlanCoverage.Caps c = caps;
+                    // the planner answered, but nothing new and admissible came out: the research is exhausted
                     outcome = outcome(record, all, c, SearchPlanCoverage.of(record, all.values(), c, sources),
-                            Reason.PLANNER_UNAVAILABLE);
+                            result == null ? Reason.PLANNER_UNAVAILABLE : Reason.NO_NEW_QUERIES);
                 } else {
-                    store.saveAll(noteGaps(cycle.getAdded()));
+                    store.saveAll(noteGaps(kept));
                     store.saveRecord(cycle.getRecord());
                 }
             } catch (IOException | CorruptProjectFileException | RuntimeException failed) {
@@ -1198,6 +1351,7 @@ public final class SearchPlanQueue {
                 System.err.println("[search-plan] the next cycle could not be stored: " + failed.getMessage());
             }
         }
+        reportRejected(rejected);
         listener.changed();
         if (outcome != null) {
             finish(outcome);

@@ -38,6 +38,7 @@ public class SearchPlanQueueTest {
     private FakeSources sources;
     private boolean busy;
     private final List<SearchPlanQueue.Outcome> outcomes = new ArrayList<SearchPlanQueue.Outcome>();
+    private Map<String, String> rejections = new HashMap<String, String>();
     private final List<SearchPlanEntry> ended = new ArrayList<SearchPlanEntry>();
     private long now = 1_000L;
     private int ids;
@@ -82,6 +83,11 @@ public class SearchPlanQueueTest {
             @Override
             public void entryEnded(SearchPlanEntry entry) {
                 ended.add(entry);
+            }
+
+            @Override
+            public void queriesRejected(Map<String, String> rejected) {
+                rejections.putAll(rejected);
             }
         }, direct, new SearchPlanQueue.Clock() {
             public long now() {
@@ -963,9 +969,10 @@ public class SearchPlanQueueTest {
         assertEquals(SearchPlanQueue.Reason.BUDGET, outcome.getReason());
         assertEquals(Collections.singletonList("A"), outcome.getUncovered());
         assertTrue(outcome.text(), outcome.text().startsWith(
-                "Search plan stopped by its research budget, not because the topic is exhausted: 0 of 1 nodes covered"));
+                "Search plan stopped by the safety cap of research cycles, not because the topic is exhausted: 0 of 1 "
+                        + "nodes covered"));
         assertTrue(outcome.text(), outcome.text().contains("Still uncovered: A."));
-        assertTrue(outcome.text(), outcome.text().contains("raise \"Research cycles\""));
+        assertTrue(outcome.text(), outcome.text().contains("raise the safety cap \"Research cycles\""));
         assertTrue(outcome.report(), outcome.report().contains("Reason: budget"));
         assertTrue(outcome.report(), outcome.report().contains("- A: uncovered (0 sources from 0 domains, 2 queries run)"));
         assertEquals("the budget stop is on record next to the plan", outcome.report(),
@@ -988,12 +995,12 @@ public class SearchPlanQueueTest {
                 "the planner wrote no new queries for research cycle 2"));
         assertEquals(1, store.loadRecord().getCycle());
 
-        // an answer that only repeats queries already run adds nothing either
+        // an answer that only repeats queries already run: the research is exhausted, not the planner broken
         outcomes.clear();
         replanner.answer = answer("a", "alpha query");
         queue.run();
         replanner.deliver();
-        assertEquals(SearchPlanQueue.Reason.PLANNER_UNAVAILABLE, outcomes.get(0).getReason());
+        assertEquals(SearchPlanQueue.Reason.NO_NEW_QUERIES, outcomes.get(0).getReason());
         assertEquals(1, queue.entriesInOrder().size());
     }
 
@@ -1046,7 +1053,7 @@ public class SearchPlanQueueTest {
         build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
         queue(caps(3, 4, 60)).run();
         port.complete(false);
-        assertEquals(SearchPlanQueue.Reason.BUDGET, outcomes.get(0).getReason());
+        assertEquals(SearchPlanQueue.Reason.NO_NEW_QUERIES, outcomes.get(0).getReason());
         assertEquals(1, outcomes.get(0).getCycles());
         assertFalse("a stop is never announced as coverage", outcomes.get(0).text().contains("covered."));
     }
@@ -1190,7 +1197,7 @@ public class SearchPlanQueueTest {
     }
 
     @Test
-    public void aWorkerQueryBeyondTheNodesBudgetIsDropped() throws Exception {
+    public void aWorkerQueryIsNeverDroppedForTheNodesQueryBudget() throws Exception {
         fourQueriesOverTwoNodes();
         SearchPlanQueue queue = queue(caps(3, 2, 60));
         queue.setTeam(team(4));
@@ -1202,7 +1209,77 @@ public class SearchPlanQueueTest {
                 first = entry;
             }
         }
-        assertTrue(first.getTeamNotes().get(0).contains("query budget"));
+        assertTrue(first.getTeamNotes().toString(),
+                first.getTeamNotes().get(0).startsWith("search \"Classloader Metaspace\" added"));
+    }
+
+    // ---- the plan ends by itself: coverage, exhaustion, a stall; every query passes the fence ------------
+
+    @Test
+    public void aCycleQueryOutsideTheWeidezaunIsRejectedWithItsReasonAndTheResearchEndsExhausted() throws Exception {
+        build(Collections.singletonList(node("a", "Datenschutz", "Wearables Baustelle Datenschutz")),
+                Collections.<String, List<String>>emptyMap());
+        FakeReplanner replanner = new FakeReplanner();
+        // live run 5: a book on wearables on construction sites searched this; only "Datenschutz" touches the mind map
+        replanner.answer = answer("a", "Datenschutz beim betrieblichen Wiedereingliederungsmanagement");
+        SearchPlanQueue queue = queue(caps(3, 4, 60, 0), replanner);
+        Map<String, String> reported = rejections;
+        queue.setQueryGate(new SearchPlanQueue.QueryGate() {
+            public String rejection(String query) {
+                return query.contains("Wiedereingliederungsmanagement")
+                        ? "outside the Weidezaun: near no concept node of the mind map" : null;
+            }
+        });
+        queue.run();
+        port.complete(false);
+        replanner.deliver();
+        assertEquals(1, port.searched.size()); // the rejected query never ran
+        assertEquals("outside the Weidezaun: near no concept node of the mind map",
+                reported.get("Datenschutz beim betrieblichen Wiedereingliederungsmanagement"));
+        SearchPlanEntry rejected = queue.entriesInOrder().get(1);
+        assertEquals(SearchPlanEntry.Status.SKIPPED, rejected.getStatus());
+        assertEquals(1, outcomes.size());
+        assertEquals(SearchPlanQueue.Reason.NO_NEW_QUERIES, outcomes.get(0).getReason());
+        assertTrue(outcomes.get(0).text(), outcomes.get(0).text().startsWith(
+                "Search plan finished: no admissible new query is left"));
+    }
+
+    @Test
+    public void aSeedQueryOnTheBlacklistNeverRuns() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Alpha Query", "Alpha Shop"));
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), queries);
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setQueryGate(new SearchPlanQueue.QueryGate() {
+            public String rejection(String query) {
+                return query.contains("Shop") ? "blacklist \"shop\"" : null;
+            }
+        });
+        queue.run();
+        port.complete(false);
+        assertEquals(Collections.singletonList("Alpha Query"), port.searched);
+    }
+
+    @Test
+    public void withoutACycleCapThePlanGoesOnPastThreeCyclesWhileTheReadingFindsNewSources() throws Exception {
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        FakeReplanner replanner = new FakeReplanner();
+        SearchPlanQueue queue = queue(caps(3, 4, 0, 0).withIdleCycles(1), replanner);
+        queue.run();
+        for (int cycle = 1; cycle <= 4; cycle++) {
+            sources.domains.put("s" + cycle, "only.example"); // one domain: never covered
+            sources.next = Arrays.asList("s" + cycle);
+            port.complete(false);
+            assertTrue("cycle " + cycle + " is no reason to stop", outcomes.isEmpty());
+            replanner.answer = answer("a", "Alpha Angle " + cycle);
+            replanner.deliver();
+        }
+        assertEquals(5, store.loadRecord().getCycle());
+        sources.next = Collections.emptyList();
+        port.complete(false); // cycle 5 found nothing new: one idle cycle ends the plan
+        assertEquals(1, outcomes.size());
+        assertEquals(SearchPlanQueue.Reason.STALLED, outcomes.get(0).getReason());
+        assertTrue(outcomes.get(0).text(), outcomes.get(0).text().contains("without a new source"));
     }
 
     @Test
