@@ -880,6 +880,7 @@ public final class ProductiveResearchSessionResources {
             return;
         }
         closed = true;
+        RunningSearchProfiles.leave(this); // a later settings save leaves this session's profile alone
         toolRefreshExecutor.shutdownNow();
         transitions.close();
         // Stop the knowledge worker FIRST (graceful: lets the current job finish). The persistent FIFO and the
