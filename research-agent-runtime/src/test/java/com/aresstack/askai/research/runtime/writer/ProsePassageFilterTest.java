@@ -100,6 +100,20 @@ public class ProsePassageFilterTest {
                 + "kostenlos bestellen und die Termine sichern."));
     }
 
+    /** Live retest of #247: a footer, a figure caption, a reference entry and a law header became topics. */
+    @Test
+    public void footersCaptionsAndReferencesAreSiteNotices() {
+        ProsePassageFilter filter = new ProsePassageFilter(ProsePassageFilter.Criteria.defaults());
+        assertFalse(filter.isProse("Startseite Impressum Datenschutzerklärung. Wie gefällt Ihnen diese Website? "
+                + "Rate jetzt mit einem bis fünf Sternen."));
+        assertFalse(filter.isProse("Abb. 3: Die Sensorweste misst Puls, Hauttemperatur und Bewegung der "
+                + "Beschäftigten auf der Baustelle."));
+        assertFalse(filter.isProse("Evers, M. (2021): Wearables im Arbeitsschutz. Eine Übersicht über Studien "
+                + "und Praxisberichte, Berlin."));
+        assertFalse(filter.isProse("BaustellV – Ausfertigungsdatum: 10.06.1998, zuletzt geändert durch Artikel 1 "
+                + "der Verordnung vom 19. Dezember."));
+    }
+
     /** Live retest of #245: shop coupons and product teasers became topics. */
     @Test
     public void couponsAndProductTeasersAreAdvertising() {

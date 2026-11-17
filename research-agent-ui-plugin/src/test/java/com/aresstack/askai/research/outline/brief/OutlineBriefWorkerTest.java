@@ -270,6 +270,10 @@ public class OutlineBriefWorkerTest {
         assertEquals("Erste Hilfe, Dokumentation und Leistungen", KeyTermTitle.of(Arrays.asList(
                 "Die Leistungen der Erste Hilfe werden mit Dokumentation erfasst. Wir zeigen Ihnen die Erste Hilfe.",
                 "Jede Erste Hilfe braucht eine Dokumentation, sagen wir Ihnen."), "Arbeitsschutz", 3));
+        // Live retest of #247: words that meet once are no term ("Probezeit Fachbeitrag"), no word twice.
+        assertEquals("Probezeit, Arbeitszeitkonto und Fachbeitrag", KeyTermTitle.of(Arrays.asList(
+                "Die Probezeit Fachbeitrag zeigt das Arbeitszeitkonto. Eine Probezeit endet, das Arbeitszeitkonto "
+                        + "bleibt. Zur Probezeit gibt es Regeln."), "", 3));
     }
 
     @Test

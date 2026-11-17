@@ -78,8 +78,10 @@ final class KeyTermTitle {
             String term = form.get(stem);
             for (Map.Entry<String, Integer> pair : pairs.entrySet()) {
                 String[] parts = pair.getKey().split(" ");
-                if ((parts[0].equals(stem) || parts[1].equals(stem))
-                        && pair.getValue() >= Math.min(count.get(parts[0]), count.get(parts[1]))) {
+                // A pair is one term only when its words always stand together, and more than once.
+                if ((parts[0].equals(stem) || parts[1].equals(stem)) && pair.getValue() > 1
+                        && pair.getValue() >= Math.max(count.get(parts[0]), count.get(parts[1]))
+                        && !used.contains(parts[0]) && !used.contains(parts[1])) {
                     term = pairForm.get(pair.getKey());
                     used.add(parts[0]);
                     used.add(parts[1]);
