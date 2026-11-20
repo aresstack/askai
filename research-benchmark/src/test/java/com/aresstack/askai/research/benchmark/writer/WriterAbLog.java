@@ -57,7 +57,7 @@ final class WriterAbLog implements Consumer<String> {
     synchronized void check() {
         if (!lost.isEmpty()) {
             throw new IllegalStateException("the writer lost its sentence vectors, every later sample would run with "
-                    + "lexical checks only; see " + file.getAbsolutePath() + ": " + lost);
+                    + "lexical checks only" + (file == null ? "" : "; see " + file.getAbsolutePath()) + ": " + lost);
         }
     }
 

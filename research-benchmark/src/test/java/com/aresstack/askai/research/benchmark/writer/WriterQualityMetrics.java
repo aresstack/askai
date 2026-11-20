@@ -45,7 +45,8 @@ public final class WriterQualityMetrics {
             this.paragraph = paragraph;
             this.first = first;
             this.text = text;
-            this.plain = MARKER.matcher(text).replaceAll(" ").replaceAll("\\s+", " ").trim();
+            this.plain = MARKER.matcher(text).replaceAll(" ").replaceAll("\\s+", " ").replaceAll(" ([.,;:!?])", "$1")
+                    .trim();
             this.words = count(WORD.matcher(plain));
             List<Integer> numbers = new ArrayList<Integer>();
             Matcher m = MARKER.matcher(text);
