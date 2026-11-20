@@ -23,8 +23,23 @@ final class WriterAbEmbeddings {
     private WriterAbEmbeddings() {
     }
 
-    /** The host's descriptor of an installed Ollama embedding model. */
+    /**
+     * The host's descriptor of an installed Ollama embedding model. A name without a tag ("bge-m3") also finds the
+     * model Ollama lists as "bge-m3:latest", since the host's lookup compares the names exactly.
+     */
     static EmbeddingEndpointDescriptor descriptor(final String ollama, String model, long timeoutMillis)
+            throws EmbeddingConfigurationException {
+        try {
+            return exactly(ollama, model, timeoutMillis);
+        } catch (EmbeddingConfigurationException notInstalled) {
+            if (model.contains(":")) {
+                throw notInstalled;
+            }
+            return exactly(ollama, model + ":latest", timeoutMillis);
+        }
+    }
+
+    private static EmbeddingEndpointDescriptor exactly(final String ollama, String model, long timeoutMillis)
             throws EmbeddingConfigurationException {
         return new OllamaEmbeddingConfigurationSnapshotProvider(
                 new OllamaEmbeddingConfigurationSnapshotProvider.OllamaEndpoint() {
