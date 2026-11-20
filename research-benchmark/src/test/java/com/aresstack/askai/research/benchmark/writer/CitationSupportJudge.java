@@ -80,8 +80,11 @@ public final class CitationSupportJudge {
         }
     }
 
+    /** Sentences before a judged one that the judge reads as context, never judges. */
+    static final int CONTEXT_SENTENCES = 2;
+
     static final String SYSTEM = "You check citations in a non-fiction text. You get one sentence and the full text "
-            + "of the source passages it cites. Decide whether the passages state what the sentence claims. "
+            + "of the source passages it cites, sometimes with the sentences just before it as context. Decide whether the passages state what the sentence claims. "
             + "\"supported\": every fact of the sentence (names, numbers, relations, causes, evaluations) is stated "
             + "by the passages, paraphrase allowed. \"partial\": the core is stated, but the sentence adds or "
             + "sharpens a detail the passages do not state. \"unsupported\": the passages do not state the claim, "
@@ -109,12 +112,20 @@ public final class CitationSupportJudge {
             byNumber.put(passage.getNumber(), passage);
         }
         List<Finding> findings = new ArrayList<Finding>();
-        for (WriterQualityMetrics.Sentence sentence : WriterQualityMetrics.sentences(text)) {
+        List<WriterQualityMetrics.Sentence> sentences = WriterQualityMetrics.sentences(text);
+        for (int i = 0; i < sentences.size(); i++) {
+            WriterQualityMetrics.Sentence sentence = sentences.get(i);
             List<Integer> cited = new ArrayList<Integer>(new java.util.LinkedHashSet<Integer>(sentence.cited));
             if (cited.isEmpty()) {
                 continue;
             }
-            StringBuilder user = new StringBuilder("SENTENCE:\n").append(sentence.plain).append("\n\nPASSAGES:\n");
+            StringBuilder user = new StringBuilder();
+            String before = context(sentences, i);
+            if (!before.isEmpty()) {
+                user.append("CONTEXT (the sentences just before, only to resolve words like \"these\" or \"this\"; "
+                        + "do not judge them):\n").append(before).append("\n\n");
+            }
+            user.append("SENTENCE:\n").append(sentence.plain).append("\n\nPASSAGES:\n");
             boolean any = false;
             for (Integer n : cited) {
                 EvidencePassage passage = byNumber.get(n);
@@ -132,13 +143,33 @@ public final class CitationSupportJudge {
         return new Result(findings);
     }
 
+    /** Up to {@link #CONTEXT_SENTENCES} sentences before sentence {@code i} in its paragraph, without markers. */
+    static String context(List<WriterQualityMetrics.Sentence> sentences, int i) {
+        StringBuilder sb = new StringBuilder();
+        for (int j = Math.max(0, i - CONTEXT_SENTENCES); j < i; j++) {
+            if (sentences.get(j).paragraph == sentences.get(i).paragraph) {
+                sb.append(sb.length() == 0 ? "" : " ").append(sentences.get(j).plain);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * The thinking switch Ollama takes for the model: gpt-oss ignores {@code false} and knows only levels, so it
+     * reasons as little as it can; every other model gets {@code false}.
+     */
+    static com.google.gson.JsonPrimitive think(String model) {
+        return model.toLowerCase(Locale.ROOT).startsWith("gpt-oss") ? new com.google.gson.JsonPrimitive("low")
+                : new com.google.gson.JsonPrimitive(false);
+    }
+
     private Finding ask(String sentence, List<Integer> cited, String user) {
         try {
             JsonObject request = new JsonObject();
             request.addProperty("model", model);
             request.addProperty("stream", false);
             request.addProperty("format", "json");
-            request.addProperty("think", false);
+            request.add("think", think(model));
             JsonObject options = new JsonObject();
             options.addProperty("temperature", 0);
             options.addProperty("num_ctx", 8192);

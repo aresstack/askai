@@ -92,13 +92,15 @@ public class WriterAbLiveTest {
         WriterAbExport export = new WriterAbExport(copy, ollama);
         String model = System.getProperty(P + "writerAb.export.embeddingModel", "").trim();
         List<String> candidates = model.isEmpty() ? installedEmbeddingModels(ollama) : Arrays.asList(model);
+        Map<String, String> settings = WriterAbVariant.settings(System.getProperty(P + "writerAb.export.settings", ""));
         WriterAbInput input = export.export(Integer.getInteger(P + "writerAb.export.outlineRevision", 0),
                 Integer.getInteger(P + "writerAb.export.chapter", 1),
                 Integer.getInteger(P + "writerAb.export.sections", 4),
-                new WriterAbVariant("export", WriterAbVariant.settings(
-                        System.getProperty(P + "writerAb.export.settings", ""))).targets(0),
+                new WriterAbVariant("export", settings).targets(0),
                 System.getProperty(P + "writerAb.export.language", ""),
-                export.embeddingWorld(candidates, export.projectId()));
+                export.embeddingWorld(candidates, export.projectId()),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadSourcePreference(
+                        new WriterAbVariant.MapStore(settings)));
         File out = new File(System.getProperty(P + "writerAb.export.out", "build/writer-ab-chapter.json"));
         if (out.getAbsoluteFile().getParentFile() != null) {
             out.getAbsoluteFile().getParentFile().mkdirs();
@@ -176,6 +178,10 @@ public class WriterAbLiveTest {
         CitationSupportJudge judge = judgeModel.isEmpty() ? null
                 : new CitationSupportJudge(ollama, judgeModel, (int) timeout);
         List<String> judgeItems = list(System.getProperty(P + "writerAb.judgeItems", WriterAbDecision.CHAPTER));
+        // the chapter alone is the app's path; its first section is written under the same conditions as section 1
+        boolean chapterOnly = Boolean.getBoolean(P + "writerAb.chapterOnly");
+        List<String> items = chapterOnly ? Arrays.asList(WriterAbDecision.CHAPTER)
+                : Arrays.asList("section 1", "section 2", "section 3", WriterAbDecision.CHAPTER);
 
         List<WriterAbArm> arms = new ArrayList<WriterAbArm>();
         for (WriterAbArm arm : WriterAbArm.parse(System.getProperty(P + "writerAb.arms", ""))) {
@@ -193,6 +199,7 @@ public class WriterAbLiveTest {
         }
 
         String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        WriterAbLog log = new WriterAbLog(new File(reports, "writer-ab-" + stamp + "-writer.log"));
         Random random = new Random(Long.getLong(P + "writerAb.seed", System.nanoTime()));
         List<WriterAbSample> all = new ArrayList<WriterAbSample>();
         try (OllamaTokenMeter meter = OllamaTokenMeter.start(ollama, timeout)) {
@@ -208,29 +215,34 @@ public class WriterAbLiveTest {
                         "model." + arm.getModel() + ".contextTokens=" + contextTokens + "\n");
                 OllamaModelPort port = BenchmarkModelPortAccess.open(arm.getModel(), meter.baseUrl(), timeout,
                         settings);
-                writers.put(arm.getModel(), SectionWriter.onPort(port, Duration.ofMillis(timeout), null)
+                writers.put(arm.getModel(), SectionWriter.onPort(port, Duration.ofMillis(timeout), log)
                         .withSentenceVectors(WriterSentenceVectors.of(sentences)));
             }
             for (int run = 1; run <= runs; run++) {
                 List<WriterAbSample> samples = new ArrayList<WriterAbSample>();
+                // a different order per run, so no variant always profits from what the shared writer cached
+                List<WriterAbVariant> order = new ArrayList<WriterAbVariant>(variants);
+                java.util.Collections.rotate(order, -(run - 1));
                 for (WriterAbArm arm : arms) {
-                    for (WriterAbVariant variant : variants) {
+                    for (WriterAbVariant variant : order) {
                         String label = label(arm, variant, variantNames);
                         WriterAbPipeline pipeline = new WriterAbPipeline(input,
                                 variant.targets(arm.getWordsPerCall()), arm.getModel());
                         SectionWriter writer = writers.get(arm.getModel());
-                        for (int i = 0; i < 3; i++) {
+                        for (int i = 0; i < 3 && !chapterOnly; i++) {
                             String item = "section " + (i + 1);
+                            log.begin("run " + run + ", " + label + ", " + item);
                             samples.add(alone(meter, input, item, label, writer, pipeline, input.sections.get(i).id,
-                                    vectors, judgeItems.contains(item) ? judge : null, run));
+                                    vectors, judgeItems.contains(item) ? judge : null, run, log));
                         }
+                        log.begin("run " + run + ", " + label + ", " + WriterAbDecision.CHAPTER);
                         samples.add(chapterByWritingJob(meter, input, label, writer, pipeline, vectors,
-                                judgeItems.contains(WriterAbDecision.CHAPTER) ? judge : null, run));
+                                judgeItems.contains(WriterAbDecision.CHAPTER) ? judge : null, run, log));
                         System.out.println("writer A/B run " + run + ": " + label + " done");
                     }
                 }
                 List<BlindAssignment> assignments = new ArrayList<BlindAssignment>();
-                for (String item : Arrays.asList("section 1", "section 2", "section 3", WriterAbDecision.CHAPTER)) {
+                for (String item : items) {
                     assignments.add(BlindAssignment.shuffle(item, labels, random));
                 }
                 String prefix = "writer-ab-" + stamp + (runs > 1 ? "-run" + run : "");
@@ -244,7 +256,8 @@ public class WriterAbLiveTest {
         String note = "Input: " + inputPath + " (format " + input.format + (input.origin.isEmpty() ? ""
                 : ", " + input.origin) + "). Variants: " + describe(variants) + ". Sentence model: "
                 + (sentenceModel.isEmpty() ? "none" : sentenceModel) + ". Judge: "
-                + (judge == null ? "none" : judge.getModel() + " on " + judgeItems) + ". Runs: " + runs + ".";
+                + (judge == null ? "none" : judge.getModel() + " on " + judgeItems) + ". Runs: " + runs + "."
+                + (chapterOnly ? " Chapter only." : "") + " Writer log: writer-ab-" + stamp + "-writer.log.";
         String summary = WriterAbReport.summary(all, note);
         write(new File(reports, "writer-ab-" + stamp + "-summary.md"), summary);
         System.out.println(summary);
@@ -261,7 +274,7 @@ public class WriterAbLiveTest {
     private static WriterAbSample alone(OllamaTokenMeter meter, WriterAbInput input, String item, String label,
                                         SectionWriter writer, WriterAbPipeline pipeline, String sectionId,
                                         Function<List<String>, List<float[]>> vectors, CitationSupportJudge judge,
-                                        int run) throws Exception {
+                                        int run, WriterAbLog log) throws Exception {
         File dir = Files.createTempDirectory("writer-ab-alone").toFile();
         SectionAssignment assignment = pipeline.alone(sectionId, new FileManuscriptStore(dir));
         meter.awaitIdle(60_000L);
@@ -271,7 +284,9 @@ public class WriterAbLiveTest {
         double seconds = (System.nanoTime() - start) / 1e9;
         meter.awaitIdle(60_000L);
         long tokens = meter.snapshot().minus(before).totalTokens();
+        log.check();
         Map<String, Integer> counts = emptyCounts();
+        counts.putAll(log.counts());
         String text = "";
         List<WriterAbSample.Section> sections = new ArrayList<WriterAbSample.Section>();
         if (!draft.isOk()) {
@@ -306,7 +321,8 @@ public class WriterAbLiveTest {
     private static WriterAbSample chapterByWritingJob(OllamaTokenMeter meter, WriterAbInput input, String label,
                                                       SectionWriter writer, WriterAbPipeline pipeline,
                                                       Function<List<String>, List<float[]>> vectors,
-                                                      CitationSupportJudge judge, int run) throws Exception {
+                                                      CitationSupportJudge judge, int run, WriterAbLog log)
+            throws Exception {
         File dir = Files.createTempDirectory("writer-ab-manuscript").toFile();
         ManuscriptWorkspace manuscript = new ManuscriptWorkspace(new FileManuscriptStore(dir));
         final RuntimeSectionWriter.Assignments app = pipeline.assignments(manuscript.store());
@@ -328,9 +344,11 @@ public class WriterAbLiveTest {
         double seconds = (System.nanoTime() - start) / 1e9;
         meter.awaitIdle(60_000L);
         long tokens = meter.snapshot().minus(before).totalTokens();
+        log.check();
 
         StringBuilder text = new StringBuilder();
         Map<String, Integer> counts = emptyCounts();
+        counts.putAll(log.counts());
         counts.put("failed sections", outcome.getRemaining().size());
         List<WriterAbSample.Section> sections = new ArrayList<WriterAbSample.Section>();
         List<String> texts = new ArrayList<String>();

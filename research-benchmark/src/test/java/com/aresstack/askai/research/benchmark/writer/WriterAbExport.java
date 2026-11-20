@@ -15,6 +15,8 @@ import com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCor
 import com.aresstack.askai.research.outline.Outline;
 import com.aresstack.askai.research.outline.OutlineChapter;
 import com.aresstack.askai.research.outline.OutlineSection;
+import com.aresstack.askai.research.plan.SourcePreference;
+import com.aresstack.askai.research.runtime.rerank.SourcePreferenceRanking;
 import com.aresstack.askai.research.store.FileManuscriptStore;
 import com.aresstack.askai.research.store.FileOutlineStore;
 import com.aresstack.askai.research.store.FileResearchSourceRepository;
@@ -41,8 +43,10 @@ import java.util.Properties;
  * pack settings the app derives from its writer targets ({@link EvidenceAssignments#packSettings}). It reads the
  * project's stores and never writes them; the caller passes a copy when in doubt.
  *
- * <p>Not reproduced: the mission's source preference (the pack keeps the relevance order) and settings other than
- * the given ones (the defaults otherwise).</p>
+ * <p>The mission's source preference is applied as the app applies it (mission of the newest pin in
+ * {@code book.json}, the given preference settings). Not reproduced: settings other than the given ones (the
+ * defaults otherwise), and the sections of earlier chapters the app has in its manuscript when it writes a later
+ * chapter (the A/B starts every chapter on an empty manuscript).</p>
  */
 public final class WriterAbExport {
 
@@ -88,6 +92,38 @@ public final class WriterAbExport {
             }
         }
         return null;
+    }
+
+    /**
+     * The mission the concept was frozen with: the newest pin of {@code book.json} that carries one, "" when none
+     * does. The app reads the committed pin; the export cannot see the commits and takes the newest.
+     */
+    String mission() {
+        try {
+            JsonObject book = JsonParser.parseString(new String(Files.readAllBytes(
+                    new File(project, "book.json").toPath()), StandardCharsets.UTF_8)).getAsJsonObject();
+            if (!book.has("pins") || !book.get("pins").isJsonArray()) {
+                return "";
+            }
+            com.google.gson.JsonArray pins = book.getAsJsonArray("pins");
+            for (int i = pins.size() - 1; i >= 0; i--) {
+                JsonObject pin = pins.get(i).getAsJsonObject();
+                if (pin.has("mission") && pin.get("mission").isJsonPrimitive()
+                        && !pin.get("mission").getAsString().trim().isEmpty()) {
+                    return pin.get("mission").getAsString();
+                }
+            }
+            return "";
+        } catch (IOException | RuntimeException unreadable) {
+            return "";
+        }
+    }
+
+    /** The ranking the app's section contexts apply for the mission's source preference under {@code settings}. */
+    static SourcePreferenceRanking ranking(String mission, SourcePreference.Settings settings) {
+        SourcePreference preference = SourcePreference.of(mission, settings);
+        return new SourcePreferenceRanking(preference.getPreferredHosts(), preference.getDemotedMarkers(),
+                preference.getRankShift());
     }
 
     /** The highest approved outline revision of the project. */
@@ -140,11 +176,12 @@ public final class WriterAbExport {
     static WriterAbInput.Section section(SectionContextBuilder packs, ProductiveSectionContexts contexts,
                                          OutlineChapter chapter, OutlineSection section,
                                          EvidenceAssignments.Targets targets) {
-        EvidencePack pack = packs.build(contexts.requestFor(SectionWriteRequest.draft(chapter, section)),
-                EvidenceAssignments.packSettings(section, targets));
+        com.aresstack.askai.research.writer.WriterPackSettings settings =
+                EvidenceAssignments.packSettings(section, targets);
+        EvidencePack pack = packs.build(contexts.requestFor(SectionWriteRequest.draft(chapter, section)), settings);
         return WriterAbInput.section(section.getId(), section.getTitle(), section.getBrief().getPurpose(),
                 section.getBrief().getKeyPoints(), section.getBrief().getWordTarget(), pack.getPassages(),
-                pack.getGlossary());
+                pack.getGlossary(), settings.toString());
     }
 
     /**
@@ -155,10 +192,12 @@ public final class WriterAbExport {
      * @param maxSections     sections taken from the chapter's start (the A/B takes three to four)
      * @param targets         the writer targets whose pack settings apply
      * @param language        the book language; "" = the concept's
+     * @param preference      the settings of the mission's source preference (the app's are on by default)
      */
     public WriterAbInput export(int outlineRevision, int chapterNumber, int maxSections,
                                 EvidenceAssignments.Targets targets, String language,
-                                EmbeddingEndpointDescriptor world) throws IOException {
+                                EmbeddingEndpointDescriptor world, SourcePreference.Settings preference)
+            throws IOException {
         String projectId = projectId();
         int revision = outlineRevision > 0 ? outlineRevision : latestApprovedOutline();
         Outline outline = new FileOutlineStore(new File(project, "outline")).approved(revision);
@@ -169,11 +208,13 @@ public final class WriterAbExport {
                 full.getProvenance(), full.isUserEdited(), full.getStaleReason(), taken);
         final String bookLanguage = language == null || language.isEmpty() ? bookLanguage() : language;
         String fingerprint = HttpEmbeddingPortAdapter.documentFingerprint(world);
+        final String mission = mission();
+        final SourcePreferenceRanking ranking = ranking(mission, preference);
         ProductiveSectionContexts contexts = new ProductiveSectionContexts(projectId, fingerprint,
                 corpus(projectId, fingerprint),
                 ProductiveSectionContexts.of(new FileResearchSourceRepository(new File(project, "sources"))),
                 new FileManuscriptStore(Files.createTempDirectory("writer-ab-export").toFile()),
-                () -> bookLanguage);
+                () -> bookLanguage, () -> ranking);
         SourceAcronymService acronyms = new SourceAcronymService(SentenceSegmenter.splitter(),
                 new FileSourceAcronymStore(new File(project, "acronyms").toPath()));
         SectionContextBuilder packs = new SectionContextBuilder(WriterAbEmbeddings.port(world),
@@ -184,7 +225,9 @@ public final class WriterAbExport {
         }
         String origin = "exported from " + project.getName() + ", outline revision " + revision + ", chapter "
                 + chapterNumber + " (" + taken.size() + " of " + full.getSections().size() + " sections), packs by "
-                + "the app's pack builder, embedding " + world.modelId + ", source preference not applied";
+                + "the app's pack builder, embedding " + world.modelId + ", source preference "
+                + (preference != null && preference.isEnabled() ? (mission.isEmpty() ? "on, no mission found"
+                : "on") : "off");
         return WriterAbInput.of(bookLanguage, chapter.getId(), chapter.getTitle(), chapter.getBrief().getPurpose(),
                 sections, origin);
     }

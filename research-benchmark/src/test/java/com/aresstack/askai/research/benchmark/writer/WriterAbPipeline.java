@@ -61,9 +61,16 @@ public final class WriterAbPipeline {
     private SectionAssignment assignment(ProductiveSectionContexts contexts, SectionWriteRequest request) {
         SectionContextRequest context = contexts.requestFor(request);
         WriterAbInput.Section section = input.section(request.getSection().getId());
+        com.aresstack.askai.research.writer.WriterPackSettings settings =
+                EvidenceAssignments.packSettings(request.getSection(), targets);
+        // the exported pack holds what the app selects under the export's pack settings, and only under those
+        if (!section.packSettings.isEmpty() && !section.packSettings.equals(settings.toString())) {
+            throw new IllegalStateException("section " + section.id + " was exported with the pack settings "
+                    + section.packSettings + ", this arm asks for " + settings + "; export the chapter again with "
+                    + "-Daskai.benchmark.writerAb.export.settings for this arm");
+        }
         return EvidenceAssignments.assignment(
-                SectionContextBuilder.pack(context, EvidenceAssignments.packSettings(request.getSection(), targets),
-                        section.passages, section.glossary),
+                SectionContextBuilder.pack(context, settings, section.passages, section.glossary),
                 request, targets, contexts.writtenSections(request), writerModel);
     }
 

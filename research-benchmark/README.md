@@ -109,7 +109,10 @@ gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest.exportTheChapte
 
 The project is copied first; the packs come from the app's pack builder over the project's index, active passages,
 accepted sources and acronym glossary, with the pack settings of the writer defaults (`.export.settings=key=value;...`
-changes them). Not reproduced: the mission's source preference. Format 2:
+changes them, and the pack settings are written per section: a run whose arm asks for other pack settings stops
+and asks for a new export). The mission's source preference is applied as in the app (mission of the newest pin
+in `book.json`, on by default). Not reproduced: the sections of earlier chapters the app has in its manuscript when
+it writes a later chapter. Format 2:
 
 ```json
 {"format": 2, "language": "de", "origin": "...",
@@ -127,12 +130,17 @@ gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest.writeTheSamples
   -Daskai.benchmark.writerAb.arms=gemma4:12b [-Daskai.benchmark.writerAb.runs=3]
   [-Daskai.benchmark.writerAb.variants=app,parts:research.writer.partContext=true]
   [-Daskai.benchmark.writerAb.judge=<judge model>] [-Daskai.benchmark.writerAb.judgeItems=chapter]
+  [-Daskai.benchmark.writerAb.chapterOnly=true] [-Daskai.benchmark.writerAb.sentenceModel=bge-m3]
 ```
 
 Arms are `model|words|thinking` entries; an empty word count keeps the app's setting (450). A variant is a set of
 writer settings against the app's defaults (`name:key=value;key=value`, or `-Daskai.benchmark.writerAb.variant.<name>=...`);
-every arm runs every variant, and the blind sheet hides arm and variant. Each arm writes sections 1-3 alone (on an
-empty manuscript) and the whole chapter through the PR 29 writing job, in every run. Per run the report directory
+every arm runs every variant, in an order that rotates per run, and the blind sheet hides arm and variant. Each arm
+writes sections 1-3 alone (on an empty manuscript) and the whole chapter through the PR 29 writing job, in every run;
+`chapterOnly` writes only the chapter (the app's path; half the time). The writer's log goes to
+`writer-ab-<time>-writer.log`, and its top-ups, top-up words, dropped top-ups, removed repeats and repairs are
+counted per sample; a writer that loses its sentence vectors stops the run. The judge reads each cited sentence
+with up to two sentences before it as context, and its unreadable answers are counted apart. Per run the report directory
 receives `writer-ab-<time>-run<n>-sheet.md` (blind, shuffled letters per item), `-metrics.md` (time, tokens, citation
 validity, uncited paragraphs, drift, claim-check and gap counts, and the quality figures: repeated words per section
 and overall by bge-m3 cosine >= 0.80, restarts, reach of the word target, short paragraphs, source blocks,

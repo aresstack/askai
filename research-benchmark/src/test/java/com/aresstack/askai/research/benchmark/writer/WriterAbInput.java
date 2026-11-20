@@ -45,9 +45,11 @@ public final class WriterAbInput {
         public final int words;
         public final List<EvidencePassage> passages;
         public final List<String> glossary;
+        /** The pack settings the export built the pack with ({@code WriterPackSettings#toString}); "" unknown. */
+        public final String packSettings;
 
         Section(String id, String title, String brief, List<String> keyPoints, int words,
-                List<EvidencePassage> passages, List<String> glossary) {
+                List<EvidencePassage> passages, List<String> glossary, String packSettings) {
             this.id = id;
             this.title = title;
             this.brief = brief;
@@ -55,6 +57,7 @@ public final class WriterAbInput {
             this.words = words;
             this.passages = Collections.unmodifiableList(new ArrayList<EvidencePassage>(passages));
             this.glossary = Collections.unmodifiableList(new ArrayList<String>(glossary));
+            this.packSettings = packSettings == null ? "" : packSettings;
         }
     }
 
@@ -105,7 +108,8 @@ public final class WriterAbInput {
             }
             sections.add(new Section(string(s, "id"), string(s, "title"), string(s, "brief"),
                     strings(s.getAsJsonArray("keyPoints")), s.has("words") ? s.get("words").getAsInt() : 900,
-                    passages, s.has("glossary") ? strings(s.getAsJsonArray("glossary")) : bookGlossary));
+                    passages, s.has("glossary") ? strings(s.getAsJsonArray("glossary")) : bookGlossary,
+                    s.has("packSettings") ? string(s, "packSettings") : ""));
         }
         String synopsis = chapter.has("purpose") ? string(chapter, "purpose") : string(root, "synopsis");
         return new WriterAbInput(format, root.has("language") ? string(root, "language") : "de",
@@ -132,6 +136,9 @@ public final class WriterAbInput {
             s.add("keyPoints", array(section.keyPoints));
             s.addProperty("words", section.words);
             s.add("glossary", array(section.glossary));
+            if (!section.packSettings.isEmpty()) {
+                s.addProperty("packSettings", section.packSettings);
+            }
             JsonArray passages = new JsonArray();
             for (EvidencePassage passage : section.passages) {
                 JsonObject p = new JsonObject();
@@ -189,7 +196,12 @@ public final class WriterAbInput {
 
     static Section section(String id, String title, String brief, List<String> keyPoints, int words,
                            List<EvidencePassage> passages, List<String> glossary) {
-        return new Section(id, title, brief, keyPoints, words, passages, glossary);
+        return section(id, title, brief, keyPoints, words, passages, glossary, "");
+    }
+
+    static Section section(String id, String title, String brief, List<String> keyPoints, int words,
+                           List<EvidencePassage> passages, List<String> glossary, String packSettings) {
+        return new Section(id, title, brief, keyPoints, words, passages, glossary, packSettings);
     }
 
     private static JsonArray array(List<String> values) {

@@ -96,8 +96,9 @@ public final class WriterAbReport {
             + "at least 0.80 to an earlier sentence (per section, and over the whole sample). Restarts: paragraphs "
             + "whose first sentence repeats something already said. Source blocks: cited sentences citing the same "
             + "single passage as the sentence before. Citations carried: sentences the judge model found fully "
-            + "supported by their cited passages, of all cited sentences it judged; not carried = unsupported "
-            + "(partial in brackets).\n";
+            + "supported by their cited passages, of all cited sentences it judged; sentences whose verdict could not be "
+            + "read are counted apart (unreadable) and left out of the share; not carried = unsupported (partial in "
+            + "brackets).\n";
 
     /** The quality cells of one sample (without the item and letter columns). */
     static String qualityCells(WriterAbSample s) {
@@ -120,6 +121,7 @@ public final class WriterAbReport {
         int supported = 0;
         int unsupported = 0;
         int partial = 0;
+        int unreadable = 0;
         for (WriterAbSample.Section section : sections) {
             WriterQualityMetrics q = section.quality;
             words += q.getWords();
@@ -137,6 +139,7 @@ public final class WriterAbReport {
             supported += section.support.count(CitationSupportJudge.Verdict.SUPPORTED);
             unsupported += section.support.count(CitationSupportJudge.Verdict.UNSUPPORTED);
             partial += section.support.count(CitationSupportJudge.Verdict.PARTIAL);
+            unreadable += section.support.count(CitationSupportJudge.Verdict.UNREADABLE);
         }
         int n = sections.size();
         return String.format(Locale.ROOT, "%d | %.0f%% | %.0f%% / %.0f%% | %s | %d | %d | %.0f%% | %.0f%% | %d | %.0f%% "
@@ -144,7 +147,8 @@ public final class WriterAbReport {
                 s.getChapterRepetition() < 0 ? "" : String.format(Locale.ROOT, "%.0f%%",
                         100 * s.getChapterRepetition()), restarts, shortOnes, 100 * blocks / n, 100 * multi / n,
                 uncited, 100 * use / n, gaps / (double) n,
-                judged == 0 ? "" : String.format(Locale.ROOT, "%.0f%% of %d", 100.0 * supported / judged, judged),
+                (judged == 0 ? "" : String.format(Locale.ROOT, "%.0f%% of %d", 100.0 * supported / judged, judged))
+                        + (unreadable == 0 ? "" : (judged == 0 ? "" : ", ") + unreadable + " unreadable"),
                 judged == 0 ? "" : unsupported + " (" + partial + ")");
     }
 
@@ -181,6 +185,37 @@ public final class WriterAbReport {
                     "%.1f", "%.0f", "%.0f"};
             for (int c = 0; c < formats.length; c++) {
                 md.append(' ').append(meanRange(rows, c, formats[c])).append(" |");
+            }
+            md.append('\n');
+        }
+        md.append("\n## Writer log and judge per arm\n\nCounted from the writer's own log lines (mean, range in "
+                + "brackets): top-ups, the words they added, top-ups by key points without an uncited passage, "
+                + "dropped top-ups, repeated sentences the writer removed, repairs; then the judge's unreadable "
+                + "answers.\n\n| Item | Arm |");
+        for (String key : WriterAbLog.KEYS) {
+            md.append(' ').append(key).append(" |");
+        }
+        md.append(" judge unreadable |\n|---|---|");
+        for (int i = 0; i <= WriterAbLog.KEYS.size(); i++) {
+            md.append("---|");
+        }
+        md.append('\n');
+        for (List<WriterAbSample> runs : byKey.values()) {
+            List<double[]> rows = new ArrayList<double[]>();
+            for (WriterAbSample s : runs) {
+                double[] row = new double[WriterAbLog.KEYS.size() + 1];
+                for (int k = 0; k < WriterAbLog.KEYS.size(); k++) {
+                    Integer value = s.getQualityCounts().get(WriterAbLog.KEYS.get(k));
+                    row[k] = value == null ? Double.NaN : value;
+                }
+                for (WriterAbSample.Section section : s.getSections()) {
+                    row[WriterAbLog.KEYS.size()] += section.support.count(CitationSupportJudge.Verdict.UNREADABLE);
+                }
+                rows.add(row);
+            }
+            md.append("| ").append(runs.get(0).getItem()).append(" | ").append(runs.get(0).getModel()).append(" |");
+            for (int c = 0; c <= WriterAbLog.KEYS.size(); c++) {
+                md.append(' ').append(meanRange(rows, c, "%.1f")).append(" |");
             }
             md.append('\n');
         }
@@ -228,7 +263,7 @@ public final class WriterAbReport {
         int flags = 0;
         for (Map.Entry<String, Integer> count : s.getQualityCounts().entrySet()) {
             if (!count.getKey().equals("writer gaps") && !count.getKey().equals("stripped markers")
-                    && !count.getKey().equals("failed sections")) {
+                    && !count.getKey().equals("failed sections") && !WriterAbLog.KEYS.contains(count.getKey())) {
                 flags += count.getValue();
             }
         }
