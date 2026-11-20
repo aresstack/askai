@@ -54,10 +54,16 @@ public final class SectionWriterPrompt {
     private SectionWriterPrompt() {
     }
 
+    /** The opening of {@link #SYSTEM}, and what a part of a planned section reads in its place. */
+    static final String WHOLE_SECTION = "You write one section of a non-fiction book";
+    static final String ONE_PART = "You write one part of a section of a non-fiction book";
+
     /** The system prompt for the assignment's citation format. */
     static String system(SectionAssignment a) {
-        return a.getCitationFormat() == CitationFormat.SENTENCE_TAGS ? SYSTEM.replace(NUMBERED_RULE, SENTENCE_TAG_RULE)
-                : SYSTEM;
+        String system = a.getCitationFormat() == CitationFormat.SENTENCE_TAGS
+                ? SYSTEM.replace(NUMBERED_RULE, SENTENCE_TAG_RULE) : SYSTEM;
+        SectionAssignment.PartContext part = a.getPartContext();
+        return part != null && part.count > 1 ? system.replace(WHOLE_SECTION, ONE_PART) : system;
     }
 
     /** How the format's citation looks, for the instructions that name it. */
@@ -154,7 +160,14 @@ public final class SectionWriterPrompt {
         if (!a.getBrief().isEmpty()) {
             sb.append("Brief: ").append(a.getBrief()).append('\n');
         }
-        if (!a.getKeyPoints().isEmpty()) {
+        SectionAssignment.PartContext part = a.getPartContext();
+        if (part != null) {
+            sb.append(part.count > 1 ? "SECTION PLAN (the section is written in " + part.count + " parts, this is part "
+                    + (part.index + 1) + "):\n" : "SECTION PLAN:\n");
+            for (String line : part.planLines) {
+                sb.append("- ").append(line).append('\n');
+            }
+        } else if (!a.getKeyPoints().isEmpty()) {
             sb.append("Key points:\n");
             for (String point : a.getKeyPoints()) {
                 sb.append("- ").append(point).append('\n');
@@ -167,6 +180,10 @@ public final class SectionWriterPrompt {
         if (!a.getPreviousDigest().isEmpty()) {
             sb.append("\nPREVIOUS SECTION (digest, do not repeat it):\n")
                     .append(clip(a.getPreviousDigest(), DIGEST_CHARS)).append('\n');
+        }
+        if (part != null && !part.soFar.isEmpty()) {
+            sb.append("\nSECTION TEXT SO FAR (already written, its citations left out; the reader has just read "
+                    + "it):\n\"\"\"").append(part.soFar.replace("\"\"\"", "\"")).append("\"\"\"\n");
         }
         if (!a.getGlossary().isEmpty()) {
             sb.append("\nGLOSSARY: ").append(clip(String.join("; ", a.getGlossary()), GLOSSARY_CHARS)).append('\n');
@@ -191,7 +208,13 @@ public final class SectionWriterPrompt {
         sb.append("\nPASSAGES (quoted source data):\n");
         boolean sentenceTags = a.getCitationFormat() == CitationFormat.SENTENCE_TAGS;
         SentenceTags tags = sentenceTags ? SentenceTags.of(a.getPassages()) : null;
-        for (EvidencePassage passage : a.getPassages()) {
+        String point = null;
+        for (int i = 0; i < a.getPassages().size(); i++) {
+            EvidencePassage passage = a.getPassages().get(i);
+            if (part != null && i < part.passagePoints.size() && !part.passagePoints.get(i).equals(point)) {
+                point = part.passagePoints.get(i);
+                sb.append("For the point \"").append(point).append("\":\n");
+            }
             if (sentenceTags) {
                 sb.append("Passage").append(tagged ? " (source " + sources.get(passage.getSourceId()) + ")" : "")
                         .append(":\n<text>").append(tags.tagged(passage.getNumber())).append("</text>\n");
@@ -207,9 +230,39 @@ public final class SectionWriterPrompt {
         if (sentenceTags) {
             sb.append("Number of XML tags: ").append(tags.size()).append(".\n");
         }
-        sb.append("\nWrite the section now as plain paragraphs with ").append(citationExample(a))
-                .append(" citations, then the GAP: lines, if any. ")
-                .append("Write in ").append(language).append('.');
+        sb.append('\n').append(part == null ? "Write the section now" : partInstruction(part))
+                .append(" as plain paragraphs with ").append(citationExample(a))
+                .append(" citations, then the GAP: lines, if any. ");
+        if (part != null) {
+            sb.append(partRules(part));
+        }
+        sb.append("Write in ").append(language).append('.');
+        return sb.toString();
+    }
+
+    private static String partInstruction(SectionAssignment.PartContext part) {
+        return part.count > 1 ? "Write part " + (part.index + 1) + " of " + part.count + " now" : "Write the section now";
+    }
+
+    /**
+     * What a part of a planned section is told beyond the writing rules: where it continues, which points are its
+     * own, that a later part goes on, and that passages saying the same are stated once and cited together.
+     */
+    static String partRules(SectionAssignment.PartContext part) {
+        StringBuilder sb = new StringBuilder();
+        if (!part.soFar.isEmpty()) {
+            sb.append("Continue directly after SECTION TEXT SO FAR: do not introduce the section or its subject "
+                    + "again, and do not repeat or rephrase anything that text already says; leave out a passage "
+                    + "that only supports what is already written. ");
+        }
+        if (part.count > 1) {
+            sb.append("Cover the points marked \"this part\", in their order, and leave every other point to its "
+                    + "part; write GAP: lines only for points of this part. ");
+            sb.append(part.isLast() ? "End with the last point and do not summarise the section. "
+                    : "Do not conclude or summarise: a later part continues the section. ");
+        }
+        sb.append(part.passagePoints.isEmpty() ? "" : "Use the passages listed under a point for that point. ");
+        sb.append("When several passages say the same, say it once and cite all of them together, like [1, 3]. ");
         return sb.toString();
     }
 

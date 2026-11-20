@@ -94,19 +94,30 @@ public class WriterAbLiveTest {
                         "model." + arm.getModel() + ".contextTokens=" + contextTokens + "\n");
                 OllamaModelPort port = BenchmarkModelPortAccess.open(arm.getModel(), meter.baseUrl(), timeout,
                         settings);
-                SectionWriter writer = SectionWriter.onPort(port, Duration.ofMillis(timeout), null);
+                SectionWriter writer = SectionWriter.onPort(port, Duration.ofMillis(timeout),
+                        Boolean.getBoolean(P + "writerAb.log") ? new java.util.function.Consumer<String>() {
+                            public void accept(String line) {
+                                System.out.println("[writer] " + line);
+                            }
+                        } : null);
+                // the product's writer checks repeats and carried claims with the sentence-embedding slot as well
+                String sentenceModel = System.getProperty(P + "writerAb.sentenceModel", "").trim();
+                if (!sentenceModel.isEmpty()) {
+                    writer = writer.withSentenceVectors(new OllamaSentenceVectors(ollama, sentenceModel));
+                }
+                final SectionWriter sectionWriter = writer;
                 int answerTokens = ModelPortSettings.writerPreset(arm.getModel()).getAnswerTokens();
                 for (int i = 0; i < 3; i++) {
                     WriterAbInput.Section section = input.sections.get(i);
                     samples.add(measure(meter, input, "section " + (i + 1), arm.getModel(), section.passages.size(),
                             new Run() {
                                 public List<SectionDraft> drafts() {
-                                    return Arrays.asList(writer.write(input.assignment(section, arm, answerTokens,
-                                            "")));
+                                    return Arrays.asList(sectionWriter.write(input.assignment(section, arm,
+                                            answerTokens, "")));
                                 }
                             }));
                 }
-                samples.add(chapterByWritingJob(meter, input, arm, writer, answerTokens));
+                samples.add(chapterByWritingJob(meter, input, arm, sectionWriter, answerTokens));
             }
         }
         Assume.assumeFalse("no arm selected by -Daskai.benchmark.models", models.isEmpty());
@@ -148,6 +159,9 @@ public class WriterAbLiveTest {
             }
             counts.put("writer gaps", counts.get("writer gaps") + draft.getGaps().size());
             counts.put("stripped markers", counts.get("stripped markers") + draft.getStrippedMarkers().size());
+            if (Boolean.getBoolean(P + "writerAb.log")) {
+                System.out.println("[writer] " + item + ": " + draft.getCalls() + " calls, gaps " + draft.getGaps());
+            }
         }
         double seconds = (System.nanoTime() - start) / 1e9;
         meter.awaitIdle(60_000L);

@@ -86,12 +86,56 @@ public final class WriterAbInput {
         return "en".equalsIgnoreCase(language) ? "English" : "de".equalsIgnoreCase(language) ? "German" : language;
     }
 
-    /** The writer's assignment for one section under an arm; {@code previousDigest} chains the sample chapter. */
+    /**
+     * The writer's assignment for one section under an arm; {@code previousDigest} chains the sample chapter. Without
+     * further properties the section gets every passage in every part and no top-up (the comparison of 17 Nov 2026).
+     * The properties below give it what the product's {@code EvidenceAssignments} gives a section, and the section
+     * plan under test:
+     * <ul>
+     * <li>{@code askai.benchmark.writerAb.wordsPerPassage}: caps the section's words at passages times this value
+     * (product default 40);</li>
+     * <li>{@code askai.benchmark.writerAb.passagesPerCall}: passages one part gets; {@code auto} = the pack divided
+     * by the section's parts, as the product sizes it;</li>
+     * <li>{@code askai.benchmark.writerAb.topUp}: {@code share,calls} of the top-up (product default
+     * {@code 0.85,2});</li>
+     * <li>{@code askai.benchmark.writerAb.plan}: {@code off}, {@code continuity} or {@code semantic}
+     * ({@code SectionPlanCriteria}), and {@code askai.benchmark.writerAb.yield}: words per evidence word of the
+     * semantic plan (0 keeps the word target).</li>
+     * </ul>
+     */
     public SectionAssignment assignment(Section section, WriterAbArm arm, int answerTokens, String previousDigest) {
+        String p = "askai.benchmark.writerAb.";
+        int words = section.words;
+        int wordsPerPassage = Integer.getInteger(p + "wordsPerPassage", 0);
+        if (wordsPerPassage > 0) {
+            words = Math.min(words, Math.max(SectionAssignment.MIN_WORDS_PER_CALL,
+                    section.passages.size() * wordsPerPassage));
+        }
+        String perCallSetting = System.getProperty(p + "passagesPerCall", "0").trim();
+        int parts = SectionAssignment.partCount(words, arm.getWordsPerCall(), section.keyPoints.size());
+        int perCall = "auto".equalsIgnoreCase(perCallSetting) ? (section.passages.size() + parts - 1) / parts
+                : Integer.parseInt(perCallSetting);
+        com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp =
+                com.aresstack.askai.research.runtime.writer.TopUpCriteria.off();
+        String topUpSetting = System.getProperty(p + "topUp", "").trim();
+        if (!topUpSetting.isEmpty()) {
+            String[] values = topUpSetting.split(",");
+            topUp = new com.aresstack.askai.research.runtime.writer.TopUpCriteria(Double.parseDouble(values[0].trim()),
+                    Integer.parseInt(values[1].trim()));
+        }
+        com.aresstack.askai.research.runtime.writer.SectionPlanCriteria plan =
+                com.aresstack.askai.research.runtime.writer.SectionPlanCriteria.of(
+                        com.aresstack.askai.research.runtime.writer.SectionPlanCriteria.Mode.valueOf(
+                                System.getProperty(p + "plan", "off").trim().toUpperCase(java.util.Locale.ROOT)));
+        String yield = System.getProperty(p + "yield", "").trim();
+        if (!yield.isEmpty()) {
+            plan = plan.withWordsPerEvidenceWord(Double.parseDouble(yield));
+        }
         return SectionAssignment.builder(section.id).title(section.title).brief(section.brief)
                 .keyPoints(section.keyPoints).passages(section.passages).synopsis(synopsis)
                 .previousDigest(previousDigest).glossary(glossary).bookLanguage(languageName())
-                .sectionWords(section.words).wordsPerCall(arm.getWordsPerCall()).answerTokens(answerTokens).build();
+                .sectionWords(words).wordsPerCall(arm.getWordsPerCall()).answerTokens(answerTokens)
+                .passagesPerCall(perCall).topUp(topUp).plan(plan).build();
     }
 
     private static String string(JsonObject object, String key) {
