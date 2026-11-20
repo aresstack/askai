@@ -37,6 +37,8 @@ public final class SectionAssignment {
     private final SynthesisCriteria synthesis;
     private final CitationFormat citationFormat;
     private final TopUpCriteria topUp;
+    private final PartContextCriteria partContextCriteria;
+    private final PartContext partContext;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -60,6 +62,36 @@ public final class SectionAssignment {
         this.synthesis = b.synthesis;
         this.citationFormat = b.citationFormat;
         this.topUp = b.topUp;
+        this.partContextCriteria = b.partContextCriteria;
+        this.partContext = b.partContext;
+    }
+
+    /**
+     * What one part call of a section knows about its section ({@link PartContextCriteria}): its place among the
+     * parts, the plan line of every key point of the section and the text of the parts before it. Immutable.
+     */
+    static final class PartContext {
+        final int index;
+        final int count;
+        final List<String> planLines;
+        final String soFar;
+
+        /**
+         * @param index     this part, from 0
+         * @param count     parts of the section
+         * @param planLines one line per key point of the section, in outline order, with its state
+         * @param soFar     the checked text of the parts before this one, markers left out
+         */
+        PartContext(int index, int count, List<String> planLines, String soFar) {
+            this.index = index;
+            this.count = count;
+            this.planLines = Collections.unmodifiableList(new ArrayList<String>(planLines));
+            this.soFar = soFar == null ? "" : soFar.trim();
+        }
+
+        boolean isLast() {
+            return index == count - 1;
+        }
     }
 
     /**
@@ -185,6 +217,23 @@ public final class SectionAssignment {
         return synthesis;
     }
 
+    /** Whether the parts of this section know their section ({@link PartContextCriteria}); off by default. */
+    public PartContextCriteria getPartContextCriteria() {
+        return partContextCriteria;
+    }
+
+    /** The part's place in its section; {@code null} for a whole section and while the part context is off. */
+    PartContext getPartContext() {
+        return partContext;
+    }
+
+    /** A copy of this part with its place in the section. */
+    SectionAssignment inSection(PartContext context) {
+        Builder b = toBuilder();
+        b.partContext = context;
+        return new SectionAssignment(b);
+    }
+
     public boolean isRewrite() {
         return !rewriteComment.isEmpty() || !currentText.isEmpty();
     }
@@ -212,6 +261,8 @@ public final class SectionAssignment {
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
         b.topUp = topUp;
+        b.partContextCriteria = partContextCriteria;
+        b.partContext = partContext;
         return b;
     }
 
@@ -248,6 +299,7 @@ public final class SectionAssignment {
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
         b.topUp = topUp;
+        b.partContextCriteria = partContextCriteria;
         return new SectionAssignment(b);
     }
 
@@ -273,6 +325,8 @@ public final class SectionAssignment {
         private SynthesisCriteria synthesis = SynthesisCriteria.defaults();
         private CitationFormat citationFormat = CitationFormat.NUMBERED;
         private TopUpCriteria topUp = TopUpCriteria.off();
+        private PartContextCriteria partContextCriteria = PartContextCriteria.off();
+        private PartContext partContext;
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -393,6 +447,12 @@ public final class SectionAssignment {
         /** Top-up bounds (settings); none when {@code null} or not set. */
         public Builder topUp(TopUpCriteria value) {
             this.topUp = value == null ? TopUpCriteria.off() : value;
+            return this;
+        }
+
+        /** Whether the parts know their section (settings); off when {@code null} or not set. */
+        public Builder partContext(PartContextCriteria value) {
+            this.partContextCriteria = value == null ? PartContextCriteria.off() : value;
             return this;
         }
 

@@ -116,10 +116,19 @@ public final class SectionWriter {
         int words = 0;
         int paragraphOffset = 0;
         String digest = assignment.getPreviousDigest();
-        for (SectionAssignment part : parts) {
+        PartContextCriteria context = assignment.getPartContextCriteria();
+        for (int index = 0; index < parts.size(); index++) {
+            SectionAssignment part = parts.get(index);
             List<EvidencePassage> packed = part.getPassages();
-            SectionDraft draft = writePart(part.part(part.getKeyPoints(), numbered(packed), part.getWordsPerCall(),
-                    digest), written, book);
+            // with the part context, a later part reads the section's text so far instead of the last sentences
+            SectionAssignment call = part.part(part.getKeyPoints(), numbered(packed), part.getWordsPerCall(),
+                    context.isEnabled() && index > 0 ? "" : digest);
+            if (context.isEnabled()) {
+                call = call.inSection(new SectionAssignment.PartContext(index, parts.size(),
+                        planLines(assignment.getKeyPoints(), parts, index),
+                        soFar(text.toString(), context.getSoFarChars())));
+            }
+            SectionDraft draft = writePart(call, written, book);
             calls += draft.getCalls();
             if (hash.isEmpty()) {
                 hash = draft.getPromptHash();
@@ -151,6 +160,46 @@ public final class SectionWriter {
         }
         return new SectionDraft(true, "", text.toString(), new java.util.TreeMap<Integer, EvidencePassage>(citations),
                 flags, gaps, stripped, model, hash, calls, words);
+    }
+
+    /**
+     * The plan line of every key point of the section as part {@code index} sees it: written by an earlier part,
+     * this part's, or a later part's.
+     */
+    static List<String> planLines(List<String> keyPoints, List<SectionAssignment> parts, int index) {
+        List<String> lines = new ArrayList<String>();
+        for (String point : keyPoints) {
+            int first = -1;
+            int last = -1;
+            for (int n = 0; n < parts.size(); n++) {
+                if (parts.get(n).getKeyPoints().contains(point)) {
+                    first = first < 0 ? n : first;
+                    last = n;
+                }
+            }
+            String state = first < 0 ? "" : last < index ? "already written" : first > index ? "a later part"
+                    : "this part";
+            lines.add(state.isEmpty() ? point : point + " - " + state);
+        }
+        return lines;
+    }
+
+    /**
+     * The text of the earlier parts as a part call carries it: without markers (each part numbers its own passages),
+     * and when it is longer than {@code maxChars}, its end from a paragraph or sentence start on.
+     */
+    static String soFar(String text, int maxChars) {
+        String plain = SectionWriterPrompt.withoutMarkers(text == null ? "" : text);
+        if (maxChars <= 0 || plain.length() <= maxChars) {
+            return plain;
+        }
+        String tail = plain.substring(plain.length() - maxChars);
+        int paragraph = tail.indexOf("\n\n");
+        if (paragraph >= 0 && paragraph < maxChars / 2) {
+            return "[...]\n\n" + tail.substring(paragraph + 2).trim();
+        }
+        java.util.regex.Matcher sentence = java.util.regex.Pattern.compile("[.!?]\\s+").matcher(tail);
+        return "[...] " + (sentence.find() ? tail.substring(sentence.end()) : tail).trim();
     }
 
     /** One call's worth: first answer, at most one continuation, at most one repair (with its own continuation). */
@@ -247,13 +296,17 @@ public final class SectionWriter {
                     uncited.add(n);
                 }
             }
-            if (uncited.isEmpty()) {
+            boolean byPoints = criteria.getFocus() == TopUpCriteria.Focus.KEY_POINTS;
+            if (uncited.isEmpty() && !byPoints) {
                 break;
             }
             String text = checked.result.text();
             log.accept("section " + a.getSectionId() + ": top-up " + (round + 1) + " for " + (target - have)
-                    + " missing words (" + have + " of " + target + "), " + uncited.size() + " uncited passages");
-            MainModelChatResult more = chat.complete(SectionWriterPrompt.topUp(a, text, uncited, target - have),
+                    + " missing words (" + have + " of " + target + "), " + uncited.size() + " uncited passages"
+                    + (byPoints ? ", by key points" : ""));
+            MainModelChatResult more = chat.complete(byPoints
+                            ? SectionWriterPrompt.topUpByKeyPoints(a, text, target - have)
+                            : SectionWriterPrompt.topUp(a, text, uncited, target - have),
                     TEMPERATURE, a.getAnswerTokens());
             calls[0]++;
             if (!more.isOk()) {
