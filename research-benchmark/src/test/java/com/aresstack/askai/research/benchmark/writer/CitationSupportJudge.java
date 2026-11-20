@@ -80,6 +80,9 @@ public final class CitationSupportJudge {
         }
     }
 
+    /** Failed calls in a row after which the rest of a text is counted unreadable without asking. */
+    static final int MAX_FAILED_IN_A_ROW = 3;
+
     /** Sentences before a judged one that the judge reads as context, never judges. */
     static final int CONTEXT_SENTENCES = 2;
 
@@ -113,6 +116,7 @@ public final class CitationSupportJudge {
         }
         List<Finding> findings = new ArrayList<Finding>();
         List<WriterQualityMetrics.Sentence> sentences = WriterQualityMetrics.sentences(text);
+        int failedInARow = 0;
         for (int i = 0; i < sentences.size(); i++) {
             WriterQualityMetrics.Sentence sentence = sentences.get(i);
             List<Integer> cited = new ArrayList<Integer>(new java.util.LinkedHashSet<Integer>(sentence.cited));
@@ -138,7 +142,16 @@ public final class CitationSupportJudge {
                 findings.add(new Finding(sentence.text, cited, Verdict.UNSUPPORTED, "cites no passage of the pack"));
                 continue;
             }
-            findings.add(ask(sentence.text, cited, user.toString()));
+            if (failedInARow >= MAX_FAILED_IN_A_ROW) {
+                // the judge model does not answer (not loadable, server busy): count the rest, do not wait for each
+                findings.add(new Finding(sentence.text, cited, Verdict.UNREADABLE, "skipped after "
+                        + MAX_FAILED_IN_A_ROW + " failed calls in a row"));
+                continue;
+            }
+            Finding finding = ask(sentence.text, cited, user.toString());
+            failedInARow = finding.verdict == Verdict.UNREADABLE && finding.reason.contains("Exception")
+                    ? failedInARow + 1 : 0;
+            findings.add(finding);
         }
         return new Result(findings);
     }

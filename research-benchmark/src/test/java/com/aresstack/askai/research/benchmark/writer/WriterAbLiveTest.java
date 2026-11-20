@@ -176,7 +176,8 @@ public class WriterAbLiveTest {
                 : WriterAbEmbeddings.documents(sentences);
         String judgeModel = System.getProperty(P + "writerAb.judge", "").trim();
         CitationSupportJudge judge = judgeModel.isEmpty() ? null
-                : new CitationSupportJudge(ollama, judgeModel, (int) timeout);
+                : new CitationSupportJudge(ollama, judgeModel,
+                        Integer.getInteger(P + "writerAb.judgeTimeoutMillis", 300_000));
         List<String> judgeItems = list(System.getProperty(P + "writerAb.judgeItems", WriterAbDecision.CHAPTER));
         // the chapter alone is the app's path; its first section is written under the same conditions as section 1
         boolean chapterOnly = Boolean.getBoolean(P + "writerAb.chapterOnly");
