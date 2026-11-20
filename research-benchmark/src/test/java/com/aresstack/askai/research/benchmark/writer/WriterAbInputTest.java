@@ -1,9 +1,6 @@
 package com.aresstack.askai.research.benchmark.writer;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
-import com.aresstack.askai.research.runtime.writer.SectionAssignment;
 
 import java.util.Arrays;
 import java.util.List;
@@ -21,18 +18,31 @@ public class WriterAbInputTest {
     }
 
     @Test
-    public void parsesTheChapterAndBuildsTheArmsAssignment() {
+    public void readsTheChapterOfSeventeenNovember() {
         WriterAbInput input = WriterAbInput.parse("{\"language\":\"de\",\"synopsis\":\"S\","
                 + "\"glossary\":[\"EEG: Erneuerbare-Energien-Gesetz\"],\"sections\":[" + section("a") + ","
                 + section("b") + "," + section("c") + "]}");
+        assertEquals(1, input.format);
         assertEquals(3, input.sections.size());
+        assertEquals("S", input.synopsis);
         assertEquals(2, input.sections.get(0).passages.get(1).getNumber());
-        SectionAssignment assignment = input.assignment(input.sections.get(1), WriterAbArm.planArms().get(1), 3072,
-                "digest");
-        assertEquals("German", assignment.getBookLanguage());
-        assertEquals(1100, assignment.getWordsPerCall());
-        assertEquals("digest", assignment.getPreviousDigest());
-        assertEquals(Arrays.asList("EEG: Erneuerbare-Energien-Gesetz"), assignment.getGlossary());
+        assertEquals("p2", input.sections.get(0).passages.get(1).getPassageId());
+        assertEquals(Arrays.asList("EEG: Erneuerbare-Energien-Gesetz"), input.sections.get(2).glossary);
+        assertEquals("S", input.outlineChapter().getBrief().getPurpose());
+        assertEquals(900, input.outlineChapter().getSections().get(1).getBrief().getWordTarget());
+    }
+
+    @Test
+    public void theExportFormatSurvivesTheFile() {
+        WriterAbInput first = WriterAbInput.parse("{\"language\":\"de\",\"synopsis\":\"S\",\"sections\":["
+                + section("a") + "," + section("b") + "," + section("c") + "]}");
+        WriterAbInput again = WriterAbInput.parse(first.toJson());
+        assertEquals(WriterAbInput.FORMAT, again.format);
+        assertEquals("de", again.language);
+        assertEquals(first.synopsis, again.synopsis);
+        assertEquals(first.sections.get(1).passages, again.sections.get(1).passages);
+        assertEquals(first.sections.get(1).keyPoints, again.sections.get(1).keyPoints);
+        assertEquals(2, again.sourceChecksums().size());
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -54,11 +64,5 @@ public class WriterAbInputTest {
     @Test(expected = IllegalArgumentException.class)
     public void anUnratedItemIsRejected() {
         OwnerRanking.resolve("## section 1\n\nRanking: \n", "section 1: A=gemma4:e2b, B=llama3.1:8b\n");
-    }
-
-    @Test
-    public void digestIsTheCutLastParagraph() {
-        assertEquals("Zweiter Absatz [1].", WriterAbLiveTest.digest("Erster.\n\nZweiter Absatz [1]."));
-        assertTrue(WriterAbLiveTest.digest("").isEmpty());
     }
 }

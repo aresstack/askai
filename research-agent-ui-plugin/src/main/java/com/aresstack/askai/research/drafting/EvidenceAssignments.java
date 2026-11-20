@@ -160,21 +160,40 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
 
     public SectionAssignment assignmentFor(SectionWriteRequest request) throws Exception {
         Targets targets = targetSettings.get();
+        EvidencePack pack = packs.build(contexts.requestFor(request), packSettings(request.getSection(), targets));
+        return assignment(pack, request, targets, contexts.writtenSections(request), writerModel.get());
+    }
+
+    /**
+     * The pack settings of one section: the passage count scales with its key-point parts, the per-source cap only
+     * when set (retest of #246: source breadth). The writer A/B exports its packs with these settings.
+     */
+    public static WriterPackSettings packSettings(com.aresstack.askai.research.outline.OutlineSection section,
+                                                  Targets targets) {
+        int parts = SectionAssignment.partCount(section.getBrief().getWordTarget(), targets.wordsPerCall,
+                section.getBrief().getKeyPoints().size());
+        return targets.pack.forParts(parts, targets.perSourceScales);
+    }
+
+    /**
+     * The writer assignment from a built pack, without any store access: what the app sends the writer for this
+     * section, and what the writer A/B sends it (stage 0 of the writer proposal, test parity).
+     *
+     * @param written     the current text of the manuscript's other written sections (repeat check)
+     * @param writerModel the model the writer slot resolves to ("" when unknown), for the citation format
+     */
+    public static SectionAssignment assignment(EvidencePack pack, SectionWriteRequest request, Targets targets,
+                                               java.util.List<String> written, String writerModel) {
         int outlineTarget = request.getSection().getBrief().getWordTarget();
-        int keyPoints = request.getSection().getBrief().getKeyPoints().size();
-        int parts = SectionAssignment.partCount(outlineTarget, targets.wordsPerCall, keyPoints);
-        // the count scales with the parts; the per-source cap only when set (retest of #246: source breadth)
-        EvidencePack pack = packs.build(contexts.requestFor(request),
-                targets.pack.forParts(parts, targets.perSourceScales));
         int wordTarget = wordTarget(outlineTarget, pack.getPassages().size(), targets.wordsPerPassage);
         SectionAssignment base = SectionWriterInputs.of(pack, request.getSection().getTitle(),
                 request.getSection().getBrief().getPurpose(), request.getSection().getBrief().getKeyPoints(),
                 wordTarget, targets.wordsPerCall, targets.answerTokens,
                 targets.carry, targets.pack.getPassageCount());
-        SectionAssignment.Builder assignment = base.toBuilder().writtenSections(contexts.writtenSections(request))
+        SectionAssignment.Builder assignment = base.toBuilder().writtenSections(written)
                 .repeats(targets.repeats).synthesis(targets.synthesis).topUp(targets.topUp)
                 .citationFormat(com.aresstack.askai.research.runtime.writer.CitationFormat.resolve(
-                        targets.citationFormat, writerModel.get()));
+                        targets.citationFormat, writerModel == null ? "" : writerModel));
         if (request.isRewrite()) {
             assignment.rewriteComment(request.getComment()).currentText(request.getCurrentText());
         }
