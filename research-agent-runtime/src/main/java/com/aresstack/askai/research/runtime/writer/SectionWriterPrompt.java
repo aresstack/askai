@@ -135,11 +135,13 @@ public final class SectionWriterPrompt {
                 + missing + " words fewer than the target. Continue after its last sentence, in "
                 + a.getBookLanguage() + ", with up to about " + missing + " more words that deepen the key points"
                 + (points.length() == 0 ? "" : " (" + points + ")") + " where the PASSAGES say more about them: "
-                + "explain, connect or compare what the passages state. A passage you have not cited yet may help "
+                + "connect or compare what the passages state, or add what a passage says beyond the text above. "
+                + "A passage you have not cited yet may help "
                 + "where it adds something new; do not add a paragraph per passage, and leave out a passage that "
                 + "only repeats what is written. Do not repeat or rephrase anything already written, and add no "
                 + "summary of it. Keep citing passages as " + citationExample(a)
-                + " after every claim and end with the GAP: lines, if any.");
+                + " after every claim and end with the GAP: lines, if any. If the PASSAGES hold nothing more on "
+                + "these points, write only the GAP: lines.");
     }
 
     private static List<ChatMessage> continuation(SectionAssignment a, String written, String instruction) {
@@ -165,7 +167,9 @@ public final class SectionWriterPrompt {
             }
             sb.append("- ").append(clip(flag.describe(), 300)).append('\n');
         }
-        sb.append("Write the section again. Cite " + citationExample(a) + " after every claim, cite only a passage that "
+        SectionAssignment.PartContext part = a.getPartContext();
+        sb.append(part != null && part.count > 1 ? "Write this part again (part " + (part.index + 1) + " of "
+                + part.count + "). " : "Write the section again. ").append("Cite " + citationExample(a) + " after every claim, cite only a passage that "
                 + "states that claim, and use only numbers and quotations that the cited passage contains; leave out "
                 + "what no passage supports. Never speak with a passage author's \"we\" or \"our\". Write in ")
                 .append(a.getBookLanguage()).append('.');

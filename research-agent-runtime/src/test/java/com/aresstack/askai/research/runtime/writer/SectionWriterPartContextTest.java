@@ -120,16 +120,68 @@ public class SectionWriterPartContextTest {
     }
 
     @Test
-    public void topUpByKeyPointsRunsAlsoWhenEveryPassageIsCited() {
+    public void topUpByKeyPointsEndsLikeTheOldOneWhenEveryPassageIsCited() {
         String first = "Die Rate stieg auf 15,5 % [1]. Danach kam ein Rückgang [2].";
         SectionWriterTest.ScriptedChat chat = new SectionWriterTest.ScriptedChat().answer(first)
                 .answer("Teil eins und Teil zwei zeigen den Rückgang [1].");
         SectionAssignment a = SectionAssignment.builder("s1").title("Rates").keyPoints(Arrays.asList("growth"))
                 .passages(SectionWriterTest.pack(2)).bookLanguage("German")
                 .wordsPerCall(SectionAssignment.MIN_WORDS_PER_CALL).answerTokens(1200)
-                .topUp(new TopUpCriteria(0.85, 1, TopUpCriteria.Focus.KEY_POINTS)).build();
+                .topUp(new TopUpCriteria(0.85, 2, TopUpCriteria.Focus.KEY_POINTS)).build();
         new SectionWriter(chat, null).write(a);
-        assertEquals(2, chat.requests.size());
+        assertEquals("no new material, no top-up: it could only rephrase", 1, chat.requests.size());
         assertEquals(TopUpCriteria.Focus.UNCITED_PASSAGES, new TopUpCriteria(0.85, 2).getFocus());
+    }
+
+    @Test
+    public void topUpByKeyPointsOffersTheGapOnlyWayOut() {
+        SectionAssignment a = SectionAssignment.builder("s1").title("Rates").keyPoints(Arrays.asList("growth"))
+                .passages(SectionWriterTest.pack(4)).bookLanguage("German").build();
+        String instruction = last(SectionWriterPrompt.topUpByKeyPoints(a, "Die Rate stieg [1].", 120));
+        assertTrue(instruction, instruction.contains("write only the GAP: lines"));
+        assertFalse("no invitation to explain from own knowledge", instruction.contains("explain"));
+    }
+
+    @Test
+    public void theRepairOfALaterPartRewritesThatPartNotTheSection() {
+        SectionAssignment part = section(new PartContextCriteria(true, 0)).inSection(
+                new SectionAssignment.PartContext(1, 3, Arrays.asList("growth - already written",
+                        "decline - this part", "outlook - a later part"), "Die Rate stieg."));
+        String repair = last(SectionWriterPrompt.repair(part, new java.util.ArrayList<ClaimFlag>()));
+        assertTrue(repair, repair.contains("Write this part again (part 2 of 3)"));
+        assertFalse(repair, repair.contains("Write the section again"));
+        String whole = last(SectionWriterPrompt.repair(section(null), new java.util.ArrayList<ClaimFlag>()));
+        assertTrue(whole, whole.contains("Write the section again"));
+    }
+
+    @Test
+    public void aKeyPointNamedTwiceKeepsTheStateOfEachOfItsParts() {
+        SectionAssignment a = section(null).toBuilder().keyPoints(Arrays.asList("growth", "decline", "growth"))
+                .build();
+        List<SectionAssignment> parts = SectionWriter.parts(a);
+        assertEquals(3, parts.size());
+        assertEquals(Arrays.asList("growth - already written", "decline - this part", "growth - a later part"),
+                SectionWriter.planLines(parts, 1));
+    }
+
+    @Test
+    public void aRewriteWithPartContextCarriesItsOwnOldTextAndTheTextSoFar() {
+        SectionWriterTest.ScriptedChat chat = new SectionWriterTest.ScriptedChat().answer(PART).answer(PART_TWO)
+                .answer(PART_THREE);
+        SectionAssignment a = section(new PartContextCriteria(true, 0)).toBuilder().rewriteComment("präziser")
+                .currentText("Alter erster Satz über das Wachstum [1].\n\nAlter zweiter Satz über den Rückgang [2]."
+                        + "\n\nAlter dritter Satz über den Ausblick [3].").build();
+        new SectionWriter(chat, null).write(a);
+        assertEquals(3, chat.requests.size());
+        String second = user(chat.requests.get(1));
+        assertTrue(second, second.contains("CURRENT TEXT OF THIS PART"));
+        assertTrue(second, second.contains("Alter zweiter Satz"));
+        assertFalse(second, second.contains("Alter erster Satz"));
+        assertTrue(second, second.contains("SECTION TEXT SO FAR"));
+        assertTrue(second, second.contains("Write part 2 of 3 now"));
+    }
+
+    private static String last(List<ChatMessage> request) {
+        return request.get(request.size() - 1).getContent();
     }
 }

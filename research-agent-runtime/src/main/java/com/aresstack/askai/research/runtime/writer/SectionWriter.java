@@ -125,7 +125,7 @@ public final class SectionWriter {
                     context.isEnabled() && index > 0 ? "" : digest);
             if (context.isEnabled()) {
                 call = call.inSection(new SectionAssignment.PartContext(index, parts.size(),
-                        planLines(assignment.getKeyPoints(), parts, index),
+                        planLines(parts, index),
                         soFar(text.toString(), context.getSoFarChars())));
             }
             SectionDraft draft = writePart(call, written, book);
@@ -164,22 +164,16 @@ public final class SectionWriter {
 
     /**
      * The plan line of every key point of the section as part {@code index} sees it: written by an earlier part,
-     * this part's, or a later part's.
+     * this part's, or a later part's. The state follows the part a point belongs to, not its text, so a key point
+     * that appears twice keeps the state of each of its parts.
      */
-    static List<String> planLines(List<String> keyPoints, List<SectionAssignment> parts, int index) {
+    static List<String> planLines(List<SectionAssignment> parts, int index) {
         List<String> lines = new ArrayList<String>();
-        for (String point : keyPoints) {
-            int first = -1;
-            int last = -1;
-            for (int n = 0; n < parts.size(); n++) {
-                if (parts.get(n).getKeyPoints().contains(point)) {
-                    first = first < 0 ? n : first;
-                    last = n;
-                }
+        for (int n = 0; n < parts.size(); n++) {
+            String state = n < index ? "already written" : n > index ? "a later part" : "this part";
+            for (String point : parts.get(n).getKeyPoints()) {
+                lines.add(point + " - " + state);
             }
-            String state = first < 0 ? "" : last < index ? "already written" : first > index ? "a later part"
-                    : "this part";
-            lines.add(state.isEmpty() ? point : point + " - " + state);
         }
         return lines;
     }
@@ -297,7 +291,8 @@ public final class SectionWriter {
                 }
             }
             boolean byPoints = criteria.getFocus() == TopUpCriteria.Focus.KEY_POINTS;
-            if (uncited.isEmpty() && !byPoints) {
+            // both foci end when the material is used up: without a new passage a top-up can only rephrase
+            if (uncited.isEmpty()) {
                 break;
             }
             String text = checked.result.text();

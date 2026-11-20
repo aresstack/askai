@@ -15,7 +15,8 @@ public final class TopUpCriteria {
      * yet, all of them named (live run 5). That turns every remaining passage into a paragraph of its own and makes
      * the text retell source after source (writer proposal, stage 1: 78 to 96 % of the sentences cite exactly one
      * passage). {@link #KEY_POINTS}: more words on the part's key points; an uncited passage may serve where it adds
-     * something new, and a passage that only repeats what is written stays out.
+     * something new, and a passage that only repeats what is written stays out. Both end when every passage is cited:
+     * without new material a top-up could only rephrase.
      */
     public enum Focus { UNCITED_PASSAGES, KEY_POINTS }
 
