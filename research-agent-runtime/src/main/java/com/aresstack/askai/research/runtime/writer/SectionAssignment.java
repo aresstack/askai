@@ -33,6 +33,7 @@ public final class SectionAssignment {
     private final ClaimCarryCheck.Criteria carry;
     private final int passagesPerCall;
     private final List<String> writtenSections;
+    private final List<String> otherSections;
     private final RepeatCheck.Criteria repeats;
     private final SynthesisCriteria synthesis;
     private final CitationFormat citationFormat;
@@ -58,6 +59,7 @@ public final class SectionAssignment {
         this.carry = b.carry;
         this.passagesPerCall = Math.max(0, b.passagesPerCall);
         this.writtenSections = Collections.unmodifiableList(new ArrayList<String>(b.writtenSections));
+        this.otherSections = Collections.unmodifiableList(new ArrayList<String>(b.otherSections));
         this.repeats = b.repeats;
         this.synthesis = b.synthesis;
         this.citationFormat = b.citationFormat;
@@ -197,6 +199,11 @@ public final class SectionAssignment {
         return passagesPerCall;
     }
 
+    /** Spike: one line per neighbouring section of the book for the prompt; empty leaves the block out. */
+    public List<String> getOtherSections() {
+        return otherSections;
+    }
+
     /**
      * The current text of every other written section of the manuscript: what the book already says. A sentence of
      * this section that repeats one of them, word for word or nearly ({@link #getRepeats()}), leaves the text (live
@@ -266,6 +273,7 @@ public final class SectionAssignment {
         b.carry = carry;
         b.passagesPerCall = passagesPerCall;
         b.writtenSections = writtenSections;
+        b.otherSections = otherSections;
         b.repeats = repeats;
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
@@ -304,6 +312,7 @@ public final class SectionAssignment {
         b.currentText = partText == null ? "" : partText.trim();
         b.carry = carry;
         b.writtenSections = writtenSections;
+        b.otherSections = otherSections;
         b.repeats = repeats;
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
@@ -330,6 +339,7 @@ public final class SectionAssignment {
         private ClaimCarryCheck.Criteria carry = ClaimCarryCheck.Criteria.defaults();
         private int passagesPerCall;
         private List<String> writtenSections = new ArrayList<String>();
+        private List<String> otherSections = new ArrayList<String>();
         private RepeatCheck.Criteria repeats = RepeatCheck.Criteria.defaults();
         private SynthesisCriteria synthesis = SynthesisCriteria.defaults();
         private CitationFormat citationFormat = CitationFormat.NUMBERED;
@@ -424,6 +434,15 @@ public final class SectionAssignment {
         /** Passages one writer call gets (the pack size setting); 0 = every passage of the pack. */
         public Builder passagesPerCall(int value) {
             this.passagesPerCall = value;
+            return this;
+        }
+
+        /**
+         * Spike: one line per neighbouring section of the book ("before this one: title: key points"), so the
+         * writer leaves their subjects to them (plan D8 budgets 60 tokens for it). Empty leaves the block out.
+         */
+        public Builder otherSections(List<String> value) {
+            this.otherSections = value == null ? new ArrayList<String>() : new ArrayList<String>(value);
             return this;
         }
 

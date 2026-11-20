@@ -181,6 +181,13 @@ public final class SectionWriterPrompt {
             sb.append("\nPREVIOUS SECTION (digest, do not repeat it):\n")
                     .append(clip(a.getPreviousDigest(), DIGEST_CHARS)).append('\n');
         }
+        if (!a.getOtherSections().isEmpty()) {
+            sb.append("\nOTHER SECTIONS OF THE BOOK (the reader reads them too: leave their subjects to them, and do not "
+                    + "define or introduce again what a section before this one covers):\n");
+            for (String line : a.getOtherSections()) {
+                sb.append("- ").append(clip(line, 300)).append('\n');
+            }
+        }
         if (part != null && !part.soFar.isEmpty()) {
             sb.append("\nSECTION TEXT SO FAR (already written, its citations left out; the reader has just read "
                     + "it):\n\"\"\"").append(part.soFar.replace("\"\"\"", "\"")).append("\"\"\"\n");
