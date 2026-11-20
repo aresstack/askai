@@ -13,6 +13,34 @@ import static org.junit.Assert.assertEquals;
 public class ResearchRuntimeSettingsWriterTest {
 
     @Test
+    public void partContextAndTopUpByKeyPointsAreOffUntilSet() {
+        com.aresstack.askai.research.drafting.EvidenceAssignments.Targets defaults =
+                ResearchRuntimeSettings.loadWriterTargets(new MemoryStore());
+        org.junit.Assert.assertFalse(defaults.getPartContext().isEnabled());
+        assertEquals(com.aresstack.askai.research.runtime.writer.PartContextCriteria.DEFAULT_SO_FAR_CHARS,
+                defaults.getPartContext().getSoFarChars());
+        assertEquals(com.aresstack.askai.research.runtime.writer.TopUpCriteria.Focus.UNCITED_PASSAGES,
+                defaults.getTopUp().getFocus());
+        org.junit.Assert.assertFalse(ResearchRuntimeSettings.loadWriterTargets(null).getPartContext().isEnabled());
+
+        MemoryStore store = new MemoryStore();
+        store.put(ResearchRuntimeSettings.KEY_WRITER_PART_CONTEXT, "true");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_PART_CONTEXT_CHARS, "4000");
+        store.put(ResearchRuntimeSettings.KEY_WRITER_TOP_UP_FOCUS, "key-points");
+        com.aresstack.askai.research.drafting.EvidenceAssignments.Targets set =
+                ResearchRuntimeSettings.loadWriterTargets(store);
+        org.junit.Assert.assertTrue(set.getPartContext().isEnabled());
+        assertEquals(4000, set.getPartContext().getSoFarChars());
+        assertEquals(com.aresstack.askai.research.runtime.writer.TopUpCriteria.Focus.KEY_POINTS,
+                set.getTopUp().getFocus());
+        // each switch alone: the part context does not change the top-up, and the other way round
+        MemoryStore onlyTopUp = new MemoryStore();
+        onlyTopUp.put(ResearchRuntimeSettings.KEY_WRITER_TOP_UP_FOCUS, "key-points");
+        org.junit.Assert.assertFalse(ResearchRuntimeSettings.loadWriterTargets(onlyTopUp).getPartContext()
+                .isEnabled());
+    }
+
+    @Test
     public void theProseCriteriaDefaultToTheFilterDefaults() {
         assertEquals(ProsePassageFilter.Criteria.defaults(),
                 ResearchRuntimeSettings.loadWriterProseCriteria(new MemoryStore()));
