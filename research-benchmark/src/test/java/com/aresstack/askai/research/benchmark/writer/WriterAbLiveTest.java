@@ -314,10 +314,10 @@ public class WriterAbLiveTest {
         SectionDraft draft = writer.write(assignment);
         double wall = (System.nanoTime() - start) / 1e9;
         meter.awaitIdle(60_000L);
-        OllamaTokenMeter.Usage used = meter.snapshot().minus(before);
-        long tokens = used.totalTokens();
+        OllamaTokenMeter.Usage usage = meter.snapshot().minus(before);
+        long tokens = usage.totalTokens();
         // without loading the model: the judge before may have pushed the writer out of memory
-        double seconds = Math.max(0, wall - used.loadMillis / 1e3);
+        double seconds = Math.max(0, wall - usage.loadMillis / 1e3);
         log.check();
         Map<String, Integer> counts = emptyCounts();
         counts.putAll(log.counts());
@@ -377,10 +377,10 @@ public class WriterAbLiveTest {
         WritingOutcome outcome = job.writeRemaining(outline);
         double wall = (System.nanoTime() - start) / 1e9;
         meter.awaitIdle(60_000L);
-        OllamaTokenMeter.Usage used = meter.snapshot().minus(before);
-        long tokens = used.totalTokens();
+        OllamaTokenMeter.Usage usage = meter.snapshot().minus(before);
+        long tokens = usage.totalTokens();
         // without loading the model: the judge before may have pushed the writer out of memory
-        double seconds = Math.max(0, wall - used.loadMillis / 1e3);
+        double seconds = Math.max(0, wall - usage.loadMillis / 1e3);
         log.check();
 
         StringBuilder text = new StringBuilder();
