@@ -26,10 +26,12 @@ import java.util.Set;
  * the {@code developer} role never used (one service answered it with HTTP 500).
  *
  * <p>Thinking: {@code reasoning_effort} carries Low, Medium and High as they are. Off and Auto send nothing (many
- * services do not know {@code "none"}), except for a model that cannot switch reasoning off ({@code gpt-oss}),
- * which gets {@code "low"} and, when the caller asked for no reasoning, the same extra reasoning room in its answer
- * budget as on Ollama ({@link ProviderCall#LEVEL_ONLY_REASONING_TOKENS}). On asks for the model's own default and
- * sends nothing.</p>
+ * services do not know {@code "none"}), except for a model that cannot switch reasoning off, which gets
+ * {@code "low"} and, when the caller asked for no reasoning, the same extra reasoning room in its answer budget as on
+ * Ollama ({@link ProviderCall#LEVEL_ONLY_REASONING_TOKENS}). Such a model is {@code gpt-oss}, and any model whose
+ * service demanded {@code max_completion_tokens} ({@link Relaxation#MAX_COMPLETION_TOKENS}): OpenAI asks that of its
+ * reasoning models, which reason by default and count their reasoning in that budget, so a short answer budget
+ * would otherwise end before the answer. On asks for the model's own default and sends nothing.</p>
  *
  * <p>Tool calls without an id (Ollama does not always give one) get {@code call_<n>}; a tool result without an id
  * answers the oldest open call of its tool name, so a conversation replayed from another provider stays valid.</p>
@@ -127,7 +129,7 @@ final class OpenAiRequestWriter {
         if (call.getTemperature() != null && !relaxations.contains(Relaxation.NO_TEMPERATURE)) {
             body.addProperty("temperature", call.getTemperature());
         }
-        String effort = reasoningEffort(call);
+        String effort = reasoningEffort(call, relaxations);
         int budget = call.getAnswerTokens();
         if (budget > 0 && call.getRequestedThinking() == ThinkingMode.OFF && "low".equals(effort)) {
             budget += ProviderCall.LEVEL_ONLY_REASONING_TOKENS; // as on Ollama (plan 4.1 rule 3)
@@ -233,8 +235,8 @@ final class OpenAiRequestWriter {
         return false;
     }
 
-    /** The {@code reasoning_effort} of a call, or null for none (see the class comment). */
-    static String reasoningEffort(ProviderCall call) {
+    /** The {@code reasoning_effort} of a call written with {@code relaxations}, or null for none (class comment). */
+    static String reasoningEffort(ProviderCall call, Set<Relaxation> relaxations) {
         switch (call.effectiveThinking()) {
             case LOW:
                 return "low";
@@ -245,7 +247,8 @@ final class OpenAiRequestWriter {
             case ON:
                 return null;
             default: // OFF and Auto
-                return OpenAiCompatibleModelProvider.isLevelOnlyApiModel(call.getModel()) ? "low" : null;
+                return OpenAiCompatibleModelProvider.isLevelOnlyApiModel(call.getModel())
+                        || relaxations.contains(Relaxation.MAX_COMPLETION_TOKENS) ? "low" : null;
         }
     }
 

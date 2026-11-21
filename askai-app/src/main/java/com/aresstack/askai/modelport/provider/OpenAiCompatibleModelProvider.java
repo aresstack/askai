@@ -32,6 +32,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * The wire of an OpenAI-compatible service ({@code POST <base URL>/chat/completions}, {@code GET <base URL>/models})
@@ -54,7 +55,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * ({@link OpenAiRequestWriter.Relaxation}: {@code max_completion_tokens} for {@code max_tokens}, no
  * {@code temperature}, no {@code reasoning_effort}, no {@code stream_options}, the other JSON form, then no
  * {@code response_format}). Such a try is no retry. Once a weaker request is accepted, the provider keeps its form
- * for the model at that base URL, so later calls do not pay the refusal again.</p>
+ * for the model's calls of the same kind (answer form and thinking level) at that base URL, so later calls do not
+ * pay the refusal again and calls of another kind keep the fields their own requests had accepted.</p>
  *
  * <p>Abort: a cancel or time-out never waits for the wire, and the port hands the call's place on at once (no
  * memory is shared, so there is no order of calls to protect). While the service has not answered yet, the
@@ -107,6 +109,11 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
     public static final ConnectionOpener PLAIN = url -> (HttpURLConnection) new URL(url).openConnection();
 
     static final int MAX_DETAIL_LENGTH = 300;
+    /**
+     * A secret a service masked itself before echoing it (OpenAI: {@code sk-proj-****abcd}), masked whole here. A
+     * match starts only where a word starts, so a long error body costs linear time.
+     */
+    private static final Pattern MASKED_SECRET = Pattern.compile("(?<![^\\s\"'`])[^\\s\"'`]*\\*{3,}[^\\s\"'`.,;:)]*");
     private static final long MAX_RETRY_WAIT_MILLIS = 30_000L;
     private static final List<Integer> RETRYABLE = Arrays.asList(429, 502, 503, 504);
     /** The message of a key the JDK's header check would refuse, quoting it in its own message. */
@@ -146,7 +153,11 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
     public ProviderCompletion chat(String baseUrl, ProviderCall call, ProviderStream stream)
             throws ProviderException {
         String url = join(baseUrl, "/chat/completions");
-        String formKey = join(baseUrl, "") + "\n" + call.getModel();
+        // A weaker form is kept for calls of the same kind only: what a refusal means depends on the answer form
+        // (the "other" JSON form of a plain JSON call is the schema form) and on the reasoning level (a service may
+        // refuse temperature only beside reasoning_effort).
+        String formKey = join(baseUrl, "") + "\n" + call.getModel() + "\n" + call.getOutputFormat().getKind()
+                + "\n" + call.effectiveThinking();
         Set<Relaxation> forms = EnumSet.noneOf(Relaxation.class);
         Set<Relaxation> accepted = acceptedForms.get(formKey);
         if (accepted != null) {
@@ -527,10 +538,11 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
     }
 
     static String redact(String text, String key) {
-        if (text == null || key == null || key.trim().isEmpty()) {
-            return text;
+        if (text == null) {
+            return null;
         }
-        return text.replace(key.trim(), "***");
+        String redacted = key == null || key.trim().isEmpty() ? text : text.replace(key.trim(), "***");
+        return MASKED_SECRET.matcher(redacted).replaceAll("***"); // a partly masked echo shows no part of it
     }
 
     static String shorten(String text) {

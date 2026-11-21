@@ -1,6 +1,7 @@
 package com.aresstack.askai.modelport.provider;
 
 import com.aresstack.askai.agent.model.port.ModelMessage;
+import com.aresstack.askai.agent.model.port.OutputFormat;
 import com.aresstack.askai.agent.model.port.ThinkingMode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -132,8 +133,12 @@ public class OpenAiCompatibleModelProviderTest {
 
     /** A call with a temperature and a reasoning level, as the research roles send them. */
     private static ProviderCall tunedCall(String model) {
-        return new ProviderCall("planner", model, Collections.singletonList(ModelMessage.user("question")),
-                null, null, ThinkingMode.LOW, ThinkingMode.DEFAULT, 0.2d, 500, 65536, null, "30m", null);
+        return tunedCall(model, ThinkingMode.LOW, null);
+    }
+
+    private static ProviderCall tunedCall(String model, ThinkingMode thinking, OutputFormat format) {
+        return new ProviderCall("planner", model, Collections.singletonList(ModelMessage.user("question in json")),
+                null, format, thinking, ThinkingMode.DEFAULT, 0.2d, 500, 65536, null, "30m", null);
     }
 
     private static final String OK = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"
@@ -347,6 +352,78 @@ public class OpenAiCompatibleModelProviderTest {
 
         provider.chat(baseUrl, call("gpt-4o-mini", null), new Deltas());
         assertTrue("another model starts with the full request again", bodies.get(3).contains("\"max_tokens\""));
+    }
+
+    @Test
+    public void aJsonFormLearnedByAPlainJsonCallLeavesSchemaCallsAlone() throws Exception {
+        chat = exchange -> { // LM Studio takes only json_schema
+            if (bodies.get(bodies.size() - 1).contains("\"json_object\"")) {
+                respond(exchange, 400, "application/json",
+                        "{\"error\":\"'response_format.type' must be 'json_schema'\"}");
+            } else {
+                sse(exchange, OK);
+            }
+        };
+        OpenAiCompatibleModelProvider provider = provider();
+        String schema = "{\"type\":\"object\",\"properties\":{\"queries\":{\"type\":\"array\",\"maxItems\":3}}}";
+
+        provider.chat(baseUrl, tunedCall("qwen3-8b", ThinkingMode.OFF, OutputFormat.json()), new Deltas());
+        assertEquals("the refusal and the schema form", 2, requests.get());
+        provider.chat(baseUrl, tunedCall("qwen3-8b", ThinkingMode.OFF, OutputFormat.jsonSchema(schema)),
+                new Deltas());
+
+        assertEquals("the schema call goes out once", 3, requests.get());
+        assertTrue("with its own schema", bodies.get(2).contains("\"json_schema\"")
+                && bodies.get(2).contains("\"maxItems\":3"));
+        provider.chat(baseUrl, tunedCall("qwen3-8b", ThinkingMode.OFF, OutputFormat.json()), new Deltas());
+        assertEquals("plain JSON calls keep the form they learned", 4, requests.get());
+        assertTrue(bodies.get(3).contains("\"json_schema\""));
+    }
+
+    @Test
+    public void aRefusalLearnedBesideAReasoningLevelLeavesCallsWithoutOneAlone() throws Exception {
+        chat = exchange -> { // a model that takes temperature only while it does not reason
+            String body = bodies.get(bodies.size() - 1);
+            if (body.contains("\"reasoning_effort\"") && body.contains("\"temperature\"")) {
+                respond(exchange, 400, "application/json", "{\"error\":{\"message\":\"Unsupported parameter: "
+                        + "'temperature' is not supported with this model.\",\"param\":\"temperature\"}}");
+            } else {
+                sse(exchange, OK);
+            }
+        };
+        OpenAiCompatibleModelProvider provider = provider();
+
+        provider.chat(baseUrl, tunedCall("m"), new Deltas()); // reasoning level Low and temperature 0.2
+        assertEquals(2, requests.get());
+        provider.chat(baseUrl, tunedCall("m", ThinkingMode.OFF, null), new Deltas());
+
+        assertEquals("a call without a reasoning level goes out once", 3, requests.get());
+        assertTrue("and keeps its temperature", bodies.get(2).contains("\"temperature\":0.2"));
+        provider.chat(baseUrl, tunedCall("m"), new Deltas());
+        assertFalse("calls with the level keep the form they learned", bodies.get(3).contains("temperature"));
+    }
+
+    @Test
+    public void aModelWhoseServiceDemandsMaxCompletionTokensKeepsAnAnswerWhenThinkingIsOff() throws Exception {
+        chat = exchange -> {
+            if (bodies.get(bodies.size() - 1).contains("\"max_tokens\"")) {
+                respond(exchange, 400, "application/json", "{\"error\":{\"message\":\"Unsupported parameter: "
+                        + "'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\","
+                        + "\"param\":\"max_tokens\"}}");
+            } else {
+                sse(exchange, OK);
+            }
+        };
+        ProviderCall label = new ProviderCall("judge", "gpt-5-mini",
+                Collections.singletonList(ModelMessage.user("label")), null, null, ThinkingMode.OFF,
+                ThinkingMode.DEFAULT, null, 120, 65536, null, "30m", null);
+
+        assertEquals("ok", provider().chat(baseUrl, label, new Deltas()).getContent());
+
+        assertEquals(2, requests.get());
+        assertTrue("the reasoning is counted in this budget, so the answer keeps its room", bodies.get(1)
+                .contains("\"max_completion_tokens\":" + (120 + ProviderCall.LEVEL_ONLY_REASONING_TOKENS)));
+        assertTrue("and the model reasons as little as it can", bodies.get(1).contains("\"reasoning_effort\":\"low\""));
     }
 
     @Test
@@ -579,6 +656,20 @@ public class OpenAiCompatibleModelProviderTest {
     public void messagesAreShortRedactedAndTheUrlIsJoinedCleanly() {
         assertEquals("http://h/v1/models", OpenAiCompatibleModelProvider.join("http://h/v1//", "/models"));
         assertEquals("token *** leaked", OpenAiCompatibleModelProvider.redact("token " + KEY + " leaked", KEY));
+        assertEquals("a service's own masked echo shows no part of the key either",
+                "Incorrect API key provided: ***. You can find your API key at https://example.org/keys.",
+                OpenAiCompatibleModelProvider.redact("Incorrect API key provided: sk-test-****************cdef. You "
+                        + "can find your API key at https://example.org/keys.", KEY));
+        assertEquals("other text stays as it is", "model 'model-x' (HTTP 403): not allowed",
+                OpenAiCompatibleModelProvider.redact("model 'model-x' (HTTP 403): not allowed", KEY));
+        StringBuilder longWord = new StringBuilder("x");
+        for (int i = 0; i < 200000; i++) {
+            longWord.append('y');
+        }
+        long started = System.nanoTime();
+        assertEquals("a long body without a masked secret comes back as it is", longWord.toString(),
+                OpenAiCompatibleModelProvider.redact(longWord.toString(), KEY));
+        assertTrue("redacting a long body takes linear time", System.nanoTime() - started < 2_000_000_000L);
         StringBuilder longText = new StringBuilder();
         for (int i = 0; i < 100; i++) {
             longText.append("line ").append(i).append('\n');

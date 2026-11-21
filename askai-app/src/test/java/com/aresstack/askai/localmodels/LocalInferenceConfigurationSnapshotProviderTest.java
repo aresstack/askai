@@ -123,6 +123,38 @@ public class LocalInferenceConfigurationSnapshotProviderTest {
     }
 
     @Test
+    public void anUpperCaseSchemeOrAUrlWithoutSchemeStillPublishesAValidDescriptor() throws Exception {
+        com.aresstack.askai.modelport.ModelPortSettingsRepository portSettings =
+                new com.aresstack.askai.modelport.ModelPortSettingsRepository(new File(folder.getRoot(),
+                        "model-port.properties"));
+        com.aresstack.askai.modelport.ModelProviderSettingsRepository providers =
+                new com.aresstack.askai.modelport.ModelProviderSettingsRepository(new File(folder.getRoot(),
+                        "model-provider.properties"));
+        LocalInferenceConfigurationSnapshotProvider provider = new LocalInferenceConfigurationSnapshotProvider(null,
+                new com.aresstack.askai.config.AppConfigurationRepository(folder.newFile("askai.properties")),
+                portSettings, providers);
+        String[][] cases = {
+                {"HTTPS://api.example.org/v1", "https://api.example.org/v1"}, // the port takes it as it is
+                {"Http://localhost:1234/v1", "http://localhost:1234/v1"},
+                {"localhost:1234/v1", LocalInferenceConfigurationSnapshotProvider.API_URL_NOT_SET}, // the port names it
+                {"ftp://files.example.org", LocalInferenceConfigurationSnapshotProvider.API_URL_NOT_SET},
+        };
+        for (String[] saved : cases) {
+            providers.save(new com.aresstack.askai.modelport.ModelProviderSettings(
+                    com.aresstack.askai.modelport.ModelProviderKind.OPENAI_COMPATIBLE, saved[0], "", 0,
+                    java.util.Collections.singletonMap(com.aresstack.askai.modelport.ModelPortSettings.DEFAULT_SLOT,
+                            "gpt-4o-mini"), 0, null, 0, 0, 0));
+            Thread.sleep(20); // a new file stamp for the next save
+
+            InferenceConfigurationSnapshot snapshot = provider.prepareForSession("s", folder.newFolder());
+
+            assertEquals(saved[0], saved[1], snapshot.getDocument().descriptor.baseUrl);
+            InferenceConfigurationValidationResult onDisk = readBack(snapshot.getSnapshotFile());
+            assertTrue(saved[0] + ": " + onDisk.describe(), onDisk.valid);
+        }
+    }
+
+    @Test
     public void failsVisiblyWithoutAMainModel() throws Exception {
         LocalInferenceConfigurationSnapshotProvider provider =
                 new LocalInferenceConfigurationSnapshotProvider(new RecordingSources(""));

@@ -152,6 +152,22 @@ public final class LocalInferenceConfigurationSnapshotProvider
         return url == null ? "" : url.trim();
     }
 
+    /**
+     * The API base URL as the session descriptor names it. The descriptor only names the endpoint (the port reads
+     * the URL for every call and reports a wrong one itself), so it always gets a URL the descriptor accepts: the
+     * scheme in lower case ({@code HTTPS://} works for the port too), else {@link #API_URL_NOT_SET} for no URL or
+     * one without an http(s) scheme. A research session then starts, and recovers once a correct URL is saved.
+     */
+    static String descriptorUrl(String url) {
+        String trimmed = url == null ? "" : url.trim();
+        int end = trimmed.indexOf("://");
+        String scheme = end < 0 ? "" : trimmed.substring(0, end).toLowerCase(java.util.Locale.ROOT);
+        if (!scheme.equals("http") && !scheme.equals("https")) {
+            return API_URL_NOT_SET;
+        }
+        return scheme + trimmed.substring(end);
+    }
+
     private static EndpointSources productionSources(final LocalModelRuntimeManager manager,
                                                      final AppConfigurationRepository centralConfig,
                                                      final com.aresstack.askai.modelport.ModelPortSettingsRepository
@@ -173,9 +189,7 @@ public final class LocalInferenceConfigurationSnapshotProvider
                 if (modelProviders == null || !modelProviders.load().usesApi()) {
                     return "";
                 }
-                String url = modelProviders.load().getApiBaseUrl();
-                // no URL set: the descriptor names a placeholder; the port's call reports the missing URL itself
-                return url.isEmpty() ? API_URL_NOT_SET : url;
+                return descriptorUrl(modelProviders.load().getApiBaseUrl());
             }
 
             public String localRuntimeBaseUrl() throws IOException {

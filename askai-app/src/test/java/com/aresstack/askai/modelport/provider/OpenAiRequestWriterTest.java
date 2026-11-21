@@ -197,6 +197,29 @@ public class OpenAiRequestWriterTest {
     }
 
     @Test
+    public void aModelWhoseServiceDemandedMaxCompletionTokensIsTreatedAsUnableToSwitchReasoningOff() {
+        ProviderCall off = simple("gpt-5-mini", ThinkingMode.OFF, ThinkingMode.DEFAULT, 120);
+        JsonObject plain = body(off);
+        assertEquals("before any refusal the request is the plain one", 120, plain.get("max_tokens").getAsInt());
+        assertFalse(plain.has("reasoning_effort"));
+
+        JsonObject reasoning = body(off, Relaxation.MAX_COMPLETION_TOKENS);
+        assertEquals("OpenAI counts the reasoning in this budget: the answer keeps its room",
+                120 + ProviderCall.LEVEL_ONLY_REASONING_TOKENS, reasoning.get("max_completion_tokens").getAsInt());
+        assertEquals("the lowest level every such model accepts", "low",
+                reasoning.get("reasoning_effort").getAsString());
+        assertEquals("Auto as well", "low", body(simple("gpt-5-mini", ThinkingMode.DEFAULT, ThinkingMode.DEFAULT,
+                120), Relaxation.MAX_COMPLETION_TOKENS).get("reasoning_effort").getAsString());
+        assertNull("On keeps the model's own default", body(simple("gpt-5-mini", ThinkingMode.ON,
+                ThinkingMode.DEFAULT, 120), Relaxation.MAX_COMPLETION_TOKENS).get("reasoning_effort"));
+
+        JsonObject noLevels = body(off, Relaxation.MAX_COMPLETION_TOKENS, Relaxation.NO_REASONING_EFFORT);
+        assertFalse("a model that refuses levels gets none", noLevels.has("reasoning_effort"));
+        assertEquals("but keeps the room", 120 + ProviderCall.LEVEL_ONLY_REASONING_TOKENS,
+                noLevels.get("max_completion_tokens").getAsInt());
+    }
+
+    @Test
     public void aStreamedAnswerAsksForItsTokenUsage() {
         JsonObject body = body(simple("gemma-4-31b", ThinkingMode.DEFAULT, ThinkingMode.DEFAULT, 0));
         assertTrue("without it OpenAI, vLLM and Ollama's /v1 report no usage, and the token budget counts nothing",
