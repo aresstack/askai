@@ -5,7 +5,6 @@ import com.aresstack.askai.agent.model.port.OutputFormat;
 import com.aresstack.askai.agent.model.port.ThinkingMode;
 import com.aresstack.askai.agent.model.port.ToolCall;
 import com.aresstack.askai.agent.model.port.ToolDefinition;
-import com.aresstack.askai.modelport.ModelPortSettings;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -13,9 +12,12 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Writes the JSON body of {@code POST /chat/completions} for one {@link ProviderCall}. Rules taken over from the
@@ -31,13 +33,68 @@ import java.util.Map;
  *
  * <p>Tool calls without an id (Ollama does not always give one) get {@code call_<n>}; a tool result without an id
  * answers the oldest open call of its tool name, so a conversation replayed from another provider stays valid.</p>
+ *
+ * <p>Token usage: a streamed answer reports it only when the request asks with
+ * {@code "stream_options": {"include_usage": true}} (OpenAI, vLLM, Ollama's {@code /v1}, LiteLLM), so the request
+ * always asks; the research token budget counts it.</p>
+ *
+ * <p>Services differ in the optional fields they accept. A field a service refuses with HTTP 400 is sent in a
+ * weaker form ({@link Relaxation}) on the next try: OpenAI's reasoning models want {@code max_completion_tokens}
+ * and only their default temperature, models without reasoning levels refuse {@code reasoning_effort}, LM Studio
+ * accepts only {@code json_schema} as {@code response_format}.</p>
  */
 final class OpenAiRequestWriter {
+
+    /**
+     * A weaker form of one optional field, for a service that refused the field (HTTP 400). Each one removes or
+     * renames the field it answers, so the same refusal cannot be answered twice.
+     */
+    enum Relaxation {
+        /** {@code max_completion_tokens} instead of {@code max_tokens} (OpenAI's reasoning models refuse the old name). */
+        MAX_COMPLETION_TOKENS("max_tokens", "with max_completion_tokens instead"),
+        /** No {@code temperature}: the service's default (reasoning models accept no other value). */
+        NO_TEMPERATURE("temperature", "without it"),
+        /** No {@code reasoning_effort}: a model without reasoning levels. */
+        NO_REASONING_EFFORT("reasoning_effort", "without it"),
+        /** No {@code stream_options}: the service does not know it, its token usage then stays unreported. */
+        NO_STREAM_OPTIONS("stream_options", "without it (token usage stays unreported)"),
+        /** The other JSON form: {@code json_schema} for a plain JSON answer, {@code json_object} for a schema answer. */
+        OTHER_JSON_FORM("response_format", "in the other JSON form"),
+        /** No {@code response_format}: the prompt alone asks for JSON. */
+        NO_RESPONSE_FORMAT("response_format", "without it (the prompt still asks for JSON)");
+
+        private final String field;
+        private final String retry;
+
+        Relaxation(String field, String retry) {
+            this.field = field;
+            this.retry = retry;
+        }
+
+        /** The request field this relaxation answers a refusal of. */
+        String field() {
+            return field;
+        }
+
+        /** How the next try sends the field, for the log line ("sending it again " + this). */
+        String retry() {
+            return retry;
+        }
+    }
+
+    /** Words of a refusal that are about the field's VALUE (too large for the context), not about the field. */
+    private static final String[] VALUE_PROBLEMS = {"too large", "too long", "maximum context", "context length",
+            "context window", "exceed"};
 
     private OpenAiRequestWriter() {
     }
 
     static String write(ProviderCall call) {
+        return write(call, Collections.<Relaxation>emptySet());
+    }
+
+    /** The body of {@code call}, with the weaker forms in {@code relaxations}. */
+    static String write(ProviderCall call, Set<Relaxation> relaxations) {
         JsonObject body = new JsonObject();
         body.addProperty("model", call.getModel());
         body.add("messages", messages(call));
@@ -57,22 +114,17 @@ final class OpenAiRequestWriter {
             }
             body.add("tools", tools);
         }
-        OutputFormat format = call.getOutputFormat();
-        if (format.getKind() == OutputFormat.Kind.JSON) {
-            JsonObject responseFormat = new JsonObject();
-            responseFormat.addProperty("type", "json_object");
-            body.add("response_format", responseFormat);
-        } else if (format.getKind() == OutputFormat.Kind.JSON_SCHEMA) {
-            JsonObject schema = new JsonObject();
-            schema.addProperty("name", "answer");
-            schema.add("schema", parse(format.getSchemaJson(), "answer schema"));
-            JsonObject responseFormat = new JsonObject();
-            responseFormat.addProperty("type", "json_schema");
-            responseFormat.add("json_schema", schema);
+        JsonObject responseFormat = responseFormat(call.getOutputFormat(), relaxations);
+        if (responseFormat != null) {
             body.add("response_format", responseFormat);
         }
         body.addProperty("stream", true);
-        if (call.getTemperature() != null) {
+        if (!relaxations.contains(Relaxation.NO_STREAM_OPTIONS)) {
+            JsonObject options = new JsonObject();
+            options.addProperty("include_usage", true); // the last chunk then carries the token usage
+            body.add("stream_options", options);
+        }
+        if (call.getTemperature() != null && !relaxations.contains(Relaxation.NO_TEMPERATURE)) {
             body.addProperty("temperature", call.getTemperature());
         }
         String effort = reasoningEffort(call);
@@ -81,12 +133,104 @@ final class OpenAiRequestWriter {
             budget += ProviderCall.LEVEL_ONLY_REASONING_TOKENS; // as on Ollama (plan 4.1 rule 3)
         }
         if (budget > 0) {
-            body.addProperty("max_tokens", budget);
+            body.addProperty(relaxations.contains(Relaxation.MAX_COMPLETION_TOKENS) ? "max_completion_tokens"
+                    : "max_tokens", budget);
         }
-        if (effort != null) {
+        if (effort != null && !relaxations.contains(Relaxation.NO_REASONING_EFFORT)) {
             body.addProperty("reasoning_effort", effort);
         }
         return body.toString();
+    }
+
+    /**
+     * The answer form: {@code json_object} for a plain JSON answer and {@code json_schema} with the caller's schema
+     * for a schema answer; {@link Relaxation#OTHER_JSON_FORM} swaps the two (a plain JSON answer then sends the
+     * schema of any object), {@link Relaxation#NO_RESPONSE_FORMAT} sends none.
+     */
+    private static JsonObject responseFormat(OutputFormat format, Set<Relaxation> relaxations) {
+        boolean json = format.getKind() == OutputFormat.Kind.JSON;
+        if ((!json && format.getKind() != OutputFormat.Kind.JSON_SCHEMA)
+                || relaxations.contains(Relaxation.NO_RESPONSE_FORMAT)) {
+            return null;
+        }
+        boolean schemaForm = json == relaxations.contains(Relaxation.OTHER_JSON_FORM);
+        JsonObject responseFormat = new JsonObject();
+        if (!schemaForm) {
+            responseFormat.addProperty("type", "json_object");
+            return responseFormat;
+        }
+        JsonObject schema = new JsonObject();
+        schema.addProperty("name", "answer");
+        schema.add("schema", json ? anyObject() : parse(format.getSchemaJson(), "answer schema"));
+        responseFormat.addProperty("type", "json_schema");
+        responseFormat.add("json_schema", schema);
+        return responseFormat;
+    }
+
+    private static JsonObject anyObject() {
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "object");
+        return schema;
+    }
+
+    /**
+     * The weaker form that answers a refusal (HTTP 400) of the request {@code sentBody}, written with
+     * {@code applied}: the first optional field of the request that the error's {@code param} names, else the first
+     * one its message names; null when the refusal names none of them, or names the answer budget's value (too
+     * large for the context), which no weaker form fixes. Only the error's own parameter and message are read,
+     * never a body that may echo the whole request.
+     */
+    static Relaxation relaxationFor(String sentBody, Set<Relaxation> applied, String param, String message) {
+        JsonObject sent;
+        try {
+            sent = JsonParser.parseString(sentBody).getAsJsonObject();
+        } catch (JsonParseException | IllegalStateException unreadable) {
+            return null;
+        }
+        String text = message == null ? "" : message.toLowerCase(Locale.ROOT);
+        Relaxation byParam = named(sent, applied, param == null ? "" : param.trim().toLowerCase(Locale.ROOT), true,
+                text);
+        return byParam != null ? byParam : named(sent, applied, text, false, text);
+    }
+
+    private static Relaxation named(JsonObject sent, Set<Relaxation> applied, String evidence, boolean isParam,
+                                    String message) {
+        if (evidence.isEmpty()) {
+            return null;
+        }
+        if (sent.has("stream_options") && names(evidence, isParam, "stream_options")) {
+            return Relaxation.NO_STREAM_OPTIONS;
+        }
+        if (sent.has("response_format") && names(evidence, isParam, "response_format")) {
+            return applied.contains(Relaxation.OTHER_JSON_FORM) ? Relaxation.NO_RESPONSE_FORMAT
+                    : Relaxation.OTHER_JSON_FORM;
+        }
+        if (sent.has("reasoning_effort") && (names(evidence, isParam, "reasoning_effort")
+                || (!isParam && evidence.contains("thinking")))) { // Ollama's /v1: "... does not support thinking"
+            return Relaxation.NO_REASONING_EFFORT;
+        }
+        if (sent.has("temperature") && names(evidence, isParam, "temperature")) {
+            return Relaxation.NO_TEMPERATURE;
+        }
+        if (sent.has("max_tokens") && names(evidence, isParam, "max_tokens") && !isValueProblem(message)) {
+            return Relaxation.MAX_COMPLETION_TOKENS;
+        }
+        return null;
+    }
+
+    /** A parameter names the field itself or a part of it ({@code response_format.type}); a message mentions it. */
+    private static boolean names(String evidence, boolean isParam, String field) {
+        return isParam ? evidence.equals(field) || evidence.startsWith(field + ".") || evidence.startsWith(field + "[")
+                : evidence.contains(field);
+    }
+
+    private static boolean isValueProblem(String message) {
+        for (String words : VALUE_PROBLEMS) {
+            if (message.contains(words)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The {@code reasoning_effort} of a call, or null for none (see the class comment). */
@@ -101,7 +245,7 @@ final class OpenAiRequestWriter {
             case ON:
                 return null;
             default: // OFF and Auto
-                return ModelPortSettings.isLevelOnlyModel(call.getModel(), null) ? "low" : null;
+                return OpenAiCompatibleModelProvider.isLevelOnlyApiModel(call.getModel()) ? "low" : null;
         }
     }
 

@@ -2694,7 +2694,8 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
 
     /**
      * True when {@code name} is bound to a model-port slot (a research phase, a helper, the default slot):
-     * a chat tab never unloads such a model (plan 5.1).
+     * a chat tab never unloads such a model (plan 5.1). The slots resolve with the chosen model provider: while
+     * the OpenAI-compatible API serves them, Ollama's slot models are no research models.
      */
     static boolean isResearchSlotModel(String name) {
         if (name == null || name.trim().isEmpty()) {
@@ -2703,15 +2704,24 @@ public final class OllamaChatPanel extends JPanel implements ChatSessionComponen
         try {
             com.aresstack.askai.modelport.ModelPortSettings settings =
                     com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory().load();
-            for (String slot : settings.knownSlotNames()) {
-                if (name.trim().equals(settings.resolveModel(slot))) {
-                    return true;
-                }
-            }
-            return false;
+            com.aresstack.askai.modelport.ModelProviderSettings providers =
+                    com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory().load();
+            return isResearchSlotModel(name, settings, providers);
         } catch (RuntimeException unreadable) {
             return false;
         }
+    }
+
+    static boolean isResearchSlotModel(String name, com.aresstack.askai.modelport.ModelPortSettings settings,
+                                       com.aresstack.askai.modelport.ModelProviderSettings providers) {
+        java.util.List<String> slots = providers.usesApi() ? ModelProviderPanel.slotNames(settings, providers)
+                : settings.knownSlotNames();
+        for (String slot : slots) {
+            if (name.trim().equals(providers.resolveModel(slot, settings))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** True when {@code name} is the explicitly selected dictation model, which must stay loaded. */

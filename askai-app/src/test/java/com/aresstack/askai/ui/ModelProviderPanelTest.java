@@ -35,8 +35,9 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * The model provider page: choosing the API, base URL and a typed key that is stored only encrypted and never
- * shown again, an empty key field that keeps the stored key, a model per task picked from the API's own list, and
- * the API fields switched off while Ollama is chosen.
+ * shown again, an empty key field that keeps the stored key, removing the key without touching unsaved edits, what
+ * a save still lacks, a model per task picked from the API's own list, and the API fields switched off while Ollama
+ * is chosen. Also which models a chat tab keeps loaded for the research slots under either provider.
  */
 public class ModelProviderPanelTest {
 
@@ -210,5 +211,69 @@ public class ModelProviderPanelTest {
         assertTrue(names.contains(ModelPortSettings.DEFAULT_SLOT));
         assertTrue(names.contains("phase.draft.writer"));
         assertEquals("custom.task", names.get(names.size() - 1));
+    }
+
+    @Test
+    public void removingTheStoredKeyKeepsTheUnsavedEditsOfThePage() throws Exception {
+        final ModelProviderSettingsRepository providers = providers();
+        providers.storeApiKey(KEY.toCharArray());
+        onEdt(() -> {
+            ModelProviderPanel panel = panel(providers);
+            panel.providerChoice().setSelectedItem(ModelProviderKind.OPENAI_COMPATIBLE);
+            panel.baseUrlField().setText(baseUrl);
+            JTable table = panel.slotTable();
+            table.getModel().setValueAt("gemma-4-31b", row(table, "phase.draft.writer"), 1);
+
+            panel.removeKey();
+
+            assertEquals("still the typed choice", ModelProviderKind.OPENAI_COMPATIBLE,
+                    panel.providerChoice().getSelectedItem());
+            assertEquals("still the typed URL", baseUrl, panel.baseUrlField().getText());
+            assertEquals("still the typed model", "gemma-4-31b",
+                    table.getModel().getValueAt(row(table, "phase.draft.writer"), 1));
+            assertTrue(panel.keyStateText(), panel.keyStateText().startsWith("No key stored"));
+        });
+        org.junit.Assert.assertNull("the key is gone", providers().apiKey());
+        assertFalse("the edits stay unsaved until Save", providers().load().usesApi());
+    }
+
+    @Test
+    public void aSaveSaysWhatTheApiStillLacks() {
+        ModelProviderSettings noUrl = new ModelProviderSettings(ModelProviderKind.OPENAI_COMPATIBLE, "", "", 0,
+                Collections.singletonMap(ModelPortSettings.DEFAULT_SLOT, "m"), 0, null, 0, 0, 0);
+        assertTrue(ModelProviderPanel.savedMessage(noUrl), ModelProviderPanel.savedMessage(noUrl)
+                .contains("base URL"));
+        ModelProviderSettings noScheme = new ModelProviderSettings(ModelProviderKind.OPENAI_COMPATIBLE,
+                "localhost:8000/v1", "", 0, Collections.singletonMap(ModelPortSettings.DEFAULT_SLOT, "m"), 0, null,
+                0, 0, 0);
+        assertTrue(ModelProviderPanel.savedMessage(noScheme).contains("http://"));
+        ModelProviderSettings noModel = new ModelProviderSettings(ModelProviderKind.OPENAI_COMPATIBLE, baseUrl, "",
+                0, null, 0, null, 0, 0, 0);
+        assertTrue(ModelProviderPanel.savedMessage(noModel).contains("default slot"));
+        ModelProviderSettings complete = new ModelProviderSettings(ModelProviderKind.OPENAI_COMPATIBLE, baseUrl,
+                "", 0, Collections.singletonMap(ModelPortSettings.DEFAULT_SLOT, "m"), 0, null, 0, 0, 0);
+        assertTrue(ModelProviderPanel.savedMessage(complete).contains("next model call"));
+        assertTrue("Ollama needs nothing here", ModelProviderPanel.savedMessage(ModelProviderSettings.defaults())
+                .contains("next model call"));
+    }
+
+    @Test
+    public void aChatTabKeepsOnlyTheModelsTheChosenProviderUsesForResearch() {
+        ModelPortSettings ollama = ModelPortSettings.defaults();
+        String shipped = ollama.resolveModel(ModelPortSettings.DEFAULT_SLOT);
+        assertTrue("Ollama serves the research slots: its slot model stays loaded",
+                OllamaChatPanel.isResearchSlotModel(shipped, ollama, ModelProviderSettings.defaults()));
+
+        java.util.Map<String, String> apiModels = new java.util.HashMap<String, String>();
+        apiModels.put(ModelPortSettings.DEFAULT_SLOT, "model-a");
+        apiModels.put("custom.task", "model-x");
+        ModelProviderSettings api = new ModelProviderSettings(ModelProviderKind.OPENAI_COMPATIBLE, baseUrl, "", 0,
+                apiModels, 0, null, 0, 0, 0);
+        assertFalse("the API serves them: a chat tab may unload Ollama's slot model again",
+                OllamaChatPanel.isResearchSlotModel(shipped, ollama, api));
+        assertTrue("an API model with the same name as a chat model is kept",
+                OllamaChatPanel.isResearchSlotModel("model-a", ollama, api));
+        assertTrue("a task only the provider page knows", OllamaChatPanel.isResearchSlotModel("model-x", ollama,
+                api));
     }
 }

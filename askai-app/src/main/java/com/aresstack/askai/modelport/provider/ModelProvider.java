@@ -71,4 +71,18 @@ public interface ModelProvider {
 
     /** The user-facing message for a slot whose model the endpoint does not offer. */
     String missingModelMessage(String model, String slot);
+
+    /**
+     * True when {@code model}, in this provider's naming, accepts only thinking levels and can never turn thinking
+     * off (plan 4.1, rule 3), so it cannot serve a helper slot. The rule is the model-port settings' own; a provider
+     * whose names carry more than the model (a vendor prefix) says how to read them.
+     */
+    default boolean isLevelOnlyModel(String model) {
+        return com.aresstack.askai.modelport.ModelPortSettings.isLevelOnlyModel(model, null);
+    }
+
+    /** The user-facing message for a helper slot whose model cannot turn thinking off: where to pick another. */
+    default String cannotTurnThinkingOffMessage(String model, String slot) {
+        return com.aresstack.askai.modelport.ModelPortSettings.thinkingOffRequiredMessage(slot, model);
+    }
 }

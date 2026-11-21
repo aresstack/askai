@@ -28,6 +28,13 @@ public final class LocalInferenceConfigurationSnapshotProvider
     static final String CHAT_PATH = "/api/chat";
     /** The chat path of an OpenAI-compatible API (informational: every call goes through the model port). */
     static final String API_CHAT_PATH = "/chat/completions";
+    /**
+     * The descriptor's base URL while the OpenAI-compatible API is chosen without one. The descriptor is
+     * informational (every call goes through the model port, which reads the URL per call and reports a missing
+     * one); it must still be an http(s) URL the codec accepts, so the session starts and recovers as soon as the
+     * user saves a URL. The {@code .invalid} name never resolves (RFC 2606).
+     */
+    static final String API_URL_NOT_SET = "http://openai-compatible.invalid";
     /** The three endpoint sources, seamed so the local/remote routing is testable without a local runtime. */
     interface EndpointSources {
         /** The central main model name ("" when none is selected). */
@@ -168,7 +175,7 @@ public final class LocalInferenceConfigurationSnapshotProvider
                 }
                 String url = modelProviders.load().getApiBaseUrl();
                 // no URL set: the descriptor names a placeholder; the port's call reports the missing URL itself
-                return url.isEmpty() ? "openai-compatible://not-configured" : url;
+                return url.isEmpty() ? API_URL_NOT_SET : url;
             }
 
             public String localRuntimeBaseUrl() throws IOException {

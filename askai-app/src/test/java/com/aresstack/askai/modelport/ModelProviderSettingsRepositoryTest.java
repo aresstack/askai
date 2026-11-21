@@ -150,6 +150,43 @@ public class ModelProviderSettingsRepositoryTest {
     }
 
     @Test
+    public void aDamagedKeyFileAsksForTheKeyAndEnteringItAgainWorks() throws IOException {
+        File keyFile = new File(folder.getRoot(), ModelProviderSettingsRepository.KEY_FILE_NAME);
+        String[] damages = {"", "not base64 at all!", java.util.Base64.getEncoder().encodeToString(new byte[5])};
+        for (String damage : damages) {
+            ModelProviderSettingsRepository repository = repository();
+            repository.storeApiKey(KEY.toCharArray());
+            Files.write(keyFile.toPath(), damage.getBytes(StandardCharsets.US_ASCII)); // a crash, a truncation
+
+            try {
+                repository().apiKey();
+                fail("a damaged key file decrypts nothing: " + damage);
+            } catch (IOException expected) {
+                assertTrue(expected.getMessage(), expected.getMessage().contains("enter the API key again"));
+                assertFalse(expected.getMessage().contains(KEY));
+            }
+            repository().storeApiKey("sk-entered-again".toCharArray());
+            assertArrayEquals("storing the key again replaces the damaged key file: '" + damage + "'",
+                    "sk-entered-again".toCharArray(), repository().apiKey());
+        }
+    }
+
+    @Test
+    public void theKeyFileIsOwnerOnlyWhereTheFileSystemKnowsPermissions() throws IOException {
+        repository().storeApiKey(KEY.toCharArray());
+        java.nio.file.Path keyFile = new File(folder.getRoot(), ModelProviderSettingsRepository.KEY_FILE_NAME)
+                .toPath();
+        try {
+            assertEquals(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"),
+                    Files.getPosixFilePermissions(keyFile));
+        } catch (UnsupportedOperationException windows) {
+            // no POSIX permissions: the file lies in the user's own profile directory
+        }
+        assertFalse("no temporary file is left behind",
+                new File(folder.getRoot(), ModelProviderSettingsRepository.KEY_FILE_NAME + ".tmp").exists());
+    }
+
+    @Test
     public void theVaultRefusesABlankKeyAndForeignValues() throws IOException {
         ApiKeyVault vault = new ApiKeyVault(new File(folder.getRoot(), "vault.key"));
         try {

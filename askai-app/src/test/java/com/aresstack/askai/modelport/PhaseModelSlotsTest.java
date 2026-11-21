@@ -187,6 +187,14 @@ public class PhaseModelSlotsTest {
     }
 
     @Test
+    public void aNamespacedOllamaModelPassesTheHelperCheckAsBefore() throws Exception {
+        // the vendor prefix is read off only for API model ids; Ollama's helper check stays as it was
+        installed = "gemma4:e2b,hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M";
+        slots("judge", "hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M");
+        assertEquals("hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M", call("judge"));
+    }
+
+    @Test
     public void theInferenceDescriptorNamesTheDefaultSlotNotTheChatModel() throws Exception {
         chatModel("llama3.1:8b");
         assertEquals("gemma4:e2b", settings.load().resolveModel(ModelPortSettings.DEFAULT_SLOT));

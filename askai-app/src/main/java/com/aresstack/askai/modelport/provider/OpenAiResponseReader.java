@@ -13,7 +13,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.TreeMap;
 
 /**
@@ -25,14 +24,18 @@ import java.util.TreeMap;
  *
  * <p>Reasoning arrives as {@code delta.reasoning_content} (vLLM, DeepSeek) or {@code delta.reasoning} (Ollama's
  * {@code /v1}, newer vLLM); both become thinking deltas. Tool calls arrive in pieces that share an {@code index}
- * and are put together here.</p>
+ * and are put together here. A service that sends pieces without {@code index} (Gemini's compatible endpoint sends
+ * each complete call in its own chunk, always at position 0) gets a new call whenever a piece carries an id other
+ * than the current call's, or, without an id, a name while the current call has one.</p>
  */
 final class OpenAiResponseReader {
 
     private final ProviderStream stream;
     private final StringBuilder content = new StringBuilder();
     private final StringBuilder thinking = new StringBuilder();
-    private final Map<Integer, String[]> toolCalls = new TreeMap<Integer, String[]>();
+    private final TreeMap<Integer, String[]> toolCalls = new TreeMap<Integer, String[]>();
+    /** Pieces without {@code index} at position {@code p} of a chunk belong to the call {@code noIndexBase + p}. */
+    private int noIndexBase;
     private String finishReason;
     private TokenUsage usage = TokenUsage.unknown();
     private boolean done;
@@ -137,24 +140,97 @@ final class OpenAiResponseReader {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    /** The message of an error body ({@code {"error":{"message":...}}} or {@code {"error":"..."}}), or null. */
+    /**
+     * The message of an error body, or null: {@code {"error":{"message":...}}} (OpenAI, vLLM, LiteLLM, Ollama's
+     * {@code /v1}), {@code {"error":"..."}} (LM Studio), a top-level {@code "message"} (older vLLM) or FastAPI's
+     * {@code {"detail":...}}, whose validation entries become {@code "<field>: <msg>"} (never their echoed input).
+     */
     static String errorMessage(String body) {
+        JsonObject root = jsonObject(body);
+        if (root == null) {
+            return null;
+        }
+        JsonElement error = root.get("error");
+        if (error != null && error.isJsonPrimitive()) {
+            return error.getAsString();
+        }
+        if (error != null && error.isJsonObject()) {
+            return text(error.getAsJsonObject(), "message");
+        }
+        String message = text(root, "message");
+        if (message != null) {
+            return message;
+        }
+        JsonElement detail = root.get("detail");
+        if (detail != null && detail.isJsonPrimitive()) {
+            return detail.getAsString();
+        }
+        if (detail != null && detail.isJsonArray()) {
+            StringBuilder joined = new StringBuilder();
+            for (JsonElement entry : detail.getAsJsonArray()) {
+                if (!entry.isJsonObject()) {
+                    continue;
+                }
+                String field = location(entry.getAsJsonObject());
+                String msg = text(entry.getAsJsonObject(), "msg");
+                if (msg == null && field == null) {
+                    continue;
+                }
+                joined.append(joined.length() == 0 ? "" : "; ").append(field == null ? "" : field + ": ")
+                        .append(msg == null ? "invalid" : msg);
+            }
+            return joined.length() == 0 ? null : joined.toString();
+        }
+        return null;
+    }
+
+    /**
+     * The request parameter an error body names, or null: {@code error.param} (OpenAI), a top-level {@code param}
+     * (older vLLM), or the field of FastAPI's first validation entry ({@code detail[0].loc}).
+     */
+    static String errorParam(String body) {
+        JsonObject root = jsonObject(body);
+        if (root == null) {
+            return null;
+        }
+        JsonElement error = root.get("error");
+        String param = error != null && error.isJsonObject() ? text(error.getAsJsonObject(), "param")
+                : text(root, "param");
+        if (param != null && !param.trim().isEmpty()) {
+            return param.trim();
+        }
+        JsonElement detail = root.get("detail");
+        if (detail != null && detail.isJsonArray()) {
+            for (JsonElement entry : detail.getAsJsonArray()) {
+                String field = entry.isJsonObject() ? location(entry.getAsJsonObject()) : null;
+                if (field != null) {
+                    return field;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** FastAPI's {@code loc} as a dotted field path without the leading {@code body}, or null. */
+    private static String location(JsonObject entry) {
+        JsonElement loc = entry.get("loc");
+        if (loc == null || !loc.isJsonArray()) {
+            return null;
+        }
+        StringBuilder path = new StringBuilder();
+        for (JsonElement part : loc.getAsJsonArray()) {
+            if (!part.isJsonPrimitive() || (path.length() == 0 && "body".equals(part.getAsString()))) {
+                continue;
+            }
+            path.append(path.length() == 0 ? "" : ".").append(part.getAsString());
+        }
+        return path.length() == 0 ? null : path.toString();
+    }
+
+    private static JsonObject jsonObject(String body) {
         try {
             JsonElement element = JsonParser.parseString(body == null ? "" : body);
-            if (!element.isJsonObject()) {
-                return null;
-            }
-            JsonElement error = element.getAsJsonObject().get("error");
-            if (error == null || error.isJsonNull()) {
-                return null;
-            }
-            if (error.isJsonPrimitive()) {
-                return error.getAsString();
-            }
-            if (error.isJsonObject()) {
-                return text(error.getAsJsonObject(), "message");
-            }
-            return null;
+            return element.isJsonObject() ? element.getAsJsonObject() : null;
         } catch (JsonParseException | IllegalStateException unreadable) {
             return null;
         }
@@ -183,19 +259,19 @@ final class OpenAiResponseReader {
                 }
                 JsonObject call = array.get(i).getAsJsonObject();
                 int index = integer(call, "index");
-                Integer key = Integer.valueOf(index >= 0 ? index : i);
+                String id = text(call, "id");
+                JsonObject function = child(call, "function");
+                String name = function == null ? null : text(function, "name");
+                Integer key = index >= 0 ? Integer.valueOf(index) : keyWithoutIndex(i, id, name);
                 String[] parts = toolCalls.get(key);
                 if (parts == null) {
                     parts = new String[]{"", "", ""};
                     toolCalls.put(key, parts);
                 }
-                String id = text(call, "id");
                 if (id != null && !id.isEmpty()) {
                     parts[0] = id;
                 }
-                JsonObject function = child(call, "function");
                 if (function != null) {
-                    String name = text(function, "name");
                     if (name != null) {
                         parts[1] = parts[1] + name;
                     }
@@ -207,6 +283,22 @@ final class OpenAiResponseReader {
                 }
             }
         }
+    }
+
+    /**
+     * The call of a piece without {@code index} at {@code position} of its chunk: the call at that position of the
+     * current group, unless the piece starts another call there (see the class comment), which opens a new group
+     * after every call so far.
+     */
+    private Integer keyWithoutIndex(int position, String id, String name) {
+        String[] current = toolCalls.get(Integer.valueOf(noIndexBase + position));
+        boolean another = current != null && (id != null && !id.isEmpty()
+                ? !current[0].isEmpty() && !current[0].equals(id)
+                : name != null && !name.isEmpty() && !current[1].isEmpty());
+        if (another) {
+            noIndexBase = toolCalls.lastKey() + 1 - position;
+        }
+        return Integer.valueOf(noIndexBase + position);
     }
 
     private void readUsage(JsonObject root) {

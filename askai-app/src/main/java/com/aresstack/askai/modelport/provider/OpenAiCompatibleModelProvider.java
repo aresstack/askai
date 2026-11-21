@@ -2,6 +2,8 @@ package com.aresstack.askai.modelport.provider;
 
 import com.aresstack.askai.client.OllamaResidentModel;
 import com.aresstack.askai.modelport.ModelPortSettings;
+import com.aresstack.askai.modelport.ModelProviderSettings;
+import com.aresstack.askai.modelport.provider.OpenAiRequestWriter.Relaxation;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -24,8 +26,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The wire of an OpenAI-compatible service ({@code POST <base URL>/chat/completions}, {@code GET <base URL>/models})
@@ -43,17 +49,28 @@ import java.util.Locale;
  * 502/503/504 before the first answer byte are retried ({@link Settings#retries()}, waiting {@code Retry-After}
  * up to 30 s, else 1 s, 2 s, ...).</p>
  *
- * <p>Abort: a cancel or time-out never waits for the wire. While the service has not answered yet, the connection
- * is closed at once. During a stream the JDK can close it only when the blocked read returns, so the stream ends
- * at the next chunk (a service that streams nothing while it reasons keeps the connection until its first chunk;
- * the caller has its terminal callback already). Ollama's path ends a stream at the next chunk as well.</p>
+ * <p>Refused fields: services accept different optional fields. When a service refuses one with HTTP 400 (or 422),
+ * naming it in the error's {@code param} or message, the request is sent again with that field in a weaker form
+ * ({@link OpenAiRequestWriter.Relaxation}: {@code max_completion_tokens} for {@code max_tokens}, no
+ * {@code temperature}, no {@code reasoning_effort}, no {@code stream_options}, the other JSON form, then no
+ * {@code response_format}). Such a try is no retry. Once a weaker request is accepted, the provider keeps its form
+ * for the model at that base URL, so later calls do not pay the refusal again.</p>
+ *
+ * <p>Abort: a cancel or time-out never waits for the wire, and the port hands the call's place on at once (no
+ * memory is shared, so there is no order of calls to protect). While the service has not answered yet, the
+ * connection is closed at once. During a stream the JDK can close it only when the blocked read returns, so the
+ * stream ends at the next chunk: a service that streams nothing while it reasons keeps generating until its next
+ * chunk (or the read timeout). Ollama's path ends a stream at the next chunk as well.</p>
  *
  * <p>Credentials: the API key is read for each request from {@link Settings#apiKey()} and sent only as the
  * {@code Authorization: Bearer} header. It never appears in a message, an exception or a log line; a service
- * echoing it back in an error body is redacted.</p>
+ * echoing it back in an error body is redacted, and a key with a line break or another control character is
+ * refused before any header is set (the JDK's header check would quote it).</p>
  *
  * <p>UNVERIFIED against the service the API is tested with: {@code response_format} with {@code json_schema},
- * {@code reasoning_effort}, tool calls, and whether a closed connection stops the generation there.</p>
+ * {@code reasoning_effort}, tool calls, whether a closed connection stops the generation there, and the refusal
+ * texts the weaker forms react to (taken from the documented errors of OpenAI, Ollama's {@code /v1}, vLLM and
+ * LM Studio).</p>
  */
 public final class OpenAiCompatibleModelProvider implements ModelProvider {
 
@@ -92,9 +109,15 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
     static final int MAX_DETAIL_LENGTH = 300;
     private static final long MAX_RETRY_WAIT_MILLIS = 30_000L;
     private static final List<Integer> RETRYABLE = Arrays.asList(429, 502, 503, 504);
+    /** The message of a key the JDK's header check would refuse, quoting it in its own message. */
+    static final String KEY_WITH_CONTROL_CHARACTERS = "the API key contains a line break or another control "
+            + "character; enter it again under Settings -> AI models -> Model provider (or correct "
+            + ModelProviderSettings.API_KEY_ENVIRONMENT_VARIABLE + ")";
 
     private final Settings settings;
     private final ConnectionOpener connections;
+    /** "base URL \n model" -> the weaker forms the service accepted for the model (see the class comment). */
+    private final Map<String, Set<Relaxation>> acceptedForms = new ConcurrentHashMap<String, Set<Relaxation>>();
 
     public OpenAiCompatibleModelProvider(Settings settings, ConnectionOpener connections) {
         if (settings == null) {
@@ -122,32 +145,57 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
     @Override
     public ProviderCompletion chat(String baseUrl, ProviderCall call, ProviderStream stream)
             throws ProviderException {
-        byte[] body;
-        try {
-            body = OpenAiRequestWriter.write(call).getBytes(StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException invalid) {
-            throw new ProviderException(invalid.getMessage(), false);
-        }
         String url = join(baseUrl, "/chat/completions");
+        String formKey = join(baseUrl, "") + "\n" + call.getModel();
+        Set<Relaxation> forms = EnumSet.noneOf(Relaxation.class);
+        Set<Relaxation> accepted = acceptedForms.get(formKey);
+        if (accepted != null) {
+            forms.addAll(accepted);
+        }
+        boolean weakened = false;
         AbortSignal abort = call.getAbort();
-        for (int attempt = 0; ; attempt++) {
+        int retry = 0;
+        while (true) {
             if (abort.isAborted()) {
                 throw new ProviderException("the call was aborted", false);
             }
-            Response response = send(url, body, abort);
+            String json;
+            try {
+                json = OpenAiRequestWriter.write(call, forms);
+            } catch (IllegalArgumentException invalid) {
+                throw new ProviderException(invalid.getMessage(), false);
+            }
+            Response response = send(url, json.getBytes(StandardCharsets.UTF_8), abort);
             try {
                 if (response.status >= 200 && response.status < 300) {
+                    if (weakened) {
+                        acceptedForms.put(formKey, EnumSet.copyOf(forms)); // later calls skip the refusals
+                    }
                     return read(response.connection, abort, stream);
                 }
-                String detail = readError(response.connection, response.key);
-                if (RETRYABLE.contains(response.status) && attempt < settings.retries()) {
-                    long wait = retryWait(response.connection, attempt);
+                String error = readErrorBody(response.connection);
+                String refusal = redact(refusalText(error), response.key);
+                if (response.status == 400 || response.status == 422) {
+                    Relaxation weaker = OpenAiRequestWriter.relaxationFor(json, forms,
+                            OpenAiResponseReader.errorParam(error), refusal);
+                    if (weaker != null && forms.add(weaker)) {
+                        weakened = true;
+                        System.err.println("[model-port] " + call.getModel() + ": the OpenAI-compatible API refused "
+                                + weaker.field() + " (HTTP " + response.status + "), sending it again "
+                                + weaker.retry());
+                        continue;
+                    }
+                }
+                String detail = shorten(refusal.isEmpty() ? redact(error, response.key) : refusal);
+                if (RETRYABLE.contains(response.status) && retry < settings.retries()) {
+                    long wait = retryWait(response.connection, retry);
                     System.err.println("[model-port] " + call.getModel() + ": HTTP " + response.status
-                            + ", retry " + (attempt + 1) + " of " + settings.retries() + " in " + wait + " ms");
+                            + ", retry " + (retry + 1) + " of " + settings.retries() + " in " + wait + " ms");
+                    retry++;
                     pause(wait, abort);
                     continue;
                 }
-                throw new ProviderException(statusMessage(response.status, detail, attempt,
+                throw new ProviderException(statusMessage(response.status, detail, retry,
                         response.key != null), false);
             } catch (IOException broken) {
                 if (abort.isAborted()) {
@@ -189,9 +237,7 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
             connection.setReadTimeout(settings.connectTimeoutMillis());
             connection.setInstanceFollowRedirects(false);
             connection.setRequestProperty("Accept", "application/json");
-            if (token != null) {
-                connection.setRequestProperty("Authorization", "Bearer " + token);
-            }
+            authorize(connection, token);
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
                 throw new ProviderException(statusMessage(status, readError(connection, token), 0,
@@ -226,6 +272,25 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
                 + "OpenAI-compatible API. Pick one of its models under Settings -> AI models -> Model provider.";
     }
 
+    /** API model ids name the publisher first ({@code openai/gpt-oss-120b}); the family is read after it. */
+    @Override
+    public boolean isLevelOnlyModel(String model) {
+        return isLevelOnlyApiModel(model);
+    }
+
+    @Override
+    public String cannotTurnThinkingOffMessage(String model, String slot) {
+        return "The " + ModelPortSettings.describe(slot) + " needs a model that can turn thinking off; "
+                + (model == null ? "" : model.trim()) + " cannot. Pick another model for it under Settings -> AI "
+                + "models -> Model provider.";
+    }
+
+    /** {@link #isLevelOnlyModel} for an API model id: the model-port rule on the name after any vendor prefix. */
+    static boolean isLevelOnlyApiModel(String model) {
+        String name = model == null ? "" : model.trim();
+        return ModelPortSettings.isLevelOnlyModel(name.substring(name.lastIndexOf('/') + 1), null);
+    }
+
     // ------------------------------------------------------------------ internals
 
     /** One sent request: the open connection, its status and the key it carried (for redaction only). */
@@ -241,7 +306,10 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
         }
     }
 
-    /** The API key for one request, or null; a stored key that cannot be read ends the request. */
+    /**
+     * The API key for one request, or null; a stored key that cannot be read ends the request, and so does a key
+     * with a line break or another control character, before any header is set.
+     */
     private String token() throws ProviderException {
         char[] key;
         try {
@@ -249,9 +317,30 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
         } catch (IOException unreadable) {
             throw new ProviderException(unreadable.getMessage(), false);
         }
-        String token = key == null ? null : new String(key).trim();
+        if (key == null) {
+            return null;
+        }
+        String token = new String(key).trim();
         clear(key);
-        return token == null || token.isEmpty() ? null : token;
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (c < 0x20 || c == 0x7f) {
+                throw new ProviderException(KEY_WITH_CONTROL_CHARACTERS, false);
+            }
+        }
+        return token.isEmpty() ? null : token;
+    }
+
+    /** Sets the bearer header; the JDK's refusal of a header value quotes the value, so its text is never used. */
+    private static void authorize(HttpURLConnection connection, String token) throws ProviderException {
+        if (token == null) {
+            return;
+        }
+        try {
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+        } catch (IllegalArgumentException refused) {
+            throw new ProviderException(KEY_WITH_CONTROL_CHARACTERS, false);
+        }
     }
 
     private Response send(String url, byte[] body, AbortSignal abort) throws ProviderException {
@@ -272,9 +361,7 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
             connection.setReadTimeout(settings.readTimeoutMillis());
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             connection.setRequestProperty("Accept", "*/*");
-            if (token != null) {
-                connection.setRequestProperty("Authorization", "Bearer " + token);
-            }
+            authorize(connection, token);
             OutputStream output = connection.getOutputStream();
             try {
                 output.write(body);
@@ -376,15 +463,31 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
     }
 
     private static String readError(HttpURLConnection connection, String key) {
-        String body;
+        String body = readErrorBody(connection);
+        String message = refusalText(body);
+        return shorten(redact(message.isEmpty() ? body : message, key));
+    }
+
+    private static String readErrorBody(HttpURLConnection connection) {
         try {
             InputStream error = connection.getErrorStream();
-            body = error == null ? "" : readAll(error);
+            return error == null ? "" : readAll(error);
         } catch (IOException unreadable) {
-            body = "";
+            return "";
         }
+    }
+
+    /**
+     * The error's own message ({@link OpenAiResponseReader#errorMessage}), or a body that is plain text; "" for a
+     * JSON body without a message, which may echo the whole request and so must not be read for field names.
+     */
+    static String refusalText(String body) {
         String message = OpenAiResponseReader.errorMessage(body);
-        return shorten(redact(message != null ? message : body, key));
+        if (message != null) {
+            return message;
+        }
+        String text = body == null ? "" : body.trim();
+        return text.startsWith("{") || text.startsWith("[") ? "" : text;
     }
 
     static List<String> modelIds(String json) throws ProviderException {

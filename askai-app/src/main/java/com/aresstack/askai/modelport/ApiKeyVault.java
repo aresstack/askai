@@ -9,12 +9,15 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.Arrays;
@@ -26,6 +29,11 @@ import java.util.EnumSet;
  * to the settings (owner-only where the file system allows it), the same scheme the research plugin uses for the
  * search providers' keys. The settings file holds only {@code v1:<iv>:<cipher text>}; neither the key nor the
  * plain API key is ever written to a log. Thread-safe.
+ *
+ * <p>A damaged key file (empty after a crash, garbled, a key of the wrong length) can decrypt nothing: reading a
+ * stored key then asks the user to enter it again, and storing a key replaces the damaged file with a new key, so
+ * entering it again always works. The key file is written owner-only from its creation and synced before it
+ * replaces the old one.</p>
  */
 public final class ApiKeyVault {
 
@@ -104,15 +112,15 @@ public final class ApiKeyVault {
     private synchronized SecretKey key(boolean create) throws IOException {
         Path path = keyFile.toPath();
         if (Files.exists(path)) {
-            byte[] encoded = Base64.getDecoder().decode(new String(Files.readAllBytes(path),
-                    StandardCharsets.US_ASCII).trim());
-            try {
-                return new SecretKeySpec(encoded, "AES");
-            } finally {
-                Arrays.fill(encoded, (byte) 0);
+            SecretKey stored = readKey(path);
+            if (stored != null) {
+                return stored;
             }
-        }
-        if (!create) {
+            if (!create) {
+                throw new IOException("the key file of the stored API key is damaged; enter the API key again");
+            }
+            // a damaged key file decrypts nothing any more: a new key replaces it
+        } else if (!create) {
             throw new IOException("the key file of the stored API key is missing; enter the API key again");
         }
         SecretKey key;
@@ -130,8 +138,16 @@ public final class ApiKeyVault {
         byte[] encoded = Base64.getEncoder().encode(key.getEncoded());
         Path temporary = path.resolveSibling(path.getFileName() + ".tmp");
         try {
-            Files.write(temporary, encoded);
-            ownerOnly(temporary);
+            Files.deleteIfExists(temporary);
+            createOwnerOnly(temporary);
+            try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING)) {
+                ByteBuffer content = ByteBuffer.wrap(encoded);
+                while (content.hasRemaining()) {
+                    channel.write(content);
+                }
+                channel.force(true); // on disk before it replaces the old file: a crash never leaves it empty
+            }
             try {
                 Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException notAtomic) {
@@ -144,12 +160,33 @@ public final class ApiKeyVault {
         return key;
     }
 
-    private static void ownerOnly(Path path) {
+    /** The AES key in the file, or null when the file holds none (empty, not Base64, not 16, 24 or 32 bytes). */
+    private static SecretKey readKey(Path path) throws IOException {
+        byte[] raw = Files.readAllBytes(path);
+        byte[] encoded = null;
         try {
-            Files.setPosixFilePermissions(path, EnumSet.of(PosixFilePermission.OWNER_READ,
-                    PosixFilePermission.OWNER_WRITE));
-        } catch (UnsupportedOperationException | IOException notPosix) {
-            // Windows: the file lies in the user's own profile directory
+            encoded = Base64.getDecoder().decode(new String(raw, StandardCharsets.US_ASCII).trim());
+            if (encoded.length != 16 && encoded.length != 24 && encoded.length != 32) {
+                return null;
+            }
+            return new SecretKeySpec(encoded, "AES");
+        } catch (IllegalArgumentException damaged) {
+            return null;
+        } finally {
+            Arrays.fill(raw, (byte) 0);
+            if (encoded != null) {
+                Arrays.fill(encoded, (byte) 0);
+            }
+        }
+    }
+
+    /** Creates an empty file readable only by its owner where the file system knows POSIX permissions. */
+    private static void createOwnerOnly(Path path) throws IOException {
+        try {
+            Files.createFile(path, PosixFilePermissions.asFileAttribute(EnumSet.of(PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE)));
+        } catch (UnsupportedOperationException notPosix) {
+            Files.createFile(path); // Windows: the file lies in the user's own profile directory
         }
     }
 

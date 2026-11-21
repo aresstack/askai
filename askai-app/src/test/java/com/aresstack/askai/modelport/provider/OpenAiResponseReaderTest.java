@@ -114,6 +114,64 @@ public class OpenAiResponseReaderTest {
     }
 
     @Test
+    public void completeCallsWithoutIndexInSeparateChunksStayApart() throws Exception {
+        // Gemini's compatible endpoint: each complete call in its own chunk, no "index", always at position 0
+        OpenAiResponseReader reader = read(
+                data("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"a\",\"type\":\"function\","
+                        + "\"function\":{\"name\":\"f\",\"arguments\":\"{\\\"q\\\":1}\"}}]}}]}")
+                        + data("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"b\",\"type\":\"function\","
+                        + "\"function\":{\"name\":\"g\",\"arguments\":\"{\\\"q\\\":2}\"}}]}}]}")
+                        + data("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"h\","
+                        + "\"arguments\":\"{}\"}},{\"id\":\"d\",\"function\":{\"name\":\"k\",\"arguments\":\"{}\"}}]}}]}")
+                        + data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}")
+                        + "data: [DONE]\n", new Deltas());
+
+        List<com.aresstack.askai.agent.model.port.ToolCall> calls = reader.completion().getToolCalls();
+        assertEquals(4, calls.size());
+        assertEquals("f", calls.get(0).getName());
+        assertEquals("{\"q\":1}", calls.get(0).getArgumentsJson());
+        assertEquals("g", calls.get(1).getName());
+        assertEquals("b", calls.get(1).getId());
+        assertEquals("{\"q\":2}", calls.get(1).getArgumentsJson());
+        assertEquals("two calls of one chunk keep their positions", "h", calls.get(2).getName());
+        assertEquals("k", calls.get(3).getName());
+    }
+
+    @Test
+    public void piecesWithoutIndexThatContinueACallArePutTogether() throws Exception {
+        OpenAiResponseReader reader = read(
+                data("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"a\",\"function\":{\"name\":\"search\","
+                        + "\"arguments\":\"{\\\"q\\\"\"}}]}}]}")
+                        + data("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\":1\"}}]}}]}")
+                        + data("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"a\",\"function\":"
+                        + "{\"arguments\":\"}\"}}]}}]}")
+                        + data("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"name\":\"fetch\","
+                        + "\"arguments\":\"{}\"}}]}}]}")
+                        + data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}"), new Deltas());
+
+        List<com.aresstack.askai.agent.model.port.ToolCall> calls = reader.completion().getToolCalls();
+        assertEquals("a repeated id continues its call; a new name without an id starts one", 2, calls.size());
+        assertEquals("search", calls.get(0).getName());
+        assertEquals("{\"q\":1}", calls.get(0).getArgumentsJson());
+        assertEquals("fetch", calls.get(1).getName());
+    }
+
+    @Test
+    public void theParameterAnErrorNamesIsRead() {
+        assertEquals("max_tokens", OpenAiResponseReader.errorParam("{\"error\":{\"message\":\"Unsupported\","
+                + "\"type\":\"invalid_request_error\",\"param\":\"max_tokens\",\"code\":\"unsupported_parameter\"}}"));
+        assertEquals("older vLLM", "temperature", OpenAiResponseReader.errorParam(
+                "{\"object\":\"error\",\"message\":\"m\",\"param\":\"temperature\"}"));
+        String fastApi = "{\"detail\":[{\"type\":\"extra_forbidden\",\"loc\":[\"body\",\"stream_options\"],"
+                + "\"msg\":\"Extra inputs are not permitted\",\"input\":{\"temperature\":0.2,\"max_tokens\":9}}]}";
+        assertEquals("FastAPI's validation entry", "stream_options", OpenAiResponseReader.errorParam(fastApi));
+        assertEquals("the message names the field, never the echoed input",
+                "stream_options: Extra inputs are not permitted", OpenAiResponseReader.errorMessage(fastApi));
+        assertNull(OpenAiResponseReader.errorParam("{\"error\":{\"message\":\"x\",\"param\":null}}"));
+        assertNull(OpenAiResponseReader.errorParam("not json"));
+    }
+
+    @Test
     public void anErrorInsideTheStreamEndsTheCall() throws Exception {
         try {
             read(data("{\"choices\":[{\"delta\":{\"content\":\"par\"}}]}")
@@ -166,7 +224,10 @@ public class OpenAiResponseReaderTest {
         assertEquals("bad key", OpenAiResponseReader.errorMessage("{\"error\":{\"message\":\"bad key\"}}"));
         assertEquals("plain", OpenAiResponseReader.errorMessage("{\"error\":\"plain\"}"));
         assertNull(OpenAiResponseReader.errorMessage("<html>gateway</html>"));
-        assertNull(OpenAiResponseReader.errorMessage("{\"detail\":\"other shape\"}"));
+        assertEquals("FastAPI", "other shape", OpenAiResponseReader.errorMessage("{\"detail\":\"other shape\"}"));
+        assertEquals("older vLLM", "top level", OpenAiResponseReader.errorMessage(
+                "{\"object\":\"error\",\"message\":\"top level\",\"type\":\"BadRequestError\",\"param\":null}"));
+        assertNull(OpenAiResponseReader.errorMessage("{\"unrelated\":true}"));
 
         assertEquals("{\"a\":1}", OpenAiResponseReader.payloadOf("data: {\"a\":1}"));
         assertEquals("[DONE]", OpenAiResponseReader.payloadOf("data:[DONE]"));

@@ -95,6 +95,34 @@ public class LocalInferenceConfigurationSnapshotProviderTest {
     }
 
     @Test
+    public void theApiWithoutABaseUrlStillPublishesAValidDescriptor() throws Exception {
+        com.aresstack.askai.modelport.ModelPortSettingsRepository portSettings =
+                new com.aresstack.askai.modelport.ModelPortSettingsRepository(new File(folder.getRoot(),
+                        "model-port.properties"));
+        com.aresstack.askai.modelport.ModelProviderSettingsRepository providers =
+                new com.aresstack.askai.modelport.ModelProviderSettingsRepository(new File(folder.getRoot(),
+                        "model-provider.properties"));
+        providers.save(new com.aresstack.askai.modelport.ModelProviderSettings(
+                com.aresstack.askai.modelport.ModelProviderKind.OPENAI_COMPATIBLE, "", "", 0,
+                java.util.Collections.singletonMap(com.aresstack.askai.modelport.ModelPortSettings.DEFAULT_SLOT,
+                        "gpt-4o-mini"), 0, null, 0, 0, 0));
+        LocalInferenceConfigurationSnapshotProvider provider = new LocalInferenceConfigurationSnapshotProvider(null,
+                new com.aresstack.askai.config.AppConfigurationRepository(folder.newFile("askai.properties")),
+                portSettings, providers);
+
+        InferenceConfigurationSnapshot snapshot = provider.prepareForSession("s", folder.newFolder("session"));
+
+        // the port reports the missing URL per call and recovers once one is saved; the session must start
+        assertEquals("gpt-4o-mini", snapshot.getModel());
+        assertEquals(LocalInferenceConfigurationSnapshotProvider.API_URL_NOT_SET,
+                snapshot.getDocument().descriptor.baseUrl);
+        assertEquals(LocalInferenceConfigurationSnapshotProvider.API_CHAT_PATH,
+                snapshot.getDocument().descriptor.chatPath);
+        InferenceConfigurationValidationResult onDisk = readBack(snapshot.getSnapshotFile());
+        assertTrue(onDisk.describe(), onDisk.valid);
+    }
+
+    @Test
     public void failsVisiblyWithoutAMainModel() throws Exception {
         LocalInferenceConfigurationSnapshotProvider provider =
                 new LocalInferenceConfigurationSnapshotProvider(new RecordingSources(""));

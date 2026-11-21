@@ -360,6 +360,14 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             residents.add(new ResidentModel(loaded.endpointId, handle(loaded.endpointId, loaded.model),
                     loaded.sizeBytes, loaded.vramBytes, loaded.expiresAt, loaded.contextLength));
         }
+        // A service that serves many models side by side keeps every model ready: a bound model there counts as
+        // resident (sizes unreported), so nothing announces a load that never happens.
+        java.util.Set<ModelHandle> ready = new java.util.HashSet<ModelHandle>();
+        for (SlotBinding binding : bindings) {
+            if (!provider(binding.getEndpointId()).sharesMemory() && ready.add(binding.getModel())) {
+                residents.add(new ResidentModel(binding.getEndpointId(), binding.getModel(), -1, -1, null, -1));
+            }
+        }
         return new ResourceSnapshot(Instant.now(), pool, bindings, capacities, residents, view.known);
     }
 
@@ -381,6 +389,18 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             return result;
         }
         final String endpointId = slots.endpointFor(model);
+        if (!provider(endpointId).sharesMemory()) {
+            // The service keeps its models ready: nothing to load, so no probe, no place and no load. The checks a
+            // call would make still answer, from what is known now (never asking the service).
+            String unusable = preflight(slot, endpointId, model);
+            if (unusable != null) {
+                result.completeExceptionally(new SlotUnavailableException(slot,
+                        SlotUnavailableException.Reason.NO_BINDING, unusable));
+            } else {
+                result.complete(null);
+            }
+            return result;
+        }
         if (needsInstalledProbe(endpointId, model)) {
             final CompletableFuture<Void> outer = new CompletableFuture<Void>();
             probeInstalled(endpointId).whenComplete((ignored, failure) -> {
@@ -492,15 +512,15 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
      * thread); an endpoint that cannot be asked skips the check, so the call itself reports the endpoint.
      */
     String preflight(ModelSlot slot, String endpointId, String model) {
-        if (ModelPortSettings.isHelperSlot(slot.getName()) && isLevelOnly(model, null)) {
-            return ModelPortSettings.thinkingOffRequiredMessage(slot.getName(), model);
+        ModelProvider provider = provider(endpointId);
+        if (ModelPortSettings.isHelperSlot(slot.getName()) && provider.isLevelOnlyModel(model)) {
+            return provider.cannotTurnThinkingOffMessage(model, slot.getName());
         }
         if (!slots.checksInstalledModels() || com.aresstack.askai.localmodels.LocalModelNames
                 .isLocalModelName(model)) {
             return null;
         }
         List<String> installed = installedModels(endpointId);
-        ModelProvider provider = provider(endpointId);
         if (installed == null || installed.isEmpty() || provider.offers(installed, model)) {
             return null;
         }
@@ -536,18 +556,44 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     }
 
     private static final long INSTALLED_TTL_MILLIS = 30_000L;
+    /**
+     * A model the cached list of an API lacks is asked for again after this long: the list depends on the key and
+     * the account, which change without the port noticing (Ollama keeps the plain TTL).
+     */
+    private static final long INSTALLED_MISS_RECHECK_MILLIS = 10_000L;
     private static final long INSTALLED_PROBE_TIMEOUT_SECONDS = 5L;
-    /** endpoint -> {probe time, installed names or null when the endpoint could not be asked}. */
+    /**
+     * endpoint -> {probe time, installed names or null when the endpoint could not be asked, the base URL asked}.
+     * An API's list is only ever the list of the URL it came from: a changed URL (the user pointed the endpoint at
+     * another service) makes it unknown at once. Ollama keeps its list for the TTL, as before.
+     */
     private final Map<String, Object[]> installedCache = new ConcurrentHashMap<String, Object[]>();
 
     /** True when the installed list of {@code endpointId} must be (re)probed before the preflight. */
+    @SuppressWarnings("unchecked")
     private boolean needsInstalledProbe(String endpointId, String model) {
         if (!slots.checksInstalledModels()
                 || com.aresstack.askai.localmodels.LocalModelNames.isLocalModelName(model)) {
             return false;
         }
         Object[] cached = installedCache.get(endpointId);
-        return cached == null || System.currentTimeMillis() - (Long) cached[0] >= INSTALLED_TTL_MILLIS;
+        if (cached == null || !sameUrl(cached, endpointId)) {
+            return true;
+        }
+        long age = System.currentTimeMillis() - (Long) cached[0];
+        if (age >= INSTALLED_TTL_MILLIS) {
+            return true;
+        }
+        ModelProvider provider = provider(endpointId);
+        List<String> names = (List<String>) cached[1];
+        return !provider.sharesMemory() && age >= INSTALLED_MISS_RECHECK_MILLIS && names != null
+                && !names.isEmpty() && !provider.offers(names, model);
+    }
+
+    /** Whether a cache entry still describes the endpoint: an API's only at the base URL it was probed at. */
+    private boolean sameUrl(Object[] cached, String endpointId) {
+        return provider(endpointId).sharesMemory()
+                || java.util.Objects.equals(cached[2], endpoints.baseUrlIfRunning(endpointId));
     }
 
     /**
@@ -558,10 +604,12 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     private CompletableFuture<Void> probeInstalled(final String endpointId) {
         final CompletableFuture<Void> done = new CompletableFuture<Void>();
         final long now = System.currentTimeMillis();
+        final AtomicReference<String> asked = new AtomicReference<String>(); // the URL the list belongs to
         CompletableFuture<List<String>> probe;
         try {
             probe = CompletableFuture.supplyAsync(() -> {
                 String baseUrl = endpoints.baseUrlIfRunning(endpointId);
+                asked.set(baseUrl);
                 if (baseUrl == null) {
                     return null;
                 }
@@ -572,22 +620,27 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 }
             }, calls).orTimeout(INSTALLED_PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (java.util.concurrent.RejectedExecutionException shutDown) {
-            installedCache.put(endpointId, new Object[]{now, null});
+            installedCache.put(endpointId, new Object[]{now, null, null});
             done.complete(null);
             return done;
         }
         probe.whenComplete((names, failure) -> {
-            installedCache.put(endpointId, new Object[]{now, failure == null ? names : null});
+            // a probe that timed out before it ran is filed under today's URL, so it is not repeated at once
+            String url = asked.get() != null ? asked.get() : endpoints.baseUrlIfRunning(endpointId);
+            installedCache.put(endpointId, new Object[]{now, failure == null ? names : null, url});
             done.complete(null);
         });
         return done;
     }
 
-    /** The cached installed model names of an endpoint, or null when unknown. Never blocks. */
+    /**
+     * The cached installed model names of an endpoint, or null when unknown (never probed, the endpoint could not
+     * be asked, or the list came from another base URL). Never blocks.
+     */
     @SuppressWarnings("unchecked")
     private List<String> installedModels(String endpointId) {
         Object[] cached = installedCache.get(endpointId);
-        return cached == null ? null : (List<String>) cached[1];
+        return cached == null || !sameUrl(cached, endpointId) ? null : (List<String>) cached[1];
     }
 
     private static void forward(CompletableFuture<SlotReservation> inner, CompletableFuture<SlotReservation> outer) {
@@ -609,11 +662,6 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     static String contextTooLarge(String model, int needed, int available) {
         return "Context too large for " + model + ": the call needs " + needed + " tokens, the model's context is "
                 + available + " (raise it in the model resources)";
-    }
-
-    /** The families that accept only thinking levels, never {@code false} (plan 4.1, rule 3). */
-    static boolean isLevelOnly(String model, String family) {
-        return ModelPortSettings.isLevelOnlyModel(model, family);
     }
 
     private ModelPortSettings settings() {
@@ -772,12 +820,14 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         }
 
         /**
-         * A cancel or time-out reports at once, but the scheduler place is handed on only once the stream has
-         * really stopped: otherwise the next call would reach the endpoint while the aborted generation (for
-         * example a slow prefill that has not sent its first chunk) is still running, breaking capacity 1.
+         * A cancel or time-out reports at once, but on an endpoint whose models share one machine's memory the
+         * scheduler place is handed on only once the stream has really stopped: otherwise the next call would reach
+         * the endpoint while the aborted generation (for example a slow prefill that has not sent its first chunk)
+         * is still running, breaking capacity 1. A service that serves many models side by side has no such order
+         * to protect, and its stream may stay silent until the read timeout: there the place is handed on at once.
          */
         private synchronized void releaseWhenOffTheWire() {
-            if (!active.get() && onWire == null && !released) {
+            if (!active.get() && !released && (onWire == null || !provider(endpointId).sharesMemory())) {
                 released = true;
                 grant.release();
             }

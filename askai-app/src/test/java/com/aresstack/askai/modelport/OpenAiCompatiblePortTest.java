@@ -3,10 +3,12 @@ package com.aresstack.askai.modelport;
 import com.aresstack.askai.agent.model.port.ChatListener;
 import com.aresstack.askai.agent.model.port.ChatRequest;
 import com.aresstack.askai.agent.model.port.ChatResult;
+import com.aresstack.askai.agent.model.port.ModelCall;
 import com.aresstack.askai.agent.model.port.ModelFailure;
 import com.aresstack.askai.agent.model.port.ModelMessage;
 import com.aresstack.askai.agent.model.port.ModelSlot;
 import com.aresstack.askai.agent.model.port.resource.ModelEndpoint;
+import com.aresstack.askai.agent.model.port.resource.SlotUnavailableException;
 import com.aresstack.askai.config.AppConfigurationRepository;
 import com.aresstack.askai.modelport.provider.OpenAiCompatibleModelProvider;
 import com.google.gson.JsonParser;
@@ -34,6 +36,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -49,8 +52,9 @@ import static org.junit.Assert.fail;
 /**
  * The productive model port with the OpenAI-compatible API chosen (the central directories over the provider
  * settings), against a scripted service: a model per task, different models side by side, several calls per model
- * by default, the per-model capacity override, nothing loaded or unloaded, and the named failures. Switching back
- * to Ollama routes every slot to Ollama again.
+ * by default, the per-model capacity override, nothing loaded or unloaded, an aborted silent stream that frees its
+ * place at once, a changed base URL asked for its own model list, warming that asks nothing, and the named failures.
+ * Switching back to Ollama routes every slot to Ollama again.
  */
 public class OpenAiCompatiblePortTest {
 
@@ -72,6 +76,10 @@ public class OpenAiCompatiblePortTest {
     private final List<String> calledModels = new CopyOnWriteArrayList<String>();
     private volatile CountDownLatch gate;
     private volatile int chatStatus = 200;
+    /** While set, the first chat call sends one chunk and then stays silent until it is counted down. */
+    private volatile CountDownLatch silence;
+    private final AtomicInteger silentCalls = new AtomicInteger();
+    private final AtomicInteger listings = new AtomicInteger();
 
     private ModelPortSettingsRepository portSettings;
     private ModelProviderSettingsRepository providers;
@@ -85,8 +93,11 @@ public class OpenAiCompatiblePortTest {
             unexpected.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath());
             respond(exchange, 404, "text/plain", "not here");
         });
-        server.createContext("/v1/models", exchange -> respond(exchange, 200, "application/json",
-                "{\"data\":[{\"id\":\"model-a\"},{\"id\":\"model-b\"},{\"id\":\"openai/gpt-oss-120b\"}]}"));
+        server.createContext("/v1/models", exchange -> {
+            listings.incrementAndGet();
+            respond(exchange, 200, "application/json",
+                    "{\"data\":[{\"id\":\"model-a\"},{\"id\":\"model-b\"},{\"id\":\"openai/gpt-oss-120b\"}]}");
+        });
         server.createContext("/v1/chat/completions", this::chat);
         server.setExecutor(Executors.newCachedThreadPool());
         server.start();
@@ -105,6 +116,10 @@ public class OpenAiCompatiblePortTest {
         CountDownLatch latch = gate;
         if (latch != null) {
             latch.countDown();
+        }
+        CountDownLatch quiet = silence;
+        if (quiet != null) {
+            quiet.countDown();
         }
         port.close();
         if (server != null) {
@@ -221,13 +236,79 @@ public class OpenAiCompatiblePortTest {
 
     @Test
     public void helperSlotsRefuseALevelOnlyModelUnderAVendorPrefix() throws Exception {
-        assertTrue(ModelPortSettings.isLevelOnlyModel("openai/gpt-oss-120b", null));
         useApi(models("judge", "openai/gpt-oss-120b"));
 
         ModelFailure failure = start(JUDGE).await().failure();
 
-        assertTrue(failure.getDetail(), failure.getDetail().contains("cannot"));
+        assertTrue(failure.getDetail(), failure.getDetail().contains("cannot turn thinking off")
+                || failure.getDetail().contains("can turn thinking off"));
+        assertTrue("it says where API models are picked", failure.getDetail().contains("Model provider"));
         assertTrue(calledModels.isEmpty());
+    }
+
+    @Test
+    public void anAbortedSilentStreamFreesItsPlaceAtOnce() throws Exception {
+        portSettings.save(new ModelPortSettings(1, Collections.singletonMap("model-a", 1), null, null, null, null,
+                null, "5m", 600, 5));
+        useApi(models("planner", "model-a"));
+        silence = new CountDownLatch(1); // a reasoning model that sends nothing more for minutes
+        Recorder first = new Recorder();
+        ModelCall silent = port.chat(ChatRequest.builder(PLANNER).message(ModelMessage.user("hi")).build(), first);
+        assertTrue("the first chunk arrived", first.firstDelta.await(15, TimeUnit.SECONDS));
+
+        silent.cancel();
+        assertEquals(ModelFailure.Kind.CANCELLED, first.await().failure().getKind());
+        Recorder second = start(PLANNER);
+
+        assertTrue("the next call gets the only place while the aborted stream is still silent",
+                second.done.await(10, TimeUnit.SECONDS));
+        assertEquals("ok from model-a", second.result().getContent());
+        assertEquals("the aborted stream is still open at the service", 1, silence.getCount());
+    }
+
+    @Test
+    public void aChangedBaseUrlIsAskedForItsOwnModelList() throws Exception {
+        useApi(models("planner", "model-a"));
+        assertEquals("ok from model-a", start(PLANNER).await().result().getContent());
+        HttpServer other = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        other.createContext("/v1/models", exchange -> respond(exchange, 200, "application/json",
+                "{\"data\":[{\"id\":\"model-z\"}]}"));
+        other.createContext("/v1/chat/completions", exchange -> {
+            drain(exchange.getRequestBody());
+            respond(exchange, 200, "text/event-stream", "data: {\"choices\":[{\"delta\":{\"content\":\"ok from "
+                    + "the other service\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
+        });
+        other.start();
+        try {
+            providers.save(new ModelProviderSettings(ModelProviderKind.OPENAI_COMPATIBLE, "http://127.0.0.1:"
+                    + other.getAddress().getPort() + "/v1", providers.load().getEncryptedApiKey(), 0,
+                    models("planner", "model-z"), 0, null, 5, 30, 0));
+
+            assertEquals("the first service's list does not refuse the second service's model",
+                    "ok from the other service", start(PLANNER).await().result().getContent());
+        } finally {
+            other.stop(0);
+        }
+    }
+
+    @Test
+    public void warmingAnApiSlotAsksTheServiceNothingAndItsModelIsReady() throws Exception {
+        useApi(models(ModelPortSettings.DEFAULT_SLOT, "model-a", "judge", "openai/gpt-oss-120b"));
+        ModelSlot phase = ModelSlot.of("phase.research");
+
+        port.warm(phase).get(5, TimeUnit.SECONDS);
+
+        assertTrue("a bound API model counts as resident, so no load is announced",
+                port.resources().isResident(phase));
+        assertEquals("no model list, no load, no call", 0, listings.get());
+        assertTrue(calledModels.isEmpty() && unexpected.isEmpty());
+        try {
+            port.warm(JUDGE).get(5, TimeUnit.SECONDS);
+            fail("a helper slot with a model that cannot turn thinking off is refused");
+        } catch (ExecutionException expected) {
+            assertTrue(expected.getCause() instanceof SlotUnavailableException);
+            assertTrue(expected.getCause().getMessage(), expected.getCause().getMessage().contains("Model provider"));
+        }
     }
 
     @Test
@@ -293,6 +374,21 @@ public class OpenAiCompatiblePortTest {
             calledModels.add(model);
             if (chatStatus != 200) {
                 respond(exchange, chatStatus, "application/json", "{\"error\":{\"message\":\"nope\"}}");
+                return;
+            }
+            CountDownLatch quiet = silence;
+            if (quiet != null && silentCalls.getAndIncrement() == 0) {
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                exchange.sendResponseHeaders(200, 0);
+                OutputStream out = exchange.getResponseBody();
+                out.write("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"hm\"}}]}\n\n"
+                        .getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                try {
+                    quiet.await(60, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
                 return;
             }
             runningAll.incrementAndGet();
@@ -366,11 +462,14 @@ public class OpenAiCompatiblePortTest {
         private final AtomicReference<ChatResult> result = new AtomicReference<ChatResult>();
         private final AtomicReference<ModelFailure> failure = new AtomicReference<ModelFailure>();
         private final CountDownLatch done = new CountDownLatch(1);
+        private final CountDownLatch firstDelta = new CountDownLatch(1);
 
         public void onThinkingDelta(String delta) {
+            firstDelta.countDown();
         }
 
         public void onContentDelta(String delta) {
+            firstDelta.countDown();
         }
 
         public void onCompleted(ChatResult completed) {

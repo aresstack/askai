@@ -174,8 +174,7 @@ public final class ModelProviderPanel extends JPanel {
         provider.setSelectedItem(settings.getProvider());
         baseUrl.setText(settings.getApiBaseUrl());
         apiKey.setText("");
-        keyState.setText(settings.hasStoredApiKey() ? "A key is stored." : "No key stored; "
-                + ModelProviderSettings.API_KEY_ENVIRONMENT_VARIABLE + " is read when it is set.");
+        keyState.setText(keyStateFor(settings.hasStoredApiKey()));
         capacity.setValue(settings.getApiCapacity());
         context.setValue(settings.getApiContextTokens());
         retries.setValue(settings.getRetries());
@@ -186,6 +185,11 @@ public final class ModelProviderPanel extends JPanel {
             slots.addRow(new Object[]{slot, settings.apiSlotModel(slot)});
         }
         updateEnabled();
+    }
+
+    private static String keyStateFor(boolean stored) {
+        return stored ? "A key is stored." : "No key stored; " + ModelProviderSettings.API_KEY_ENVIRONMENT_VARIABLE
+                + " is read when it is set.";
     }
 
     /** The slots the model resources show, plus every slot with an API model, in a stable order. */
@@ -222,10 +226,7 @@ public final class ModelProviderPanel extends JPanel {
                 repository.storeApiKey(typed);
             }
             load(repository.load());
-            ModelProviderSettings saved = repository.load();
-            status.setText(saved.usesApi() && saved.resolveApiModel(ModelPortSettings.DEFAULT_SLOT).isEmpty()
-                    ? "Saved. Set at least the default slot's model, every task inherits it."
-                    : "Saved. Applies to the next model call.");
+            status.setText(savedMessage(repository.load()));
         } catch (IOException | IllegalArgumentException failed) {
             status.setText("Could not save: " + failed.getMessage());
         } finally {
@@ -233,10 +234,30 @@ public final class ModelProviderPanel extends JPanel {
         }
     }
 
-    private void removeKey() {
+    /** What a save leaves to do: a base URL, a default model, or nothing. */
+    static String savedMessage(ModelProviderSettings saved) {
+        if (saved.usesApi()) {
+            String url = saved.getApiBaseUrl();
+            if (url.isEmpty()) {
+                return "Saved. Enter the API base URL; without it no call reaches the API.";
+            }
+            String lower = url.toLowerCase(java.util.Locale.ROOT);
+            if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+                return "Saved. The API base URL must start with http:// or https://.";
+            }
+            if (saved.resolveApiModel(ModelPortSettings.DEFAULT_SLOT).isEmpty()) {
+                return "Saved. Set at least the default slot's model, every task inherits it.";
+            }
+        }
+        return "Saved. Applies to the next model call.";
+    }
+
+    /** Removes only the stored key; whatever else the page shows stays as typed (and unsaved). */
+    void removeKey() {
         try {
             repository.removeApiKey();
-            load(repository.load());
+            apiKey.setText("");
+            keyState.setText(keyStateFor(false));
             status.setText("The stored API key is removed.");
         } catch (IOException failed) {
             status.setText("Could not remove the key: " + failed.getMessage());

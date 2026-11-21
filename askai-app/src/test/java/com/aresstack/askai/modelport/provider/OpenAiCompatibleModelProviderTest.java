@@ -36,7 +36,8 @@ import static org.junit.Assert.fail;
 /**
  * The OpenAI-compatible provider against a scripted service on {@code /v1}: what reaches the wire (path, key only
  * in the header, no event-stream Accept), the streamed and the one-piece answer, named failures without the key,
- * retries, a broken stream, the abort, the model list, and that nothing is ever loaded or unloaded.
+ * retries, refused fields sent again in a weaker form, a broken stream, the abort, the model list, and that nothing
+ * is ever loaded or unloaded.
  */
 public class OpenAiCompatibleModelProviderTest {
 
@@ -129,6 +130,15 @@ public class OpenAiCompatibleModelProviderTest {
                 null, null, ThinkingMode.DEFAULT, ThinkingMode.DEFAULT, null, 500, 65536, null, "30m", abort);
     }
 
+    /** A call with a temperature and a reasoning level, as the research roles send them. */
+    private static ProviderCall tunedCall(String model) {
+        return new ProviderCall("planner", model, Collections.singletonList(ModelMessage.user("question")),
+                null, null, ThinkingMode.LOW, ThinkingMode.DEFAULT, 0.2d, 500, 65536, null, "30m", null);
+    }
+
+    private static final String OK = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"
+            + DONE;
+
     private static final class Deltas implements ProviderStream {
         final List<String> seen = new CopyOnWriteArrayList<String>();
 
@@ -186,6 +196,7 @@ public class OpenAiCompatibleModelProviderTest {
         assertEquals("Bearer " + KEY, authorizations.get(0));
         assertFalse("one service refused the event-stream Accept", accepts.get(0).contains("text/event-stream"));
         assertTrue(bodies.get(0), bodies.get(0).contains("\"stream\":true"));
+        assertTrue("the token usage is asked for", bodies.get(0).contains("\"include_usage\":true"));
         assertTrue(bodies.get(0).contains("\"model\":\"gemma-4-31b\""));
         assertFalse("the key never travels in the body", bodies.get(0).contains(KEY));
     }
@@ -292,6 +303,122 @@ public class OpenAiCompatibleModelProviderTest {
 
         assertTrue(failure.getMessage(), failure.getMessage().contains("enter it again"));
         assertEquals(0, requests.get());
+    }
+
+    @Test
+    public void aKeyWithALineBreakIsRefusedWithoutQuotingIt() throws Exception {
+        key = "sk-SECRET123\nsk-other".toCharArray(); // an environment variable read from a two-line file
+
+        ProviderException chatFailure = failure(provider(), call("m", null));
+        assertEquals(OpenAiCompatibleModelProvider.KEY_WITH_CONTROL_CHARACTERS, chatFailure.getMessage());
+        try {
+            provider().modelNames(baseUrl);
+            fail("a key the header cannot carry lists nothing");
+        } catch (ProviderException expected) {
+            assertFalse(expected.getMessage(), expected.getMessage().contains("SECRET"));
+        }
+        assertEquals("nothing was sent", 0, requests.get());
+    }
+
+    // ------------------------------------------------------------------ refused fields
+
+    @Test
+    public void aRefusedFieldIsSentAgainInAWeakerFormThatIsKeptForTheModel() throws Exception {
+        chat = exchange -> {
+            String body = bodies.get(bodies.size() - 1);
+            if (body.contains("\"max_tokens\"")) {
+                respond(exchange, 400, "application/json", "{\"error\":{\"message\":\"Unsupported parameter: "
+                        + "'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\","
+                        + "\"type\":\"invalid_request_error\",\"param\":\"max_tokens\",\"code\":\"unsupported_parameter\"}}");
+            } else {
+                sse(exchange, OK);
+            }
+        };
+        OpenAiCompatibleModelProvider provider = provider();
+
+        assertEquals("ok", provider.chat(baseUrl, call("gpt-5-mini", null), new Deltas()).getContent());
+        assertEquals("the refusal and the weaker request", 2, requests.get());
+        assertTrue(bodies.get(1), bodies.get(1).contains("\"max_completion_tokens\":500"));
+        assertFalse(bodies.get(1).contains("\"max_tokens\""));
+
+        assertEquals("ok", provider.chat(baseUrl + "/", call("gpt-5-mini", null), new Deltas()).getContent());
+        assertEquals("the next call of the model starts in the accepted form", 3, requests.get());
+        assertTrue(bodies.get(2).contains("\"max_completion_tokens\""));
+
+        provider.chat(baseUrl, call("gpt-4o-mini", null), new Deltas());
+        assertTrue("another model starts with the full request again", bodies.get(3).contains("\"max_tokens\""));
+    }
+
+    @Test
+    public void refusalsOneAfterAnotherAreAnsweredOneByOneAndAreNoRetries() throws Exception {
+        retries = 0;
+        chat = exchange -> {
+            String body = bodies.get(bodies.size() - 1);
+            if (body.contains("\"temperature\"")) {
+                respond(exchange, 400, "application/json", "{\"error\":{\"message\":\"Unsupported value: "
+                        + "'temperature' does not support 0.2 with this model.\",\"param\":\"temperature\"}}");
+            } else if (body.contains("\"reasoning_effort\"")) {
+                respond(exchange, 400, "application/json",
+                        "{\"error\":{\"message\":\"m does not support thinking\",\"param\":null}}");
+            } else {
+                sse(exchange, OK);
+            }
+        };
+
+        assertEquals("ok", provider().chat(baseUrl, tunedCall("m"), new Deltas()).getContent());
+        assertEquals(3, requests.get());
+        assertFalse(bodies.get(2).contains("temperature"));
+        assertFalse(bodies.get(2).contains("reasoning_effort"));
+        assertTrue("everything else is still sent", bodies.get(2).contains("\"max_tokens\":500"));
+    }
+
+    @Test
+    public void aStrictServersValidationRefusalDropsTheUnknownField() throws Exception {
+        chat = exchange -> {
+            if (bodies.get(bodies.size() - 1).contains("stream_options")) {
+                respond(exchange, 422, "application/json", "{\"detail\":[{\"type\":\"extra_forbidden\","
+                        + "\"loc\":[\"body\",\"stream_options\"],\"msg\":\"Extra inputs are not permitted\","
+                        + "\"input\":{\"include_usage\":true}}]}");
+            } else {
+                sse(exchange, OK);
+            }
+        };
+
+        assertEquals("ok", provider().chat(baseUrl, call("m", null), new Deltas()).getContent());
+        assertEquals(2, requests.get());
+        assertFalse(bodies.get(1).contains("stream_options"));
+    }
+
+    @Test
+    public void aRefusalNamingNoFieldIsReportedAfterOneRequest() throws Exception {
+        chat = exchange -> respond(exchange, 400, "application/json", "{\"error\":{\"message\":\"Invalid "
+                + "'messages[0].content': string too long\",\"param\":\"messages\"}}");
+
+        ProviderException failure = failure(provider(), call("m", null));
+
+        assertTrue(failure.getMessage(), failure.getMessage().contains("HTTP 400"));
+        assertTrue("the service's words are kept", failure.getMessage().contains("string too long"));
+        assertEquals(1, requests.get());
+    }
+
+    @Test
+    public void aWeakerFormThatIsRefusedAsWellIsNotKept() throws Exception {
+        chat = exchange -> {
+            if (bodies.get(bodies.size() - 1).contains("\"temperature\"")) {
+                respond(exchange, 400, "application/json",
+                        "{\"error\":{\"message\":\"bad temperature\",\"param\":\"temperature\"}}");
+            } else {
+                respond(exchange, 400, "application/json", "{\"error\":{\"message\":\"model is busy elsewhere\"}}");
+            }
+        };
+        OpenAiCompatibleModelProvider provider = provider();
+
+        ProviderException failure = failure(provider, tunedCall("m"));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("model is busy elsewhere"));
+        assertEquals(2, requests.get());
+
+        failure(provider, tunedCall("m"));
+        assertTrue("an unhelpful weaker form is not remembered", bodies.get(2).contains("\"temperature\""));
     }
 
     @Test
@@ -435,6 +562,17 @@ public class OpenAiCompatibleModelProviderTest {
         assertEquals(65536, provider.contextTokens("gemma-4-31b"));
         assertNull("no residency to report", provider.residentModels(baseUrl));
         assertEquals("nothing reached the service", 0, requests.get());
+    }
+
+    @Test
+    public void gptOssUnderAVendorPrefixCannotTurnThinkingOffOnTheApiOnly() {
+        assertTrue(provider().isLevelOnlyModel("openai/gpt-oss-120b"));
+        assertTrue(provider().isLevelOnlyModel("gpt-oss-20b"));
+        assertFalse(provider().isLevelOnlyModel("gemma-4-31b"));
+        assertFalse("Ollama reads its names as before (a namespaced GGUF passes there)",
+                new OllamaModelProvider(null).isLevelOnlyModel("hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M"));
+        assertTrue(provider().cannotTurnThinkingOffMessage("openai/gpt-oss-120b", "judge")
+                .contains("Model provider"));
     }
 
     @Test
