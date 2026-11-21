@@ -277,31 +277,8 @@ public final class ModelProviderPanel extends JPanel {
             String message;
             List<String> listed = Collections.emptyList();
             try {
-                listed = new OpenAiCompatibleModelProvider(new OpenAiCompatibleModelProvider.Settings() {
-                    public int defaultCapacity() {
-                        return 1;
-                    }
-
-                    public int contextTokens(String model) {
-                        return 1;
-                    }
-
-                    public int connectTimeoutMillis() {
-                        return 15_000;
-                    }
-
-                    public int readTimeoutMillis() {
-                        return 30_000;
-                    }
-
-                    public int retries() {
-                        return 0;
-                    }
-
-                    public char[] apiKey() throws IOException {
-                        return new String(typed).trim().isEmpty() ? repository.apiKey() : typed.clone();
-                    }
-                }, connections).modelNames(url);
+                listed = OpenAiCompatibleModelProvider.listModels(url,
+                        () -> new String(typed).trim().isEmpty() ? repository.apiKey() : typed.clone(), connections);
                 message = listed.isEmpty() ? "The API lists no models; model names can still be typed."
                         : "The API offers " + listed.size() + " models; pick them in the task table.";
             } catch (Exception failed) {

@@ -182,6 +182,22 @@ public final class ModelProviderSettings {
                 apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries);
     }
 
+    /**
+     * A copy with another base URL and model of the {@code default} slot ("" clears it); the other slots keep their
+     * models (the setup wizard sets only these two).
+     */
+    public ModelProviderSettings withApi(String baseUrl, String defaultModel) {
+        Map<String, String> models = new LinkedHashMap<String, String>(apiSlotModels);
+        String model = defaultModel == null ? "" : defaultModel.trim();
+        if (model.isEmpty()) {
+            models.remove(ModelPortSettings.DEFAULT_SLOT);
+        } else {
+            models.put(ModelPortSettings.DEFAULT_SLOT, model);
+        }
+        return new ModelProviderSettings(provider, baseUrl, encryptedApiKey, apiCapacity, models, apiContextTokens,
+                apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries);
+    }
+
     /** A copy with another stored key ("" removes it). */
     public ModelProviderSettings withEncryptedApiKey(String encrypted) {
         return new ModelProviderSettings(provider, apiBaseUrl, encrypted, apiCapacity, apiSlotModels,

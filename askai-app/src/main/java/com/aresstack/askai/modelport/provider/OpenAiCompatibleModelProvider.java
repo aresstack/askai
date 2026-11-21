@@ -105,6 +105,45 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
         HttpURLConnection open(String url) throws IOException;
     }
 
+    /** Where a one-off model listing gets its key; the caller of {@link #listModels} clears the array. */
+    public interface KeySource {
+        /** The key, or null for none. */
+        char[] apiKey() throws IOException;
+    }
+
+    /**
+     * Lists the models of {@code baseUrl} once, without retries (15 s to connect, 30 s to read): the settings page
+     * and the setup wizard, before anything is saved.
+     */
+    public static List<String> listModels(String baseUrl, final KeySource key, ConnectionOpener connections)
+            throws ProviderException {
+        return new OpenAiCompatibleModelProvider(new Settings() {
+            public int defaultCapacity() {
+                return 1;
+            }
+
+            public int contextTokens(String model) {
+                return 1;
+            }
+
+            public int connectTimeoutMillis() {
+                return 15_000;
+            }
+
+            public int readTimeoutMillis() {
+                return 30_000;
+            }
+
+            public int retries() {
+                return 0;
+            }
+
+            public char[] apiKey() throws IOException {
+                return key == null ? null : key.apiKey();
+            }
+        }, connections).modelNames(baseUrl);
+    }
+
     /** Opens a plain connection without the app's network settings (tests, tools). */
     public static final ConnectionOpener PLAIN = url -> (HttpURLConnection) new URL(url).openConnection();
 

@@ -66,6 +66,8 @@ public final class SetupWizardPanel extends JPanel {
     static final int STEP_NETWORK = STEP_CONNECTION;
     static final int STEP_VOICE = STEP_CONNECTION;
     static final int STEP_RUNTIME = 1;
+    static final String PROVIDER_OLLAMA = "Ollama (this computer or a server)";
+    static final String PROVIDER_API = "OpenAI-compatible API";
     static final int STEP_CHAT = 2;
     static final int STEP_KNOWLEDGE = 3;
     /** Optional: microphone and audio model for speaking instead of typing. */
@@ -190,6 +192,22 @@ public final class SetupWizardPanel extends JPanel {
     private SetupWizardMascot.Art checkSuccessArt;
     private boolean runtimeChecking;
     private int runtimeGeneration;
+    /** Whether Ollama or AskAI's local runtime answered the last runtime check. */
+    private boolean runtimeReachable;
+    // Step 2: the model provider (Ollama, or an OpenAI-compatible API for the research's model slots)
+    private final JComboBox<String> providerChoice = ComicControls.comboBox();
+    private final JTextField apiUrl = ComicControls.textField(28);
+    private final javax.swing.JPasswordField apiKey = ComicControls.passwordField(28);
+    private final JLabel apiKeyHint = statusLabel();
+    private final JComboBox<String> apiModel = ComicControls.comboBox();
+    private final ComicButton apiTest = new ComicButton("Test API", ComicButton.Accent.ACTION);
+    private final ComicButton apiTasks = new ComicButton("Model per task…");
+    private final JLabel apiStatus = statusLabel();
+    private final List<JComponent> apiParts = new ArrayList<JComponent>();
+    private boolean apiChecking;
+    private boolean apiAnswered;
+    private int apiGeneration;
+    private boolean apiKeyStored;
 
     // Step 3: chat model
     private final JComboBox<String> chatModel = ComicControls.comboBox();
@@ -386,7 +404,19 @@ public final class SetupWizardPanel extends JPanel {
     private JPanel runtimeStep() {
         Rows rows = new Rows(STEP_RUNTIME, "AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
-                + "runtime. One of them must answer; the final check shows which one does.");
+                + "runtime. The research can use an OpenAI-compatible API instead: then the API must answer, and "
+                + "the chat window, embeddings and reranker stay with Ollama or the local runtime. The final check "
+                + "shows what answers.");
+        providerChoice.addItem(PROVIDER_OLLAMA);
+        providerChoice.addItem(PROVIDER_API);
+        rows.field("Model provider", providerChoice);
+        apiModel.setEditable(true); // a model the API does not list can still be typed
+        apiTasks.setToolTipText("All tasks, concurrent calls and timeouts of the API (saved right away)");
+        apiParts.addAll(rows.stretched("API base URL", inline(apiUrl, apiTest)));
+        apiParts.addAll(rows.stretched("API key", apiKey));
+        apiParts.addAll(rows.stretched("", new StatusLine(null, apiKeyHint).panel));
+        apiParts.addAll(rows.stretched("Research model", inline(apiModel, apiTasks)));
+        apiParts.addAll(rows.stretched("", new StatusLine(null, apiStatus).panel));
         // Two lines in one cell: address, "Test connection", "Download Ollama…"; below them the status in the
         // field column and "Get Manager…" right under "Download Ollama…", in the same column and just as wide.
         JPanel runtimeLine = transparent(new GridBagLayout());
@@ -575,11 +605,35 @@ public final class SetupWizardPanel extends JPanel {
             if (!busy) {
                 runtimeGeneration++;
                 runtimeChecking = false;
-                done[STEP_RUNTIME] = false;
+                runtimeReachable = false;
+                updateRuntimeDone();
                 updateButtons();
             }
         }));
         runtimeTest.addActionListener(e -> checkRuntime());
+        providerChoice.addActionListener(e -> {
+            if (!busy) {
+                providerChanged();
+            }
+        });
+        SimpleDocumentListener apiEdited = new SimpleDocumentListener(() -> {
+            if (!busy) {
+                apiGeneration++;
+                apiChecking = false;
+                apiAnswered = false;
+                updateRuntimeDone();
+                if (apiKey.getPassword().length > 0 && done[STEP_CHECK]) {
+                    done[STEP_CHECK] = false; // a new key is saved and checked by the next final check
+                    checkStatus.setText(CHECK_OUTDATED);
+                }
+                updateButtons();
+            }
+        });
+        apiUrl.getDocument().addDocumentListener(apiEdited);
+        apiKey.getDocument().addDocumentListener(apiEdited);
+        apiTest.addActionListener(e -> checkApi());
+        apiTasks.addActionListener(e -> editModelProvider());
+        apiModel.addActionListener(e -> updateButtons());
         runtimeDownload.addActionListener(e -> setup.openRuntimeDownload());
         runtimeManager.addActionListener(e -> setup.openOllamaManagerDownload());
         modelsRefresh.addActionListener(e -> refreshModels());
@@ -874,8 +928,11 @@ public final class SetupWizardPanel extends JPanel {
         } else {
             narrator.show(WizardGuide.THOUGHT_SILENT); // only a thought: he has no voice yet
         }
-        if (index == STEP_RUNTIME && !done[STEP_RUNTIME] && !runtimeChecking && !busy) {
+        if (index == STEP_RUNTIME && !done[STEP_RUNTIME] && !runtimeChecking && !apiChecking && !busy) {
             checkRuntime(); // the default address usually works: check right away instead of waiting for a click
+            if (apiChosen() && !apiUrl.getText().trim().isEmpty()) {
+                checkApi();
+            }
         } else if ((index == STEP_CHAT || index == STEP_KNOWLEDGE) && !modelsLoaded && !modelsLoading) {
             refreshModels();
         } else if (index == STEP_CHECK) {
@@ -910,6 +967,12 @@ public final class SetupWizardPanel extends JPanel {
         skipButton.setEnabled(!busy && !installing());
         skipButton.setToolTipText(voice ? SKIP_VOICE_HINT : SKIP_STEP_HINT);
         trail.setNavigable(!busy && !installing() && !handingOff);
+        for (JComponent part : apiParts) {
+            part.setVisible(apiChosen());
+        }
+        providerChoice.setEnabled(!busy);
+        apiTest.setEnabled(!busy && !apiChecking);
+        apiTasks.setEnabled(!busy);
         boolean manual = PROXY_MANUAL.equals(selectedProxyMode());
         for (JComponent part : manualProxyParts) {
             part.setVisible(manual);
@@ -1091,7 +1154,8 @@ public final class SetupWizardPanel extends JPanel {
         final int generation = ++runtimeGeneration;
         clearError(STEP_RUNTIME);
         runtimeChecking = true;
-        done[STEP_RUNTIME] = false;
+        runtimeReachable = false;
+        updateRuntimeDone();
         ollamaStatus.setText("Asking Ollama …");
         updateButtons();
         setup.checkRuntime(collect(), status -> {
@@ -1104,8 +1168,16 @@ public final class SetupWizardPanel extends JPanel {
                     : "Not reachable" + (status.ollamaProblem().isEmpty() ? "" : ": "
                     + shorten(status.ollamaProblem())));
             // AskAI's local runtime has nothing to set up here; the final check reports it.
-            done[STEP_RUNTIME] = status.reachable();
-            mascotOf(STEP_RUNTIME).setArt(status.reachable() ? runtimeConnectedArt : runtimeInstallArt);
+            runtimeReachable = status.reachable();
+            updateRuntimeDone();
+            if (apiChosen()) {
+                // The research runs on the API: a missing Ollama is no error here (the API check decides).
+                if (status.reachable()) {
+                    runtimeAnswered();
+                }
+                updateButtons();
+                return;
+            }
             if (!status.reachable()) {
                 fail(STEP_RUNTIME, "Neither Ollama nor AskAI's local runtime can serve models. Start Ollama "
                         + "(or install it with “Download Ollama…”), check the address and test again."
@@ -1129,6 +1201,111 @@ public final class SetupWizardPanel extends JPanel {
         if (audioListed) {
             loadAudioModels(choice(audioModel, AUDIO_AUTOMATIC)); // another runtime has other audio models
         }
+    }
+
+    boolean apiChosen() {
+        return PROVIDER_API.equals(providerChoice.getSelectedItem());
+    }
+
+    /** The runtime step is done when the chosen provider answers: the API, or else Ollama or the local runtime. */
+    private void updateRuntimeDone() {
+        done[STEP_RUNTIME] = apiChosen() ? apiAnswered : runtimeReachable;
+        mascotOf(STEP_RUNTIME).setArt(done[STEP_RUNTIME] ? runtimeConnectedArt : runtimeInstallArt);
+    }
+
+    private void providerChanged() {
+        clearError(STEP_RUNTIME);
+        updateRuntimeDone();
+        if (apiChosen() && !apiAnswered && !apiChecking && !apiUrl.getText().trim().isEmpty()) {
+            checkApi();
+        } else if (!apiChosen() && !runtimeReachable && !runtimeChecking && step == STEP_RUNTIME) {
+            checkRuntime();
+        }
+        updateButtons();
+    }
+
+    /** Lists the API's models with the typed key (or the stored one); the research model list offers them. */
+    private void checkApi() {
+        final int generation = ++apiGeneration;
+        clearError(STEP_RUNTIME);
+        apiAnswered = false;
+        if (apiUrl.getText().trim().isEmpty()) {
+            apiChecking = false;
+            updateRuntimeDone();
+            state(apiStatus, false, "Enter the base URL of the API");
+            fail(STEP_RUNTIME, "Enter the base URL of the OpenAI-compatible API (it usually ends with /v1).");
+            return;
+        }
+        apiChecking = true;
+        updateRuntimeDone();
+        apiStatus.setIcon(null);
+        apiStatus.setText("Asking the API …");
+        updateButtons();
+        setup.checkApi(collect(), apiKey.getPassword(), status -> {
+            if (closed || generation != apiGeneration) {
+                return;
+            }
+            apiChecking = false;
+            apiAnswered = status.answered();
+            if (apiAnswered) {
+                boolean wasBusy = busy;
+                busy = true; // refilling the list is no edit
+                try {
+                    String chosen = text(apiModel);
+                    setChoices(apiModel, status.models(), chosen.isEmpty() && !status.models().isEmpty()
+                            ? status.models().get(0) : chosen, false);
+                } finally {
+                    busy = wasBusy;
+                }
+            }
+            state(apiStatus, apiAnswered, !apiAnswered ? "Not reachable" + (status.problem().isEmpty() ? ""
+                    : ": " + shorten(status.problem()))
+                    : status.models().isEmpty() ? "Connected; the API lists no models, type the model name"
+                    : "Connected (" + status.models().size() + " models)");
+            updateRuntimeDone();
+            if (!apiAnswered) {
+                fail(STEP_RUNTIME, "The OpenAI-compatible API did not answer. Check the base URL and the key and "
+                        + "test again." + (status.problem().isEmpty() ? "" : "\nAPI: " + status.problem()));
+                return;
+            }
+            runtimeAnswered();
+            updateButtons();
+        });
+    }
+
+    /** The full provider settings (all tasks) in AskAI's dialog; the step shows what is stored afterwards. */
+    private void editModelProvider() {
+        SetupDraft stored = setup.editModelProvider(this, collect());
+        if (stored == null) {
+            return;
+        }
+        loadProvider(stored);
+        apiAnswered = false;
+        updateRuntimeDone();
+        if (apiChosen() && !apiUrl.getText().trim().isEmpty()) {
+            checkApi();
+        }
+        updateButtons();
+    }
+
+    private void loadProvider(SetupDraft value) {
+        boolean wasBusy = busy;
+        busy = true;
+        try {
+            providerChoice.setSelectedItem(value.useApi() ? PROVIDER_API : PROVIDER_OLLAMA);
+            apiUrl.setText(value.apiBaseUrl());
+            apiKey.setText("");
+            setChoices(apiModel, Collections.<String>emptyList(), value.apiDefaultModel(), false);
+            apiKeyStored = value.apiKeyStored();
+            showKeyHint();
+        } finally {
+            busy = wasBusy;
+        }
+    }
+
+    private void showKeyHint() {
+        apiKeyHint.setText(apiKeyStored ? "A key is stored (encrypted); leave the field empty to keep it."
+                : "No key stored yet; without one AskAI uses the environment variable ASKAI_OPENAI_API_KEY.");
     }
 
     // --- steps 3 and 4: models
@@ -1196,7 +1373,8 @@ public final class SetupWizardPanel extends JPanel {
 
     /** An installed chat model is chosen: only then may "Next" leave the chat model step. */
     private boolean chatModelReady() {
-        return installedChat.contains(text(chatModel));
+        // With the API answering, a missing Ollama does not hold the setup up: the chat window then has no model.
+        return installedChat.contains(text(chatModel)) || (apiChosen() && apiAnswered && installedChat.isEmpty());
     }
 
     /** The first entry of {@code now} that was not in {@code before}; {@code null} if none. */
@@ -1394,9 +1572,16 @@ public final class SetupWizardPanel extends JPanel {
         draft = collect();
         checkStatus.setText("Saving and checking …");
         setBusy(true);
-        setup.finish(draft, checks -> {
+        final boolean keyTyped = apiKey.getPassword().length > 0;
+        setup.finish(draft, apiKey.getPassword(), checks -> {
             if (closed) {
                 return;
+            }
+            if (keyTyped) {
+                apiKey.setText(""); // stored (encrypted) now; still busy, so this is no edit
+                apiKeyStored = true;
+                showKeyHint();
+                draft = draft.toBuilder().apiKeyStored(true).build();
             }
             setBusy(false);
             lastChecks = checks == null ? Collections.<SetupCheck>emptyList() : checks;
@@ -1993,6 +2178,7 @@ public final class SetupWizardPanel extends JPanel {
         setProxy(initial);
         trustWindows.setSelected(initial.trustWindowsStores());
         ollamaUrl.setText(initial.ollamaBaseUrl());
+        loadProvider(initial);
         boolean wasBusy = busy;
         busy = true;
         try {
@@ -2016,7 +2202,9 @@ public final class SetupWizardPanel extends JPanel {
                 .chatModel(text(chatModel))
                 .embeddingModel(text(embeddingModel))
                 .rerankerModel(text(rerankerModel))
-                .nlpSentence(text(sentenceGerman), text(sentenceEnglish));
+                .nlpSentence(text(sentenceGerman), text(sentenceEnglish))
+                .api(apiChosen(), apiUrl.getText(), text(apiModel))
+                .apiKeyStored(apiKeyStored);
         if (voicesLoaded && !voiceByLabel.isEmpty()) {
             b.voices(voiceId(voiceGerman), voiceId(voiceEnglish));
         }
@@ -2031,7 +2219,7 @@ public final class SetupWizardPanel extends JPanel {
 
     /** What the final check covers: everything but the voices. */
     private static String checkedKey(SetupDraft value) {
-        return value.toBuilder().voices("", "").build().toString();
+        return value.toBuilder().voices("", "").apiKeyStored(false).build().toString();
     }
 
     private void setBusy(boolean value) {
@@ -2292,6 +2480,34 @@ public final class SetupWizardPanel extends JPanel {
 
     JTextField embeddingDimensionField() {
         return embeddingDimension;
+    }
+
+    JComboBox<String> providerChoice() {
+        return providerChoice;
+    }
+
+    JTextField apiUrlField() {
+        return apiUrl;
+    }
+
+    javax.swing.JPasswordField apiKeyField() {
+        return apiKey;
+    }
+
+    JComboBox<String> apiModelChoice() {
+        return apiModel;
+    }
+
+    JButton apiTestButton() {
+        return apiTest;
+    }
+
+    String apiStatusText() {
+        return apiStatus.getText();
+    }
+
+    boolean apiPartsShown() {
+        return !apiParts.isEmpty() && apiParts.get(0).isVisible();
     }
 
     String ollamaStatusText() {

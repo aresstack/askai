@@ -724,6 +724,74 @@ public class SetupWizardPanelTest {
         assertFalse(run.isCompleted());
     }
 
+    @Test
+    public void theApiChoiceShowsItsFieldsAndAnAnsweringApiIsEnoughWithoutOllama() {
+        Fake fake = new Fake();
+        fake.ollamaVersion = null;
+        fake.noChatModels = true;
+        SetupWizardPanel wizard = wizard(fake);
+        assertFalse("Ollama stays the first choice", wizard.apiPartsShown());
+
+        wizard.providerChoice().setSelectedItem(SetupWizardPanel.PROVIDER_API);
+        wizard.apiUrlField().setText("https://api.example.org/v1");
+        assertTrue(wizard.apiPartsShown());
+        wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
+
+        assertEquals(1, fake.apiChecks);
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
+        assertNull("a missing Ollama is no error while the API answers", wizard.errorOf(SetupWizardPanel.STEP_RUNTIME));
+        assertTrue(wizard.apiStatusText().contains("2 models"));
+        assertEquals("the first listed model is preselected", "model-a", wizard.draft().apiDefaultModel());
+        assertTrue(wizard.isWitchAwake());
+
+        wizard.jumpTo(SetupWizardPanel.STEP_CHAT);
+        assertTrue("without Ollama the chat model step does not hold the setup up", wizard.nextButton().isEnabled());
+    }
+
+    @Test
+    public void anApiThatDoesNotAnswerIsAnErrorEvenWhenOllamaDoes() {
+        Fake fake = new Fake();
+        fake.apiProblem = "HTTP 401";
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.providerChoice().setSelectedItem(SetupWizardPanel.PROVIDER_API);
+        wizard.apiUrlField().setText("https://api.example.org/v1");
+        wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
+
+        assertFalse(wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
+        assertTrue(wizard.errorOf(SetupWizardPanel.STEP_RUNTIME).contains("HTTP 401"));
+
+        fake.apiProblem = null;
+        wizard.apiTestButton().doClick();
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
+        assertNull(wizard.errorOf(SetupWizardPanel.STEP_RUNTIME));
+
+        wizard.providerChoice().setSelectedItem(SetupWizardPanel.PROVIDER_OLLAMA);
+        assertFalse(wizard.apiPartsShown());
+        assertTrue("Ollama answered the earlier check", wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
+        assertFalse(wizard.draft().useApi());
+    }
+
+    @Test
+    public void theTypedKeyGoesOnlyToTheCheckAndTheFinishAndIsClearedAfterwards() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.providerChoice().setSelectedItem(SetupWizardPanel.PROVIDER_API);
+        wizard.apiUrlField().setText("https://api.example.org/v1");
+        wizard.apiKeyField().setText("sk-typed-in-wizard");
+        assertFalse("the draft carries no key", wizard.draft().toString().contains("sk-typed"));
+
+        walkToEnd(wizard);
+
+        assertEquals("sk-typed-in-wizard", fake.apiKeySeen);
+        assertEquals("sk-typed-in-wizard", fake.finishedKey);
+        assertTrue(fake.finished.useApi());
+        assertEquals("https://api.example.org/v1", fake.finished.apiBaseUrl());
+        assertEquals("model-a", fake.finished.apiDefaultModel());
+        assertEquals("", new String(wizard.apiKeyField().getPassword()));
+        assertTrue(wizard.draft().apiKeyStored());
+        assertTrue("clearing the stored key's field is no change", wizard.isDone(SetupWizardPanel.STEP_CHECK));
+    }
+
     private static void walkToEnd(SetupWizardPanel wizard) {
         wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
         wizard.jumpTo(SetupWizardPanel.STEP_VOICE);
@@ -745,6 +813,12 @@ public class SetupWizardPanelTest {
         boolean holdNetwork;
         BiConsumer<String, String> pendingNetwork;
         String ollamaVersion = "0.9.0";
+        List<String> apiModels = Arrays.asList("model-a", "model-b");
+        String apiProblem;
+        int apiChecks;
+        String apiKeySeen;
+        String finishedKey;
+        boolean noChatModels;
         boolean localRuntime;
         int runtimeChecks;
         int sentenceInstalls;
@@ -834,12 +908,27 @@ public class SetupWizardPanelTest {
         }
 
         @Override
+        public void checkApi(SetupDraft draft, char[] typedKey, Consumer<ApiStatus> done) {
+            apiChecks++;
+            apiKeySeen = new String(typedKey);
+            Arrays.fill(typedKey, '\0');
+            done.accept(apiProblem == null ? new ApiStatus(apiModels, "") : new ApiStatus(null, apiProblem));
+        }
+
+        @Override
+        public void finish(SetupDraft draft, char[] typedApiKey, Consumer<List<SetupCheck>> done) {
+            finishedKey = typedApiKey == null ? null : new String(typedApiKey);
+            finish(draft, done);
+        }
+
+        @Override
         public void openRuntimeDownload() {
         }
 
         @Override
         public void loadModels(SetupDraft draft, Consumer<SetupModels> done) {
-            List<String> chat = new ArrayList<String>(Arrays.asList("llama3.2", "qwen3"));
+            List<String> chat = noChatModels ? new ArrayList<String>()
+                    : new ArrayList<String>(Arrays.asList("llama3.2", "qwen3"));
             chat.addAll(browserInstalled);
             done.accept(new SetupModels(chat, Collections.singletonList(
                     "nomic-embed-text"), rerankerInstalls > 0 ? Collections.singletonList("ms-marco-MiniLM-L6-v2")
