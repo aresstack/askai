@@ -1,0 +1,24 @@
+{
+ "comment": "Self-written sample stock for CandidateSearchStockTest, format of the outline replay (#255).",
+ "dim": 3,
+ "frameVector": [0.5, 0.5, 0.0],
+ "anchors": [],
+ "passages": [
+  {"id": "p1", "captureId": "cap-a", "sourceId": "src-a", "domain": "a.example", "heading": "Sensoren",
+   "text": "Brustgurte messen die Herzfrequenz mit Elektroden.", "vector": [0.9, 0.1, 0.0]},
+  {"id": "p2", "captureId": "cap-a", "sourceId": "src-a", "domain": "a.example", "heading": "Sensoren",
+   "text": "Smartwatches messen die Herzfrequenz optisch am Handgelenk.", "vector": [0.8, 0.2, 0.0]},
+  {"id": "p3", "captureId": "cap-a", "sourceId": "src-a", "domain": "a.example", "heading": "Sensoren",
+   "text": "Ein dritter Absatz derselben Quelle über Sensoren und Herzfrequenz.", "vector": [0.85, 0.1, 0.1]},
+  {"id": "p4", "captureId": "cap-b", "sourceId": "src-b", "domain": "b.example", "heading": "Puls",
+   "text": "Optische Sensoren messen den Puls über das Licht.", "vector": [0.7, 0.0, 0.3]},
+  {"id": "p5", "captureId": "cap-c", "sourceId": "src-c", "domain": "c.example", "heading": "Kopie",
+   "text": "Brustgurte messen die Herzfrequenz mit Elektroden.", "vector": [0.9, 0.1, 0.0]},
+  {"id": "p6", "captureId": "cap-d", "sourceId": "src-d", "domain": "d.example", "heading": "Recht",
+   "text": "Der Betriebsrat bestimmt bei technischen Einrichtungen mit.", "vector": [0.0, 0.9, 0.1]},
+  {"id": "p7", "captureId": "cap-b2", "sourceId": "src-b", "domain": "b.example", "heading": "Recht",
+   "text": "Datenschutz verlangt eine Rechtsgrundlage für Gesundheitsdaten.", "vector": [0.1, 0.8, 0.1]},
+  {"id": "p8", "captureId": "cap-c2", "sourceId": "src-c", "domain": "c.example", "heading": "Menü",
+   "text": "Navigation Startseite Impressum", "vector": [0.3, 0.3, 0.3]}
+ ]
+}

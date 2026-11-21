@@ -100,6 +100,31 @@ tasks.register('outlineLiveAcceptance', Test) {
     }
 }
 
+// Component tests on a stored stock (build plan of 21.11.2026), on the owner's machine: each *StockTest reads its
+// files from -Daskai.stock.<component>.* and is skipped without them in the normal test run.
+tasks.register('componentStockTest', Test) {
+    description = 'Runs the component tests on a stored stock (paths as -Daskai.stock.* properties).'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    filter {
+        includeTestsMatching '*StockTest'
+    }
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
+    }
+    doFirst {
+        System.getProperties().each { key, value ->
+            if (key.toString().startsWith('askai.stock.')) {
+                systemProperty key.toString(), value.toString()
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // ADR 0001, work item I: the LangChain4j SPIKE. One worker role (the search planner of lane G) is built a
 // second time with LangChain4j core, through a ChatModel adapter over the host's model port. The spike is its
