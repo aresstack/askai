@@ -38,8 +38,10 @@ public final class ResearchModelSlots {
     /** The book writer in the Document phase. */
     public static final ModelSlot PHASE_DRAFT_WRITER = ModelSlot.of("phase.draft.writer");
     /**
-     * The repeat judge of the finished book (component 12): one small call per candidate pair of sentences, many in
-     * parallel. Inherits the Document model until the user gives it its own; meant for {@code gemma4:e2b}.
+     * The repeat judge of the finished book (component 12): one call per candidate pair of sentences, several in
+     * parallel. Inherits the Document model until the user gives it its own; meant for {@code gemma4:12b} (component
+     * test of 21.11.2026 on fresh pairs: {@code gemma4:e2b} found 4 of 9 GLEICH, {@code gemma4:12b} 7 of 9 with no
+     * false GLEICH).
      */
     public static final ModelSlot PHASE_DRAFT_REPEAT = ModelSlot.of("phase.draft.repeat");
 

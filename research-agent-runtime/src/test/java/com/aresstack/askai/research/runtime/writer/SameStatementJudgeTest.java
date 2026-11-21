@@ -89,6 +89,7 @@ public class SameStatementJudgeTest {
         String prompt = messages.get(1).getContent();
         assertTrue(prompt.startsWith("Früherer Satz:\n" + EARLIER + "\n\nSpäterer Satz:\n" + LATER + "\n\n"));
         assertTrue(prompt.contains("bringt keine wesentliche neue Information"));
+        assertTrue(prompt.contains("nach einer anderen Rechtsgrundlage"));
         assertTrue("examples from another field than the book", prompt.contains("Beispiele aus einem anderen Gebiet"));
         assertFalse(prompt.contains("freiwillig"));
         assertTrue(prompt.endsWith("Antworte als JSON mit den Feldern \"grund\" und \"urteil\"."));

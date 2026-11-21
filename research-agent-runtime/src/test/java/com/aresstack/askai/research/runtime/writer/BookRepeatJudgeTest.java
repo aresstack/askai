@@ -153,7 +153,7 @@ public class BookRepeatJudgeTest {
     }
 
     @Test
-    public void teilweiseIsReportedToKeepOnlyTheNewPartVerschiedenIsNot() {
+    public void teilweiseIsAHintVerschiedenIsNothing() {
         BookRepeatCheckTest.FakeModel model = new BookRepeatCheckTest.FakeModel()
                 .with(SENSORS, 1, 0).with(PARAPHRASE, 0.96f, 0.28f).with(OTHER_ACTOR, 0.9f, 0, 0.436f);
         Judge judge = new Judge().answer("Versicherte", "VERSCHIEDEN").answer("Kleidungssensoren", "TEILWEISE");
@@ -161,27 +161,63 @@ public class BookRepeatJudgeTest {
         BookRepeatCheck.Result result = check(model, judge).check(Arrays.asList(
                 s("sec-a", SENSORS, "p1"), s("sec-b", PARAPHRASE, "p3"), s("sec-c", OTHER_ACTOR, "p4")));
 
-        assertEquals(1, result.getPairs().size());
-        BookRepeatCheck.Pair pair = result.getPairs().get(0);
-        assertEquals(BookRepeatCheck.Reason.PARTLY_SAME, pair.getReason());
-        assertEquals("PARAPHRASE repeats SENSORS", 1, pair.getLaterIndex());
-        assertEquals(0, pair.getEarlierIndex());
-        assertEquals(1, pair.getMatches());
+        assertTrue("no order to the writer", result.getPairs().isEmpty());
+        assertEquals(0, result.getRepeatedWords());
+        assertEquals(1, result.getHints().size());
+        BookRepeatCheck.Pair hint = result.getHints().get(0);
+        assertEquals(BookRepeatCheck.Reason.PARTLY_SAME, hint.getReason());
+        assertEquals("PARAPHRASE partly repeats SENSORS", 1, hint.getLaterIndex());
+        assertEquals(0, hint.getEarlierIndex());
         assertEquals(1, result.count(BookRepeatCheck.Reason.PARTLY_SAME));
         assertEquals(0, result.count(BookRepeatCheck.Reason.SAME_STATEMENT));
-        assertEquals("a TEILWEISE sentence brings something new: no repeated words", 0, result.getRepeatedWords());
         assertEquals("PARAPHRASE vs SENSORS; OTHER_ACTOR vs SENSORS and vs PARAPHRASE (0.86)", 3,
                 result.getJudged().size());
         assertEquals(1, result.count(SameStatementJudge.Verdict.PARTLY));
         assertEquals(2, result.count(SameStatementJudge.Verdict.DIFFERENT));
-        assertTrue(result.getJudged().get(0).isReported());
-        for (BookRepeatCheck.Judged judged : result.getJudged().subList(1, 3)) {
+        for (BookRepeatCheck.Judged judged : result.getJudged()) {
             assertFalse(judged.isReported());
-            assertNull(judged.getPair().getReason());
         }
+        assertNull(result.getJudged().get(1).getPair().getReason());
         assertEquals(BookRepeatCheck.Status.COMPLETE, result.getStatus());
-        assertTrue(result.toString(), result.toString().contains("1 of 3 sentences repeat, 1 of them with something "
-                + "new"));
+        assertTrue(result.toString(), result.toString().contains("0 of 3 sentences repeat, 1 hints TEILWEISE"));
+    }
+
+    @Test
+    public void normReferencesAreNoNumbersForTheModelStage() {
+        String earlier = "Arbeitgeber dürfen Daten der Beschäftigten für Zwecke des Beschäftigungsverhältnisses "
+                + "verarbeiten [1].";
+        String withNorm = "Nach § 26 Abs. 1 BDSG dürfen Arbeitgeber Daten der Beschäftigten für Zwecke des "
+                + "Beschäftigungsverhältnisses verarbeiten [2].";
+        String withShare = "Arbeitgeber dürfen Daten von 20 % der Beschäftigten für Zwecke des "
+                + "Beschäftigungsverhältnisses verarbeiten [3].";
+        BookRepeatCheckTest.FakeModel model = new BookRepeatCheckTest.FakeModel()
+                .with(earlier, 1, 0).with(withNorm, 0.95f, 0.312f).with(withShare, 0.95f, 0, 0.312f);
+        Judge judge = new Judge().answer("BDSG", "GLEICH").answer("20 %", "GLEICH");
+
+        BookRepeatCheck.Result result = check(model, judge).check(Arrays.asList(
+                s("sec-a", earlier), s("sec-b", withNorm), s("sec-c", withShare)));
+
+        assertEquals("the § sentence is asked, the new share is not", 1, judge.calls.get());
+        assertEquals(1, result.getPairs().size());
+        assertEquals(1, result.getPairs().get(0).getLaterIndex());
+        assertTrue(result.getPairs().get(0).isNumbersCovered());
+
+        BookRepeatCheck.Result rulesOnly = new BookRepeatCheck(null, null, model, null, null).check(Arrays.asList(
+                s("sec-a", earlier), s("sec-b", withNorm)));
+        assertTrue("without a judge the norm numbers still count", rulesOnly.getPairs().isEmpty());
+        assertFalse(rulesOnly.getNearest().get(0).isNumbersCovered());
+    }
+
+    @Test
+    public void theNormReferencePattern() {
+        String[] norms = {"§ 26 Abs. 1 BDSG", "§§ 87 und 90 BetrVG", "Art. 6 Abs. 1 lit. f DSGVO",
+            "Artikel 9 Absatz 2", "Article 88(1) GDPR", "§ 5 ArbSchG"};
+        for (String norm : norms) {
+            assertTrue(norm, RepeatCheck.numbers(BookRepeatCheck.NORM_REFERENCE.matcher(norm).replaceAll(" § "))
+                    .isEmpty());
+        }
+        assertEquals("a quantity after the reference stays", 1, RepeatCheck.numbers(BookRepeatCheck.NORM_REFERENCE
+                .matcher("Nach § 26 BDSG gilt das für 20 % der Fälle.").replaceAll(" § ")).size());
     }
 
     @Test
@@ -208,6 +244,7 @@ public class BookRepeatJudgeTest {
         assertEquals(BookRepeatCheck.Reason.SAME_STATEMENT, pair.getReason());
         assertEquals("three earlier sentences repeated, wholly or partly", 3, pair.getMatches());
         assertTrue(result.getRepeatedWords() > 0);
+        assertTrue("a sentence with a GLEICH gets no hint", result.getHints().isEmpty());
         assertFalse(result.getJudged().get(0).isReported());
         assertEquals(BookRepeatCheck.Reason.PARTLY_SAME, result.getJudged().get(0).getPair().getReason());
         assertTrue(result.getJudged().get(1).isReported());

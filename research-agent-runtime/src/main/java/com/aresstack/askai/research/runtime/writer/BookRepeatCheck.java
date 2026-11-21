@@ -16,6 +16,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * Component 12 of the build plan of 21.11.2026: finds the same statement at two places of the book. Input: every
@@ -44,11 +45,13 @@ import java.util.function.Consumer;
  * candidates: an earlier sentence that states every number of the later one and reaches
  * {@link Options#getCandidateSimilarity() the candidate similarity} or the word rule's min share. The
  * {@link Options#getMaxJudgedPerSentence() most similar candidates} of each later sentence go to the model, in
- * parallel. Its verdict {@code GLEICH} reports a pair to strike ({@link Reason#SAME_STATEMENT}), its verdict
- * {@code TEILWEISE} a pair of which only the new part of the later sentence is worth keeping
- * ({@link Reason#PARTLY_SAME}; first model run of 21.11.2026: a repeated statement with an added detail is a
- * repetition for the book too); a later sentence with both gets its most similar {@code GLEICH}. The same text is still
- * reported without a call. Every judged pair is kept with the model's raw answers ({@link Result#getJudged()}).</p>
+ * parallel. Only its verdict {@code GLEICH} reports a pair ({@link Reason#SAME_STATEMENT}): the writer strikes the
+ * later sentence. A later sentence with a {@code TEILWEISE} verdict and no {@code GLEICH} gets a hint
+ * ({@link Reason#PARTLY_SAME}, {@link Result#getHints()}), no order: on fresh pairs the models called 13 to 16 of 40
+ * different pairs TEILWEISE (component test of 21.11.2026). The same text is still reported without a call. Every
+ * judged pair is kept with the model's raw answers ({@link Result#getJudged()}). For the model stage, the numbers of
+ * paragraph and article references ("§ 26 Abs. 1 BDSG", "Art. 88 DSGVO") are no numbers of the number rule: a later
+ * sentence that names the legal basis is a candidate, and the judge decides; without a judge they still count.</p>
  *
  * <p>Errors: the sentence vectors come in batches, and a failed batch gets one repair attempt (the number of attempts
  * is an option). When it fails again, the check asks the model no more, keeps what the word rules find and reports
@@ -78,8 +81,8 @@ public final class BookRepeatCheck {
         /** The judge read both sentences and found the same statement ({@code GLEICH}): strike the later one. */
         SAME_STATEMENT,
         /**
-         * The judge found the earlier statement repeated with essential new information ({@code TEILWEISE}): keep only
-         * the new part of the later sentence.
+         * The judge found the earlier statement repeated with essential new information ({@code TEILWEISE}): a hint
+         * ({@link Result#getHints()}), not a repeat.
          */
         PARTLY_SAME
     }
@@ -360,6 +363,7 @@ public final class BookRepeatCheck {
         private final int words;
         private final int repeatedWords;
         private final List<Pair> pairs;
+        private final List<Pair> hints;
         private final List<Pair> nearest;
         private final List<Judged> judged;
         private final String judgeModel;
@@ -367,8 +371,8 @@ public final class BookRepeatCheck {
         private final Options options;
 
         Result(Status status, String problem, int sentences, int checked, int withoutVector, int words,
-               int repeatedWords, List<Pair> pairs, List<Pair> nearest, List<Judged> judged, String judgeModel,
-               RepeatCheck.Criteria criteria, Options options) {
+               int repeatedWords, List<Pair> pairs, List<Pair> hints, List<Pair> nearest, List<Judged> judged,
+               String judgeModel, RepeatCheck.Criteria criteria, Options options) {
             this.status = status;
             this.problem = problem;
             this.sentences = sentences;
@@ -377,6 +381,7 @@ public final class BookRepeatCheck {
             this.words = words;
             this.repeatedWords = repeatedWords;
             this.pairs = Collections.unmodifiableList(pairs);
+            this.hints = Collections.unmodifiableList(hints);
             this.nearest = Collections.unmodifiableList(nearest);
             this.judged = Collections.unmodifiableList(judged);
             this.judgeModel = judgeModel == null ? "" : judgeModel;
@@ -413,7 +418,7 @@ public final class BookRepeatCheck {
             return words;
         }
 
-        /** Words of the sentences that repeat an earlier one; a TEILWEISE sentence brings news and is not counted. */
+        /** Words of the sentences that repeat an earlier one ({@link #getPairs()}). */
         public int getRepeatedWords() {
             return repeatedWords;
         }
@@ -428,6 +433,14 @@ public final class BookRepeatCheck {
             return pairs;
         }
 
+        /**
+         * One pair per later sentence the judge called {@code TEILWEISE} to an earlier one and {@code GLEICH} to none:
+         * its most similar such pair, reason {@link Reason#PARTLY_SAME}. A hint, not a repeat; empty without a judge.
+         */
+        public List<Pair> getHints() {
+            return hints;
+        }
+
         /** For every checked sentence with an earlier sentence to compare: the most similar one, repeat or not. */
         public List<Pair> getNearest() {
             return nearest;
@@ -438,10 +451,12 @@ public final class BookRepeatCheck {
             return judged;
         }
 
-        /** Reported pairs with this reason. */
+        /** Reported pairs and hints with this reason. */
         public int count(Reason reason) {
             int n = 0;
-            for (Pair p : pairs) {
+            List<Pair> all = new ArrayList<Pair>(pairs);
+            all.addAll(hints);
+            for (Pair p : all) {
                 if (p.getReason() == reason) {
                     n++;
                 }
@@ -480,10 +495,9 @@ public final class BookRepeatCheck {
                     count(SameStatementJudge.Verdict.SAME), count(SameStatementJudge.Verdict.PARTLY),
                     count(SameStatementJudge.Verdict.DIFFERENT), count(SameStatementJudge.Verdict.ERROR),
                     count(SameStatementJudge.Verdict.NOT_JUDGED));
-            int partly = count(Reason.PARTLY_SAME);
             return String.format(Locale.ROOT, "%s: %d of %d sentences repeat%s (%.1f %% of the words), %d checked, "
                             + "%d without vector%s%s", status, pairs.size(), sentences,
-                    partly == 0 ? "" : ", " + partly + " of them with something new", 100 * getRepeatedWordShare(),
+                    hints.isEmpty() ? "" : ", " + hints.size() + " hints TEILWEISE", 100 * getRepeatedWordShare(),
                     checked, withoutVector, judgedLine, problem.isEmpty() ? "" : " (" + problem + ")");
         }
     }
@@ -496,17 +510,20 @@ public final class BookRepeatCheck {
         final List<String> content;
         final Set<String> stems;
         final Set<String> numbers;
+        /** The numbers outside paragraph and article references: the number rule of the model stage. */
+        final Set<String> plainNumbers;
         final int words;
         float[] unit;
 
         Prepared(Sentence sentence, String plain, String key, List<String> content, Set<String> stems,
-                 Set<String> numbers, int words) {
+                 Set<String> numbers, Set<String> plainNumbers, int words) {
             this.sentence = sentence;
             this.plain = plain;
             this.key = key;
             this.content = content;
             this.stems = stems;
             this.numbers = numbers;
+            this.plainNumbers = plainNumbers;
             this.words = words;
         }
     }
@@ -619,6 +636,7 @@ public final class BookRepeatCheck {
         }
 
         List<Pair> pairs = new ArrayList<Pair>();
+        List<Pair> hints = new ArrayList<Pair>();
         List<Pair> nearest = new ArrayList<Pair>();
         Pair[] sameTextOf = new Pair[n];
         List<List<Candidate>> candidatesOf = new ArrayList<List<Candidate>>(n);
@@ -652,7 +670,8 @@ public final class BookRepeatCheck {
                 if (!eligible && !sameText) {
                     continue;
                 }
-                boolean numbersCovered = earlier.numbers.containsAll(later.numbers);
+                boolean numbersCovered = judging ? earlier.plainNumbers.containsAll(later.plainNumbers)
+                        : earlier.numbers.containsAll(later.numbers);
                 double share = eligible ? words.overlap(later.content, earlier.stems) : 0;
                 double similarity = later.unit == null || earlier.unit == null ? -1 : dot(later.unit, earlier.unit);
                 Reason reason = null;
@@ -693,8 +712,9 @@ public final class BookRepeatCheck {
             }
             if (best >= 0) {
                 Prepared earlier = prepared.get(best);
-                Pair found = pair(prepared, best, j, bestShare, bestSimilarity,
-                        earlier.numbers.containsAll(later.numbers), bestReason, matches);
+                Pair found = pair(prepared, best, j, bestShare, bestSimilarity, judging
+                        ? earlier.plainNumbers.containsAll(later.plainNumbers)
+                        : earlier.numbers.containsAll(later.numbers), bestReason, matches);
                 if (judging) {
                     sameTextOf[j] = found; // the same text needs no call; reported in reading order below
                     candidates.clear();
@@ -742,9 +762,7 @@ public final class BookRepeatCheck {
                         unjudged++;
                     }
                 }
-                if (chosen == null) {
-                    chosen = partly; // no GLEICH: the most similar TEILWEISE, of which only the new part stays
-                }
+                Candidate hint = chosen == null ? partly : null; // no GLEICH: the most similar TEILWEISE, a hint
                 for (Candidate c : candidates) {
                     Reason reason = reasonOf(c.judgement.getVerdict());
                     Pair p = pair(prepared, c.earlier, c.later, c.share, c.similarity, c.numbersCovered, reason,
@@ -752,9 +770,9 @@ public final class BookRepeatCheck {
                     judged.add(new Judged(p, c.judgement, c == chosen));
                     if (c == chosen) {
                         pairs.add(p);
-                        if (reason == Reason.SAME_STATEMENT) {
-                            repeatedWords += later.words;
-                        }
+                        repeatedWords += later.words;
+                    } else if (c == hint) {
+                        hints.add(p);
                     }
                 }
             }
@@ -765,7 +783,7 @@ public final class BookRepeatCheck {
         }
         Status status = problem.isEmpty() ? Status.COMPLETE : Status.INCOMPLETE;
         Result result = new Result(status, problem, n, checked, withoutVector, bookWords, repeatedWords, pairs,
-                nearest, judged, judging ? judge.modelName() : "", criteria, options);
+                hints, nearest, judged, judging ? judge.modelName() : "", criteria, options);
         log("repeat check: " + result);
         return result;
     }
@@ -896,8 +914,19 @@ public final class BookRepeatCheck {
             }
         }
         return new Prepared(sentence, plain, CitationValidator.pointKey(sentence.getText()), content, stems,
-                RepeatCheck.numbers(plain), count);
+                RepeatCheck.numbers(plain), RepeatCheck.numbers(NORM_REFERENCE.matcher(plain).replaceAll(" § ")),
+                count);
     }
+
+    /**
+     * A paragraph or article reference with its sub-parts: "§ 26 Abs. 1 BDSG", "§§ 87 und 90", "Art. 6 Abs. 1 lit.
+     * f", "Artikel 9 Absatz 2", "Article 88", "Section 5". Its numbers name a norm, they are no quantities.
+     */
+    static final Pattern NORM_REFERENCE = Pattern.compile("(?:§§?|\\b(?:Art\\.|Artikel\\b|Article\\b|Section\\b|"
+            + "Sec\\.))\\s*\\d+[a-z]?(?:\\s*(?:,|und|and|bis|-|\u2013)\\s*\\d+[a-z]?)*"
+            + "(?:\\s*(?:Abs\\.|Absatz|S\\.|Satz|Nr\\.|Nummer|lit\\.|Buchst\\.|para\\.|\\()\\s*\\d+[a-z]?\\)?"
+            + "(?:\\s*(?:,|und|and|bis|-|\u2013)\\s*\\d+[a-z]?)*)*",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     /**
      * Fetches a unit vector for every sentence with words, each distinct text once, in batches. A batch gets

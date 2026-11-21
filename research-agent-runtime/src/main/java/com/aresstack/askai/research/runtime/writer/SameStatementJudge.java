@@ -33,9 +33,11 @@ import java.util.Locale;
  * <p>First model run (21.11.2026, the 60 judged pairs of the book of 17 Nov): both models called nearly every small
  * detail new information and said {@code TEILWEISE} for most pairs the test data call {@code GLEICH}; and the
  * prompt's examples were close to two pairs of the test data. Since then the prompt asks for essential new
- * information, its examples come from another field (road traffic), and {@link BookRepeatCheck} reports a
- * {@code TEILWEISE} pair too: for the book, a sentence that repeats a statement and adds a detail is a repetition, of
- * which only the new part is worth keeping.</p>
+ * information, its examples come from another field (road traffic), and the definitions are those of the test data.
+ * Second model run (fresh pairs): {@code TEILWEISE} is not reliable with either model (13 and 16 of 40 different pairs
+ * called TEILWEISE; the models do not check whether the earlier statement is in the later sentence at all), while
+ * {@code GLEICH} held with {@code gemma4:12b} (7 of 9, none of 40 different pairs). So only {@code GLEICH} reports a
+ * repeat to the writer; {@code TEILWEISE} stays a hint in the result ({@link BookRepeatCheck.Result#getHints()}).</p>
  */
 public final class SameStatementJudge {
 
@@ -221,8 +223,8 @@ public final class SameStatementJudge {
                     + "weiterer Handelnder oder ein Zweck, der etwas Eigenes sagt.\n"
                     + "- VERSCHIEDEN: Der spätere Satz macht eine andere Aussage, auch wenn Thema oder Begründung "
                     + "gleich sind. Das gilt auch, wenn er dasselbe für andere Handelnde oder Betroffene sagt als der "
-                    + "frühere Satz, unter einer anderen Bedingung, mit einer anderen Zahl, für einen anderen Zeitraum "
-                    + "oder Ort.\n\n"
+                    + "frühere Satz, unter einer anderen Bedingung, mit einer anderen Zahl, nach einer anderen "
+                    + "Rechtsgrundlage, für einen anderen Zeitraum oder Ort.\n\n"
                     + "Beispiele aus einem anderen Gebiet:\n"
                     + "- „Radfahrer müssen bei Dunkelheit das Licht einschalten.“ und „Wer im Dunkeln Rad fährt, muss "
                     + "das Licht anmachen, etwa auf dem Heimweg.“: GLEICH.\n"
@@ -243,7 +245,8 @@ public final class SameStatementJudge {
                 + "or a purpose that says something of its own.\n"
                 + "- VERSCHIEDEN: the later sentence makes another statement, even when topic or justification are the "
                 + "same. That holds too when it says the same for other actors or persons concerned than the earlier "
-                + "sentence, under another condition, with another number, for another period or place.\n\n"
+                + "sentence, under another condition, with another number, under another legal basis, for another "
+                + "period or place.\n\n"
                 + "Examples from another field:\n"
                 + "- \"Cyclists must switch on their lights in the dark.\" and \"Whoever cycles in the dark has to "
                 + "turn the light on, for instance on the way home.\": GLEICH.\n"

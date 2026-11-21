@@ -39,19 +39,20 @@ import static org.junit.Assert.assertTrue;
  * candidates, a small model judges each candidate pair). The architect fixes the targets before each run and passes
  * them as {@code .minFound}, {@code .maxFalse} and {@code .maxUnjudged}. First run on the 60 pairs of the book of
  * 17 Nov ({@code alt\c12b-prereg.json}: at least 20 of 24 GLEICH reported, at most 2 of 32 VERSCHIEDEN, at most 1
- * without a verdict): failed at the boundary GLEICH/TEILWEISE. Since then a TEILWEISE verdict reports a pair too (the
- * writer strikes a GLEICH sentence and keeps only the new part of a TEILWEISE one). Every run is counted in both
- * readings ({@code alt\c12c-prereg.json}, defaults): "beide" (the product): of GLEICH and TEILWEISE pairs at least
- * {@code .minFound} (16) reported, of VERSCHIEDEN at most {@code .maxFalse} (3), of GLEICH at most
- * {@code .maxSameAsDifferent} (1) with the verdict VERSCHIEDEN; "nurGleich": of GLEICH at least
- * {@code .gleichMinFound} (7) reported as GLEICH, of VERSCHIEDEN at most {@code .gleichMaxFalse} (2) as GLEICH; both at
- * most {@code .maxUnjudged} (1) without a verdict. {@code .lesart} (beide) names the reading that decides. Fresh pairs
- * need {@code .url} for their sentence vectors.
+ * without a verdict): failed at the boundary GLEICH/TEILWEISE. Second run on 60 fresh pairs
+ * ({@code alt\c12c-prereg.json}): TEILWEISE unreliable with both models, GLEICH held with gemma4:12b. Since then only
+ * GLEICH reports to the writer and TEILWEISE is a hint; gemma4:12b is the default judge. Every run is counted in two
+ * readings, with the targets of c12c as defaults: "nurGleich" (the product): of GLEICH at least {@code .gleichMinFound}
+ * (7) reported as GLEICH, of VERSCHIEDEN at most {@code .gleichMaxFalse} (2) as GLEICH; "beide" (a TEILWEISE hint
+ * counts as found): of GLEICH and TEILWEISE pairs at least {@code .minFound} (16) found, of VERSCHIEDEN at most
+ * {@code .maxFalse} (3), of GLEICH at most {@code .maxSameAsDifferent} (1) with the verdict VERSCHIEDEN. Both allow at
+ * most {@code .maxUnjudged} (1) without a verdict; {@code .lesart} (nurGleich) names the reading that decides. Fresh
+ * pairs need {@code .url} for their sentence vectors.
  * {@link #samplePairs()} runs the whole path on six self-written pairs with a fake sentence model and a scripted judge
  * in every build; {@link #storedPairs()} needs Ollama and is skipped without {@code .chatUrl}:
  * <pre>
  * ./gradlew :research-agent-ui-plugin:componentStockTest --tests '*BookRepeatJudgeStockTest*'
- *   -Daskai.stock.repeat.chatUrl=http://127.0.0.1:11434 -Daskai.stock.repeat.chatModel=gemma4:e2b
+ *   -Daskai.stock.repeat.chatUrl=http://127.0.0.1:11434 -Daskai.stock.repeat.chatModel=gemma4:12b
  *   -Daskai.stock.repeat.vectors=sentence-vectors.json (stored vectors of an earlier run; or .url with .embedModel)
  *   -Daskai.stock.repeat.parallel=4 -Daskai.stock.repeat.runs=2 (two runs one after the other: agreement at 0)
  *   -Daskai.stock.repeat.out=build/component-stock/repeat-judge
@@ -66,9 +67,9 @@ import static org.junit.Assert.assertTrue;
 public class BookRepeatJudgeStockTest {
 
     private static final String P = "askai.stock.repeat.";
-    /** The reading of the product: GLEICH and TEILWEISE both report a pair. */
+    /** The reading that counts a TEILWEISE hint as found too. */
     static final String BOTH = "beide";
-    /** The other reading: only GLEICH reports a pair. */
+    /** The reading of the product: only GLEICH reports a repeat to the writer. */
     static final String ONLY_SAME = "nurGleich";
 
     @Rule
@@ -127,7 +128,7 @@ public class BookRepeatJudgeStockTest {
         int onlySameMinFound = 7;
         int onlySameMaxFalse = 2;
         int maxUnjudged = 1;
-        String reading = BOTH;
+        String reading = ONLY_SAME;
         RepeatCheck.Criteria base = RepeatCheck.Criteria.defaults();
     }
 
@@ -153,7 +154,7 @@ public class BookRepeatJudgeStockTest {
         assertEquals(2, all.get("gleichGemeldet").getAsInt());
         assertEquals(1, all.get("verschiedenGemeldet").getAsInt());
         assertEquals("[\"S4\"]", all.get("verschiedenGemeldetBlaetter").toString());
-        assertEquals("S6: TEILWEISE reports too", 1, all.get("teilweiseGemeldet").getAsInt());
+        assertEquals("S6: the TEILWEISE hint counts in the reading beide", 1, all.get("teilweiseGemeldet").getAsInt());
         assertEquals(1, all.get("teilweiseGemeldetAlsTeilweise").getAsInt());
         assertEquals(0, all.get("gleichGemeldetAlsTeilweise").getAsInt());
         assertEquals(0, all.get("verschiedenGemeldetAlsTeilweise").getAsInt());
@@ -188,8 +189,9 @@ public class BookRepeatJudgeStockTest {
                 s4run.getAsJsonArray("rohantworten").get(0).getAsString());
         assertTrue(s4run.get("gemeldet").getAsBoolean());
         assertEquals("streichen", s4run.get("meldung").getAsString());
-        assertEquals("nur das Neue behalten", pair(result, "S6").getAsJsonArray("laeufe").get(0).getAsJsonObject()
-                .get("meldung").getAsString());
+        JsonObject s6run = pair(result, "S6").getAsJsonArray("laeufe").get(0).getAsJsonObject();
+        assertEquals("Hinweis TEILWEISE", s6run.get("meldung").getAsString());
+        assertFalse("a hint is no order to the writer", s6run.get("gemeldet").getAsBoolean());
         JsonObject s5 = pair(result, "S5");
         assertFalse(s5.get("vorausgewaehlt").getAsBoolean());
         assertEquals("Zahlenregel", s5.get("nichtVorausgewaehltWeil").getAsString());
@@ -227,7 +229,7 @@ public class BookRepeatJudgeStockTest {
         RepeatStock.CachingVectors vectors = vectorsPath.isEmpty()
                 ? new RepeatStock.CachingVectors(BookRepeatStockTest.ollama(url, embedModel, dimension))
                 : RepeatStock.CachingVectors.fromJson(BookRepeatStockTest.read(vectorsPath));
-        String chatModel = System.getProperty(P + "chatModel", "gemma4:e2b");
+        String chatModel = System.getProperty(P + "chatModel", "gemma4:12b");
         String numCtx = System.getProperty(P + "numCtx", "");
         boolean think = !"omit".equalsIgnoreCase(System.getProperty(P + "think", "false"));
         OllamaJudgeChat chat = new OllamaJudgeChat(chatUrl, chatModel, numCtx.isEmpty() ? null
@@ -305,8 +307,8 @@ public class BookRepeatJudgeStockTest {
         rules.addProperty("mindestInhaltswoerter", settings.base.getMinWords());
         rules.addProperty("hoechstensJeSatz", settings.maxJudged);
         rules.addProperty("zahlenregel", "vor dem Modell, ohne Ausnahme");
-        rules.addProperty("gemeldet", "GLEICH (streichen) und TEILWEISE (nur das Neue behalten); gleicher Text ohne "
-                + "Modell");
+        rules.addProperty("gemeldet", "GLEICH (streichen); TEILWEISE nur als Hinweis; gleicher Text ohne Modell");
+        rules.addProperty("normnummern", "Paragraphen- und Artikelnummern zaehlen nicht fuer die Zahlenregel");
         result.add("regeln", rules);
         JsonObject targets = new JsonObject();
         targets.addProperty("massgeblicheLesart", settings.reading);
@@ -480,8 +482,9 @@ public class BookRepeatJudgeStockTest {
                 continue;
             }
             BookRepeatCheck.Result result = results.get(i);
-            boolean reported = !result.getPairs().isEmpty();
-            boolean partly = reported && result.getPairs().get(0).getReason() == BookRepeatCheck.Reason.PARTLY_SAME;
+            BookRepeatCheck.Reason found = foundReason(result);
+            boolean reported = found != null;
+            boolean partly = found == BookRepeatCheck.Reason.PARTLY_SAME;
             if (!result.getJudged().isEmpty() || reported) {
                 candidates++;
             }
@@ -565,6 +568,14 @@ public class BookRepeatJudgeStockTest {
         return o;
     }
 
+    /** A repeat reported to the writer, else a TEILWEISE hint, else {@code null}. */
+    private static BookRepeatCheck.Reason foundReason(BookRepeatCheck.Result result) {
+        if (!result.getPairs().isEmpty()) {
+            return result.getPairs().get(0).getReason();
+        }
+        return result.getHints().isEmpty() ? null : BookRepeatCheck.Reason.PARTLY_SAME;
+    }
+
     /** The model's verdict on the pair ({@code GLEICHER_TEXT} without a call), empty when it was no candidate. */
     private static String verdictOf(BookRepeatCheck.Result result) {
         if (!result.getJudged().isEmpty()) {
@@ -614,9 +625,9 @@ public class BookRepeatJudgeStockTest {
                         : judgement.getAnswers()));
                 run.addProperty("versuche", judgement == null ? 0 : judgement.getAttempts());
                 run.addProperty("gemeldet", !result.getPairs().isEmpty());
-                run.addProperty("meldung", result.getPairs().isEmpty() ? ""
-                        : result.getPairs().get(0).getReason() == BookRepeatCheck.Reason.PARTLY_SAME
-                        ? "nur das Neue behalten" : "streichen");
+                BookRepeatCheck.Reason found = foundReason(result);
+                run.addProperty("meldung", found == null ? "" : found == BookRepeatCheck.Reason.PARTLY_SAME
+                        ? "Hinweis TEILWEISE" : "streichen");
                 run.addProperty("fehler", judgement == null ? "" : judgement.getProblem());
                 run.addProperty("dauerMs", millis.get(r)[i]);
                 perRun.add(run);
