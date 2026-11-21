@@ -1,9 +1,10 @@
-{"frage": "Q1", "urteil": "BELEGT", "passage": "p1", "quelle": "src-a", "domain": "a.example", "text": "Brustgurte messen die Herzfrequenz mit Elektroden."}
+{"frage": "Q1", "urteil": "BELEGT", "passage": "p5", "quelle": "src-c", "domain": "c.example", "text": "Brustgurte messen die Herzfrequenz mit Elektroden."}
 {"frage": "Q1", "urteil": "BELEGT", "passage": "p2", "quelle": "src-a", "domain": "a.example", "text": "Smartwatches messen die Herzfrequenz optisch am Handgelenk."}
 {"frage": "Q1", "urteil": "HINWEIS", "passage": "p3", "quelle": "src-a", "domain": "a.example", "text": "Ein dritter Absatz derselben Quelle über Sensoren und Herzfrequenz."}
 {"frage": "Q1", "urteil": "BELEGT", "passage": "p4", "quelle": "src-b", "domain": "b.example", "text": "Optische Sensoren messen den Puls über das Licht."}
 {"frage": "Q1", "urteil": "KEIN", "passage": "p8", "quelle": "src-c", "domain": "c.example", "text": "Navigation Startseite Impressum"}
+{"frage": "Q1", "urteil": "BELEGT", "passage": "p9", "quelle": "src-e", "domain": "e.example", "text": "Sensoren in Westen messen Herzfrequenz, Hauttemperatur und Sturz."}
 {"frage": "Q2", "urteil": "BELEGT", "passage": "p6", "quelle": "src-d", "domain": "d.example", "text": "Der Betriebsrat bestimmt bei technischen Einrichtungen mit."}
 {"frage": "Q2", "urteil": "HINWEIS", "passage": "p7", "quelle": "src-b", "domain": "b.example", "text": "Datenschutz verlangt eine Rechtsgrundlage für Gesundheitsdaten."}
-{"frage": "Q3", "urteil": "BELEGT", "passage": "p5", "quelle": "src-c", "domain": "c.example", "text": "Brustgurte messen die Herzfrequenz mit Elektroden."}
 {"frage": "Q2", "urteil": "HINWEIS", "passage": "p5", "quelle": "src-c", "domain": "c.example", "text": "Brustgurte messen die Herzfrequenz mit Elektroden."}
+{"frage": "Q3", "urteil": "BELEGT", "passage": "p5", "quelle": "src-c", "domain": "c.example", "text": "Brustgurte messen die Herzfrequenz mit Elektroden."}

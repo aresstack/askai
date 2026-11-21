@@ -238,6 +238,33 @@ public class CandidateSearchTest {
                 list.getCandidates().get(1).getSimilarityRank());
     }
 
+    /** Architect review of #260: the text index gets the question's content words, as the search plan takes them. */
+    @Test
+    public void theKeyWordQueryIsTheQuestionsContentWords() {
+        FakeIndex index = twoRankings();
+        CandidateList list = new CandidateSearch(index, new FakePort(), THREE).search(PROJECT, WORLD,
+                "Welche Sensoren messen die Herzfrequenz bei der Arbeit?");
+        assertEquals("Sensoren messen Herzfrequenz", index.lastText);
+        assertEquals("Sensoren messen Herzfrequenz", list.getKeywordQuery());
+        assertEquals("an acronym stays, a stopword goes", "hilft KI Arbeitsschutz",
+                CandidateSearch.keywordQuery("Wie hilft KI beim Arbeitsschutz?"));
+    }
+
+    @Test
+    public void aQuestionWithoutKeyWordsLeavesTheSimilarityList() {
+        FakeIndex index = twoRankings();
+        CandidateList list = new CandidateSearch(index, new FakePort(), THREE).search(PROJECT, WORLD,
+                "Was ist das?");
+        assertEquals("", list.getKeywordQuery());
+        assertEquals("the text index is not asked", 0, index.keywordCalls);
+        assertEquals(CandidateList.PathState.EMPTY, list.getKeywords());
+        assertEquals(Arrays.asList("s1", "s2", "s3"), list.passageIds());
+        assertEquals(1, list.getNotes().size());
+        assertTrue(list.getNotes().get(0), list.getNotes().get(0).contains("no key word")
+                && list.getNotes().get(0).endsWith("the similarity list stands alone."));
+        assertFalse(list.isFailed());
+    }
+
     @Test
     public void searchAllEmbedsTheQuestionsInOneCall() {
         FakeIndex index = twoRankings();

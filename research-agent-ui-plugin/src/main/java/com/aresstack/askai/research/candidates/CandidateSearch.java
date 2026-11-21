@@ -6,6 +6,7 @@ import com.aresstack.askai.research.knowledge.processing.index.PassageSearchHit;
 import com.aresstack.askai.research.knowledge.processing.index.PassageSemanticQuery;
 import com.aresstack.askai.research.knowledge.processing.index.PassageTextQuery;
 import com.aresstack.askai.research.knowledge.processing.index.SemanticKnowledgeIndex;
+import com.aresstack.askai.research.plan.ConceptPlanNodes;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -21,7 +22,8 @@ import java.util.Set;
  * Component 5 of the build plan of 21.11.2026: the passages of the stock that the evidence judge (component 6) should
  * read for one question. No chat model is involved. It reads the project's {@link SemanticKnowledgeIndex} twice: by
  * similarity to the question's vector (the cosine index of the active embedding world) and by the question's key words
- * (the text index).
+ * (the text index). The key words are the question's content words as the search plan takes them from a mission
+ * ({@link ConceptPlanNodes#missionKeywords}: four letters or an acronym, no stopword, each once).
  *
  * <p>{@link CandidateSearchSettings.Mode#UNION} (default): the {@code perList} passages most similar to the question
  * united with the {@code perList} best by key words. Each list is walked from the top: a text counts once, a source
@@ -115,7 +117,8 @@ public final class CandidateSearch {
                                     String vectorProblem) {
         List<String> notes = new ArrayList<String>();
         Ranking similar = similar(projectId, fingerprint, vector, vectorProblem);
-        Ranking keywords = keywords(projectId, fingerprint, question);
+        String keywordQuery = keywordQuery(question);
+        Ranking keywords = keywords(projectId, fingerprint, keywordQuery);
         String keywordsAlone = keywords.state == CandidateList.PathState.DELIVERED
                 ? "; the key-word list stands alone." : ".";
         if (similar.problem != null) {
@@ -123,18 +126,32 @@ public final class CandidateSearch {
         } else if (similar.state == CandidateList.PathState.EMPTY && keywords.state != CandidateList.PathState.EMPTY) {
             notes.add("The similarity search found no passage vector in world " + fingerprint + keywordsAlone);
         }
+        String similarAlone = similar.state == CandidateList.PathState.DELIVERED
+                ? "; the similarity list stands alone." : ".";
         if (keywords.problem != null) {
-            notes.add("Key-word ranking failed (" + keywords.problem + ")"
-                    + (similar.state == CandidateList.PathState.DELIVERED
-                    ? "; the similarity list stands alone." : "."));
+            notes.add("Key-word ranking failed (" + keywords.problem + ")" + similarAlone);
+        } else if (keywordQuery.isEmpty()) {
+            notes.add("The question has no key word for the text index" + similarAlone);
         }
         List<Candidate> candidates = settings.getMode() == CandidateSearchSettings.Mode.FUSION
                 ? fused(similar, keywords) : united(similar, keywords);
         if (candidates.isEmpty() && similar.problem == null && keywords.problem == null) {
             notes.add("No passage of world " + fingerprint + " matched the question.");
         }
-        return new CandidateList(question, settings, candidates, similar.state, similar.hits.size(),
+        return new CandidateList(question, keywordQuery, settings, candidates, similar.state, similar.hits.size(),
                 keywords.state, keywords.hits.size(), notes);
+    }
+
+    /** The key-word query of a question: its content words, as the search plan takes them; empty without any. */
+    static String keywordQuery(String question) {
+        StringBuilder query = new StringBuilder();
+        for (String word : ConceptPlanNodes.missionKeywords(question, Collections.<String>emptyList())) {
+            if (query.length() > 0) {
+                query.append(' ');
+            }
+            query.append(word);
+        }
+        return query.toString();
     }
 
     private Ranking similar(String projectId, String fingerprint, float[] vector, String vectorProblem) {
@@ -149,10 +166,13 @@ public final class CandidateSearch {
         }
     }
 
-    private Ranking keywords(String projectId, String fingerprint, String question) {
+    private Ranking keywords(String projectId, String fingerprint, String query) {
+        if (query.isEmpty()) {
+            return Ranking.of(Collections.<PassageSearchHit>emptyList(), settings.getDepth());
+        }
         try {
             return Ranking.of(index.keywordSearch(projectId,
-                    new PassageTextQuery(fingerprint, question, settings.getDepth())), settings.getDepth());
+                    new PassageTextQuery(fingerprint, query, settings.getDepth())), settings.getDepth());
         } catch (RuntimeException failed) {
             return Ranking.failed("the key-word search failed: " + message(failed));
         }

@@ -277,6 +277,7 @@ final class CandidateStock {
             entry.addProperty("id", question.id);
             entry.addProperty("question", question.text);
             entry.addProperty("answerable", question.answerable);
+            entry.addProperty("keywordQuery", list.getKeywordQuery());
             entry.addProperty("similarity", list.getSimilarity().name());
             entry.addProperty("keywords", list.getKeywords().name());
             JsonArray notes = new JsonArray();

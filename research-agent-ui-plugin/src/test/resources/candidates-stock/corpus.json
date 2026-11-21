@@ -19,6 +19,8 @@
   {"id": "p7", "captureId": "cap-b2", "sourceId": "src-b", "domain": "b.example", "heading": "Recht",
    "text": "Datenschutz verlangt eine Rechtsgrundlage für Gesundheitsdaten.", "vector": [0.1, 0.8, 0.1]},
   {"id": "p8", "captureId": "cap-c2", "sourceId": "src-c", "domain": "c.example", "heading": "Menü",
-   "text": "Navigation Startseite Impressum", "vector": [0.3, 0.3, 0.3]}
+   "text": "Navigation Startseite Impressum", "vector": [0.3, 0.3, 0.3]},
+  {"id": "p9", "captureId": "cap-e", "sourceId": "src-e", "domain": "e.example", "heading": "Westen",
+   "text": "Sensoren in Westen messen Herzfrequenz, Hauttemperatur und Sturz.", "vector": [0.2, 0.3, 0.9]}
  ]
 }

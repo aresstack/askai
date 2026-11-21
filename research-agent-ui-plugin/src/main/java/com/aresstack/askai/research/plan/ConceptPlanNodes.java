@@ -212,9 +212,10 @@ public final class ConceptPlanNodes {
     /**
      * The content words of the mission, in order, without stopwords and blacklist terms (a content word has four
      * letters or more, or is a short acronym such as "KI" or "IoT"): the words of a quoted title first (the live run of 2026-11-09 queried "kompaktes vollständig belegtes" — the three content words
-     * before the title — on every first-level card), then the rest of the mission.
+     * before the title — on every first-level card), then the rest of the mission. The candidate search (component 5)
+     * builds its key-word query from a question the same way.
      */
-    static List<String> missionKeywords(String mission, List<String> blacklist) {
+    public static List<String> missionKeywords(String mission, List<String> blacklist) {
         List<String> keywords = new ArrayList<String>();
         if (mission == null) {
             return keywords;

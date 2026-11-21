@@ -70,28 +70,32 @@ public class CandidateSearchStockTest {
                 scratch.newFolder("index"), out);
 
         CandidateStock.Scored union = run.union;
-        assertEquals(Arrays.asList("p1", "p3", "p2", "p4"), union.lists.get(0).passageIds());
+        assertEquals("Sensoren messen Herzfrequenz", union.lists.get(0).getKeywordQuery());
+        assertEquals("p9 is far from the question's vector, its key words bring it in",
+                Arrays.asList("p1", "p9", "p3", "p4"), union.lists.get(0).passageIds());
         Candidate p1 = union.lists.get(0).getCandidates().get(0);
-        assertEquals(Candidate.Via.BOTH, p1.getVia());
+        assertEquals(Candidate.Via.SIMILARITY, p1.getVia());
         assertEquals("p5 carries the text of p1", Arrays.asList("p5"), p1.getSameTextPassageIds());
-        assertEquals(Arrays.asList("p6", "p7", "p8", "p1"), union.lists.get(1).passageIds());
+        assertEquals(Candidate.Via.BOTH, union.lists.get(0).getCandidates().get(3).getVia());
+        assertEquals(Arrays.asList("p6", "p7", "p8"), union.lists.get(1).passageIds());
         assertEquals(Arrays.asList("Q1"), union.served);
         assertEquals(Arrays.asList("Q2"), union.unserved);
         assertEquals("Q3 has a direct hit among the pairs, not in its list", Arrays.asList("Q3"),
                 union.falseNoEvidence);
-        assertEquals(12, union.candidates);
-        assertEquals(4, union.direct);
-        assertEquals("p3 for Q1; p7 and p1 (judged as p5, same text) for Q2", 3, union.hints);
-        assertEquals(5, union.unjudged);
+        assertEquals(10, union.candidates);
+        assertEquals("p1 (judged as p5, same text), p9, p4 for Q1; p6 for Q2", 4, union.direct);
+        assertEquals(2, union.hints);
+        assertEquals(4, union.unjudged);
 
         CandidateStock.Scored fusion = run.fusion;
-        assertEquals(Arrays.asList("p1", "p2", "p4"), fusion.lists.get(0).passageIds());
-        assertEquals(Arrays.asList("p6", "p7", "p1"), fusion.lists.get(1).passageIds());
-        assertEquals(Arrays.asList("Q1"), fusion.served);
+        assertEquals("the fused order loses p9", Arrays.asList("p1", "p3", "p4"), fusion.lists.get(0).passageIds());
+        assertEquals(Arrays.asList("p6", "p7", "p8"), fusion.lists.get(1).passageIds());
+        assertEquals(Arrays.asList("Q1", "Q2"), fusion.unserved);
+        assertTrue(fusion.served.isEmpty());
         assertEquals(9, fusion.candidates);
-        assertEquals(4, fusion.direct);
+        assertEquals(3, fusion.direct);
         assertEquals(2, fusion.hints);
-        assertEquals(3, fusion.unjudged);
+        assertEquals(4, fusion.unjudged);
         assertTrue(new File(out, "result.json").isFile());
         assertTrue(new File(out, "lists-union.json").isFile());
         assertTrue(new File(out, "lists-fusion.json").isFile());

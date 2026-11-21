@@ -23,6 +23,7 @@ public final class CandidateList {
     }
 
     private final String question;
+    private final String keywordQuery;
     private final CandidateSearchSettings settings;
     private final List<Candidate> candidates;
     private final PathState similarity;
@@ -31,10 +32,11 @@ public final class CandidateList {
     private final int keywordsRead;
     private final List<String> notes;
 
-    CandidateList(String question, CandidateSearchSettings settings, List<Candidate> candidates,
+    CandidateList(String question, String keywordQuery, CandidateSearchSettings settings, List<Candidate> candidates,
                   PathState similarity, int similarityRead, PathState keywords, int keywordsRead,
                   List<String> notes) {
         this.question = question;
+        this.keywordQuery = keywordQuery;
         this.settings = settings;
         this.candidates = Collections.unmodifiableList(new ArrayList<Candidate>(candidates));
         this.similarity = similarity;
@@ -46,6 +48,11 @@ public final class CandidateList {
 
     public String getQuestion() {
         return question;
+    }
+
+    /** The query the text index was asked: the question's content words; empty when it has none. */
+    public String getKeywordQuery() {
+        return keywordQuery;
     }
 
     public CandidateSearchSettings getSettings() {
