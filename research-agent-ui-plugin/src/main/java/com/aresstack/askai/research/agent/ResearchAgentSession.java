@@ -1930,7 +1930,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     public void queriesRejected(final java.util.Map<String, String> rejected) {
                         final StringBuilder line = new StringBuilder("Search plan: ").append(rejected.size())
                                 .append(rejected.size() == 1 ? " query" : " queries")
-                                .append(" rejected by the scope or the blacklist:");
+                                .append(" rejected by the search hygiene (repeat, blacklist or form):");
                         for (java.util.Map.Entry<String, String> r : rejected.entrySet()) {
                             technicalLog("search-plan query rejected \"" + r.getKey() + "\": " + r.getValue());
                             line.append("\n- \"").append(r.getKey()).append("\": ").append(r.getValue());
@@ -1997,10 +1997,15 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     }
                 });
         // plan T5: the research team runs several planned queries at once (read at every dispatch)
-        // the fence: every planned, cycle, worker and gap query passes the blacklist and the Weidezaun before it runs
+        // component 4, the search hygiene: every planned, cycle, worker and gap query is checked for its form, a
+        // repeat and the blacklist before it runs; its nearness to the mind map is logged, never a reason
         searchPlanQueue.setQueryGate(new com.aresstack.askai.research.plan.SearchPlanQueue.QueryGate() {
-            public String rejection(String query) {
-                return planQueryRejection(query);
+            public com.aresstack.askai.research.domain.scope.TypedBlacklist blacklist() {
+                return com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft());
+            }
+
+            public String nearness(String query) {
+                return planQueryNearness(query);
             }
         });
         searchPlanQueue.setTeam(new com.aresstack.askai.research.plan.SearchPlanQueue.Team() {
@@ -7017,23 +7022,23 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return "ENDED";
     }
 
-    /** The scope snapshot the plan's query gate evaluates against, and the fence it was pinned for. */
+    /** The scope snapshot the plan's nearness log reads against, and the fence it was pinned for. */
     private volatile String planGateHandle;
     private volatile String planGateFence = "";
     private volatile boolean planGateInAffinity;
 
     /**
-     * The search plan's query gate: the typed blacklist, then the Weidezaun. A query on the canonical OUT side is
-     * rejected, and with concept anchors present so is a query near no concept node at all (live run 5: "Datenschutz
-     * beim betrieblichen Wiedereingliederungsmanagement" in a book on wearables on construction sites). The second
-     * check is the setting {@code research.plan.queryNeedsConceptNearness}. {@code null} = the query may run.
+     * Component 4 of the component plan (2026-11-21): how near a search query lies to the mind map, computed with the
+     * scope check of the frozen concept and written to the technical log (the similarity to the nearest concept node
+     * and to the nearest exclusion). It is never a reason to reject: the search hygiene rejects only for the form, a
+     * repeat or the blacklist ({@link com.aresstack.askai.research.plan.SearchHygiene}). Only while
+     * {@code research.plan.queryNeedsConceptNearness} is switched on (default off, for comparisons) does the old rule
+     * answer: a query on the canonical OUT side, or near no concept node at all, is rejected. {@code null} = no
+     * objection.
      */
-    String planQueryRejection(String query) {
-        String hit = com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft())
-                .firstMatch(query, "", "");
-        if (hit != null) {
-            return "blacklist \"" + hit + "\"";
-        }
+    String planQueryNearness(String query) {
+        boolean oldRule = com.aresstack.askai.research.host.ResearchRuntimeSettings
+                .loadPlanQueryNeedsConceptNearness(hostStateStore);
         String fence = fenceFingerprintNow();
         String handle = planGateHandle;
         if (handle == null || !fence.equals(planGateFence) || !searchScopeSnapshots.containsKey(handle)) {
@@ -7043,43 +7048,67 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             String begin = searchScopeBeginLine();
             if (!begin.startsWith("ACTIVE handle=")) {
                 planGateHandle = null;
-                technicalLog("search-plan query gate: scope check " + begin + " for \"" + query + "\"");
-                return null; // no scope system: only the blacklist applies
+                technicalLog("search-hygiene nearness of \"" + query + "\": no scope check (" + begin + ")");
+                return null;
             }
             handle = begin.substring("ACTIVE handle=".length()).split(" ")[0];
             planGateHandle = handle;
             planGateFence = fence;
             planGateInAffinity = begin.contains("inAffinity=true");
         }
-        com.google.gson.JsonArray items = new com.google.gson.JsonArray();
-        com.google.gson.JsonObject item = new com.google.gson.JsonObject();
-        item.addProperty("id", "q");
-        item.addProperty("text", query);
-        items.add(item);
-        String reply = searchScopeEvaluate(handle, "plan-query", items.toString());
-        if (!reply.startsWith("EVALUATED")) {
-            return "scope check unavailable (" + reply + ")";
+        SearchScopeSnapshot snapshot = searchScopeSnapshots.get(handle);
+        if (snapshot == null) {
+            technicalLog("search-hygiene nearness of \"" + query + "\": no scope snapshot");
+            return null;
         }
-        String verdict = reply.contains("\n") ? reply.substring(reply.indexOf('\n') + 1) : "";
-        if (verdict.startsWith("OUT")) {
-            return "outside scope (nearest exclusion: " + quoted(verdict, "nearest=\"") + ")";
+        com.aresstack.askai.research.scope.SearchScopeGate.Decision decision;
+        try {
+            decision = com.aresstack.askai.research.scope.SearchScopeGate.evaluate(
+                    java.util.Collections.singletonList(
+                            new com.aresstack.askai.research.scope.SearchScopeGate.Item("q", query)),
+                    snapshot.anchorVectors, snapshot.labelsById, snapshot.embedder, snapshot.thresholds).get(0);
+        } catch (RuntimeException unavailable) {
+            technicalLog("search-hygiene nearness of \"" + query + "\": unavailable (" + unavailable.getMessage()
+                    + ")");
+            return oldRule ? "scope check unavailable (" + unavailable.getMessage() + ")" : null;
         }
-        if (verdict.startsWith("KEEP") && planGateInAffinity && !verdict.contains("in=NEAR")
-                && com.aresstack.askai.research.host.ResearchRuntimeSettings
-                        .loadPlanQueryNeedsConceptNearness(hostStateStore)) {
+        technicalLog("search-hygiene nearness of \"" + query + "\": " + nearnessLine(decision, snapshot.labelsById)
+                + (oldRule ? " (old similarity rule on)" : " (logged only)"));
+        if (!oldRule) {
+            return null;
+        }
+        if (decision.verdict == com.aresstack.askai.research.scope.SearchScopeGate.Verdict.OUT) {
+            return "outside scope (nearest exclusion: " + decision.nearestOutLabel + ")";
+        }
+        if (decision.verdict == com.aresstack.askai.research.scope.SearchScopeGate.Verdict.KEEP
+                && planGateInAffinity && !decision.nearIn) {
             return "outside the Weidezaun: near no concept node of the mind map";
         }
         return null;
     }
 
-    private static String quoted(String line, String key) {
-        int at = line.indexOf(key);
-        if (at < 0) {
-            return "";
+    /** The reading of one query for the log: the nearest concept node and exclusion with their similarity. */
+    static String nearnessLine(com.aresstack.askai.research.scope.SearchScopeGate.Decision decision,
+                               java.util.Map<String, String> labelsById) {
+        com.aresstack.askai.research.domain.scope.ScopeFenceEvaluator.Reading reading = decision.reading;
+        if (reading == null) {
+            return decision.verdict.name().toLowerCase(java.util.Locale.ROOT);
         }
-        int start = at + key.length();
-        int end = line.indexOf('"', start);
-        return end < 0 ? line.substring(start) : line.substring(start, end);
+        StringBuilder line = new StringBuilder(reading.hint.name().toLowerCase(java.util.Locale.ROOT));
+        if (reading.nearestInAnchorId != null) {
+            line.append(", concept node \"").append(label(labelsById, reading.nearestInAnchorId)).append("\" ")
+                    .append(String.format(java.util.Locale.ROOT, "%.3f", reading.nearestInSimilarity));
+        }
+        if (reading.nearestOutAnchorId != null) {
+            line.append(", exclusion \"").append(label(labelsById, reading.nearestOutAnchorId)).append("\" ")
+                    .append(String.format(java.util.Locale.ROOT, "%.3f", reading.nearestOutSimilarity));
+        }
+        return line.toString();
+    }
+
+    private static String label(java.util.Map<String, String> labelsById, String anchorId) {
+        String label = labelsById == null ? null : labelsById.get(anchorId);
+        return label == null || label.trim().isEmpty() ? anchorId : label;
     }
 
     /** The effective-fence fingerprint: scope revision + concept epoch#revision. */

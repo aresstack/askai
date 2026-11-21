@@ -363,8 +363,8 @@ public final class WebSearchApplicationService {
     }
 
     /**
-     * Where the page workers' new search queries go after the Weidezaun and the blacklist have judged them:
-     * {@code rejectedReason} is {@code null} for a query that may be searched, otherwise why it was dropped.
+     * Where the page workers' new search queries go: {@code rejectedReason} is {@code null} for a query the search
+     * plan's hygiene then checks like every other query, otherwise why the page dropped it.
      */
     public interface SuggestionSink {
         void suggested(String query, String pageUrl, String rejectedReason);
@@ -389,10 +389,11 @@ public final class WebSearchApplicationService {
     }
 
     /**
-     * The page workers' new queries pass the same fence as everything else in this run: the typed blacklist, then
-     * the scope control against the Weidezaun. A page the worker judged not useful suggests nothing (live run 4: a
-     * drinking-water PDF and a vendor page fed their own terms into the gap research). Every dropped query is
-     * reported with its reason, never swallowed.
+     * The page workers' new queries go to the search plan, where the search hygiene checks them like every other
+     * query (component 4 of the component plan, 2026-11-21: the form, a repeat, the blacklist; the nearness to the
+     * mind map is only logged there). Only a page the worker judged not useful suggests nothing (live run 4: a
+     * drinking-water PDF and a vendor page fed their own terms into the gap research); the plan keeps such a
+     * query as a skipped entry with this reason, never silently.
      *
      * @param useful whether the worker judged the page useful (yes or partly)
      */
@@ -401,31 +402,8 @@ public final class WebSearchApplicationService {
         if (sink == null || queries == null || queries.isEmpty()) {
             return;
         }
-        List<SearchScopeControlPort.Item> items = new ArrayList<SearchScopeControlPort.Item>();
-        java.util.Map<String, String> rejected = new java.util.LinkedHashMap<String, String>();
         for (String query : queries) {
-            String hit = blacklist.firstMatch(query, "", "");
-            if (!useful) {
-                rejected.put(query, "the page was not useful");
-            } else if (hit != null) {
-                rejected.put(query, "blacklist \"" + hit + "\"");
-            } else {
-                items.add(new SearchScopeControlPort.Item(query, query));
-            }
-        }
-        java.util.Map<String, SearchScopeControlPort.Decision> verdicts = scopeVerdicts("query", items);
-        for (SearchScopeControlPort.Item item : items) {
-            if (verdicts == null) {
-                rejected.put(item.id, "scope check unavailable");
-                continue;
-            }
-            SearchScopeControlPort.Decision decision = verdicts.get(item.id);
-            if (decision != null && decision.out) {
-                rejected.put(item.id, "outside scope (nearest exclusion: " + decision.nearestOutLabel + ")");
-            }
-        }
-        for (String query : queries) {
-            String reason = rejected.get(query);
+            String reason = useful ? null : "the page was not useful";
             listener.status(reason == null ? "page worker suggests search \"" + query + "\" (from " + pageUrl + ")"
                     : "page worker search \"" + query + "\" dropped: " + reason);
             sink.suggested(query, pageUrl, reason);

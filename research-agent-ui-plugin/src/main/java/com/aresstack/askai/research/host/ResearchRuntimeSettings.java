@@ -496,14 +496,16 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_PLAN_IDLE_CYCLES = "research.plan.idleCycles";
     public static final int DEFAULT_PLAN_IDLE_CYCLES = 2;
     /**
-     * Whether a planned query must lie near a concept node of the mind map (the IN side of the Weidezaun) to run, not
-     * only off the exclusions. Default ON: live run 5 searched "Datenschutz beim betrieblichen
-     * Wiedereingliederungsmanagement" for a book on wearables on construction sites.
+     * The old similarity rule of the plan's query gate, for comparisons only. Default OFF (component 4 of the
+     * component plan, 2026-11-21): the search hygiene rejects a query only for its form, a repeat or the blacklist,
+     * and how near the query lies to the mind map is logged. ON restores the old rule: a query on the canonical OUT
+     * side, or near no concept node of the mind map, is rejected (the replay of 2026-11-21 rejected 5 of 13 good
+     * searches of the 17 Nov run with it). A chat keeps the value it read first.
      */
     public static final String KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS = "research.plan.queryNeedsConceptNearness";
 
     public static boolean loadPlanQueryNeedsConceptNearness(WorkspaceStateStore store) {
-        return store == null || store.getBoolean(KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS, true);
+        return store != null && store.getBoolean(KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS, false);
     }
 
     /**
