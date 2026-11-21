@@ -22,6 +22,7 @@ public final class QuestionEvidence {
     private final List<EvidenceVerdict> direct;
     private final List<EvidenceVerdict> leads;
     private final int independentSources;
+    private final int distinctDomains;
     private final int judgedPassages;
     private final int errors;
     private final int downgraded;
@@ -30,12 +31,13 @@ public final class QuestionEvidence {
     private final int searchesWithoutNewEvidence;
 
     QuestionEvidence(ResearchQuestion question, List<EvidenceVerdict> direct, List<EvidenceVerdict> leads,
-                     int independentSources, int judgedPassages, int errors, int downgraded,
+                     int independentSources, int distinctDomains, int judgedPassages, int errors, int downgraded,
                      int lastRoundWithNewEvidence, int roundsWithoutNewEvidence, int searchesWithoutNewEvidence) {
         this.question = question;
         this.direct = Collections.unmodifiableList(new ArrayList<EvidenceVerdict>(direct));
         this.leads = Collections.unmodifiableList(new ArrayList<EvidenceVerdict>(leads));
         this.independentSources = independentSources;
+        this.distinctDomains = distinctDomains;
         this.judgedPassages = judgedPassages;
         this.errors = errors;
         this.downgraded = downgraded;
@@ -67,11 +69,15 @@ public final class QuestionEvidence {
     }
 
     /**
-     * Independent sources among the direct evidence: two sources count apart only when their domain or their text
-     * differs.
+     * Independent sources among the direct evidence: sources with the same text are one group, whatever their domain.
      */
     public int getIndependentSources() {
         return independentSources;
+    }
+
+    /** Distinct domains among the direct evidence; a source without an address counts as a domain of its own. */
+    public int getDistinctDomains() {
+        return distinctDomains;
     }
 
     /** Passages with a verdict for this question, FEHLER left out. */
@@ -110,6 +116,7 @@ public final class QuestionEvidence {
         counts.put("direkt", direct.size());
         counts.put("hinweise", leads.size());
         counts.put("quellen", independentSources);
+        counts.put("domains", distinctDomains);
         counts.put("geprueft", judgedPassages);
         counts.put("fehler", errors);
         counts.put("rundenOhneNeuenBeleg", roundsWithoutNewEvidence);

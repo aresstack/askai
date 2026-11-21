@@ -120,16 +120,17 @@ public final class ResearchMemory {
     }
 
     /**
-     * Take a new question in. A question worded like an open or set-aside question the memory holds (letters and
-     * digits compared, case ignored) is not added again: the one held is returned, so evidence stays in one place.
+     * Take a new question in. A question worded like one the memory holds (letters and digits compared, case ignored)
+     * does not stand on its own: it is kept as its own record, so its origin and topic are not lost, and merged into
+     * the question held, so evidence stays in one place. The same question with the same id again changes nothing.
      * Questions of the same meaning in other words are the merge's to find (component 15), not the memory's.
      *
-     * @return the question the memory holds for this wording
-     * @throws IllegalArgumentException when the id is taken, the topic or a merged id is unknown
+     * @return the question that stands for this wording: the new one, or the one held (with the new one merged in)
+     * @throws IllegalArgumentException when the id is taken by another question, the topic or a merged id is unknown
      */
     public synchronized ResearchQuestion addQuestion(ResearchQuestion question) throws IOException {
         ResearchQuestion sameWording = withWording(question.getText());
-        if (sameWording != null) {
+        if (sameWording != null && sameWording.getId().equals(question.getId())) {
             return sameWording;
         }
         if (questions.containsKey(question.getId())) {
@@ -139,7 +140,14 @@ public final class ResearchMemory {
         log.question(question);
         questions.put(question.getId(), question);
         ensureVerdictMap(question.getId());
-        return question;
+        if (sameWording == null) {
+            return question;
+        }
+        ResearchQuestion held = sameWording.withMerged(Collections.singletonList(question),
+                question.getTimeMillis());
+        log.question(held);
+        questions.put(held.getId(), held);
+        return held;
     }
 
     /**
@@ -392,8 +400,8 @@ public final class ResearchMemory {
                 laterRounds.add(stamped.verdict.getRound());
             }
         }
-        return new QuestionEvidence(question, direct, leads, independentSources(allDirect), judged, errors,
-                downgraded, lastNewRound, laterRounds.size(), searchesWithoutNewEvidence(questionId));
+        return new QuestionEvidence(question, direct, leads, independentSources(allDirect), distinctDomains(allDirect),
+                judged, errors, downgraded, lastNewRound, laterRounds.size(), searchesWithoutNewEvidence(questionId));
     }
 
     /** Every question that stands on its own with what the memory holds for it. */
@@ -443,7 +451,7 @@ public final class ResearchMemory {
             }
         }
         return new TopicEvidence(topic, questionIds, directTexts.size(), leadsOf(current, directTexts).size(),
-                independentSources(allDirect), findings.size());
+                independentSources(allDirect), distinctDomains(allDirect), findings.size());
     }
 
     /** Every search, in the order it came in, with its latest record. */
@@ -556,21 +564,22 @@ public final class ResearchMemory {
     }
 
     /**
-     * Independent sources among direct evidence. Two source ids are one source when they carry the same text and are
-     * not shown to sit on different domains; the same source id is always one source.
+     * Independent sources among direct evidence: sources that carry the same text are one group, whatever domain
+     * they sit on (the same law on two portals, a press release copied by others); the same source id is always one
+     * source. Architect's measurement of 21.11.: the same text always counted as one source group.
      */
     private static int independentSources(List<EvidenceVerdict> direct) {
         Map<String, String> parent = new LinkedHashMap<String, String>();
+        Map<String, String> sourceOfText = new HashMap<String, String>();
         for (EvidenceVerdict verdict : direct) {
             parent.put(verdict.getSourceId(), verdict.getSourceId());
         }
-        for (int i = 0; i < direct.size(); i++) {
-            for (int j = i + 1; j < direct.size(); j++) {
-                EvidenceVerdict a = direct.get(i);
-                EvidenceVerdict b = direct.get(j);
-                if (a.getTextKey().equals(b.getTextKey()) && !onDifferentDomains(a, b)) {
-                    parent.put(root(parent, a.getSourceId()), root(parent, b.getSourceId()));
-                }
+        for (EvidenceVerdict verdict : direct) {
+            String first = sourceOfText.get(verdict.getTextKey());
+            if (first == null) {
+                sourceOfText.put(verdict.getTextKey(), verdict.getSourceId());
+            } else {
+                parent.put(root(parent, verdict.getSourceId()), root(parent, first));
             }
         }
         Set<String> roots = new HashSet<String>();
@@ -580,10 +589,17 @@ public final class ResearchMemory {
         return roots.size();
     }
 
-    private static boolean onDifferentDomains(EvidenceVerdict a, EvidenceVerdict b) {
-        String domainA = a.getSourceDomain();
-        String domainB = b.getSourceDomain();
-        return !domainA.isEmpty() && !domainB.isEmpty() && !domainA.equals(domainB);
+    /**
+     * Distinct domains among direct evidence ({@link SourceDomain}); a source without an address counts as a domain of
+     * its own.
+     */
+    private static int distinctDomains(List<EvidenceVerdict> direct) {
+        Set<String> domains = new HashSet<String>();
+        for (EvidenceVerdict verdict : direct) {
+            String domain = verdict.getSourceDomain();
+            domains.add(domain.isEmpty() ? "source:" + verdict.getSourceId() : domain);
+        }
+        return domains.size();
     }
 
     private static String root(Map<String, String> parent, String source) {

@@ -21,6 +21,9 @@ public final class PassageText {
     /** A shorter quote proves nothing: it stands in almost every passage. */
     public static final int MIN_QUOTE_CHARS = 20;
 
+    /** Each part of a quote shortened with an ellipsis needs this many characters. */
+    public static final int MIN_PART_CHARS = 8;
+
     private static final Pattern LINE_END_HYPHEN = Pattern.compile("(?<=\\p{L})-[ \\t]*\\r?\\n\\s*(?=\\p{Ll})");
     private static final Pattern ELISION = Pattern.compile(
             "\\[\\s*(?:\\.\\.\\.|…)\\s*\\]|\\(\\s*(?:\\.\\.\\.|…)\\s*\\)|\\.\\.\\.|…");
@@ -40,8 +43,8 @@ public final class PassageText {
 
     /**
      * Whether {@code quote} stands verbatim in {@code passageText}. A quote the model shortened with an ellipsis
-     * holds when its parts stand in the passage in that order. A quote of fewer than {@value #MIN_QUOTE_CHARS}
-     * characters never holds.
+     * holds when its parts stand in the passage in that order and each part has at least {@value #MIN_PART_CHARS}
+     * characters. A quote of fewer than {@value #MIN_QUOTE_CHARS} characters never holds.
      */
     public static boolean holdsQuote(String passageText, String quote) {
         String text = plain(passageText);
@@ -54,6 +57,9 @@ public final class PassageText {
             String piece = part.trim();
             if (piece.isEmpty()) {
                 continue;
+            }
+            if (piece.length() < MIN_PART_CHARS) {
+                return false;
             }
             int at = text.indexOf(piece, from);
             if (at < 0) {

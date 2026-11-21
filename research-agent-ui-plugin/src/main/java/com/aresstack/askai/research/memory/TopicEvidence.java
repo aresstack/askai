@@ -15,15 +15,17 @@ public final class TopicEvidence {
     private final int directCount;
     private final int leadCount;
     private final int independentSources;
+    private final int distinctDomains;
     private final int findings;
 
     TopicEvidence(ResearchTopic topic, List<String> questionIds, int directCount, int leadCount,
-                  int independentSources, int findings) {
+                  int independentSources, int distinctDomains, int findings) {
         this.topic = topic;
         this.questionIds = Collections.unmodifiableList(new ArrayList<String>(questionIds));
         this.directCount = directCount;
         this.leadCount = leadCount;
         this.independentSources = independentSources;
+        this.distinctDomains = distinctDomains;
         this.findings = findings;
     }
 
@@ -49,6 +51,11 @@ public final class TopicEvidence {
     /** Independent sources among the direct evidence. */
     public int getIndependentSources() {
         return independentSources;
+    }
+
+    /** Distinct domains among the direct evidence. */
+    public int getDistinctDomains() {
+        return distinctDomains;
     }
 
     /** Places the topic was found in (Fundstellen), the merged topics' included. */

@@ -89,24 +89,42 @@ public class ResearchMemoryTest {
         assertEquals(1, evidence.getIndependentSources());
     }
 
+    /** The same law on two portals, a press release copied by others: one source group on two domains. */
     @Test
-    public void theSameTextOnTwoDomainsIsOneEvidenceFromTwoSources() throws Exception {
+    public void theSameTextOnTwoDomainsIsOneSourceGroupOnTwoDomains() throws Exception {
         ResearchMemory memory = memoryWithQuestion();
-        memory.record(direct("p1", "s1", "https://example.org/a", TEXT_A));
-        memory.record(direct("p2", "s2", "https://other.example.net/b", TEXT_A));
+        memory.record(direct("p1", "s1", "https://www.gesetze-im-internet.de/betrvg/__87.html", TEXT_A));
+        memory.record(direct("p2", "s2", "https://www.arbeitsschutzgesetze.com/betrvg-87", TEXT_A));
 
         QuestionEvidence evidence = memory.evidenceOf(Q);
         assertEquals(1, evidence.getDirectCount());
-        assertEquals(2, evidence.getIndependentSources());
+        assertEquals(1, evidence.getIndependentSources());
+        assertEquals(2, evidence.getDistinctDomains());
+        assertEquals(Integer.valueOf(2), evidence.counts().get("domains"));
     }
 
     @Test
-    public void differentTextsOnOneDomainAreTwoSources() throws Exception {
+    public void differentTextsOnOneDomainAreTwoSourcesOnOneDomain() throws Exception {
         ResearchMemory memory = memoryWithQuestion();
         memory.record(direct("p1", "s1", "https://example.org/a", TEXT_A));
         memory.record(direct("p2", "s2", "https://example.org/b", TEXT_B));
 
         assertEquals(2, memory.evidenceOf(Q).getIndependentSources());
+        assertEquals(1, memory.evidenceOf(Q).getDistinctDomains());
+    }
+
+    @Test
+    public void aTextSharedByTwoSourcesJoinsThemAlthoughTheyAlsoCarryOtherTexts() throws Exception {
+        ResearchMemory memory = memoryWithQuestion();
+        memory.record(direct("p1", "s1", "https://a.example/x", TEXT_A));
+        memory.record(direct("p2", "s1", "https://a.example/x", TEXT_B));
+        memory.record(direct("p3", "s2", "https://b.example/y", TEXT_B));
+        memory.record(direct("p4", "s3", "https://c.example/z", TEXT_C));
+
+        QuestionEvidence evidence = memory.evidenceOf(Q);
+        assertEquals(3, evidence.getDirectCount());
+        assertEquals("s1 and s2 share a text", 2, evidence.getIndependentSources());
+        assertEquals(3, evidence.getDistinctDomains());
     }
 
     @Test
@@ -193,6 +211,8 @@ public class ResearchMemoryTest {
         assertFalse("a changed word is no quote",
                 PassageText.holdsQuote(passage, "ein Zustimmungsrecht, wenn technische Einrichtungen"));
         assertFalse("no quote, no evidence", PassageText.holdsQuote(passage, ""));
+        assertFalse("every part of a shortened quote needs 8 characters",
+                PassageText.holdsQuote(passage, "Der ... ein ... wenn technische Einrichtungen"));
     }
 
     // ------------------------------------------------------------------------------------ errors
@@ -243,14 +263,26 @@ public class ResearchMemoryTest {
         assertEquals("Kein Beleg gefunden", memory.evidenceOf("N01").summary());
     }
 
+    /** Architect review of 21.11.: a question worded like one held keeps its own origin as a merged record. */
     @Test
-    public void theSameWordingIsHeldOnce() throws Exception {
+    public void theSameWordingStandsOnceAndKeepsItsOrigin() throws Exception {
         ResearchMemory memory = memoryWithQuestion();
+        memory.addTopic(ResearchTopic.found("T-gew", "Gewerkschaftliche Praxis", "", null, "gemma4:e2b", 2L));
         ResearchQuestion again = ResearchQuestion.open("N02", "welche Rechte hat der Betriebsrat bei KI-Systemen",
-                "", ResearchQuestion.Origin.LEITUNG, 2L);
+                "T-gew", ResearchQuestion.Origin.FINDER, 2L);
 
-        assertSame(memory.question(Q), memory.addQuestion(again));
+        ResearchQuestion stands = memory.addQuestion(again);
+
+        assertEquals(Q, stands.getId());
+        assertEquals(Collections.singletonList("N02"), stands.getMergedFrom());
         assertEquals(1, memory.questions().size());
+        ResearchQuestion kept = memory.question("N02");
+        assertEquals(ResearchQuestion.Origin.FINDER, kept.getOrigin());
+        assertEquals("T-gew", kept.getTopicId());
+        assertEquals(Q, memory.currentQuestion("N02").getId());
+        assertSame("the same question again changes nothing", memory.question(Q),
+                memory.addQuestion(ResearchQuestion.open(Q, "Welche Rechte hat der Betriebsrat bei KI-Systemen?",
+                        "T-recht", ResearchQuestion.Origin.KONZEPT, 5L)));
     }
 
     @Test
@@ -442,8 +474,17 @@ public class ResearchMemoryTest {
         assertEquals("bmas.de", SourceDomain.of("https://www.bmas.de/DE/Arbeit/x.html"));
         assertEquals("bmas.de", SourceDomain.of("https://service.bmas.de/print"));
         assertEquals("ico.org.uk", SourceDomain.of("https://ico.org.uk/for-organisations/"));
-        assertEquals("bund.de", SourceDomain.of("https://www.bmi.bund.de/x"));
         assertEquals("bka.gv.at", SourceDomain.of("https://www.ris.bka.gv.at/x"));
+        assertEquals("bsi.bund.de", SourceDomain.of("https://www.bsi.bund.de/DE/x"));
+        assertEquals("bmas.bund.de", SourceDomain.of("https://bmas.bund.de/y"));
+        assertEquals("ldi.nrw.de", SourceDomain.of("https://www.ldi.nrw.de/a"));
+        assertEquals("arbeitsschutz.nrw.de", SourceDomain.of("https://www.arbeitsschutz.nrw.de/b"));
+        assertEquals("lgl.bayern.de", SourceDomain.of("https://www.lgl.bayern.de/c"));
+        assertEquals("osha.europa.eu", SourceDomain.of("https://osha.europa.eu/de"));
+        assertEquals("eur-lex.europa.eu", SourceDomain.of("https://eur-lex.europa.eu/legal-content/x"));
+        assertEquals("seco.admin.ch", SourceDomain.of("https://www.seco.admin.ch/z"));
+        assertEquals("bund.de", SourceDomain.of("https://www.bund.de/"));
+        assertEquals("bsi.bund.de", SourceDomain.of("https://web.bsi.bund.de/x"));
         assertEquals("example.org", SourceDomain.of("example.org/a"));
         assertEquals("", SourceDomain.of(""));
         assertEquals("", SourceDomain.of("not a url"));
