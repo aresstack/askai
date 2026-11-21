@@ -91,6 +91,16 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         String baseUrlIfRunning(String endpointId);
 
         /**
+         * What the model list of an endpoint whose models do not share memory (a remote service) belongs to: its
+         * base URL, and where the list depends on the account, a mark of the credentials (opaque, compared for
+         * equality only, never the credential itself). A list asked for under another identity is unknown, so the
+         * next call asks again. Never starts anything; null when the endpoint has no base URL.
+         */
+        default String listIdentity(String endpointId) {
+            return baseUrlIfRunning(endpointId);
+        }
+
+        /**
          * The wire of an endpoint; null = the port's {@link OllamaModelProvider} (Ollama and AskAI's local runtime
          * both speak Ollama's API).
          */
@@ -390,9 +400,21 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         }
         final String endpointId = slots.endpointFor(model);
         if (!provider(endpointId).sharesMemory()) {
-            // The service keeps its models ready: nothing to load, so no probe, no place and no load. The checks a
-            // call would make still answer, from what is known now (never asking the service).
-            String unusable = preflight(slot, endpointId, model);
+            // The service keeps its models ready: nothing to load, so no place, no load and no request. What a call
+            // would refuse still answers, from what is known now: a missing base URL (a setting of a remote
+            // service, so reading it starts nothing), a helper slot's level-only model, and a model missing from
+            // the cached list while a call would still go by that list (one a call would ask for again first is
+            // not used).
+            try {
+                endpoints.baseUrl(endpointId);
+            } catch (IOException unavailable) {
+                reachability.put(endpointId, Boolean.FALSE);
+                result.completeExceptionally(new SlotUnavailableException(slot,
+                        SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, "endpoint " + endpointId
+                                + " is not available: " + unavailable.getMessage()));
+                return result;
+            }
+            String unusable = preflight(slot, endpointId, model, !needsInstalledProbe(endpointId, model));
             if (unusable != null) {
                 result.completeExceptionally(new SlotUnavailableException(slot,
                         SlotUnavailableException.Reason.NO_BINDING, unusable));
@@ -512,11 +534,16 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
      * thread); an endpoint that cannot be asked skips the check, so the call itself reports the endpoint.
      */
     String preflight(ModelSlot slot, String endpointId, String model) {
+        return preflight(slot, endpointId, model, true);
+    }
+
+    /** As {@link #preflight(ModelSlot, String, String)}; {@code useInstalledList} false leaves the installed check out. */
+    private String preflight(ModelSlot slot, String endpointId, String model, boolean useInstalledList) {
         ModelProvider provider = provider(endpointId);
         if (ModelPortSettings.isHelperSlot(slot.getName()) && provider.isLevelOnlyModel(model)) {
             return provider.cannotTurnThinkingOffMessage(model, slot.getName());
         }
-        if (!slots.checksInstalledModels() || com.aresstack.askai.localmodels.LocalModelNames
+        if (!useInstalledList || !slots.checksInstalledModels() || com.aresstack.askai.localmodels.LocalModelNames
                 .isLocalModelName(model)) {
             return null;
         }
@@ -557,15 +584,16 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
 
     private static final long INSTALLED_TTL_MILLIS = 30_000L;
     /**
-     * A model the cached list of an API lacks is asked for again after this long: the list depends on the key and
-     * the account, which change without the port noticing (Ollama keeps the plain TTL).
+     * A model the cached list of an API lacks is asked for again after this long: the service's offer changes
+     * without the port noticing (a model added to a server, an account given access). Ollama keeps the plain TTL.
      */
     private static final long INSTALLED_MISS_RECHECK_MILLIS = 10_000L;
     private static final long INSTALLED_PROBE_TIMEOUT_SECONDS = 5L;
     /**
-     * endpoint -> {probe time, installed names or null when the endpoint could not be asked, the base URL asked}.
-     * An API's list is only ever the list of the URL it came from: a changed URL (the user pointed the endpoint at
-     * another service) makes it unknown at once. Ollama keeps its list for the TTL, as before.
+     * endpoint -> {probe time, installed names or null when the endpoint could not be asked, the list identity
+     * asked under (APIs only, else null)}. An API's list is only ever the list of the identity it was asked under
+     * ({@link EndpointDirectory#listIdentity}): a changed base URL or a newly stored key makes it unknown at once.
+     * Ollama keeps its list for the TTL, as before.
      */
     private final Map<String, Object[]> installedCache = new ConcurrentHashMap<String, Object[]>();
 
@@ -577,7 +605,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             return false;
         }
         Object[] cached = installedCache.get(endpointId);
-        if (cached == null || !sameUrl(cached, endpointId)) {
+        if (cached == null || !sameList(cached, endpointId)) {
             return true;
         }
         long age = System.currentTimeMillis() - (Long) cached[0];
@@ -590,10 +618,10 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 && !names.isEmpty() && !provider.offers(names, model);
     }
 
-    /** Whether a cache entry still describes the endpoint: an API's only at the base URL it was probed at. */
-    private boolean sameUrl(Object[] cached, String endpointId) {
+    /** Whether a cache entry still describes the endpoint: an API's only under the identity it was asked under. */
+    private boolean sameList(Object[] cached, String endpointId) {
         return provider(endpointId).sharesMemory()
-                || java.util.Objects.equals(cached[2], endpoints.baseUrlIfRunning(endpointId));
+                || java.util.Objects.equals(cached[2], endpoints.listIdentity(endpointId));
     }
 
     /**
@@ -604,12 +632,17 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     private CompletableFuture<Void> probeInstalled(final String endpointId) {
         final CompletableFuture<Void> done = new CompletableFuture<Void>();
         final long now = System.currentTimeMillis();
-        final AtomicReference<String> asked = new AtomicReference<String>(); // the URL the list belongs to
+        final boolean perIdentity = !provider(endpointId).sharesMemory(); // an API's list belongs to its identity
+        final AtomicReference<String> asked = new AtomicReference<String>(); // the identity the list belongs to
         CompletableFuture<List<String>> probe;
         try {
             probe = CompletableFuture.supplyAsync(() -> {
+                if (perIdentity) {
+                    // read before the URL and the key the request uses: a list newer than its identity is asked
+                    // for again, and a list is never filed under an identity newer than itself
+                    asked.set(endpoints.listIdentity(endpointId));
+                }
                 String baseUrl = endpoints.baseUrlIfRunning(endpointId);
-                asked.set(baseUrl);
                 if (baseUrl == null) {
                     return null;
                 }
@@ -625,9 +658,10 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             return done;
         }
         probe.whenComplete((names, failure) -> {
-            // a probe that timed out before it ran is filed under today's URL, so it is not repeated at once
-            String url = asked.get() != null ? asked.get() : endpoints.baseUrlIfRunning(endpointId);
-            installedCache.put(endpointId, new Object[]{now, failure == null ? names : null, url});
+            // an API probe that timed out before it ran is filed under today's identity, so it is not repeated at once
+            String identity = !perIdentity ? null
+                    : asked.get() != null ? asked.get() : endpoints.listIdentity(endpointId);
+            installedCache.put(endpointId, new Object[]{now, failure == null ? names : null, identity});
             done.complete(null);
         });
         return done;
@@ -635,12 +669,12 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
 
     /**
      * The cached installed model names of an endpoint, or null when unknown (never probed, the endpoint could not
-     * be asked, or the list came from another base URL). Never blocks.
+     * be asked, or an API's list was asked for under another base URL or key). Never blocks.
      */
     @SuppressWarnings("unchecked")
     private List<String> installedModels(String endpointId) {
         Object[] cached = installedCache.get(endpointId);
-        return cached == null || !sameUrl(cached, endpointId) ? null : (List<String>) cached[1];
+        return cached == null || !sameList(cached, endpointId) ? null : (List<String>) cached[1];
     }
 
     private static void forward(CompletableFuture<SlotReservation> inner, CompletableFuture<SlotReservation> outer) {
@@ -790,13 +824,17 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         }
 
         /**
-         * Takes the wire for one call: waits while an earlier (aborted) call of this reservation is still
-         * streaming, so a reservation never has two requests at the endpoint. False when the reservation was
-         * closed meanwhile or the waiting thread was interrupted.
+         * Takes the wire for one call. On an endpoint whose models share one machine's memory it waits while an
+         * earlier (aborted) call of this reservation is still streaming, so the reservation never has two requests
+         * at the endpoint. A service that serves many models side by side hands an aborted call's place on at once
+         * (see {@link #releaseWhenOffTheWire}), and so does its reservation: the next call goes out while the
+         * aborted stream may stay silent until the read timeout, and that stream's late {@link #leaveWire} is a
+         * no-op. False when the reservation was closed meanwhile or the waiting thread was interrupted.
          */
         synchronized boolean enterWire(Call call) {
+            boolean inOrder = provider(endpointId).sharesMemory();
             try {
-                while (onWire != null) {
+                while (onWire != null && inOrder) {
                     wait();
                 }
             } catch (InterruptedException interrupted) {

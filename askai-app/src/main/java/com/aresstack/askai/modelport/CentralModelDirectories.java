@@ -114,6 +114,20 @@ public final class CentralModelDirectories {
                 String url = central.load().getOllamaBaseUrl();
                 return url == null || url.trim().isEmpty() ? null : url.trim();
             }
+
+            public String listIdentity(String endpointId) {
+                if (!OPENAI_COMPATIBLE.equals(endpointId)) {
+                    return baseUrlIfRunning(endpointId);
+                }
+                ModelProviderSettings settings = providers == null ? ModelProviderSettings.defaults()
+                        : providers.load();
+                String url = settings.getApiBaseUrl();
+                // The API's model list depends on the account: a newly stored key (encrypted anew each time) marks
+                // a list of its own. A hash of the encrypted text, never the key; the environment variable cannot
+                // change while the app runs.
+                return url.isEmpty() ? null
+                        : url + "\n" + Integer.toHexString(settings.getEncryptedApiKey().hashCode());
+            }
         };
     }
 

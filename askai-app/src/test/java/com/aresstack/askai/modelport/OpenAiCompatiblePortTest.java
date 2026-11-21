@@ -8,6 +8,8 @@ import com.aresstack.askai.agent.model.port.ModelFailure;
 import com.aresstack.askai.agent.model.port.ModelMessage;
 import com.aresstack.askai.agent.model.port.ModelSlot;
 import com.aresstack.askai.agent.model.port.resource.ModelEndpoint;
+import com.aresstack.askai.agent.model.port.resource.SlotRequest;
+import com.aresstack.askai.agent.model.port.resource.SlotReservation;
 import com.aresstack.askai.agent.model.port.resource.SlotUnavailableException;
 import com.aresstack.askai.config.AppConfigurationRepository;
 import com.aresstack.askai.modelport.provider.OpenAiCompatibleModelProvider;
@@ -28,6 +30,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -53,8 +56,9 @@ import static org.junit.Assert.fail;
  * The productive model port with the OpenAI-compatible API chosen (the central directories over the provider
  * settings), against a scripted service: a model per task, different models side by side, several calls per model
  * by default, the per-model capacity override, nothing loaded or unloaded, an aborted silent stream that frees its
- * place at once, a changed base URL asked for its own model list, warming that asks nothing, and the named failures.
- * Switching back to Ollama routes every slot to Ollama again.
+ * place at once (also under an explicit reservation), a changed base URL or a new key asked for its own model list,
+ * warming that asks nothing but names a missing base URL, and the named failures. Switching back to Ollama routes
+ * every slot to Ollama again.
  */
 public class OpenAiCompatiblePortTest {
 
@@ -62,6 +66,8 @@ public class OpenAiCompatiblePortTest {
     private static final ModelSlot CONVERSATION = ModelSlot.of("conversation");
     private static final ModelSlot JUDGE = ModelSlot.of("judge"); // an app-wide helper slot
     private static final String KEY = "sk-port-test-42";
+    /** The key of a second account, which is also offered {@code model-x}. */
+    private static final String SECOND_KEY = "sk-port-test-second-account";
 
     @Rule
     public final TemporaryFolder folder = new TemporaryFolder();
@@ -95,8 +101,11 @@ public class OpenAiCompatiblePortTest {
         });
         server.createContext("/v1/models", exchange -> {
             listings.incrementAndGet();
+            boolean secondAccount = ("Bearer " + SECOND_KEY).equals(
+                    exchange.getRequestHeaders().getFirst("Authorization"));
             respond(exchange, 200, "application/json",
-                    "{\"data\":[{\"id\":\"model-a\"},{\"id\":\"model-b\"},{\"id\":\"openai/gpt-oss-120b\"}]}");
+                    "{\"data\":[{\"id\":\"model-a\"},{\"id\":\"model-b\"},{\"id\":\"openai/gpt-oss-120b\"}"
+                            + (secondAccount ? ",{\"id\":\"model-x\"}" : "") + "]}");
         });
         server.createContext("/v1/chat/completions", this::chat);
         server.setExecutor(Executors.newCachedThreadPool());
@@ -289,6 +298,64 @@ public class OpenAiCompatiblePortTest {
         } finally {
             other.stop(0);
         }
+    }
+
+    @Test
+    public void anExplicitReservationGoesOnAtOnceAfterAnAbortedSilentStream() throws Exception {
+        useApi(models("planner", "model-a"));
+        silence = new CountDownLatch(1); // a reasoning model that sends nothing more for minutes
+        SlotReservation reservation = port.reserve(new SlotRequest(PLANNER, 0, Duration.ofSeconds(5), "task-1"))
+                .get(5, TimeUnit.SECONDS);
+        Recorder first = new Recorder();
+        ModelCall silent = port.chat(reservation, ChatRequest.builder(PLANNER).message(ModelMessage.user("hi"))
+                .build(), first);
+        assertTrue("the first chunk arrived", first.firstDelta.await(15, TimeUnit.SECONDS));
+
+        silent.cancel();
+        assertEquals(ModelFailure.Kind.CANCELLED, first.await().failure().getKind());
+        Recorder second = new Recorder();
+        port.chat(reservation, ChatRequest.builder(PLANNER).message(ModelMessage.user("hi")).build(), second);
+
+        assertTrue("the next call under the same reservation goes out while the aborted stream is still silent",
+                second.done.await(10, TimeUnit.SECONDS));
+        assertEquals("ok from model-a", second.result().getContent());
+        assertEquals("the aborted stream is still open at the service", 1, silence.getCount());
+        reservation.close();
+    }
+
+    @Test
+    public void aNewKeyIsAskedForItsOwnModelList() throws Exception {
+        useApi(models("planner", "model-x"));
+        ModelFailure refused = start(PLANNER).await().failure();
+        assertTrue(refused.getDetail(), refused.getDetail().contains("not offered by the OpenAI-compatible API"));
+
+        providers.storeApiKey(SECOND_KEY.toCharArray()); // an account that is offered model-x
+
+        assertEquals("the first account's list does not refuse the new key's model", "ok from model-x",
+                start(PLANNER).await().result().getContent());
+    }
+
+    @Test
+    public void warmingNamesAMissingBaseUrlAndIgnoresAListACallWouldAskForAgain() throws Exception {
+        providers.save(new ModelProviderSettings(ModelProviderKind.OPENAI_COMPATIBLE, "", "", 0,
+                models("planner", "model-x"), 0, null, 5, 30, 0));
+        try {
+            port.warm(PLANNER).get(5, TimeUnit.SECONDS);
+            fail("a call would fail without a base URL, so warming does too");
+        } catch (ExecutionException expected) {
+            SlotUnavailableException unavailable = (SlotUnavailableException) expected.getCause();
+            assertEquals(SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, unavailable.getReason());
+            assertTrue(unavailable.getMessage(), unavailable.getMessage().contains("no base URL"));
+        }
+        useApi(models("planner", "model-x"));
+        assertTrue("the first account's list lacks model-x",
+                start(PLANNER).await().failure().getDetail().contains("not offered"));
+        int listed = listings.get();
+
+        providers.storeApiKey(SECOND_KEY.toCharArray());
+        port.warm(PLANNER).get(5, TimeUnit.SECONDS);
+
+        assertEquals("warming still asks the service nothing", listed, listings.get());
     }
 
     @Test
