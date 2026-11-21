@@ -142,7 +142,10 @@ writes sections 1-3 alone (on an empty manuscript) and the whole chapter through
 counted per sample; a writer that loses its sentence vectors stops the run. The judge reads each cited sentence
 with up to two sentences before it as context, and its unreadable answers are counted apart. The judge is unloaded
 after every sample and an arm after its turn (`keep_alive` 0), so two big models never share memory, and a sample's
-seconds leave out Ollama's `load_duration`. Per run the report directory
+seconds leave out Ollama's `load_duration`. Every writer call goes to `writer-ab-<time>-calls.jsonl` with its kind
+(draft, top-up, repair, continuation) and answer text, and with a judge every judged sentence, carried ones included,
+goes to `writer-ab-<time>-run<n>-judge.jsonl` (it names the arms), so verdicts can be split by draft and top-up and
+the judge can be checked blind in both directions. Per run the report directory
 receives `writer-ab-<time>-run<n>-sheet.md` (blind, shuffled letters per item), `-metrics.md` (time, tokens, citation
 validity, uncited paragraphs, drift, claim-check and gap counts, and the quality figures: repeated words per section
 and overall by bge-m3 cosine >= 0.80, restarts, reach of the word target, short paragraphs, source blocks,

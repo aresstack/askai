@@ -73,6 +73,29 @@ public class WriterAbLogTest {
     }
 
     @Test
+    public void theCallsAreRecordedByKindWithTheirAnswerText() throws Exception {
+        File file = File.createTempFile("writer-ab", ".jsonl");
+        Files.write(file.toPath(), new byte[0]);
+        WriterAbCalls calls = new WriterAbCalls(file);
+        calls.begin("run 1, gemma4:12b @parts, chapter");
+        String system = "You write one section of a non-fiction book from numbered source passages";
+        calls.accept("{\"model\":\"gemma4:12b\",\"messages\":[{\"content\":\"" + system + "\"}]}",
+                "{\"message\":{\"content\":\"Erster \"},\"done\":false}\n"
+                        + "{\"message\":{\"content\":\"Satz [1].\"},\"done\":true}\n");
+        calls.accept("{\"model\":\"gemma4:12b\",\"messages\":[{\"content\":\"" + system + "\"},{\"content\":"
+                + "\"Your answer above is already written and stays as it is; it has about 200 words\"}]}",
+                "{\"message\":{\"content\":\"Nachtrag [2].\"},\"done\":true}");
+        calls.accept("{\"model\":\"gpt-oss:20b\",\"messages\":[{\"content\":\"judge this\"}]}",
+                "{\"message\":{\"content\":\"{}\"},\"done\":true}");
+        List<String> lines = Files.readAllLines(file.toPath(), StandardCharsets.UTF_8);
+        assertEquals(2, lines.size());
+        assertTrue(lines.get(0), lines.get(0).contains("\"kind\":\"draft\"") && lines.get(0).contains("Erster Satz [1]."));
+        assertTrue(lines.get(1), lines.get(1).contains("\"kind\":\"top-up\"") && lines.get(1).contains("@parts"));
+        assertEquals(WriterAbCalls.REPAIR, WriterAbCalls.kind(system
+                + " A previous answer to this request broke the writing rules:"));
+    }
+
+    @Test
     public void anArmSpecFromABatchFileUsesHashInsteadOfBar() {
         List<WriterAbArm> arms = WriterAbArm.parse("gemma4:e2b##,gpt-oss:20b##low,llama3.1:8b|1100|");
         assertEquals("gpt-oss:20b", arms.get(1).getModel());

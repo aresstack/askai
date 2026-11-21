@@ -225,9 +225,11 @@ public class WriterAbLiveTest {
 
         String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         WriterAbLog log = new WriterAbLog(new File(reports, "writer-ab-" + stamp + "-writer.log"));
+        WriterAbCalls calls = new WriterAbCalls(new File(reports, "writer-ab-" + stamp + "-calls.jsonl"));
         Random random = new Random(Long.getLong(P + "writerAb.seed", System.nanoTime()));
         List<WriterAbSample> all = new ArrayList<WriterAbSample>();
         try (OllamaTokenMeter meter = OllamaTokenMeter.start(ollama, timeout)) {
+            meter.onExchange(calls);
             int contextTokens = Integer.getInteger(P + "writerAb.contextTokens", DEFAULT_CONTEXT_TOKENS);
             Map<String, SectionWriter> writers = new LinkedHashMap<String, SectionWriter>();
             for (WriterAbArm arm : arms) {
@@ -257,10 +259,12 @@ public class WriterAbLiveTest {
                         for (int i = 0; i < 3 && !chapterOnly; i++) {
                             String item = "section " + (i + 1);
                             log.begin("run " + run + ", " + label + ", " + item);
+                            calls.begin("run " + run + ", " + label + ", " + item);
                             samples.add(alone(meter, input, item, label, writer, pipeline, input.sections.get(i).id,
                                     vectors, judgeItems.contains(item) ? judge : null, run, log));
                         }
                         log.begin("run " + run + ", " + label + ", " + WriterAbDecision.CHAPTER);
+                        calls.begin("run " + run + ", " + label + ", " + WriterAbDecision.CHAPTER);
                         samples.add(chapterByWritingJob(meter, input, label, writer, pipeline, vectors,
                                 judgeItems.contains(WriterAbDecision.CHAPTER) ? judge : null, run, log));
                         System.out.println("writer A/B run " + run + ": " + label + " done");
@@ -281,6 +285,9 @@ public class WriterAbLiveTest {
                 write(new File(reports, prefix + "-metrics.md"), WriterAbReport.metrics(assignments, samples)
                         + "\n" + WriterAbReport.quality(assignments, samples));
                 write(new File(reports, prefix + "-key.txt"), WriterAbReport.key(assignments));
+                if (judge != null) {
+                    write(new File(reports, prefix + "-judge.jsonl"), WriterAbReport.findings(samples));
+                }
                 all.addAll(samples);
             }
         }

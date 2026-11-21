@@ -51,6 +51,8 @@ public final class OllamaTokenMeter implements AutoCloseable {
     private final java.util.concurrent.atomic.AtomicInteger inFlight =
             new java.util.concurrent.atomic.AtomicInteger();
     private final Object idle = new Object();
+    /** Gets every model call's request and response body when set; for a harness that records the calls. */
+    private volatile java.util.function.BiConsumer<String, String> exchanges;
 
     private OllamaTokenMeter(String upstream, int readTimeoutMillis) throws IOException {
         this.upstream = upstream.endsWith("/") ? upstream.substring(0, upstream.length() - 1) : upstream;
@@ -87,6 +89,11 @@ public final class OllamaTokenMeter implements AutoCloseable {
             }
             return true;
         }
+    }
+
+    /** Hands every successful model call's request and response body to {@code exchanges} (null: none). */
+    public void onExchange(java.util.function.BiConsumer<String, String> exchanges) {
+        this.exchanges = exchanges;
     }
 
     /** The base URL the subject must use instead of Ollama's. */
@@ -166,7 +173,12 @@ public final class OllamaTokenMeter implements AutoCloseable {
                 if (status >= 400) {
                     failedCalls.incrementAndGet();
                 } else {
-                    record(copy.toString(StandardCharsets.UTF_8));
+                    String response = copy.toString(StandardCharsets.UTF_8);
+                    record(response);
+                    java.util.function.BiConsumer<String, String> listener = exchanges;
+                    if (listener != null) {
+                        listener.accept(new String(requestBody, StandardCharsets.UTF_8), response);
+                    }
                 }
             }
         } catch (IOException upstreamFailure) {

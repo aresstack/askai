@@ -240,6 +240,39 @@ public final class WriterAbReport {
         return md.toString();
     }
 
+    /**
+     * Every judged sentence of the samples as one JSON line (item, arm, run, section, verdict, sentence, cited
+     * passage numbers, reason), carried ones included: the source of a blind check of the judge in both directions
+     * and of the split by draft and top-up. It names the arms like the summary.
+     */
+    public static String findings(List<WriterAbSample> samples) {
+        StringBuilder out = new StringBuilder();
+        for (WriterAbSample s : samples) {
+            for (WriterAbSample.Section section : s.getSections()) {
+                if (section.support == null) {
+                    continue;
+                }
+                for (CitationSupportJudge.Finding f : section.support.findings) {
+                    com.google.gson.JsonObject line = new com.google.gson.JsonObject();
+                    line.addProperty("item", s.getItem());
+                    line.addProperty("arm", s.getModel());
+                    line.addProperty("run", s.getRun());
+                    line.addProperty("section", section.id);
+                    line.addProperty("verdict", f.verdict.name().toLowerCase(Locale.ROOT));
+                    line.addProperty("sentence", f.sentence.trim());
+                    com.google.gson.JsonArray cited = new com.google.gson.JsonArray();
+                    for (Integer n : f.cited) {
+                        cited.add(n);
+                    }
+                    line.add("cited", cited);
+                    line.addProperty("reason", f.reason);
+                    out.append(line).append('\n');
+                }
+            }
+        }
+        return out.toString();
+    }
+
     /** words, reach, repetition, overall, restarts, gaps, multi, uncited, carried, claim flags, tokens, seconds. */
     private static double[] figures(WriterAbSample s) {
         double[] f = new double[12];
