@@ -33,13 +33,10 @@ public final class SectionAssignment {
     private final ClaimCarryCheck.Criteria carry;
     private final int passagesPerCall;
     private final List<String> writtenSections;
-    private final List<String> otherSections;
     private final RepeatCheck.Criteria repeats;
     private final SynthesisCriteria synthesis;
     private final CitationFormat citationFormat;
     private final TopUpCriteria topUp;
-    private final SectionPlanCriteria plan;
-    private final PartContext partContext;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -59,50 +56,10 @@ public final class SectionAssignment {
         this.carry = b.carry;
         this.passagesPerCall = Math.max(0, b.passagesPerCall);
         this.writtenSections = Collections.unmodifiableList(new ArrayList<String>(b.writtenSections));
-        this.otherSections = Collections.unmodifiableList(new ArrayList<String>(b.otherSections));
         this.repeats = b.repeats;
         this.synthesis = b.synthesis;
         this.citationFormat = b.citationFormat;
         this.topUp = b.topUp;
-        this.plan = b.plan;
-        this.partContext = b.partContext;
-    }
-
-    /**
-     * What one part call knows about its section ({@link SectionPlanCriteria}): its place among the parts, the plan
-     * line of every key point of the section, the text of the parts before it and, per passage of the part, the key
-     * point it belongs to. Immutable.
-     */
-    static final class PartContext {
-        final int index;
-        final int count;
-        final List<String> planLines;
-        final String soFar;
-        final List<String> passagePoints;
-
-        /**
-         * @param index         this part, from 0
-         * @param count         parts of the section
-         * @param planLines     one line per key point of the section, in outline order, with its state
-         * @param soFar         the checked text of the parts before this one, markers left out
-         * @param passagePoints the key point of each passage of the part, in the part's passage order; empty when
-         *                      the passages are not assigned to key points
-         */
-        PartContext(int index, int count, List<String> planLines, String soFar, List<String> passagePoints) {
-            this.index = index;
-            this.count = count;
-            this.planLines = Collections.unmodifiableList(new ArrayList<String>(planLines));
-            this.soFar = soFar == null ? "" : soFar.trim();
-            this.passagePoints = Collections.unmodifiableList(new ArrayList<String>(passagePoints));
-        }
-
-        boolean isFirst() {
-            return index == 0;
-        }
-
-        boolean isLast() {
-            return index == count - 1;
-        }
     }
 
     /**
@@ -199,11 +156,6 @@ public final class SectionAssignment {
         return passagesPerCall;
     }
 
-    /** Spike: one line per neighbouring section of the book for the prompt; empty leaves the block out. */
-    public List<String> getOtherSections() {
-        return otherSections;
-    }
-
     /**
      * The current text of every other written section of the manuscript: what the book already says. A sentence of
      * this section that repeats one of them, word for word or nearly ({@link #getRepeats()}), leaves the text (live
@@ -233,23 +185,6 @@ public final class SectionAssignment {
         return synthesis;
     }
 
-    /** How the parts of this section are kept apart ({@link SectionPlanCriteria}); off by default. */
-    public SectionPlanCriteria getPlan() {
-        return plan;
-    }
-
-    /** The part's place in its section; {@code null} for a whole section and while the plan is off. */
-    PartContext getPartContext() {
-        return partContext;
-    }
-
-    /** A copy of this part with its place in the section. */
-    SectionAssignment inSection(PartContext context) {
-        Builder b = toBuilder();
-        b.partContext = context;
-        return new SectionAssignment(b);
-    }
-
     public boolean isRewrite() {
         return !rewriteComment.isEmpty() || !currentText.isEmpty();
     }
@@ -273,13 +208,10 @@ public final class SectionAssignment {
         b.carry = carry;
         b.passagesPerCall = passagesPerCall;
         b.writtenSections = writtenSections;
-        b.otherSections = otherSections;
         b.repeats = repeats;
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
         b.topUp = topUp;
-        b.plan = plan;
-        b.partContext = partContext;
         return b;
     }
 
@@ -312,12 +244,10 @@ public final class SectionAssignment {
         b.currentText = partText == null ? "" : partText.trim();
         b.carry = carry;
         b.writtenSections = writtenSections;
-        b.otherSections = otherSections;
         b.repeats = repeats;
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
         b.topUp = topUp;
-        b.plan = plan;
         return new SectionAssignment(b);
     }
 
@@ -339,13 +269,10 @@ public final class SectionAssignment {
         private ClaimCarryCheck.Criteria carry = ClaimCarryCheck.Criteria.defaults();
         private int passagesPerCall;
         private List<String> writtenSections = new ArrayList<String>();
-        private List<String> otherSections = new ArrayList<String>();
         private RepeatCheck.Criteria repeats = RepeatCheck.Criteria.defaults();
         private SynthesisCriteria synthesis = SynthesisCriteria.defaults();
         private CitationFormat citationFormat = CitationFormat.NUMBERED;
         private TopUpCriteria topUp = TopUpCriteria.off();
-        private SectionPlanCriteria plan = SectionPlanCriteria.off();
-        private PartContext partContext;
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -437,15 +364,6 @@ public final class SectionAssignment {
             return this;
         }
 
-        /**
-         * Spike: one line per neighbouring section of the book ("before this one: title: key points"), so the
-         * writer leaves their subjects to them (plan D8 budgets 60 tokens for it). Empty leaves the block out.
-         */
-        public Builder otherSections(List<String> value) {
-            this.otherSections = value == null ? new ArrayList<String>() : new ArrayList<String>(value);
-            return this;
-        }
-
         /** The current text of every other written section of the manuscript ({@link #getWrittenSections()}). */
         public Builder writtenSections(List<String> value) {
             List<String> texts = new ArrayList<String>();
@@ -475,12 +393,6 @@ public final class SectionAssignment {
         /** Top-up bounds (settings); none when {@code null} or not set. */
         public Builder topUp(TopUpCriteria value) {
             this.topUp = value == null ? TopUpCriteria.off() : value;
-            return this;
-        }
-
-        /** How the parts of the section are kept apart (settings); off when {@code null} or not set. */
-        public Builder plan(SectionPlanCriteria value) {
-            this.plan = value == null ? SectionPlanCriteria.off() : value;
             return this;
         }
 

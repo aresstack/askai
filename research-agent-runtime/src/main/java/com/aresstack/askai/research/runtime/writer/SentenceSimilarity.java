@@ -57,11 +57,6 @@ public final class SentenceSimilarity {
         return best;
     }
 
-    /** The vectors of {@code texts}, in their order; {@code null} when the sentence model is unavailable. */
-    List<float[]> vectors(List<String> texts) {
-        return texts == null || texts.isEmpty() || !isAvailable() ? null : vectorsOf(texts);
-    }
-
     private synchronized List<float[]> vectorsOf(List<String> texts) {
         List<String> missing = new ArrayList<String>();
         for (String text : texts) {

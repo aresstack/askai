@@ -88,17 +88,9 @@ public final class SectionWriter {
         return new SectionWriter(new PortMainModelChat(port, ResearchModelSlots.PHASE_DRAFT_WRITER, timeout), log);
     }
 
-    /**
-     * Writes the whole section; more words than one call's target are split by key points. With a
-     * {@linkplain SectionPlanCriteria section plan} every part call knows its place in the section and the text of
-     * the parts before it, and in the semantic mode {@link SectionPlanner} assigns the passages to the key points.
-     */
+    /** Writes the whole section; more words than one call's target are split by key points. */
     public SectionDraft write(SectionAssignment assignment) {
-        SectionPlanCriteria criteria = assignment.getPlan();
-        SectionPlanner.Plan plan = criteria.getMode() == SectionPlanCriteria.Mode.SEMANTIC
-                ? SectionPlanner.plan(assignment, similarity, log) : null;
-        List<SectionAssignment> parts = plan == null ? parts(assignment) : plan.parts;
-        boolean continuity = !criteria.isOff();
+        List<SectionAssignment> parts = parts(assignment);
         // what the book already says: every other written section; each part adds its own sentences
         java.util.Set<String> written = new java.util.HashSet<String>();
         for (String text : assignment.getWrittenSections()) {
@@ -110,7 +102,7 @@ public final class SectionWriter {
             log.accept("section " + assignment.getSectionId() + ": repeat check against " + book.size()
                     + " sentences of " + assignment.getWrittenSections().size() + " other written sections");
         }
-        if (parts.size() == 1 && plan == null) {
+        if (parts.size() == 1) {
             return writePart(parts.get(0), written, book);
         }
         StringBuilder text = new StringBuilder();
@@ -124,17 +116,10 @@ public final class SectionWriter {
         int words = 0;
         int paragraphOffset = 0;
         String digest = assignment.getPreviousDigest();
-        for (int index = 0; index < parts.size(); index++) {
-            SectionAssignment part = parts.get(index);
+        for (SectionAssignment part : parts) {
             List<EvidencePassage> packed = part.getPassages();
-            SectionAssignment call = part.part(part.getKeyPoints(), numbered(packed), part.getWordsPerCall(),
-                    continuity && index > 0 ? "" : digest);
-            if (continuity) {
-                call = call.inSection(new SectionAssignment.PartContext(index, parts.size(),
-                        planLines(assignment, parts, plan, index), soFar(text.toString(), criteria.getSoFarChars()),
-                        plan == null ? java.util.Collections.<String>emptyList() : plan.passagePoints.get(index)));
-            }
-            SectionDraft draft = writePart(call, written, book);
+            SectionDraft draft = writePart(part.part(part.getKeyPoints(), numbered(packed), part.getWordsPerCall(),
+                    digest), written, book);
             calls += draft.getCalls();
             if (hash.isEmpty()) {
                 hash = draft.getPromptHash();
@@ -164,67 +149,8 @@ public final class SectionWriter {
             written.addAll(CitationValidator.sentenceKeys(draft.getText()));
             book.rememberText(draft.getText());
         }
-        if (plan != null) {
-            // a key point without a passage is an open point the plan found; the writer was not asked to write it
-            for (String point : plan.uncovered()) {
-                if (!gaps.contains(point)) {
-                    gaps.add(point);
-                }
-            }
-        }
         return new SectionDraft(true, "", text.toString(), new java.util.TreeMap<Integer, EvidencePassage>(citations),
                 flags, gaps, stripped, model, hash, calls, words);
-    }
-
-    /**
-     * The plan line of every key point of the section as part {@code index} sees it: written by an earlier part,
-     * this part's, a later part's, or without a passage.
-     */
-    static List<String> planLines(SectionAssignment section, List<SectionAssignment> parts, SectionPlanner.Plan plan,
-                                  int index) {
-        List<String> lines = new ArrayList<String>();
-        List<String> points = plan == null ? section.getKeyPoints() : plan.keyPoints;
-        for (int k = 0; k < points.size(); k++) {
-            String point = points.get(k);
-            int first = -1;
-            int last = -1;
-            if (plan != null) {
-                first = plan.firstPart[k];
-                last = plan.lastPart[k];
-            } else {
-                for (int n = 0; n < parts.size(); n++) {
-                    if (parts.get(n).getKeyPoints().contains(point)) {
-                        first = first < 0 ? n : first;
-                        last = n;
-                    }
-                }
-            }
-            String state = first < 0 ? "no source passages, leave it out"
-                    : parts.size() == 1 ? ""
-                    : last < index ? "already written"
-                    : first > index ? "a later part"
-                    : first < index ? "this part (continued)" : "this part";
-            lines.add(state.isEmpty() ? point : point + " - " + state);
-        }
-        return lines;
-    }
-
-    /**
-     * The text of the earlier parts as a part call carries it: without markers (each part numbers its own passages),
-     * and when it is longer than {@code maxChars}, its end from a paragraph or sentence start on.
-     */
-    static String soFar(String text, int maxChars) {
-        String plain = SectionWriterPrompt.withoutMarkers(text == null ? "" : text);
-        if (maxChars <= 0 || plain.length() <= maxChars) {
-            return plain;
-        }
-        String tail = plain.substring(plain.length() - maxChars);
-        int paragraph = tail.indexOf("\n\n");
-        if (paragraph >= 0 && paragraph < maxChars / 2) {
-            return "[...]\n\n" + tail.substring(paragraph + 2).trim();
-        }
-        java.util.regex.Matcher sentence = java.util.regex.Pattern.compile("[.!?]\\s+").matcher(tail);
-        return "[...] " + (sentence.find() ? tail.substring(sentence.end()) : tail).trim();
     }
 
     /** One call's worth: first answer, at most one continuation, at most one repair (with its own continuation). */

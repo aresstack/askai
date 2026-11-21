@@ -94,30 +94,19 @@ public class WriterAbLiveTest {
                         "model." + arm.getModel() + ".contextTokens=" + contextTokens + "\n");
                 OllamaModelPort port = BenchmarkModelPortAccess.open(arm.getModel(), meter.baseUrl(), timeout,
                         settings);
-                SectionWriter writer = SectionWriter.onPort(port, Duration.ofMillis(timeout),
-                        Boolean.getBoolean(P + "writerAb.log") ? new java.util.function.Consumer<String>() {
-                            public void accept(String line) {
-                                System.out.println("[writer] " + line);
-                            }
-                        } : null);
-                // the product's writer checks repeats and carried claims with the sentence-embedding slot as well
-                String sentenceModel = System.getProperty(P + "writerAb.sentenceModel", "").trim();
-                if (!sentenceModel.isEmpty()) {
-                    writer = writer.withSentenceVectors(new OllamaSentenceVectors(ollama, sentenceModel));
-                }
-                final SectionWriter sectionWriter = writer;
+                SectionWriter writer = SectionWriter.onPort(port, Duration.ofMillis(timeout), null);
                 int answerTokens = ModelPortSettings.writerPreset(arm.getModel()).getAnswerTokens();
                 for (int i = 0; i < 3; i++) {
                     WriterAbInput.Section section = input.sections.get(i);
                     samples.add(measure(meter, input, "section " + (i + 1), arm.getModel(), section.passages.size(),
                             new Run() {
                                 public List<SectionDraft> drafts() {
-                                    return Arrays.asList(sectionWriter.write(input.assignment(section, arm,
-                                            answerTokens, "")));
+                                    return Arrays.asList(writer.write(input.assignment(section, arm, answerTokens,
+                                            "")));
                                 }
                             }));
                 }
-                samples.add(chapterByWritingJob(meter, input, arm, sectionWriter, answerTokens));
+                samples.add(chapterByWritingJob(meter, input, arm, writer, answerTokens));
             }
         }
         Assume.assumeFalse("no arm selected by -Daskai.benchmark.models", models.isEmpty());
@@ -159,9 +148,6 @@ public class WriterAbLiveTest {
             }
             counts.put("writer gaps", counts.get("writer gaps") + draft.getGaps().size());
             counts.put("stripped markers", counts.get("stripped markers") + draft.getStrippedMarkers().size());
-            if (Boolean.getBoolean(P + "writerAb.log")) {
-                System.out.println("[writer] " + item + ": " + draft.getCalls() + " calls, gaps " + draft.getGaps());
-            }
         }
         double seconds = (System.nanoTime() - start) / 1e9;
         meter.awaitIdle(60_000L);
@@ -193,9 +179,6 @@ public class WriterAbLiveTest {
                 new OutlineBrief(input.synopsis, new ArrayList<String>(), 0), OutlineProvenance.NONE, false, "",
                 sections)));
         final List<String> order = new ArrayList<String>(byId.keySet());
-        final boolean book = Boolean.parseBoolean(System.getProperty(P + "writerAb.book", "false"));
-        final Map<String, List<com.aresstack.askai.research.runtime.writer.EvidencePassage>> given =
-                new LinkedHashMap<String, List<com.aresstack.askai.research.runtime.writer.EvidencePassage>>();
         RuntimeSectionWriter adapter = new RuntimeSectionWriter(writer, new RuntimeSectionWriter.Assignments() {
             public SectionAssignment assignmentFor(SectionWriteRequest request) {
                 String id = request.getSection().getId();
@@ -205,54 +188,7 @@ public class WriterAbLiveTest {
                     SectionRevision previous = manuscript.store().current(order.get(index - 1));
                     digest = previous == null ? "" : digest(previous.getText());
                 }
-                WriterAbInput.Section section = byId.get(id);
-                if (!book) {
-                    return input.assignment(section, arm, answerTokens, digest);
-                }
-                // spike of the book level: an evidence ledger (a passage an earlier section cited leaves this pack),
-                // the written sections for the repeat check as in the product, and the neighbour sections' key points
-                java.util.Set<String> cited = new java.util.HashSet<String>();
-                List<String> written = new ArrayList<String>();
-                for (int i = 0; i < index; i++) {
-                    SectionRevision earlier = manuscript.store().current(order.get(i));
-                    List<com.aresstack.askai.research.runtime.writer.EvidencePassage> pack = given.get(order.get(i));
-                    if (earlier == null || pack == null) {
-                        continue;
-                    }
-                    written.add(earlier.getText());
-                    java.util.regex.Matcher m = MARKERS.matcher(earlier.getText());
-                    while (m.find()) {
-                        for (String n : m.group(1).split("[,;]")) {
-                            int number = Integer.parseInt(n.trim());
-                            if (number >= 1 && number <= pack.size()) {
-                                cited.add(pack.get(number - 1).getPassageId());
-                            }
-                        }
-                    }
-                }
-                List<com.aresstack.askai.research.runtime.writer.EvidencePassage> kept =
-                        new ArrayList<com.aresstack.askai.research.runtime.writer.EvidencePassage>();
-                for (com.aresstack.askai.research.runtime.writer.EvidencePassage passage : section.passages) {
-                    if (!cited.contains(passage.getPassageId())) {
-                        kept.add(new com.aresstack.askai.research.runtime.writer.EvidencePassage(kept.size() + 1,
-                                passage.getSourceId(), passage.getSourceChecksum(), passage.getPassageId(),
-                                passage.getText()));
-                    }
-                }
-                given.put(id, kept);
-                List<String> others = new ArrayList<String>();
-                for (int i = 0; i < order.size(); i++) {
-                    if (i != index) {
-                        WriterAbInput.Section other = byId.get(order.get(i));
-                        others.add((i < index ? "before this one: " : "after this one: ") + other.title + ": "
-                                + String.join("; ", other.keyPoints));
-                    }
-                }
-                System.out.println("[writer] book level: section " + (index + 1) + " keeps " + kept.size() + " of "
-                        + section.passages.size() + " passages");
-                return input.assignment(new WriterAbInput.Section(section.id, section.title, section.brief,
-                        section.keyPoints, section.words, kept), arm, answerTokens, digest).toBuilder()
-                        .writtenSections(written).otherSections(others).build();
+                return input.assignment(byId.get(id), arm, answerTokens, digest);
             }
         });
         SectionWritingJob job = new SectionWritingJob(new InMemoryTaskBoard(), manuscript, adapter, null, null);
@@ -287,9 +223,6 @@ public class WriterAbLiveTest {
         return new WriterAbSample(WriterAbDecision.CHAPTER, arm.getModel(), text.toString(), seconds, tokens,
                 WriterSampleMetrics.measure(text.toString(), maxPassages(input), input.language), counts);
     }
-
-    private static final java.util.regex.Pattern MARKERS =
-            java.util.regex.Pattern.compile("\\[(\\d{1,3}(?:\\s*[,;]\\s*\\d{1,3})*)\\]");
 
     private static Map<String, Integer> emptyCounts() {
         Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
