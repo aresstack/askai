@@ -920,11 +920,14 @@ public final class BookRepeatCheck {
 
     /**
      * A paragraph or article reference with its sub-parts: "§ 26 Abs. 1 BDSG", "§§ 87 und 90", "Art. 6 Abs. 1 lit.
-     * f", "Artikel 9 Absatz 2", "Article 88", "Section 5". Its numbers name a norm, they are no quantities.
+     * f", "Artikel 9 Absatz 2", "Artikeln 12 bis 22 und 34", "Paragraf 87 Absatz 1 Nummer 6", "Article 88",
+     * "Section 5". Its numbers name a norm, they are no quantities.
      */
-    static final Pattern NORM_REFERENCE = Pattern.compile("(?:§§?|\\b(?:Art\\.|Artikel\\b|Article\\b|Section\\b|"
-            + "Sec\\.))\\s*\\d+[a-z]?(?:\\s*(?:,|und|and|bis|-|\u2013)\\s*\\d+[a-z]?)*"
-            + "(?:\\s*(?:Abs\\.|Absatz|S\\.|Satz|Nr\\.|Nummer|lit\\.|Buchst\\.|para\\.|\\()\\s*\\d+[a-z]?\\)?"
+    static final Pattern NORM_REFERENCE = Pattern.compile("(?:§§?|\\b(?:Art\\.|Artikeln?\\b|Articles?\\b|"
+            + "Sections?\\b|Sec\\.|Paragra(?:f|ph)(?:en)?\\b))\\s*\\d+[a-z]?"
+            + "(?:\\s*(?:,|und|and|bis|-|\u2013)\\s*\\d+[a-z]?)*"
+            + "(?:\\s*(?:Abs\\.|Absatz|Absätze|S\\.|Satz|Sätze|Nr\\.|Nrn\\.|Nummern?|lit\\.|Buchst\\.|"
+            + "Buchstaben?|Ziff\\.|Ziffern?|UAbs\\.|Unterabsatz|para\\.|\\()\\s*\\d+[a-z]?\\)?"
             + "(?:\\s*(?:,|und|and|bis|-|\u2013)\\s*\\d+[a-z]?)*)*",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 

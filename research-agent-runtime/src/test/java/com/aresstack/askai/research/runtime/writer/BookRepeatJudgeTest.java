@@ -211,7 +211,8 @@ public class BookRepeatJudgeTest {
     @Test
     public void theNormReferencePattern() {
         String[] norms = {"§ 26 Abs. 1 BDSG", "§§ 87 und 90 BetrVG", "Art. 6 Abs. 1 lit. f DSGVO",
-            "Artikel 9 Absatz 2", "Article 88(1) GDPR", "§ 5 ArbSchG"};
+            "Artikel 9 Absatz 2", "Article 88(1) GDPR", "§ 5 ArbSchG", "den Artikeln 12 bis 22 und 34 DSGVO",
+            "§ 87 Abs. 1 Nr. 6 BetrVG", "Paragraf 87 Absatz 1 Nummer 6", "Art. 4 Ziff. 15", "Articles 13 and 14"};
         for (String norm : norms) {
             assertTrue(norm, RepeatCheck.numbers(BookRepeatCheck.NORM_REFERENCE.matcher(norm).replaceAll(" § "))
                     .isEmpty());
