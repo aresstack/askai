@@ -91,6 +91,8 @@ public class WriterAbLogTest {
         assertEquals(2, lines.size());
         assertTrue(lines.get(0), lines.get(0).contains("\"kind\":\"draft\"") && lines.get(0).contains("Erster Satz [1]."));
         assertTrue(lines.get(1), lines.get(1).contains("\"kind\":\"top-up\"") && lines.get(1).contains("@parts"));
+        assertEquals(WriterAbCalls.DRAFT, WriterAbCalls.kind(
+                "You write one part of a section of a non-fiction book from numbered source passages"));
         assertEquals(WriterAbCalls.REPAIR, WriterAbCalls.kind(system
                 + " A previous answer to this request broke the writing rules:"));
     }

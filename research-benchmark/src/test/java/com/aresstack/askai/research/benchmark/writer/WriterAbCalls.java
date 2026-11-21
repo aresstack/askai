@@ -47,7 +47,10 @@ final class WriterAbCalls implements BiConsumer<String, String> {
         if (request.contains("Your answer was cut off")) {
             return CONTINUATION;
         }
-        if (request.contains("You write one section of a non-fiction book")) {
+        // a whole-section call ("You write one section of ...") or a part call with part context ("You write one
+        // part of a section of ...")
+        if (request.contains("You write one section of a non-fiction book")
+                || request.contains("You write one part of a section of a non-fiction book")) {
             return DRAFT;
         }
         return "";
