@@ -12,16 +12,40 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Repair plan step 5a: the user's explicit weight of a main theme, written into the mission ("Recht 40 %",
- * "Technik: 20 Prozent", "30 % für Implementierung"). A theme is a first-level card of the concept; the mission names
- * it by its full name or by a word of five or more letters that only this card's name holds. A percentage belongs to
- * the nearest card name in the same clause; a percentage two cards claim goes to the nearer one. Shares above 100 %
- * in sum are scaled down later ({@code SectionBudget}). Stateless.
+ * Repair plan step 5a: the user's explicit weight of a main theme, written into the mission ("Gewichtung: Recht
+ * 40 %", "Schwerpunkt Technik mit 20 Prozent", "30 % des Buchs für Implementierung"). A theme is a first-level card of
+ * the concept; the mission names it by its full name or by a word of five or more letters that only this card's name
+ * holds. A percentage belongs to the nearest card name in the same clause; a percentage two cards claim goes to the
+ * nearer one.
+ * <p>
+ * A percentage near a card name is often a fact of the subject, not a weight ("Förderung bis zu 20 % Zuschuss",
+ * architect review of 21.11.). So a percentage counts as a weight only when its sentence holds a weight word
+ * (Gewicht, Gewichtung, Anteil, Schwerpunkt, des Umfangs, des Buchs, ausmachen, weight, share, focus, of the book);
+ * without any such sentence, the percentages count only when at least two cards carry one and they add up to at most
+ * 100 %. A percentage after a comparison ("bis zu", "um", "über", "mindestens", "up to", ...) is never a weight. A bare
+ * "Umfang" is no weight word, because the length sentence ("Umfang 20 Seiten") often names the themes too. Shares
+ * above 100 % in sum are scaled down later ({@code SectionBudget}). Stateless.
  */
 public final class MissionWeights {
 
     private static final String PERCENT = "(\\d{1,2}(?:[.,]\\d)?|100)\\s*(?:%|prozent\\b|percent\\b)";
     private static final int GAP = 40;
+
+    /** Words that make a percentage in the same sentence a weight of the book. */
+    private static final Pattern WEIGHT_WORD = Pattern.compile("gewicht|anteil|schwerpunkt|des umfangs|vom umfang"
+            + "|am umfang|des buch(?:e)?s|vom buch|am buch|ausmach|weight|\\bshare|\\bfocus|of the book");
+
+    /** A comparison right before the number makes it a fact of the subject, not a weight. */
+    private static final Pattern COMPARISON_BEFORE = Pattern.compile("(?:^|[^\\p{L}])(?:bis zu|bis|um|über|ueber"
+            + "|unter|mindestens|höchstens|hoechstens|maximal|max|mehr als|weniger als|up to|over|under|at least"
+            + "|at most|more than|less than)\\s*$");
+
+    /** Dots of abbreviations ("ca.", "z. B.", "max.") are no sentence ends. */
+    private static final Pattern ABBREVIATION_DOT = Pattern.compile(
+            "(?<=(?:^|[^\\p{L}])(?:ca|bzw|approx|vgl|ggf|inkl|max|min|etc|[\\p{L}]))\\.");
+
+    /** Sentence ends; a dot between digits is a decimal point. */
+    private static final Pattern SENTENCE_END = Pattern.compile("[.!?;](?!\\d)|\\n");
 
     private MissionWeights() {
     }
@@ -32,7 +56,7 @@ public final class MissionWeights {
         if (mission == null || mission.trim().isEmpty() || cards == null || cards.isEmpty()) {
             return shares;
         }
-        String text = mission.toLowerCase(Locale.ROOT);
+        String text = ABBREVIATION_DOT.matcher(mission.toLowerCase(Locale.ROOT)).replaceAll(" ");
         // per number position: the card that claims it and the distance of its name
         Map<Integer, String> owner = new LinkedHashMap<Integer, String>();
         Map<Integer, Integer> distance = new LinkedHashMap<Integer, Integer>();
@@ -46,21 +70,27 @@ public final class MissionWeights {
                 Matcher after = Pattern.compile("(?<![\\p{L}])" + quoted + "(?![\\p{L}])[^.;\\n%]{0," + GAP + "}?"
                         + PERCENT).matcher(text);
                 while (after.find()) {
+                    if (afterComparison(text, after.start(1))) {
+                        continue;
+                    }
                     claim(card, after.start(1), after.start(1) - (after.start() + name.length()),
                             number(after.group(1)), owner, distance, value);
                 }
                 Matcher before = Pattern.compile("(?<![\\d.,])" + PERCENT + "[^.;\\n%\\d]{0," + GAP + "}?(?<![\\p{L}])"
                         + quoted + "(?![\\p{L}])").matcher(text);
                 while (before.find()) {
+                    if (afterComparison(text, before.start(1))) {
+                        continue;
+                    }
                     int gap = before.end() - name.length() - before.end(1);
                     claim(card, before.start(1), gap, number(before.group(1)), owner, distance, value);
                 }
             }
         }
-        for (Map.Entry<Integer, String> claimed : owner.entrySet()) {
-            double share = value.get(claimed.getKey()) / 100.0;
-            if (share > 0 && share <= 1 && !shares.containsKey(claimed.getValue())) {
-                shares.put(claimed.getValue(), share);
+        for (Integer position : weights(text, owner, value)) {
+            double share = value.get(position) / 100.0;
+            if (share > 0 && share <= 1 && !shares.containsKey(owner.get(position))) {
+                shares.put(owner.get(position), share);
             }
         }
         // keep the cards' order
@@ -83,6 +113,49 @@ public final class MissionWeights {
             parts.add(share.getKey() + " " + number + " %");
         }
         return String.join(", ", parts);
+    }
+
+    /**
+     * The claimed percentages that are weights: those in a sentence with a weight word; without any, all of them when
+     * at least two cards carry one and they add up to at most 100 %; else none.
+     */
+    private static List<Integer> weights(String text, Map<Integer, String> owner, Map<Integer, Double> value) {
+        List<Integer> signalled = new ArrayList<Integer>();
+        Set<String> cards = new LinkedHashSet<String>();
+        double sum = 0;
+        for (Map.Entry<Integer, String> claimed : owner.entrySet()) {
+            if (WEIGHT_WORD.matcher(sentenceAt(text, claimed.getKey())).find()) {
+                signalled.add(claimed.getKey());
+            }
+            cards.add(claimed.getValue());
+            sum += value.get(claimed.getKey());
+        }
+        if (!signalled.isEmpty()) {
+            return signalled;
+        }
+        if (cards.size() >= 2 && sum <= 100.5) {
+            return new ArrayList<Integer>(owner.keySet());
+        }
+        return Collections.emptyList();
+    }
+
+    private static boolean afterComparison(String text, int numberStart) {
+        return COMPARISON_BEFORE.matcher(text.substring(Math.max(0, numberStart - 24), numberStart)).find();
+    }
+
+    private static String sentenceAt(String text, int position) {
+        int start = 0;
+        int end = text.length();
+        Matcher boundary = SENTENCE_END.matcher(text);
+        while (boundary.find()) {
+            if (boundary.end() <= position) {
+                start = boundary.end();
+            } else {
+                end = boundary.start();
+                break;
+            }
+        }
+        return text.substring(start, Math.max(start, end));
     }
 
     private static void claim(String card, int position, int gap, double number, Map<Integer, String> owner,

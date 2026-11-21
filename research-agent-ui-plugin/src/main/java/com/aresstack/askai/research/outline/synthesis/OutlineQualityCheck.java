@@ -211,13 +211,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
      * no merged area).
      */
     private static void areas(PlannedChapter chapter, int index, SynthesisBrief brief, List<PlanFinding> blocking) {
-        Map<String, String> majorTopicOfGroup = new LinkedHashMap<String, String>();
-        for (String key : chapter.getMaterialKeys()) {
-            SynthesisBrief.TopicEntry topic = brief.topic(key);
-            if (topic != null && topic.getProfile().isMajor() && !majorTopicOfGroup.containsKey(topic.getGroupKey())) {
-                majorTopicOfGroup.put(topic.getGroupKey(), topic.getKey());
-            }
-        }
+        Map<String, String> majorTopicOfGroup = majorTopicOfGroup(chapter, brief);
         if (majorTopicOfGroup.size() > 1) {
             List<String> described = new ArrayList<String>();
             for (String topicKey : majorTopicOfGroup.values()) {
@@ -227,6 +221,23 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                     + "\" combines independent major research areas: " + String.join(" and ", described)
                     + ". Each is large enough for a chapter of its own."));
         }
+    }
+
+    /** Per topic group of the chapter's whole major topics, the first such topic. */
+    private static Map<String, String> majorTopicOfGroup(PlannedChapter chapter, SynthesisBrief brief) {
+        Map<String, String> majorTopicOfGroup = new LinkedHashMap<String, String>();
+        for (String key : chapter.getMaterialKeys()) {
+            SynthesisBrief.TopicEntry topic = brief.topic(key);
+            if (topic != null && topic.getProfile().isMajor() && !majorTopicOfGroup.containsKey(topic.getGroupKey())) {
+                majorTopicOfGroup.put(topic.getGroupKey(), topic.getKey());
+            }
+        }
+        return majorTopicOfGroup;
+    }
+
+    /** {@code true} when the chapter holds whole major areas of different topic groups ({@link #AREAS_MERGED}). */
+    static boolean combinesAreas(PlannedChapter chapter, SynthesisBrief brief) {
+        return majorTopicOfGroup(chapter, brief).size() > 1;
     }
 
     /**
@@ -708,43 +719,91 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
      * more, the chapter with the fewest distinct passages (one without an explicit share first) joins the chapter it
      * fits best: the one on the same concept card, else the nearest by topic relations and title. Before, 9 or 10
      * planned chapters each kept one section and the book fell below 12 sections.
+     * <p>
+     * Three limits keep the fold from undoing the outline (architect review of 21.11.): the count never goes below the
+     * number of main themes (concept cards) with material, the last chapter of a card is never folded away, and no
+     * fold may join two major areas of different groups ({@link #AREAS_MERGED} would flag the result). When nothing
+     * can be folded, the chapters stay and a note says why.
      */
     private OutlinePlan fitChaptersToBudget(OutlinePlan plan, SynthesisBrief brief, List<String> notes) {
         int total = length.targetWords(brief.getContext().getDeliverable());
         if (!length.isSectionBudget() || total <= 0 || plan.getChapters().size() < 2) {
             return plan;
         }
-        int limit = Math.max(1, total / (BUDGET_SECTIONS_PER_CHAPTER * length.getBudgetSectionWords()));
-        if (plan.getChapters().size() <= limit) {
+        int byWords = Math.max(1, total / (BUDGET_SECTIONS_PER_CHAPTER * length.getBudgetSectionWords()));
+        if (plan.getChapters().size() <= byWords) {
             return plan;
         }
         TopicAnalysis analysis = brief.getAnalysis();
         List<PlannedChapter> chapters = new ArrayList<PlannedChapter>(plan.getChapters());
+        int cards = cardsWithMaterial(chapters, brief).size();
+        int limit = Math.max(byWords, cards);
+        if (limit > byWords) {
+            notes.add("The book's " + total + " words allow " + byWords + " chapters, but " + cards
+                    + " main themes of the concept carry material; each keeps a chapter of its own.");
+        }
         while (chapters.size() > limit) {
-            int thin = -1;
-            int fewest = Integer.MAX_VALUE;
-            boolean thinHasShare = true;
+            List<Integer> order = new ArrayList<Integer>();
+            final Map<Integer, Integer> distinct = new LinkedHashMap<Integer, Integer>();
+            final Map<Integer, Boolean> share = new LinkedHashMap<Integer, Boolean>();
+            Map<String, Integer> chaptersOfCard = cardsWithMaterial(chapters, brief);
             for (int i = 0; i < chapters.size(); i++) {
                 PlannedChapter chapter = chapters.get(i);
-                int distinct = analysis.distinctCount(passagesOf(chapterKeys(chapter), brief));
-                boolean share = !Double.isNaN(brief.getContext().shareOf(OutlineAssembler.conceptNodeOf(chapter,
-                        brief), chapter.getTitle()));
-                if (thin < 0 || (thinHasShare && !share) || (share == thinHasShare && distinct < fewest)) {
-                    thin = i;
-                    fewest = distinct;
-                    thinHasShare = share;
+                String card = OutlineAssembler.conceptNodeOf(chapter, brief);
+                if (!card.isEmpty() && chaptersOfCard.get(card) == 1) {
+                    continue;
                 }
+                order.add(i);
+                distinct.put(i, analysis.distinctCount(passagesOf(chapterKeys(chapter), brief)));
+                share.put(i, !Double.isNaN(brief.getContext().shareOf(card, chapter.getTitle())));
             }
-            int into = chapterFoldTarget(chapters, thin, brief);
-            PlannedChapter small = chapters.get(thin);
-            PlannedChapter host = chapters.get(into);
-            chapters.set(into, joined(host, small));
-            chapters.remove(thin);
-            notes.add("Chapter \"" + small.getTitle() + "\" joined \"" + host.getTitle() + "\": the book's " + total
-                    + " words allow " + limit + " chapters with room for " + BUDGET_SECTIONS_PER_CHAPTER
-                    + " sections of " + length.getBudgetSectionWords() + " words each.");
+            Collections.sort(order, new java.util.Comparator<Integer>() {
+                @Override
+                public int compare(Integer a, Integer b) {
+                    int byShare = Boolean.compare(share.get(a), share.get(b));
+                    return byShare != 0 ? byShare : Integer.compare(distinct.get(a), distinct.get(b));
+                }
+            });
+            boolean folded = false;
+            for (int thin : order) {
+                int into = chapterFoldTarget(chapters, thin, brief);
+                if (into < 0 || into >= chapters.size() || into == thin) {
+                    continue;
+                }
+                PlannedChapter small = chapters.get(thin);
+                PlannedChapter host = chapters.get(into);
+                PlannedChapter merged = joined(host, small);
+                if (combinesAreas(merged, brief)) {
+                    continue;
+                }
+                chapters.set(into, merged);
+                chapters.remove(thin);
+                notes.add("Chapter \"" + small.getTitle() + "\" joined \"" + host.getTitle() + "\": the book's "
+                        + total + " words allow " + limit + " chapters with room for " + BUDGET_SECTIONS_PER_CHAPTER
+                        + " sections of " + length.getBudgetSectionWords() + " words each.");
+                folded = true;
+                break;
+            }
+            if (!folded) {
+                notes.add("The book's " + total + " words allow " + limit + " chapters; " + chapters.size()
+                        + " stay, because each is the last chapter of a main theme or would join two research areas.");
+                break;
+            }
         }
         return plan.withChapters(chapters);
+    }
+
+    /** Per concept card that a chapter carries, the number of chapters on it. */
+    private static Map<String, Integer> cardsWithMaterial(List<PlannedChapter> chapters, SynthesisBrief brief) {
+        Map<String, Integer> count = new LinkedHashMap<String, Integer>();
+        for (PlannedChapter chapter : chapters) {
+            String card = OutlineAssembler.conceptNodeOf(chapter, brief);
+            if (!card.isEmpty()) {
+                Integer known = count.get(card);
+                count.put(card, known == null ? 1 : known + 1);
+            }
+        }
+        return count;
     }
 
     private static List<String> chapterKeys(PlannedChapter chapter) {

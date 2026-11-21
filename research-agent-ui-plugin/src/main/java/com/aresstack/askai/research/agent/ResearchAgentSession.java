@@ -3851,7 +3851,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                 }
             }
         } catch (RuntimeException unreadable) {
-            // the length line stands alone
+            technicalLog("mission weights: concept cards unreadable, the length line stands alone: " + unreadable);
         }
         return hint;
     }

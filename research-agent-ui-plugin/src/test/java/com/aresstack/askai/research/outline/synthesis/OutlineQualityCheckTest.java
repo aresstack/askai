@@ -24,6 +24,11 @@ public class OutlineQualityCheckTest {
         return new PlannedChapter(title, "Purpose.", material, concepts, Arrays.asList(sections), false);
     }
 
+    /** The concept requirement key of a topic's card, as the chapter's concept keys. */
+    private static List<String> cardOf(SynthesisBrief brief, String topicKey) {
+        return Collections.singletonList(brief.topic(topicKey).getConceptKey());
+    }
+
     private static boolean has(List<PlanFinding> findings, String code, boolean blocking) {
         for (PlanFinding finding : findings) {
             if (finding.getCode().equals(code) && finding.isBlocking() == blocking) {
@@ -594,8 +599,44 @@ public class OutlineQualityCheckTest {
      * The chapter count follows the length too: 1,800 words leave room for 2 chapters of two 450-word sections;
      * the thinnest chapters join the chapter they fit best and keep their sections there.
      */
+    /**
+     * Repair plan step 5a: chapters beyond the book's room join the chapter they fit best, on the same card. "Area
+     * one, more" names no concept requirement (else an earlier fix merges it); its material sits on area one's card.
+     */
     @Test
     public void theChapterCountFollowsTheBookLength() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "3000 words";
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Area one", Collections.singletonList("T1.1"), cardOf(brief, "T1"), section("One", "T1.1")),
+                chapter("Area one, more", Collections.singletonList("T1.2"), Collections.<String>emptyList(),
+                        section("More", "T1.2")),
+                chapter("Area two", Collections.singletonList("T2"), cardOf(brief, "T2"), section("Two", "T2")),
+                chapter("Area three", Collections.singletonList("T3"), cardOf(brief, "T3"), section("Three", "T3")),
+                chapter("Area four", Collections.singletonList("T4"), cardOf(brief, "T4"), section("Four", "T4"))),
+                Collections.<String>emptyList(), false);
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        List<PlannedChapter> chapters = fixed.getPlan().getChapters();
+        assertEquals(fixed.getPlan().toString(), 4, chapters.size());
+        assertTrue(fixed.getPlan() + " " + fixed.getNotes(),
+                chapters.get(0).getMaterialKeys().containsAll(Arrays.asList("T1.1", "T1.2")));
+        boolean noted = false;
+        for (String note : fixed.getNotes()) {
+            noted |= note.contains("joined") && note.contains("allow 4 chapters");
+        }
+        assertTrue(fixed.getNotes().toString(), noted);
+        assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.AREAS_MERGED, true));
+    }
+
+    /**
+     * Architect review of 21.11.: a small book keeps one chapter per main theme with material. 1,800 words allow two
+     * chapters, but folding four themes into two would join independent areas, which the review then flags.
+     */
+    @Test
+    public void aSmallBookKeepsEveryMainTheme() {
         SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
         corpus.deliverable = "1800 words";
         SynthesisBrief brief = corpus.brief();
@@ -604,12 +645,18 @@ public class OutlineQualityCheckTest {
 
         OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
 
-        assertEquals(fixed.getPlan().toString(), 2, fixed.getPlan().getChapters().size());
+        java.util.Set<String> cards = new java.util.HashSet<String>();
+        for (PlannedChapter chapter : fixed.getPlan().getChapters()) {
+            String card = OutlineAssembler.conceptNodeOf(chapter, brief);
+            assertTrue(chapter.getTitle() + " shares its card", card.isEmpty() || cards.add(card));
+        }
+        assertEquals("every main theme keeps its chapter", 4, cards.size());
         boolean noted = false;
         for (String note : fixed.getNotes()) {
-            noted |= note.contains("allow 2 chapters");
+            noted |= note.contains("4 main themes of the concept carry material");
         }
         assertTrue(fixed.getNotes().toString(), noted);
+        assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.AREAS_MERGED, true));
         java.util.Set<String> before = new java.util.HashSet<String>();
         for (PlannedChapter chapter : plan.getChapters()) {
             before.addAll(chapter.getMaterialKeys());

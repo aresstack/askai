@@ -20,7 +20,8 @@ public class OutlineGenerationSharesTest {
         labels.put("n-law", "Recht, Datenschutz und Betriebsrat");
         List<String> notes = new ArrayList<String>();
 
-        Map<String, Double> byId = OutlineGeneration.chapterShares("Umfang 20 Seiten, Recht 40 %", labels, notes);
+        Map<String, Double> byId = OutlineGeneration.chapterShares("Umfang 20 Seiten. Gewichtung: Recht 40 %.",
+                labels, notes);
 
         assertEquals(1, byId.size());
         assertEquals(0.40, byId.get("n-law"), 1e-9);
