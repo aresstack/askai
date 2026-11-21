@@ -110,6 +110,11 @@ public class OutlineQualityCheckTest {
         assertEquals(36000, length.targetWords("120 pages"));
         assertEquals(25000, length.targetWords("20000-30000 words"));
         assertEquals(30000, length.targetWords("ca. 100 Seiten"));
+        // Repair plan step 1: the en dash and "bis" read as a range, not as its upper end.
+        assertEquals(7500, length.targetWords("20–30 Seiten"));
+        assertEquals(7500, length.targetWords("20 bis 30 Seiten"));
+        assertEquals(7500, length.targetWords("20-30 pages"));
+        assertEquals(8000, length.targetWords("8.000 Wörter"));
         assertEquals(0, length.targetWords("a practical book"));
         assertEquals(700, length.unboundedTarget(3));
         assertEquals("capped", 1100, length.unboundedTarget(30));
@@ -540,5 +545,103 @@ public class OutlineQualityCheckTest {
         all.addAll(OutlineQualityCheck.units(brief, "T2"));
         assertEquals(new java.util.TreeSet<String>(all), new java.util.TreeSet<String>(
                 fixed.getChapters().get(0).getSections().get(0).getMaterialKeys()));
+    }
+
+    // ------------------------------------------------------------------ repair plan step 5a
+
+    private static int sections(OutlinePlan plan) {
+        int sections = 0;
+        for (PlannedChapter chapter : plan.getChapters()) {
+            sections += chapter.getSections().size();
+        }
+        return sections;
+    }
+
+    /**
+     * The 17 Nov book had 26 to 35 sections of 210 to 300 words for 7,500 words. With a book length a chapter now
+     * keeps at most its words / 450 sections, and every section gets at least 350 words.
+     */
+    @Test
+    public void theSectionCountFollowsTheBookLengthAndNoSectionFallsBelowTheFloor() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "2000 words";
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults());
+        assertTrue("the fallback plan has more sections than 2000 words carry", sections(plan) > 4);
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        assertTrue(fixed.getPlan().toString(), sections(fixed.getPlan()) <= 4);
+        boolean noted = false;
+        for (String note : fixed.getNotes()) {
+            noted |= note.contains("words allow");
+        }
+        assertTrue(fixed.getNotes().toString(), noted);
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(fixed.getPlan(), brief, "s", Collections.<PlanFinding>emptyList(), fixed.getNotes());
+        int total = 0;
+        for (com.aresstack.askai.research.outline.OutlineChapter chapter : outline.getChapters()) {
+            for (com.aresstack.askai.research.outline.OutlineSection section : chapter.getSections()) {
+                int words = section.getBrief().getWordTarget();
+                assertTrue(section.getTitle() + " " + words, words >= OutlineLengthSettings.DEFAULT_SECTION_WORD_FLOOR);
+                total += words;
+            }
+        }
+        assertEquals("the sum stays the book length", 2000, total, 50 * sections(fixed.getPlan()));
+    }
+
+    @Test
+    public void switchedOffTheSectionsFollowTheMaterialAsBefore() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "2000 words";
+        SynthesisBrief brief = corpus.brief();
+        OutlineLengthSettings off = OutlineLengthSettings.defaults().withSectionBudget(false);
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief, off);
+        assertTrue(sections(new OutlineQualityCheck(off).fix(plan, brief).getPlan())
+                > sections(CHECK.fix(plan, brief).getPlan()));
+    }
+
+    /** An explicit share of a concept card is met within 5 percentage points; the rest follows the material. */
+    @Test
+    public void anExplicitShareOfAConceptCardIsMet() {
+        SynthesisFixture corpus = oneTopicThreeConcepts();
+        corpus.deliverable = "6000 words";
+        corpus.chapterShares.put("c-law", 0.5);
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan plan = CHECK.fix(new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Collections.singletonList("T1"), Collections.singletonList("C1"),
+                        section("A", "T1")),
+                chapter("Safety", Collections.singletonList("T1"), Collections.singletonList("C2"),
+                        section("B", "T1")),
+                chapter("Law", Collections.singletonList("T1"), Collections.singletonList("C3"),
+                        section("C", "T1"))),
+                Collections.<String>emptyList(), false), brief).getPlan();
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "s", Collections.<PlanFinding>emptyList(), Collections.<String>emptyList());
+
+        int total = 0;
+        int law = 0;
+        for (com.aresstack.askai.research.outline.OutlineChapter chapter : outline.getChapters()) {
+            total += chapter.getBrief().getWordTarget();
+            if (chapter.getTitle().equals("Law")) {
+                law = chapter.getBrief().getWordTarget();
+            }
+        }
+        assertEquals("Law holds half of the book", 0.5, (double) law / total, 0.05);
+    }
+
+    @Test
+    public void theFloorComesFirstAndTheRestFollowsTheWeights() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.withFloor(2000, new long[]{1, 1, 18}, 350, length);
+        assertTrue(words[0] >= 350);
+        assertTrue(words[1] >= 350);
+        assertEquals(2000, words[0] + words[1] + words[2], 100);
+        int[] shared = SectionBudget.spread(1000, new long[]{1, 3}, new double[]{0.5, Double.NaN}, 0, length);
+        assertEquals(500, shared[0]);
+        assertEquals(500, shared[1]);
+        assertEquals(4, length.budgetSectionLimit(2000));
+        assertEquals("at least one section", 1, length.budgetSectionLimit(300));
     }
 }

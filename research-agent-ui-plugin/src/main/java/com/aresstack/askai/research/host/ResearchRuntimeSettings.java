@@ -500,6 +500,17 @@ public final class ResearchRuntimeSettings {
      * only off the exclusions. Default ON: live run 5 searched "Datenschutz beim betrieblichen
      * Wiedereingliederungsmanagement" for a book on wearables on construction sites.
      */
+    /**
+     * Repair plan step 1: when the scope names no length, the length the mission states ("20 bis 30 Seiten") becomes
+     * the deliverable of the frozen concept, and Phase 3 reads it the same way from a concept frozen without one.
+     * Default ON; off = the deliverable stays empty as before.
+     */
+    public static final String KEY_LENGTH_FROM_MISSION = "research.concept.lengthFromMission";
+
+    public static boolean loadLengthFromMission(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_LENGTH_FROM_MISSION, true);
+    }
+
     public static final String KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS = "research.plan.queryNeedsConceptNearness";
 
     public static boolean loadPlanQueryNeedsConceptNearness(WorkspaceStateStore store) {

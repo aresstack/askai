@@ -2,6 +2,7 @@ package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.research.book.FrozenConcept;
 import com.aresstack.askai.research.concept.ConceptIdentity;
+import com.aresstack.askai.research.domain.scope.DeliverableLengthText;
 import com.aresstack.askai.research.knowledge.ClusteringMonitor;
 import com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery;
 import com.aresstack.askai.research.knowledge.processing.live.TopicAnalysisSnapshot;
@@ -195,15 +196,25 @@ public final class OutlineGeneration {
         TopicAnalysisSnapshot snapshot = discovery.analysisFor(monitor);
         checkCancel(monitor);
         OutlineGenerationSettings settings = inputs.settings();
+        String deliverable = frozen.getDeliverable();
+        List<String> lengthNotes = new ArrayList<String>();
+        if (deliverable.trim().isEmpty() && settings.isLengthFromMission()) {
+            // Repair plan step 1: a concept frozen before the mission's length was read (or without one).
+            deliverable = DeliverableLengthText.describe(DeliverableLengthText.read(frozen.getMission()));
+            lengthNotes.add(deliverable.isEmpty()
+                    ? "The concept names no book length, so the outline has no word budget."
+                    : "The concept was frozen without a book length; the mission's \"" + deliverable
+                    + "\" sets the word budget.");
+        }
         SynthesisContext context = new SynthesisContext(inputs.bookTitle(frozen), frozen.getMission(),
-                frozen.getDeliverable(), frozen.getLanguage(), frozen.getPin().getBlacklist());
+                deliverable, frozen.getLanguage(), frozen.getPin().getBlacklist());
         final TopicAnalysisSnapshot texts = snapshot;
         SynthesisBrief brief = SynthesisBrief.of(context, snapshot.analysis(), new SynthesisBrief.Texts() {
             public String text(String passageId) {
                 return texts.text(passageId);
             }
         }, settings.getSynthesis());
-        List<String> notes = new ArrayList<String>();
+        List<String> notes = new ArrayList<String>(lengthNotes);
         if (!snapshot.isSettled()) {
             notes.add(snapshot.getPendingSourceIds().size() + " sources were still being processed when the topic "
                     + "analysis was taken; generate again once they are done to include them.");

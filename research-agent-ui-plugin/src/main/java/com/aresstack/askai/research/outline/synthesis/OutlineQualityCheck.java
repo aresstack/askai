@@ -394,6 +394,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         fixed = packCodeSections(fixed, brief, notes);
         fixed = nearDuplicateTitles(fixed, notes);
         fixed = foldThinSections(fixed, brief, notes);
+        fixed = fitSectionsToBudget(fixed, brief, notes);
         return new Fixed(fixed, notes);
     }
 
@@ -693,6 +694,69 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
                 }
             }
             chapters.add(chapter.withSections(sections));
+        }
+        return plan.withChapters(chapters);
+    }
+
+    /**
+     * Repair plan step 5a: with a book length, a chapter keeps at most its words / the budget section words sections.
+     * The chapter words are the book length spread over the chapters (an explicit share of its concept card first,
+     * the rest by distinct material, each chapter at least the section floor); while a chapter has more sections, its
+     * section with the fewest distinct passages is folded into the section it fits best ({@link #foldTarget}).
+     * Before step 5a, 26 to 35 sections shared the 7,500 words of the 17 Nov book.
+     */
+    private OutlinePlan fitSectionsToBudget(OutlinePlan plan, SynthesisBrief brief, List<String> notes) {
+        int total = length.targetWords(brief.getContext().getDeliverable());
+        if (!length.isSectionBudget() || total <= 0 || plan.getChapters().isEmpty()) {
+            return plan;
+        }
+        TopicAnalysis analysis = brief.getAnalysis();
+        int n = plan.getChapters().size();
+        long[] weights = new long[n];
+        double[] shares = new double[n];
+        List<String> cards = new ArrayList<String>();
+        for (int c = 0; c < n; c++) {
+            PlannedChapter chapter = plan.getChapters().get(c);
+            for (PlannedSection section : chapter.getSections()) {
+                weights[c] += Math.max(1, analysis.distinctCount(passagesOf(section.getMaterialKeys(), brief)));
+            }
+            String card = OutlineAssembler.conceptNodeOf(chapter, brief);
+            cards.add(card);
+            shares[c] = brief.getContext().shareOf(card, chapter.getTitle());
+        }
+        shares = ChapterShares.splitAmongSiblings(shares, cards, weights);
+        int[] chapterWords = SectionBudget.spread(total, weights, shares, length.getSectionWordFloor(), length);
+        List<PlannedChapter> chapters = new ArrayList<PlannedChapter>();
+        for (int c = 0; c < n; c++) {
+            PlannedChapter chapter = plan.getChapters().get(c);
+            int limit = length.budgetSectionLimit(chapterWords[c]);
+            List<PlannedSection> sections = new ArrayList<PlannedSection>(chapter.getSections());
+            while (sections.size() > limit) {
+                int thin = 0;
+                int fewest = Integer.MAX_VALUE;
+                for (int i = 0; i < sections.size(); i++) {
+                    int distinct = analysis.distinctCount(passagesOf(sections.get(i).getMaterialKeys(), brief));
+                    if (distinct < fewest) {
+                        thin = i;
+                        fewest = distinct;
+                    }
+                }
+                int into = foldTarget(sections, thin, brief);
+                PlannedSection small = sections.get(thin);
+                PlannedSection neighbour = sections.get(into);
+                List<String> keys = new ArrayList<String>(neighbour.getMaterialKeys());
+                for (String key : small.getMaterialKeys()) {
+                    if (!keys.contains(key)) {
+                        keys.add(key);
+                    }
+                }
+                sections.set(into, neighbour.withMaterialKeys(keys));
+                sections.remove(thin);
+                notes.add("Section \"" + small.getTitle() + "\" of \"" + chapter.getTitle() + "\" was folded into \""
+                        + neighbour.getTitle() + "\": the chapter's " + chapterWords[c] + " words allow " + limit
+                        + " sections of at least " + length.getBudgetSectionWords() + " words.");
+            }
+            chapters.add(sections.size() == chapter.getSections().size() ? chapter : chapter.withSections(sections));
         }
         return plan.withChapters(chapters);
     }

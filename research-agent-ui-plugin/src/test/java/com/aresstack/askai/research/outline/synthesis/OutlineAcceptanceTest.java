@@ -227,7 +227,10 @@ public class OutlineAcceptanceTest {
             }
         }
         assertEquals("the length is spread over the sections", 12000, total);
-        assertEquals("3 distinct passages get a third of what 9 get", falls / 3.0, battery, 50);
+        // Repair plan step 5a: every section gets the floor first; above it the words follow the distinct material.
+        int floor = OutlineLengthSettings.DEFAULT_SECTION_WORD_FLOOR;
+        assertEquals("above the floor, 3 distinct passages get a third of what 9 get", (falls - floor) / 3.0,
+                battery - floor, 50);
     }
 
     // ------------------------------------------------------------------ D

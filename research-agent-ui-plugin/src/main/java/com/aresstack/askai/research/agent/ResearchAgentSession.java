@@ -2402,7 +2402,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
 
             public String deliverable() {
-                return describeDeliverable(currentScopeDraft().getDeliverable());
+                // Repair plan step 1: the scoping grammar cannot carry a length; the mission's length fills the gap.
+                com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = currentScopeDraft();
+                return com.aresstack.askai.research.domain.scope.DeliverableLengthText.effective(
+                        draft.getDeliverable(), draft.getMission(),
+                        com.aresstack.askai.research.host.ResearchRuntimeSettings.loadLengthFromMission(
+                                hostStateStore));
             }
 
             public String language() {
@@ -2416,16 +2421,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     static String describeDeliverable(com.aresstack.askai.research.domain.scope.ResearchDeliverable deliverable) {
-        if (deliverable == null || !deliverable.hasTargetLength()) {
-            return "";
-        }
-        String unit = deliverable.getLengthUnit().name().toLowerCase(java.util.Locale.ROOT);
-        int min = deliverable.getTargetLengthMin();
-        int max = deliverable.getTargetLengthMax();
-        if (min > 0 && max > 0 && min != max) {
-            return min + "-" + max + " " + unit;
-        }
-        return Math.max(min, max) + " " + unit;
+        return com.aresstack.askai.research.domain.scope.DeliverableLengthText.describe(deliverable);
     }
 
     /** The book manifest, or {@code null} in fake mode. */
@@ -3811,6 +3807,16 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     /** The mission shown above the concept tree ("" when none is recorded yet). */
     public String currentMission() {
         return currentScopeDraft().getMission();
+    }
+
+    /**
+     * Repair plan step 1: the line under the mission that says which book length the later phases get (from the
+     * scope, else read from the mission), or that there is none.
+     */
+    public String currentLengthHint() {
+        com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = currentScopeDraft();
+        return com.aresstack.askai.research.book.ConceptLengthHint.of(draft.getDeliverable(), draft.getMission(),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadLengthFromMission(hostStateStore));
     }
 
     /**

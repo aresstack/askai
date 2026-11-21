@@ -191,9 +191,10 @@ public final class ResearchBriefViewContribution implements ArtifactViewContribu
                                         .of(service.snapshot());
                 final String mission = research.currentMission();
                 final String mode = research.conceptModeMessage();
+                final String length = research.currentLengthHint();
                 uiExecutor.execute(new Runnable() {
                     public void run() {
-                        view.renderMission(mission, mode);
+                        view.renderMission(mission, mode, length);
                         view.render(projection);
                     }
                 });
