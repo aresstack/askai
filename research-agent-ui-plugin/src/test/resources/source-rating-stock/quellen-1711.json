@@ -1,0 +1,680 @@
+{
+ "stand": "2026-11-21",
+ "was": "Testdaten fuer Komponente 16 (Quellenbewertung): die 82 Domains, die das Buch vom 17.11. zitiert (1613 Zitate), mit Urteil des Architekten",
+ "hinweise": [
+  "Urteil aus Domainname, Kenntnis der Anbieter und einer Beispielpassage; eine Person, ein Durchgang.",
+  "sicher=false: Quellenart unsicher (unbekannter Anbieter); diese zaehlen nicht fuer die Schwellen, nur fuer den Bericht.",
+  "Rechtsraum wird nur bei GESETZ_NORM, BEHOERDE_UNFALLVERSICHERUNG, KANZLEI_BERATUNG und VERBAND gewertet; sonst ist OHNE oder das Land des Anbieters beides richtig.",
+  "Schwellen (Baudokument, vorgeschlagen): Quellenart bei mindestens 85 % der Zitate (sichere Domains) richtig; hoechstens eine HERSTELLER_HANDEL-Domain als WISSENSCHAFT oder BEHOERDE; Rechtsraum bei mindestens 95 % der gewerteten Zitate richtig. Endgueltig vor dem ersten Lauf festlegen.",
+  "Eingabe fuer die Komponente: Adresse, Titel, Domain und erste Passage je Quellengruppe aus dem Bestand (replay-corpus.json)."
+ ],
+ "zitateJeQuellenart": {
+  "BEHOERDE_UNFALLVERSICHERUNG": 496,
+  "KANZLEI_BERATUNG": 239,
+  "SONSTIGE": 136,
+  "FACHPRESSE": 193,
+  "HERSTELLER_HANDEL": 395,
+  "GESETZ_NORM": 40,
+  "NACHSCHLAGEWERK": 50,
+  "VERBAND": 28,
+  "WISSENSCHAFT": 36
+ },
+ "domains": [
+  {
+   "domain": "forum.dguv.de",
+   "zitate": 94,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "publikationen.dguv.de",
+   "zitate": 94,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "betriebsrat.com",
+   "zitate": 66,
+   "quellenart": "KANZLEI_BERATUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "sicherearbeit.at",
+   "zitate": 65,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "AT",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "compdocs.de",
+   "zitate": 59,
+   "quellenart": "SONSTIGE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "arbeitsschutz-aktuell.hinte-messe.de",
+   "zitate": 56,
+   "quellenart": "FACHPRESSE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "dr-datenschutz.de",
+   "zitate": 47,
+   "quellenart": "KANZLEI_BERATUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "bsi.bund.de",
+   "zitate": 46,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "tww.law",
+   "zitate": 40,
+   "quellenart": "KANZLEI_BERATUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "hrtime.de",
+   "zitate": 38,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "dguv.de",
+   "zitate": 37,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "built-smart-hub.com",
+   "zitate": 36,
+   "quellenart": "SONSTIGE",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "baua.de",
+   "zitate": 36,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "externer-datenschutzbeauftragter-dresden.de",
+   "zitate": 36,
+   "quellenart": "KANZLEI_BERATUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "handwerksblatt.de",
+   "zitate": 32,
+   "quellenart": "FACHPRESSE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "conrad.at",
+   "zitate": 30,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "AT",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "trans.info",
+   "zitate": 30,
+   "quellenart": "FACHPRESSE",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "NEIN",
+   "sicher": false
+  },
+  {
+   "domain": "all-about-security.de",
+   "zitate": 27,
+   "quellenart": "FACHPRESSE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "arbeitsschutz.nrw.de",
+   "zitate": 26,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "gesetze-im-internet.de",
+   "zitate": 25,
+   "quellenart": "GESETZ_NORM",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "uvex-safety.com",
+   "zitate": 24,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "source.android.com",
+   "zitate": 23,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "univio.com",
+   "zitate": 23,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "softeq.com",
+   "zitate": 23,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "arbeitsschutzgesetze.com",
+   "zitate": 23,
+   "quellenart": "NACHSCHLAGEWERK",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "bgbau-medien.de",
+   "zitate": 23,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "scnsoft.de",
+   "zitate": 22,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "ismarch.com",
+   "zitate": 22,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "bgbau.de",
+   "zitate": 19,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "wiemer-arndt.de",
+   "zitate": 19,
+   "quellenart": "KANZLEI_BERATUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "weka.de",
+   "zitate": 18,
+   "quellenart": "FACHPRESSE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "autosen.com",
+   "zitate": 17,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "digitalzentrumbau.de",
+   "zitate": 17,
+   "quellenart": "VERBAND",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": false
+  },
+  {
+   "domain": "hashtagpraxis.com",
+   "zitate": 17,
+   "quellenart": "SONSTIGE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "samw.ch",
+   "zitate": 17,
+   "quellenart": "WISSENSCHAFT",
+   "rechtsraum": "CH",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "link.springer.com",
+   "zitate": 16,
+   "quellenart": "WISSENSCHAFT",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "mokosmart.com",
+   "zitate": 15,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "de.wikipedia.org",
+   "zitate": 15,
+   "quellenart": "NACHSCHLAGEWERK",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "eur-lex.europa.eu",
+   "zitate": 15,
+   "quellenart": "GESETZ_NORM",
+   "rechtsraum": "EU",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "calima.io",
+   "zitate": 14,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "bertsch-pruefinstitut.de",
+   "zitate": 14,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "fachkraft-arbeitssicherheit.com",
+   "zitate": 14,
+   "quellenart": "KANZLEI_BERATUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "hensche.de",
+   "zitate": 14,
+   "quellenart": "KANZLEI_BERATUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "blog.dormakaba.com",
+   "zitate": 13,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "baumeister.de",
+   "zitate": 13,
+   "quellenart": "FACHPRESSE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "bau.com",
+   "zitate": 12,
+   "quellenart": "FACHPRESSE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "conrad.ch",
+   "zitate": 12,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "CH",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "tutool.io",
+   "zitate": 12,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "healthy-workplaces.osha.europa.eu",
+   "zitate": 12,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "EU",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "arbeitsrechte.de",
+   "zitate": 12,
+   "quellenart": "NACHSCHLAGEWERK",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "lora-wan.de",
+   "zitate": 11,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "uv-bund-bahn.de",
+   "zitate": 11,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "oira.osha.europa.eu",
+   "zitate": 11,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "EU",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "sbe-elektroservice.de",
+   "zitate": 11,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "maibornwolff.de",
+   "zitate": 10,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "iotusecase.com",
+   "zitate": 10,
+   "quellenart": "SONSTIGE",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "osha.europa.eu",
+   "zitate": 9,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "EU",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "balluff.com",
+   "zitate": 8,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "facebook.com",
+   "zitate": 8,
+   "quellenart": "SONSTIGE",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "vdma.eu",
+   "zitate": 7,
+   "quellenart": "VERBAND",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "benchmarkgensuite.com",
+   "zitate": 7,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "emb-neutraubling.de",
+   "zitate": 7,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "iot.telekom.com",
+   "zitate": 6,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "topconpositioning.com",
+   "zitate": 6,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "gewerbeaufsicht.bayern.de",
+   "zitate": 6,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "microsensys.de",
+   "zitate": 5,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "remato.com",
+   "zitate": 5,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "personen-notsignal-anlagen-pna.de",
+   "zitate": 5,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "haufe.de",
+   "zitate": 5,
+   "quellenart": "FACHPRESSE",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "praeventionsforum-plus.info",
+   "zitate": 5,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": false
+  },
+  {
+   "domain": "ccnet.de",
+   "zitate": 4,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "de.linkedin.com",
+   "zitate": 4,
+   "quellenart": "SONSTIGE",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "elektroschmitz-esm.de",
+   "zitate": 3,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "mb.uni-paderborn.de",
+   "zitate": 3,
+   "quellenart": "WISSENSCHAFT",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "goerg.de",
+   "zitate": 3,
+   "quellenart": "KANZLEI_BERATUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "hseblog.com",
+   "zitate": 2,
+   "quellenart": "SONSTIGE",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "ldi.nrw.de",
+   "zitate": 2,
+   "quellenart": "BEHOERDE_UNFALLVERSICHERUNG",
+   "rechtsraum": "DE",
+   "eigeninteresse": "NEIN",
+   "sicher": true
+  },
+  {
+   "domain": "arbeitundtechnik.gpa.at",
+   "zitate": 2,
+   "quellenart": "VERBAND",
+   "rechtsraum": "AT",
+   "eigeninteresse": "UNKLAR",
+   "sicher": true
+  },
+  {
+   "domain": "twigcom.com",
+   "zitate": 2,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  },
+  {
+   "domain": "collab.dvb.bayern",
+   "zitate": 2,
+   "quellenart": "VERBAND",
+   "rechtsraum": "DE",
+   "eigeninteresse": "UNKLAR",
+   "sicher": false
+  },
+  {
+   "domain": "ime.de",
+   "zitate": 2,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "DE",
+   "eigeninteresse": "JA",
+   "sicher": false
+  },
+  {
+   "domain": "omniwot.com",
+   "zitate": 1,
+   "quellenart": "HERSTELLER_HANDEL",
+   "rechtsraum": "OHNE",
+   "eigeninteresse": "JA",
+   "sicher": true
+  }
+ ]
+}
