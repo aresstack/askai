@@ -776,6 +776,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         scopeCheckExecutor.shutdownNow();
         outlineGenerationExecutor.shutdownNow();
+        questionDraftExecutor.shutdownNow();
         com.aresstack.askai.research.scope.BackendScopeProbeGenerator waitingGenerator =
                 activeProbeGenerator;
         if (waitingGenerator != null) {
@@ -2412,6 +2413,13 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             public java.util.List<String> blacklist() {
                 return currentBlacklistTerms();
             }
+
+            public com.aresstack.askai.research.concept.questions.MissionQuestionList questions() {
+                com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store =
+                        missionQuestionStore();
+                return store == null ? com.aresstack.askai.research.concept.questions.MissionQuestionList.empty()
+                        : store.load();
+            }
         };
     }
 
@@ -3838,6 +3846,113 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             fireStateChanged();
         }
         return null;
+    }
+
+    // ------------------------------------------------------------------ repair plan 2a: question list
+
+    private final java.util.concurrent.ExecutorService questionDraftExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "mission-question-draft");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    /** The working copy of the question list, or {@code null} without an open project. */
+    private com.aresstack.askai.research.concept.questions.FileMissionQuestionStore missionQuestionStore() {
+        if (productiveResources == null || productiveResources.isClosed()) {
+            return null;
+        }
+        return new com.aresstack.askai.research.concept.questions.FileMissionQuestionStore(
+                productiveResources.getProjectContext().getProjectDirectory());
+    }
+
+    /** The question list as the user edits it (the frozen one after the concept was approved). */
+    public String missionQuestionsText() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = isInScoping() ? null : frozenConcept();
+            if (frozen != null) {
+                return frozen.getQuestions().toText();
+            }
+        } catch (Exception unreadable) {
+            // fall through to the working copy
+        }
+        com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store = missionQuestionStore();
+        return store == null ? "" : store.load().toText();
+    }
+
+    private boolean isInScoping() {
+        return productiveResources != null && !productiveResources.isClosed()
+                && com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(
+                        productiveResources.currentState().getPhaseId());
+    }
+
+    /**
+     * The user's edit of the question list; refused outside Concept (the approved list is frozen).
+     * @return {@code null} when saved, otherwise the reason
+     */
+    public String saveMissionQuestions(String text) {
+        com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store = missionQuestionStore();
+        if (store == null) {
+            return "No project is open; the questions are not stored.";
+        }
+        if (!isInScoping()) {
+            return "The questions were approved with the concept; reopen the concept to change them.";
+        }
+        try {
+            store.save(com.aresstack.askai.research.concept.questions.MissionQuestionList.parse(text,
+                    store.load()));
+            return null;
+        } catch (java.io.IOException failed) {
+            return "The questions could not be stored: " + failed.getMessage();
+        }
+    }
+
+    /**
+     * Drafts the question list from the mission and the first-level cards in one model call, in the background, and
+     * stores it as the working copy; {@code done} gets {@code null} or the reason it failed, on the UI thread.
+     */
+    public void draftMissionQuestions(final java.util.function.Consumer<String> done) {
+        final com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store = missionQuestionStore();
+        if (store == null || !isInScoping()) {
+            done.accept(store == null ? "No project is open." : "Questions are drafted in the Concept phase only.");
+            return;
+        }
+        com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+        final java.util.List<String> cards = service == null ? java.util.Collections.<String>emptyList()
+                : com.aresstack.askai.research.book.FrozenConcept.firstLevelCards(
+                        service.store().effectiveContent());
+        final String mission = currentScopeDraft().getMission();
+        final String language = sessionLanguage.currentLanguage().getCode();
+        com.aresstack.askai.agent.model.port.ModelPort port = hostContext == null ? null
+                : hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class);
+        final com.aresstack.askai.research.runtime.team.MainModelChat chat = port == null ? null
+                : com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(port,
+                        com.aresstack.askai.research.concept.questions.MissionQuestionDrafter.ROLE,
+                        java.time.Duration.ofSeconds(180));
+        questionDraftExecutor.execute(new Runnable() {
+            public void run() {
+                long started = System.currentTimeMillis();
+                com.aresstack.askai.research.concept.questions.MissionQuestionDrafter.Result result =
+                        new com.aresstack.askai.research.concept.questions.MissionQuestionDrafter(chat)
+                                .draft(mission, cards, language);
+                String problem = result.getProblem();
+                if (result.isOk()) {
+                    try {
+                        store.save(result.getList());
+                    } catch (java.io.IOException failed) {
+                        problem = "The questions could not be stored: " + failed.getMessage();
+                    }
+                }
+                technicalLog("mission questions: " + (problem == null ? result.getList().size() + " drafted"
+                        : "failed: " + problem) + " in " + (System.currentTimeMillis() - started) + " ms");
+                final String outcome = problem;
+                uiExecutor.execute(new Runnable() {
+                    public void run() {
+                        done.accept(outcome);
+                    }
+                });
+            }
+        });
     }
 
     /** The persisted phase divider, e.g. "Phase 3: Outline, started by you". */

@@ -44,6 +44,24 @@ public final class ResearchBriefViewContribution implements ArtifactViewContribu
                 return research.editMission(mission);
             }
         });
+        // Repair plan step 2a: the question list of the book, drafted on request, approved with the concept.
+        view.setQuestionsHandler(new MissionQuestionsDialog.Handler() {
+            public String text() {
+                return research.missionQuestionsText();
+            }
+
+            public String save(String text) {
+                return research.saveMissionQuestions(text);
+            }
+
+            public void draft(java.util.function.Consumer<String> done) {
+                research.draftMissionQuestions(done);
+            }
+
+            public boolean editable() {
+                return research.conceptModeMessage() == null || research.conceptModeMessage().isEmpty();
+            }
+        });
         // The user's manual edit + rollback path — the SAME validating pipeline as every agent
         // write (strict parse, envelope check, CAS against the shown revision, atomic commit).
         view.setEditActions(new ConceptPaperView.SaveHandler() {

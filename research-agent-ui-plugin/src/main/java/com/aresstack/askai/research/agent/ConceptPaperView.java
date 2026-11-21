@@ -87,6 +87,9 @@ public final class ConceptPaperView extends JPanel {
     private final ComicButton refreshButton = new ComicButton("⟳");
     private final ComicButton treeButton = new ComicButton("Tree");
     private final ComicButton jsonButton = new ComicButton("JSON");
+    /** Repair plan step 2a: opens the question list of the book. */
+    private final ComicButton questionsButton = new ComicButton("Questions");
+    private MissionQuestionsDialog.Handler questionsHandler;
     private final ConceptTreeView treeView = new ConceptTreeView();
     private final JScrollPane treeScroll = new JScrollPane(treeView);
     /** Tree first — the pretty surface; JSON stays the power/recovery mode. */
@@ -151,13 +154,21 @@ public final class ConceptPaperView extends JPanel {
         searchRow.add(searchBar, BorderLayout.CENTER);
         JPanel modeToggle = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         modeToggle.setOpaque(false);
-        for (ComicButton button : new ComicButton[] {treeButton, jsonButton}) {
+        for (ComicButton button : new ComicButton[] {questionsButton, treeButton, jsonButton}) {
             button.setFocusable(false);
             button.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
             modeToggle.add(button);
         }
         treeButton.setToolTipText("Show the concept as an editable card tree");
         jsonButton.setToolTipText("Show and edit the raw JSON document");
+        questionsButton.setToolTipText("The research questions per first-level card: draft, edit, approve with the "
+                + "concept");
+        questionsButton.setVisible(false);
+        questionsButton.addActionListener(e -> {
+            if (questionsHandler != null) {
+                MissionQuestionsDialog.show(this, questionsHandler);
+            }
+        });
         searchRow.add(modeToggle, BorderLayout.EAST);
         // The search row is the topmost element, at the same place as the Chats tab's search: nothing above.
         add(searchRow, BorderLayout.NORTH);
@@ -213,6 +224,12 @@ public final class ConceptPaperView extends JPanel {
         missionSaveButton.addActionListener(saveMission);
         missionField.addActionListener(saveMission);
         return block;
+    }
+
+    /** Repair plan step 2a: shows the "Questions" button; {@code null} hides it. */
+    void setQuestionsHandler(MissionQuestionsDialog.Handler handler) {
+        this.questionsHandler = handler;
+        questionsButton.setVisible(handler != null);
     }
 
     public void setMissionSaver(MissionSaver saver) {
