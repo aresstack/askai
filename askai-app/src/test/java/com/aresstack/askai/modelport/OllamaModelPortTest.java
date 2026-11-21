@@ -572,7 +572,9 @@ public class OllamaModelPortTest {
         Recorder recorder = new Recorder().await0(port, request(slot).thinking(thinking).maxOutputTokens(budget)
                 .build());
         assertNull(String.valueOf(recorder.failure.get()), recorder.failure.get());
-        return new ObjectMapper().readTree(bodies.get(before));
+        // the chat is the last request: a model switch sends an unload of the previous model before it
+        assertTrue(bodies.size() > before);
+        return new ObjectMapper().readTree(bodies.get(bodies.size() - 1));
     }
 
     @Test
@@ -669,6 +671,50 @@ public class OllamaModelPortTest {
         port.close();
         Recorder recorder = new Recorder().await0(port, request(JUDGE).build());
         assertEquals(ModelFailure.Kind.PORT_CLOSED, recorder.failure.get().getKind());
+    }
+
+    /** A model switch unloads the previous model before the next model's call (Angelo, 2026-11-21). */
+    @Test
+    public void aModelSwitchUnloadsThePreviousModelBeforeTheNextCall() throws Exception {
+        slotModels.put("planner", "gemma4:12b");
+        assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+        assertNull(new Recorder().await0(port, request(JUDGE).build()).failure.get());
+
+        assertEquals("chat, unload, chat", 3, bodies.size());
+        JsonNode unload = body(1);
+        assertEquals("gemma4:e2b", unload.get("model").asText());
+        assertEquals(0, unload.get("keep_alive").asInt());
+        assertEquals("gemma4:12b", body(2).get("model").asText());
+
+        assertNull(new Recorder().await0(port, request(JUDGE).build()).failure.get());
+        assertEquals("the same model again unloads nothing", 4, bodies.size());
+        assertTrue(body(3).has("messages"));
+    }
+
+    @Test
+    public void aWarmLoadAfterASwitchUnloadsThePreviousModelFirst() throws Exception {
+        slotModels.put("planner", "gemma4:12b");
+        assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+        port.warm(JUDGE).get(10, TimeUnit.SECONDS);
+
+        assertEquals(3, bodies.size());
+        assertEquals("gemma4:e2b", body(1).get("model").asText());
+        assertEquals(0, body(1).get("keep_alive").asInt());
+        assertEquals("gemma4:12b", body(2).get("model").asText());
+        assertEquals("5m", body(2).get("keep_alive").asText());
+    }
+
+    @Test
+    public void theUnloadCanBeSwitchedOff() throws Exception {
+        System.setProperty("askai.modelport.unloadOnSwitch", "false");
+        try {
+            slotModels.put("planner", "gemma4:12b");
+            assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+            assertNull(new Recorder().await0(port, request(JUDGE).build()).failure.get());
+            assertEquals("two chats, no unload", 2, bodies.size());
+        } finally {
+            System.clearProperty("askai.modelport.unloadOnSwitch");
+        }
     }
 
     private void waitForRequests(int count) throws InterruptedException {

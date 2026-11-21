@@ -136,7 +136,20 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     private final Map<String, Boolean> reachability = new ConcurrentHashMap<String, Boolean>();
     private final AtomicInteger reservationIds = new AtomicInteger();
     private final Map<String, Capabilities> capabilityCache = new ConcurrentHashMap<String, Capabilities>();
+    /**
+     * Per endpoint the model a switch left behind, unloaded before the next model's first call goes out. Set by
+     * the scheduler's switch listener, taken by the call that holds the new model's place.
+     */
+    private final Map<String, String> pendingUnloads = new ConcurrentHashMap<String, String>();
     private volatile boolean closed;
+
+    /**
+     * Whether a model switch unloads the previous model ({@code keep_alive 0}) before the next model's first call.
+     * On by default; {@code -Daskai.modelport.unloadOnSwitch=false} turns it off.
+     */
+    static boolean unloadOnSwitch() {
+        return !"false".equalsIgnoreCase(System.getProperty("askai.modelport.unloadOnSwitch", "true").trim());
+    }
 
     public OllamaModelPort(EndpointDirectory endpoints, SlotDirectory slots,
                            ModelPortSettingsRepository settingsRepository, ClientFactory clientFactory) {
@@ -171,31 +184,69 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             }
 
             public boolean mayCoexist(String endpointId, List<String> loaded, String next) {
-                long budget = settings().memoryBudgetBytes(endpointId);
-                if (budget < 0) {
-                    return false; // no budget: no memory planning, so a switch is a deliberate step
-                }
-                long total = residency.lastKnownSize(endpointId, next);
-                if (total < 0) {
-                    return false;
-                }
-                for (String model : loaded) {
-                    long size = residency.lastKnownSize(endpointId, model);
-                    if (size < 0) {
-                        return false; // an unknown footprint never counts as fitting
-                    }
-                    total += size;
-                }
-                return total <= budget; // the combined footprint, not each pair, must fit
+                return OllamaModelPort.this.mayCoexist(endpointId, loaded, next);
             }
         }, new ModelResourceScheduler.SwitchListener() {
             public void onModelSwitch(String endpointId, String fromModel, String toModel) {
+                // The scheduler also reports a change of model between two calls that would have fit side by
+                // side; only a switch the memory planning does not allow unloads the previous model.
+                boolean unload = unloadOnSwitch()
+                        && !mayCoexist(endpointId, Collections.singletonList(fromModel), toModel);
+                if (unload) {
+                    pendingUnloads.put(endpointId, fromModel);
+                }
                 System.err.println("[model-port] model switch on " + endpointId + ": " + fromModel + " -> "
-                        + toModel);
+                        + toModel + (unload ? " (unloading " + fromModel + ")" : ""));
             }
         });
         this.calls = Executors.newCachedThreadPool(daemon("model-port-call"));
         this.timers = Executors.newSingleThreadScheduledExecutor(daemon("model-port-timer"));
+    }
+
+    /**
+     * Whether {@code next} may be loaded while all of {@code loaded} are: only with a memory budget for the
+     * endpoint and known sizes that fit it together.
+     */
+    private boolean mayCoexist(String endpointId, List<String> loaded, String next) {
+        long budget = settings().memoryBudgetBytes(endpointId);
+        if (budget < 0) {
+            return false; // no budget: no memory planning, so a switch is a deliberate step
+        }
+        long total = residency.lastKnownSize(endpointId, next);
+        if (total < 0) {
+            return false;
+        }
+        for (String model : loaded) {
+            long size = residency.lastKnownSize(endpointId, model);
+            if (size < 0) {
+                return false; // an unknown footprint never counts as fitting
+            }
+            total += size;
+        }
+        return total <= budget; // the combined footprint, not each pair, must fit
+    }
+
+    /**
+     * Unloads the model a switch on {@code endpointId} left behind, before {@code model}'s call goes out. The
+     * caller holds {@code model}'s place, so the scheduler admits no call of the old model meanwhile. Without
+     * this, Ollama keeps the old model for its keep-alive (5 minutes by default) next to the new one; on a PC
+     * with 32 GB that pushed the commit charge to its limit and crashed llama-server (2026-11-21). A failed
+     * unload is logged and the call goes on: Ollama may still evict on its own.
+     */
+    private void unloadLeftBehind(String endpointId, String baseUrl, String model) {
+        String previous = pendingUnloads.remove(endpointId);
+        if (previous == null || previous.equals(model)) {
+            return;
+        }
+        try {
+            client(baseUrl).unloadModel(previous);
+            System.err.println("[model-port] unloaded " + previous + " on " + endpointId + " before " + model);
+        } catch (OllamaRequestException failed) {
+            System.err.println("[model-port] unloading " + previous + " on " + endpointId + " failed: "
+                    + failed.getMessage());
+        } catch (RuntimeException failed) {
+            System.err.println("[model-port] unloading " + previous + " on " + endpointId + " failed: " + failed);
+        }
     }
 
     // ------------------------------------------------------------------ ModelPort
@@ -425,7 +476,9 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     private void load(ModelSlot slot, String endpointId, String model, CompletableFuture<Void> result) {
         try {
             ModelPortSettings settings = settings();
-            client(endpoints.baseUrl(endpointId)).loadModel(model, settings.getKeepAlive(),
+            String baseUrl = endpoints.baseUrl(endpointId);
+            unloadLeftBehind(endpointId, baseUrl, model);
+            client(baseUrl).loadModel(model, settings.getKeepAlive(),
                     settings.contextOf(model));
             reachability.put(endpointId, Boolean.TRUE);
             result.complete(null);
@@ -961,6 +1014,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                         + " is not available: " + unavailable.getMessage());
                 return;
             }
+            unloadLeftBehind(reservation.endpointId, baseUrl, reservation.model);
             Map<String, Object> options = new LinkedHashMap<String, Object>();
             options.put("num_ctx", reservation.contextTokens); // the model's context, on every call
             if (request.getTemperature() != null) {
