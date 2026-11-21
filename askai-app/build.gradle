@@ -131,11 +131,9 @@ application {
     mainClass = 'com.aresstack.askai.AskAiApp'
 }
 
-jar {
-    manifest {
-        attributes('Main-Class': application.mainClass.get())
-    }
-}
+// The thin jar (askai-app-<version>.jar) holds only the app's own classes, without libraries and launcher: it
+// is not runnable and names no Main-Class, so a double-click on it cannot be mistaken for the fat jar
+// (askai-<version>.jar). Before, it named AskAiApp and Java 8 failed on it with UnsupportedClassVersionError.
 
 // GraalVM js and regex both ship a file at
 // META-INF/services/com.oracle.truffle.api.TruffleLanguage$Provider. A plain fat jar
