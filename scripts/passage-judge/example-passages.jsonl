@@ -1,0 +1,6 @@
+{"id": "ex-1", "expected": 2, "text": "Ein Sensor im Helmband misst die Körpertemperatur und warnt den Träger, bevor ein Hitzschlag droht. Die Werte bleiben auf dem Gerät, die Bauleitung sieht nur, dass eine Warnung ausgelöst wurde."}
+{"id": "ex-2", "expected": 2, "text": "Wer allein im Kanalschacht arbeitet, trägt ein Notsignalgerät am Gürtel. Bleibt die Person länger als eine Minute reglos, geht der Alarm mit dem Standort an die Leitstelle."}
+{"id": "ex-3", "expected": 1, "text": "Stürze von Gerüsten und Leitern gehören zu den häufigsten schweren Unfällen auf Baustellen. Ab zwei Metern Höhe sind Seitenschutz oder Auffangeinrichtungen vorgeschrieben."}
+{"id": "ex-4", "expected": 1, "text": "Der Betriebsrat bestimmt mit, wenn eine technische Einrichtung das Verhalten oder die Leistung der Beschäftigten überwachen kann. Auf die Absicht des Arbeitgebers kommt es dabei nicht an."}
+{"id": "ex-5", "expected": 0, "text": "Ortsveränderliche elektrische Betriebsmittel auf Baustellen werden alle drei Monate geprüft. Die Prüfung umfasst Sichtprüfung, Schutzleiterwiderstand und Isolationswiderstand."}
+{"id": "ex-6", "expected": 0, "text": "Startseite | Produkte | Über uns | Kontakt | Newsletter abonnieren | Datenschutzerklärung | Impressum"}
