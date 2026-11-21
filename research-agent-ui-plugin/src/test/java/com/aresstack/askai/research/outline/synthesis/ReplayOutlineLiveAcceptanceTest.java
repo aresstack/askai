@@ -20,6 +20,7 @@ import com.aresstack.askai.research.outline.OutlineSection;
 import com.aresstack.askai.research.runtime.team.ChatMessage;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.runtime.team.MainModelChatResult;
+import com.aresstack.askai.research.runtime.writer.ProsePassageFilter;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -39,11 +40,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Test tooling (outside CI, not product code): Phase 3 replayed on the STORED corpus of a real book. The passages,
@@ -57,6 +61,10 @@ import java.util.Set;
  * {@code vector}. Optional: {@code .keep} (a file with one passage id per line), {@code .deliverable},
  * {@code .out} (directory), {@code .analysisOnly} (stop after the topic analysis, which needs no model), and the
  * model properties of the live acceptance.
+ * <p>{@code .prose=true} is for a corpus file that holds EVERY stored passage of a workspace (a raw export): the
+ * rows then pass the product's passage rule first ({@link ProsePassageFilter} with its defaults, captions judged
+ * on the whole page), as {@code SharedTopicDiscovery} narrows the stored corpus before it clusters. Without it the
+ * file is taken as the corpus the app analysed. The ids that entered the analysis are written to {@code kept.txt}.
  * <p>The file format is shown by the small self-written sample in {@code src/test/resources/outline-replay};
  * {@link ReplayOutlineSampleTest} runs it through the topic analysis in the normal test run.
  */
@@ -72,6 +80,7 @@ public class ReplayOutlineLiveAcceptanceTest {
         String deliverable = System.getProperty("askai.outline.live.replay.deliverable", "");
         String keepPath = System.getProperty("askai.outline.live.replay.keep", "");
         boolean analysisOnly = Boolean.getBoolean("askai.outline.live.replay.analysisOnly");
+        boolean prose = Boolean.getBoolean("askai.outline.live.replay.prose");
         File out = new File(System.getProperty("askai.outline.live.replay.out", "build/outline-replay"));
         Files.createDirectories(out.toPath());
 
@@ -89,9 +98,21 @@ public class ReplayOutlineLiveAcceptanceTest {
                 }
             }
         }
-        final StoredCorpus stored = StoredCorpus.read(corpus, raw, keep);
+        final StoredCorpus stored = StoredCorpus.read(corpus, raw, keep,
+                prose ? new ProsePassageFilter(ProsePassageFilter.Criteria.defaults()) : null);
         System.out.println("[outline-replay] passages=" + stored.passages.size() + " of " + stored.total
+                + (prose ? " (no prose " + stored.noProse + ", captions " + stored.captions + ")" : "")
                 + " anchors=" + stored.anchors.size() + " deliverable='" + deliverable + "' model=" + model);
+        if (stored.passages.size() > StoredCorpus.APP_CORPUS_LIMIT) {
+            System.out.println("[outline-replay] WARNING: the app clusters at most " + StoredCorpus.APP_CORPUS_LIMIT
+                    + " passages (CorpusLimit keeps the most typical ones of every source); this replay keeps all "
+                    + stored.passages.size());
+        }
+        StringBuilder kept = new StringBuilder();
+        for (Passage passage : stored.passages) {
+            kept.append(passage.getPassageId()).append('\n');
+        }
+        Files.write(new File(out, "kept.txt").toPath(), kept.toString().getBytes(StandardCharsets.UTF_8));
 
         TopicAnalysis analysis = stored.analyse();
         JsonArray topics = new JsonArray();
@@ -185,9 +206,16 @@ public class ReplayOutlineLiveAcceptanceTest {
     /** The stored corpus of a replay: the kept passages with their vectors, the concept nodes and the frame. */
     static final class StoredCorpus {
         private static final String WORLD = "replay";
+        /** {@code SharedTopicDiscovery.DEFAULT_CORPUS_LIMIT}; above it the app cuts the corpus, the replay does not. */
+        static final int APP_CORPUS_LIMIT = 6000;
+        /** A passage id's place on its page, as {@code SharedTopicDiscovery} reads it. */
+        private static final Pattern PLACE = Pattern.compile("#p(\\d+)(?:~(\\d+))?@");
 
         /** Passages in the corpus file, before the keep list. */
         final int total;
+        /** Rows the passage rule took out as no prose, and as captions of a listing page (0 without the rule). */
+        int noProse;
+        int captions;
         final List<Passage> passages = new ArrayList<Passage>();
         final List<AnalysisPassage> analysisPassages = new ArrayList<AnalysisPassage>();
         final Map<String, String> texts = new LinkedHashMap<String, String>();
@@ -206,8 +234,27 @@ public class ReplayOutlineLiveAcceptanceTest {
          * file) or, without it, from the {@code vector} of every passage row. {@code keep} null keeps everything.
          */
         static StoredCorpus read(JsonObject corpus, ByteBuffer raw, Set<String> keep) {
+            return read(corpus, raw, keep, null);
+        }
+
+        /**
+         * As {@link #read(JsonObject, ByteBuffer, Set)}; with {@code prose} the rows pass the product's passage rule
+         * first, in the order of {@code SharedTopicDiscovery.narrowed}: a row stays when the filter calls it prose
+         * and it is no caption of its page. The page is every row of the capture in the file, keep list or not.
+         */
+        static StoredCorpus read(JsonObject corpus, ByteBuffer raw, Set<String> keep, ProsePassageFilter prose) {
             int dim = corpus.get("dim").getAsInt();
             JsonArray rows = corpus.getAsJsonArray("passages");
+            Set<String> noProse = new HashSet<String>();
+            Set<String> captions = prose == null ? Collections.<String>emptySet() : captionsOf(rows, prose);
+            if (prose != null) {
+                for (JsonElement element : rows) {
+                    JsonObject row = element.getAsJsonObject();
+                    if (!prose.isProse(row.get("text").getAsString())) {
+                        noProse.add(row.get("id").getAsString());
+                    }
+                }
+            }
             if (raw != null && raw.capacity() != rows.size() * dim * 4) {
                 throw new IllegalStateException("vector file holds " + raw.capacity() + " bytes, expected "
                         + rows.size() * dim * 4);
@@ -217,6 +264,14 @@ public class ReplayOutlineLiveAcceptanceTest {
             for (int i = 0; i < rows.size(); i++) {
                 JsonObject row = rows.get(i).getAsJsonObject();
                 String id = row.get("id").getAsString();
+                if (noProse.contains(id)) {
+                    stored.noProse++;
+                    continue;
+                }
+                if (captions.contains(id)) {
+                    stored.captions++;
+                    continue;
+                }
                 if (keep != null && !keep.contains(id)) {
                     continue;
                 }
@@ -250,7 +305,53 @@ public class ReplayOutlineLiveAcceptanceTest {
             return stored;
         }
 
-        /** The order of SharedTopicDiscovery.run (the corpus is below the corpus limit, so nothing is omitted). */
+        /**
+         * The captions of every page, as {@code SharedTopicDiscovery.rejectedOnPage} finds them: each capture's rows
+         * in page order (the passage id carries the ordinal of its first sentence, then its piece number; an id
+         * without a place keeps its file order behind the others).
+         */
+        private static Set<String> captionsOf(JsonArray rows, ProsePassageFilter prose) {
+            Map<String, List<JsonObject>> pages = new LinkedHashMap<String, List<JsonObject>>();
+            for (JsonElement element : rows) {
+                JsonObject row = element.getAsJsonObject();
+                String capture = row.get("captureId").getAsString();
+                List<JsonObject> page = pages.get(capture);
+                if (page == null) {
+                    page = new ArrayList<JsonObject>();
+                    pages.put(capture, page);
+                }
+                page.add(row);
+            }
+            Set<String> captions = new HashSet<String>();
+            for (List<JsonObject> page : pages.values()) {
+                Collections.sort(page, new Comparator<JsonObject>() {
+                    public int compare(JsonObject a, JsonObject b) {
+                        long[] x = place(a.get("id").getAsString());
+                        long[] y = place(b.get("id").getAsString());
+                        int byOrdinal = x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0;
+                        return byOrdinal != 0 ? byOrdinal : x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0;
+                    }
+                });
+                List<String> texts = new ArrayList<String>();
+                for (JsonObject row : page) {
+                    texts.add(row.get("text").getAsString());
+                }
+                for (int index : prose.captions(texts)) {
+                    captions.add(page.get(index).get("id").getAsString());
+                }
+            }
+            return captions;
+        }
+
+        private static long[] place(String passageId) {
+            Matcher m = PLACE.matcher(passageId == null ? "" : passageId);
+            if (!m.find()) {
+                return new long[]{Long.MAX_VALUE, 0};
+            }
+            return new long[]{Long.parseLong(m.group(1)), m.group(2) == null ? 0 : Long.parseLong(m.group(2))};
+        }
+
+        /** The order of SharedTopicDiscovery.run (below the app's corpus limit nothing is omitted). */
         TopicAnalysis analyse() {
             TopicAnalysisSettings settings = TopicAnalysisSettings.defaults();
             TopicDendrogram.SplitRule split = new TopicAnalyzer(settings, frame).conceptSplit(vectors, anchors);

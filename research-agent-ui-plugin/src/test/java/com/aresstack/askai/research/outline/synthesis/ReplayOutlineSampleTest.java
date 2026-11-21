@@ -4,6 +4,7 @@ import com.aresstack.askai.research.knowledge.EmbeddingPort;
 import com.aresstack.askai.research.knowledge.topic.TopicAnalysis;
 import com.aresstack.askai.research.knowledge.topic.TopicProfile;
 import com.aresstack.askai.research.outline.synthesis.ReplayOutlineLiveAcceptanceTest.StoredCorpus;
+import com.aresstack.askai.research.runtime.writer.ProsePassageFilter;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -112,6 +113,51 @@ public class ReplayOutlineSampleTest {
             assertArrayEquals(entry.getKey(), entry.getValue().getValues(),
                     fromFile.vectors.get(entry.getKey()).getValues(), 0f);
         }
+    }
+
+    @Test
+    public void theProseRuleTakesBoilerplateOutOfARawExport() throws Exception {
+        // One article page and one listing page, both out of page order in the file.
+        JsonObject corpus = sample();
+        int dim = corpus.get("dim").getAsInt();
+        JsonArray rows = new JsonArray();
+        rows.add(row(dim, "artikel#p4@v", "artikel", "Die Sohle misst den Druck unter dem Fuß und meldet eine "
+                + "Fehlbelastung, bevor der Träger sie selbst bemerkt."));
+        rows.add(row(dim, "artikel#p0@v", "artikel", "Startseite Produkte Kontakt"));
+        rows.add(row(dim, "artikel#p2@v", "artikel", "Messung im Schuh"));
+        StringBuilder menu = new StringBuilder();
+        for (int i = 0; i < 40; i++) {
+            rows.add(row(dim, "liste#p" + (i < 20 ? i : i + 1) + "@v", "liste", "Kalender " + (2000 + i)));
+        }
+        rows.add(row(dim, "liste#p20@v", "liste", "Wer regelmäßig übt, bleibt im Notfall ruhig und hilft sofort."));
+        corpus.add("passages", rows);
+
+        ProsePassageFilter prose = new ProsePassageFilter(ProsePassageFilter.Criteria.defaults());
+        StoredCorpus stored = StoredCorpus.read(corpus, null, null, prose);
+
+        assertEquals(44, stored.total);
+        assertEquals("only the statement of the article page stays", 1, stored.passages.size());
+        assertEquals("artikel#p4@v", stored.passages.get(0).getPassageId());
+        assertEquals("the menu, the heading and the 40 product lines are no prose", 42, stored.noProse);
+        assertEquals("the lone sentence between the product lines is a caption", 1, stored.captions);
+        assertEquals("without the rule every row is taken as analysed", 44,
+                StoredCorpus.read(corpus, null, null).passages.size());
+    }
+
+    private static JsonObject row(int dim, String id, String capture, String text) {
+        JsonObject row = new JsonObject();
+        row.addProperty("id", id);
+        row.addProperty("captureId", capture);
+        row.addProperty("sourceId", "s-" + capture);
+        row.addProperty("domain", capture + ".example");
+        row.addProperty("heading", "");
+        row.addProperty("text", text);
+        JsonArray vector = new JsonArray();
+        for (int d = 0; d < dim; d++) {
+            vector.add(d == 0 ? 1f : 0f);
+        }
+        row.add("vector", vector);
+        return row;
     }
 
     private static Map<String, TopicProfile> topicOfEveryPassage(TopicAnalysis analysis) {
