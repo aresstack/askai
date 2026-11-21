@@ -106,11 +106,15 @@ public final class AgentRuntimeServices {
                 : new LocalRerankerModelCatalog(localModelRuntime);
         com.aresstack.askai.modelport.ModelPortSettingsRepository modelPortSettings =
                 com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory();
+        // Ollama (default) or an OpenAI-compatible API fills the model slots; read per call.
+        com.aresstack.askai.modelport.ModelProviderSettingsRepository modelProviders =
+                com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();
         // The inference descriptor names the research default slot's model (plan 5.1), which may live on the
-        // LOCAL runtime or a REMOTE Ollama — so it is published whenever there is a central config.
+        // LOCAL runtime, a REMOTE Ollama or the OpenAI-compatible API — so it is published whenever there is a
+        // central config.
         this.inferenceSnapshots = centralConfig == null ? null
                 : new LocalInferenceConfigurationSnapshotProvider(localModelRuntime, centralConfig,
-                        modelPortSettings);
+                        modelPortSettings, modelProviders);
         // The embedding model is provider-crossing (Ollama OR AskAI-local), so it is published whenever there is
         // a central config — the Ollama arm needs only the central Ollama endpoint, not a local runtime.
         this.embeddingSnapshots = centralConfig == null ? null
@@ -129,7 +133,7 @@ public final class AgentRuntimeServices {
                 : new LocalActiveResearchSessionRegistry(inferenceSnapshots, rerankerSnapshots, centralConfig);
         this.modelPort = centralConfig == null ? null
                 : com.aresstack.askai.modelport.CentralModelDirectories.productivePort(centralConfig,
-                        localModelRuntime, modelPortSettings);
+                        localModelRuntime, modelPortSettings, modelProviders);
         System.err.println("[agent-runtime] localRuntime=" + (localModelRuntime != null)
                 + " centralConfig=" + (centralConfig != null)
                 + " reranker.snapshotProvider.published=" + (rerankerSnapshots != null)

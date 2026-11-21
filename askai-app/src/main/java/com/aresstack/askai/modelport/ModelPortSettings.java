@@ -304,10 +304,12 @@ public final class ModelPortSettings {
 
     /**
      * True when {@code model} belongs to a family that accepts only thinking levels, never "off" (plan 4.1,
-     * rule 3), so it can never serve a {@linkplain #isHelperSlot helper slot}.
+     * rule 3), so it can never serve a {@linkplain #isHelperSlot helper slot}. A vendor or namespace prefix, as
+     * OpenAI-compatible APIs name their models ({@code openai/gpt-oss-120b}), does not hide the family.
      */
     public static boolean isLevelOnlyModel(String model, String family) {
         String name = model == null ? "" : model.trim().toLowerCase(java.util.Locale.ROOT);
+        name = name.substring(name.lastIndexOf('/') + 1);
         String fam = family == null ? "" : family.toLowerCase(java.util.Locale.ROOT).replace("-", "");
         return name.startsWith("gpt-oss") || fam.equals("gptoss");
     }
