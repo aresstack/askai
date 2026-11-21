@@ -77,6 +77,9 @@ public class OllamaModelPortTest {
     private final AtomicInteger shows = new AtomicInteger();
     private final AtomicInteger maxConcurrent = new AtomicInteger();
     private volatile CountDownLatch gate;
+    /** Holds the answer to an unload ({@code keep_alive 0}) while set. */
+    private volatile CountDownLatch unloadGate;
+    private volatile boolean unloadFails;
     private volatile long answerDelayMillis;
     private final Map<String, String> slotModels = new HashMap<String, String>();
     private ModelPortSettingsRepository settings;
@@ -89,7 +92,24 @@ public class OllamaModelPortTest {
         server.createContext("/api/chat", this::chat);
         server.createContext("/api/show", this::show);
         server.createContext("/api/generate", exchange -> {
-            bodies.add(new String(drain(exchange.getRequestBody()), StandardCharsets.UTF_8));
+            String request = new String(drain(exchange.getRequestBody()), StandardCharsets.UTF_8);
+            bodies.add(request);
+            boolean unload = request.replace(" ", "").contains("\"keep_alive\":0");
+            CountDownLatch held = unloadGate;
+            if (unload && held != null) {
+                try {
+                    held.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (unload && unloadFails) {
+                byte[] error = "{\"error\":\"boom\"}".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(500, error.length);
+                exchange.getResponseBody().write(error);
+                exchange.close();
+                return;
+            }
             respond(exchange, "{\"model\":\"x\",\"response\":\"\",\"done\":true}");
         });
         server.createContext("/api/ps", exchange -> respond(exchange, "{\"models\":[{\"name\":\"gemma4:e2b\","
@@ -702,6 +722,38 @@ public class OllamaModelPortTest {
         assertEquals(0, body(1).get("keep_alive").asInt());
         assertEquals("gemma4:12b", body(2).get("model").asText());
         assertEquals("5m", body(2).get("keep_alive").asText());
+    }
+
+    /** Architect review of PR #258: with a capacity above one, no call of the new model passes the unload. */
+    @Test
+    public void everyCallOfTheNewModelWaitsForTheUnload() throws Exception {
+        slotModels.put("planner", "gemma4:12b");
+        assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+        unloadGate = new CountDownLatch(1);
+        Recorder first = new Recorder();
+        Recorder second = new Recorder();
+        port.chat(request(JUDGE).build(), first);
+        port.chat(request(JUDGE).build(), second);
+        waitForRequests(2);
+        Thread.sleep(300);
+        assertEquals("no chat of the new model while the old one unloads", 2, bodies.size());
+        unloadGate.countDown();
+        assertNull(first.await().failure.get());
+        assertNull(second.await().failure.get());
+        assertEquals("one unload, two chats", 4, bodies.size());
+        assertEquals("gemma4:12b", body(2).get("model").asText());
+        assertEquals("gemma4:12b", body(3).get("model").asText());
+    }
+
+    @Test
+    public void aFailedUnloadDoesNotStopTheCall() throws Exception {
+        slotModels.put("planner", "gemma4:12b");
+        unloadFails = true;
+        assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+        Recorder judged = new Recorder().await0(port, request(JUDGE).build());
+        assertNull(String.valueOf(judged.failure.get()), judged.failure.get());
+        assertEquals("chat, failed unload, chat", 3, bodies.size());
+        assertEquals("gemma4:12b", body(2).get("model").asText());
     }
 
     @Test

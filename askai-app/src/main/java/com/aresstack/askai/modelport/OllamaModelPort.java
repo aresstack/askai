@@ -137,10 +137,13 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     private final AtomicInteger reservationIds = new AtomicInteger();
     private final Map<String, Capabilities> capabilityCache = new ConcurrentHashMap<String, Capabilities>();
     /**
-     * Per endpoint the model a switch left behind, unloaded before the next model's first call goes out. Set by
-     * the scheduler's switch listener, taken by the call that holds the new model's place.
+     * Per endpoint the models switches left behind, unloaded before the next call goes out. Filled by the
+     * scheduler's switch listener; a set, so a switch whose first call never ran does not hide the model it left.
      */
-    private final Map<String, String> pendingUnloads = new ConcurrentHashMap<String, String>();
+    private final Map<String, java.util.Set<String>> pendingUnloads =
+            new ConcurrentHashMap<String, java.util.Set<String>>();
+    /** One lock per endpoint: every call waits there until the left-behind models are unloaded. */
+    private final Map<String, Object> unloadLocks = new ConcurrentHashMap<String, Object>();
     private volatile boolean closed;
 
     /**
@@ -193,7 +196,8 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 boolean unload = unloadOnSwitch()
                         && !mayCoexist(endpointId, Collections.singletonList(fromModel), toModel);
                 if (unload) {
-                    pendingUnloads.put(endpointId, fromModel);
+                    pendingUnloads.computeIfAbsent(endpointId,
+                            id -> java.util.concurrent.ConcurrentHashMap.<String>newKeySet()).add(fromModel);
                 }
                 System.err.println("[model-port] model switch on " + endpointId + ": " + fromModel + " -> "
                         + toModel + (unload ? " (unloading " + fromModel + ")" : ""));
@@ -227,25 +231,35 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     }
 
     /**
-     * Unloads the model a switch on {@code endpointId} left behind, before {@code model}'s call goes out. The
-     * caller holds {@code model}'s place, so the scheduler admits no call of the old model meanwhile. Without
-     * this, Ollama keeps the old model for its keep-alive (5 minutes by default) next to the new one; on a PC
-     * with 32 GB that pushed the commit charge to its limit and crashed llama-server (2026-11-21). A failed
-     * unload is logged and the call goes on: Ollama may still evict on its own.
+     * Unloads the models switches on {@code endpointId} left behind, before {@code model}'s call goes out. Every
+     * call of the endpoint passes the endpoint's lock here, so with a capacity above one no second call of the new
+     * model goes out while the first one is still unloading. The caller holds {@code model}'s place, so the
+     * scheduler admits no call of an old model meanwhile. Without this, Ollama keeps the old model for its
+     * keep-alive (5 minutes by default) next to the new one; on a PC with 32 GB that pushed the commit charge to
+     * its limit and crashed llama-server (2026-11-21). A failed unload is logged and the call goes on: Ollama may
+     * still evict on its own.
      */
     private void unloadLeftBehind(String endpointId, String baseUrl, String model) {
-        String previous = pendingUnloads.remove(endpointId);
-        if (previous == null || previous.equals(model)) {
+        java.util.Set<String> left = pendingUnloads.get(endpointId);
+        if (left == null || left.isEmpty()) {
             return;
         }
-        try {
-            client(baseUrl).unloadModel(previous);
-            System.err.println("[model-port] unloaded " + previous + " on " + endpointId + " before " + model);
-        } catch (OllamaRequestException failed) {
-            System.err.println("[model-port] unloading " + previous + " on " + endpointId + " failed: "
-                    + failed.getMessage());
-        } catch (RuntimeException failed) {
-            System.err.println("[model-port] unloading " + previous + " on " + endpointId + " failed: " + failed);
+        synchronized (unloadLocks.computeIfAbsent(endpointId, id -> new Object())) {
+            left.remove(model); // in use again: nothing to unload
+            for (String previous : new ArrayList<String>(left)) {
+                try {
+                    client(baseUrl).unloadModel(previous);
+                    System.err.println("[model-port] unloaded " + previous + " on " + endpointId + " before "
+                            + model);
+                } catch (OllamaRequestException failed) {
+                    System.err.println("[model-port] unloading " + previous + " on " + endpointId + " failed: "
+                            + failed.getMessage());
+                } catch (RuntimeException failed) {
+                    System.err.println("[model-port] unloading " + previous + " on " + endpointId + " failed: "
+                            + failed);
+                }
+                left.remove(previous);
+            }
         }
     }
 
