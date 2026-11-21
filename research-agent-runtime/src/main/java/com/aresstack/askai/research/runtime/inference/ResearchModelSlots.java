@@ -37,6 +37,11 @@ public final class ResearchModelSlots {
     public static final ModelSlot PHASE_OUTLINE_BRIEFS = ModelSlot.of("phase.outline.briefs");
     /** The book writer in the Document phase. */
     public static final ModelSlot PHASE_DRAFT_WRITER = ModelSlot.of("phase.draft.writer");
+    /**
+     * The repeat judge of the finished book (component 12): one small call per candidate pair of sentences, many in
+     * parallel. Inherits the Document model until the user gives it its own; meant for {@code gemma4:e2b}.
+     */
+    public static final ModelSlot PHASE_DRAFT_REPEAT = ModelSlot.of("phase.draft.repeat");
 
     /**
      * The slot of a live phase id: {@code phase.<id>}; an empty id (before the host reports one, the opening

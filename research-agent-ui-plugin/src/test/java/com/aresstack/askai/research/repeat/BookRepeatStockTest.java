@@ -278,7 +278,7 @@ public class BookRepeatStockTest {
     }
 
     /** The product's adapter as the sentence slot uses it: documents, one call per batch. */
-    private static SentenceVectors ollama(String url, String model, int dimension) {
+    static SentenceVectors ollama(String url, String model, int dimension) {
         EmbeddingEndpointDescriptor descriptor = new EmbeddingEndpointDescriptor(model, url, "/api/embed", dimension,
                 "", "", 120000L);
         final HttpEmbeddingPortAdapter adapter = new HttpEmbeddingPortAdapter(descriptor,
@@ -295,7 +295,7 @@ public class BookRepeatStockTest {
     }
 
     /** Each pair's earlier sentence on an axis of its own, the later one at the pair's cosine to it. */
-    private static SentenceVectors fake(List<RepeatStock.Case> cases) {
+    static SentenceVectors fake(List<RepeatStock.Case> cases) {
         final Map<String, float[]> vectors = new HashMap<String, float[]>();
         int axis = 0;
         for (RepeatStock.Case c : cases) {
@@ -338,7 +338,7 @@ public class BookRepeatStockTest {
         throw new AssertionError("no row " + bound);
     }
 
-    private static String resource(String name) throws IOException {
+    static String resource(String name) throws IOException {
         InputStream in = BookRepeatStockTest.class.getResourceAsStream("/repeat-stock/" + name);
         if (in == null) {
             throw new IOException("missing test resource " + name);
@@ -348,7 +348,7 @@ public class BookRepeatStockTest {
         }
     }
 
-    private static String read(String path) throws IOException {
+    static String read(String path) throws IOException {
         return new String(Files.readAllBytes(new File(path).toPath()), StandardCharsets.UTF_8);
     }
 }

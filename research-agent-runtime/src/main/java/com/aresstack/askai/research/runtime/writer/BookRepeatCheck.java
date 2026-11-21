@@ -2,12 +2,19 @@ package com.aresstack.askai.research.runtime.writer;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -32,10 +39,20 @@ import java.util.function.Consumer;
  * So that a bound can be read off a book, every checked sentence also gets its nearest earlier sentence with both
  * measures, repeat or not ({@link Result#getNearest()}).</p>
  *
+ * <p>With a {@link SameStatementJudge} the check works in two stages (component test of 21.11.2026: no similarity
+ * bound separated the same statement from the same topic with another actor or condition). The rules only pick
+ * candidates: an earlier sentence that states every number of the later one and reaches
+ * {@link Options#getCandidateSimilarity() the candidate similarity} or the word rule's min share. The
+ * {@link Options#getMaxJudgedPerSentence() most similar candidates} of each later sentence go to the model, in
+ * parallel, and only its verdict {@code GLEICH} reports a pair ({@link Reason#SAME_STATEMENT}); the same text is still
+ * reported without a call. Every judged pair is kept with the model's raw answers ({@link Result#getJudged()}).</p>
+ *
  * <p>Errors: the sentence vectors come in batches, and a failed batch gets one repair attempt (the number of attempts
  * is an option). When it fails again, the check asks the model no more, keeps what the word rules find and reports
- * itself {@link Status#INCOMPLETE} with the reason: a failed model never reads as "no repetition". The check keeps
- * no state between calls; it is as thread-safe as the injected sentence model.</p>
+ * itself {@link Status#INCOMPLETE} with the reason: a failed model never reads as "no repetition". The same holds for
+ * the judge: a pair it could not judge ({@code FEHLER}), and every pair left unasked after
+ * {@link Options#STOP_AFTER_FAILURES} failures in a row, makes the result incomplete and stays in the list without a
+ * verdict. The check keeps no state between calls; it is as thread-safe as the injected models.</p>
  */
 public final class BookRepeatCheck {
 
@@ -54,7 +71,9 @@ public final class BookRepeatCheck {
         /** The earlier sentence holds at least min share of its content words. */
         WORDS,
         /** The earlier sentence reaches min similarity: the same statement in other words. */
-        MEANING
+        MEANING,
+        /** The judge read both sentences and found the same statement ({@code GLEICH}). */
+        SAME_STATEMENT
     }
 
     /** How the book is read; immutable. */
@@ -63,10 +82,21 @@ public final class BookRepeatCheck {
         public static final int DEFAULT_BATCH_SIZE = 32;
         /** Default calls per batch: the first and one repair attempt (rules of the build plan). */
         public static final int DEFAULT_ATTEMPTS = 2;
+        /** Default similarity from which a pair goes to the judge (the architect's proposal of 21.11.2026). */
+        public static final double DEFAULT_CANDIDATE_SIMILARITY = 0.70;
+        /** Default number of candidates per later sentence the judge reads, the most similar first. */
+        public static final int DEFAULT_MAX_JUDGED_PER_SENTENCE = 3;
+        /** Default number of judge calls at the same time. */
+        public static final int DEFAULT_PARALLEL = 4;
+        /** After this many failed pairs in a row the judge is asked no more. */
+        public static final int STOP_AFTER_FAILURES = 3;
 
         private final boolean withinSection;
         private final int batchSize;
         private final int attempts;
+        private final double candidateSimilarity;
+        private final int maxJudgedPerSentence;
+        private final int parallel;
 
         /**
          * @param withinSection also compare with the earlier sentences of the same section (default: only earlier
@@ -75,16 +105,54 @@ public final class BookRepeatCheck {
          * @param attempts      calls per batch before the check reports itself incomplete
          */
         public Options(boolean withinSection, int batchSize, int attempts) {
+            this(withinSection, batchSize, attempts, DEFAULT_CANDIDATE_SIMILARITY, DEFAULT_MAX_JUDGED_PER_SENTENCE,
+                    DEFAULT_PARALLEL);
+        }
+
+        private Options(boolean withinSection, int batchSize, int attempts, double candidateSimilarity,
+                        int maxJudgedPerSentence, int parallel) {
             if (batchSize < 1 || attempts < 1) {
                 throw new IllegalArgumentException("a batch needs at least one sentence and one attempt");
+            }
+            if (Double.isNaN(candidateSimilarity) || candidateSimilarity > 1 || maxJudgedPerSentence < 1
+                    || parallel < 1) {
+                throw new IllegalArgumentException("the judge needs a similarity up to 1, at least one candidate "
+                        + "per sentence and at least one call at a time");
             }
             this.withinSection = withinSection;
             this.batchSize = batchSize;
             this.attempts = attempts;
+            this.candidateSimilarity = candidateSimilarity;
+            this.maxJudgedPerSentence = maxJudgedPerSentence;
+            this.parallel = parallel;
         }
 
         public static Options defaults() {
             return new Options(false, DEFAULT_BATCH_SIZE, DEFAULT_ATTEMPTS);
+        }
+
+        /**
+         * A copy with the judge's settings.
+         *
+         * @param candidateSimilarity  similarity from which a pair goes to the judge
+         * @param maxJudgedPerSentence candidates per later sentence the judge reads, the most similar first
+         * @param parallel             judge calls at the same time
+         */
+        public Options withJudging(double candidateSimilarity, int maxJudgedPerSentence, int parallel) {
+            return new Options(withinSection, batchSize, attempts, candidateSimilarity, maxJudgedPerSentence,
+                    parallel);
+        }
+
+        public double getCandidateSimilarity() {
+            return candidateSimilarity;
+        }
+
+        public int getMaxJudgedPerSentence() {
+            return maxJudgedPerSentence;
+        }
+
+        public int getParallel() {
+            return parallel;
         }
 
         public boolean isWithinSection() {
@@ -102,7 +170,9 @@ public final class BookRepeatCheck {
         @Override
         public String toString() {
             return (withinSection ? "all earlier sentences" : "earlier sections") + ", " + batchSize
-                    + " per batch, " + attempts + " attempts";
+                    + " per batch, " + attempts + " attempts, judge from similarity "
+                    + String.format(Locale.ROOT, "%.2f", candidateSimilarity) + ", " + maxJudgedPerSentence
+                    + " per sentence, " + parallel + " at a time";
         }
     }
 
@@ -233,6 +303,42 @@ public final class BookRepeatCheck {
         }
     }
 
+    /** A candidate pair the judge read (or was meant to read), with its verdict and raw answers; immutable. */
+    public static final class Judged {
+        private final Pair pair;
+        private final SameStatementJudge.Judgement judgement;
+        private final boolean reported;
+
+        Judged(Pair pair, SameStatementJudge.Judgement judgement, boolean reported) {
+            this.pair = pair;
+            this.judgement = judgement;
+            this.reported = reported;
+        }
+
+        /** The two sentences with both measures; the reason is {@link Reason#SAME_STATEMENT} for a GLEICH verdict. */
+        public Pair getPair() {
+            return pair;
+        }
+
+        public SameStatementJudge.Judgement getJudgement() {
+            return judgement;
+        }
+
+        public SameStatementJudge.Verdict getVerdict() {
+            return judgement.getVerdict();
+        }
+
+        /** Whether this pair is the one reported for its later sentence ({@link Result#getPairs()}). */
+        public boolean isReported() {
+            return reported;
+        }
+
+        @Override
+        public String toString() {
+            return pair + " " + judgement;
+        }
+    }
+
     /** What the check found; immutable. */
     public static final class Result {
         private final Status status;
@@ -244,12 +350,14 @@ public final class BookRepeatCheck {
         private final int repeatedWords;
         private final List<Pair> pairs;
         private final List<Pair> nearest;
+        private final List<Judged> judged;
+        private final String judgeModel;
         private final RepeatCheck.Criteria criteria;
         private final Options options;
 
         Result(Status status, String problem, int sentences, int checked, int withoutVector, int words,
-               int repeatedWords, List<Pair> pairs, List<Pair> nearest, RepeatCheck.Criteria criteria,
-               Options options) {
+               int repeatedWords, List<Pair> pairs, List<Pair> nearest, List<Judged> judged, String judgeModel,
+               RepeatCheck.Criteria criteria, Options options) {
             this.status = status;
             this.problem = problem;
             this.sentences = sentences;
@@ -259,6 +367,8 @@ public final class BookRepeatCheck {
             this.repeatedWords = repeatedWords;
             this.pairs = Collections.unmodifiableList(pairs);
             this.nearest = Collections.unmodifiableList(nearest);
+            this.judged = Collections.unmodifiableList(judged);
+            this.judgeModel = judgeModel == null ? "" : judgeModel;
             this.criteria = criteria;
             this.options = options;
         }
@@ -312,6 +422,27 @@ public final class BookRepeatCheck {
             return nearest;
         }
 
+        /** Every candidate pair of the judge, in reading order of the later sentence; empty without a judge. */
+        public List<Judged> getJudged() {
+            return judged;
+        }
+
+        /** Candidate pairs with this verdict. */
+        public int count(SameStatementJudge.Verdict verdict) {
+            int n = 0;
+            for (Judged j : judged) {
+                if (j.getVerdict() == verdict) {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /** What the judge's chat calls (the slot in the app); empty without a judge. */
+        public String getJudgeModel() {
+            return judgeModel;
+        }
+
         public RepeatCheck.Criteria getCriteria() {
             return criteria;
         }
@@ -322,9 +453,14 @@ public final class BookRepeatCheck {
 
         @Override
         public String toString() {
+            String judgedLine = judged.isEmpty() ? "" : String.format(Locale.ROOT, ", judged %d pairs (%d GLEICH, "
+                            + "%d TEILWEISE, %d VERSCHIEDEN, %d FEHLER, %d not judged)", judged.size(),
+                    count(SameStatementJudge.Verdict.SAME), count(SameStatementJudge.Verdict.PARTLY),
+                    count(SameStatementJudge.Verdict.DIFFERENT), count(SameStatementJudge.Verdict.ERROR),
+                    count(SameStatementJudge.Verdict.NOT_JUDGED));
             return String.format(Locale.ROOT, "%s: %d of %d sentences repeat (%.1f %% of the words), %d checked, "
-                            + "%d without vector%s", status, pairs.size(), sentences, 100 * getRepeatedWordShare(),
-                    checked, withoutVector, problem.isEmpty() ? "" : " (" + problem + ")");
+                            + "%d without vector%s%s", status, pairs.size(), sentences, 100 * getRepeatedWordShare(),
+                    checked, withoutVector, judgedLine, problem.isEmpty() ? "" : " (" + problem + ")");
         }
     }
 
@@ -351,9 +487,28 @@ public final class BookRepeatCheck {
         }
     }
 
+    /** A candidate pair of the model stage while the check runs. */
+    private static final class Candidate {
+        final int earlier;
+        final int later;
+        final double share;
+        final double similarity;
+        final boolean numbersCovered;
+        SameStatementJudge.Judgement judgement;
+
+        Candidate(int earlier, int later, double share, double similarity, boolean numbersCovered) {
+            this.earlier = earlier;
+            this.later = later;
+            this.share = share;
+            this.similarity = similarity;
+            this.numbersCovered = numbersCovered;
+        }
+    }
+
     private final RepeatCheck.Criteria criteria;
     private final ClaimCarryCheck words;
     private final SentenceVectors vectors;
+    private final SameStatementJudge judge;
     private final Options options;
     private final Consumer<String> log;
 
@@ -367,9 +522,20 @@ public final class BookRepeatCheck {
      */
     public BookRepeatCheck(RepeatCheck.Criteria criteria, ClaimCarryCheck.Criteria carry, SentenceVectors vectors,
                            Options options, Consumer<String> log) {
+        this(criteria, carry, vectors, null, options, log);
+    }
+
+    /**
+     * The two-stage check: the rules pick candidates, the judge decides (see the class comment).
+     *
+     * @param judge the model stage; {@code null} leaves the rules alone (the constructor above)
+     */
+    public BookRepeatCheck(RepeatCheck.Criteria criteria, ClaimCarryCheck.Criteria carry, SentenceVectors vectors,
+                           SameStatementJudge judge, Options options, Consumer<String> log) {
         this.criteria = criteria == null ? RepeatCheck.Criteria.defaults() : criteria;
         this.words = new ClaimCarryCheck(carry);
         this.vectors = vectors;
+        this.judge = judge;
         this.options = options == null ? Options.defaults() : options;
         this.log = log;
     }
@@ -411,11 +577,13 @@ public final class BookRepeatCheck {
             bookWords += p.words;
         }
 
-        boolean meaning = criteria.getMinSimilarity() > 0;
+        boolean judging = judge != null;
+        boolean meaning = !judging && criteria.getMinSimilarity() > 0;
         String problem = "";
         int withoutVector = 0;
-        if (meaning) {
-            problem = vectors == null ? "no sentence model: only the word rules ran" : embed(prepared);
+        if (meaning || judging) {
+            problem = vectors == null ? (judging ? "no sentence model: only the word rule picked candidates"
+                    : "no sentence model: only the word rules ran") : embed(prepared);
             for (Prepared p : prepared) {
                 if (!p.stems.isEmpty() && p.unit == null) {
                     withoutVector++;
@@ -428,10 +596,14 @@ public final class BookRepeatCheck {
 
         List<Pair> pairs = new ArrayList<Pair>();
         List<Pair> nearest = new ArrayList<Pair>();
+        Pair[] sameTextOf = new Pair[n];
+        List<List<Candidate>> candidatesOf = new ArrayList<List<Candidate>>(n);
         int checked = 0;
         int repeatedWords = 0;
         for (int j = 0; j < n; j++) {
             Prepared later = prepared.get(j);
+            List<Candidate> candidates = new ArrayList<Candidate>();
+            candidatesOf.add(candidates);
             boolean eligible = later.content.size() >= criteria.getMinWords();
             if (eligible) {
                 checked++;
@@ -462,6 +634,11 @@ public final class BookRepeatCheck {
                 Reason reason = null;
                 if (sameText) {
                     reason = Reason.SAME_TEXT;
+                } else if (judging) {
+                    if (numbersCovered && ((similarity >= 0 && similarity >= options.getCandidateSimilarity())
+                            || share >= criteria.getMinShare())) {
+                        candidates.add(new Candidate(i, j, share, similarity, true));
+                    }
                 } else if (numbersCovered && share >= criteria.getMinShare()) {
                     reason = Reason.WORDS;
                 } else if (numbersCovered && meaning && similarity >= criteria.getMinSimilarity()) {
@@ -492,16 +669,155 @@ public final class BookRepeatCheck {
             }
             if (best >= 0) {
                 Prepared earlier = prepared.get(best);
-                pairs.add(pair(prepared, best, j, bestShare, bestSimilarity,
-                        earlier.numbers.containsAll(later.numbers), bestReason, matches));
-                repeatedWords += later.words;
+                Pair found = pair(prepared, best, j, bestShare, bestSimilarity,
+                        earlier.numbers.containsAll(later.numbers), bestReason, matches);
+                if (judging) {
+                    sameTextOf[j] = found; // the same text needs no call; reported in reading order below
+                    candidates.clear();
+                } else {
+                    pairs.add(found);
+                    repeatedWords += later.words;
+                }
+            }
+            if (judging && candidates.size() > 1) {
+                Collections.sort(candidates, MOST_SIMILAR_FIRST);
+            }
+            if (judging && candidates.size() > options.getMaxJudgedPerSentence()) {
+                candidates.subList(options.getMaxJudgedPerSentence(), candidates.size()).clear();
+            }
+        }
+
+        List<Judged> judged = new ArrayList<Judged>();
+        if (judging) {
+            String judgeProblem = judgeAll(prepared, candidatesOf);
+            int unjudged = 0;
+            for (int j = 0; j < n; j++) {
+                Prepared later = prepared.get(j);
+                if (sameTextOf[j] != null) {
+                    pairs.add(sameTextOf[j]);
+                    repeatedWords += later.words;
+                    continue;
+                }
+                List<Candidate> candidates = candidatesOf.get(j);
+                Candidate chosen = null;
+                int same = 0;
+                for (Candidate c : candidates) {
+                    if (c.judgement.getVerdict() == SameStatementJudge.Verdict.SAME) {
+                        same++;
+                        if (chosen == null) {
+                            chosen = c; // the most similar GLEICH: candidates are in that order
+                        }
+                    } else if (!c.judgement.isJudged()) {
+                        unjudged++;
+                    }
+                }
+                for (Candidate c : candidates) {
+                    boolean isSame = c.judgement.getVerdict() == SameStatementJudge.Verdict.SAME;
+                    Pair p = pair(prepared, c.earlier, c.later, c.share, c.similarity, c.numbersCovered,
+                            isSame ? Reason.SAME_STATEMENT : null, isSame ? same : 0);
+                    judged.add(new Judged(p, c.judgement, c == chosen));
+                    if (c == chosen) {
+                        pairs.add(p);
+                        repeatedWords += later.words;
+                    }
+                }
+            }
+            if (unjudged > 0) {
+                String line = unjudged + " candidate pairs without a verdict: " + judgeProblem;
+                problem = problem.isEmpty() ? line : problem + "; " + line;
             }
         }
         Status status = problem.isEmpty() ? Status.COMPLETE : Status.INCOMPLETE;
         Result result = new Result(status, problem, n, checked, withoutVector, bookWords, repeatedWords, pairs,
-                nearest, criteria, options);
+                nearest, judged, judging ? judge.modelName() : "", criteria, options);
         log("repeat check: " + result);
         return result;
+    }
+
+    private static final Comparator<Candidate> MOST_SIMILAR_FIRST = new Comparator<Candidate>() {
+        @Override
+        public int compare(Candidate a, Candidate b) {
+            int bySimilarity = Double.compare(b.similarity, a.similarity);
+            if (bySimilarity != 0) {
+                return bySimilarity;
+            }
+            int byShare = Double.compare(b.share, a.share);
+            return byShare != 0 ? byShare : Integer.compare(a.earlier, b.earlier);
+        }
+    };
+
+    /**
+     * Asks the judge about every candidate, each distinct pair of texts once, {@link Options#getParallel()} at a
+     * time. After {@link Options#STOP_AFTER_FAILURES} failed pairs in a row the remaining pairs are not asked.
+     *
+     * @return the last failure, empty when every pair got a verdict
+     */
+    private String judgeAll(List<Prepared> prepared, List<List<Candidate>> candidatesOf) {
+        final Map<String, List<Candidate>> byTexts = new LinkedHashMap<String, List<Candidate>>();
+        for (List<Candidate> candidates : candidatesOf) {
+            for (Candidate c : candidates) {
+                String key = prepared.get(c.earlier).plain + "\u0000" + prepared.get(c.later).plain;
+                List<Candidate> same = byTexts.get(key);
+                if (same == null) {
+                    same = new ArrayList<Candidate>();
+                    byTexts.put(key, same);
+                }
+                same.add(c);
+            }
+        }
+        if (byTexts.isEmpty()) {
+            return "";
+        }
+        final AtomicInteger failuresInRow = new AtomicInteger();
+        final String[] lastFailure = {""};
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(options.getParallel(), byTexts.size()));
+        List<Future<?>> running = new ArrayList<Future<?>>();
+        try {
+            for (final List<Candidate> group : byTexts.values()) {
+                final String earlier = prepared.get(group.get(0).earlier).plain;
+                final String later = prepared.get(group.get(0).later).plain;
+                running.add(pool.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        SameStatementJudge.Judgement judgement;
+                        if (failuresInRow.get() >= Options.STOP_AFTER_FAILURES) {
+                            judgement = SameStatementJudge.Judgement.notJudged("not asked: the judge failed "
+                                    + Options.STOP_AFTER_FAILURES + " pairs in a row");
+                        } else {
+                            judgement = judge.judge(earlier, later);
+                            if (judgement.getVerdict() == SameStatementJudge.Verdict.ERROR) {
+                                failuresInRow.incrementAndGet();
+                                synchronized (lastFailure) {
+                                    lastFailure[0] = judgement.getProblem();
+                                }
+                                log("repeat check: judge failed on a pair: " + judgement.getProblem());
+                            } else {
+                                failuresInRow.set(0);
+                            }
+                        }
+                        for (Candidate c : group) {
+                            c.judgement = judgement;
+                        }
+                    }
+                }));
+            }
+            for (Future<?> future : running) {
+                try {
+                    future.get();
+                } catch (ExecutionException failed) {
+                    throw new IllegalStateException("repeat judge crashed", failed.getCause());
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("repeat check interrupted", interrupted);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        synchronized (lastFailure) {
+            return lastFailure[0].isEmpty() && failuresInRow.get() >= Options.STOP_AFTER_FAILURES
+                    ? "the judge failed" : lastFailure[0];
+        }
     }
 
     /** Orders candidates for the one pair of a later sentence: the same text first, then the most similar. */

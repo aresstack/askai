@@ -33,7 +33,7 @@ public class BookRepeatCheckTest {
             + "sogar um 40 % [2].";
 
     /** A sentence model with chosen vectors; every other text gets an axis of its own (cosine 0 to all). */
-    private static final class FakeModel implements SentenceVectors {
+    static final class FakeModel implements SentenceVectors {
         final Map<String, float[]> known = new HashMap<String, float[]>();
         final List<List<String>> calls = new ArrayList<List<String>>();
         final Map<String, float[]> axes = new HashMap<String, float[]>();
@@ -68,11 +68,11 @@ public class BookRepeatCheckTest {
         }
     }
 
-    private static String plain(String sentence) {
+    static String plain(String sentence) {
         return new BookRepeatCheck.Sentence("", sentence, null).plainText();
     }
 
-    private static BookRepeatCheck.Sentence s(String section, String text, String... passages) {
+    static BookRepeatCheck.Sentence s(String section, String text, String... passages) {
         return new BookRepeatCheck.Sentence(section, text, Arrays.asList(passages));
     }
 
