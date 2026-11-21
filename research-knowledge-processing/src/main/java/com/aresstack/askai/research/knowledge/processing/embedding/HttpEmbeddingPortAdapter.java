@@ -10,7 +10,8 @@ import java.util.List;
 /**
  * The productive {@link EmbeddingPort}: it POSTs a BATCH {@code /api/embed} request built from the injected
  * {@link EmbeddingEndpointDescriptor} and validates the response STRICTLY. It knows ONLY the descriptor — no
- * host runtime manager, no model catalog, no AskAI settings, no Swing. Batch in / batch out. Each call's
+ * host runtime manager, no model catalog, no AskAI settings, no Swing. Batch in / batch out; a long batch goes out in
+ * requests of at most {@link #DEFAULT_MAX_INPUTS_PER_REQUEST} inputs. Each call's
  * {@link EmbeddingPort.Role} selects the model card's prompt ({@link EmbeddingPromptScheme}): as text for Ollama
  * models, through {@code input_type} for the local runtime's E5 models, nothing for raw calls. There is NO zero-vector fallback, NO retry on another model, and NO legacy
  * {@code /api/embeddings} path — a malformed or inconsistent response fails hard (a retryable EMBEDDING error).
@@ -21,14 +22,34 @@ import java.util.List;
  */
 public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
 
+    /**
+     * Inputs per {@code /api/embed} request; a longer list goes out in requests of this size, in order. Ollama hands
+     * every input of a request to its model runner at once. On 21.11.2026 the runner refused one request with 260
+     * inputs three times ("connectex: ... actively refused" on its {@code /tokenize}), while requests with up to 217
+     * inputs passed: the passage segmentation sends all sentences of a paragraph block in one call, and one PDF of
+     * the 12 Nov stock is a single block of 260 sentences.
+     */
+    public static final int DEFAULT_MAX_INPUTS_PER_REQUEST = 32;
+
     private final EmbeddingEndpointDescriptor descriptor;
     private final EmbeddingHttpTransport transport;
     private final EmbeddingPromptScheme scheme;
+    private final int maxInputsPerRequest;
 
     public HttpEmbeddingPortAdapter(EmbeddingEndpointDescriptor descriptor, EmbeddingHttpTransport transport) {
+        this(descriptor, transport, DEFAULT_MAX_INPUTS_PER_REQUEST);
+    }
+
+    /** @param maxInputsPerRequest inputs per request (at least 1) */
+    public HttpEmbeddingPortAdapter(EmbeddingEndpointDescriptor descriptor, EmbeddingHttpTransport transport,
+                                    int maxInputsPerRequest) {
+        if (maxInputsPerRequest < 1) {
+            throw new IllegalArgumentException("an embedding request needs at least one input");
+        }
         this.descriptor = descriptor;
         this.transport = transport;
         this.scheme = EmbeddingPromptScheme.forModel(descriptor.modelId);
+        this.maxInputsPerRequest = maxInputsPerRequest;
     }
 
     /** The prompt scheme of the descriptor's model. */
@@ -56,19 +77,18 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
         for (String text : inputs) {
             prompted.add(scheme.apply(role, text));
         }
-        String body = buildRequest(descriptor.modelId, prompted, scheme.inputType(role));
-        String response;
-        try {
-            response = transport.post(descriptor.endpointUrl(), body);
-        } catch (IOException ex) {
-            throw new EmbeddingException("embedding request to " + descriptor.endpointUrl()
-                    + " failed: " + ex.getMessage(), ex);
-        }
-        List<float[]> matrix = parseEmbeddingMatrix(response);
-        if (matrix.size() != inputs.size()) {
-            throw new EmbeddingException("embedding count " + matrix.size()
-                    + " does not match input count " + inputs.size());
-        }
+        List<float[]> matrix = new ArrayList<float[]>(prompted.size());
+        int from = 0;
+        do {
+            List<String> part = prompted.subList(from, Math.min(prompted.size(), from + maxInputsPerRequest));
+            List<float[]> answer = post(buildRequest(descriptor.modelId, part, scheme.inputType(role)));
+            if (answer.size() != part.size()) {
+                throw new EmbeddingException("embedding count " + answer.size()
+                        + " does not match input count " + part.size());
+            }
+            matrix.addAll(answer);
+            from += part.size();
+        } while (from < prompted.size());
         String fingerprint = fingerprint(role);
         List<EmbeddingVector> vectors = new ArrayList<EmbeddingVector>();
         for (float[] values : matrix) {
@@ -76,6 +96,18 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
             vectors.add(new EmbeddingVector(descriptor.modelId, fingerprint, values));
         }
         return vectors;
+    }
+
+    /** One request; its parsed matrix. */
+    private List<float[]> post(String body) {
+        String response;
+        try {
+            response = transport.post(descriptor.endpointUrl(), body);
+        } catch (IOException ex) {
+            throw new EmbeddingException("embedding request to " + descriptor.endpointUrl()
+                    + " failed: " + ex.getMessage(), ex);
+        }
+        return parseEmbeddingMatrix(response);
     }
 
     private void validateVector(float[] values) {
