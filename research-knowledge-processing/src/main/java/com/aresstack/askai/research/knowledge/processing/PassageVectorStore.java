@@ -38,4 +38,14 @@ public interface PassageVectorStore {
     /** The passage ids of a generation, in the persisted (deterministic) order. */
     List<String> passageIds(String captureId, String segmentationPipelineVersion,
                             String embeddingFingerprint, String languageCode);
+
+    /**
+     * Point R (2026-11-21): removes the vectors of {@code captureId} that belong to no generation, because the save
+     * that should have followed them failed (before the fix, every re-embedding of an old workspace left one such
+     * {@code vectors.bin} per capture). A generation the repository wrote is never touched. Returns how many
+     * leftovers were removed; a store without such leftovers removes none.
+     */
+    default int removeOrphans(String captureId) {
+        return 0;
+    }
 }

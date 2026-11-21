@@ -307,7 +307,8 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
 
     /**
      * Write ONE capture's generation (sentences + passages + manifest) fully, THEN atomically swap the active
-     * pointer to it — the single commit point that makes the whole capture's derived data active at once.
+     * pointer to it — the single commit point that makes the whole capture's derived data active at once. Every
+     * file is written only when its content changes, so committing the active generation again writes nothing.
      */
     private void commitGeneration(SourceCapture capture, List<Sentence> sentences, List<Passage> passages) {
         List<Passage> p = passages == null ? new ArrayList<Passage>() : passages;
@@ -344,7 +345,8 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
         writeIfChanged(new File(genDir, "passages.properties"), serializePassages(p));
 
         // 2. ONLY now: atomically activate this generation (a crash before this keeps the previous one active).
-        atomicWrite(new File(new File(root, "active"), hash(capture.getCaptureId()) + ".properties"),
+        // An unchanged pointer is not rewritten: committing the active generation again writes nothing (point R).
+        writeIfChanged(new File(new File(root, "active"), hash(capture.getCaptureId()) + ".properties"),
                 "captureId=" + escape(capture.getCaptureId()) + "\nprocessingKey=" + processingKey
                         + "\nsourceId=" + escape(capture.getSourceId())
                         + "\ncapturedAtMillis=" + capture.getCapturedAtMillis() + "\n");
@@ -513,9 +515,13 @@ public final class FileResearchProjectRepository implements ResearchProjectRepos
      */
     static File generationDir(File projectDirectory, String captureId, String segmentationVersion,
                               String fingerprint, String languageCode) {
-        File base = new File(projectDirectory, "knowledge");
-        return new File(new File(new File(base, "derived"), hash(captureId)),
+        return new File(derivedDir(projectDirectory, captureId),
                 processingKey(captureId, segmentationVersion, fingerprint, languageCode));
+    }
+
+    /** The folder that holds every generation of one capture ({@code knowledge/derived/<h(captureId)>}). */
+    static File derivedDir(File projectDirectory, String captureId) {
+        return new File(new File(new File(projectDirectory, "knowledge"), "derived"), hash(captureId));
     }
 
     // ------------------------------------------------------------------ IO helpers

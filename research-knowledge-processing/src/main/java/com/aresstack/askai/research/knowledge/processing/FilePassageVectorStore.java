@@ -85,6 +85,47 @@ public final class FilePassageVectorStore implements PassageVectorStore {
         return decoded == null ? new ArrayList<String>() : new ArrayList<String>(decoded.vectors.keySet());
     }
 
+    /**
+     * A generation folder of the capture that holds nothing but vectors ({@code vectors.bin}, maybe its temp file)
+     * is a leftover: the repository writes sentences, passages and manifest into every generation it commits, and no
+     * active pointer can name a folder without them. Such folders are deleted, the capture's other generations stay.
+     */
+    @Override
+    public int removeOrphans(String captureId) {
+        File[] generations = FileResearchProjectRepository.derivedDir(projectDirectory, captureId).listFiles();
+        if (generations == null) {
+            return 0;
+        }
+        int removed = 0;
+        for (File generation : generations) {
+            File[] files = generation.listFiles();
+            if (files == null || files.length == 0) {
+                continue;
+            }
+            boolean vectorsOnly = true;
+            for (File file : files) {
+                String name = file.getName();
+                if (!file.isFile() || !(name.equals(FILE_NAME) || name.equals(FILE_NAME + ".tmp"))) {
+                    vectorsOnly = false;
+                    break;
+                }
+            }
+            if (!vectorsOnly) {
+                continue;
+            }
+            try {
+                for (File file : files) {
+                    Files.deleteIfExists(file.toPath());
+                }
+                Files.deleteIfExists(generation.toPath());
+                removed++;
+            } catch (IOException ex) {
+                throw new IllegalStateException("cannot remove the leftover vectors " + generation, ex);
+            }
+        }
+        return removed;
+    }
+
     // ------------------------------------------------------------------ identity / paths
 
     private File vectorsFile(String captureId, String segVersion, String fingerprint, String languageCode) {
