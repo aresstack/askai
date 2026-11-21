@@ -87,27 +87,72 @@ Results go to `docs/ollama-model-budget-measurements.md`.
 
 ## Writer A/B (plan PR 31)
 
-Opt-in probe `WriterAbLiveTest` in the `benchmark` task. Input: one chapter exported from a real project after
-its Outline phase, as JSON:
+Opt-in probe `WriterAbLiveTest` in the `benchmark` task. Since stage 0 of the writer proposal (November 2026) it
+writes the way the app writes: only the retrieval of the evidence pack is replaced by an exported pack, everything
+after it is the app's code (`WriterAbPipeline`): the section context of `ProductiveSectionContexts` (synopsis =
+the chapter's purpose, digest = the start of the previous section's current text, the other written sections for the
+repeat check, the book language as the concept pins it), the pack budgets of `SectionContextBuilder.pack` and the
+writer targets of `EvidenceAssignments.assignment` read by `ResearchRuntimeSettings.loadWriterTargets` (passages
+per part, 40 words per passage, top-up, repeat and synthesis criteria, citation format of the model). The writer gets
+the app's sentence vectors (`bge-m3` by default, `-Daskai.benchmark.writerAb.sentenceModel`).
+`WriterAbParityTest` pins that the A/B sends the writer exactly the requests the app sends.
+
+### Input: export a chapter with its complete packs
+
+```
+gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest.exportTheChapter*'
+  -Daskai.benchmark.writerAb.export.workspace=<project directory>
+  -Daskai.benchmark.writerAb.export.out=chapter.json
+  [-Daskai.benchmark.writerAb.export.chapter=1] [-Daskai.benchmark.writerAb.export.sections=4]
+  [-Daskai.benchmark.writerAb.export.outlineRevision=<n>] [-Daskai.benchmark.writerAb.export.embeddingModel=bge-m3]
+```
+
+The project is copied first; the packs come from the app's pack builder over the project's index, active passages,
+accepted sources and acronym glossary, with the pack settings of the writer defaults (`.export.settings=key=value;...`
+changes them, and the pack settings are written per section: a run whose arm asks for other pack settings stops
+and asks for a new export). The mission's source preference is applied as in the app (mission of the newest pin
+in `book.json`, on by default). Not reproduced: the sections of earlier chapters the app has in its manuscript when
+it writes a later chapter. Format 2:
 
 ```json
-{"language": "de", "synopsis": "...", "glossary": ["EEG: Erneuerbare-Energien-Gesetz"],
- "sections": [{"id": "s1", "title": "...", "brief": "...", "keyPoints": ["..."], "words": 900,
-               "passages": [{"sourceId": "...", "checksum": "...", "passageId": "...", "text": "..."}]}]}
+{"format": 2, "language": "de", "origin": "...",
+ "chapter": {"id": "...", "title": "...", "purpose": "..."},
+ "sections": [{"id": "s1", "title": "...", "brief": "...", "keyPoints": ["..."], "words": 1100, "glossary": ["..."],
+               "passages": [{"number": 1, "passageId": "...", "sourceId": "...", "checksum": "...", "text": "..."}]}]}
 ```
 
-Three to four sections, each with the same 8 x 300 evidence pack for every model; the glossary block comes from
-PR 38. Run:
+Format 1 (the chapter of 17 November: `synopsis`, a book-wide `glossary`, the cited passages only) is still read.
+
+### Run
 
 ```
-gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest*' -Daskai.benchmark.writerAb.input=chapter.json
+gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest.writeTheSamples*' -Daskai.benchmark.writerAb.input=chapter.json
+  -Daskai.benchmark.writerAb.arms=gemma4:12b [-Daskai.benchmark.writerAb.runs=3]
+  [-Daskai.benchmark.writerAb.variants=app,parts:research.writer.partContext=true]
+  [-Daskai.benchmark.writerAb.judge=<judge model>] [-Daskai.benchmark.writerAb.judgeItems=chapter]
+  [-Daskai.benchmark.writerAb.chapterOnly=true] [-Daskai.benchmark.writerAb.sentenceModel=bge-m3]
 ```
 
-Each of `gemma4:e2b` (450-word parts), `llama3.1:8b` and `gpt-oss:20b` (1,100 words) writes sections 1-3 alone and
-the whole chapter through the PR 29 writing job (each section gets the digest of the one before). The report directory receives
-`writer-ab-<time>-sheet.md` (blind, shuffled letters per item), `-metrics.md` (time, tokens, citation validity,
-uncited-paragraph rate, language drift, claim-check and gap counts, without names) and `-key.txt`. Fill one
-`Ranking:` line per item in the sheet without opening the key, then:
+Arms are `model|words|thinking` entries (`#` instead of `|` from a Windows batch file: `gpt-oss:20b##low`); an empty word count keeps the app's setting (450). A variant is a set of
+writer settings against the app's defaults (`name:key=value;key=value`, or `-Daskai.benchmark.writerAb.variant.<name>=...`);
+every arm runs every variant, in an order that rotates per run, and the blind sheet hides arm and variant. Each arm
+writes sections 1-3 alone (on an empty manuscript) and the whole chapter through the PR 29 writing job, in every run;
+`chapterOnly` writes only the chapter (the app's path; half the time). The writer's log goes to
+`writer-ab-<time>-writer.log`, and its top-ups, top-up words, dropped top-ups, removed repeats and repairs are
+counted per sample; a writer that loses its sentence vectors stops the run. The judge reads each cited sentence
+with up to two sentences before it as context, and its unreadable answers are counted apart. The judge is unloaded
+after every sample and an arm after its turn (`keep_alive` 0), so two big models never share memory, and a sample's
+seconds leave out Ollama's `load_duration`. Every writer call goes to `writer-ab-<time>-calls.jsonl` with its kind
+(draft, top-up, repair, continuation) and answer text, and with a judge every judged sentence, carried ones included,
+goes to `writer-ab-<time>-run<n>-judge.jsonl` (it names the arms), so verdicts can be split by draft and top-up and
+the judge can be checked blind in both directions. Per run the report directory
+receives `writer-ab-<time>-run<n>-sheet.md` (blind, shuffled letters per item), `-metrics.md` (time, tokens, citation
+validity, uncited paragraphs, drift, claim-check and gap counts, and the quality figures: repeated words per section
+and overall by bge-m3 cosine >= 0.80, restarts, reach of the word target, short paragraphs, source blocks,
+two-source sentences, pack use, and with a judge the share of cited sentences whose passages carry them) and
+`-key.txt`; `writer-ab-<time>-summary.md` gives mean and range per arm over the runs and lists every sentence the
+judge found not carried. It names the arms: open it only after the rating. Fill one `Ranking:` line per item in a
+sheet without opening the key, then:
 
 ```
 gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest*' -Daskai.benchmark.writerAb.rated=sheet.md -Daskai.benchmark.writerAb.key=key.txt
