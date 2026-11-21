@@ -4628,7 +4628,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     static final String MISSING_LENGTH_QUESTION = "The concept names no book length, so the outline gets no word "
-            + "budget (the book of 17 Nov had none and came out without one). Name it in the mission, for example "
+            + "budget and the book can come out much longer or shorter than intended. Name it in the mission, for "
+            + "example "
             + "\"Umfang 20 bis 30 Seiten\".\n\nApprove without a length anyway?";
 
     /**
