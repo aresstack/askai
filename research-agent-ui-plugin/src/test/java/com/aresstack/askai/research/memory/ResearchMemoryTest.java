@@ -248,6 +248,21 @@ public class ResearchMemoryTest {
         assertNull(memory.verdictOnSameText(Q, TEXT_C));
     }
 
+    @Test
+    public void aTextKeyCutOnABlankStillFindsItsVerdict() throws Exception {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            text.append("Messwerte ");
+        }
+        String key = PassageText.key(text.toString());
+        assertEquals(PassageText.KEY_CHARS - 1, key.length());
+        assertEquals(key.trim(), key);
+        ResearchMemory memory = memoryWithQuestion();
+        memory.record(direct("p1", "s1", "https://a.example/x", text.toString()));
+        assertEquals(key, direct("p1", "s1", "", text.toString()).getTextKey());
+        assertEquals("p1", memory.verdictOnSameText(Q, text.toString()).getPassageId());
+    }
+
     // ---------------------------------------------------------------------------------- questions
 
     @Test

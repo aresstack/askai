@@ -31,14 +31,17 @@ public final class PassageText {
     private PassageText() {
     }
 
-    /** The first {@value #KEY_CHARS} characters, lower case, everything but letters and digits folded to a blank. */
+    /**
+     * The first {@value #KEY_CHARS} characters, lower case, everything but letters and digits folded to a blank, with
+     * no blank at either end (a verdict stores its key trimmed, so a key cut on a blank must not keep it).
+     */
     public static String key(String passageText) {
         if (passageText == null) {
             return "";
         }
         String folded = unhyphenated(passageText).toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", " ")
                 .trim();
-        return folded.length() > KEY_CHARS ? folded.substring(0, KEY_CHARS) : folded;
+        return folded.length() > KEY_CHARS ? folded.substring(0, KEY_CHARS).trim() : folded;
     }
 
     /**
