@@ -47,9 +47,18 @@ final class RepeatStock {
         final String earlierText;
         final String laterSection;
         final String laterText;
+        /** The architect's extra field {@code grenzfall} as written, {@code null} when the file has none. */
+        final JsonElement borderline;
 
         Case(String sheet, String stratum, String verdict, double overlap, boolean sameEvidence,
              String earlierSection, String earlierText, String laterSection, String laterText) {
+            this(sheet, stratum, verdict, overlap, sameEvidence, earlierSection, earlierText, laterSection, laterText,
+                    null);
+        }
+
+        Case(String sheet, String stratum, String verdict, double overlap, boolean sameEvidence,
+             String earlierSection, String earlierText, String laterSection, String laterText,
+             JsonElement borderline) {
             this.sheet = sheet;
             this.stratum = stratum;
             this.verdict = verdict;
@@ -59,6 +68,7 @@ final class RepeatStock {
             this.earlierText = earlierText;
             this.laterSection = laterSection;
             this.laterText = laterText;
+            this.borderline = borderline;
         }
 
         /** The pair as a book: the sections are distinct by construction, the passages shared where judged so. */
@@ -71,6 +81,11 @@ final class RepeatStock {
         }
     }
 
+    /**
+     * The judged pairs: {@code blatt}, {@code urteil} and both {@code satz} are required; {@code schicht},
+     * {@code ueberlappung}, {@code gleicherBeleg} (false), the sections and the extra field {@code grenzfall} may be
+     * missing. Unknown fields are ignored.
+     */
     static List<Case> read(String json) {
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
         List<Case> cases = new ArrayList<Case>();
@@ -78,13 +93,22 @@ final class RepeatStock {
             JsonObject p = element.getAsJsonObject();
             JsonObject earlier = p.getAsJsonObject("frueher");
             JsonObject later = p.getAsJsonObject("spaeter");
-            cases.add(new Case(p.get("blatt").getAsString(), p.get("schicht").getAsString(),
-                    p.get("urteil").getAsString(), p.get("ueberlappung").getAsDouble(),
-                    p.get("gleicherBeleg").getAsBoolean(), earlier.get("abschnitt").getAsString(),
-                    earlier.get("satz").getAsString(), later.get("abschnitt").getAsString(),
-                    later.get("satz").getAsString()));
+            JsonElement overlap = p.get("ueberlappung");
+            JsonElement sameEvidence = p.get("gleicherBeleg");
+            JsonElement borderline = p.get("grenzfall");
+            cases.add(new Case(p.get("blatt").getAsString(), optional(p, "schicht"), p.get("urteil").getAsString(),
+                    overlap == null || overlap.isJsonNull() ? Double.NaN : overlap.getAsDouble(),
+                    sameEvidence != null && !sameEvidence.isJsonNull() && sameEvidence.getAsBoolean(),
+                    optional(earlier, "abschnitt"), earlier.get("satz").getAsString(), optional(later, "abschnitt"),
+                    later.get("satz").getAsString(), borderline == null || borderline.isJsonNull() ? null
+                    : borderline));
         }
         return cases;
+    }
+
+    private static String optional(JsonObject o, String field) {
+        JsonElement value = o.get(field);
+        return value == null || value.isJsonNull() ? "" : value.getAsString();
     }
 
     /** Every text the check embeds, each once, in pair order. */
@@ -275,7 +299,9 @@ final class RepeatStock {
             o.addProperty("schicht", c.stratum);
             o.addProperty("urteil", c.verdict);
             o.addProperty("gleicherBeleg", c.sameEvidence);
-            o.addProperty("ueberlappungArchitekt", c.overlap);
+            if (!Double.isNaN(c.overlap)) {
+                o.addProperty("ueberlappungArchitekt", c.overlap);
+            }
             List<BookRepeatCheck.Pair> nearest = result.getNearest();
             o.addProperty("geprueft", !nearest.isEmpty());
             if (!nearest.isEmpty()) {

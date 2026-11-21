@@ -88,7 +88,9 @@ public class SameStatementJudgeTest {
         assertEquals(SameStatementJudge.SYSTEM_DE, messages.get(0).getContent());
         String prompt = messages.get(1).getContent();
         assertTrue(prompt.startsWith("Früherer Satz:\n" + EARLIER + "\n\nSpäterer Satz:\n" + LATER + "\n\n"));
-        assertTrue(prompt.contains("eine andere Bedingung (zum Beispiel freiwillig statt verpflichtend)"));
+        assertTrue(prompt.contains("bringt keine wesentliche neue Information"));
+        assertTrue("examples from another field than the book", prompt.contains("Beispiele aus einem anderen Gebiet"));
+        assertFalse(prompt.contains("freiwillig"));
         assertTrue(prompt.endsWith("Antworte als JSON mit den Feldern \"grund\" und \"urteil\"."));
 
         JsonObject schema = JsonParser.parseString(chat.schemas.get(0)).getAsJsonObject();

@@ -29,6 +29,13 @@ import java.util.Locale;
  * build plan: a failed call or an answer that is no valid verdict gets one repair attempt, then the pair is
  * {@link Verdict#ERROR} with the reason, never "different". The judge keeps no state; it is as thread-safe as the
  * injected chat.</p>
+ *
+ * <p>First model run (21.11.2026, the 60 judged pairs of the book of 17 Nov): both models called nearly every small
+ * detail new information and said {@code TEILWEISE} for most pairs the test data call {@code GLEICH}; and the
+ * prompt's examples were close to two pairs of the test data. Since then the prompt asks for essential new
+ * information, its examples come from another field (road traffic), and {@link BookRepeatCheck} reports a
+ * {@code TEILWEISE} pair too: for the book, a sentence that repeats a statement and adds a detail is a repetition, of
+ * which only the new part is worth keeping.</p>
  */
 public final class SameStatementJudge {
 
@@ -191,13 +198,14 @@ public final class SameStatementJudge {
     }
 
     static final String SYSTEM_DE = "Du prüfst ein Sachbuch auf Wiederholungen. Du bekommst zwei Sätze aus "
-            + "verschiedenen Abschnitten desselben Buchs und entscheidest, ob der spätere Satz dieselbe Aussage macht "
-            + "wie der frühere. Du urteilst nur über die beiden Sätze, nicht über ihre Richtigkeit. Antworte nur mit "
-            + "JSON.";
+            + "verschiedenen Abschnitten desselben Buchs und entscheidest, ob der spätere Satz die Aussage des "
+            + "früheren wiederholt, ganz oder mit einer wesentlichen neuen Information. Du urteilst nur über die "
+            + "beiden Sätze, nicht über ihre Richtigkeit. Antworte nur mit JSON.";
 
     static final String SYSTEM_EN = "You check a non-fiction book for repetitions. You get two sentences from "
-            + "different sections of the same book and decide whether the later sentence makes the same statement as "
-            + "the earlier one. You judge only the two sentences, not whether they are true. Answer only with JSON.";
+            + "different sections of the same book and decide whether the later sentence repeats the statement of the "
+            + "earlier one, wholly or with essential new information. You judge only the two sentences, not whether "
+            + "they are true. Answer only with JSON.";
 
     static String prompt(String earlier, String later, boolean german) {
         String e = earlier == null ? "" : earlier.trim();
@@ -205,28 +213,44 @@ public final class SameStatementJudge {
         if (german) {
             return "Früherer Satz:\n" + e + "\n\nSpäterer Satz:\n" + l + "\n\n"
                     + "Urteile so:\n"
-                    + "- GLEICH: Der spätere Satz sagt dasselbe wie der frühere, auch mit anderen Wörtern, und bringt "
-                    + "keine neue Information.\n"
-                    + "- TEILWEISE: Ein Teil der Aussage wiederholt sich, aber der spätere Satz bringt zusätzlich eine "
-                    + "neue Information.\n"
-                    + "- VERSCHIEDEN: Die Sätze haben ein anderes Thema, oder dasselbe Thema mit einer anderen "
-                    + "Aussage.\n"
-                    + "Wichtig: Nennen die Sätze einen anderen Handelnden oder Betroffenen (zum Beispiel Beschäftigte "
-                    + "statt Arbeitgeber), eine andere Bedingung (zum Beispiel freiwillig statt verpflichtend), eine "
-                    + "andere Zahl, einen anderen Zeitraum oder ein anderes Land, dann ist das VERSCHIEDEN, auch wenn "
-                    + "die Wörter ähnlich sind.\n\n"
+                    + "- GLEICH: Der spätere Satz macht dieselbe Aussage wie der frühere. Was er dazu bringt, ist nur "
+                    + "ein Beispiel, eine Aufzählung, die dasselbe sagt, oder eine Umformulierung, nichts, was einen "
+                    + "eigenen Satz verdienen würde. Er bringt keine wesentliche neue Information.\n"
+                    + "- TEILWEISE: Im Kern macht der spätere Satz dieselbe Aussage wie der frühere, und dazu kommt "
+                    + "eine eigene neue Aussage: etwa eine neue Bedingung, eine Folge, eine Rechtsgrundlage, ein "
+                    + "weiterer Handelnder oder ein Zweck, der etwas Eigenes sagt.\n"
+                    + "- VERSCHIEDEN: Der spätere Satz macht eine andere Aussage, auch wenn Thema oder Begründung "
+                    + "gleich sind. Das gilt auch, wenn er dasselbe für andere Handelnde oder Betroffene sagt als der "
+                    + "frühere Satz, unter einer anderen Bedingung, mit einer anderen Zahl, für einen anderen Zeitraum "
+                    + "oder Ort.\n\n"
+                    + "Beispiele aus einem anderen Gebiet:\n"
+                    + "- „Radfahrer müssen bei Dunkelheit das Licht einschalten.“ und „Wer im Dunkeln Rad fährt, muss "
+                    + "das Licht anmachen, etwa auf dem Heimweg.“: GLEICH.\n"
+                    + "- „Radfahrer müssen bei Dunkelheit das Licht einschalten.“ und „Radfahrer müssen bei Dunkelheit "
+                    + "das Licht einschalten, sonst droht ein Bußgeld.“: TEILWEISE.\n"
+                    + "- „Radfahrer müssen bei Dunkelheit das Licht einschalten.“ und „Autofahrer müssen bei "
+                    + "Dunkelheit das Licht einschalten.“: VERSCHIEDEN.\n\n"
                     + "Schreibe zuerst in einem Satz den Grund, dann das Urteil. Antworte als JSON mit den Feldern "
                     + "\"grund\" und \"urteil\".";
         }
         return "Earlier sentence:\n" + e + "\n\nLater sentence:\n" + l + "\n\n"
                 + "Judge like this:\n"
-                + "- GLEICH: the later sentence says the same as the earlier one, even in other words, and adds no new "
-                + "information.\n"
-                + "- TEILWEISE: part of the statement repeats, but the later sentence adds new information.\n"
-                + "- VERSCHIEDEN: the sentences have another topic, or the same topic with another statement.\n"
-                + "Important: when the sentences name another actor or another person concerned (for example workers "
-                + "instead of employers), another condition (for example voluntary instead of mandatory), another "
-                + "number, another period or another country, that is VERSCHIEDEN, even when the words are similar.\n\n"
+                + "- GLEICH: the later sentence makes the same statement as the earlier one. What it adds is only an "
+                + "example, a list that says the same, or a rewording, nothing that would deserve a sentence of its "
+                + "own. It adds no essential new information.\n"
+                + "- TEILWEISE: at its core the later sentence makes the same statement as the earlier one, and adds a "
+                + "statement of its own: for instance a new condition, a consequence, a legal basis, a further actor "
+                + "or a purpose that says something of its own.\n"
+                + "- VERSCHIEDEN: the later sentence makes another statement, even when topic or justification are the "
+                + "same. That holds too when it says the same for other actors or persons concerned than the earlier "
+                + "sentence, under another condition, with another number, for another period or place.\n\n"
+                + "Examples from another field:\n"
+                + "- \"Cyclists must switch on their lights in the dark.\" and \"Whoever cycles in the dark has to "
+                + "turn the light on, for instance on the way home.\": GLEICH.\n"
+                + "- \"Cyclists must switch on their lights in the dark.\" and \"Cyclists must switch on their lights "
+                + "in the dark, or they risk a fine.\": TEILWEISE.\n"
+                + "- \"Cyclists must switch on their lights in the dark.\" and \"Drivers must switch on their lights "
+                + "in the dark.\": VERSCHIEDEN.\n\n"
                 + "First write the reason in one sentence, then the verdict. Answer as JSON with the fields \"grund\" "
                 + "and \"urteil\".";
     }

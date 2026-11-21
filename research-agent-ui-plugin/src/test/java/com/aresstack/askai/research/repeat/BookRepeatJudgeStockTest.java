@@ -35,10 +35,18 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Component 12 with the model stage on the judged sentence pairs of the book of 17 Nov (decision of 21.11.2026, 22:35:
- * the similarity only picks candidates, a small model judges each candidate pair). Targets fixed by the architect
- * before the run ({@code alt\c12b-prereg.json}): on all 60 pairs at least 20 of 24 GLEICH reported, at most 2 of 32
- * VERSCHIEDEN, at most 1 candidate pair without a verdict; gemma4:e2b decides, gemma4:12b is a reference.
+ * Component 12 with the model stage on judged sentence pairs (decision of 21.11.2026, 22:35: the similarity only picks
+ * candidates, a small model judges each candidate pair). The architect fixes the targets before each run and passes
+ * them as {@code .minFound}, {@code .maxFalse} and {@code .maxUnjudged}. First run on the 60 pairs of the book of
+ * 17 Nov ({@code alt\c12b-prereg.json}: at least 20 of 24 GLEICH reported, at most 2 of 32 VERSCHIEDEN, at most 1
+ * without a verdict): failed at the boundary GLEICH/TEILWEISE. Since then a TEILWEISE verdict reports a pair too (the
+ * writer strikes a GLEICH sentence and keeps only the new part of a TEILWEISE one). Every run is counted in both
+ * readings ({@code alt\c12c-prereg.json}, defaults): "beide" (the product): of GLEICH and TEILWEISE pairs at least
+ * {@code .minFound} (16) reported, of VERSCHIEDEN at most {@code .maxFalse} (3), of GLEICH at most
+ * {@code .maxSameAsDifferent} (1) with the verdict VERSCHIEDEN; "nurGleich": of GLEICH at least
+ * {@code .gleichMinFound} (7) reported as GLEICH, of VERSCHIEDEN at most {@code .gleichMaxFalse} (2) as GLEICH; both at
+ * most {@code .maxUnjudged} (1) without a verdict. {@code .lesart} (beide) names the reading that decides. Fresh pairs
+ * need {@code .url} for their sentence vectors.
  * {@link #samplePairs()} runs the whole path on six self-written pairs with a fake sentence model and a scripted judge
  * in every build; {@link #storedPairs()} needs Ollama and is skipped without {@code .chatUrl}:
  * <pre>
@@ -47,7 +55,9 @@ import static org.junit.Assert.assertTrue;
  *   -Daskai.stock.repeat.vectors=sentence-vectors.json (stored vectors of an earlier run; or .url with .embedModel)
  *   -Daskai.stock.repeat.parallel=4 -Daskai.stock.repeat.runs=2 (two runs one after the other: agreement at 0)
  *   -Daskai.stock.repeat.out=build/component-stock/repeat-judge
- *   optional: .pairs, .candidateSimilarity (0.70), .maxJudged (3), .minFound (20), .maxFalse (2), .maxUnjudged (1),
+ *   optional: .pairs (another file of judged pairs in the same form), .candidateSimilarity (0.70), .maxJudged (3),
+ *             .minFound (16), .maxFalse (3), .maxSameAsDifferent (1), .gleichMinFound (7), .gleichMaxFalse (2),
+ *             .maxUnjudged (1), .lesart (beide|nurGleich),
  *             .numCtx (only when set), .think=omit (else think:false is sent), .timeoutSeconds (120)
  * </pre>
  * {@code result.json} holds per pair the measures, whether it was a candidate, and per run the model's verdict, its
@@ -56,6 +66,10 @@ import static org.junit.Assert.assertTrue;
 public class BookRepeatJudgeStockTest {
 
     private static final String P = "askai.stock.repeat.";
+    /** The reading of the product: GLEICH and TEILWEISE both report a pair. */
+    static final String BOTH = "beide";
+    /** The other reading: only GLEICH reports a pair. */
+    static final String ONLY_SAME = "nurGleich";
 
     @Rule
     public TemporaryFolder scratch = new TemporaryFolder();
@@ -107,9 +121,13 @@ public class BookRepeatJudgeStockTest {
         int maxJudged = BookRepeatCheck.Options.DEFAULT_MAX_JUDGED_PER_SENTENCE;
         int parallel = 4;
         int runs = 1;
-        int minFound = 20;
-        int maxFalse = 2;
+        int minFound = 16;
+        int maxFalse = 3;
+        int maxSameAsDifferent = 1;
+        int onlySameMinFound = 7;
+        int onlySameMaxFalse = 2;
         int maxUnjudged = 1;
+        String reading = BOTH;
         RepeatCheck.Criteria base = RepeatCheck.Criteria.defaults();
     }
 
@@ -121,8 +139,10 @@ public class BookRepeatJudgeStockTest {
                 .answer("widersprechen", "VERSCHIEDEN").answer("freiwillig", "GLEICH").answer("stoppen", "TEILWEISE");
         Settings settings = new Settings();
         settings.runs = 2;
-        settings.minFound = 2;
+        settings.minFound = 3;
         settings.maxFalse = 1;
+        settings.onlySameMinFound = 2;
+        settings.onlySameMaxFalse = 1;
         File out = scratch.newFolder("out");
 
         JsonObject result = run(cases, vectors, judge, "fake", settings, "sample-pairs.json", out, "test", "");
@@ -133,10 +153,19 @@ public class BookRepeatJudgeStockTest {
         assertEquals(2, all.get("gleichGemeldet").getAsInt());
         assertEquals(1, all.get("verschiedenGemeldet").getAsInt());
         assertEquals("[\"S4\"]", all.get("verschiedenGemeldetBlaetter").toString());
-        assertEquals(0, all.get("teilweiseGemeldet").getAsInt());
+        assertEquals("S6: TEILWEISE reports too", 1, all.get("teilweiseGemeldet").getAsInt());
+        assertEquals(1, all.get("teilweiseGemeldetAlsTeilweise").getAsInt());
+        assertEquals(0, all.get("gleichGemeldetAlsTeilweise").getAsInt());
+        assertEquals(0, all.get("verschiedenGemeldetAlsTeilweise").getAsInt());
         assertEquals(5, all.get("vorausgewaehlt").getAsInt());
         assertEquals(0, all.get("fehlerOderNichtBeurteilt").getAsInt());
+        assertEquals("S1, S2 and S6", 3, all.get("gleichOderTeilweiseGemeldet").getAsInt());
+        assertEquals(0, all.get("gleichAlsVerschieden").getAsInt());
+        assertEquals(2, all.get("gleichAlsGleichGemeldet").getAsInt());
+        assertEquals(1, all.get("verschiedenAlsGleichGemeldet").getAsInt());
         assertTrue(run1.get("bestanden").getAsBoolean());
+        assertTrue(run1.getAsJsonObject("lesarten").getAsJsonObject(BOTH).get("bestanden").getAsBoolean());
+        assertTrue(run1.getAsJsonObject("lesarten").getAsJsonObject(ONLY_SAME).get("bestanden").getAsBoolean());
         JsonObject odd = run1.getAsJsonObject("ungerade");
         assertEquals("S1, S3, S5", 1, odd.get("gleich").getAsInt());
         assertEquals(2, odd.get("verschieden").getAsInt());
@@ -158,6 +187,9 @@ public class BookRepeatJudgeStockTest {
         assertEquals("{\"grund\":\"Grund freiwillig.\",\"urteil\":\"GLEICH\"}",
                 s4run.getAsJsonArray("rohantworten").get(0).getAsString());
         assertTrue(s4run.get("gemeldet").getAsBoolean());
+        assertEquals("streichen", s4run.get("meldung").getAsString());
+        assertEquals("nur das Neue behalten", pair(result, "S6").getAsJsonArray("laeufe").get(0).getAsJsonObject()
+                .get("meldung").getAsString());
         JsonObject s5 = pair(result, "S5");
         assertFalse(s5.get("vorausgewaehlt").getAsBoolean());
         assertEquals("Zahlenregel", s5.get("nichtVorausgewaehltWeil").getAsString());
@@ -208,7 +240,14 @@ public class BookRepeatJudgeStockTest {
         settings.runs = Integer.getInteger(P + "runs", settings.runs);
         settings.minFound = Integer.getInteger(P + "minFound", settings.minFound);
         settings.maxFalse = Integer.getInteger(P + "maxFalse", settings.maxFalse);
+        settings.maxSameAsDifferent = Integer.getInteger(P + "maxSameAsDifferent", settings.maxSameAsDifferent);
+        settings.onlySameMinFound = Integer.getInteger(P + "gleichMinFound", settings.onlySameMinFound);
+        settings.onlySameMaxFalse = Integer.getInteger(P + "gleichMaxFalse", settings.onlySameMaxFalse);
         settings.maxUnjudged = Integer.getInteger(P + "maxUnjudged", settings.maxUnjudged);
+        settings.reading = System.getProperty(P + "lesart", settings.reading);
+        if (!BOTH.equals(settings.reading) && !ONLY_SAME.equals(settings.reading)) {
+            throw new IllegalArgumentException("-D" + P + "lesart must be " + BOTH + " or " + ONLY_SAME);
+        }
         System.out.println("[repeat-judge] " + cases.size() + " pairs " + RepeatStock.counts(cases) + ", judge "
                 + chatModel + " at " + chatUrl + ", " + settings.parallel + " at a time, " + settings.runs
                 + " run(s)");
@@ -266,12 +305,22 @@ public class BookRepeatJudgeStockTest {
         rules.addProperty("mindestInhaltswoerter", settings.base.getMinWords());
         rules.addProperty("hoechstensJeSatz", settings.maxJudged);
         rules.addProperty("zahlenregel", "vor dem Modell, ohne Ausnahme");
-        rules.addProperty("gemeldet", "nur GLEICH; gleicher Text ohne Modell");
+        rules.addProperty("gemeldet", "GLEICH (streichen) und TEILWEISE (nur das Neue behalten); gleicher Text ohne "
+                + "Modell");
         result.add("regeln", rules);
         JsonObject targets = new JsonObject();
-        targets.addProperty("gleichMindestens", settings.minFound);
-        targets.addProperty("verschiedenHoechstens", settings.maxFalse);
-        targets.addProperty("ohneUrteilHoechstens", settings.maxUnjudged);
+        targets.addProperty("massgeblicheLesart", settings.reading);
+        JsonObject both = new JsonObject();
+        both.addProperty("gleichOderTeilweiseGemeldetMindestens", settings.minFound);
+        both.addProperty("verschiedenGemeldetHoechstens", settings.maxFalse);
+        both.addProperty("gleichAlsVerschiedenHoechstens", settings.maxSameAsDifferent);
+        both.addProperty("ohneUrteilHoechstens", settings.maxUnjudged);
+        targets.add(BOTH, both);
+        JsonObject onlySame = new JsonObject();
+        onlySame.addProperty("gleichAlsGleichGemeldetMindestens", settings.onlySameMinFound);
+        onlySame.addProperty("verschiedenAlsGleichGemeldetHoechstens", settings.onlySameMaxFalse);
+        onlySame.addProperty("ohneUrteilHoechstens", settings.maxUnjudged);
+        targets.add(ONLY_SAME, onlySame);
         result.add("vorgaben", targets);
 
         List<List<BookRepeatCheck.Result>> runs = new ArrayList<List<BookRepeatCheck.Result>>();
@@ -298,18 +347,45 @@ public class BookRepeatJudgeStockTest {
             report.add("alle", all);
             report.add("ungerade", counts(cases, results, 1));
             report.add("gerade", counts(cases, results, 2));
-            boolean passed = all.get("gleichGemeldet").getAsInt() >= settings.minFound
+            int unjudged = all.get("fehlerOderNichtBeurteilt").getAsInt();
+            boolean bothPassed = all.get("gleichOderTeilweiseGemeldet").getAsInt() >= settings.minFound
                     && all.get("verschiedenGemeldet").getAsInt() <= settings.maxFalse
-                    && all.get("fehlerOderNichtBeurteilt").getAsInt() <= settings.maxUnjudged;
+                    && all.get("gleichAlsVerschieden").getAsInt() <= settings.maxSameAsDifferent
+                    && unjudged <= settings.maxUnjudged;
+            boolean onlySamePassed = all.get("gleichAlsGleichGemeldet").getAsInt() >= settings.onlySameMinFound
+                    && all.get("verschiedenAlsGleichGemeldet").getAsInt() <= settings.onlySameMaxFalse
+                    && unjudged <= settings.maxUnjudged;
+            JsonObject readings = new JsonObject();
+            readings.add(BOTH, reading(bothPassed, String.format(Locale.ROOT, "GLEICH oder TEILWEISE %d von %d "
+                            + "gemeldet (mindestens %d), VERSCHIEDEN %d von %d gemeldet (hoechstens %d), GLEICH als "
+                            + "VERSCHIEDEN %d (hoechstens %d), ohne Urteil %d (hoechstens %d)",
+                    all.get("gleichOderTeilweiseGemeldet").getAsInt(), all.get("gleichOderTeilweise").getAsInt(),
+                    settings.minFound, all.get("verschiedenGemeldet").getAsInt(), all.get("verschieden").getAsInt(),
+                    settings.maxFalse, all.get("gleichAlsVerschieden").getAsInt(), settings.maxSameAsDifferent,
+                    unjudged, settings.maxUnjudged)));
+            readings.add(ONLY_SAME, reading(onlySamePassed, String.format(Locale.ROOT, "GLEICH %d von %d als GLEICH "
+                            + "gemeldet (mindestens %d), VERSCHIEDEN %d von %d als GLEICH (hoechstens %d), ohne "
+                            + "Urteil %d (hoechstens %d)", all.get("gleichAlsGleichGemeldet").getAsInt(),
+                    all.get("gleich").getAsInt(), settings.onlySameMinFound,
+                    all.get("verschiedenAlsGleichGemeldet").getAsInt(), all.get("verschieden").getAsInt(),
+                    settings.onlySameMaxFalse, unjudged, settings.maxUnjudged)));
+            report.add("lesarten", readings);
+            boolean passed = BOTH.equals(settings.reading) ? bothPassed : onlySamePassed;
             report.addProperty("bestanden", passed);
             report.addProperty("befund", String.format(Locale.ROOT, "Lauf %d: GLEICH %d von %d gemeldet (mindestens "
-                            + "%d), VERSCHIEDEN %d von %d (hoechstens %d), TEILWEISE %d von %d (nur Bericht), ohne "
-                            + "Urteil %d (hoechstens %d)", r, all.get("gleichGemeldet").getAsInt(),
-                    all.get("gleich").getAsInt(), settings.minFound, all.get("verschiedenGemeldet").getAsInt(),
-                    all.get("verschieden").getAsInt(), settings.maxFalse, all.get("teilweiseGemeldet").getAsInt(),
+                            + "%d; davon %d als TEILWEISE), VERSCHIEDEN %d von %d (hoechstens %d; davon %d als "
+                            + "TEILWEISE), TEILWEISE %d von %d (nur Bericht), ohne Urteil %d (hoechstens %d)", r,
+                    all.get("gleichGemeldet").getAsInt(), all.get("gleich").getAsInt(), settings.minFound,
+                    all.get("gleichGemeldetAlsTeilweise").getAsInt(), all.get("verschiedenGemeldet").getAsInt(),
+                    all.get("verschieden").getAsInt(), settings.maxFalse,
+                    all.get("verschiedenGemeldetAlsTeilweise").getAsInt(), all.get("teilweiseGemeldet").getAsInt(),
                     all.get("teilweise").getAsInt(), all.get("fehlerOderNichtBeurteilt").getAsInt(),
                     settings.maxUnjudged));
             System.out.println("[repeat-judge] " + report.get("befund").getAsString());
+            System.out.println("[repeat-judge] Lesart " + BOTH + ": " + readings.getAsJsonObject(BOTH).get("befund")
+                    .getAsString() + " -> " + (bothPassed ? "bestanden" : "nicht bestanden"));
+            System.out.println("[repeat-judge] Lesart " + ONLY_SAME + ": " + readings.getAsJsonObject(ONLY_SAME)
+                    .get("befund").getAsString() + " -> " + (onlySamePassed ? "bestanden" : "nicht bestanden"));
             allPassed &= passed;
             runReports.add(report);
         }
@@ -321,14 +397,24 @@ public class BookRepeatJudgeStockTest {
         JsonObject verdict = new JsonObject();
         verdict.addProperty("bestanden", allPassed);
         StringBuilder text = new StringBuilder(allPassed ? "bestanden" : "nicht bestanden");
+        text.append(" in der Lesart ").append(settings.reading);
         text.append(runs.size() > 1 ? " (jeder Lauf muss die Vorgaben erfuellen)" : "");
         for (JsonElement report : runReports) {
-            text.append("; ").append(report.getAsJsonObject().get("befund").getAsString());
+            JsonObject r = report.getAsJsonObject();
+            text.append("; Lauf ").append(r.get("lauf").getAsInt()).append(": ").append(r.getAsJsonObject("lesarten")
+                    .getAsJsonObject(settings.reading).get("befund").getAsString());
         }
         verdict.addProperty("befund", text.toString());
         result.add("ergebnis", verdict);
         Files.write(new File(out, "result.json").toPath(), RepeatStock.pretty(result).getBytes(StandardCharsets.UTF_8));
         return result;
+    }
+
+    private static JsonObject reading(boolean passed, String finding) {
+        JsonObject o = new JsonObject();
+        o.addProperty("bestanden", passed);
+        o.addProperty("befund", finding);
+        return o;
     }
 
     private static int calls(MainModelChat chat) {
@@ -383,6 +469,10 @@ public class BookRepeatJudgeStockTest {
         List<String> sameMissed = new ArrayList<String>();
         List<String> differentReported = new ArrayList<String>();
         List<String> partReported = new ArrayList<String>();
+        int samePartly = 0;
+        int differentPartly = 0;
+        int partPartly = 0;
+        List<String> sameAsDifferent = new ArrayList<String>();
         List<String> unjudged = new ArrayList<String>();
         for (int i = 0; i < cases.size(); i++) {
             RepeatStock.Case c = cases.get(i);
@@ -391,6 +481,7 @@ public class BookRepeatJudgeStockTest {
             }
             BookRepeatCheck.Result result = results.get(i);
             boolean reported = !result.getPairs().isEmpty();
+            boolean partly = reported && result.getPairs().get(0).getReason() == BookRepeatCheck.Reason.PARTLY_SAME;
             if (!result.getJudged().isEmpty() || reported) {
                 candidates++;
             }
@@ -403,27 +494,42 @@ public class BookRepeatJudgeStockTest {
             if (RepeatStock.SAME.equals(c.verdict)) {
                 same++;
                 (reported ? sameReported : sameMissed).add(c.sheet);
+                samePartly += partly ? 1 : 0;
+                if (SameStatementJudge.Verdict.DIFFERENT.wireName().equals(verdictOf(result))) {
+                    sameAsDifferent.add(c.sheet);
+                }
             } else if (RepeatStock.DIFFERENT.equals(c.verdict)) {
                 different++;
                 if (reported) {
                     differentReported.add(c.sheet);
                 }
+                differentPartly += partly ? 1 : 0;
             } else {
                 part++;
                 if (reported) {
                     partReported.add(c.sheet);
                 }
+                partPartly += partly ? 1 : 0;
             }
         }
         JsonObject o = new JsonObject();
         o.addProperty("gleich", same);
+        o.addProperty("gleichOderTeilweise", same + part);
+        o.addProperty("gleichOderTeilweiseGemeldet", sameReported.size() + partReported.size());
         o.addProperty("gleichGemeldet", sameReported.size());
+        o.addProperty("gleichGemeldetAlsTeilweise", samePartly);
+        o.addProperty("gleichAlsGleichGemeldet", sameReported.size() - samePartly);
         o.add("gleichVerfehlt", RepeatStock.strings(sameMissed));
+        o.addProperty("gleichAlsVerschieden", sameAsDifferent.size());
+        o.add("gleichAlsVerschiedenBlaetter", RepeatStock.strings(sameAsDifferent));
         o.addProperty("verschieden", different);
         o.addProperty("verschiedenGemeldet", differentReported.size());
+        o.addProperty("verschiedenGemeldetAlsTeilweise", differentPartly);
+        o.addProperty("verschiedenAlsGleichGemeldet", differentReported.size() - differentPartly);
         o.add("verschiedenGemeldetBlaetter", RepeatStock.strings(differentReported));
         o.addProperty("teilweise", part);
         o.addProperty("teilweiseGemeldet", partReported.size());
+        o.addProperty("teilweiseGemeldetAlsTeilweise", partPartly);
         o.add("teilweiseGemeldetBlaetter", RepeatStock.strings(partReported));
         o.addProperty("vorausgewaehlt", candidates);
         o.addProperty("fehlerOderNichtBeurteilt", unjudged.size());
@@ -481,6 +587,9 @@ public class BookRepeatJudgeStockTest {
             o.addProperty("schicht", c.stratum);
             o.addProperty("urteil", c.verdict);
             o.addProperty("gleicherBeleg", c.sameEvidence);
+            if (c.borderline != null) {
+                o.add("grenzfall", c.borderline);
+            }
             BookRepeatCheck.Pair nearest = first.getNearest().isEmpty() ? null : first.getNearest().get(0);
             if (nearest != null) {
                 o.addProperty("kosinus", RepeatStock.round(nearest.getSimilarity()));
@@ -505,6 +614,9 @@ public class BookRepeatJudgeStockTest {
                         : judgement.getAnswers()));
                 run.addProperty("versuche", judgement == null ? 0 : judgement.getAttempts());
                 run.addProperty("gemeldet", !result.getPairs().isEmpty());
+                run.addProperty("meldung", result.getPairs().isEmpty() ? ""
+                        : result.getPairs().get(0).getReason() == BookRepeatCheck.Reason.PARTLY_SAME
+                        ? "nur das Neue behalten" : "streichen");
                 run.addProperty("fehler", judgement == null ? "" : judgement.getProblem());
                 run.addProperty("dauerMs", millis.get(r)[i]);
                 perRun.add(run);

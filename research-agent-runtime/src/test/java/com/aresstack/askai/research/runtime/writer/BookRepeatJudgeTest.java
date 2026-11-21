@@ -153,7 +153,7 @@ public class BookRepeatJudgeTest {
     }
 
     @Test
-    public void teilweiseAndVerschiedenAreKeptButNotReported() {
+    public void teilweiseIsReportedToKeepOnlyTheNewPartVerschiedenIsNot() {
         BookRepeatCheckTest.FakeModel model = new BookRepeatCheckTest.FakeModel()
                 .with(SENSORS, 1, 0).with(PARAPHRASE, 0.96f, 0.28f).with(OTHER_ACTOR, 0.9f, 0, 0.436f);
         Judge judge = new Judge().answer("Versicherte", "VERSCHIEDEN").answer("Kleidungssensoren", "TEILWEISE");
@@ -161,17 +161,57 @@ public class BookRepeatJudgeTest {
         BookRepeatCheck.Result result = check(model, judge).check(Arrays.asList(
                 s("sec-a", SENSORS, "p1"), s("sec-b", PARAPHRASE, "p3"), s("sec-c", OTHER_ACTOR, "p4")));
 
-        assertTrue(result.getPairs().isEmpty());
-        assertEquals(0, result.getRepeatedWords());
+        assertEquals(1, result.getPairs().size());
+        BookRepeatCheck.Pair pair = result.getPairs().get(0);
+        assertEquals(BookRepeatCheck.Reason.PARTLY_SAME, pair.getReason());
+        assertEquals("PARAPHRASE repeats SENSORS", 1, pair.getLaterIndex());
+        assertEquals(0, pair.getEarlierIndex());
+        assertEquals(1, pair.getMatches());
+        assertEquals(1, result.count(BookRepeatCheck.Reason.PARTLY_SAME));
+        assertEquals(0, result.count(BookRepeatCheck.Reason.SAME_STATEMENT));
+        assertEquals("a TEILWEISE sentence brings something new: no repeated words", 0, result.getRepeatedWords());
         assertEquals("PARAPHRASE vs SENSORS; OTHER_ACTOR vs SENSORS and vs PARAPHRASE (0.86)", 3,
                 result.getJudged().size());
         assertEquals(1, result.count(SameStatementJudge.Verdict.PARTLY));
         assertEquals(2, result.count(SameStatementJudge.Verdict.DIFFERENT));
-        for (BookRepeatCheck.Judged judged : result.getJudged()) {
+        assertTrue(result.getJudged().get(0).isReported());
+        for (BookRepeatCheck.Judged judged : result.getJudged().subList(1, 3)) {
             assertFalse(judged.isReported());
             assertNull(judged.getPair().getReason());
         }
         assertEquals(BookRepeatCheck.Status.COMPLETE, result.getStatus());
+        assertTrue(result.toString(), result.toString().contains("1 of 3 sentences repeat, 1 of them with something "
+                + "new"));
+    }
+
+    @Test
+    public void gleichGoesBeforeAMoreSimilarTeilweise() {
+        String later = "Helmsensoren erkennen Stürze sofort und alarmieren automatisch die zuständigen Ersthelfer.";
+        String[] names = {"Alpha", "Bravo", "Charlie"};
+        double[] cosines = {0.95, 0.90, 0.85};
+        BookRepeatCheckTest.FakeModel model = new BookRepeatCheckTest.FakeModel().with(later, 1, 0);
+        List<BookRepeatCheck.Sentence> book = new ArrayList<BookRepeatCheck.Sentence>();
+        for (int k = 0; k < names.length; k++) {
+            String earlier = "Fassung " + names[k] + ": Sensoren im Schutzhelm melden jeden Sturz an Ersthelfer.";
+            model.with(earlier, (float) cosines[k], (float) Math.sqrt(1 - cosines[k] * cosines[k]));
+            book.add(s("sec-a", earlier));
+        }
+        book.add(s("sec-b", later));
+        Judge judge = new Judge().answer("Alpha", "TEILWEISE").answer("Bravo", "GLEICH").answer("Charlie",
+                "TEILWEISE");
+
+        BookRepeatCheck.Result result = check(model, judge).check(book);
+
+        assertEquals(1, result.getPairs().size());
+        BookRepeatCheck.Pair pair = result.getPairs().get(0);
+        assertEquals("the most similar GLEICH, not the more similar TEILWEISE", 1, pair.getEarlierIndex());
+        assertEquals(BookRepeatCheck.Reason.SAME_STATEMENT, pair.getReason());
+        assertEquals("three earlier sentences repeated, wholly or partly", 3, pair.getMatches());
+        assertTrue(result.getRepeatedWords() > 0);
+        assertFalse(result.getJudged().get(0).isReported());
+        assertEquals(BookRepeatCheck.Reason.PARTLY_SAME, result.getJudged().get(0).getPair().getReason());
+        assertTrue(result.getJudged().get(1).isReported());
+        assertFalse(result.getJudged().get(2).isReported());
     }
 
     @Test

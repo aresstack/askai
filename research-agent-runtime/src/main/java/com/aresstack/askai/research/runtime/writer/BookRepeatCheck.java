@@ -44,7 +44,10 @@ import java.util.function.Consumer;
  * candidates: an earlier sentence that states every number of the later one and reaches
  * {@link Options#getCandidateSimilarity() the candidate similarity} or the word rule's min share. The
  * {@link Options#getMaxJudgedPerSentence() most similar candidates} of each later sentence go to the model, in
- * parallel, and only its verdict {@code GLEICH} reports a pair ({@link Reason#SAME_STATEMENT}); the same text is still
+ * parallel. Its verdict {@code GLEICH} reports a pair to strike ({@link Reason#SAME_STATEMENT}), its verdict
+ * {@code TEILWEISE} a pair of which only the new part of the later sentence is worth keeping
+ * ({@link Reason#PARTLY_SAME}; first model run of 21.11.2026: a repeated statement with an added detail is a
+ * repetition for the book too); a later sentence with both gets its most similar {@code GLEICH}. The same text is still
  * reported without a call. Every judged pair is kept with the model's raw answers ({@link Result#getJudged()}).</p>
  *
  * <p>Errors: the sentence vectors come in batches, and a failed batch gets one repair attempt (the number of attempts
@@ -72,8 +75,13 @@ public final class BookRepeatCheck {
         WORDS,
         /** The earlier sentence reaches min similarity: the same statement in other words. */
         MEANING,
-        /** The judge read both sentences and found the same statement ({@code GLEICH}). */
-        SAME_STATEMENT
+        /** The judge read both sentences and found the same statement ({@code GLEICH}): strike the later one. */
+        SAME_STATEMENT,
+        /**
+         * The judge found the earlier statement repeated with essential new information ({@code TEILWEISE}): keep only
+         * the new part of the later sentence.
+         */
+        PARTLY_SAME
     }
 
     /** How the book is read; immutable. */
@@ -315,7 +323,10 @@ public final class BookRepeatCheck {
             this.reported = reported;
         }
 
-        /** The two sentences with both measures; the reason is {@link Reason#SAME_STATEMENT} for a GLEICH verdict. */
+        /**
+         * The two sentences with both measures; the reason is {@link Reason#SAME_STATEMENT} for a GLEICH verdict,
+         * {@link Reason#PARTLY_SAME} for TEILWEISE and {@code null} otherwise.
+         */
         public Pair getPair() {
             return pair;
         }
@@ -402,7 +413,7 @@ public final class BookRepeatCheck {
             return words;
         }
 
-        /** Words of the sentences that repeat an earlier one. */
+        /** Words of the sentences that repeat an earlier one; a TEILWEISE sentence brings news and is not counted. */
         public int getRepeatedWords() {
             return repeatedWords;
         }
@@ -425,6 +436,17 @@ public final class BookRepeatCheck {
         /** Every candidate pair of the judge, in reading order of the later sentence; empty without a judge. */
         public List<Judged> getJudged() {
             return judged;
+        }
+
+        /** Reported pairs with this reason. */
+        public int count(Reason reason) {
+            int n = 0;
+            for (Pair p : pairs) {
+                if (p.getReason() == reason) {
+                    n++;
+                }
+            }
+            return n;
         }
 
         /** Candidate pairs with this verdict. */
@@ -458,8 +480,10 @@ public final class BookRepeatCheck {
                     count(SameStatementJudge.Verdict.SAME), count(SameStatementJudge.Verdict.PARTLY),
                     count(SameStatementJudge.Verdict.DIFFERENT), count(SameStatementJudge.Verdict.ERROR),
                     count(SameStatementJudge.Verdict.NOT_JUDGED));
-            return String.format(Locale.ROOT, "%s: %d of %d sentences repeat (%.1f %% of the words), %d checked, "
-                            + "%d without vector%s%s", status, pairs.size(), sentences, 100 * getRepeatedWordShare(),
+            int partly = count(Reason.PARTLY_SAME);
+            return String.format(Locale.ROOT, "%s: %d of %d sentences repeat%s (%.1f %% of the words), %d checked, "
+                            + "%d without vector%s%s", status, pairs.size(), sentences,
+                    partly == 0 ? "" : ", " + partly + " of them with something new", 100 * getRepeatedWordShare(),
                     checked, withoutVector, judgedLine, problem.isEmpty() ? "" : " (" + problem + ")");
         }
     }
@@ -700,25 +724,37 @@ public final class BookRepeatCheck {
                 }
                 List<Candidate> candidates = candidatesOf.get(j);
                 Candidate chosen = null;
-                int same = 0;
+                Candidate partly = null;
+                int repeats = 0;
                 for (Candidate c : candidates) {
-                    if (c.judgement.getVerdict() == SameStatementJudge.Verdict.SAME) {
-                        same++;
+                    SameStatementJudge.Verdict verdict = c.judgement.getVerdict();
+                    if (verdict == SameStatementJudge.Verdict.SAME) {
+                        repeats++;
                         if (chosen == null) {
                             chosen = c; // the most similar GLEICH: candidates are in that order
+                        }
+                    } else if (verdict == SameStatementJudge.Verdict.PARTLY) {
+                        repeats++;
+                        if (partly == null) {
+                            partly = c;
                         }
                     } else if (!c.judgement.isJudged()) {
                         unjudged++;
                     }
                 }
+                if (chosen == null) {
+                    chosen = partly; // no GLEICH: the most similar TEILWEISE, of which only the new part stays
+                }
                 for (Candidate c : candidates) {
-                    boolean isSame = c.judgement.getVerdict() == SameStatementJudge.Verdict.SAME;
-                    Pair p = pair(prepared, c.earlier, c.later, c.share, c.similarity, c.numbersCovered,
-                            isSame ? Reason.SAME_STATEMENT : null, isSame ? same : 0);
+                    Reason reason = reasonOf(c.judgement.getVerdict());
+                    Pair p = pair(prepared, c.earlier, c.later, c.share, c.similarity, c.numbersCovered, reason,
+                            reason == null ? 0 : repeats);
                     judged.add(new Judged(p, c.judgement, c == chosen));
                     if (c == chosen) {
                         pairs.add(p);
-                        repeatedWords += later.words;
+                        if (reason == Reason.SAME_STATEMENT) {
+                            repeatedWords += later.words;
+                        }
                     }
                 }
             }
@@ -732,6 +768,14 @@ public final class BookRepeatCheck {
                 nearest, judged, judging ? judge.modelName() : "", criteria, options);
         log("repeat check: " + result);
         return result;
+    }
+
+    /** The reason a verdict reports a pair with; {@code null} for VERSCHIEDEN and for no verdict. */
+    private static Reason reasonOf(SameStatementJudge.Verdict verdict) {
+        if (verdict == SameStatementJudge.Verdict.SAME) {
+            return Reason.SAME_STATEMENT;
+        }
+        return verdict == SameStatementJudge.Verdict.PARTLY ? Reason.PARTLY_SAME : null;
     }
 
     private static final Comparator<Candidate> MOST_SIMILAR_FIRST = new Comparator<Candidate>() {
