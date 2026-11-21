@@ -3880,6 +3880,40 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return store == null ? "" : store.load().toText();
     }
 
+    /**
+     * The question headings that name no first-level card of the concept the questions belong to (the working
+     * concept in Concept, the frozen one afterwards), joined by ", "; {@code ""} when every heading names a card.
+     */
+    public String missionQuestionHeadingsWithoutCard() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = isInScoping() ? null : frozenConcept();
+            com.aresstack.askai.research.concept.questions.MissionQuestionList list;
+            java.util.List<String> cards;
+            if (frozen != null) {
+                list = frozen.getQuestions();
+                java.util.List<String> unbound = new java.util.ArrayList<String>();
+                for (java.util.Map.Entry<String, java.util.List<com.aresstack.askai.research.concept.questions
+                        .MissionQuestion>> card : list.byCard().entrySet()) {
+                    if (card.getValue().get(0).getCardAnchorId().isEmpty()) {
+                        unbound.add(card.getKey());
+                    }
+                }
+                return String.join(", ", unbound);
+            }
+            com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store = missionQuestionStore();
+            com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+            if (store == null || service == null) {
+                return "";
+            }
+            list = store.load();
+            cards = com.aresstack.askai.research.book.FrozenConcept.firstLevelCards(
+                    service.store().effectiveContent());
+            return String.join(", ", list.cardsWithoutCard(cards));
+        } catch (Exception unreadable) {
+            return "";
+        }
+    }
+
     private boolean isInScoping() {
         return productiveResources != null && !productiveResources.isClosed()
                 && com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(

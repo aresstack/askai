@@ -44,7 +44,10 @@ public final class MissionQuestionDrafter {
             .build();
 
     static final double TEMPERATURE = 0.3;
+    /** At least this many answer tokens; the question probe used 529 to 678 for four cards. */
     static final int ANSWER_TOKENS = 1500;
+    /** Answer tokens per card (the probe: 135 to 170 per card), so a mind map of many cards is not cut off. */
+    static final int ANSWER_TOKENS_PER_CARD = 375;
     static final int MIN_PER_CARD = 4;
     static final int MAX_PER_CARD = 5;
 
@@ -97,7 +100,8 @@ public final class MissionQuestionDrafter {
         String schema = schema(cards.size());
         String problem = null;
         for (int attempt = 0; attempt < 2; attempt++) {
-            MainModelChatResult result = chat.completeJson(messages, TEMPERATURE, ANSWER_TOKENS, schema);
+            MainModelChatResult result = chat.completeJson(messages, TEMPERATURE, answerTokens(cards.size()),
+                    schema);
             if (!result.isOk()) {
                 problem = "The model gave no answer: " + result.getDetail();
                 continue;
@@ -109,6 +113,10 @@ public final class MissionQuestionDrafter {
             problem = "The model's answer was no valid question list.";
         }
         return new Result(MissionQuestionList.empty(), problem);
+    }
+
+    static int answerTokens(int cards) {
+        return Math.max(ANSWER_TOKENS, ANSWER_TOKENS_PER_CARD * cards);
     }
 
     static final String SYSTEM_DE = "Du bist die Rechercheleitung für ein Sachbuch. Du leitest aus dem Buchauftrag "

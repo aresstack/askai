@@ -36,6 +36,14 @@ final class MissionQuestionsDialog {
 
         /** Whether the list can be changed now (Concept phase). */
         boolean editable();
+
+        /**
+         * The headings that name no first-level card (for example after a card was renamed), {@code ""} when every
+         * heading names one.
+         */
+        default String headingsWithoutCard() {
+            return "";
+        }
     }
 
     static final String HINT = "One \"## card\" line per first-level card, one question per line below it. The "
@@ -43,6 +51,20 @@ final class MissionQuestionsDialog {
             + "Weidezaun. The saved list is approved with the concept.";
 
     private MissionQuestionsDialog() {
+    }
+
+    /** {@code text}, followed by the headings that name no card, so a renamed card does not go unnoticed. */
+    static String withCardWarning(String text, Handler handler) {
+        String missing = handler.headingsWithoutCard();
+        if (missing == null || missing.isEmpty()) {
+            return text;
+        }
+        return "<html>" + escape(text) + "<br><b>No card named:</b> " + escape(missing)
+                + ". Rename the heading to the card, or its questions belong to no card.</html>";
+    }
+
+    private static String escape(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     static void show(Component owner, final Handler handler) {
@@ -55,7 +77,8 @@ final class MissionQuestionsDialog {
         area.setText(handler.text());
         final boolean editable = handler.editable();
         area.setEditable(editable);
-        final JLabel status = new JLabel(editable ? HINT : "Approved with the concept (read-only).");
+        final JLabel status = new JLabel(withCardWarning(editable ? HINT : "Approved with the concept (read-only).",
+                handler));
         final ComicButton draft = new ComicButton("Draft");
         final ComicButton save = new ComicButton("Save");
         final ComicButton close = new ComicButton("Close");
@@ -71,7 +94,7 @@ final class MissionQuestionsDialog {
                 save.setEnabled(true);
                 if (problem == null) {
                     area.setText(handler.text());
-                    status.setText("Drafted. Edit, delete or add questions, then save.");
+                    status.setText(withCardWarning("Drafted. Edit, delete or add questions, then save.", handler));
                 } else {
                     status.setText(problem);
                 }
@@ -81,7 +104,7 @@ final class MissionQuestionsDialog {
             String problem = handler.save(area.getText());
             if (problem == null) {
                 area.setText(handler.text());
-                status.setText("Saved.");
+                status.setText(withCardWarning("Saved.", handler));
             } else {
                 status.setText(problem);
             }

@@ -135,4 +135,11 @@ public class MissionQuestionDrafterTest {
         assertEquals("G?", list.getQuestions().get(5).getText());
         assertNull(MissionQuestionDrafter.parse("[]", Arrays.asList("Eins")));
     }
+
+    /** Architect review of PR #257: the probe needed 135 to 170 tokens per card; many cards must not cut the JSON. */
+    @Test
+    public void theAnswerBudgetGrowsWithTheCards() {
+        org.junit.Assert.assertEquals(1500, MissionQuestionDrafter.answerTokens(4));
+        org.junit.Assert.assertEquals(3750, MissionQuestionDrafter.answerTokens(10));
+    }
 }

@@ -60,4 +60,28 @@ public class MissionQuestionListTest {
         assertEquals(MissionQuestion.Origin.APP, loaded.getQuestions().get(1).getOrigin());
         assertEquals("Technik", loaded.getQuestions().get(1).getCard());
     }
+
+    /** Architect review of PR #257: a question points at its card by the card's anchor id, not by its name alone. */
+    @Test
+    public void questionsAreBoundToTheAnchorIdOfTheirCard() {
+        MissionQuestionList list = MissionQuestionList.parse("## Recht und Datenschutz\n- Wann stimmt der "
+                + "Betriebsrat zu?\n## Alte Karte\n- Was kostet es?\n", MissionQuestionList.empty());
+        java.util.List<String> cards = java.util.Arrays.asList("Technologien und Sensortypen",
+                " recht und datenschutz ");
+
+        MissionQuestionList bound = list.withCardAnchors(cards);
+
+        org.junit.Assert.assertEquals("anchor-concept-recht-und-datenschutz",
+                bound.getQuestions().get(0).getCardAnchorId());
+        org.junit.Assert.assertEquals("", bound.getQuestions().get(1).getCardAnchorId());
+        org.junit.Assert.assertEquals(java.util.Collections.singletonList("Alte Karte"),
+                list.cardsWithoutCard(cards));
+        org.junit.Assert.assertEquals("the binding survives JSON", "anchor-concept-recht-und-datenschutz",
+                MissionQuestionList.fromJson(bound.toJson()).getQuestions().get(0).getCardAnchorId());
+        org.junit.Assert.assertEquals("the same id the Weidezaun gives the card",
+                com.aresstack.askai.research.scope.ConceptAnchorProjection.anchorsOf(
+                        "{\"title\":\"\",\"concept\":[{\"Recht und Datenschutz\":[]}]}",
+                        com.aresstack.askai.research.domain.scope.ResearchScopeDraft.empty()).get(0).getAnchorId(),
+                bound.getQuestions().get(0).getCardAnchorId());
+    }
 }

@@ -76,6 +76,51 @@ public final class MissionQuestionList {
         return cards;
     }
 
+    /**
+     * The same list with each question bound to the anchor id of the first-level card its heading names (exact name,
+     * case and surrounding blanks ignored). A heading that names no card leaves its questions unbound.
+     */
+    public MissionQuestionList withCardAnchors(List<String> firstLevelCards) {
+        Map<String, String> anchorOf = new LinkedHashMap<String, String>();
+        if (firstLevelCards != null) {
+            for (String card : firstLevelCards) {
+                String key = key(card);
+                if (!key.isEmpty() && !anchorOf.containsKey(key)) {
+                    anchorOf.put(key, com.aresstack.askai.research.scope.ConceptAnchorProjection.anchorIdOf(
+                            java.util.Collections.singletonList(card.trim())));
+                }
+            }
+        }
+        List<MissionQuestion> bound = new ArrayList<MissionQuestion>();
+        for (MissionQuestion question : questions) {
+            String anchor = anchorOf.get(key(question.getCard()));
+            bound.add(new MissionQuestion(question.getId(), question.getCard(), question.getText(),
+                    question.getOrigin(), anchor == null ? "" : anchor));
+        }
+        return new MissionQuestionList(bound);
+    }
+
+    /** The headings of this list that name none of {@code firstLevelCards}, in list order. */
+    public List<String> cardsWithoutCard(List<String> firstLevelCards) {
+        Set<String> known = new LinkedHashSet<String>();
+        if (firstLevelCards != null) {
+            for (String card : firstLevelCards) {
+                known.add(key(card));
+            }
+        }
+        List<String> missing = new ArrayList<String>();
+        for (String card : byCard().keySet()) {
+            if (!known.contains(key(card))) {
+                missing.add(card);
+            }
+        }
+        return missing;
+    }
+
+    private static String key(String card) {
+        return card == null ? "" : card.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
     /** The editable text form (see the class comment); {@code ""} for an empty list. */
     public String toText() {
         StringBuilder text = new StringBuilder();
@@ -134,6 +179,9 @@ public final class MissionQuestionList {
             entry.addProperty("card", question.getCard());
             entry.addProperty("text", question.getText());
             entry.addProperty("origin", question.getOrigin().name().toLowerCase(java.util.Locale.ROOT));
+            if (!question.getCardAnchorId().isEmpty()) {
+                entry.addProperty("cardAnchor", question.getCardAnchorId());
+            }
             array.add(entry);
         }
         return array;
@@ -152,7 +200,8 @@ public final class MissionQuestionList {
             JsonObject entry = element.getAsJsonObject();
             String origin = string(entry, "origin");
             list.add(new MissionQuestion(string(entry, "id"), string(entry, "card"), string(entry, "text"),
-                    "app".equalsIgnoreCase(origin) ? MissionQuestion.Origin.APP : MissionQuestion.Origin.USER));
+                    "app".equalsIgnoreCase(origin) ? MissionQuestion.Origin.APP : MissionQuestion.Origin.USER,
+                    string(entry, "cardAnchor")));
         }
         return new MissionQuestionList(list);
     }

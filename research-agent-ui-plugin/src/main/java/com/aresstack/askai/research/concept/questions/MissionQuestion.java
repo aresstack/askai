@@ -14,12 +14,22 @@ public final class MissionQuestion {
     private final String card;
     private final String text;
     private final Origin origin;
+    private final String cardAnchorId;
 
     public MissionQuestion(String id, String card, String text, Origin origin) {
+        this(id, card, text, origin, "");
+    }
+
+    /**
+     * @param cardAnchorId the anchor id of the card the heading named when the concept was frozen
+     *                     ({@code anchor-concept-<slug>}), {@code ""} when no first-level card carried that name
+     */
+    public MissionQuestion(String id, String card, String text, Origin origin, String cardAnchorId) {
         this.id = id == null ? "" : id.trim();
         this.card = card == null ? "" : card.trim();
         this.text = text == null ? "" : text.trim();
         this.origin = origin == null ? Origin.USER : origin;
+        this.cardAnchorId = cardAnchorId == null ? "" : cardAnchorId.trim();
     }
 
     /** {@code F01}, {@code F02}, ... in list order. */
@@ -38,6 +48,14 @@ public final class MissionQuestion {
 
     public Origin getOrigin() {
         return origin;
+    }
+
+    /**
+     * The anchor id of the question's card, resolved when the concept was frozen, so a later rename of the card does
+     * not cut the question off; {@code ""} before freezing or when the heading named no card.
+     */
+    public String getCardAnchorId() {
+        return cardAnchorId;
     }
 
     @Override

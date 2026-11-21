@@ -54,6 +54,14 @@ public final class ConceptAnchorProjection {
         return anchors;
     }
 
+    /**
+     * The anchor id {@link #anchorsOf} gives the card at {@code path} (first-level card: a path of one name), so
+     * other records can point at a card by the same id.
+     */
+    public static String anchorIdOf(List<String> path) {
+        return path == null || path.isEmpty() ? "" : "anchor-concept-" + slugOf(join(path));
+    }
+
     /** Exact suppression truth: EXCLUDED facet labels + ids and the plain exclusion strings. */
     private static Set<String> suppressedNames(ResearchScopeDraft draft) {
         Set<String> suppressed = new HashSet<String>();
