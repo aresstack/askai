@@ -22,12 +22,32 @@ public final class ConceptLengthHint {
         if (!described.isEmpty()) {
             return "Book length: " + described + ".";
         }
-        String read = fromMission ? DeliverableLengthText.describe(DeliverableLengthText.read(mission)) : "";
+        if (!fromMission) {
+            return MISSING;
+        }
+        String read = DeliverableLengthText.describe(DeliverableLengthText.read(mission));
+        java.util.List<String> named = DeliverableLengthText.candidates(mission);
         if (!read.isEmpty()) {
+            if (named.size() > 1) {
+                return "Book length: " + read + ", read from the mission (it also names " + others(named, read)
+                        + ").";
+            }
             return "Book length: " + read + ", read from the mission.";
         }
-        return "No book length: name it in the mission (for example \"20 bis 30 Seiten\"), otherwise the outline "
-                + "has no word budget.";
+        if (named.size() > 1) {
+            return "No book length: the mission names " + String.join(", ", named) + "; write \"Umfang\" before the "
+                    + "one the book has, otherwise the outline has no word budget.";
+        }
+        return MISSING;
+    }
+
+    private static final String MISSING = "No book length: name it in the mission (for example \"20 bis 30 "
+            + "Seiten\"), otherwise the outline has no word budget.";
+
+    private static String others(java.util.List<String> named, String taken) {
+        java.util.List<String> rest = new java.util.ArrayList<>(named);
+        rest.remove(taken);
+        return String.join(", ", rest);
     }
 
     /** {@code true} when the hint says that no length is known. */

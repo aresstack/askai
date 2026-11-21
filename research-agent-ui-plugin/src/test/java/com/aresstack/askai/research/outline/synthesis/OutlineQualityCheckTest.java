@@ -644,4 +644,27 @@ public class OutlineQualityCheckTest {
         assertEquals(4, length.budgetSectionLimit(2000));
         assertEquals("at least one section", 1, length.budgetSectionLimit(300));
     }
+
+    /** The architect's review of PR #256: shares adding up to the whole must not starve the parts without one. */
+    @Test
+    public void explicitSharesLeaveTheOpenPartsTheirFloor() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.spread(7500, new long[]{1, 1, 5, 5},
+                new double[]{0.6, 0.4, Double.NaN, Double.NaN}, 1000, length);
+        assertTrue(java.util.Arrays.toString(words), words[2] >= 1000);
+        assertTrue(java.util.Arrays.toString(words), words[3] >= 1000);
+        assertTrue("six to four stays", words[0] > words[1]);
+        assertEquals(7500, words[0] + words[1] + words[2] + words[3], 50);
+    }
+
+    @Test
+    public void sharesWithoutOpenPartsAddUpToTheTotal() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.spread(7500, new long[]{1, 1, 1},
+                new double[]{0.33, 0.33, 0.34}, 350, length);
+        assertEquals(java.util.Arrays.toString(words), 7500, words[0] + words[1] + words[2]);
+        int[] partial = SectionBudget.spread(8000, new long[]{1, 1}, new double[]{0.5, 0.3}, 350, length);
+        assertEquals("five to three of the whole", 8000, partial[0] + partial[1]);
+        assertEquals(5000, partial[0], 50);
+    }
 }

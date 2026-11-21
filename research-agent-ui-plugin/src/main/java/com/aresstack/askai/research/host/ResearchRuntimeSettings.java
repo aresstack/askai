@@ -496,11 +496,6 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_PLAN_IDLE_CYCLES = "research.plan.idleCycles";
     public static final int DEFAULT_PLAN_IDLE_CYCLES = 2;
     /**
-     * Whether a planned query must lie near a concept node of the mind map (the IN side of the Weidezaun) to run, not
-     * only off the exclusions. Default ON: live run 5 searched "Datenschutz beim betrieblichen
-     * Wiedereingliederungsmanagement" for a book on wearables on construction sites.
-     */
-    /**
      * Repair plan step 1: when the scope names no length, the length the mission states ("20 bis 30 Seiten") becomes
      * the deliverable of the frozen concept, and Phase 3 reads it the same way from a concept frozen without one.
      * Default ON; off = the deliverable stays empty as before.
@@ -511,6 +506,11 @@ public final class ResearchRuntimeSettings {
         return store == null || store.getBoolean(KEY_LENGTH_FROM_MISSION, true);
     }
 
+    /**
+     * Whether a planned query must lie near a concept node of the mind map (the IN side of the Weidezaun) to run, not
+     * only off the exclusions. Default ON: live run 5 searched "Datenschutz beim betrieblichen
+     * Wiedereingliederungsmanagement" for a book on wearables on construction sites.
+     */
     public static final String KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS = "research.plan.queryNeedsConceptNearness";
 
     public static boolean loadPlanQueryNeedsConceptNearness(WorkspaceStateStore store) {

@@ -27,4 +27,15 @@ public class ConceptLengthHintTest {
         assertTrue("switched off, the mission is not read", ConceptLengthHint.isMissing(ConceptLengthHint.of(
                 ResearchDeliverable.unspecified(), "20 bis 30 Seiten", false)));
     }
+
+    @Test
+    public void namesEveryLengthWhenItCannotPickOne() {
+        String hint = ConceptLengthHint.of(ResearchDeliverable.unspecified(),
+                "ein Leitfaden mit 10 Seiten oder ein Buch mit 40 Seiten", true);
+        assertTrue(hint, ConceptLengthHint.isMissing(hint));
+        assertTrue(hint, hint.contains("10 pages, 40 pages"));
+        assertEquals("Book length: 40 pages, read from the mission (it also names 10 pages).",
+                ConceptLengthHint.of(ResearchDeliverable.unspecified(), "Vorlage hatte 10 Seiten; Umfang 40 Seiten",
+                        true));
+    }
 }

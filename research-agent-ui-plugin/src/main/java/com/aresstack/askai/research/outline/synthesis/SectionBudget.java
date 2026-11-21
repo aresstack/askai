@@ -5,7 +5,8 @@ package com.aresstack.askai.research.outline.synthesis;
  * <ul>
  * <li>every part gets the floor first, the rest of the budget follows the weights (so no part falls below the floor
  * while the budget allows it);</li>
- * <li>a part with an explicit share gets that share of the whole; the parts without one share the rest by weight.</li>
+ * <li>a part with an explicit share gets that share of the whole; the parts without one share the rest by weight,
+ * each still at least the floor (the explicit shares shrink to make room for it).</li>
  * </ul>
  * Before step 5a the words followed the distinct passages alone, without floor: the 17 Nov outline had sections of
  * 210 to 300 words. Stateless.
@@ -35,19 +36,30 @@ final class SectionBudget {
                 open++;
             }
         }
-        // Shares beyond the whole are scaled down; parts without a share then get nothing beyond what is left.
-        double scale = fixed > 1.0 ? 1.0 / fixed : 1.0;
+        // Explicit shares leave every part without one its floor: they are scaled down to what remains after those
+        // floors (and to the whole when they add up to more). Without open parts they fill the whole, so 0.5/0.3
+        // means five to three of the book, not eight tenths of it.
+        double limit = open == 0 ? 1.0 : Math.max(0.0, 1.0 - (double) floor * open / total);
+        double scale = open == 0 ? 1.0 / fixed : (fixed > limit ? limit / fixed : 1.0);
         long rest = total;
+        int largest = -1;
         for (int i = 0; i < n; i++) {
             if (hasShare(shares, i)) {
                 words[i] = length.round(Math.round(total * shares[i] * scale));
                 rest -= words[i];
+                if (largest < 0 || words[i] > words[largest]) {
+                    largest = i;
+                }
             }
         }
-        rest = Math.max(0, rest);
         if (open == 0) {
+            // The rounding residue goes to the largest part, so the parts add up to the total.
+            if (largest >= 0 && words[largest] + rest > 0) {
+                words[largest] += (int) rest;
+            }
             return words;
         }
+        rest = Math.max(0, rest);
         long[] openWeights = new long[open];
         int k = 0;
         for (int i = 0; i < n; i++) {

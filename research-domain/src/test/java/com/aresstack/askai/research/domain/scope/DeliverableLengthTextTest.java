@@ -64,6 +64,40 @@ public class DeliverableLengthTextTest {
         assertEquals("", read("4 Hauptthemen und 3 Zielgruppen"));
     }
 
+    /** The five cases of the architect's review of PR #256 (2026-11-21). */
+    @Test
+    public void aLengthPerPartIsNoBookLength() {
+        assertEquals("30 pages", read("Kapitel je 5 Seiten, insgesamt 30 Seiten"));
+        assertEquals("20-30 pages", read("2 Seiten je Kapitel; Umfang 20\u201330 Seiten"));
+        assertEquals("20-30 pages", read("3 pages per chapter, 20 to 30 pages in total"));
+    }
+
+    @Test
+    public void readsZwischenUndAsARange() {
+        assertEquals("20-30 pages", read("zwischen 20 und 30 Seiten"));
+        assertEquals("20-30 pages", read("between 20 and 30 pages"));
+        assertEquals("30 pages", read("Kapitel 3 und 30 Seiten"));
+    }
+
+    @Test
+    public void aPageReferenceOrAnAbbreviationIsNoLength() {
+        assertNull(DeliverableLengthText.read("DGUV Information 211-042 Seite 3"));
+        assertNull(DeliverableLengthText.read("nach 30 s. Messdauer"));
+        assertNull(DeliverableLengthText.read("siehe pp. 12"));
+        assertEquals("20-30 pages", read("Praxisbuch, 20-30 Seiten, Hinweise aus DGUV Information 211-042 Seite 3"));
+    }
+
+    @Test
+    public void severalLengthsWithoutAWholeWordGiveNone() {
+        assertNull(DeliverableLengthText.read("ein Leitfaden mit 10 Seiten oder ein Buch mit 40 Seiten"));
+        assertEquals(java.util.Arrays.asList("10 pages", "40 pages"),
+                DeliverableLengthText.candidates("ein Leitfaden mit 10 Seiten oder ein Buch mit 40 Seiten"));
+        assertEquals("40 pages", read("Vorlage hatte 10 Seiten; Umfang 40 Seiten"));
+        assertEquals("the same length twice is one length", "20-30 pages",
+                read("20-30 Seiten. Bitte 20 bis 30 Seiten einhalten."));
+        assertEquals("20-30 pages", read("Umfang 20-30 Seiten je nach Bedarf"));
+    }
+
     @Test
     public void aReversedRangeIsOrdered() {
         assertEquals("20-30 pages", read("30 bis 20 Seiten"));
