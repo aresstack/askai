@@ -22,6 +22,7 @@ import static com.aresstack.askai.research.memory.ResearchMemoryTest.TEXT_B;
 import static com.aresstack.askai.research.memory.ResearchMemoryTest.TEXT_C;
 import static com.aresstack.askai.research.memory.ResearchMemoryTest.direct;
 import static com.aresstack.askai.research.memory.ResearchMemoryTest.lead;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -127,6 +128,45 @@ public class ResearchMemoryStoreTest {
             fail("a damaged line must not be skipped");
         } catch (CorruptProjectFileException expected) {
             assertTrue(expected.getMessage(), expected.getMessage().contains("line 2"));
+        }
+    }
+
+    /** Build plan, point R: a line of a newer version stops the opening, and the file stays as it is. */
+    @Test
+    public void aNewerVersionStopsWithoutTouchingTheFile() throws Exception {
+        File project = tmp.newFolder("project");
+        ResearchMemoryStore store = new ResearchMemoryStore(project);
+        store.open().addQuestion(ResearchQuestion.open(Q, "Welche Rechte hat der Betriebsrat?", "",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        appendRaw(store.logFile(), "{\"v\":2,\"art\":\"quelle\",\"quelleId\":\"s1\"}\n{\"v\":2,\"art\":\"fr");
+        byte[] before = Files.readAllBytes(store.logFile().toPath());
+        try {
+            store.open();
+            fail("a newer version must not be read");
+        } catch (ResearchMemoryStore.NewerVersionException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("newer AskAI")
+                    && expected.getMessage().contains("line 2 has version 2"));
+        }
+        assertArrayEquals("not even the unfinished last line is cut", before,
+                Files.readAllBytes(store.logFile().toPath()));
+    }
+
+    /** Build plan, point R: a newer build moves the memory to a new generation; this build stays out of it. */
+    @Test
+    public void aPointerToAnotherGenerationStops() throws Exception {
+        File project = tmp.newFolder("project");
+        ResearchMemoryStore store = new ResearchMemoryStore(project);
+        store.open().addQuestion(ResearchQuestion.open(Q, "Welche Rechte hat der Betriebsrat?", "",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        File pointer = new File(store.logFile().getParentFile(), "current");
+        Files.write(pointer.toPath(), "log.jsonl\n".getBytes(StandardCharsets.UTF_8));
+        assertEquals("a pointer to this build's generation is fine", 1, store.open().questions().size());
+        Files.write(pointer.toPath(), "g2/log.jsonl\n".getBytes(StandardCharsets.UTF_8));
+        try {
+            store.open();
+            fail("a newer generation must not be read");
+        } catch (ResearchMemoryStore.NewerVersionException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("'g2/log.jsonl'"));
         }
     }
 

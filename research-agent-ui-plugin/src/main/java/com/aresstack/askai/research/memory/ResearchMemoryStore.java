@@ -26,26 +26,56 @@ import java.util.Map;
  * <p>
  * A line that cannot be read fails closed ({@link CorruptProjectFileException}); nothing is repaired or skipped.
  * The one exception is a last line without its line end: that is a write the process did not finish, it never
- * reached the memory, and it is cut off when the memory is opened.
+ * reached the memory, and it is cut off once every complete line has been read.
+ * <p>
+ * Version rule (build plan, point R): every line carries the version it was written in ({@code "v"}). A build reads
+ * every version from 1 up to its own and never rewrites an old line. A change of the format that needs old lines in
+ * a new shape writes a new generation and switches the pointer {@code research-memory/current} to it, as the passage
+ * store does; without a pointer the generation is {@code log.jsonl}. A line of a newer version, or a pointer to a
+ * generation this build does not know, stops the opening with {@link NewerVersionException} before anything is
+ * written.
  */
 public final class ResearchMemoryStore {
 
+    /** The version this build writes; it reads every version from 1 up to it. */
     static final int VERSION = 1;
+
+    /** The generation this build writes and reads, named as the pointer names it. */
+    static final String GENERATION = "log.jsonl";
 
     private static final Gson GSON = new Gson();
 
     private final File logFile;
+    private final File pointerFile;
 
     public ResearchMemoryStore(File projectDirectory) {
-        this.logFile = new File(new File(projectDirectory, "research-memory"), "log.jsonl");
+        File folder = new File(projectDirectory, "research-memory");
+        this.logFile = new File(folder, GENERATION);
+        this.pointerFile = new File(folder, "current");
     }
 
     public File logFile() {
         return logFile;
     }
 
+    /** The research memory was written by a newer AskAI: this build neither reads nor changes it. */
+    public static final class NewerVersionException extends Exception {
+        private final File file;
+
+        NewerVersionException(File file, String what) {
+            super("The research memory was written by a newer AskAI (" + what + "; this build reads versions 1 to "
+                    + VERSION + "). Nothing was changed; open the project with the newer build.");
+            this.file = file;
+        }
+
+        public File getFile() {
+            return file;
+        }
+    }
+
     /** The memory as stored, writing through to the file from now on. Empty before the first record. */
-    public synchronized ResearchMemory open() throws IOException, CorruptProjectFileException {
+    public synchronized ResearchMemory open() throws IOException, CorruptProjectFileException,
+            NewerVersionException {
         ResearchMemory memory = new ResearchMemory(new ResearchMemory.Log() {
             @Override
             public void topic(ResearchTopic topic) throws IOException {
@@ -72,29 +102,59 @@ public final class ResearchMemoryStore {
                 append(toJson(decision));
             }
         });
+        checkGeneration();
         if (!logFile.isFile()) {
             return memory;
         }
         String content = new String(Files.readAllBytes(logFile.toPath()), AtomicFiles.UTF8);
         int end = content.lastIndexOf('\n') + 1;
-        if (end < content.length()) {
-            System.err.println("[research-memory] dropping an unfinished last record of " + logFile);
-            AtomicFiles.write(logFile, content.substring(0, end));
-        }
+        List<JsonObject> records = new ArrayList<JsonObject>();
         int lineNumber = 0;
         for (String line : content.substring(0, end).split("\n")) {
             lineNumber++;
             if (line.trim().isEmpty()) {
                 continue;
             }
+            JsonObject record;
+            int version;
             try {
-                replay(memory, JsonParser.parseString(line).getAsJsonObject());
+                record = JsonParser.parseString(line).getAsJsonObject();
+                version = record.get("v").getAsInt();
             } catch (RuntimeException unreadable) {
                 throw new CorruptProjectFileException(logFile, "The research memory cannot be read (line "
                         + lineNumber + "): " + unreadable.getMessage());
             }
+            if (version > VERSION) {
+                throw new NewerVersionException(logFile, "line " + lineNumber + " has version " + version);
+            }
+            records.add(record);
+        }
+        lineNumber = 0;
+        for (JsonObject record : records) {
+            lineNumber++;
+            try {
+                replay(memory, record);
+            } catch (RuntimeException unreadable) {
+                throw new CorruptProjectFileException(logFile, "The research memory cannot be read (record "
+                        + lineNumber + "): " + unreadable.getMessage());
+            }
+        }
+        if (end < content.length()) {
+            System.err.println("[research-memory] dropping an unfinished last record of " + logFile);
+            AtomicFiles.write(logFile, content.substring(0, end));
         }
         return memory;
+    }
+
+    /** A pointer to another generation than this build's means a newer build moved the memory on. */
+    private void checkGeneration() throws IOException, NewerVersionException {
+        if (!pointerFile.isFile()) {
+            return;
+        }
+        String current = new String(Files.readAllBytes(pointerFile.toPath()), AtomicFiles.UTF8).trim();
+        if (!GENERATION.equals(current)) {
+            throw new NewerVersionException(pointerFile, "the current generation is '" + current + "'");
+        }
     }
 
     private synchronized void append(JsonObject record) throws IOException {
@@ -111,9 +171,10 @@ public final class ResearchMemoryStore {
 
     // ------------------------------------------------------------------------------------------- reading
 
+    /** One record in the shape of its version; version 1 is the only one so far. */
     private static void replay(ResearchMemory memory, JsonObject record) {
         int version = record.get("v").getAsInt();
-        if (version != VERSION) {
+        if (version < 1) {
             throw new IllegalArgumentException("unknown version " + version);
         }
         String kind = text(record, "art");
