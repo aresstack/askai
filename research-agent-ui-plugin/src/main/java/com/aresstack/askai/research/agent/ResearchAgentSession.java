@@ -2663,6 +2663,26 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                         public long now() {
                             return System.currentTimeMillis();
                         }
+
+                        public java.util.Map<String, String> conceptNodeLabels(
+                                com.aresstack.askai.research.book.FrozenConcept frozen) {
+                            java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+                            com.aresstack.askai.research.concept.ConceptBranchService service =
+                                    conceptBranchService();
+                            if (frozen == null || service == null) {
+                                return labels;
+                            }
+                            try {
+                                for (com.aresstack.askai.research.outline.generate.ConceptOutlineNode node
+                                        : com.aresstack.askai.research.host.OutlineGeneration.conceptNodes(frozen,
+                                        service.store())) {
+                                    labels.put(node.getId(), node.getLabel());
+                                }
+                            } catch (Exception unreadable) {
+                                technicalLog("mission weights: concept nodes unreadable: " + unreadable);
+                            }
+                            return labels;
+                        }
                     },
                     resources.outlineRun(), outlineGenerationExecutor);
             final com.aresstack.askai.research.host.OutlineClusteringRun clustering = resources.outlineRun();
@@ -3815,8 +3835,25 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     public String currentLengthHint() {
         com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = currentScopeDraft();
-        return com.aresstack.askai.research.book.ConceptLengthHint.of(draft.getDeliverable(), draft.getMission(),
+        String hint = com.aresstack.askai.research.book.ConceptLengthHint.of(draft.getDeliverable(),
+                draft.getMission(),
                 com.aresstack.askai.research.host.ResearchRuntimeSettings.loadLengthFromMission(hostStateStore));
+        // Repair plan step 5a: the weights the mission gives the main themes, so the user sees they were read.
+        try {
+            com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+            if (service != null) {
+                String weights = com.aresstack.askai.research.book.MissionWeights.describe(
+                        com.aresstack.askai.research.book.MissionWeights.read(draft.getMission(),
+                                com.aresstack.askai.research.book.FrozenConcept.firstLevelCards(
+                                        service.store().effectiveContent())));
+                if (!weights.isEmpty()) {
+                    hint = hint + " Weights: " + weights + ".";
+                }
+            }
+        } catch (RuntimeException unreadable) {
+            // the length line stands alone
+        }
+        return hint;
     }
 
     /**

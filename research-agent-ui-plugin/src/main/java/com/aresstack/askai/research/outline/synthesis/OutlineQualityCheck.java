@@ -394,6 +394,7 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
         fixed = packCodeSections(fixed, brief, notes);
         fixed = nearDuplicateTitles(fixed, notes);
         fixed = foldThinSections(fixed, brief, notes);
+        fixed = fitChaptersToBudget(fixed, brief, notes);
         fixed = fitSectionsToBudget(fixed, brief, notes);
         return new Fixed(fixed, notes);
     }
@@ -696,6 +697,136 @@ public final class OutlineQualityCheck implements OutlinePlanReview {
             chapters.add(chapter.withSections(sections));
         }
         return plan.withChapters(chapters);
+    }
+
+    /** Sections a chapter should have room for when the budget limits the number of chapters. */
+    static final int BUDGET_SECTIONS_PER_CHAPTER = 2;
+
+    /**
+     * Repair plan step 5a, the chapter count: with a book length, the book keeps at most its words / (2 x the budget
+     * section words) chapters, so every chapter has room for two sections (7,500 words: 8 chapters). While there are
+     * more, the chapter with the fewest distinct passages (one without an explicit share first) joins the chapter it
+     * fits best: the one on the same concept card, else the nearest by topic relations and title. Before, 9 or 10
+     * planned chapters each kept one section and the book fell below 12 sections.
+     */
+    private OutlinePlan fitChaptersToBudget(OutlinePlan plan, SynthesisBrief brief, List<String> notes) {
+        int total = length.targetWords(brief.getContext().getDeliverable());
+        if (!length.isSectionBudget() || total <= 0 || plan.getChapters().size() < 2) {
+            return plan;
+        }
+        int limit = Math.max(1, total / (BUDGET_SECTIONS_PER_CHAPTER * length.getBudgetSectionWords()));
+        if (plan.getChapters().size() <= limit) {
+            return plan;
+        }
+        TopicAnalysis analysis = brief.getAnalysis();
+        List<PlannedChapter> chapters = new ArrayList<PlannedChapter>(plan.getChapters());
+        while (chapters.size() > limit) {
+            int thin = -1;
+            int fewest = Integer.MAX_VALUE;
+            boolean thinHasShare = true;
+            for (int i = 0; i < chapters.size(); i++) {
+                PlannedChapter chapter = chapters.get(i);
+                int distinct = analysis.distinctCount(passagesOf(chapterKeys(chapter), brief));
+                boolean share = !Double.isNaN(brief.getContext().shareOf(OutlineAssembler.conceptNodeOf(chapter,
+                        brief), chapter.getTitle()));
+                if (thin < 0 || (thinHasShare && !share) || (share == thinHasShare && distinct < fewest)) {
+                    thin = i;
+                    fewest = distinct;
+                    thinHasShare = share;
+                }
+            }
+            int into = chapterFoldTarget(chapters, thin, brief);
+            PlannedChapter small = chapters.get(thin);
+            PlannedChapter host = chapters.get(into);
+            chapters.set(into, joined(host, small));
+            chapters.remove(thin);
+            notes.add("Chapter \"" + small.getTitle() + "\" joined \"" + host.getTitle() + "\": the book's " + total
+                    + " words allow " + limit + " chapters with room for " + BUDGET_SECTIONS_PER_CHAPTER
+                    + " sections of " + length.getBudgetSectionWords() + " words each.");
+        }
+        return plan.withChapters(chapters);
+    }
+
+    private static List<String> chapterKeys(PlannedChapter chapter) {
+        List<String> keys = new ArrayList<String>(chapter.getMaterialKeys());
+        for (PlannedSection section : chapter.getSections()) {
+            for (String key : section.getMaterialKeys()) {
+                if (!keys.contains(key)) {
+                    keys.add(key);
+                }
+            }
+        }
+        return keys;
+    }
+
+    /** {@code host} with {@code guest}'s keys and sections after its own; the host keeps title and purpose. */
+    private static PlannedChapter joined(PlannedChapter host, PlannedChapter guest) {
+        List<String> material = new ArrayList<String>(host.getMaterialKeys());
+        for (String key : guest.getMaterialKeys()) {
+            if (!material.contains(key)) {
+                material.add(key);
+            }
+        }
+        List<String> concepts = new ArrayList<String>(host.getConceptKeys());
+        for (String key : guest.getConceptKeys()) {
+            if (!concepts.contains(key)) {
+                concepts.add(key);
+            }
+        }
+        List<PlannedSection> sections = new ArrayList<PlannedSection>(host.getSections());
+        sections.addAll(guest.getSections());
+        return new PlannedChapter(host.getTitle(), host.getPurpose(), material, concepts, sections,
+                host.isUntitled() && guest.isUntitled());
+    }
+
+    /**
+     * The chapter that chapter {@code index} fits best: one on the same concept card, else the one whose material is
+     * nearest by topic relations or title, else its previous (for the first, its next) neighbour.
+     */
+    private static int chapterFoldTarget(List<PlannedChapter> chapters, int index, SynthesisBrief brief) {
+        PlannedChapter guest = chapters.get(index);
+        String card = OutlineAssembler.conceptNodeOf(guest, brief);
+        Set<String> topics = new LinkedHashSet<String>();
+        for (String key : chapterKeys(guest)) {
+            topics.add(brief.topicKeyOf(key));
+        }
+        int best = index > 0 ? index - 1 : index + 1;
+        double bestScore = 0;
+        for (int j = 0; j < chapters.size(); j++) {
+            if (j == index) {
+                continue;
+            }
+            PlannedChapter other = chapters.get(j);
+            double score = 0;
+            if (!card.isEmpty() && card.equals(OutlineAssembler.conceptNodeOf(other, brief))) {
+                score = 3.0;
+            }
+            for (String key : chapterKeys(other)) {
+                String otherKey = brief.topicKeyOf(key);
+                if (topics.contains(otherKey)) {
+                    score = Math.max(score, 2.0);
+                    continue;
+                }
+                SynthesisBrief.TopicEntry otherTopic = brief.topic(otherKey);
+                for (String own : topics) {
+                    SynthesisBrief.TopicEntry topic = brief.topic(own);
+                    if (topic == null || otherTopic == null) {
+                        continue;
+                    }
+                    for (TopicRelation relation : topic.getProfile().getRelated()) {
+                        if (relation.getTopicId().equals(otherTopic.getProfile().getTopicId())) {
+                            score = Math.max(score, relation.getCentroidSimilarity());
+                        }
+                    }
+                }
+            }
+            score = Math.max(score, titleKinship(guest.getTitle(), other.getTitle()));
+            if (score > bestScore) {
+                best = j;
+                bestScore = score;
+            }
+        }
+        return best;
     }
 
     /**

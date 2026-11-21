@@ -590,6 +590,37 @@ public class OutlineQualityCheckTest {
         assertEquals("the sum stays the book length", 2000, total, 50 * sections(fixed.getPlan()));
     }
 
+    /**
+     * The chapter count follows the length too: 1,800 words leave room for 2 chapters of two 450-word sections;
+     * the thinnest chapters join the chapter they fit best and keep their sections there.
+     */
+    @Test
+    public void theChapterCountFollowsTheBookLength() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "1800 words";
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults());
+        assertTrue("the fallback plan has more chapters than 1800 words carry", plan.getChapters().size() > 2);
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        assertEquals(fixed.getPlan().toString(), 2, fixed.getPlan().getChapters().size());
+        boolean noted = false;
+        for (String note : fixed.getNotes()) {
+            noted |= note.contains("allow 2 chapters");
+        }
+        assertTrue(fixed.getNotes().toString(), noted);
+        java.util.Set<String> before = new java.util.HashSet<String>();
+        for (PlannedChapter chapter : plan.getChapters()) {
+            before.addAll(chapter.getMaterialKeys());
+        }
+        java.util.Set<String> after = new java.util.HashSet<String>();
+        for (PlannedChapter chapter : fixed.getPlan().getChapters()) {
+            after.addAll(chapter.getMaterialKeys());
+        }
+        assertTrue("no material is lost", after.containsAll(before));
+    }
+
     @Test
     public void switchedOffTheSectionsFollowTheMaterialAsBefore() {
         SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
