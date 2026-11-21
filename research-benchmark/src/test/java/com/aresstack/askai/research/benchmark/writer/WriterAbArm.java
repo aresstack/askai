@@ -38,7 +38,8 @@ public final class WriterAbArm {
     /**
      * The arms of {@code -Daskai.benchmark.writerAb.arms}: comma-separated {@code model|words|thinking} entries
      * ({@code gemma4:12b|450|,gpt-oss:20b|450|low}); an empty word count keeps the app's setting (words per call,
-     * 450 by default). Empty = the {@linkplain #planArms plan's arms}.
+     * 450 by default). {@code #} works like {@code |}, because a Windows batch file cannot pass {@code |} on
+     * ({@code gpt-oss:20b##low}). Empty = the {@linkplain #planArms plan's arms}.
      */
     public static List<WriterAbArm> parse(String spec) {
         if (spec == null || spec.trim().isEmpty()) {
@@ -49,7 +50,7 @@ public final class WriterAbArm {
             if (entry.trim().isEmpty()) {
                 continue;
             }
-            String[] parts = entry.trim().split("\\|", -1);
+            String[] parts = entry.trim().split("[|#]", -1);
             arms.add(new WriterAbArm(parts[0], parts.length > 1 && !parts[1].trim().isEmpty()
                     ? Integer.parseInt(parts[1].trim()) : 0, parts.length > 2 ? parts[2].trim() : ""));
         }

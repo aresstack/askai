@@ -73,6 +73,16 @@ public class WriterAbLogTest {
     }
 
     @Test
+    public void anArmSpecFromABatchFileUsesHashInsteadOfBar() {
+        List<WriterAbArm> arms = WriterAbArm.parse("gemma4:e2b##,gpt-oss:20b##low,llama3.1:8b|1100|");
+        assertEquals("gpt-oss:20b", arms.get(1).getModel());
+        assertEquals("low", arms.get(1).getThinking());
+        assertEquals(0, arms.get(1).getWordsPerCall());
+        assertEquals("", arms.get(0).getThinking());
+        assertEquals(1100, arms.get(2).getWordsPerCall());
+    }
+
+    @Test
     public void theExportRanksLikeTheAppWhenTheMissionPrefersSources() throws Exception {
         File project = Files.createTempDirectory("writer-ab-project").toFile();
         Files.write(new File(project, "book.json").toPath(), ("{\"pins\":[{\"mission\":\"alt\"},"

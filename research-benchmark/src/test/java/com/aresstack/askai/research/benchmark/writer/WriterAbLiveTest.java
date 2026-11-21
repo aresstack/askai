@@ -113,6 +113,30 @@ public class WriterAbLiveTest {
         }
     }
 
+    /**
+     * Unloads a model at once ({@code keep_alive} 0) instead of after Ollama's five minutes, so the writer and the
+     * judge are never both in memory: on a PC near its memory limit the second big model runs partly on the CPU or
+     * crashes the llama-server, and the next sample would be measured under other conditions.
+     */
+    static void unload(String ollama, String model) {
+        try {
+            java.net.HttpURLConnection connection =
+                    (java.net.HttpURLConnection) new java.net.URL(ollama + "/api/generate").openConnection();
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            com.google.gson.JsonObject body = new com.google.gson.JsonObject();
+            body.addProperty("model", model);
+            body.addProperty("keep_alive", 0);
+            connection.getOutputStream().write(body.toString().getBytes(StandardCharsets.UTF_8));
+            try (java.io.InputStream in = connection.getInputStream()) {
+                readAll(in);
+            }
+        } catch (IOException ignored) {
+            // an unload is housekeeping; Ollama unloads by itself after keep_alive
+        }
+    }
+
     /** The installed Ollama models whose name says they embed, the app's bge-m3 first. */
     private static List<String> installedEmbeddingModels(String ollama) throws IOException {
         java.net.HttpURLConnection connection =
@@ -240,6 +264,12 @@ public class WriterAbLiveTest {
                         samples.add(chapterByWritingJob(meter, input, label, writer, pipeline, vectors,
                                 judgeItems.contains(WriterAbDecision.CHAPTER) ? judge : null, run, log));
                         System.out.println("writer A/B run " + run + ": " + label + " done");
+                        if (judge != null && !judge.getModel().equals(arm.getModel())) {
+                            unload(ollama, judge.getModel());
+                        }
+                    }
+                    if (arms.size() > 1) {
+                        unload(ollama, arm.getModel());
                     }
                 }
                 List<BlindAssignment> assignments = new ArrayList<BlindAssignment>();
@@ -282,9 +312,12 @@ public class WriterAbLiveTest {
         OllamaTokenMeter.Usage before = meter.snapshot();
         long start = System.nanoTime();
         SectionDraft draft = writer.write(assignment);
-        double seconds = (System.nanoTime() - start) / 1e9;
+        double wall = (System.nanoTime() - start) / 1e9;
         meter.awaitIdle(60_000L);
-        long tokens = meter.snapshot().minus(before).totalTokens();
+        OllamaTokenMeter.Usage used = meter.snapshot().minus(before);
+        long tokens = used.totalTokens();
+        // without loading the model: the judge before may have pushed the writer out of memory
+        double seconds = Math.max(0, wall - used.loadMillis / 1e3);
         log.check();
         Map<String, Integer> counts = emptyCounts();
         counts.putAll(log.counts());
@@ -342,9 +375,12 @@ public class WriterAbLiveTest {
         OllamaTokenMeter.Usage before = meter.snapshot();
         long start = System.nanoTime();
         WritingOutcome outcome = job.writeRemaining(outline);
-        double seconds = (System.nanoTime() - start) / 1e9;
+        double wall = (System.nanoTime() - start) / 1e9;
         meter.awaitIdle(60_000L);
-        long tokens = meter.snapshot().minus(before).totalTokens();
+        OllamaTokenMeter.Usage used = meter.snapshot().minus(before);
+        long tokens = used.totalTokens();
+        // without loading the model: the judge before may have pushed the writer out of memory
+        double seconds = Math.max(0, wall - used.loadMillis / 1e3);
         log.check();
 
         StringBuilder text = new StringBuilder();

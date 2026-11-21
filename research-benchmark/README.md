@@ -133,14 +133,16 @@ gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest.writeTheSamples
   [-Daskai.benchmark.writerAb.chapterOnly=true] [-Daskai.benchmark.writerAb.sentenceModel=bge-m3]
 ```
 
-Arms are `model|words|thinking` entries; an empty word count keeps the app's setting (450). A variant is a set of
+Arms are `model|words|thinking` entries (`#` instead of `|` from a Windows batch file: `gpt-oss:20b##low`); an empty word count keeps the app's setting (450). A variant is a set of
 writer settings against the app's defaults (`name:key=value;key=value`, or `-Daskai.benchmark.writerAb.variant.<name>=...`);
 every arm runs every variant, in an order that rotates per run, and the blind sheet hides arm and variant. Each arm
 writes sections 1-3 alone (on an empty manuscript) and the whole chapter through the PR 29 writing job, in every run;
 `chapterOnly` writes only the chapter (the app's path; half the time). The writer's log goes to
 `writer-ab-<time>-writer.log`, and its top-ups, top-up words, dropped top-ups, removed repeats and repairs are
 counted per sample; a writer that loses its sentence vectors stops the run. The judge reads each cited sentence
-with up to two sentences before it as context, and its unreadable answers are counted apart. Per run the report directory
+with up to two sentences before it as context, and its unreadable answers are counted apart. The judge is unloaded
+after every sample and an arm after its turn (`keep_alive` 0), so two big models never share memory, and a sample's
+seconds leave out Ollama's `load_duration`. Per run the report directory
 receives `writer-ab-<time>-run<n>-sheet.md` (blind, shuffled letters per item), `-metrics.md` (time, tokens, citation
 validity, uncited paragraphs, drift, claim-check and gap counts, and the quality figures: repeated words per section
 and overall by bge-m3 cosine >= 0.80, restarts, reach of the word target, short paragraphs, source blocks,

@@ -18,7 +18,7 @@ public class OllamaTokenMeterTest {
 
     private static final String STREAM = "{\"message\":{\"content\":\"Hel\"},\"done\":false}\n"
             + "{\"message\":{\"content\":\"lo\"},\"done\":false}\n"
-            + "{\"done\":true,\"prompt_eval_count\":120,\"eval_count\":7,\"total_duration\":2500000000}\n";
+            + "{\"done\":true,\"prompt_eval_count\":120,\"eval_count\":7,\"total_duration\":2500000000,\"load_duration\":1200000000}\n";
     private static final String SINGLE = "{\"message\":{\"content\":\"{}\"},\"done\":true,"
             + "\"prompt_eval_count\":30,\"eval_count\":3,\"total_duration\":500000000}";
 
@@ -56,6 +56,7 @@ public class OllamaTokenMeterTest {
             assertEquals(10, used.outputTokens);
             assertEquals(160, used.totalTokens());
             assertEquals(3000, used.modelMillis);
+            assertEquals(1200, used.loadMillis);
             assertTrue("nothing in flight after the calls returned", meter.awaitIdle(1000));
         } finally {
             upstream.stop(0);
