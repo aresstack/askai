@@ -4093,6 +4093,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             scopeApproveDiag("cancelled: the user kept the previous record");
             return ScopingApprovalOutcome.USER_CANCELLED; // nothing dispatched
         }
+        if (!confirmMissingLength()) {
+            scopeApproveDiag("cancelled: the user adds a book length first");
+            return ScopingApprovalOutcome.USER_CANCELLED; // nothing dispatched
+        }
         scopeApproveDiag("before=" + snapshot.getPhaseId() + "/" + snapshot.getStateId());
         // PR 07: the single, explicit transition. The concept approval and the Phase-1 record are the
         // transition's own record (ConceptFreezeHook); a failed approval refuses the transition.
@@ -4623,10 +4627,39 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
     }
 
+    static final String MISSING_LENGTH_QUESTION = "The concept names no book length, so the outline gets no word "
+            + "budget (the book of 17 Nov had none and came out without one). Name it in the mission, for example "
+            + "\"Umfang 20 bis 30 Seiten\".\n\nApprove without a length anyway?";
+
+    /**
+     * Repair plan step 1 (Angelo, 2026-11-21: warn, approval still possible): when neither the scope nor the
+     * mission names a book length, the approval asks once; OK goes on, Cancel dispatches nothing. Without a
+     * display (tests, headless hosts that set no confirmation) it only logs and goes on.
+     */
+    private boolean confirmMissingLength() {
+        String hint;
+        try {
+            hint = currentLengthHint();
+        } catch (RuntimeException unreadable) {
+            return true;
+        }
+        if (!com.aresstack.askai.research.book.ConceptLengthHint.isMissing(hint)) {
+            return true;
+        }
+        scopeApproveDiag("no book length: " + hint);
+        if (resubmitConfirmationIsDefault && java.awt.GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        String detail = hint.startsWith("No book length: the mission names") ? hint + "\n\n" : "";
+        return resubmitConfirmation.confirm(detail + MISSING_LENGTH_QUESTION);
+    }
+
     /** PR 12: asks the user before a re-submit keeps accepted sources out; {@code true} = go on. */
     public interface ResubmitConfirmation {
         boolean confirm(String message);
     }
+
+    private volatile boolean resubmitConfirmationIsDefault = true;
 
     private volatile ResubmitConfirmation resubmitConfirmation = new ResubmitConfirmation() {
         public boolean confirm(final String message) {
@@ -4646,6 +4679,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     public void setResubmitConfirmation(ResubmitConfirmation confirmation) {
         if (confirmation != null) {
             this.resubmitConfirmation = confirmation;
+            this.resubmitConfirmationIsDefault = false;
         }
     }
 
