@@ -37,7 +37,8 @@ public final class DeliverableLengthText {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     /** A length for one part, not for the book: "je 5 Seiten", "jeweils 3 Seiten". */
     private static final Pattern PER_PART_BEFORE = Pattern.compile(
-            "(?:\\bje|\\bjeweils|\\bpro|\\beach|\\bper)\\s+(?:(?:ca\\.|etwa|rund|about|around)\\s+)?$",
+            "(?:\\bje|\\bjeweils|\\bpro|\\beach|\\bper)\\s+(?:\\p{L}+\\s+)?"
+                    + "(?:(?:ca\\.|etwa|rund|about|around)\\s+)?$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     /** "2 Seiten je Kapitel", "3 pages per chapter". */
     private static final Pattern PER_PART_AFTER = Pattern.compile("^\\s*(?:je(?!\\s+nach)|pro|jeweils|per|each)\\s+\\p{L}",
@@ -141,6 +142,8 @@ public final class DeliverableLengthText {
             }
             String before = text.substring(Math.max(0, matcher.start() - 60), matcher.start());
             String after = text.substring(matcher.end(), Math.min(text.length(), matcher.end() + 20));
+            // "ca." and "z. B." end no clause: their dot must not cut "Umfang" off its length.
+            before = before.replaceAll("(?i)\\b(ca|bzw|z\\.\\s?b|approx)\\.", "$1");
             if (PER_PART_BEFORE.matcher(before).find() || PER_PART_AFTER.matcher(after).find()) {
                 continue;
             }

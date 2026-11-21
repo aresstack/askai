@@ -667,4 +667,15 @@ public class OutlineQualityCheckTest {
         assertEquals("five to three of the whole", 8000, partial[0] + partial[1]);
         assertEquals(5000, partial[0], 50);
     }
+
+    /** Second architect review of PR #256: rounding the shares must not drop the floor of the open parts. */
+    @Test
+    public void roundingTheSharesKeepsTheFloorOfTheOpenParts() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.spread(7500, new long[]{1, 1, 9, 1},
+                new double[]{0.55, 0.45, Double.NaN, Double.NaN}, 1000, length);
+        assertTrue(java.util.Arrays.toString(words), words[2] >= 1000);
+        assertTrue(java.util.Arrays.toString(words), words[3] >= 1000);
+        assertEquals(7500, words[0] + words[1] + words[2] + words[3], 50);
+    }
 }

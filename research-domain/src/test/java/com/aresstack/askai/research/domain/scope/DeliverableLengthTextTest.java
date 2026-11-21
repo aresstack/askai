@@ -70,6 +70,8 @@ public class DeliverableLengthTextTest {
         assertEquals("30 pages", read("Kapitel je 5 Seiten, insgesamt 30 Seiten"));
         assertEquals("20-30 pages", read("2 Seiten je Kapitel; Umfang 20\u201330 Seiten"));
         assertEquals("20-30 pages", read("3 pages per chapter, 20 to 30 pages in total"));
+        assertEquals("30 pages", read("je Kapitel 5 Seiten, insgesamt 30 Seiten"));
+        assertEquals("25 pages", read("Vorlage 10 Seiten; Umfang ca. 25 Seiten"));
     }
 
     @Test

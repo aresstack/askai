@@ -59,6 +59,15 @@ final class SectionBudget {
             }
             return words;
         }
+        // Each share is rounded to the step on its own; together they may leave less than a floor per open part.
+        // The shortfall comes off the largest share, so the open parts keep their floor.
+        long needed = (long) floor * open;
+        if (largest >= 0 && rest < needed && needed <= total) {
+            long shortfall = needed - rest;
+            int taken = (int) Math.min(shortfall, words[largest]);
+            words[largest] -= taken;
+            rest += taken;
+        }
         rest = Math.max(0, rest);
         long[] openWeights = new long[open];
         int k = 0;
