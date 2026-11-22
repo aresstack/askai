@@ -21,27 +21,27 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Test tooling (outside CI, not product code): a chat model straight on Ollama's {@code /api/chat}, for the stock test
- * of the research lead (the topic finder's stock test has the same one without thinking). Non-streaming, the schema
- * as {@code format}, temperature and answer budget from the caller, {@code think} as given ({@code null} leaves it
- * out; the lead's role thinks, so its stock test sends {@code true}), {@code num_ctx} only when set (another value
- * makes Ollama load the model again). An answer cut off at the budget fails, as in the product's port; the budget
- * counts the thinking too. It counts the tokens Ollama reports and the characters of the thinking, nothing of the
- * text.
+ * Test tooling (outside CI, not product code): a chat model straight on Ollama's {@code /api/chat}, for the stock tests
+ * of the research lead and the search planner (the topic finder's stock test has the same one without thinking).
+ * Non-streaming, the schema as {@code format}, temperature and answer budget from the caller, {@code think} as given
+ * ({@code null} leaves it out; the lead's role thinks, so its stock test sends {@code true}, the planner's does not
+ * think), {@code num_ctx} only when set (another value makes Ollama load the model again). An answer cut off at the
+ * budget fails, as in the product's port; the budget counts the thinking too. It counts the tokens Ollama reports and
+ * the characters of the thinking, nothing of the text.
  */
-final class OllamaStockChat implements MainModelChat {
+public final class OllamaStockChat implements MainModelChat {
 
     private final String url;
     private final String model;
     private final Integer numCtx;
     private final Boolean think;
     private final int timeoutMillis;
-    final AtomicInteger calls = new AtomicInteger();
-    final AtomicInteger failures = new AtomicInteger();
-    final AtomicLong evalTokens = new AtomicLong();
-    final AtomicLong thinkingChars = new AtomicLong();
+    public final AtomicInteger calls = new AtomicInteger();
+    public final AtomicInteger failures = new AtomicInteger();
+    public final AtomicLong evalTokens = new AtomicLong();
+    public final AtomicLong thinkingChars = new AtomicLong();
 
-    OllamaStockChat(String url, String model, Integer numCtx, Boolean think, int timeoutMillis) {
+    public OllamaStockChat(String url, String model, Integer numCtx, Boolean think, int timeoutMillis) {
         this.url = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
         this.model = model;
         this.numCtx = numCtx;
