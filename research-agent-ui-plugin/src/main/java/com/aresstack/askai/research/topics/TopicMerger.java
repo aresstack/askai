@@ -21,6 +21,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,6 +38,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -69,8 +71,11 @@ import java.util.function.Consumer;
  * failed call gets one repair attempt, then the comparison is FEHLER: it merges nothing, the asking group is held back
  * and offered again by the next run; after {@link Options#STOP_AFTER_FAILURES} failures in a row the rest is not asked
  * (FEHLER too). Verdicts that worked are reused when the same two texts come again ({@link TopicMergeLog}), so a
- * rerun asks the model only what is new. The merger keeps only an embedding cache between runs; it is as thread-safe
- * as the injected chat.</p>
+ * rerun asks the model only what is new; with a {@link Recorder} every answer is written the moment it is there, so a
+ * run that breaks off loses no answer. Every text of a run (proposals, their questions, the known topics and
+ * questions) is embedded before the first model call, so the embedding model is not loaded again between the chat
+ * calls; a failed embedding request is tried {@value #EMBED_ATTEMPTS} times. The merger keeps only an embedding cache
+ * between runs; it is as thread-safe as the injected chat.</p>
  */
 public final class TopicMerger {
 
@@ -740,6 +745,18 @@ public final class TopicMerger {
     /** The questions of a card the card step shows, each cut to {@link #QUESTION_CHARS} characters. */
     static final int CARD_QUESTIONS = 8;
     private static final int QUESTION_CHARS = 200;
+    /** Tries of one embedding request: a timeout while the model loads beside a large chat model is tried again. */
+    static final int EMBED_ATTEMPTS = 3;
+    /** Pause before an embedding request is tried again. */
+    static final long EMBED_PAUSE_MILLIS = 5000L;
+
+    /**
+     * Takes every answer of the model the moment it is there ({@link TopicMergeLog#append} in the app), so a run that
+     * breaks off keeps what was asked. Called from the worker threads, one answer at a time per call.
+     */
+    public interface Recorder {
+        void record(Comparison comparison) throws IOException;
+    }
 
     private final MainModelChat chat;
     private final EmbeddingPort embeddings;
@@ -750,6 +767,8 @@ public final class TopicMerger {
     private final Clock clock;
     private final Map<String, float[]> vectorCache = new HashMap<String, float[]>();
     private String cachedFingerprint = "";
+    /** The pause before an embedding request is tried again; tests set 0. */
+    volatile long embedPauseMillis = EMBED_PAUSE_MILLIS;
 
     /**
      * @param chat       the transport of the slot ({@link #ROLE})
@@ -800,6 +819,17 @@ public final class TopicMerger {
      * @throws IllegalStateException    when the embedding model fails (nothing is decided then; run again)
      */
     public Result merge(List<TopicProposal> proposals, ResearchMemory memory, List<Comparison> earlier) {
+        return merge(proposals, memory, earlier, null);
+    }
+
+    /**
+     * {@link #merge(List, ResearchMemory, List)}, and every answer of the model goes to {@code recorder} the moment it
+     * is there (the cases of {@link Result#getAsked()}, in the order they finish).
+     *
+     * @param recorder {@code null} records nothing; a recorder that fails stops the merge
+     */
+    public Result merge(List<TopicProposal> proposals, ResearchMemory memory, List<Comparison> earlier,
+                        Recorder recorder) {
         long now = clock.millis();
         List<TopicProposal> todo = unplaced(proposals, memory);
         Set<String> ids = new HashSet<String>();
@@ -856,6 +886,13 @@ public final class TopicMerger {
         for (List<String> texts : anchorTexts.values()) {
             needed.addAll(texts);
         }
+        // The questions too, before the first call: the embedding model is not loaded again between the chat calls.
+        for (TopicProposal proposal : todo) {
+            needed.addAll(proposal.getQuestions());
+        }
+        for (ResearchQuestion question : memory.questions()) {
+            needed.add(question.getText());
+        }
         embedAll(needed);
         for (Node item : items) {
             item.vectors.add(vectorCache.get(item.embedText));
@@ -871,10 +908,10 @@ public final class TopicMerger {
                 options.isCardStep());
         List<Comparison> used = new ArrayList<Comparison>();
         List<Comparison> asked = new ArrayList<Comparison>();
-        decide(Collections.singletonList(topicPool), verdicts, used, asked);
+        decide(Collections.singletonList(topicPool), verdicts, used, asked, recorder);
         Unions unions = unite(topicPool, true);
-        List<CardCase> cardCases = options.isCardStep() ? cardStep(topicPool, unions, verdicts, used, asked)
-                : Collections.<CardCase>emptyList();
+        List<CardCase> cardCases = options.isCardStep() ? cardStep(topicPool, unions, verdicts, used, asked,
+                recorder) : Collections.<CardCase>emptyList();
 
         // Held back: a failed case that could have merged something is asked again next run.
         Set<Integer> heldRoots = new HashSet<Integer>();
@@ -1019,7 +1056,7 @@ public final class TopicMerger {
             plannedPools.add(planned);
             rootOfPool.put(planned, rootOfPool.get(pool));
         }
-        decide(plannedPools, verdicts, used, asked);
+        decide(plannedPools, verdicts, used, asked, recorder);
 
         List<MergedQuestion> questions = new ArrayList<MergedQuestion>();
         Map<String, List<String>> standingOfTopic = new HashMap<String, List<String>>();
@@ -1626,7 +1663,7 @@ public final class TopicMerger {
 
     /** The verdicts for the doubtful edges: reused when the same two texts were judged before, else asked. */
     private void decide(List<Pool> pools, Map<String, Comparison> verdicts, List<Comparison> used,
-                        List<Comparison> asked) {
+                        List<Comparison> asked, Recorder recorder) {
         List<Edge> open = new ArrayList<Edge>();
         List<String[]> requests = new ArrayList<String[]>();
         List<Pool> poolOfOpen = new ArrayList<Pool>();
@@ -1678,7 +1715,7 @@ public final class TopicMerger {
                 }
             });
         }
-        List<Comparison> results = run(cases);
+        List<Comparison> results = run(cases, recorder);
         for (int i = 0; i < open.size(); i++) {
             open.get(i).comparison = results.get(i);
             used.add(results.get(i));
@@ -1695,23 +1732,28 @@ public final class TopicMerger {
 
     /**
      * The cases, at most {@link Options#getParallel()} at a time, the results in the order of the cases; after
-     * {@link Options#STOP_AFTER_FAILURES} failed cases in a row the rest is not asked (FEHLER).
+     * {@link Options#STOP_AFTER_FAILURES} failed cases in a row the rest is not asked (FEHLER). Each result goes to
+     * the recorder as soon as it is there.
      */
-    private List<Comparison> run(List<Case> cases) {
+    private List<Comparison> run(List<Case> cases, final Recorder recorder) {
         List<Comparison> results = new ArrayList<Comparison>();
         if (cases.isEmpty()) {
             return results;
         }
         final AtomicInteger failuresInRow = new AtomicInteger();
         final AtomicReference<String> lastFailure = new AtomicReference<String>("");
+        final AtomicBoolean unrecorded = new AtomicBoolean();
         ExecutorService workers = Executors.newFixedThreadPool(Math.min(options.getParallel(), cases.size()));
         List<Future<Comparison>> running = new ArrayList<Future<Comparison>>();
         try {
             for (final Case next : cases) {
                 running.add(workers.submit(() -> {
+                    if (unrecorded.get()) {
+                        return next.notAsked("not asked: an earlier answer could not be recorded");
+                    }
                     if (failuresInRow.get() >= Options.STOP_AFTER_FAILURES) {
-                        return next.notAsked("not asked: the model failed " + Options.STOP_AFTER_FAILURES
-                                + " cases in a row; last: " + lastFailure.get());
+                        return recorded(next.notAsked("not asked: the model failed " + Options.STOP_AFTER_FAILURES
+                                + " cases in a row; last: " + lastFailure.get()), recorder, unrecorded);
                     }
                     Comparison result = next.ask();
                     if (result.isOk()) {
@@ -1720,7 +1762,7 @@ public final class TopicMerger {
                         lastFailure.set(result.getProblem());
                         failuresInRow.incrementAndGet();
                     }
-                    return result;
+                    return recorded(result, recorder, unrecorded);
                 }));
             }
             for (Future<Comparison> result : running) {
@@ -1735,6 +1777,19 @@ public final class TopicMerger {
             workers.shutdownNow();
         }
         return results;
+    }
+
+    /** The result after the recorder took it; a failed recording stops the cases that have not begun. */
+    private static Comparison recorded(Comparison result, Recorder recorder, AtomicBoolean unrecorded) {
+        if (recorder != null) {
+            try {
+                recorder.record(result);
+            } catch (IOException failed) {
+                unrecorded.set(true);
+                throw new UncheckedIOException("an answer of the topic merge could not be recorded", failed);
+            }
+        }
+        return result;
     }
 
     /** A head of a family put to the card step, with its verdict. */
@@ -1757,7 +1812,7 @@ public final class TopicMerger {
      * back for the held-back rule.
      */
     private List<CardCase> cardStep(final Pool pool, Unions unions, Map<String, Comparison> verdicts,
-                                    List<Comparison> used, List<Comparison> asked) {
+                                    List<Comparison> used, List<Comparison> asked, Recorder recorder) {
         int groups = pool.groups.size();
         final List<String> cardIds = new ArrayList<String>();
         List<Integer> cards = new ArrayList<Integer>();
@@ -1828,7 +1883,7 @@ public final class TopicMerger {
                 }
             });
         }
-        List<Comparison> results = run(calls);
+        List<Comparison> results = run(calls, recorder);
         for (int i = 0; i < open.size(); i++) {
             open.get(i).comparison = results.get(i);
             used.add(results.get(i));
@@ -2345,12 +2400,7 @@ public final class TopicMerger {
             for (int from = 0; from < missing.size() && !changed; from += options.getEmbedBatch()) {
                 List<String> batch = new ArrayList<String>(missing.subList(from,
                         Math.min(missing.size(), from + options.getEmbedBatch())));
-                List<EmbeddingPort.EmbeddingVector> vectors;
-                try {
-                    vectors = embeddings.embed(EmbeddingPort.Role.DOCUMENT, batch);
-                } catch (RuntimeException failed) {
-                    throw new IllegalStateException("the embedding model failed: " + failed.getMessage(), failed);
-                }
+                List<EmbeddingPort.EmbeddingVector> vectors = embedTried(batch);
                 if (vectors == null || vectors.size() != batch.size()) {
                     throw new IllegalStateException("the embedding model returned " + (vectors == null ? 0
                             : vectors.size()) + " vectors for " + batch.size() + " texts");
@@ -2375,6 +2425,30 @@ public final class TopicMerger {
             }
         }
         throw new IllegalStateException("the embedding model changed while the texts were embedded");
+    }
+
+    /** One embedding request, tried {@value #EMBED_ATTEMPTS} times when it fails (a timeout, a refused connection). */
+    private List<EmbeddingPort.EmbeddingVector> embedTried(List<String> batch) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= EMBED_ATTEMPTS; attempt++) {
+            try {
+                return embeddings.embed(EmbeddingPort.Role.DOCUMENT, batch);
+            } catch (RuntimeException failed) {
+                last = failed;
+                if (attempt < EMBED_ATTEMPTS) {
+                    log("embedding request failed (try " + attempt + " of " + EMBED_ATTEMPTS + "): "
+                            + failed.getMessage() + "; trying again in " + embedPauseMillis / 1000 + " s");
+                    try {
+                        Thread.sleep(embedPauseMillis);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("topic merge interrupted", interrupted);
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("the embedding model failed " + EMBED_ATTEMPTS + " times: "
+                + last.getMessage(), last);
     }
 
     private static float[] mean(List<float[]> vectors) {

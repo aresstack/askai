@@ -78,8 +78,11 @@ import static org.junit.Assert.assertTrue;
  *   optional: gleich, zweifel, frageGleich, frageZweifel (bands), kandidaten (3), kartenschritt (true),
  *   oberthemaQuellen (2: sources a new topic needs to take subtopics), tiefe (2: levels below the top), parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
- *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused)
+ *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
+ * Every answer of the model goes to {@code <out>/projekt/topic-merge/log.jsonl} the moment it is there, and all texts
+ * are embedded before the first model call (a failed embedding request is tried three times): a run that breaks off
+ * is continued by starting it again without {@code neu}, and it asks only what is not in the log yet.
  */
 public class TopicMergerStockTest {
 
@@ -237,6 +240,7 @@ public class TopicMergerStockTest {
         String embedUrl = System.getProperty(P + "embedUrl", chatUrl);
         String embedModel = System.getProperty(P + "embedModel", "bge-m3:latest");
         int dimension = Integer.getInteger(P + "dimension", 1024);
+        int embedTimeout = Integer.getInteger(P + "embedTimeoutSeconds", 300) * 1000;
         String numCtx = System.getProperty(P + "numCtx", "");
         boolean think = !"omit".equalsIgnoreCase(System.getProperty(P + "think", "false"));
         int timeout = 1000 * Integer.getInteger(P + "timeoutSeconds", 180);
@@ -285,14 +289,16 @@ public class TopicMergerStockTest {
                 : knownPath);
         sources.addProperty("chat", chatModel + " at " + chatUrl + (numCtx.isEmpty() ? "" : ", num_ctx " + numCtx)
                 + (think ? ", think:false" : ", think weggelassen") + ", Zeitlimit " + timeout / 1000 + " s");
-        sources.addProperty("einbettung", embedModel + " at " + embedUrl + ", " + dimension + " Dimensionen");
+        sources.addProperty("einbettung", embedModel + " at " + embedUrl + ", " + dimension + " Dimensionen, "
+                + "Zeitlimit " + embedTimeout / 1000 + " s");
         System.out.println("[topic-merge] " + proposals.size() + " proposals, chat " + chatModel + ", embeddings "
                 + embedModel + ", " + options.getParallel() + " at a time");
 
         MainModelChat chat = new OllamaStockChat(chatUrl, chatModel, numCtx.isEmpty() ? null : Integer.valueOf(numCtx),
                 think, timeout);
         EmbeddingPort embeddings = new HttpEmbeddingPortAdapter(new EmbeddingEndpointDescriptor(embedModel, embedUrl,
-                "/api/embed", dimension, "", "", 120000L), new UrlConnectionEmbeddingHttpTransport(120000));
+                "/api/embed", dimension, "", "", (long) embedTimeout), new UrlConnectionEmbeddingHttpTransport(
+                embedTimeout));
         settings.language = task[1];
         JsonObject result = run(proposals, mission, known, expected, chat, embeddings, settings, out, sources);
         System.out.println("[topic-merge] result " + new File(out, "result.json").getAbsolutePath());
@@ -328,9 +334,9 @@ public class TopicMergerStockTest {
                 line -> System.out.println("[topic-merge] " + line));
 
         long start = System.currentTimeMillis();
-        Result result = merger.merge(proposals, memory, earlier);
+        // Every answer goes to the log the moment it is there: a run that breaks off is continued by starting again.
+        Result result = merger.merge(proposals, memory, earlier, log::append);
         long mergeMillis = System.currentTimeMillis() - start;
-        log.appendAll(result.getAsked());
         result.applyTo(memory);
 
         JsonObject json = new JsonObject();
@@ -415,9 +421,8 @@ public class TopicMergerStockTest {
             }
             int standingBefore = memory.questions().size();
             long twinStart = System.currentTimeMillis();
-            Result twin = merger.merge(twins, memory, known2);
+            Result twin = merger.merge(twins, memory, known2, log::append);
             twinMillis = System.currentTimeMillis() - twinStart;
-            log.appendAll(twin.getAsked());
             int recognized = 0;
             Map<String, String> topicOfTwin = new HashMap<String, String>();
             for (MergedTopic topic : twin.getTopics()) {

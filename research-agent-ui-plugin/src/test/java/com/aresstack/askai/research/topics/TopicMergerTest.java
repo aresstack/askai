@@ -18,8 +18,11 @@ import com.aresstack.askai.research.topics.TopicMerger.Result;
 import com.aresstack.askai.research.topics.TopicProposal.FindingCheck;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -44,6 +47,131 @@ import static org.junit.Assert.fail;
 public class TopicMergerTest {
 
     private static final String MISSION = "Ein Praxisbuch über Verkehr in Städten: Tempo, Radwege, Parken.";
+
+    @Rule
+    public TemporaryFolder tmp = new TemporaryFolder();
+
+    // ------------------------------------------------------------------------------------------- robustness
+
+    /** The architect's run c15c of 22.11.: an embedding timeout after 39 minutes lost every answer of the model. */
+    @Test
+    public void everyAnswerIsRecordedTheMomentItIsThere() throws Exception {
+        List<Comparison> recorded = Collections.synchronizedList(new ArrayList<Comparison>());
+
+        Result result = cardMerger(cardChat(false)).merge(cardProposals(), cardMemory(), null, recorded::add);
+
+        assertFalse(result.getAsked().isEmpty());
+        assertEquals(result.getAsked(), recorded);
+
+        try {
+            cardMerger(cardChat(false)).merge(cardProposals(), cardMemory(), null, comparison -> {
+                throw new IOException("disk full");
+            });
+            fail("a recorder that fails stops the merge");
+        } catch (IllegalStateException expected) {
+            assertTrue(String.valueOf(expected.getCause()),
+                    expected.getCause() instanceof java.io.UncheckedIOException);
+        }
+    }
+
+    @Test
+    public void aRunThatBreaksOffLosesNoAnswer() throws Exception {
+        int all = cardMerger(cardChat(false)).merge(cardProposals(), cardMemory(), null).getAsked().size();
+        assertTrue(all >= 3);
+        TopicMergeLog log = new TopicMergeLog(tmp.newFolder("project"));
+        log.open();
+        AtomicInteger answers = new AtomicInteger();
+        try {
+            cardMerger(cardChat(false)).merge(cardProposals(), cardMemory(), null, comparison -> {
+                if (answers.incrementAndGet() == 3) {
+                    throw new IOException("the run breaks off");
+                }
+                log.append(comparison);
+            });
+            fail("the run breaks off at the third answer");
+        } catch (IllegalStateException expected) {
+            assertEquals(3, answers.get());
+        }
+
+        Scripted again = cardChat(false);
+        TopicMergeLog reopened = new TopicMergeLog(log.logFile().getParentFile().getParentFile());
+        List<Comparison> earlier = reopened.open();
+        Result result = cardMerger(again).merge(cardProposals(), cardMemory(), earlier, reopened::append);
+
+        assertEquals(2, earlier.size());
+        assertEquals("the two answers written before the break are reused", all - 2, again.calls.get());
+        assertEquals(all - 2, result.getAsked().size());
+        assertEquals(all, reopened.open().size());
+    }
+
+    @Test
+    public void aFailedEmbeddingRequestIsTriedAgain() throws Exception {
+        Table table = cardVectors();
+        AtomicInteger calls = new AtomicInteger();
+        EmbeddingPort slowOnce = (role, texts) -> {
+            if (calls.incrementAndGet() == 1) {
+                throw new IllegalStateException("java.net.SocketTimeoutException: Read timed out");
+            }
+            return table.embed(role, texts);
+        };
+        TopicMerger merger = new TopicMerger(cardChat(false), slowOnce, MISSION, "de", Options.defaults()
+                .withParallel(1).withSubtopics(1, 2), null, CLOCK);
+        merger.embedPauseMillis = 0;
+
+        Result result = merger.merge(cardProposals(), cardMemory(), null);
+
+        assertFalse(result.getTopics().isEmpty());
+        assertEquals(1 + table.calls.get(), calls.get());
+
+        AtomicInteger tries = new AtomicInteger();
+        TopicMerger down = new TopicMerger(cardChat(false), (role, texts) -> {
+            tries.incrementAndGet();
+            throw new IllegalStateException("connection refused");
+        }, MISSION, "de", Options.defaults(), null, CLOCK);
+        down.embedPauseMillis = 0;
+        try {
+            down.merge(cardProposals(), cardMemory(), null);
+            fail("the embedding model is down");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("failed 3 times"));
+            assertEquals(TopicMerger.EMBED_ATTEMPTS, tries.get());
+        }
+    }
+
+    @Test
+    public void everyTextIsEmbeddedBeforeTheFirstModelCall() throws Exception {
+        ResearchMemory memory = cardMemory();
+        memory.addQuestion(ResearchQuestion.open("K1", "Wie sicher sind Fahrradstraßen?", "T-rad",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        Table table = cardVectors()
+                .put("Wie sicher sind Fahrradstraßen?", 0, 0, 0, 0.6, 0.8, 0, 0)
+                .put("Wo gibt es Fahrradstraßen?", 0, 0, 0, 1, 0, 0, 0)
+                .put("Wer ordnet Fahrradstraßen an?", 0, 0, 0, 0.8, 0, 0.6, 0)
+                .put("Was kostet ein Parkausweis?", 0, 0, 0, 0, 0, 0.6, 0.8);
+        List<String> events = Collections.synchronizedList(new ArrayList<String>());
+        EmbeddingPort watched = (role, texts) -> {
+            events.add("embed");
+            return table.embed(role, texts);
+        };
+        Scripted inner = cardChat(false);
+        Scripted chat = new Scripted(m -> {
+            events.add("chat");
+            return inner.answers.apply(m);
+        });
+        List<TopicProposal> proposals = Arrays.asList(
+                proposal("f1", "s1", "Fahrradstraßen", "", true, "Wo gibt es Fahrradstraßen?"),
+                proposal("f2", "s2", "Fahrradstraßen in Berlin", "", true, "Wer ordnet Fahrradstraßen an?"),
+                proposal("p1", "s3", "Parkraumbewirtschaftung", "", true, "Was kostet ein Parkausweis?"),
+                proposal("p2", "s4", "Anwohnerparken", true), proposal("l1", "s5", "Bahnlärm", true));
+
+        Result result = new TopicMerger(chat, watched, MISSION, "de", Options.defaults().withParallel(1)
+                .withSubtopics(1, 2), null, CLOCK).merge(proposals, memory, null);
+
+        assertFalse(result.getQuestions().isEmpty());
+        assertTrue(events.toString(), events.contains("chat"));
+        assertTrue("no embedding after the first call: " + events,
+                events.lastIndexOf("embed") < events.indexOf("chat"));
+    }
 
     // ------------------------------------------------------------------------------------------- step 1
 
@@ -820,7 +948,9 @@ public class TopicMergerTest {
                 .put("Fahrradstraßen", 1, 0, 0, 0, 0, 0, 0)
                 .put("Fahrradstraßen in Berlin", 0.8, 0.6, 0, 0, 0, 0, 0)
                 .put("Fahrradstraßen in Berlin-Mitte", 0.48, 0.6, 0.64, 0, 0, 0, 0)
-                .put("Tarifvertrag für Busfahrer", 0, 0, 0, 0, 1, 0, 0);
+                .put("Tarifvertrag für Busfahrer", 0, 0, 0, 0, 1, 0, 0)
+                .put("Wie sicher sind Fahrradstraßen?", 0, 0, 0, 1, 0, 0, 0)
+                .put("Was kostet Anwohnerparken?", 0, 0, 0, 0.6, 0.8, 0, 0);
         List<TopicProposal> proposals = Arrays.asList(proposal("f1", "s1", "Fahrradstraßen", true),
                 proposal("f2", "s2", "Fahrradstraßen", true), proposal("b1", "s3", "Fahrradstraßen in Berlin", true),
                 proposal("b2", "s4", "Fahrradstraßen in Berlin", true),
