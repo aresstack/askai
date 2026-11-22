@@ -22,18 +22,27 @@ public class DescriptionCheckTest {
     @Test
     public void aProviderSpeakingAboutItsOwnOfferIsAdvertising() {
         names(NoiseMark.Kind.WERBUNG, "Ein Anbieter empfiehlt sein Produkt für die Baustelle.");
-        names(NoiseMark.Kind.WERBUNG, "Ein Softwarehersteller beschreibt die Vorteile seiner Lösung.");
+        names(NoiseMark.Kind.WERBUNG, "Ein Anbieter lobt seine eigene App für Radfahrer.");
         names(NoiseMark.Kind.WERBUNG, "Ein Kursanbieter bewirbt seine Kurse für Fahranfänger.");
-        names(NoiseMark.Kind.WERBUNG, "Ein Unternehmen stellt seine Partnerschaft mit einer Versicherung vor.");
         names(NoiseMark.Kind.WERBUNG, "Ein Händler beschreibt Funktionen, um das Gerät zu verkaufen.");
         names(NoiseMark.Kind.WERBUNG, "Der Online-Shop nennt Preise, um Kunden zu gewinnen.");
         names(NoiseMark.Kind.WERBUNG, "A vendor promotes its own software.");
         names(NoiseMark.Kind.WERBUNG, "Eine Werbeanzeige für Fahrradhelme.");
     }
 
+    /** Version 5: advertising is narrower again; a factual description of a product is a statement. */
+    @Test
+    public void aProviderDescribingWhatItsProductDoesNamesNothing() {
+        namesNothing("Ein Softwarehersteller beschreibt die Vorteile seiner Lösung.");
+        namesNothing("Ein Hersteller nennt die Funktionen seines Geräts.");
+        namesNothing("Der Hersteller empfiehlt, den Akku regelmäßig zu laden.");
+    }
+
     @Test
     public void theSiteSpeakingAboutItselfIsASiteDescriptionImprintOrNotice() {
         names(NoiseMark.Kind.SEITENBESCHREIBUNG, "Die Seite stellt sich und ihr Team vor.");
+        names(NoiseMark.Kind.SEITENBESCHREIBUNG, "Ein Unternehmen stellt seine Partnerschaft mit einer Versicherung "
+                + "vor.");
         names(NoiseMark.Kind.SEITENBESCHREIBUNG, "Ein Verlag beschreibt seine Geschichte.");
         names(NoiseMark.Kind.IMPRESSUM, "Die Firma nennt ihre Anschrift und ihre Öffnungszeiten.");
         names(NoiseMark.Kind.IMPRESSUM, "Das Impressum nennt den Betreiber der Seite.");

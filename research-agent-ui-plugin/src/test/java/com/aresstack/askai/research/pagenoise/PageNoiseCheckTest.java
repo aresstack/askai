@@ -226,14 +226,18 @@ public class PageNoiseCheckTest {
             assertTrue("every kind once, in order: " + kind, next > at);
             at = next;
         }
-        assertTrue(prompt, prompt.contains("eigenes Produkt, seine eigene Leistung oder seine Partnerschaften sagt "
-                + "(Funktionen, Vorteile, Lob, Empfehlung), selbst wenn es sachlich klingt."));
+        assertTrue(prompt, prompt.contains("Aufrufe zum Kaufen, Bestellen, Buchen, Testen, Anmelden oder Anfragen, Lob "
+                + "oder Empfehlung des eigenen Angebots."));
         assertTrue(prompt, prompt.contains("oder spricht über den Beitrag oder das Dokument selbst"));
         assertTrue(prompt, prompt.contains("etwa Eckdaten eines Dokuments oder einer Vorschrift (Titel, Datum, Stand, "
                 + "Änderungen, Fundstelle, Aktenzeichen, Herausgeber), bloße Namenslisten (Autoren, Mitwirkende, "
                 + "Mitglieder) oder Formularfelder."));
-        assertTrue(prompt, prompt.contains("Erklärt ein Anbieter die Sache allgemein, ohne sein Angebot zu nennen, ist "
-                + "das keine Werbung."));
+        assertTrue(prompt, prompt.contains("Sagt ein Anbieter sachlich, was ein Produkt oder eine Leistung kann oder "
+                + "bringt, ohne zum Kauf aufzurufen und ohne es zu loben, ist das keine Werbung."));
+        assertTrue(prompt, prompt.contains("auch was ein Anbieter sachlich über die Sache erklärt oder darüber, was "
+                + "ein Produkt oder eine Leistung kann oder bringt."));
+        assertFalse("version 5: a provider's factual description is no advertising any more",
+                prompt.contains("selbst wenn es sachlich klingt"));
         assertTrue(prompt, prompt.contains("Eine Liste, deren Einträge etwas aussagen, ist kein Verzeichnis."));
         assertTrue(prompt, prompt.contains("die nur Fundstellen nennen, auch wenn ein einleitender Satz davorsteht."));
         assertTrue(prompt, prompt.contains("eine Zeile, die nur ankündigt, was folgt (etwa eine Liste), ohne selbst "
@@ -492,8 +496,10 @@ public class PageNoiseCheckTest {
         assertEquals("a kind of leftover stays as the model named it", NoiseMark.Kind.LITERATUR, contents.kind);
         assertFalse(contents.overruled);
 
+        assertFalse("version 5: describing its own offer is no advertising by itself", PageNoiseCheck.parse(
+                answer("Eine Fahrschule beschreibt ihr Angebot.", "AUSSAGE")).overruled);
         ScriptedChat chat = new ScriptedChat(prompt -> prompt.contains("Fahrschule bietet Ihnen")
-                ? answer("Eine Fahrschule beschreibt ihr Angebot.", "AUSSAGE") : careful(prompt));
+                ? answer("Eine Fahrschule lobt ihr Angebot.", "AUSSAGE") : careful(prompt));
         NoiseMarks marks = new NoiseMarks();
         Result result = check(chat).check(Arrays.asList(passage("p1", CONTENT), passage("p2", AD)), marks);
 
@@ -573,6 +579,46 @@ public class PageNoiseCheckTest {
         assertTrue(PageNoiseCheck.isWithoutStatement(mark));
         assertFalse(PageNoiseCheck.isOverruled(mark));
         assertFalse(PageNoiseCheck.isWithoutStatement(marks.mark(PageNoiseCheck.textKey(passage("p1", CONTENT)))));
+    }
+
+    /** Acceptance of version 4: lines that only announce what follows, with the dot of an abbreviation or a date. */
+    @Test
+    public void aLeadInIsAHeadingByRule() throws Exception {
+        String date = "Die wichtigsten Regeln für Lastenräder, die seit dem 1. Januar 2025 gelten, finden Sie hier im "
+                + "Überblick:";
+        String abbreviation = "Für Radfahrer gelten auf gemeinsamen Geh- und Radwegen z. B. folgende Pflichten nach "
+                + "§ 2 Abs. 4 der Verordnung:";
+        String question = "Was gilt für Radfahrer auf Gehwegen und in Fußgängerzonen? Hier finden Sie die Antworten im "
+                + "Überblick:";
+        String statement = "Radfahrer dürfen in Fußgängerzonen nur fahren, wenn ein Zusatzzeichen es ausdrücklich "
+                + "erlaubt. Dabei gilt:";
+        String year = "Die neue Regel für Lastenräder auf Radwegen gilt seit dem Jahr 2025. Für Anhänger ändert sich "
+                + "dagegen Folgendes:";
+        String longer = "Für Radfahrer, die mit Kindern im Anhänger unterwegs sind, gelten z. B. auf Radwegen, auf "
+                + "Gehwegen, in Fußgängerzonen und auf Landstraßen besondere Pflichten, die Eltern kennen sollten, "
+                + "bevor sie losfahren:";
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        NoiseMarks marks = new NoiseMarks();
+
+        Result result = check(chat).check(Arrays.asList(passage("p1", date), passage("p2", abbreviation),
+                passage("p3", question), passage("p4", statement), passage("p5", year), passage("p6", longer)),
+                marks);
+
+        for (String leadIn : new String[]{date, abbreviation, question}) {
+            NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage("p", leadIn)));
+            assertEquals(leadIn, NoiseMark.RULES, mark.getStage());
+            assertEquals(NoiseMark.Kind.UEBERSCHRIFT, mark.getKind());
+            assertTrue(PageNoiseCheck.isLeadIn(mark));
+        }
+        assertEquals("a lead-in: 17 words that end in a colon, without a sentence of their own",
+                marks.mark(PageNoiseCheck.textKey(passage("p1", date))).getReason());
+        assertEquals("a sentence of its own, a year at the end of one or more than 25 words go to the model", 3,
+                result.getAsked());
+        for (String model : new String[]{statement, year, longer}) {
+            assertFalse(model, PageNoiseCheck.isLeadIn(marks.mark(PageNoiseCheck.textKey(passage("p", model)))));
+        }
+        assertEquals("", PageNoiseCheck.leadIn(CONTENT));
+        assertEquals("", PageNoiseCheck.leadIn("Ein Satz ohne Doppelpunkt am Ende, aber mit Abs. 2 und z. B. mehr."));
     }
 
     /** Acceptance of version 3: the site-notice rule dropped two passages of content on a single word. */

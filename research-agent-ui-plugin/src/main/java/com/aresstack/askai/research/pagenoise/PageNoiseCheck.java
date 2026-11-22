@@ -45,7 +45,9 @@ import java.util.regex.Pattern;
  * without punctuation, site notices, promotion, capitals, links; on a page of almost no prose a lone short sentence is
  * a caption. A passage that breaks a rule is RAUSCHEN with the kind of the rule. A single site notice that is also a
  * word of prose on the matter (cookies, FAQ, privacy settings, ...) breaks no rule here: the model judges that passage
- * ({@link ProsePassageFilter#rule(String, boolean)}).</p>
+ * ({@link ProsePassageFilter#rule(String, boolean)}). A lead-in is an UEBERSCHRIFT by rule ({@link #leadIn}): a short
+ * passage that ends in a colon and holds no sentence of its own, only the dots of abbreviations or numbers, or
+ * questions.</p>
  *
  * <p>Stage 2, only on what stage 1 lets through: one call of a small model (slot {@code phase.research.noise},
  * thinking off) per text. The model says in a short sentence who speaks and to what end, then what the piece itself
@@ -72,9 +74,11 @@ public final class PageNoiseCheck {
      * "keine", and AUSSAGE without a statement is a leftover; a single site notice that is also a word of prose goes
      * to the model; the kinds name lines that only announce what follows, lists with an introductory sentence, key
      * data of a regulation and bare lists of names, and say where a provider's general explanation and a list that
-     * states something stand.
+     * states something stand. 5: a lead-in is a leftover by rule ({@link #leadIn}); advertising is narrower again: a
+     * provider who says factually what a product or a service does or brings makes a statement, only offers, prices,
+     * calls to buy and praise or recommendation of its own offer are advertising.
      */
-    public static final int VERSION = 4;
+    public static final int VERSION = 5;
 
     /** Prompt, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
@@ -100,6 +104,12 @@ public final class PageNoiseCheck {
 
     /** The word the model gives as {@code aussage} when the piece says nothing about the matter. */
     static final String NO_STATEMENT_WORD = "keine";
+
+    /** The most words a lead-in may have ({@link #leadIn}). */
+    static final int LEAD_IN_MAX_WORDS = 25;
+
+    /** How the reason of a lead-in's mark begins. */
+    static final String LEAD_IN = "a lead-in: ";
 
     /**
      * The kinds of leftover the model may name, in the order of the prompt; {@link NoiseMark.Kind#STRUKTUR} belongs to
@@ -468,6 +478,11 @@ public final class PageNoiseCheck {
             return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN, kindOf(rule),
                     NoiseMark.RULES, filter.reason(passage.getText(), true), "", VERSION, now, 0);
         }
+        String leadIn = leadIn(passage.getText());
+        if (!leadIn.isEmpty()) {
+            return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN,
+                    NoiseMark.Kind.UEBERSCHRIFT, NoiseMark.RULES, leadIn, "", VERSION, now, 0);
+        }
         if (caption) {
             return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN,
                     NoiseMark.Kind.BILDUNTERSCHRIFT, NoiseMark.RULES, "a lone short sentence on a page of almost no "
@@ -478,6 +493,76 @@ public final class PageNoiseCheck {
                     NoiseMark.Kind.KEINE, NoiseMark.RULES, "passes the prose rules; no model", "", VERSION, now, 0);
         }
         return null;
+    }
+
+    /** Abbreviations whose dot ends no sentence (lower case, without the dot). */
+    private static final Set<String> ABBREVIATIONS = new HashSet<String>(Arrays.asList("abb", "abs", "allg", "anm",
+            "art", "aufl", "bd", "betr", "bspw", "bzgl", "bzw", "ca", "dr", "ebd", "einschl", "etc", "evtl", "ff",
+            "gem", "ggf", "hrsg", "inkl", "insb", "insbes", "jh", "kap", "lfd", "lit", "lt", "max", "mind", "min",
+            "mio", "mrd", "nr", "prof", "rd", "sog", "st", "std", "str", "tab", "tel", "tsd", "usw", "vgl", "vs",
+            "ziff", "zzgl", "zt", "approx", "cf", "eg", "ie", "no", "vol", "fig", "pp", "jr", "sr", "mr", "mrs", "ms"));
+    private static final Pattern OPENING = Pattern.compile("^[\"„“«‚‘(\\[]+");
+    private static final Pattern CLOSING = Pattern.compile("[\"“”»’')\\]]+$");
+    private static final Pattern WORDLIKE = Pattern.compile("[\\p{L}\\p{N}]");
+
+    /**
+     * Why the passage is a lead-in, a line that only announces what follows; {@code ""} when it is none. A lead-in has
+     * at most {@link #LEAD_IN_MAX_WORDS} words, ends in a colon and holds no sentence of its own: no full stop or
+     * exclamation mark after a word that is no abbreviation, initial or number of one or two digits, before a capital
+     * or a digit. Questions count as no sentence of its own ("Was gilt für Lastenräder? Die Regeln im Überblick:").
+     * The prose rules already drop such a line when nothing in it looks like the end of a sentence; this rule also
+     * takes the line whose only dots are those of "z. B.", "Abs." or "1. Januar".
+     */
+    static String leadIn(String text) {
+        String t = text == null ? "" : text.replace("\u00AD", "").trim();
+        if (!t.endsWith(":")) {
+            return "";
+        }
+        String[] tokens = t.split("\\s+");
+        int words = 0;
+        for (String token : tokens) {
+            words += WORDLIKE.matcher(token).find() ? 1 : 0;
+        }
+        if (words > LEAD_IN_MAX_WORDS) {
+            return "";
+        }
+        for (int i = 0; i + 1 < tokens.length; i++) {
+            if (endsSentence(tokens[i], tokens[i + 1])) {
+                return "";
+            }
+        }
+        return LEAD_IN + words + " words that end in a colon, without a sentence of their own";
+    }
+
+    private static boolean endsSentence(String token, String next) {
+        String bare = CLOSING.matcher(token).replaceAll("");
+        if (!bare.endsWith(".") && !bare.endsWith("!")) {
+            return false;
+        }
+        String following = OPENING.matcher(next).replaceAll("");
+        if (following.isEmpty() || !(Character.isUpperCase(following.codePointAt(0))
+                || Character.isDigit(following.codePointAt(0)))) {
+            return false;
+        }
+        String word = OPENING.matcher(bare.replaceAll("[.!]+$", "")).replaceAll("");
+        if (word.contains(".") || word.matches("\\d{1,2}|[IVXLC]+")) {
+            return false;
+        }
+        int letters = 0;
+        for (int i = 0; i < word.length(); i++) {
+            letters += Character.isLetter(word.charAt(i)) ? 1 : 0;
+        }
+        if (letters <= 1 && !word.matches("\\d{3,}")) {
+            // An initial or a single letter ("z. B."); a year ("2024.") ends a sentence.
+            return false;
+        }
+        return !ABBREVIATIONS.contains(word.toLowerCase(Locale.ROOT));
+    }
+
+    /** Whether stage 1 marked the text as a lead-in ({@link #leadIn}). */
+    public static boolean isLeadIn(NoiseMark mark) {
+        return mark != null && mark.isNoise() && mark.getStage() == NoiseMark.RULES
+                && mark.getKind() == NoiseMark.Kind.UEBERSCHRIFT && mark.getReason().startsWith(LEAD_IN);
     }
 
     static NoiseMark.Kind kindOf(ProsePassageFilter.Rule rule) {
@@ -691,11 +776,10 @@ public final class PageNoiseCheck {
 
     /** What each kind of leftover is, as the German prompt says it. */
     private static final Map<NoiseMark.Kind, String> KINDS_DE = kinds(
-            "will verkaufen oder Kunden gewinnen: Angebote, Produkte, Preise, Rabatte, Gutscheine, Aufrufe zum "
-                    + "Kaufen, Bestellen, Buchen, Testen, Anmelden oder Anfragen; auch was ein Anbieter über sein "
-                    + "eigenes Produkt, seine eigene Leistung oder seine Partnerschaften sagt (Funktionen, Vorteile, "
-                    + "Lob, Empfehlung), selbst wenn es sachlich klingt. Erklärt ein Anbieter die Sache allgemein, "
-                    + "ohne sein Angebot zu nennen, ist das keine Werbung.",
+            "will verkaufen oder Kunden gewinnen: Angebote, Preise, Rabatte, Gutscheine, Aufrufe zum Kaufen, "
+                    + "Bestellen, Buchen, Testen, Anmelden oder Anfragen, Lob oder Empfehlung des eigenen Angebots. "
+                    + "Sagt ein Anbieter sachlich, was ein Produkt oder eine Leistung kann oder bringt, ohne zum Kauf "
+                    + "aufzurufen und ohne es zu loben, ist das keine Werbung.",
             "stellt die Seite oder ihren Anbieter vor (wer er ist, was er anbietet, Ziele, Team, Partner, Kunden, "
                     + "Referenzen, Auszeichnungen) oder spricht über den Beitrag oder das Dokument selbst: was er "
                     + "behandelt, wie er aufgebaut ist, für wen er gedacht ist, was der Leser darin erfährt.",
@@ -719,11 +803,10 @@ public final class PageNoiseCheck {
 
     /** What each kind of leftover is, as the English prompt says it. */
     private static final Map<NoiseMark.Kind, String> KINDS_EN = kinds(
-            "wants to sell or to win customers: offers, products, prices, discounts, coupons, calls to buy, order, "
-                    + "book, try, sign up or get in touch; also what a provider says about its own product, its own "
-                    + "service or its partnerships (features, advantages, praise, recommendation), even when it sounds "
-                    + "factual. When a provider explains the matter in general without naming its offer, it is no "
-                    + "advertising.",
+            "wants to sell or to win customers: offers, prices, discounts, coupons, calls to buy, order, book, try, "
+                    + "sign up or get in touch, praise or recommendation of its own offer. When a provider says "
+                    + "factually what a product or a service does or brings, without a call to buy and without praise, "
+                    + "it is no advertising.",
             "presents the site or its provider (who they are, what they offer, aims, team, partners, customers, "
                     + "references, awards) or speaks about the article or document itself: what it covers, how it is "
                     + "built, whom it is meant for, what the reader learns in it.",
@@ -758,7 +841,8 @@ public final class PageNoiseCheck {
                     .append("- \"").append(CONTENT_KIND).append("\": informiert über die Sache: ein Sachverhalt, "
                             + "eine Regel, eine Pflicht, eine Zahl, ein Ergebnis, eine Erklärung, eine Anleitung, "
                             + "eine Empfehlung, ein Beispiel oder eine begründete Meinung, auch als Liste, wenn ihre "
-                            + "Einträge etwas aussagen; auch was ein Anbieter allgemein über die Sache erklärt. "
+                            + "Einträge etwas aussagen; auch was ein Anbieter sachlich über die Sache erklärt oder "
+                            + "darüber, was ein Produkt oder eine Leistung kann oder bringt. "
                             + "Prüfstein: Ein Sachbuch könnte das Stück als Aussage zur Sache zitieren.\n\n")
                     .append("Ob die Sache zu einem Buch passt, spielt keine Rolle.\n\n")
                     .append("Antworte nur mit JSON: {\"beschreibung\": ein kurzer Satz, wer hier spricht und wozu, "
@@ -777,8 +861,9 @@ public final class PageNoiseCheck {
                     .append("- \"").append(CONTENT_KIND).append("\": informs about the matter: a fact, a rule, a "
                             + "duty, a number, a result, an explanation, an instruction, an advice, an example or an "
                             + "opinion with reasons, also as a list whose entries say something; also what a provider "
-                            + "explains about the matter in general. Test: a non-fiction book could quote the piece as "
-                            + "a statement on the matter.\n\n")
+                            + "explains factually about the matter or about what a product or a service does or "
+                            + "brings. Test: a non-fiction book could quote the piece as a statement on the "
+                            + "matter.\n\n")
                     .append("Whether the matter fits a book does not count.\n\n")
                     .append("Answer only with JSON: {\"beschreibung\": one short sentence, who speaks here and to what "
                             + "end, \"aussage\": what the piece itself says about the matter, in one short sentence, "

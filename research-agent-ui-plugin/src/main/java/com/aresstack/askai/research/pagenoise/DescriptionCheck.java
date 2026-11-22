@@ -16,9 +16,10 @@ import java.util.regex.Pattern;
  * <ul>
  *     <li>the sentence names the piece as a kind of leftover, at its start ("Ein Inhaltsverzeichnis ...") or after
  *     "ist" ("Das Stück ist eine Literaturliste");</li>
- *     <li>a provider or the site is the subject and speaks about itself: it advertises, names its own product, offer
- *     or partners, presents itself, gives its own contact data or asks for cookies; or it writes to sell or to win
- *     customers;</li>
+ *     <li>a provider or the site is the subject and speaks about itself: it advertises, recommends or praises its own
+ *     product or offer, presents itself or its partners, gives its own contact data or asks for cookies; or it writes
+ *     to sell or to win customers. A provider who describes what its product does or brings makes a statement
+ *     (version 5 of the check);</li>
  *     <li>the piece itself is the subject and speaks about itself: what the article announces or covers, how the
  *     document is built.</li>
  * </ul>
@@ -66,16 +67,16 @@ final class DescriptionCheck {
         type(NoiseMark.Kind.SEITENHINWEIS, "cookie-hinweis|cookiehinweis|cookie-banner|cookiebanner"
                 + "|datenschutzhinweis|newsletter-anmeldung|newsletteranmeldung|cookie notice|cookie banner");
         SELF_ACTS.put(NoiseMark.Kind.WERBUNG, unicode("\\b(?:wirbt|bewirbt|vermarktet|advertises|promotes"
-                + "|markets)\\b|" + OWN + "(?:produkt|produkte|produkts|produktes|produkten|angebot|angebote|angebots"
-                + "|angeboten|lösung|lösungen|dienstleistung|dienstleistungen|leistung|leistungen|software|app|apps"
-                + "|gerät|geräte|geräts|geräten|kurs|kurse|kurses|kursen|seminar|seminare|seminaren|schulung"
-                + "|schulungen|tarif|tarife|partner|partnern|partnerschaft|partnerschaften|kooperation|kooperationen"
-                + "|product|products|offer|offers|service|services|solution|solutions|device|devices|course|courses"
-                + "|partners|partnership|partnerships)\\b"));
+                + "|markets)\\b|\\b(?:empfiehlt|lobt|preist|recommends|praises)\\s+(?:[\\p{L}-]+\\s+){0,2}?" + OWN
+                + "(?:produkt|produkte|produkts|produktes|produkten|angebot|angebote|angebots|angeboten|lösung|lösungen"
+                + "|dienstleistung|dienstleistungen|leistung|leistungen|software|app|apps|gerät|geräte|geräts|geräten"
+                + "|kurs|kurse|kurses|kursen|seminar|seminare|seminaren|schulung|schulungen|tarif|tarife|product"
+                + "|products|offer|offers|service|services|solution|solutions|device|devices|course|courses)\\b"));
         SELF_ACTS.put(NoiseMark.Kind.SEITENBESCHREIBUNG, unicode("\\bstellt sich\\b|\\bsich selbst\\b"
                 + "|\\büber sich\\b|\\b(?:introduces|presents|describes) itself\\b|\\babout itself\\b|" + OWN
-                + "(?:unternehmen|team|geschichte|ziele|mission|referenzen|kunden|auszeichnungen|standorte|company"
-                + "|history|aims|customers|references|awards)\\b"));
+                + "(?:unternehmen|team|geschichte|ziele|mission|referenzen|kunden|auszeichnungen|standorte|partner"
+                + "|partnern|partnerschaft|partnerschaften|kooperation|kooperationen|company|history|aims|customers"
+                + "|references|awards|partners|partnership|partnerships)\\b"));
         SELF_ACTS.put(NoiseMark.Kind.IMPRESSUM, unicode(OWN + "(?:kontaktdaten|kontaktangaben|anschrift"
                 + "|adresse|telefonnummer|öffnungszeiten|impressum|contact details|address|phone number|opening hours"
                 + "|imprint)\\b"));

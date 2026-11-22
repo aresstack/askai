@@ -70,8 +70,11 @@ import static org.junit.Assert.assertTrue;
  * {@code "labels"} or {@code "passagen"}, or one such object per line. A label is INHALT, RAUSCHEN or MISCH (CONTENT,
  * NOISE and MIXED are read too). The marks go to {@code <out>/<model>/page-noise/marks.jsonl}, and a run that stops
  * continues from them. {@code <out>/<model>/urteile.jsonl} holds per checked passage its label, its mark and the
- * model's reason; {@code result.json} holds ids and counts only, no passage text and no reason of the model. The
- * other files carry words of the sources and stay on the machine.
+ * model's reason; {@code result.json} holds ids and counts only, no passage text and no reason of the model. Besides
+ * R1 to R3 it counts by label how often each lever acted: {@code artAusBeschreibung} (the first sentence overruled
+ * AUSSAGE), {@code ohneAussage} (AUSSAGE with "keine"), {@code ankuendigungsregel} (the lead-in rule of stage 1), and
+ * {@code aussageFeld}, how the model filled "aussage" for each kind it named. The other files carry words of the
+ * sources and stay on the machine.
  */
 public class PageNoiseStockTest {
 
@@ -339,11 +342,64 @@ public class PageNoiseStockTest {
             }
         }
         JsonObject result = counts(checked, labels, marks, run, settings, millis);
+        result.add("aussageFeld", statementField(marks.logFile(), checked, labels));
         result.addProperty("modell", model);
         result.addProperty("fassung", PageNoiseCheck.VERSION);
         result.addProperty("sprache", corpus.language);
         write(dir, result);
         return result;
+    }
+
+    /**
+     * How the model filled "aussage", read from the raw answers in the marks: per label, the answers that say "keine"
+     * and those with a statement, each by the kind the model named ("keine/UEBERSCHRIFT", "aussage/AUSSAGE", ...).
+     * Counts only; the statements themselves stay in the marks.
+     */
+    static JsonObject statementField(File log, List<Passage> checked, Map<String, Label> labels) throws IOException {
+        Map<String, JsonObject> latest = new HashMap<String, JsonObject>();
+        if (log.isFile()) {
+            for (String line : Files.readAllLines(log.toPath(), StandardCharsets.UTF_8)) {
+                try {
+                    JsonObject json = JsonParser.parseString(line).getAsJsonObject();
+                    if ("marke".equals(json.has("art") ? json.get("art").getAsString() : "")) {
+                        latest.put(json.get("text").getAsString(), json);
+                    }
+                } catch (RuntimeException unreadable) {
+                    // NoiseMarks reads the file too and fails on what it cannot read; here a line only counts.
+                }
+            }
+        }
+        Map<String, Map<String, Integer>> byLabel = new LinkedHashMap<String, Map<String, Integer>>();
+        Set<String> seen = new HashSet<String>();
+        for (Passage passage : checked) {
+            String key = PageNoiseCheck.textKey(passage);
+            JsonObject mark = latest.get(key);
+            if (mark == null || !seen.add(key) || !mark.has("rohantworten")
+                    || mark.getAsJsonArray("rohantworten").size() == 0) {
+                continue;
+            }
+            JsonArray raw = mark.getAsJsonArray("rohantworten");
+            JsonObject answer;
+            try {
+                answer = JsonParser.parseString(raw.get(raw.size() - 1).getAsString()).getAsJsonObject();
+            } catch (RuntimeException notJson) {
+                continue;
+            }
+            String kind = answer.has("art") && answer.get("art").isJsonPrimitive()
+                    ? answer.get("art").getAsString().trim().toUpperCase(Locale.ROOT) : "";
+            String statement = answer.has("aussage") && answer.get("aussage").isJsonPrimitive()
+                    ? answer.get("aussage").getAsString() : "";
+            String bucket = (statement.trim().isEmpty() ? "leer/" : PageNoiseCheck.saysNothing(statement) ? "keine/"
+                    : "aussage/") + (kind.isEmpty() ? "?" : kind);
+            Label label = labels.get(passage.getId());
+            byLabel.computeIfAbsent(label == null ? "OHNE_ETIKETT" : label.verdict,
+                    ignored -> new LinkedHashMap<String, Integer>()).merge(bucket, 1, Integer::sum);
+        }
+        JsonObject field = new JsonObject();
+        for (Map.Entry<String, Map<String, Integer>> entry : byLabel.entrySet()) {
+            field.add(entry.getKey(), tree(entry.getValue()));
+        }
+        return field;
     }
 
     private static String given(NoiseMark mark) {
@@ -414,8 +470,10 @@ public class PageNoiseStockTest {
         result.addProperty("gefragt", run.getAsked());
         int overruled = 0;
         int withoutStatement = 0;
+        int leadIns = 0;
         Map<String, Integer> overruledByLabel = new LinkedHashMap<String, Integer>();
         Map<String, Integer> withoutStatementByLabel = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> leadInByLabel = new LinkedHashMap<String, Integer>();
         for (Passage passage : checked) {
             NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage));
             Label label = labels.get(passage.getId());
@@ -428,11 +486,17 @@ public class PageNoiseStockTest {
                 withoutStatement++;
                 withoutStatementByLabel.merge(verdict, 1, Integer::sum);
             }
+            if (PageNoiseCheck.isLeadIn(mark)) {
+                leadIns++;
+                leadInByLabel.merge(verdict, 1, Integer::sum);
+            }
         }
         result.addProperty("artAusBeschreibung", overruled);
         result.add("artAusBeschreibungNachEtikett", tree(overruledByLabel));
         result.addProperty("ohneAussage", withoutStatement);
         result.add("ohneAussageNachEtikett", tree(withoutStatementByLabel));
+        result.addProperty("ankuendigungsregel", leadIns);
+        result.add("ankuendigungsregelNachEtikett", tree(leadInByLabel));
         result.add("nachUrteil", tree(byVerdict));
         result.add("rauschenNachKlasse", tree(byKind));
         result.add("rauschenNachStufe", tree(byStage));
@@ -685,6 +749,14 @@ public class PageNoiseStockTest {
         assertEquals(2, result.getAsJsonObject("rauschenNachKlasse").get("WERBUNG").getAsInt());
         assertEquals(3, result.getAsJsonObject("rauschenNachStufe").get("1").getAsInt());
         assertEquals("gemma4:e2b", result.get("modell").getAsString());
+        assertEquals(0, result.get("ankuendigungsregel").getAsInt());
+        JsonObject field = result.getAsJsonObject("aussageFeld");
+        int nothing = 0;
+        for (Map.Entry<String, JsonElement> bucket : field.getAsJsonObject("RAUSCHEN").entrySet()) {
+            nothing += bucket.getKey().startsWith("keine/") ? bucket.getValue().getAsInt() : 0;
+        }
+        assertEquals("the model said \"keine\" for both leftovers it caught", 2, nothing);
+        assertEquals(3, field.getAsJsonObject("INHALT").get("aussage/AUSSAGE").getAsInt());
         assertFalse("counts only: " + result, result.toString().contains("Tempo"));
         assertFalse(result.toString().contains("wirbt"));
         File dir = new File(out, "gemma4_e2b");
