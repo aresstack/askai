@@ -454,6 +454,31 @@ public final class ResearchMemory {
                 independentSources(allDirect), distinctDomains(allDirect), findings.size());
     }
 
+    /**
+     * Every place a topic was found (Fundstellen), its own and those of the topics merged into it, each place once,
+     * in the order the records came in; empty for an unknown id.
+     */
+    public synchronized List<ResearchTopic.Finding> findingsOfTopic(String topicId) {
+        List<ResearchTopic.Finding> all = new ArrayList<ResearchTopic.Finding>();
+        if (!topics.containsKey(topicId)) {
+            return all;
+        }
+        Set<String> parts = new HashSet<String>(closure(topicId, topicMergeMap()));
+        Set<String> seen = new HashSet<String>();
+        for (ResearchTopic part : topics.values()) {
+            if (!parts.contains(part.getId())) {
+                continue;
+            }
+            for (ResearchTopic.Finding finding : part.getFindings()) {
+                if (seen.add(finding.getSourceId() + "\u0000" + finding.getPassageId() + "\u0000"
+                        + Texts.wording(finding.getQuote()))) {
+                    all.add(finding);
+                }
+            }
+        }
+        return all;
+    }
+
     /** Every search, in the order it came in, with its latest record. */
     public synchronized List<SearchRecord> searches() {
         return new ArrayList<SearchRecord>(searches.values());
@@ -645,6 +670,21 @@ public final class ResearchMemory {
         Map<String, List<String>> merges = topicMergeMap();
         merges.put(topic.getId(), topic.getMergedFrom());
         checkNoCycle(topic.getId(), merges, "topic");
+        String parent = topic.getParentId();
+        if (parent.isEmpty()) {
+            return;
+        }
+        if (!topics.containsKey(parent)) {
+            throw new IllegalArgumentException("topic " + topic.getId() + " names no known parent topic " + parent);
+        }
+        Set<String> seen = new HashSet<String>();
+        for (String at = parent; !at.isEmpty() && seen.add(at); ) {
+            if (at.equals(topic.getId())) {
+                throw new IllegalArgumentException("topic " + topic.getId() + " would be a subtopic of itself");
+            }
+            ResearchTopic above = topics.get(at);
+            at = above == null ? "" : above.getParentId();
+        }
     }
 
     private static void checkNoCycle(String start, Map<String, List<String>> merges, String kind) {
