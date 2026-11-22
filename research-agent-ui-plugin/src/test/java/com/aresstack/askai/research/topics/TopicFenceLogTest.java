@@ -61,7 +61,7 @@ public class TopicFenceLogTest {
         assertEquals(Fence.AUSSEN, read.get(3).getFence());
         assertEquals("Kein Sachthema: Das ist die Navigation der Seite.", read.get(3).getReason());
         assertFalse(read.get(0).isNoTopic() || read.get(1).isNoTopic() || read.get(2).isNoTopic());
-        assertEquals(2, read.get(0).getVersion());
+        assertEquals(3, read.get(0).getVersion());
         Verdict back = read.get(0);
         assertEquals("thema-0001", back.getTopicId());
         assertEquals("Lieferverkehr", back.getTopicName());
@@ -88,15 +88,15 @@ public class TopicFenceLogTest {
         assertEquals("the brief once", 5, lines.length);
         assertTrue(lines[0], lines[0].startsWith("{\"v\":2,\"art\":\"grundlage\",\"grundlage\":\"" + brief.basis()));
         assertTrue(lines[1], lines[1].startsWith("{\"v\":2,\"art\":\"zaun\",\"themaId\":\"thema-0001\""));
-        assertTrue(lines[1], lines[1].endsWith(",\"keinThema\":false,\"fassung\":2}"));
-        assertTrue(lines[4], lines[4].endsWith(",\"keinThema\":true,\"fassung\":2}"));
+        assertTrue(lines[1], lines[1].endsWith(",\"keinThema\":false,\"fassung\":3}"));
+        assertTrue(lines[4], lines[4].endsWith(",\"keinThema\":true,\"fassung\":3}"));
         assertEquals("topic-fence", log.logFile().getParentFile().getName());
         again.appendBrief(brief);
         assertEquals(5, new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8)
                 .split("\n").length);
 
         appendRaw(log.logFile(), lines[1].replace("{\"v\":2,", "{\"v\":1,")
-                .replace(",\"keinThema\":false,\"fassung\":2}", "}") + "\n");
+                .replace(",\"keinThema\":false,\"fassung\":3}", "}") + "\n");
         List<Verdict> older = new TopicFenceLog(project).open();
         assertEquals("a line of version 1 is read", 5, older.size());
         assertFalse(older.get(4).isNoTopic());

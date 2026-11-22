@@ -73,8 +73,11 @@ public class TopicFenceCheckTest {
         assertEquals(0.0, chat.temperature, 0.0);
         assertEquals(400, chat.tokens);
         JsonObject schema = JsonParser.parseString(chat.schemas.get(0)).getAsJsonObject();
-        assertEquals("the reason comes first", "[grund, urteil]",
+        assertEquals("the statement check and the reason come first", "[aussage, grund, urteil]",
                 schema.getAsJsonObject("properties").keySet().toString());
+        assertEquals("[\"ja\",\"nein\"]",
+                schema.getAsJsonObject("properties").getAsJsonObject("aussage").get("enum").toString());
+        assertEquals("[\"aussage\",\"grund\",\"urteil\"]", schema.get("required").toString());
         assertEquals("[\"innen\",\"aussen\",\"unklar\",\"kein_thema\"]",
                 schema.getAsJsonObject("properties").getAsJsonObject("urteil").get("enum").toString());
         assertEquals(ResearchModelSlots.PHASE_RESEARCH_FENCE.getName(), TopicFenceCheck.ROLE.getSlot().getName());
@@ -120,13 +123,28 @@ public class TopicFenceCheckTest {
         assertTrue(prompt, prompt.contains("Es muss keiner Karte entsprechen"));
         assertTrue(prompt, prompt.contains("Dass es in den Bereich einer Karte fällt, reicht dafür nicht."));
         assertTrue(prompt, prompt.contains("macht es noch nicht zu einem Thema des Buchs"));
-        assertTrue("Angelo's rules of 22 Nov", prompt.contains("Dazu zählen auch Regeln und Pflichten, die beim "
-                + "Einsatz des Gegenstands gelten, auch wenn die Quelle ihn nicht nennt, die Technik, aus der er "
-                + "besteht oder mit der er arbeitet, mit ihren Grenzen und Risiken, und verwandte Anwendungen und "
-                + "Märkte, deren Erkenntnisse sich auf ihn übertragen lassen."));
+        assertTrue("the subject itself, not its surroundings", prompt.contains("Entscheidend ist, ob das Thema den "
+                + "Gegenstand des Auftrags selbst betrifft, nicht nur sein Umfeld: Derselbe Ort, dieselbe Branche oder "
+                + "dasselbe Rechtsgebiet stiftet noch keinen Bezug, und ein fehlender Bezug zum Einsatzort schließt "
+                + "umgekehrt nichts aus."));
+        assertTrue("the statement first", prompt.contains("Prüfe zuerst \"aussage\": \"ja\", wenn die Auszüge etwas "
+                + "zur Sache sagen; \"nein\", wenn sie nur verweisen, Titel oder Links aufzählen, navigieren oder "
+                + "Fragen stellen, ohne sie zu beantworten.\n\nDann wähle ein Urteil:\n- \"innen\""));
+        assertTrue("Angelo's rules of 22 Nov", prompt.contains("Dazu zählen, auch wenn die Quelle den Gegenstand "
+                + "nicht nennt oder Einsatzort und Zielgruppe des Auftrags fehlen: Regeln und Pflichten, die für den "
+                + "Gegenstand selbst oder seinen Einsatz gelten; die Technik, aus der er besteht oder mit der er "
+                + "arbeitet, mit ihren Grenzen und Risiken; verwandte Geräte, Anwendungen und Märkte, deren "
+                + "Erkenntnisse sich auf ihn übertragen lassen."));
         assertTrue("a rule must apply", prompt.contains("Eine Regel, Norm oder Pflicht, die beim Einsatz des "
-                + "Gegenstands nicht gilt, weil sie andere Anlagen, Geräte oder Tätigkeiten betrifft, ist \"aussen\""));
-        assertTrue(prompt, prompt.contains("es ist offen, ob eine Regel beim Einsatz des Gegenstands gilt"));
+                + "Gegenstands nicht gilt, weil sie andere Anlagen, Maschinen, Geräte oder Tätigkeiten betrifft, ist "
+                + "\"aussen\"."));
+        assertTrue("the surroundings are outside", prompt.contains("Allgemeine Pflichten des Einsatzorts oder der "
+                + "Branche, die unabhängig vom Gegenstand gelten, und Tätigkeiten ohne den Gegenstand sind "
+                + "\"aussen\"."));
+        assertTrue("doubt is no inside", prompt.contains("- \"unklar\": Es ist offen, ob das Thema den Gegenstand "
+                + "betrifft, etwa ob eine Regel beim Einsatz des Gegenstands gilt"));
+        assertTrue(prompt, prompt.contains("eine Übersichtsseite, die nur Titel anderer Beiträge aufzählt"));
+        assertTrue(prompt, prompt.contains("Bei \"aussage\": \"nein\" ist das Urteil immer \"kein_thema\"."));
         assertTrue(prompt, prompt.contains("- \"kein_thema\": Das ist kein Sachthema, sondern ein Rest der Webseite "
                 + "oder des Dokuments"));
         assertTrue(prompt, prompt.endsWith("eine Karte ist kein Grund) und \"urteil\" (\"innen\", \"aussen\", "
@@ -139,6 +157,8 @@ public class TopicFenceCheckTest {
                 || plain.contains("Rahmen") || plain.contains("Aus den Quellen") || plain.contains("Worum es geht"));
         assertTrue("the cards come after the topic", plain.indexOf("Karten der Mindmap")
                 > plain.indexOf("Zu prüfendes Thema:"));
+        assertTrue("without excerpts the statement is about name and description", plain.contains("Prüfe zuerst "
+                + "\"aussage\": Auszüge fehlen hier; \"ja\", wenn Name und Beschreibung eine Sache benennen;"));
         String english = TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), subject, false, Options.defaults());
         assertTrue(english, english.startsWith("Book mission:\n") && english.contains("Topic to check:\nSchulstraßen"));
         assertTrue(english, english.contains("Cards of the mind map, for orientation only:\n- Tempo und "
@@ -147,6 +167,16 @@ public class TopicFenceCheckTest {
         assertTrue(english, english.contains("- \"kein_thema\": This is no subject matter but a remnant of the web "
                 + "page or document") && english.contains("A rule, standard or duty that does not apply when the "
                 + "subject is used"));
+        assertTrue(english, english.contains("What counts is whether the topic concerns the subject of the mission "
+                + "itself, not only its surroundings") && english.contains("First check \"aussage\": \"ja\" if the "
+                + "excerpts say something about the matter;") && english.contains("general duties of the place of use "
+                + "or the industry that hold regardless of the subject"));
+        assertTrue(english, english.endsWith("Answer only with JSON with the fields \"aussage\" (\"ja\" or "
+                + "\"nein\", first), \"grund\" (one or two sentences: what the topic has to do with the subject of "
+                + "the mission, or why nothing; a card is no reason) and \"urteil\" (\"innen\", \"aussen\", "
+                + "\"unklar\" or \"kein_thema\")."));
+        assertTrue(TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), new Subject("t", "Schulstraßen", "", null), false,
+                Options.defaults()).contains("First check \"aussage\": there are no excerpts here;"));
 
         String withoutCards = TopicFenceCheck.prompt(brief, subject, true, Options.defaults().withCards(false));
         assertFalse(withoutCards, withoutCards.contains("Karten der Mindmap") || withoutCards.contains("Radverkehr"));
@@ -373,6 +403,84 @@ public class TopicFenceCheckTest {
         }
         assertFalse(TopicFenceCheck.isNoTopicWord("kein"));
         assertNull("not a fence of the memory", TopicFenceCheck.fenceOf("kein_thema"));
+    }
+
+    @Test
+    public void excerptsWithoutAStatementMakeNoSubjectWhateverTheVerdictSays() {
+        Scripted chat = new Scripted(messages -> {
+            String topic = topicOf(messages);
+            if (topic.startsWith("Fragen")) {
+                return MainModelChatResult.ok("{\"aussage\":\"nein\",\"grund\":\"Die Auszüge fragen nur nach "
+                        + "Radwegen.\",\"urteil\":\"innen\"}");
+            }
+            if (topic.startsWith("Linkliste")) {
+                return MainModelChatResult.ok("{\"aussage\":\"nein\",\"grund\":\"Nur Titel anderer Beiträge.\","
+                        + "\"urteil\":\"kein_thema\"}");
+            }
+            if (topic.startsWith("Ungültig")) {
+                return MainModelChatResult.ok(messages.size() == 2
+                        ? "{\"aussage\":\"vielleicht\",\"grund\":\"x\",\"urteil\":\"innen\"}"
+                        : "{\"aussage\":\" Ja \",\"grund\":\"Parkhäuser gehören zum Parken.\",\"urteil\":\"innen\"}");
+            }
+            if (topic.startsWith("Bahnlärm")) {
+                return MainModelChatResult.ok("{\"aussage\":\"nein\",\"grund\":\"Nur ein Verweis.\","
+                        + "\"urteil\":\"aussen\"}");
+            }
+            return MainModelChatResult.ok("{\"aussage\":\"ja\",\"grund\":\"Schulstraßen beruhigen den "
+                    + "Verkehr.\",\"urteil\":\"innen\"}");
+        });
+        List<Verdict> verdicts = check(chat, Options.defaults().withParallel(1)).check(Arrays.asList(
+                new Subject("t1", "Fragen zu Radwegen", "", Collections.singletonList("Wie breit muss ein Radweg "
+                        + "sein? Wer zahlt ihn?")),
+                new Subject("t2", "Linkliste Verkehr", "", Collections.singletonList("Weitere Beiträge: Parken, "
+                        + "Radwege, Tempo 30")),
+                new Subject("t3", "Ungültig Parkhaus", "", null),
+                new Subject("t4", "Schulstraßen", "", Collections.singletonList("Die Schulstraße ist morgens für "
+                        + "Autos gesperrt.")),
+                new Subject("t5", "Bahnlärm", "", null)), Brief.of(MISSION, CARDS));
+
+        Verdict questions = verdicts.get(0);
+        assertTrue(questions.isOk());
+        assertTrue("nein outweighs innen", questions.isNoTopic());
+        assertEquals(Fence.AUSSEN, questions.getFence());
+        assertEquals("Kein Sachthema: Die Auszüge tragen keine Aussage. Die Auszüge fragen nur nach Radwegen.",
+                questions.getReason());
+        assertEquals("no question to the author", 0, TopicFenceCheck.questions(verdicts).size());
+        assertEquals("no note where the verdict agrees", "Kein Sachthema: Nur Titel anderer Beiträge.",
+                verdicts.get(1).getReason());
+        assertTrue(verdicts.get(1).isNoTopic());
+
+        Verdict repaired = verdicts.get(2);
+        assertTrue(repaired.isOk());
+        assertEquals(Fence.INNEN, repaired.getFence());
+        assertFalse(repaired.isNoTopic());
+        assertEquals("Parkhäuser gehören zum Parken.", repaired.getReason());
+        assertEquals(2, repaired.getAnswers().size());
+        assertEquals("Deine Antwort war ungültig: \"aussage\" must be ja or nein\nAntworte noch einmal, nur mit "
+                + "dem JSON-Objekt.", chat.requests.get(3).get(3).getContent());
+
+        Verdict inside = verdicts.get(3);
+        assertEquals(Fence.INNEN, inside.getFence());
+        assertFalse(inside.isNoTopic());
+        assertEquals("Schulstraßen beruhigen den Verkehr.", inside.getReason());
+        assertTrue("nein turns aussen into kein_thema", verdicts.get(4).isNoTopic());
+        assertEquals("Kein Sachthema: Die Auszüge tragen keine Aussage. Nur ein Verweis.",
+                verdicts.get(4).getReason());
+        for (Verdict verdict : verdicts) {
+            assertEquals(3, verdict.getVersion());
+        }
+
+        Verdict english = new TopicFenceCheck(new Scripted(m -> MainModelChatResult.ok("{\"aussage\":\"nein\","
+                + "\"grund\":\"Only questions.\",\"urteil\":\"innen\"}")), "en", Options.defaults(), null)
+                .check(Collections.singletonList(new Subject("t", "Questions on cycle paths", "", null)),
+                        Brief.of(MISSION, CARDS)).get(0);
+        assertEquals("Not a subject: The excerpts carry no statement. Only questions.", english.getReason());
+        TopicFenceCheck.Answer before = TopicFenceCheck.parse("{\"grund\":\"Gehört zum Parken.\","
+                + "\"urteil\":\"innen\"}");
+        assertEquals("an answer without the field reads as before", Fence.INNEN, before.fence);
+        assertFalse(before.noTopic);
+        assertEquals("\"aussage\" must be ja or nein", TopicFenceCheck.parse("{\"aussage\":1,\"grund\":\"x\","
+                + "\"urteil\":\"innen\"}").problem);
     }
 
     @Test

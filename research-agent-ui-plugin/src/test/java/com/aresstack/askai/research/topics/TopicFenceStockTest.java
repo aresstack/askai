@@ -38,14 +38,17 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Stream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Component 14 on stored data: the fence check with gemma4:12b against the mission of the stock of 17.11.2026 and the
@@ -80,7 +83,9 @@ import static org.junit.Assert.assertTrue;
  *   optional: rand (text file), gedaechtnis (project folder of a topic merge run), arme (81,17,15), parallel,
  *   auszug (characters per finding, 600), fundstellen (4), numCtx, think, timeoutSeconds, wiederholen (true),
  *   themen, erwartet, stichworte, karten (fragen file), kartenZeigen (true; false leaves the cards out of the
- *   prompt and the out folder gets -ohne-karten)
+ *   prompt and the out folder gets -ohne-karten), nurThemen (a file of topic ids of the memory: set 15 judges only
+ *   the topics they stand in now; one id per line, # starts a comment line, commas allowed, or JSON: an array or an
+ *   object with ids, themen or topics, each element an id or an object with id or themaId)
  * </pre>
  */
 public class TopicFenceStockTest {
@@ -213,6 +218,57 @@ public class TopicFenceStockTest {
     }
 
     @Test
+    public void aListOfIdsKeepsTheTopicsTheyStandInNow() throws Exception {
+        ResearchMemory memory = new ResearchMemory();
+        memory.addTopic(ResearchTopic.ofCard("konzept-1", "Parken", "karte-1", 0, 1L));
+        ResearchTopic a = ResearchTopic.found("v1", "Ladezonen für Lieferwagen", "", null, "m", 1L);
+        ResearchTopic b = ResearchTopic.found("v2", "Lieferverkehr am Morgen", "", null, "m", 1L);
+        ResearchTopic c = ResearchTopic.found("v3", "Güterzüge", "", null, "m", 1L);
+        for (ResearchTopic topic : Arrays.asList(a, b, c)) {
+            memory.addTopic(topic);
+        }
+        memory.addTopic(ResearchTopic.found("thema-0001", "Ladezonen", "", null, "m", 2L)
+                .withMerged(Arrays.asList(a, b), "m", 2L));
+        memory.addTopic(ResearchTopic.found("thema-0002", "Güterzüge", "", null, "m", 2L)
+                .withMerged(Arrays.asList(c), "m", 2L));
+        memory.addTopic(ResearchTopic.found("thema-0003", "Schulstraßen", "", null, "m", 2L));
+
+        List<String> ids = OnlyTopics.readIds("\uFEFF# Stichprobe vom 22.11.\nv1\n\nthema-0001, v2\r\nthema-0003;"
+                + " konzept-1\nunbekannt-9\nv1\n");
+        assertEquals(Arrays.asList("v1", "thema-0001", "v2", "thema-0003", "konzept-1", "unbekannt-9", "v1"), ids);
+        OnlyTopics only = OnlyTopics.resolve(ids, memory);
+        assertEquals(Arrays.asList("thema-0001", "thema-0003"), new ArrayList<String>(only.standing));
+        assertEquals(6, only.given.size());
+        assertEquals(Arrays.asList("v1", "v2"), only.redirected);
+        assertEquals(Arrays.asList("thema-0001", "v2"), only.collapsed);
+        assertEquals(Collections.singletonList("konzept-1"), only.cards);
+        assertEquals(Collections.singletonList("unbekannt-9"), only.unknown);
+        JsonObject json = only.json("auswahl.txt");
+        assertEquals("{\"datei\":\"auswahl.txt\",\"angegeben\":6,\"gefunden\":2,\"umgeleitet\":2,"
+                + "\"zusammengefallen\":2,\"karten\":[\"konzept-1\"],\"unbekannt\":[\"unbekannt-9\"]}",
+                json.toString());
+
+        List<Case> cases = fromMerge(memory, Collections.<Expected>emptyList(), Options.defaults(), only.standing);
+        assertEquals(2, cases.size());
+        assertEquals("thema-0001", cases.get(0).subject.getTopicId());
+        assertEquals("thema-0003", cases.get(1).subject.getTopicId());
+        assertEquals("without a list every topic", 3, fromMerge(memory, Collections.<Expected>emptyList(),
+                Options.defaults()).size());
+
+        assertEquals(Arrays.asList("v3", "thema-0003", "thema-0001"), OnlyTopics.readIds("{\"themen\":[{\"id\":"
+                + "\"v3\"},{\"themaId\":\"thema-0003\",\"name\":\"Schulstraßen\"},\"thema-0001\"]}"));
+        assertEquals(Arrays.asList("v3", "x"), OnlyTopics.readIds(" [\"v3\", \"x\"]"));
+        assertEquals(Collections.singletonList("thema-0002"), new ArrayList<String>(OnlyTopics.resolve(
+                OnlyTopics.readIds("{\"ids\":[\"v3\"]}"), memory).standing));
+        try {
+            OnlyTopics.readIds("{\"liste\":[]}");
+            fail("no list");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("ids, themen or topics"));
+        }
+    }
+
+    @Test
     public void storedStock() throws Exception {
         String corpusPath = System.getProperty(P + "korpus", "");
         Assume.assumeTrue("fence check stock test skipped (no -D" + P + "korpus)", !corpusPath.isEmpty());
@@ -225,6 +281,11 @@ public class TopicFenceStockTest {
         String memoryPath = System.getProperty(P + "gedaechtnis", "");
         List<String> sets = Arrays.asList(System.getProperty(P + "arme", memoryPath.isEmpty() ? "81,17" : "81,17,15")
                 .split("\\s*,\\s*"));
+        String onlyPath = System.getProperty(P + "nurThemen", "");
+        if (!onlyPath.isEmpty() && (!sets.contains("15") || memoryPath.isEmpty())) {
+            throw new IllegalArgumentException("-D" + P + "nurThemen limits set 15: give -D" + P + "gedaechtnis and "
+                    + "keep 15 in -D" + P + "arme");
+        }
         boolean showCards = !"false".equalsIgnoreCase(System.getProperty(P + "kartenZeigen", "true"));
         File out = new File(System.getProperty(P + "out", "build/component-stock/topic-fence"),
                 chatModel.replaceAll("[^A-Za-z0-9._-]", "_") + (edgePath.isEmpty() ? "" : "-rand")
@@ -258,9 +319,19 @@ public class TopicFenceStockTest {
         if (sets.contains("17")) {
             cases.addAll(named(expected, themen, texts, settings.options));
         }
+        JsonObject onlyJson = null;
         if (sets.contains("15")) {
             Assume.assumeTrue("set 15 needs -D" + P + "gedaechtnis", !memoryPath.isEmpty());
-            cases.addAll(fromMerge(copiedMemory(new File(memoryPath), out), expected, settings.options));
+            ResearchMemory memory = copiedMemory(new File(memoryPath), out);
+            OnlyTopics only = null;
+            if (!onlyPath.isEmpty()) {
+                only = OnlyTopics.resolve(OnlyTopics.readIds(new String(Files.readAllBytes(new File(onlyPath)
+                        .toPath()), StandardCharsets.UTF_8)), memory);
+                onlyJson = only.json(onlyPath);
+                System.out.println("[topic-fence] nurThemen: " + only.given.size() + " ids, " + only.standing.size()
+                        + " topics, " + only.unknown.size() + " unknown");
+            }
+            cases.addAll(fromMerge(memory, expected, settings.options, only == null ? null : only.standing));
         }
         JsonObject sources = new JsonObject();
         sources.addProperty("korpus", corpusPath);
@@ -268,6 +339,9 @@ public class TopicFenceStockTest {
         sources.addProperty("rand", edgePath.isEmpty() ? "keiner" : edgePath + " (" + edge.length() + " Zeichen)");
         sources.addProperty("karten", String.join(" | ", cards));
         sources.addProperty("gedaechtnis", memoryPath.isEmpty() ? "keins" : memoryPath);
+        if (onlyJson != null) {
+            sources.add("nurThemen", onlyJson);
+        }
         sources.addProperty("chat", chatModel + " at " + chatUrl + (numCtx.isEmpty() ? "" : ", num_ctx " + numCtx)
                 + (think ? ", think:false" : ", think weggelassen") + ", Zeitlimit " + timeout / 1000 + " s");
         System.out.println("[topic-fence] " + cases.size() + " topics, chat " + chatModel + ", "
@@ -564,9 +638,14 @@ public class TopicFenceStockTest {
      * of the named topic that at least two clear proposals of the topic carry and at least 60 % of its clear ones.
      */
     static List<Case> fromMerge(ResearchMemory memory, List<Expected> expected, Options options) {
+        return fromMerge(memory, expected, options, null);
+    }
+
+    /** As above, only the standing topics whose ids {@code only} holds; {@code null} for all. */
+    static List<Case> fromMerge(ResearchMemory memory, List<Expected> expected, Options options, Set<String> only) {
         List<ResearchTopic> judged = new ArrayList<ResearchTopic>();
         for (ResearchTopic topic : memory.topics()) {
-            if (topic.getOrigin() != ResearchTopic.Origin.KONZEPT) {
+            if (topic.getOrigin() != ResearchTopic.Origin.KONZEPT && (only == null || only.contains(topic.getId()))) {
                 judged.add(topic);
             }
         }
@@ -603,6 +682,116 @@ public class TopicFenceStockTest {
             cases.add(new Case("15", subjects.get(t), reference, 0));
         }
         return cases;
+    }
+
+    /**
+     * The topics a list of ids of the memory names (switch {@code nurThemen}): each id is resolved to the topic it
+     * stands in now ({@link ResearchMemory#currentTopic}), so an id of a proposal that the merge took into a topic
+     * names that topic. Cards are inside by definition and not judged.
+     */
+    static final class OnlyTopics {
+        /** The distinct ids of the file, in its order. */
+        final List<String> given = new ArrayList<String>();
+        /** The standing topics to judge, in the order their first id came. */
+        final Set<String> standing = new LinkedHashSet<String>();
+        /** Ids that stand in another topic now (merged into it). */
+        final List<String> redirected = new ArrayList<String>();
+        /** Ids that landed on a topic an earlier id of the file already named. */
+        final List<String> collapsed = new ArrayList<String>();
+        final List<String> cards = new ArrayList<String>();
+        final List<String> unknown = new ArrayList<String>();
+
+        /** One id per line ({@code #} starts a comment line; commas, semicolons and blanks part ids) or JSON. */
+        static List<String> readIds(String text) {
+            String t = text.startsWith("\uFEFF") ? text.substring(1) : text;
+            List<String> ids = new ArrayList<String>();
+            String trimmed = t.trim();
+            if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+                JsonElement root = JsonParser.parseString(trimmed);
+                JsonArray list = null;
+                if (root.isJsonArray()) {
+                    list = root.getAsJsonArray();
+                } else {
+                    for (String key : Arrays.asList("ids", "themen", "topics")) {
+                        if (list == null && root.getAsJsonObject().has(key)) {
+                            list = root.getAsJsonObject().getAsJsonArray(key);
+                        }
+                    }
+                }
+                if (list == null) {
+                    throw new IllegalArgumentException("nurThemen: a JSON array, or an object with ids, themen or "
+                            + "topics expected");
+                }
+                for (JsonElement element : list) {
+                    String id = "";
+                    if (element.isJsonPrimitive()) {
+                        id = element.getAsString();
+                    } else if (element.isJsonObject()) {
+                        JsonObject object = element.getAsJsonObject();
+                        JsonElement value = object.has("id") ? object.get("id") : object.get("themaId");
+                        id = value == null || !value.isJsonPrimitive() ? "" : value.getAsString();
+                    }
+                    if (id.trim().isEmpty()) {
+                        throw new IllegalArgumentException("nurThemen: an element without id: " + element);
+                    }
+                    ids.add(id.trim());
+                }
+                return ids;
+            }
+            for (String line : t.split("\\r?\\n")) {
+                String l = line.trim();
+                if (l.isEmpty() || l.startsWith("#")) {
+                    continue;
+                }
+                for (String id : l.split("[\\s,;]+")) {
+                    if (!id.isEmpty()) {
+                        ids.add(id);
+                    }
+                }
+            }
+            return ids;
+        }
+
+        static OnlyTopics resolve(List<String> ids, ResearchMemory memory) {
+            OnlyTopics only = new OnlyTopics();
+            for (String id : new LinkedHashSet<String>(ids)) {
+                only.given.add(id);
+                ResearchTopic topic = memory.currentTopic(id);
+                if (topic == null) {
+                    only.unknown.add(id);
+                } else if (topic.getOrigin() == ResearchTopic.Origin.KONZEPT) {
+                    only.cards.add(id);
+                } else {
+                    if (!topic.getId().equals(id)) {
+                        only.redirected.add(id);
+                    }
+                    if (!only.standing.add(topic.getId())) {
+                        only.collapsed.add(id);
+                    }
+                }
+            }
+            return only;
+        }
+
+        JsonObject json(String file) {
+            JsonObject json = new JsonObject();
+            json.addProperty("datei", file);
+            json.addProperty("angegeben", given.size());
+            json.addProperty("gefunden", standing.size());
+            json.addProperty("umgeleitet", redirected.size());
+            json.addProperty("zusammengefallen", collapsed.size());
+            json.add("karten", strings(cards));
+            json.add("unbekannt", strings(unknown));
+            return json;
+        }
+
+        private static JsonArray strings(List<String> values) {
+            JsonArray array = new JsonArray();
+            for (String value : values) {
+                array.add(value);
+            }
+            return array;
+        }
     }
 
     // ------------------------------------------------------------------------------------------------- helpers

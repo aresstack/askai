@@ -48,19 +48,28 @@ import java.util.function.Consumer;
  *       card: the concept gives the direction, not the finished content, so a new topic inside the mission's subject
  *       is INNEN. Falling within the area of a card is no reason: the prompt shows the cards after the topic, as
  *       orientation only, and asks for a reason that names the subject of the mission. Angelo's verdicts on the
- *       disputed topics of 22 Nov are in the prompt as general rules: rules and duties that apply when the subject is
- *       used count even where the source does not name it, so do the technology it consists of or works with, with
- *       its limits and risks, and related applications and markets whose findings carry over.</li>
+ *       disputed topics of 22 Nov are in the prompt as general rules: rules and duties that apply to the subject or
+ *       its use count even where the source does not name it or the mission's place of use is missing, so do the
+ *       technology it consists of or works with, with its limits and risks, and related devices, applications and
+ *       markets whose findings carry over.</li>
  *   <li>AUSSEN: another subject; also a rule that does not apply when the subject is used, although it comes from the
- *       same field (Angelo on 22 Nov: the test duty of DGUV V3 does not concern battery devices). It stops only
- *       further search on the topic; its sources and passages stay in the stock.</li>
+ *       same field (Angelo on 22 Nov: the test duty of DGUV V3 does not concern battery devices), and a general duty
+ *       of the place of use or the industry that holds regardless of the subject. The measure is the subject itself,
+ *       not its surroundings: the same place, industry or field of law makes no link, a missing link to the place of
+ *       use rules nothing out. It stops only further search on the topic; its sources and passages stay in the
+ *       stock.</li>
  *   <li>UNKLAR: at the edge of the subject, open whether a rule applies, or not enough to tell. It goes to the author
  *       as a question ({@link #questions}) and blocks nothing.</li>
  *   <li>KEIN_THEMA: no subject matter but a remnant of the page or document (navigation, contact data, a literature
- *       list). The stock test of 22 Nov let such topics through as INNEN with every edge text. In the memory it is
- *       AUSSEN with the reason marked ({@link Verdict#isNoTopic()}), so the outline and the report need nothing
- *       new.</li>
+ *       list, an overview page of titles). The stock test of 22 Nov let such topics through as INNEN with every edge
+ *       text. In the memory it is AUSSEN with the reason marked ({@link Verdict#isNoTopic()}), so the outline and the
+ *       report need nothing new.</li>
  * </ul>
+ *
+ * <p>Before the verdict the model answers {@code aussage}: do the excerpts say anything about the matter, or do they
+ * only refer, list, navigate or ask without answering (without excerpts: do name and description name a matter).
+ * "nein" makes the verdict KEIN_THEMA whatever the model chose, with a note in the reason; an answer without the field
+ * is read as before.</p>
  *
  * <p>A topic is judged once, and again when the mission, the edge, the scope or the cards change (the
  * {@link Brief#basis() basis} of a verdict), the topic's own name and description change, or the prompt has a new
@@ -72,9 +81,10 @@ import java.util.function.Consumer;
  * author ({@link #byAuthor}) holds until the author changes it, whatever the basis.</p>
  *
  * <p>Rules of the build plan: a slot of its own ({@link ResearchModelSlots#PHASE_RESEARCH_FENCE}), a fixed answer
- * schema with the reason first, thinking off, temperature 0, one repair attempt. A failed call gives FEHLER with its
- * cause, never a verdict; after five failures in a row the rest is not asked, with the last cause. Topics are judged
- * in parallel, the order of the verdicts is the order of the topics.</p>
+ * schema with the statement check and the reason before the verdict, thinking off, temperature 0, one repair
+ * attempt. A failed call gives FEHLER with its cause, never a verdict; after five failures in a row the rest is not
+ * asked, with the last cause. Topics are judged in parallel, the order of the verdicts is the order of the
+ * topics.</p>
  */
 public final class TopicFenceCheck {
 
@@ -477,17 +487,22 @@ public final class TopicFenceCheck {
             .purpose("component 14: judges one merged topic against the mission, the edge of the subject and the "
                     + "cards of the mind map: inside the fence, outside, or unclear for the author")
             .promptFromCaller()
-            .output(RoleOutput.schema(schema(), "grund (one or two sentences), urteil (innen, aussen, unklar, "
-                    + "kein_thema)"))
+            .output(RoleOutput.schema(schema(), "aussage (ja, nein), grund (one or two sentences), urteil (innen, "
+                    + "aussen, unklar, kein_thema)"))
             .thinking(ThinkingMode.OFF)
             .build();
 
     /**
      * The prompt's version; a model's verdict under another one does not hold. 1 (21.11.2026): innen, aussen, unklar.
      * 2 (22.11.2026): kein_thema, a rule must apply when the subject is used, Angelo's rules for what counts inside,
-     * the subtopics of a parent.
+     * the subtopics of a parent. 3 (22.11.2026): a first field {@code aussage} (do the excerpts say anything about the
+     * matter, or only refer, list, navigate or ask; "nein" makes the verdict kein_thema); the measure is whether a
+     * topic concerns the subject itself, not only its place, industry or field of law; the inclusions hold without a
+     * link to the place of use, and general duties of the place and rules for other installations are outside (the
+     * architect's run c14d: Angelo's inclusions turned down for want of a link to the place of use, and on fresh
+     * topics general rules of the place taken in).
      */
-    public static final int PROMPT_VERSION = 2;
+    public static final int PROMPT_VERSION = 3;
 
     static final double TEMPERATURE = 0.0;
     /** Answer budget: two sentences and one word. */
@@ -501,6 +516,9 @@ public final class TopicFenceCheck {
     /** The start of the reason of a KEIN_THEMA verdict, in the memory and the log. */
     public static final String NO_TOPIC_DE = "Kein Sachthema: ";
     public static final String NO_TOPIC_EN = "Not a subject: ";
+    /** After {@link #NO_TOPIC_DE} when the excerpts carry no statement but the verdict said otherwise. */
+    static final String NO_STATEMENT_DE = "Die Auszüge tragen keine Aussage. ";
+    static final String NO_STATEMENT_EN = "The excerpts carry no statement. ";
 
     static final String SYSTEM_DE = "Du prüfst für ein Sachbuch, ob ein Thema hineingehört. Der Buchauftrag steckt den "
             + "Gegenstand des Buchs ab, den Weidezaun. Du urteilst über ein Thema nach dem anderen. Antworte nur mit "
@@ -736,7 +754,8 @@ public final class TopicFenceCheck {
             answers.add(text);
             Answer answer = parse(text);
             if (answer.problem.isEmpty()) {
-                String reason = answer.noTopic ? (german ? NO_TOPIC_DE : NO_TOPIC_EN) + answer.reason : answer.reason;
+                String reason = !answer.noTopic ? answer.reason : (german ? NO_TOPIC_DE : NO_TOPIC_EN)
+                        + (answer.noStatement ? (german ? NO_STATEMENT_DE : NO_STATEMENT_EN) : "") + answer.reason;
                 return new Verdict(subject.getTopicId(), subject.getName(), subject.key(), basis, Verdict.Status.OK,
                         answer.fence, reason, "", answers, Verdict.Origin.MODELL, chat.modelName(),
                         clock.millis(), clock.millis() - start, answer.noTopic, PROMPT_VERSION);
@@ -852,53 +871,83 @@ public final class TopicFenceCheck {
         }
         if (german) {
             text.append("Gehört das Thema in dieses Buch? Maßstab ist der Buchauftrag mit seinem Rand, nicht die "
-                            + "Karten. Wähle ein Urteil:\n")
-                    .append("- \"innen\": Das Thema selbst handelt vom Gegenstand des Auftrags oder liefert eine "
-                            + "Erkenntnis, die erkennbar zu diesem Gegenstand beiträgt. Dazu zählen auch Regeln und "
-                            + "Pflichten, die beim Einsatz des Gegenstands gelten, auch wenn die Quelle ihn nicht "
-                            + "nennt, die Technik, aus der er besteht oder mit der er arbeitet, mit ihren Grenzen und "
-                            + "Risiken, und verwandte Anwendungen und Märkte, deren Erkenntnisse sich auf ihn "
-                            + "übertragen lassen. Es muss keiner Karte entsprechen: Auch ein Thema, das keine Karte "
-                            + "vorsieht, gehört dann dazu. Dass es in den Bereich einer Karte fällt, reicht dafür "
-                            + "nicht.\n")
-                    .append("- \"aussen\": Das Thema behandelt einen anderen Gegenstand und trägt zum Auftrag nichts "
-                            + "bei, auch nicht als übertragbare Erkenntnis. Eine Regel, Norm oder Pflicht, die beim "
-                            + "Einsatz des Gegenstands nicht gilt, weil sie andere Anlagen, Geräte oder Tätigkeiten "
-                            + "betrifft, ist \"aussen\", auch wenn sie aus demselben Rechts- oder Fachgebiet stammt. "
+                            + "Karten. Entscheidend ist, ob das Thema den Gegenstand des Auftrags selbst betrifft, "
+                            + "nicht nur sein Umfeld: Derselbe Ort, dieselbe Branche oder dasselbe Rechtsgebiet "
+                            + "stiftet noch keinen Bezug, und ein fehlender Bezug zum Einsatzort schließt umgekehrt "
+                            + "nichts aus.\n\n")
+                    .append(shown > 0 ? "Prüfe zuerst \"aussage\": \"ja\", wenn die Auszüge etwas zur Sache sagen; "
+                            + "\"nein\", wenn sie nur verweisen, Titel oder Links aufzählen, navigieren oder Fragen "
+                            + "stellen, ohne sie zu beantworten.\n\n"
+                            : "Prüfe zuerst \"aussage\": Auszüge fehlen hier; \"ja\", wenn Name und Beschreibung eine "
+                            + "Sache benennen; \"nein\", wenn sie nur auf Navigation, Verweise, Listen oder offene "
+                            + "Fragen deuten.\n\n")
+                    .append("Dann wähle ein Urteil:\n")
+                    .append("- \"innen\": Das Thema handelt vom Gegenstand des Auftrags oder liefert eine Erkenntnis, "
+                            + "die erkennbar zu ihm beiträgt. Dazu zählen, auch wenn die Quelle den Gegenstand nicht "
+                            + "nennt oder Einsatzort und Zielgruppe des Auftrags fehlen: Regeln und Pflichten, die für "
+                            + "den Gegenstand selbst oder seinen Einsatz gelten; die Technik, aus der er besteht oder "
+                            + "mit der er arbeitet, mit ihren Grenzen und Risiken; verwandte Geräte, Anwendungen und "
+                            + "Märkte, deren Erkenntnisse sich auf ihn übertragen lassen. Es muss keiner Karte "
+                            + "entsprechen: Auch ein Thema, das keine Karte vorsieht, gehört dann dazu. Dass es in den "
+                            + "Bereich einer Karte fällt, reicht dafür nicht.\n")
+                    .append("- \"aussen\": Das Thema betrifft den Gegenstand nicht und trägt zum Auftrag nichts bei, "
+                            + "auch nicht als übertragbare Erkenntnis. Eine Regel, Norm oder Pflicht, die beim Einsatz "
+                            + "des Gegenstands nicht gilt, weil sie andere Anlagen, Maschinen, Geräte oder Tätigkeiten "
+                            + "betrifft, ist \"aussen\". Derselbe Ort, dieselbe Branche oder dasselbe Rechtsgebiet "
+                            + "ändern daran nichts: Allgemeine Pflichten des Einsatzorts oder der Branche, die "
+                            + "unabhängig vom Gegenstand gelten, und Tätigkeiten ohne den Gegenstand sind \"aussen\". "
                             + "Dass ein Thema einer Karte ähnelt oder dieselben Wörter benutzt, macht es noch nicht zu "
                             + "einem Thema des Buchs.\n")
-                    .append("- \"unklar\": Das Thema liegt am Rand des Auftrags, es ist offen, ob eine Regel beim "
-                            + "Einsatz des Gegenstands gilt, oder die Angaben reichen für ein Urteil nicht. Dann "
+                    .append("- \"unklar\": Es ist offen, ob das Thema den Gegenstand betrifft, etwa ob eine Regel "
+                            + "beim Einsatz des Gegenstands gilt, oder die Angaben reichen für ein Urteil nicht. Dann "
                             + "entscheidet der Autor.\n")
                     .append("- \"kein_thema\": Das ist kein Sachthema, sondern ein Rest der Webseite oder des "
                             + "Dokuments, etwa Navigation oder Menü, Kontaktdaten oder Impressum, eine Literatur- oder "
-                            + "Linkliste, ein Hinweis zu Cookies oder zur Anmeldung.\n\n")
-                    .append("Antworte nur mit JSON mit den Feldern \"grund\" (ein oder zwei Sätze, zuerst: was das "
-                            + "Thema mit dem Gegenstand des Auftrags zu tun hat oder warum nichts; eine Karte ist kein "
-                            + "Grund) und \"urteil\" (\"innen\", \"aussen\", \"unklar\" oder \"kein_thema\").");
+                            + "Linkliste, eine Übersichtsseite, die nur Titel anderer Beiträge aufzählt, ein Hinweis "
+                            + "zu Cookies oder zur Anmeldung. Bei \"aussage\": \"nein\" ist das Urteil immer "
+                            + "\"kein_thema\".\n\n")
+                    .append("Antworte nur mit JSON mit den Feldern \"aussage\" (\"ja\" oder \"nein\", zuerst), "
+                            + "\"grund\" (ein oder zwei Sätze: was das Thema mit dem Gegenstand des Auftrags zu tun "
+                            + "hat oder warum nichts; eine Karte ist kein Grund) und \"urteil\" (\"innen\", "
+                            + "\"aussen\", \"unklar\" oder \"kein_thema\").");
         } else {
             text.append("Does the topic belong in this book? The measure is the book mission with its edge, not the "
-                            + "cards. Choose one verdict:\n")
-                    .append("- \"innen\": The topic itself deals with the subject of the mission or yields a finding "
-                            + "that recognisably adds to that subject. This includes rules and duties that apply when "
-                            + "the subject is used, even if the source does not name it, the technology it consists of "
-                            + "or works with, with its limits and risks, and related applications and markets whose "
-                            + "findings carry over to it. It need not match a card: a topic that no card foresees "
-                            + "belongs then as well. Falling within the area of a card is not enough.\n")
-                    .append("- \"aussen\": The topic deals with another subject and adds nothing to the mission, not "
+                            + "cards. What counts is whether the topic concerns the subject of the mission itself, not "
+                            + "only its surroundings: the same place, industry or field of law makes no link yet, and "
+                            + "a missing link to the place of use rules nothing out.\n\n")
+                    .append(shown > 0 ? "First check \"aussage\": \"ja\" if the excerpts say something about the "
+                            + "matter; \"nein\" if they only refer, list titles or links, navigate, or ask questions "
+                            + "without answering them.\n\n"
+                            : "First check \"aussage\": there are no excerpts here; \"ja\" if name and description "
+                            + "name a matter; \"nein\" if they only point to navigation, references, lists or open "
+                            + "questions.\n\n")
+                    .append("Then choose one verdict:\n")
+                    .append("- \"innen\": The topic deals with the subject of the mission or yields a finding that "
+                            + "recognisably adds to it. This includes, even if the source does not name the subject or "
+                            + "the mission's place of use and audience are missing: rules and duties that apply to the "
+                            + "subject itself or its use; the technology it consists of or works with, with its limits "
+                            + "and risks; related devices, applications and markets whose findings carry over to it. "
+                            + "It need not match a card: a topic that no card foresees belongs then as well. Falling "
+                            + "within the area of a card is not enough.\n")
+                    .append("- \"aussen\": The topic does not concern the subject and adds nothing to the mission, not "
                             + "even as a transferable finding. A rule, standard or duty that does not apply when the "
-                            + "subject is used, because it concerns other installations, devices or activities, is "
-                            + "\"aussen\", even if it comes from the same field of law or expertise. Resembling a card "
-                            + "or using the same words does not make it a topic of the book.\n")
-                    .append("- \"unklar\": The topic lies at the edge of the mission, it is open whether a rule "
-                            + "applies when the subject is used, or there is not enough to judge. Then the author "
+                            + "subject is used, because it concerns other installations, machines, devices or "
+                            + "activities, is \"aussen\". The same place, industry or field of law changes nothing: "
+                            + "general duties of the place of use or the industry that hold regardless of the subject, "
+                            + "and activities without the subject, are \"aussen\". Resembling a card or using the same "
+                            + "words does not make it a topic of the book.\n")
+                    .append("- \"unklar\": It is open whether the topic concerns the subject, for instance whether a "
+                            + "rule applies when the subject is used, or there is not enough to judge. Then the author "
                             + "decides.\n")
                     .append("- \"kein_thema\": This is no subject matter but a remnant of the web page or document, "
                             + "such as navigation or a menu, contact details or an imprint, a list of literature or "
-                            + "links, a notice about cookies or signing in.\n\n")
-                    .append("Answer only with JSON with the fields \"grund\" (one or two sentences, first: what the "
-                            + "topic has to do with the subject of the mission, or why nothing; a card is no reason) "
-                            + "and \"urteil\" (\"innen\", \"aussen\", \"unklar\" or \"kein_thema\").");
+                            + "links, an overview page that only lists titles of other articles, a notice about "
+                            + "cookies or signing in. With \"aussage\": \"nein\" the verdict is always "
+                            + "\"kein_thema\".\n\n")
+                    .append("Answer only with JSON with the fields \"aussage\" (\"ja\" or \"nein\", first), "
+                            + "\"grund\" (one or two sentences: what the topic has to do with the subject of the "
+                            + "mission, or why nothing; a card is no reason) and \"urteil\" (\"innen\", \"aussen\", "
+                            + "\"unklar\" or \"kein_thema\").");
         }
         return text.toString();
     }
@@ -932,8 +981,14 @@ public final class TopicFenceCheck {
         text.append('\n');
     }
 
-    /** {@code grund} first, then {@code urteil} from the four words; nothing else. */
+    /** {@code aussage} (ja, nein) first, then {@code grund}, then {@code urteil} from the four words; nothing else. */
     static String schema() {
+        JsonArray yesNo = new JsonArray();
+        yesNo.add(STATEMENT_YES);
+        yesNo.add(STATEMENT_NO);
+        JsonObject statement = new JsonObject();
+        statement.addProperty("type", "string");
+        statement.add("enum", yesNo);
         JsonObject reason = new JsonObject();
         reason.addProperty("type", "string");
         JsonArray words = new JsonArray();
@@ -945,9 +1000,11 @@ public final class TopicFenceCheck {
         verdict.addProperty("type", "string");
         verdict.add("enum", words);
         JsonObject properties = new JsonObject();
+        properties.add("aussage", statement);
         properties.add("grund", reason);
         properties.add("urteil", verdict);
         JsonArray required = new JsonArray();
+        required.add("aussage");
         required.add("grund");
         required.add("urteil");
         JsonObject schema = new JsonObject();
@@ -960,11 +1017,17 @@ public final class TopicFenceCheck {
 
     /** The fourth word of the answer: no subject matter, a remnant of the page or document. */
     static final String NO_TOPIC_WORD = "kein_thema";
+    /** The excerpts say something about the matter. */
+    static final String STATEMENT_YES = "ja";
+    /** The excerpts only refer, list, navigate or ask: the verdict is kein_thema whatever the answer says. */
+    static final String STATEMENT_NO = "nein";
 
     /** A verdict as read from an answer, or why the answer holds none. KEIN_THEMA is AUSSEN with {@code noTopic}. */
     static final class Answer {
         Fence fence;
         boolean noTopic;
+        /** {@code aussage} was nein while the verdict said otherwise: the code made it kein_thema. */
+        boolean noStatement;
         String reason = "";
         String problem = "";
     }
@@ -990,6 +1053,20 @@ public final class TopicFenceCheck {
         if (fence == null) {
             answer.problem = "\"urteil\" must be innen, aussen, unklar or kein_thema";
             return answer;
+        }
+        JsonElement statement = json.get("aussage");
+        if (statement != null) {
+            String yesNo = statement.isJsonPrimitive() ? statement.getAsString().trim().toLowerCase(Locale.ROOT) : "";
+            boolean no = yesNo.equals(STATEMENT_NO) || yesNo.equals("no") || yesNo.equals("false");
+            if (!no && !yesNo.equals(STATEMENT_YES) && !yesNo.equals("yes") && !yesNo.equals("true")) {
+                answer.problem = "\"aussage\" must be ja or nein";
+                return answer;
+            }
+            if (no && !noTopic) {
+                answer.noStatement = true;
+                noTopic = true;
+                fence = Fence.AUSSEN;
+            }
         }
         JsonElement reason = json.get("grund");
         String why = reason != null && reason.isJsonPrimitive()
