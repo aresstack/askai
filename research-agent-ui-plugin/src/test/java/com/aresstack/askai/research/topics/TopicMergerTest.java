@@ -2879,6 +2879,40 @@ public class TopicMergerTest {
         assertEquals("T-rad", formedNamed(guarded, "Recht der Fahrradstraßen").getParentId());
     }
 
+    /**
+     * The card guard has its own threshold (default 0.85): a subject at 0.75 to the card's name draws its families
+     * together under the card when only the pairs' threshold drops to 0.70, and is held by the guard at 0.70.
+     */
+    @Test
+    public void theCardGuardKeepsItsOwnThresholdWhenThePairsThresholdDrops() throws Exception {
+        assertEquals(0.85, Options.defaults().getSubjectCard(), 1e-9);
+        assertEquals(0.85, Options.defaults().withSubjects(true, 0.70).getSubjectCard(), 1e-9);
+        assertEquals(0.70, Options.defaults().withSubjectCard(0.70).withSubjects(true, 0.85).getSubjectCard(), 1e-9);
+        assertEquals(0.70, Options.defaults().withSubjects(true, 0.85).withSubjectCard(0.70).getSubjectCard(), 1e-9);
+        assertEquals(0.85, Options.defaults().withSubjectCard(0.70).withSubjects(true, 0.85).getSubjectSimilarity(),
+                1e-9);
+        Result pairsLower = subjectRun("ja", Options.defaults().withParallel(1).withSubjects(true, 0.70), true, null,
+                "Radverkehrsstraßen");
+        assertEquals(0, (int) pairsLower.getParentCounts().get("subjectCard"));
+        MergedTopic roof = formedNamed(pairsLower, "Radverkehrsstraßen");
+        assertEquals(roof.getId(), topicOf(pairsLower, "d1").getParentId());
+        assertEquals(roof.getId(), topicOf(pairsLower, "r1").getParentId());
+        Result guarded = subjectRun("ja", Options.defaults().withParallel(1).withSubjects(true, 0.70)
+                .withSubjectCard(0.70), true, null, "Radverkehrsstraßen");
+        assertEquals(2, (int) guarded.getParentCounts().get("subjectCard"));
+        assertEquals("T-rad", formedNamed(guarded, "Recht der Fahrradstraßen").getParentId());
+        assertEquals(1, (int) guarded.getParentCounts().get("subjectRoofs"));
+        assertEquals(2, (int) pairsLower.getParentCounts().get("subjectRoofs"));
+        for (double wrong : new double[]{0, -0.1, 1.01, Double.NaN}) {
+            try {
+                Options.defaults().withSubjectCard(wrong);
+                fail("card guard " + wrong);
+            } catch (IllegalArgumentException expected) {
+                // the guard must lie in (0, 1]
+            }
+        }
+    }
+
     /** A parent named like the subject is laid flat: the new parent takes its place; the other stays a subfamily. */
     @Test
     public void aParentNamedLikeTheSubjectGivesItsPlaceToTheNewParent() throws Exception {
@@ -3080,6 +3114,7 @@ public class TopicMergerTest {
                     .put("Lärm an Bahnstrecken", 0, 0, 0, 0, 0, 0, 0, 0, Math.sqrt(0.5), Math.sqrt(0.5), 0, 0)
                     .put("Fahrradstraßen", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
                     .put("Fahrradstraße", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0.995)
+                    .put("Radverkehrsstraßen", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.75, Math.sqrt(1 - 0.75 * 0.75))
                     .put("Grundlagen der Fahrradstraßen", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
             if (!crowd) {
                 siblings(vectors, new double[]{1, 0}, 2, 12, "Definition der Fahrradstraße", "Beschilderung von "
