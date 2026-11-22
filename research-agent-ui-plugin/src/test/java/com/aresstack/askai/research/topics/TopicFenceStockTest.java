@@ -463,6 +463,16 @@ public class TopicFenceStockTest {
         remnants.addProperty("von", noTopicFound[1]);
         remnants.addProperty("beiAnderen", noTopicAll[0] - noTopicFound[0]);
         json.add("keinThema", remnants);
+        int turned = 0;
+        for (Verdict verdict : verdicts) {
+            turned += TopicFenceCheck.turnedUnclear(verdict) ? 1 : 0;
+        }
+        JsonObject bridges = new JsonObject();
+        bridges.addProperty("was", "nur Bericht: Urteile innen, die der Code zu unklar machte, weil das Modell beim "
+                + "Feld gegenstand nein sagte (Fassung 4)");
+        bridges.addProperty("umgestuft", turned);
+        bridges.addProperty("von", verdicts.size());
+        json.add("ohneGegenstand", bridges);
         json.addProperty("fragenAnDenAutor", TopicFenceCheck.questions(verdicts).size());
         json.addProperty("bestanden", missed.isEmpty());
         json.addProperty("befund", missed.isEmpty() ? "alle Kriterien erfüllt" : "nicht erfüllt: "
