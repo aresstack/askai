@@ -138,14 +138,14 @@ public class ResearchMemoryStoreTest {
         ResearchMemoryStore store = new ResearchMemoryStore(project);
         store.open().addQuestion(ResearchQuestion.open(Q, "Welche Rechte hat der Betriebsrat?", "",
                 ResearchQuestion.Origin.KONZEPT, 1L));
-        appendRaw(store.logFile(), "{\"v\":2,\"art\":\"quelle\",\"quelleId\":\"s1\"}\n{\"v\":2,\"art\":\"fr");
+        appendRaw(store.logFile(), "{\"v\":3,\"art\":\"quelle\",\"quelleId\":\"s1\"}\n{\"v\":3,\"art\":\"fr");
         byte[] before = Files.readAllBytes(store.logFile().toPath());
         try {
             store.open();
             fail("a newer version must not be read");
         } catch (ResearchMemoryStore.NewerVersionException expected) {
             assertTrue(expected.getMessage(), expected.getMessage().contains("newer AskAI")
-                    && expected.getMessage().contains("line 2 has version 2"));
+                    && expected.getMessage().contains("line 2 has version 3"));
         }
         assertArrayEquals("not even the unfinished last line is cut", before,
                 Files.readAllBytes(store.logFile().toPath()));
