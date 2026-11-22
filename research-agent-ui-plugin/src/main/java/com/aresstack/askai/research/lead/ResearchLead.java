@@ -37,10 +37,10 @@ import java.util.function.Consumer;
 
 /**
  * Component 8 of the build plan of 21.11.2026, the research lead (Rechercheleitung): after each round it judges the
- * situation and decides the next step. One call of gemma4:12b per round, with thinking, sees the counts of the memory
- * and single quotes, never the whole stock, and decides per question or topic: follow it on, change the strategy
- * (other words, another kind of source, named publishers, another language), take in new questions for a topic, set a
- * question aside; and for the run: go on or end.
+ * situation and decides the next step. One call of gemma4:12b per round, without thinking, sees the counts of the
+ * memory and single quotes, never the whole stock, and decides per question or topic: follow it on, change the
+ * strategy (other words, another kind of source, named publishers, another language), take in new questions for a
+ * topic, set a question aside; and for the run: go on or end.
  *
  * <p>Rules are only guardrails: the budget of rounds and searches, no search of a question with a strategy that
  * already brought nothing, not even within a topic's task ({@code fruitlessLimit} searches without new evidence force
@@ -105,12 +105,12 @@ public final class ResearchLead {
         /**
          * 40 questions, 15 found topics and 10 topics of the author shown, the last 12 searches, quotes of up to 200
          * characters; a change after 2 searches without new evidence, an end after 3 rounds with nothing new; up to 3
-         * new questions per topic and 20 per round; 16,384 answer tokens (Ollama counts the thinking in), so prompt
-         * and answer fit the role's context of 32,768; 2 tasks per round beyond the slots for questions of found
-         * topics never searched.
+         * new questions per topic and 20 per round; 8,192 answer tokens (the longest answer of the stock tests had
+         * well under 2,000), so prompt and answer fit the role's context of 32,768 and an answer that runs away stops
+         * early; 2 tasks per round beyond the slots for questions of found topics never searched.
          */
         public static Options defaults() {
-            return new Options(40, 15, 10, 12, 200, 2, 3, 3, 20, 16384, 2);
+            return new Options(40, 15, 10, 12, 200, 2, 3, 3, 20, 8192, 2);
         }
 
         public Options withShown(int questions, int topics, int unclear) {
@@ -234,7 +234,11 @@ public final class ResearchLead {
         }
     }
 
-    /** The role: its own slot under Sources, a schema per request (the targets of the round), thinking on. */
+    /**
+     * The role: its own slot under Sources, a schema per request (the targets of the round), thinking off. With
+     * thinking on, gemma4:12b thought without end in three of six calls of the stock test of 22.11.2026 (cut off at
+     * 16,384 tokens, no answer); without it all six calls answered in 4 to 28 s and every criterion held.
+     */
     public static final ResearchRole ROLE = ResearchRole.builder("research-lead",
                     ResearchModelSlots.PHASE_RESEARCH_LEAD)
             .purpose("component 8: judges the situation after each round of the Sources phase and decides the next "
@@ -242,17 +246,18 @@ public final class ResearchLead {
             .promptFromCaller()
             .output(RoleOutput.schemaPerRequest("lage, entscheidungen (grund, ziel, handlung, strategie, vorgabe, "
                     + "fragen), lauf (grund, handlung)"))
-            .thinking(ThinkingMode.ON)
+            .thinking(ThinkingMode.OFF)
             .contextTokens(ResearchLead.CONTEXT_TOKENS)
             .build();
 
     /**
-     * The context the lead needs at least: a prompt of up to about 6,000 tokens and the answer budget of 16,384 with
-     * the thinking. The platform sends the model's own context and refuses a smaller one before the call, so
-     * gemma4:12b needs the model setting 32,768 (the preset is 16,384). Stock tests of 22.11.2026: without a context
-     * Ollama ran 12b with 256k and calls took up to 14 minutes; with 16,384 and 10,240 answer tokens the thinking
-     * used up the whole budget in three runs and the answer was cut off empty; 12b runs as fast at 32,768 as at
-     * 8,192.
+     * The context the lead asks for: a prompt of up to about 6,000 tokens and the answer budget of 8,192 fit with
+     * room. The platform sends the model's own context and refuses a smaller one before the call, so gemma4:12b needs
+     * the model setting 32,768 (the preset is 16,384). Stock tests of 22.11.2026: without a context Ollama ran 12b
+     * with 256k and calls took up to 14 minutes; with thinking on, the thinking used up 10,240 and then 16,384 answer
+     * tokens in three of six calls and the answer was cut off empty; without thinking (run c8e, context 32,768) every
+     * call answered; 12b runs as fast at 32,768 as at 8,192. The context stays as measured: Ollama cuts a prompt that
+     * does not fit from the front without a word.
      */
     static final int CONTEXT_TOKENS = 32768;
 

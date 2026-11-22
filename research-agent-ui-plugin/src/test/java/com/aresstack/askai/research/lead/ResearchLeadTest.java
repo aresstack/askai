@@ -111,7 +111,7 @@ public class ResearchLeadTest {
 
         assertEquals(1, chat.calls.get());
         assertEquals(0.0, chat.temperature, 0.0);
-        assertEquals(16384, chat.tokens);
+        assertEquals(8192, chat.tokens);
         JsonObject schema = JsonParser.parseString(chat.schemas.get(0)).getAsJsonObject();
         JsonArray targets = schema.getAsJsonObject("properties").getAsJsonObject("entscheidungen")
                 .getAsJsonObject("items").getAsJsonObject("properties").getAsJsonObject("ziel")
@@ -156,9 +156,10 @@ public class ResearchLeadTest {
     }
 
     @Test
-    public void theRoleHasItsOwnSlotUnderSourcesAndThinks() {
+    public void theRoleHasItsOwnSlotUnderSourcesAndDoesNotThink() {
         assertEquals("phase.research.lead", ResearchLead.ROLE.getSlot().getName());
-        assertEquals(ThinkingMode.ON, ResearchLead.ROLE.getThinking());
+        assertEquals("thinking ran without end in the stock test", ThinkingMode.OFF,
+                ResearchLead.ROLE.getThinking());
         assertTrue(ResearchLead.ROLE.getOutput().isSchemaPerRequest());
         assertEquals("the lead needs a fixed context, not Ollama's default", 32768,
                 ResearchLead.ROLE.getContextTokens());

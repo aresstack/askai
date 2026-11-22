@@ -54,7 +54,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Component 8 on stored data: the research lead with gemma4:12b (thinking on) on five fixed situations built from the
+ * Component 8 on stored data: the research lead with gemma4:12b (thinking off) on five fixed situations built from the
  * stock of 17.11.2026: its mission, the four cards and 20 questions of its concept (fragen-1711.json), quotes from the
  * architect's evidence pairs (belegpaare-1711.jsonl, only on the owner's machine) and the 17 named topics
  * (erwartete-themen-1711.json) as topics the topic finder found, with sample passages of their sheets as findings.
@@ -92,9 +92,9 @@ import static org.junit.Assert.assertTrue;
  *     -Daskai.stock.lead.belegpaare=&lt;belegpaare-1711.jsonl&gt;
  *     -Daskai.stock.lead.chatUrl=http://127.0.0.1:11434 -Daskai.stock.lead.chatModel=gemma4:12b
  *   optional: rand (text file with the edge of the subject; the out folder gets -rand), lagen (S1,S2,S3,S4,S5),
- *   laeufe (2, runs of S1 to S3), think (true; false, or omit to leave it out), numCtx (32768, the context of the
- *   lead's role; omit to leave it to the server), timeoutSeconds (600), antwortTokens (16384), fragen, erwartet,
- *   themen, stichworte (files instead of the copies in the test resources)
+ *   laeufe (2, runs of S1 to S3), think (false, as the role; true, or omit to leave it out), numCtx (32768, the
+ *   context of the lead's role; omit to leave it to the server), timeoutSeconds (600), antwortTokens (8192), fragen,
+ *   erwartet, themen, stichworte (files instead of the copies in the test resources)
  * </pre>
  */
 public class ResearchLeadStockTest {
@@ -327,7 +327,7 @@ public class ResearchLeadStockTest {
         String chatModel = System.getProperty(P + "chatModel", "gemma4:12b");
         String numCtxSetting = System.getProperty(P + "numCtx", String.valueOf(ResearchLead.CONTEXT_TOKENS));
         String numCtx = "omit".equalsIgnoreCase(numCtxSetting) ? "" : numCtxSetting.trim();
-        String thinkSetting = System.getProperty(P + "think", "true");
+        String thinkSetting = System.getProperty(P + "think", "false");
         Boolean think = "omit".equalsIgnoreCase(thinkSetting) ? null : Boolean.valueOf(!"false".equalsIgnoreCase(
                 thinkSetting));
         int timeout = 1000 * Integer.getInteger(P + "timeoutSeconds", 600);
