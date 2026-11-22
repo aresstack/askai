@@ -50,11 +50,14 @@ import java.util.function.Consumer;
  * <p>Step 1 without a chat model: one vector per proposal (name and description, {@link EmbeddingPort} in the document
  * role, bge-m3 in the app), grouped with the average-linkage clusterer of the topic analysis ({@link TopicClusterer})
  * at the similarity {@link Options#getSame()}; the same name joins too. Every group is then compared with its nearest
- * known topic (and the topics merged into it) and with its nearest larger group. At or above {@code same} the two join
- * without a model, below {@link Options#getDoubt()} nothing happens. Step 2 with gemma4:12b only for the doubtful cases
- * in between: the same, a subtopic of, or different. Known topics, and known questions, never merge with each other.
- * The questions of a topic go through the same two steps with their own band, and a question merges only with
- * questions of its own topic.</p>
+ * known topics (and the topics merged into them) and with its nearest larger groups, up to
+ * {@link Options#getCandidates()} of each. At or above {@code same} the two join without a model, below
+ * {@link Options#getDoubt()} nothing happens. Step 2 with gemma4:12b only for the doubtful cases in between: the same,
+ * a subtopic of, or different. Known topics, and known questions, never merge with each other. Then the card step:
+ * cards of the mind map have broad names that a similarity does not reach, so they get no doubtful pairwise case;
+ * instead every head of a family (no known topic, under no topic) is put to the model once with all cards: the same
+ * as a card, part of a card, or none, and none is a valid answer. The questions of a topic go through the same two
+ * steps with their own band, and a question merges only with questions of its own topic.</p>
  *
  * <p>Nothing is lost: the proposals stay in {@code topic-proposals/}, and {@link Result#applyTo} makes each one a topic
  * of its own in the research memory, merged into its topic (zusammengeführtAus), so a merge can be taken back. A
@@ -120,9 +123,11 @@ public final class TopicMerger {
         private final int parallel;
         private final boolean namesOnly;
         private final int embedBatch;
+        private final int candidates;
+        private final boolean cardStep;
 
         private Options(double same, double doubt, double questionSame, double questionDoubt, int parallel,
-                        boolean namesOnly, int embedBatch) {
+                        boolean namesOnly, int embedBatch, int candidates, boolean cardStep) {
             if (!(doubt > 0 && doubt <= same && same <= 1) || !(questionDoubt > 0 && questionDoubt <= questionSame
                     && questionSame <= 1)) {
                 throw new IllegalArgumentException("a band needs 0 < doubt <= same <= 1");
@@ -134,32 +139,57 @@ public final class TopicMerger {
             this.parallel = Math.max(1, parallel);
             this.namesOnly = namesOnly;
             this.embedBatch = Math.max(1, embedBatch);
+            this.candidates = Math.max(1, candidates);
+            this.cardStep = cardStep;
         }
 
         /**
          * Proposals join without a model at a cosine of 0.85, the model decides from 0.72 up; questions at 0.92 and
          * from 0.85; four calls at a time; 32 texts per embedding request (point R: Ollama refuses large batches).
-         * Proposals by name and description. Assumptions until the stock test has shown the similarities.
+         * Proposals by name and description. Each group is compared with up to three candidates of each kind, and
+         * the cards of the mind map are decided by the card step. Assumptions until the stock test has shown the
+         * similarities.
          */
         public static Options defaults() {
-            return new Options(0.85, 0.72, 0.92, 0.85, 4, false, 32);
+            return new Options(0.85, 0.72, 0.92, 0.85, 4, false, 32, 3, true);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {
-            return new Options(newSame, newDoubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch);
+            return new Options(newSame, newDoubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch,
+                    candidates, cardStep);
         }
 
         public Options withQuestionBand(double newSame, double newDoubt) {
-            return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch);
+            return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep);
         }
 
         public Options withParallel(int calls) {
-            return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch);
+            return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch, candidates,
+                    cardStep);
         }
 
         /** Compare proposals by their names alone, without the description. */
         public Options withNamesOnly(boolean names) {
-            return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch);
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch, candidates,
+                    cardStep);
+        }
+
+        /**
+         * How many candidates a group is compared with: up to this many known topics and as many earlier groups, the
+         * most similar ones at or above the lower end of the band.
+         */
+        public Options withCandidates(int perKind) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, perKind,
+                    cardStep);
+        }
+
+        /**
+         * With the card step (the default) the cards of the mind map get no doubtful pairwise case: every head of a
+         * family is put to the model once with all cards. Without it, cards are compared like any known topic.
+         */
+        public Options withCardStep(boolean on) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    on);
         }
 
         public double getSame() {
@@ -189,12 +219,25 @@ public final class TopicMerger {
         public int getEmbedBatch() {
             return embedBatch;
         }
+
+        public int getCandidates() {
+            return candidates;
+        }
+
+        public boolean isCardStep() {
+            return cardStep;
+        }
     }
 
-    /** One doubtful case put to the model, with its verdict or why there is none; immutable. */
+    /**
+     * One case put to the model, with its verdict or why there is none; immutable. For the card step (kind
+     * {@link Kind#KARTE}) B is the list of cards as the model read it, the verdict is {@link Relation#GLEICH} (the
+     * topic is a card), {@link Relation#A_TEIL_VON_B} (part of a card) or {@link Relation#VERSCHIEDEN} (no card),
+     * and {@link #getBId()} names the card, {@code ""} for none.
+     */
     public static final class Comparison {
-        /** Two topics, or two questions of one topic. */
-        public enum Kind { THEMA, FRAGE }
+        /** Two topics, two questions of one topic, or a topic and the cards of the mind map. */
+        public enum Kind { THEMA, FRAGE, KARTE }
 
         public enum Status { OK, FEHLER }
 
@@ -728,7 +771,7 @@ public final class TopicMerger {
                 }
             }
             Node anchor = Node.anchor(topic.getId(), topic.getName(), topic.getDescription(), texts.get(0),
-                    memberNames);
+                    memberNames, topic.getOrigin() == ResearchTopic.Origin.KONZEPT);
             anchors.add(anchor);
             anchorTexts.put(anchor, texts);
         }
@@ -750,11 +793,14 @@ public final class TopicMerger {
         }
 
         // Step 1 and the cases of step 2 for the topics.
-        Pool topicPool = plan(items, anchors, options.getSame(), options.getDoubt(), Comparison.Kind.THEMA, "");
+        Pool topicPool = plan(items, anchors, options.getSame(), options.getDoubt(), Comparison.Kind.THEMA, "",
+                options.isCardStep());
         List<Comparison> used = new ArrayList<Comparison>();
         List<Comparison> asked = new ArrayList<Comparison>();
         decide(Collections.singletonList(topicPool), verdicts, used, asked);
         Unions unions = unite(topicPool, true);
+        List<CardCase> cardCases = options.isCardStep() ? cardStep(topicPool, unions, verdicts, used, asked)
+                : Collections.<CardCase>emptyList();
 
         // Held back: a failed case that could have merged something is asked again next run.
         Set<Integer> heldRoots = new HashSet<Integer>();
@@ -769,6 +815,17 @@ public final class TopicMerger {
             if (hold >= 0 && heldRoots.add(hold)) {
                 heldReason.put(hold, "comparison with " + edge.comparison.getBId() + " failed: "
                         + edge.comparison.getProblem());
+            }
+        }
+        // A failed card case holds the whole family back, so the next run puts it together again.
+        for (CardCase card : cardCases) {
+            if (card.comparison.isOk()) {
+                continue;
+            }
+            for (int root : familyOf(card.root, topicPool.groups.size(), unions)) {
+                if (heldRoots.add(root)) {
+                    heldReason.put(root, "card step failed: " + card.comparison.getProblem());
+                }
             }
         }
 
@@ -812,11 +869,12 @@ public final class TopicMerger {
             if (id == null || unions.anchorOf(root) >= 0) {
                 continue;
             }
-            Integer parentRoot = unions.parentOf.get(root);
+            Integer parentNode = unions.parentOf.get(root);
             String parent = "";
-            if (parentRoot != null) {
-                if (parentRoot >= topicPool.groups.size()) {
-                    parent = anchors.get(parentRoot - topicPool.groups.size()).id;
+            if (parentNode != null) {
+                int parentRoot = unions.find(parentNode);
+                if (unions.anchorOf(parentRoot) >= 0) {
+                    parent = anchors.get(unions.anchorOf(parentRoot)).id;
                 } else if (topicIdOfRoot.containsKey(parentRoot)) {
                     parent = topicIdOfRoot.get(parentRoot);
                 }
@@ -859,7 +917,7 @@ public final class TopicMerger {
                     ResearchTopic of = memory.currentTopic(question.getTopicId());
                     if (of != null && of.getId().equals(topicId)) {
                         questionAnchors.add(Node.anchor(question.getId(), question.getText(), "",
-                                question.getText(), Collections.<String>emptyList()));
+                                question.getText(), Collections.<String>emptyList(), false));
                         questionTexts.add(question.getText());
                     }
                 }
@@ -884,7 +942,7 @@ public final class TopicMerger {
                 node.vectors.add(vectorCache.get(node.embedText));
             }
             Pool planned = plan(pool.items, pool.anchors, options.getQuestionSame(), options.getQuestionDoubt(),
-                    Comparison.Kind.FRAGE, pool.context);
+                    Comparison.Kind.FRAGE, pool.context, false);
             plannedPools.add(planned);
             rootOfPool.put(planned, rootOfPool.get(pool));
         }
@@ -987,7 +1045,8 @@ public final class TopicMerger {
         }
         log("topic merge: " + todo.size() + " proposals, " + topicPool.groups.size() + " groups, " + topics.size()
                 + " topics (" + (topics.size() - fresh.size()) + " known), " + heldBack.size() + " held back, "
-                + asked.size() + " model calls, " + (used.size() - asked.size()) + " reused");
+                + cardCases.size() + " card cases, " + asked.size() + " model calls, " + (used.size() - asked.size())
+                + " reused");
         return new Result(placed, topics, questions, used, asked, heldBack, topicPool.groups.size(),
                 chat.modelName(), now);
     }
@@ -1052,11 +1111,13 @@ public final class TopicMerger {
         final String embedText;
         final List<String> otherNames;
         final boolean anchor;
+        /** A card of the mind map (a known topic of origin KONZEPT). */
+        final boolean card;
         /** Unit vectors: one for an item; for an anchor its own and those of the topics merged into it. */
         final List<float[]> vectors = new ArrayList<float[]>();
 
         private Node(String id, String name, String description, String embedText, List<String> otherNames,
-                     boolean anchor) {
+                     boolean anchor, boolean card) {
             this.id = id;
             this.name = clean(name);
             this.description = clean(description);
@@ -1064,15 +1125,16 @@ public final class TopicMerger {
             this.embedText = embedText;
             this.otherNames = otherNames;
             this.anchor = anchor;
+            this.card = card;
         }
 
         static Node item(String id, String name, String description, String embedText) {
-            return new Node(id, name, description, embedText, Collections.<String>emptyList(), false);
+            return new Node(id, name, description, embedText, Collections.<String>emptyList(), false, false);
         }
 
         static Node anchor(String id, String name, String description, String embedText,
-                           List<String> memberNames) {
-            return new Node(id, name, description, embedText, memberNames, true);
+                           List<String> memberNames, boolean card) {
+            return new Node(id, name, description, embedText, memberNames, true, card);
         }
     }
 
@@ -1123,10 +1185,12 @@ public final class TopicMerger {
 
     /**
      * Step 1: groups of items at or above {@code same} (average linkage) or with the same wording, largest first; each
-     * group's nearest anchor and nearest earlier group, when at or above {@code doubt}.
+     * group's nearest anchors and nearest earlier groups at or above {@code doubt}, up to
+     * {@link Options#getCandidates()} of each. An anchor of the same wording is the only anchor of its group. With
+     * {@code cardsApart} a card is a candidate only at or above {@code same}: its doubtful cases go to the card step.
      */
     private Pool plan(List<Node> items, List<Node> anchors, double same, double doubt, Comparison.Kind kind,
-                      String context) {
+                      String context, boolean cardsApart) {
         Pool pool = new Pool(items, anchors, kind, context);
         int n = items.size();
         int[] parent = new int[n];
@@ -1183,46 +1247,55 @@ public final class TopicMerger {
                 anchorOfKey.put(anchors.get(a).key, a);
             }
         }
+        int perKind = options.getCandidates();
         for (int g = 0; g < groups.size(); g++) {
             float[] centroid = pool.centroids.get(g);
-            int bestAnchor = -1;
-            double bestAnchorSimilarity = -2;
+            Integer sameWording = null;
             for (int i : groups.get(g)) {
-                Integer same1 = anchorOfKey.get(items.get(i).key);
-                if (same1 != null) {
-                    bestAnchor = same1;
-                    bestAnchorSimilarity = 1.0;
+                sameWording = anchorOfKey.get(items.get(i).key);
+                if (sameWording != null) {
                     break;
                 }
             }
-            if (bestAnchor < 0) {
+            if (sameWording != null) {
+                pool.edges.add(new Edge(g, sameWording, true, 1.0, true));
+            } else {
+                double[] toAnchors = new double[anchors.size()];
                 for (int a = 0; a < anchors.size(); a++) {
+                    toAnchors[a] = -2;
                     for (float[] vector : anchors.get(a).vectors) {
-                        double similarity = dot(centroid, vector);
-                        if (similarity > bestAnchorSimilarity) {
-                            bestAnchorSimilarity = similarity;
-                            bestAnchor = a;
-                        }
+                        toAnchors[a] = Math.max(toAnchors[a], dot(centroid, vector));
+                    }
+                    if (cardsApart && anchors.get(a).card && toAnchors[a] < same) {
+                        toAnchors[a] = -2;
                     }
                 }
-            }
-            if (bestAnchor >= 0 && bestAnchorSimilarity >= doubt) {
-                pool.edges.add(new Edge(g, bestAnchor, true, bestAnchorSimilarity, bestAnchorSimilarity >= same));
-            }
-            int bestGroup = -1;
-            double bestGroupSimilarity = -2;
-            for (int h = 0; h < g; h++) {
-                double similarity = dot(centroid, pool.centroids.get(h));
-                if (similarity > bestGroupSimilarity) {
-                    bestGroupSimilarity = similarity;
-                    bestGroup = h;
+                for (int a : nearest(toAnchors, perKind, doubt)) {
+                    pool.edges.add(new Edge(g, a, true, toAnchors[a], toAnchors[a] >= same));
                 }
             }
-            if (bestGroup >= 0 && bestGroupSimilarity >= doubt) {
-                pool.edges.add(new Edge(g, bestGroup, false, bestGroupSimilarity, bestGroupSimilarity >= same));
+            double[] toGroups = new double[g];
+            for (int h = 0; h < g; h++) {
+                toGroups[h] = dot(centroid, pool.centroids.get(h));
+            }
+            for (int h : nearest(toGroups, perKind, doubt)) {
+                pool.edges.add(new Edge(g, h, false, toGroups[h], toGroups[h] >= same));
             }
         }
         return pool;
+    }
+
+    /** The indexes of the highest scores at or above the floor, at most {@code count}, highest first. */
+    private static List<Integer> nearest(final double[] scores, int count, double floor) {
+        List<Integer> indexes = new ArrayList<Integer>();
+        for (int i = 0; i < scores.length; i++) {
+            if (scores[i] >= floor) {
+                indexes.add(i);
+            }
+        }
+        Collections.sort(indexes, (x, y) -> scores[x] != scores[y] ? Double.compare(scores[y], scores[x])
+                : Integer.compare(x, y));
+        return indexes.size() <= count ? indexes : new ArrayList<Integer>(indexes.subList(0, count));
     }
 
     /** Average-linkage groups at or above the similarity: the clusterer of the topic analysis over stand-ins. */
@@ -1399,26 +1472,61 @@ public final class TopicMerger {
                 }
             }
         }
-        if (open.isEmpty()) {
-            return;
+        List<Case> cases = new ArrayList<Case>();
+        for (int i = 0; i < open.size(); i++) {
+            final Edge edge = open.get(i);
+            final String[] request = requests.get(i);
+            final Pool pool = poolOfOpen.get(i);
+            cases.add(new Case() {
+                @Override
+                public Comparison ask() {
+                    return TopicMerger.this.ask(pool.kind, pool.context, request, edge.toAnchor, edge.similarity);
+                }
+
+                @Override
+                public Comparison notAsked(String why) {
+                    return new Comparison(pool.kind, request[0], request[1], request[2], request[3], edge.toAnchor,
+                            edge.similarity, Comparison.Status.FEHLER, null, "", why, null, chat.modelName(),
+                            clock.millis(), 0L);
+                }
+            });
+        }
+        List<Comparison> results = run(cases);
+        for (int i = 0; i < open.size(); i++) {
+            open.get(i).comparison = results.get(i);
+            used.add(results.get(i));
+            asked.add(results.get(i));
+        }
+    }
+
+    /** A case for the model: how it is asked, and the FEHLER it becomes when the batch stops before it. */
+    private interface Case {
+        Comparison ask();
+
+        Comparison notAsked(String why);
+    }
+
+    /**
+     * The cases, at most {@link Options#getParallel()} at a time, the results in the order of the cases; after
+     * {@link Options#STOP_AFTER_FAILURES} failed cases in a row the rest is not asked (FEHLER).
+     */
+    private List<Comparison> run(List<Case> cases) {
+        List<Comparison> results = new ArrayList<Comparison>();
+        if (cases.isEmpty()) {
+            return results;
         }
         final AtomicInteger failuresInRow = new AtomicInteger();
         final AtomicReference<String> lastFailure = new AtomicReference<String>("");
-        ExecutorService workers = Executors.newFixedThreadPool(Math.min(options.getParallel(), open.size()));
+        ExecutorService workers = Executors.newFixedThreadPool(Math.min(options.getParallel(), cases.size()));
         List<Future<Comparison>> running = new ArrayList<Future<Comparison>>();
         try {
-            for (int i = 0; i < open.size(); i++) {
-                final Edge edge = open.get(i);
-                final String[] request = requests.get(i);
-                final Pool pool = poolOfOpen.get(i);
+            for (final Case next : cases) {
                 running.add(workers.submit(() -> {
                     if (failuresInRow.get() >= Options.STOP_AFTER_FAILURES) {
-                        return new Comparison(pool.kind, request[0], request[1], request[2], request[3],
-                                edge.toAnchor, edge.similarity, Comparison.Status.FEHLER, null, "",
-                                "not asked: the model failed " + Options.STOP_AFTER_FAILURES + " cases in a row; last: "
-                                        + lastFailure.get(), null, chat.modelName(), clock.millis(), 0L);
+                        return next.notAsked("not asked: the model failed " + Options.STOP_AFTER_FAILURES
+                                + " cases in a row; last: " + lastFailure.get());
                     }
-                    Comparison result = ask(pool.kind, pool.context, request, edge.toAnchor, edge.similarity);
+                    Comparison result = next.ask();
                     if (result.isOk()) {
                         failuresInRow.set(0);
                     } else {
@@ -1428,11 +1536,8 @@ public final class TopicMerger {
                     return result;
                 }));
             }
-            for (int i = 0; i < open.size(); i++) {
-                Comparison result = running.get(i).get();
-                open.get(i).comparison = result;
-                used.add(result);
-                asked.add(result);
+            for (Future<Comparison> result : running) {
+                results.add(result.get());
             }
         } catch (ExecutionException crashed) {
             throw new IllegalStateException("topic merge crashed", crashed.getCause());
@@ -1442,6 +1547,188 @@ public final class TopicMerger {
         } finally {
             workers.shutdownNow();
         }
+        return results;
+    }
+
+    /** A head of a family put to the card step, with its verdict. */
+    private static final class CardCase {
+        final int root;
+        Comparison comparison;
+
+        CardCase(int root) {
+            this.root = root;
+        }
+    }
+
+    /**
+     * The card step: every head of a family (a merged topic that is no known topic and lies under no topic) is put to
+     * the model once with all cards of the mind map, because cards have broad names that a similarity does not reach.
+     * The same as a card merges the head into the card, part of a card makes it a subtopic of the card, none leaves
+     * it new. A verdict on the same topic text and the same list of cards is reused. The verdicts are applied to the
+     * unions; the cases come back for the held-back rule.
+     */
+    private List<CardCase> cardStep(final Pool pool, Unions unions, Map<String, Comparison> verdicts,
+                                    List<Comparison> used, List<Comparison> asked) {
+        int groups = pool.groups.size();
+        final List<String> cardIds = new ArrayList<String>();
+        List<Integer> cards = new ArrayList<Integer>();
+        for (int a = 0; a < pool.anchors.size(); a++) {
+            if (pool.anchors.get(a).card) {
+                cards.add(a);
+                cardIds.add(pool.anchors.get(a).id);
+            }
+        }
+        List<CardCase> cases = new ArrayList<CardCase>();
+        if (cards.isEmpty()) {
+            return cases;
+        }
+        Map<Integer, List<Integer>> membersOfHead = new LinkedHashMap<Integer, List<Integer>>();
+        for (int g = 0; g < groups; g++) {
+            int root = unions.find(g);
+            if (unions.anchorOf(root) >= 0 || unions.parentOf.containsKey(root)) {
+                continue;
+            }
+            if (!membersOfHead.containsKey(root)) {
+                membersOfHead.put(root, new ArrayList<Integer>());
+            }
+            membersOfHead.get(root).addAll(pool.groups.get(g));
+        }
+        List<Integer> heads = new ArrayList<Integer>(membersOfHead.keySet());
+        for (int head : heads) {
+            Collections.sort(membersOfHead.get(head));
+        }
+        Collections.sort(heads, (x, y) -> Integer.compare(membersOfHead.get(x).get(0), membersOfHead.get(y).get(0)));
+        final String cardsText = cardList(pool.anchors, cards);
+        List<CardCase> open = new ArrayList<CardCase>();
+        List<Case> calls = new ArrayList<Case>();
+        for (int head : heads) {
+            List<Integer> members = membersOfHead.get(head);
+            final String aId = pool.items.get(members.get(0)).id;
+            final String aText = shownMembers(pool, members);
+            List<float[]> vectors = new ArrayList<float[]>();
+            for (int i : members) {
+                vectors.add(pool.items.get(i).vectors.get(0));
+            }
+            float[] centroid = unit(mean(vectors));
+            final double[] toCards = new double[cards.size()];
+            for (int c = 0; c < cards.size(); c++) {
+                toCards[c] = -2;
+                for (float[] vector : pool.anchors.get(cards.get(c)).vectors) {
+                    toCards[c] = Math.max(toCards[c], dot(centroid, vector));
+                }
+            }
+            CardCase next = new CardCase(head);
+            cases.add(next);
+            Comparison earlier = verdicts.get(Comparison.key(Comparison.Kind.KARTE, aText, cardsText));
+            if (earlier != null && (earlier.getBId().isEmpty() || cardIds.contains(earlier.getBId()))) {
+                next.comparison = earlier;
+                used.add(earlier);
+                continue;
+            }
+            open.add(next);
+            calls.add(new Case() {
+                @Override
+                public Comparison ask() {
+                    return askCard(aId, aText, cardIds, cardsText, toCards);
+                }
+
+                @Override
+                public Comparison notAsked(String why) {
+                    return new Comparison(Comparison.Kind.KARTE, aId, aText, "", cardsText, true, highest(toCards),
+                            Comparison.Status.FEHLER, null, "", why, null, chat.modelName(), clock.millis(), 0L);
+                }
+            });
+        }
+        List<Comparison> results = run(calls);
+        for (int i = 0; i < open.size(); i++) {
+            open.get(i).comparison = results.get(i);
+            used.add(results.get(i));
+            asked.add(results.get(i));
+        }
+        for (CardCase next : cases) {
+            Comparison verdict = next.comparison;
+            if (!verdict.isOk() || verdict.getRelation() == Relation.VERSCHIEDEN) {
+                continue;
+            }
+            int card = groups + cards.get(cardIds.indexOf(verdict.getBId()));
+            if (verdict.getRelation() == Relation.GLEICH) {
+                unions.parent[next.root] = unions.find(card);
+            } else {
+                unions.parentOf.put(next.root, card);
+            }
+        }
+        return cases;
+    }
+
+    /** The roots of a family: its head and every group root whose chain of parents reaches the head. */
+    private static Set<Integer> familyOf(int head, int groups, Unions unions) {
+        Set<Integer> family = new LinkedHashSet<Integer>();
+        for (int g = 0; g < groups; g++) {
+            int root = unions.find(g);
+            Set<Integer> seen = new HashSet<Integer>();
+            Integer at = root;
+            while (at != null && seen.add(at)) {
+                if (at == head) {
+                    family.add(root);
+                    break;
+                }
+                Integer up = unions.parentOf.get(at);
+                at = up == null ? null : unions.find(up);
+            }
+        }
+        return family;
+    }
+
+    private static double highest(double[] values) {
+        double best = -2;
+        for (double value : values) {
+            best = Math.max(best, value);
+        }
+        return best;
+    }
+
+    /** One head against the cards: at most {@link #ATTEMPTS} calls. */
+    Comparison askCard(String aId, String aText, List<String> cardIds, String cardsText, double[] toCards) {
+        List<ChatMessage> messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system(german ? CARD_SYSTEM_DE : CARD_SYSTEM_EN));
+        messages.add(ChatMessage.user(cardPrompt(mission, aText, cardsText, german)));
+        String schema = cardSchema(cardIds);
+        List<String> answers = new ArrayList<String>();
+        String problem = "";
+        long start = clock.millis();
+        for (int attempt = 1; attempt <= ATTEMPTS; attempt++) {
+            MainModelChatResult result;
+            try {
+                result = chat.completeJson(new ArrayList<ChatMessage>(messages), TEMPERATURE, ANSWER_TOKENS, schema);
+            } catch (RuntimeException failed) {
+                result = MainModelChatResult.failure(MainModelChatResult.Status.PROVIDER_FAILURE,
+                        failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage());
+            }
+            if (result == null || !result.isOk()) {
+                answers.add("");
+                problem = result == null ? "model call returned nothing"
+                        : "model call failed (" + result.getStatus() + "): " + result.getDetail();
+                continue;
+            }
+            String text = result.getText() == null ? "" : result.getText();
+            answers.add(text);
+            Verdict verdict = parseCard(text, cardIds);
+            if (verdict.problem.isEmpty()) {
+                double similarity = verdict.card.isEmpty() ? highest(toCards) : toCards[cardIds.indexOf(verdict.card)];
+                return new Comparison(Comparison.Kind.KARTE, aId, aText, verdict.card, cardsText, true, similarity,
+                        Comparison.Status.OK, verdict.relation, verdict.reason, "", answers, chat.modelName(),
+                        clock.millis(), clock.millis() - start);
+            }
+            problem = "invalid answer: " + verdict.problem;
+            messages.add(ChatMessage.assistant(text));
+            messages.add(ChatMessage.user((german ? "Deine Antwort war ungültig: " : "Your answer was invalid: ")
+                    + verdict.problem + (german ? "\nAntworte noch einmal, nur mit dem JSON-Objekt."
+                    : "\nAnswer again with the JSON object only.")));
+        }
+        log("card step failed for " + aId + ": " + problem);
+        return new Comparison(Comparison.Kind.KARTE, aId, aText, "", cardsText, true, highest(toCards),
+                Comparison.Status.FEHLER, null, "", problem, answers, chat.modelName(), clock.millis(),
+                clock.millis() - start);
     }
 
     /** One case: at most {@link #ATTEMPTS} calls. */
@@ -1509,10 +1796,20 @@ public final class TopicMerger {
             + "und sagst, wie sie zusammenhängen. Antworte nur mit JSON.";
     static final String SYSTEM_EN = "You order the topics and questions of a non-fiction book. You compare two at a "
             + "time and say how they relate. Answer only with JSON.";
+    static final String CARD_SYSTEM_DE = "Du ordnest die Themen eines Sachbuchs den Karten seiner Mindmap zu. "
+            + "Antworte nur mit JSON.";
+    static final String CARD_SYSTEM_EN = "You assign the topics of a non-fiction book to the cards of its mind map. "
+            + "Answer only with JSON.";
+    /** The word of the card step for a topic that belongs to no card. */
+    static final String NO_CARD = "keine";
 
     /** A group as the model reads it: its central member, then up to three other names of the group. */
     private String shown(Pool pool, int group) {
-        List<Integer> members = pool.groups.get(group);
+        return shownMembers(pool, pool.groups.get(group));
+    }
+
+    /** Members of one or more groups as the model reads them: the central member and up to three other names. */
+    private String shownMembers(Pool pool, List<Integer> members) {
         Node center = pool.items.get(central(members, pool.items));
         if (pool.kind == Comparison.Kind.FRAGE) {
             return center.name;
@@ -1613,6 +1910,56 @@ public final class TopicMerger {
                 + "(one sentence).";
     }
 
+    /** The cards as the card step lists them: one line each, id and name, the description in brackets. */
+    private static String cardList(List<Node> anchors, List<Integer> cards) {
+        StringBuilder text = new StringBuilder();
+        for (int a : cards) {
+            Node card = anchors.get(a);
+            if (text.length() > 0) {
+                text.append('\n');
+            }
+            text.append(card.id).append(": ").append(card.name);
+            if (!card.description.isEmpty()) {
+                text.append(" (").append(card.description).append(')');
+            }
+        }
+        return text.toString();
+    }
+
+    static String cardPrompt(String mission, String topic, String cards, boolean german) {
+        String task = mission.length() <= MISSION_CHARS ? mission : mission.substring(0, MISSION_CHARS).trim() + " …";
+        if (german) {
+            return "Buchauftrag:\n" + (task.isEmpty() ? "(keiner angegeben)" : task) + "\n\n"
+                    + "Karten der Mindmap (sie geben die Richtung des Buchs vor, nicht seinen ganzen Inhalt):\n"
+                    + cards + "\n\n"
+                    + "Thema:\n" + topic + "\n\n"
+                    + "Gehört das Thema zu einer der Karten? Wähle eine Zuordnung:\n"
+                    + "- \"gleich\": Das Thema ist eine der Karten selbst, nur anders benannt. Ein Abschnitt über das "
+                    + "Thema deckt die ganze Karte ab.\n"
+                    + "- \"teil_von\": Das Thema ist ein Teilaspekt einer Karte. Die Karte ist breiter und schließt "
+                    + "das Thema ein.\n"
+                    + "- \"keine\": Das Thema passt zu keiner Karte. Das ist erlaubt: Ein Buch darf Themen enthalten, "
+                    + "die keine Karte vorsieht.\n"
+                    + "Ob das Thema ins Buch gehört, spielt hier keine Rolle.\n\n"
+                    + "Antworte nur mit JSON mit den Feldern \"grund\" (ein Satz), \"zuordnung\" (\"gleich\", "
+                    + "\"teil_von\" oder \"keine\") und \"karte\" (die Kennung vor dem Doppelpunkt, bei \"keine\" "
+                    + "das Wort keine).";
+        }
+        return "Book mission:\n" + (task.isEmpty() ? "(none given)" : task) + "\n\n"
+                + "Cards of the mind map (they give the book its direction, not all of its content):\n"
+                + cards + "\n\n"
+                + "Topic:\n" + topic + "\n\n"
+                + "Does the topic belong to one of the cards? Choose one assignment:\n"
+                + "- \"gleich\": The topic is one of the cards itself, only named differently. A section on the topic "
+                + "covers the whole card.\n"
+                + "- \"teil_von\": The topic is a part of a card. The card is wider and includes the topic.\n"
+                + "- \"keine\": The topic fits no card. That is allowed: a book may hold topics no card foresees.\n"
+                + "Whether the topic belongs in the book does not matter here.\n\n"
+                + "Answer only with JSON with the fields \"grund\" (one sentence), \"zuordnung\" (\"gleich\", "
+                + "\"teil_von\" or \"keine\") and \"karte\" (the id before the colon, for \"keine\" the word "
+                + "keine).";
+    }
+
     /** {@code beziehung} from the four relations (topics) or two (questions), and {@code grund}; nothing else. */
     static String schema(boolean topics) {
         JsonArray words = new JsonArray();
@@ -1640,25 +1987,110 @@ public final class TopicMerger {
         return schema.toString();
     }
 
+    /** {@code grund} first, then {@code zuordnung} (gleich, teil_von, keine) and {@code karte} (a card id or keine). */
+    static String cardSchema(List<String> cardIds) {
+        JsonObject reason = new JsonObject();
+        reason.addProperty("type", "string");
+        JsonArray words = new JsonArray();
+        words.add("gleich");
+        words.add("teil_von");
+        words.add(NO_CARD);
+        JsonObject assignment = new JsonObject();
+        assignment.addProperty("type", "string");
+        assignment.add("enum", words);
+        JsonArray ids = new JsonArray();
+        for (String id : cardIds) {
+            ids.add(id);
+        }
+        ids.add(NO_CARD);
+        JsonObject card = new JsonObject();
+        card.addProperty("type", "string");
+        card.add("enum", ids);
+        JsonObject properties = new JsonObject();
+        properties.add("grund", reason);
+        properties.add("zuordnung", assignment);
+        properties.add("karte", card);
+        JsonArray required = new JsonArray();
+        required.add("grund");
+        required.add("zuordnung");
+        required.add("karte");
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "object");
+        schema.add("properties", properties);
+        schema.add("required", required);
+        schema.addProperty("additionalProperties", false);
+        return schema.toString();
+    }
+
     /** A verdict as read from an answer, or why the answer holds none. */
     static final class Verdict {
         Relation relation;
         String reason = "";
         String problem = "";
+        /** The card of a card-step verdict, {@code ""} for none. */
+        String card = "";
     }
 
-    static Verdict parse(String answer, boolean topics) {
-        Verdict verdict = new Verdict();
-        JsonObject json;
+    /** The answer as a JSON object, or {@code null} with the problem set. */
+    private static JsonObject object(String answer, Verdict verdict) {
         try {
             JsonElement element = JsonParser.parseString(answer == null ? "" : answer.trim());
             if (!element.isJsonObject()) {
                 verdict.problem = "the answer is no JSON object";
-                return verdict;
+                return null;
             }
-            json = element.getAsJsonObject();
+            return element.getAsJsonObject();
         } catch (RuntimeException notJson) {
             verdict.problem = "the answer is no JSON";
+            return null;
+        }
+    }
+
+    private static String reasonOf(JsonObject json) {
+        JsonElement reason = json.get("grund");
+        String text = reason != null && reason.isJsonPrimitive()
+                ? reason.getAsString().replaceAll("\\s+", " ").trim() : "";
+        return text.length() <= REASON_CHARS ? text : text.substring(0, REASON_CHARS).trim() + " …";
+    }
+
+    /** gleich, teil_von (part of the card) or keine, and for the first two a card of the list. */
+    static Verdict parseCard(String answer, List<String> cardIds) {
+        Verdict verdict = new Verdict();
+        JsonObject json = object(answer, verdict);
+        if (json == null) {
+            return verdict;
+        }
+        JsonElement word = json.get("zuordnung");
+        String assignment = word != null && word.isJsonPrimitive() ? word.getAsString().trim().toLowerCase(Locale.ROOT)
+                : "";
+        if ("gleich".equals(assignment)) {
+            verdict.relation = Relation.GLEICH;
+        } else if ("teil_von".equals(assignment)) {
+            verdict.relation = Relation.A_TEIL_VON_B;
+        } else if (NO_CARD.equals(assignment)) {
+            verdict.relation = Relation.VERSCHIEDEN;
+        } else {
+            verdict.problem = "\"zuordnung\" must be gleich, teil_von or keine";
+            return verdict;
+        }
+        if (verdict.relation != Relation.VERSCHIEDEN) {
+            JsonElement card = json.get("karte");
+            String id = card != null && card.isJsonPrimitive() ? card.getAsString().trim() : "";
+            if (!cardIds.contains(id)) {
+                verdict.relation = null;
+                verdict.problem = "\"karte\" must name one of the cards (" + String.join(", ", cardIds) + ")";
+                return verdict;
+            }
+            verdict.card = id;
+        }
+        verdict.reason = reasonOf(json);
+        return verdict;
+    }
+
+    static Verdict parse(String answer, boolean topics) {
+        Verdict verdict = new Verdict();
+        JsonObject json = object(answer, verdict);
+        if (json == null) {
             return verdict;
         }
         JsonElement word = json.get("beziehung");
@@ -1669,10 +2101,7 @@ public final class TopicMerger {
             return verdict;
         }
         verdict.relation = relation;
-        JsonElement reason = json.get("grund");
-        String text = reason != null && reason.isJsonPrimitive()
-                ? reason.getAsString().replaceAll("\\s+", " ").trim() : "";
-        verdict.reason = text.length() <= REASON_CHARS ? text : text.substring(0, REASON_CHARS).trim() + " …";
+        verdict.reason = reasonOf(json);
         return verdict;
     }
 

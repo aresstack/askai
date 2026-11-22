@@ -72,8 +72,9 @@ import static org.junit.Assert.assertTrue;
  *     -Daskai.stock.merge.korpus=&lt;replay-corpus.json, only for the mission&gt;  (or .auftrag=&lt;text file&gt;)
  *     -Daskai.stock.merge.chatUrl=http://127.0.0.1:11434 -Daskai.stock.merge.chatModel=gemma4:12b
  *     -Daskai.stock.merge.embedModel=bge-m3:latest -Daskai.stock.merge.out=&lt;folder&gt;
- *   optional: gleich, zweifel, frageGleich, frageZweifel (bands), parallel, nurNamen, zwilling (true), numCtx,
- *   think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file), neu (true: forget earlier verdicts)
+ *   optional: gleich, zweifel, frageGleich, frageZweifel (bands), kandidaten (3), kartenschritt (true), parallel,
+ *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
+ *   neu (true: forget earlier verdicts)
  * </pre>
  */
 public class TopicMergerStockTest {
@@ -164,7 +165,12 @@ public class TopicMergerStockTest {
         assertEquals(6, read.size());
 
         TopicFinderTest.Scripted chat = new TopicFinderTest.Scripted(m -> MainModelChatResult.ok(
-                "{\"beziehung\":\"verschieden\",\"grund\":\"Anderes Thema.\"}"));
+                !TopicMerger.CARD_SYSTEM_DE.equals(m.get(0).getContent())
+                        ? "{\"beziehung\":\"verschieden\",\"grund\":\"Anderes Thema.\"}"
+                        : m.get(1).getContent().contains("Thema:\nParken und Gebühren")
+                        ? "{\"grund\":\"Gebühren gehören zum Parken.\",\"zuordnung\":\"teil_von\","
+                        + "\"karte\":\"konzept-2\"}"
+                        : "{\"grund\":\"Keine Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\"}"));
         JsonObject sources = new JsonObject();
         sources.addProperty("vorschlaege", "Beispiel");
         JsonObject result = run(read, "Ein Buch über Verkehr in Städten.", known, expected, chat, new Words(),
@@ -172,13 +178,18 @@ public class TopicMergerStockTest {
 
         assertEquals(6, result.getAsJsonObject("eingabe").get("vorschlaege").getAsInt());
         JsonObject topics = result.getAsJsonObject("themen");
-        assertEquals("Radwege joins its card; Tempo 30, Bahnlärm and the fees are new", 1,
+        assertEquals("Radwege joins its card; Tempo 30 (twice) and Bahnlärm are new", 1,
                 topics.get("bekannteMitVorschlaegen").getAsInt());
-        assertEquals(4, topics.get("neu").getAsInt());
+        assertEquals(3, topics.get("neu").getAsInt());
+        assertEquals("the fees under the card Parken", 1, topics.get("unterthema").getAsInt());
         JsonObject asked = result.getAsJsonObject("vergleiche").getAsJsonObject("themen");
-        assertEquals("only the fees against the card Parken are doubtful", 1, asked.get("gefragt").getAsInt());
-        assertEquals(1, asked.getAsJsonObject("urteile").get("VERSCHIEDEN").getAsInt());
-        assertEquals(1, chat.calls.get());
+        assertEquals("no doubtful pair: the fees meet the card Parken in the card step", 0,
+                asked.get("gefragt").getAsInt());
+        JsonObject cards = result.getAsJsonObject("vergleiche").getAsJsonObject("karten");
+        assertEquals("four heads against the cards", 4, cards.get("gefragt").getAsInt());
+        assertEquals(1, cards.getAsJsonObject("urteile").get("A_TEIL_VON_B").getAsInt());
+        assertEquals(3, cards.getAsJsonObject("urteile").get("VERSCHIEDEN").getAsInt());
+        assertEquals(4, chat.calls.get());
         JsonObject structure = result.getAsJsonObject("herkuenfte");
         assertTrue(structure.get("jederVorschlagEinmal").getAsBoolean());
         assertTrue(structure.get("fundstellenErhalten").getAsBoolean());
@@ -225,7 +236,9 @@ public class TopicMergerStockTest {
                 .withTopicBand(number("gleich", 0.85), number("zweifel", 0.72))
                 .withQuestionBand(number("frageGleich", 0.92), number("frageZweifel", 0.85))
                 .withParallel(Integer.getInteger(P + "parallel", 4))
-                .withNamesOnly("true".equalsIgnoreCase(System.getProperty(P + "nurNamen", "false")));
+                .withNamesOnly("true".equalsIgnoreCase(System.getProperty(P + "nurNamen", "false")))
+                .withCandidates(Integer.getInteger(P + "kandidaten", 3))
+                .withCardStep(!"false".equalsIgnoreCase(System.getProperty(P + "kartenschritt", "true")));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -492,7 +505,8 @@ public class TopicMergerStockTest {
                 bands.add(band.getKey(), counts(band.getValue()));
             }
             part.add("nachAehnlichkeit", bands);
-            json.add(kind == Comparison.Kind.THEMA ? "themen" : "fragen", part);
+            json.add(kind == Comparison.Kind.THEMA ? "themen" : kind == Comparison.Kind.FRAGE ? "fragen" : "karten",
+                    part);
         }
         List<String> problems = new ArrayList<String>();
         for (Comparison failed : result.getFailed()) {
@@ -831,6 +845,8 @@ public class TopicMergerStockTest {
         json.addProperty("fragenZweifel", o.getQuestionDoubt());
         json.addProperty("parallel", o.getParallel());
         json.addProperty("nurNamen", o.isNamesOnly());
+        json.addProperty("kandidaten", o.getCandidates());
+        json.addProperty("kartenschritt", o.isCardStep());
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);
         return json;
