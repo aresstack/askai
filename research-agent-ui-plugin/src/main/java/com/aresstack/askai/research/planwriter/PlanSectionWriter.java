@@ -69,21 +69,24 @@ import java.util.regex.Pattern;
  * the new sentence stays when the check judged it, it is not worse than the old one and repeats no other sentence,
  * otherwise the old one stays. A claim counts as stated as a fact only when its part of the sentence names no speaker
  * ({@link VisibleAttribution}); where one still does after the rewrite, the speaker is put in at its place
- * (", wie ein Anbieter angibt") and the sentence is checked again. A sentence that still fails, and a sentence without
- * any citation, is marked ({@link WrittenSection.Mark}), never deleted. The section, its marks, gaps and counts go to
- * {@link WrittenSections} the moment it is done.</p>
+ * (", wie ein Anbieter angibt") and the sentence is checked again, but never beside another attribution, never where
+ * the clause also cites another source and at most once in a sentence. A sentence that still fails, and a sentence
+ * without any citation, is marked ({@link WrittenSection.Mark}), never deleted. The section, its marks, gaps and
+ * counts go to {@link WrittenSections} the moment it is done.</p>
  *
- * <p>The prompt names a source by its site (component 10 stock test c10: a letter in the prompt ended up in the text
- * as "Quelle C" 19 times); a source without a site keeps its letter.</p>
+ * <p>The prompt names a source by its site's own name without its ending, "Sturzwacht" for sturzwacht.example
+ * (component 10 stock test c10: a letter in the prompt ended up in the text as "Quelle C" 19 times; c10b: "Der
+ * Hersteller conrad.at" 54 times); a source without a site keeps its letter.</p>
  */
 public final class PlanSectionWriter {
 
     /**
      * The adapter's, prompt's and rules' version; a written section records it. 2: a claim whose part names its speaker
      * is no fact, the speaker put in where one still stands as a fact, sources named by their site, the rewrite sees
-     * the sentences around it.
+     * the sentences around it. 3: sources named by their site's own name without its ending; no speaker put in beside
+     * another attribution, where the clause cites another source, or twice in a sentence (the review of c10b).
      */
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
 
     static final double REWRITE_TEMPERATURE = 0.3;
     static final int CONTEXT_TOKENS = 8192;
@@ -377,6 +380,7 @@ public final class PlanSectionWriter {
         final PassageLookup.Passage passage;
         final String text;
         final List<String> names;
+        final String name;
         final List<String> notes = new ArrayList<String>();
         int number;
         boolean contradiction;
@@ -388,6 +392,7 @@ public final class PlanSectionWriter {
             this.passage = passage;
             this.text = text;
             this.names = sourceNames(passage);
+            this.name = sourceName(passage);
         }
     }
 
@@ -398,6 +403,18 @@ public final class PlanSectionWriter {
         }
         List<String> names = VisibleAttribution.namesOf(passage.getSourceUrl());
         return names.isEmpty() ? VisibleAttribution.namesOf(passage.getSourceId()) : names;
+    }
+
+    /**
+     * The name the prompt gives a source ({@link VisibleAttribution#nameOf}): its site's own name without its ending,
+     * of its address, else of its id; {@code ""} for a source without a site, which gets a letter.
+     */
+    static String sourceName(PassageLookup.Passage passage) {
+        if (passage == null) {
+            return "";
+        }
+        String name = VisibleAttribution.nameOf(passage.getSourceUrl());
+        return name.isEmpty() ? VisibleAttribution.nameOf(passage.getSourceId()) : name;
     }
 
     /** One key point with the numbers of its passages, contradiction passages first. */
@@ -578,8 +595,8 @@ public final class PlanSectionWriter {
         for (Entry entry : entries) {
             pack.add(new EvidencePassage(entry.number, entry.passage.getSourceId(), "", entry.passage.getPassageId(),
                     entry.text, String.join("; ", entry.notes)));
-            if (!entry.names.isEmpty() && !names.containsKey(entry.passage.getSourceId())) {
-                names.put(entry.passage.getSourceId(), entry.names.get(0));
+            if (!entry.name.isEmpty() && !names.containsKey(entry.passage.getSourceId())) {
+                names.put(entry.passage.getSourceId(), entry.name);
             }
         }
         List<String> keyPoints = new ArrayList<String>();
@@ -1169,7 +1186,7 @@ public final class PlanSectionWriter {
                 return null;
             }
             out = VisibleAttribution.withSpeaker(out, citation.getMarker(), namesOf(citation), kindOf(citation),
-                    phrase);
+                    phrase, sameSource(passages, citation, cited));
         }
         if (out.equals(sentence)) {
             return null;
@@ -1200,6 +1217,24 @@ public final class PlanSectionWriter {
     /** The names the source of a cited passage goes by. */
     private List<String> namesOf(BookSection.Citation citation) {
         return sourceNames(passages.find(citation.getPassageId()));
+    }
+
+    /**
+     * The markers of the passages the sentence cites from the source of {@code citation}, its own among them: the same
+     * source id, or the same site name (two pages of one site are one speaker for "wie ein Anbieter angibt").
+     */
+    static Set<Integer> sameSource(PassageLookup passages, BookSection.Citation citation,
+                                   List<BookSection.Citation> cited) {
+        String name = sourceName(passages.find(citation.getPassageId()));
+        Set<Integer> own = new HashSet<Integer>();
+        own.add(citation.getMarker());
+        for (BookSection.Citation other : cited) {
+            boolean sameId = !citation.getSourceId().isEmpty() && citation.getSourceId().equals(other.getSourceId());
+            if (sameId || !name.isEmpty() && name.equals(sourceName(passages.find(other.getPassageId())))) {
+                own.add(other.getMarker());
+            }
+        }
+        return own;
     }
 
     /** The kind of the source of a cited passage (component 16), {@code ""} when unknown. */
@@ -1390,10 +1425,10 @@ public final class PlanSectionWriter {
             BookSection.Citation citation = new BookSection.Citation(n, passage.getPassageId(),
                     passage.getSourceId(), passage.getText());
             Entry entry = prepared.entryOf(passage.getPassageId());
-            List<String> names = namesOf(citation);
             String finding = finding(n, verdictOf(sentence.getText(), citation), entry == null ? ""
-                    : entry.passage.getSourceKind(), names.isEmpty() ? "" : names.get(0),
-                    VisibleAttribution.attributes(sentence.getText(), n, names, kindOf(citation)), options.german());
+                    : entry.passage.getSourceKind(), sourceName(passages.find(citation.getPassageId())),
+                    VisibleAttribution.attributes(sentence.getText(), n, namesOf(citation), kindOf(citation)),
+                    options.german());
             if (!finding.isEmpty()) {
                 findings.add(finding);
             }

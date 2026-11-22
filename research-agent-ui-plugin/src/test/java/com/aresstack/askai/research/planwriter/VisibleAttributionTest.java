@@ -34,6 +34,11 @@ public class VisibleAttributionTest {
         return VisibleAttribution.withSpeaker(sentence, number, NONE, sourceKind, phrase);
     }
 
+    private static String withSpeaker(String sentence, int number, String sourceKind, String phrase,
+                                      Integer... own) {
+        return VisibleAttribution.withSpeaker(sentence, number, NONE, sourceKind, phrase, Arrays.asList(own));
+    }
+
     @Test
     public void everyFrameThatHandsAClaimToItsSpeakerCounts() {
         assertTrue(named("Nach Angaben des Herstellers erkennt die Kamera Kennzeichen auch bei Nacht [2].", 2));
@@ -252,11 +257,50 @@ public class VisibleAttributionTest {
         assertEquals("", VisibleAttribution.hostOf("src-1234"));
         assertEquals("", VisibleAttribution.hostOf(""));
         assertEquals("", VisibleAttribution.hostOf(null));
-        assertEquals("a short name is no name of its own", Collections.singletonList("abc.example"),
+        assertEquals("a short name counts only in capitals", Arrays.asList("abc.example", "ABC"),
                 VisibleAttribution.namesOf("abc.example"));
-        assertEquals(Collections.singletonList("portal.vdb.example"),
-                VisibleAttribution.namesOf("portal.vdb.example"));
+        Collection<String> vdb = VisibleAttribution.namesOf("portal.vdb.example");
+        assertEquals(Arrays.asList("portal.vdb.example", "VDB"), vdb);
+        assertTrue(named("Laut dem VDB sinken die Unfallzahlen [1].", 1, ASSOCIATION, vdb));
+        assertTrue(named("Der VDB empfiehlt mehr Tempo-30-Zonen [1].", 1, ASSOCIATION, vdb));
+        assertFalse("a short word in lower case names no source", named("Laut vdb sinken die Unfallzahlen [1].", 1,
+                ASSOCIATION, vdb));
+        Collection<String> app = VisibleAttribution.namesOf("app.example");
+        assertEquals(Arrays.asList("app.example", "APP"), app);
+        assertFalse("a short word names no source", named("Laut App sinken die Unfallzahlen [1].", 1, ASSOCIATION,
+                app));
+        assertTrue(named("Laut APP sinken die Unfallzahlen [1].", 1, ASSOCIATION, app));
+        assertEquals(Collections.singletonList("a-b.example"), VisibleAttribution.namesOf("a-b.example"));
+        assertEquals(Arrays.asList("laermschutz.europa.eu", "laermschutz"),
+                VisibleAttribution.namesOf("https://laermschutz.europa.eu/de"));
         assertTrue(VisibleAttribution.namesOf("blitzer").isEmpty());
+    }
+
+    /** The review of c10b: 54 sentences named a domain as the speaker ("Der Hersteller conrad.at"). */
+    @Test
+    public void theWriterNamesASiteByItsOwnNameWithoutItsEnding() {
+        assertEquals("Verkehrstechnik-Nord", VisibleAttribution.nameOf("https://www.verkehrstechnik-nord.example/k"));
+        assertEquals("Sturzwacht", VisibleAttribution.nameOf("https://source.sturzwacht.example/app"));
+        assertEquals("Radwege-Nord", VisibleAttribution.nameOf("https://www.radwege-nord.co.uk/news"));
+        assertEquals("up to four letters in capitals", "VDB", VisibleAttribution.nameOf("portal.vdb.example"));
+        assertEquals("KFZV", VisibleAttribution.nameOf("kfzv.example"));
+        assertEquals("Blitzer", VisibleAttribution.nameOf("blitzer.example"));
+        assertEquals("München", VisibleAttribution.nameOf("münchen.example"));
+        assertEquals("a site that hosts others: the name under it", "Laermschutz",
+                VisibleAttribution.nameOf("https://laermschutz.europa.eu/de"));
+        assertEquals("Verkehrsamt", VisibleAttribution.nameOf("verkehrsamt.bund.de"));
+        assertEquals("no name of its own: the host", "a-b.example", VisibleAttribution.nameOf("a-b.example"));
+        assertEquals("x.example", VisibleAttribution.nameOf("x.example"));
+        assertEquals("xn--mnchen-3ya.example", VisibleAttribution.nameOf("xn--mnchen-3ya.example"));
+        assertEquals("no site", "", VisibleAttribution.nameOf("blitzer"));
+        assertEquals("", VisibleAttribution.nameOf(null));
+
+        for (String url : new String[]{"https://www.verkehrstechnik-nord.example/k", "portal.vdb.example",
+                "kfzv.example", "münchen.example", "a-b.example", "radwegeunion.example"}) {
+            String name = VisibleAttribution.nameOf(url);
+            assertTrue("the name the writer is given names the source: " + name, named("Laut " + name + " sinken "
+                    + "die Unfallzahlen [1].", 1, ASSOCIATION, VisibleAttribution.namesOf(url)));
+        }
     }
 
     @Test
@@ -264,13 +308,14 @@ public class VisibleAttributionTest {
         String phrase = ", wie ein Anbieter angibt";
         assertEquals("Die Kamera erkennt jedes Kennzeichen, wie ein Anbieter angibt [2].",
                 withSpeaker("Die Kamera erkennt jedes Kennzeichen [2].", 2, MAKER, phrase));
-        String middle = withSpeaker("Die Kamera erkennt Fußgänger [3] und warnt den Fahrer [4].", 3, MAKER, phrase);
+        String middle = withSpeaker("Die Kamera erkennt Fußgänger [3] und warnt den Fahrer [4].", 3, MAKER, phrase,
+                3, 4);
         assertEquals("a comma closes it when the sentence goes on", "Die Kamera erkennt Fußgänger, wie ein Anbieter "
                 + "angibt [3], und warnt den Fahrer [4].", middle);
         assertTrue(named(middle, 3));
         assertFalse(named(middle, 4));
         assertEquals("Die Kamera erkennt Fußgänger, wie ein Anbieter angibt [3], und sie warnt [4].",
-                withSpeaker("Die Kamera erkennt Fußgänger [3], und sie warnt [4].", 3, MAKER, phrase));
+                withSpeaker("Die Kamera erkennt Fußgänger [3], und sie warnt [4].", 3, MAKER, phrase, 3, 4));
         String named = "Laut einem Anbieter erkennt die Kamera Fußgänger [3].";
         assertEquals(named, withSpeaker(named, 3, MAKER, phrase));
         assertEquals("not cited", "Die Kamera erkennt Fußgänger [3].",
@@ -313,10 +358,76 @@ public class VisibleAttributionTest {
         String otherOpens = "Laut einem Verband erkennt die Kamera Fußgänger [1] und Radfahrer [2].";
         assertEquals(otherOpens, withSpeaker(otherOpens, 2, MAKER, phrase));
         assertEquals(other, withSpeaker(other, 2, ASSOCIATION, ", wie ein Verband angibt"));
-        assertEquals("only the claim no frame carries gets it", "Laut Hersteller erkennt das System Fußgänger [1] und "
-                + "Radfahrer [2], und die Ampel schaltet um, wie ein Anbieter angibt [2].", withSpeaker("Laut "
-                + "Hersteller erkennt das System Fußgänger [1] und Radfahrer [2], und die Ampel schaltet um [2].", 2,
-                MAKER, phrase));
+        String carried = "Laut Hersteller erkennt das System Fußgänger [1] und Radfahrer [2], und die Ampel schaltet "
+                + "um [2].";
+        assertEquals("no second speaker in a sentence that names one", carried, withSpeaker(carried, 2, MAKER,
+                phrase, 1, 2));
+    }
+
+    /** The review of c10b: ", wie ein Anbieter angibt" beside "laut einer Quelle". */
+    @Test
+    public void noSpeakerIsPutInBesideAnyOtherAttribution() {
+        String phrase = ", wie ein Anbieter angibt";
+        for (String sentence : new String[]{
+                "Laut einer Quelle erkennt die Kamera jedes Fahrzeug [2].",
+                "Die Kamera erkennt laut Experten jedes Fahrzeug [2].",
+                "Laut sturzwacht.example erkennt die App jeden Sturz [2].",
+                "Einer Studie zufolge erkennt die Kamera jedes Fahrzeug [2].",
+                "Nach eigenen Angaben erkennt die Kamera jedes Fahrzeug [2].",
+                "Aus Sicht der Forscher erkennt die Kamera jedes Fahrzeug [2].",
+                "Die Kamera erkennt jedes Fahrzeug, heißt es in der Studie [2].",
+                "Die Kamera erkennt jedes Fahrzeug, wie Tests zeigen [2].",
+                "Die Kamera erkennt jedes Fahrzeug, so die Autoren [2].",
+                "Fachleute betonen, dass die Kamera jedes Fahrzeug erkennt [2].",
+                "Der Hersteller verspricht acht Stunden Laufzeit [2].",
+                "Der Hersteller gibt eine Laufzeit von acht Stunden an [2].",
+                "Messungen belegen, dass die Kamera jedes Fahrzeug erkennt [2].",
+                "Angeblich erkennt die Kamera jedes Fahrzeug [2].",
+                "According to one study, the camera reads every plate [2].",
+                "The camera reportedly reads every plate [2].",
+                "As researchers report, the camera reads every plate [2].",
+                "Studies show that the camera reads every plate [2]."}) {
+            assertTrue(sentence, VisibleAttribution.reported(sentence));
+            assertEquals(sentence, sentence, withSpeaker(sentence, 2, MAKER, phrase));
+        }
+        for (String sentence : new String[]{
+                "Die Kamera erkennt jedes Fahrzeug [2].",
+                "Der Lüfter der Kamera ist laut [2].",
+                "Laut und deutlich warnt die Sirene den Fahrer [2].",
+                "Die Anzeige zeigt die Geschwindigkeit, die Uhrzeit und das Datum [2].",
+                "Die Kamera gibt ein Signal an die Leitstelle [2].",
+                "Tempo 30 senkt den Lärm, so dass Anwohner besser schlafen [2].",
+                "Demzufolge sinkt der Lärm in den Wohnstraßen [2].",
+                "The camera reads every plate [2]."}) {
+            assertFalse(sentence, VisibleAttribution.reported(sentence));
+        }
+        assertEquals("Die Anzeige zeigt die Geschwindigkeit, die Uhrzeit und das Datum, wie ein Anbieter angibt [2].",
+                withSpeaker("Die Anzeige zeigt die Geschwindigkeit, die Uhrzeit und das Datum [2].", 2, MAKER,
+                        phrase));
+        assertFalse(VisibleAttribution.reported(null));
+    }
+
+    /** The review of c10b: a sentence with "[15] …, wie ein Anbieter angibt [12]" reads as the speaker of both. */
+    @Test
+    public void aSpeakerGoesOnlyIntoAClauseThatCitesNoOtherSourceAndOnlyOnce() {
+        String phrase = ", wie ein Anbieter angibt";
+        String comma = "Die Stadt misst den Lärm [1], und die Kamera erkennt jedes Fahrzeug [2].";
+        assertEquals("another source in the clause", comma, withSpeaker(comma, 2, MAKER, phrase));
+        assertEquals("Die Stadt misst den Lärm [1]; die Kamera erkennt jedes Fahrzeug, wie ein Anbieter angibt [2].",
+                withSpeaker("Die Stadt misst den Lärm [1]; die Kamera erkennt jedes Fahrzeug [2].", 2, MAKER, phrase));
+        String after = "Die Kamera erkennt jedes Fahrzeug [2] und die Stadt misst den Lärm [1].";
+        assertEquals("another source after the group", after, withSpeaker(after, 2, MAKER, phrase));
+        String bracket = "Die Kamera erkennt jedes Fahrzeug [1; 2].";
+        assertEquals("a \";\" inside a group splits no clause", bracket, withSpeaker(bracket, 2, MAKER, phrase));
+        assertEquals("Die Kamera erkennt jedes Fahrzeug, wie ein Anbieter angibt [1; 2].", withSpeaker(bracket, 2,
+                MAKER, phrase, 1, 2));
+        String before = "Die Kamera erkennt jedes Fahrzeug [1; 3] und warnt den Fahrer [2].";
+        assertEquals("nor a \";\" inside the group before", before, withSpeaker(before, 2, MAKER, phrase));
+        assertEquals("the same source", "Die Kamera erkennt jedes Fahrzeug, wie ein Anbieter angibt [2], und warnt "
+                + "den Fahrer [5].", withSpeaker("Die Kamera erkennt jedes Fahrzeug [2] und warnt den Fahrer [5].", 2,
+                MAKER, phrase, 2, 5));
+        String twice = "Die Kamera erkennt Fußgänger [2] und warnt den Fahrer [2].";
+        assertEquals("one phrase per sentence", twice, withSpeaker(twice, 2, MAKER, phrase));
     }
 
     @Test
