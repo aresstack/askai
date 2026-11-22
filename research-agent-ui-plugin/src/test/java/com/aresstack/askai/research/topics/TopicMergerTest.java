@@ -1944,12 +1944,22 @@ public class TopicMergerTest {
                 (int) wider.getParentCounts().get("acrossMerged"));
         assertEquals(2, formed(wider).size());
 
+        assertEquals(0, (int) wider.getParentCounts().get("acrossPartOf"));
+
         Result part = buildAndRun("a_teil_von_b", Options.defaults().withParallel(1));
-        assertEquals("a part of the parent at the other place goes under it too", 1,
+        assertEquals("across places only the same subject merges (lever (3) after c15h)", 0,
                 (int) part.getParentCounts().get("acrossMerged"));
-        assertEquals(1, formed(part).size());
-        assertEquals("Bau der Radwege", formed(part).get(0).getName());
-        assertEquals(formed(part).get(0).getId(), topicOf(part, "h4").getParentId());
+        assertEquals(1, (int) part.getParentCounts().get("acrossPartOf"));
+        assertEquals(2, formed(part).size());
+        String operation = topicOf(part, "h4").getParentId();
+        assertEquals("Betrieb der Radwege", part.topic(operation).getName());
+        assertEquals("it stays at the top", "", part.topic(operation).getParentId());
+        assertEquals(0, (int) same.getParentCounts().get("acrossPartOf"));
+
+        Result full = buildAndRun("gleich", Options.defaults().withParallel(1).withFullParts(3));
+        assertEquals("the same subject merges into a full parent too", 1,
+                (int) full.getParentCounts().get("acrossMerged"));
+        assertEquals(1, formed(full).size());
     }
 
     @Test
@@ -2105,6 +2115,71 @@ public class TopicMergerTest {
 
     @Test
     public void aHeadThatStandsAloneJoinsTheMostSimilarParentOfAnyPlace() throws Exception {
+        Result result = aloneRun("a_teil_von_b", Options.defaults().withParallel(1));
+
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals("no parent at the top: the consolidation of its place has none to offer", 0,
+                (int) counts.get("looseCases"));
+        assertEquals("Radwegpflege was in the parent's case: not asked again", 1, (int) counts.get("singleCases"));
+        assertEquals(1, (int) counts.get("singleJoined"));
+        assertEquals(0, (int) counts.get("singleFull"));
+        String parent = topicOf(result, "a1").getParentId();
+        assertEquals("Radwegbau", result.topic(parent).getName());
+        assertEquals("T-rad", result.topic(parent).getParentId());
+        assertEquals(parent, topicOf(result, "d1").getParentId());
+        assertEquals("", topicOf(result, "e1").getParentId());
+        List<Comparison> single = noted(result.getAsked(), TopicMerger.NOTE_SINGLE);
+        assertEquals(1, single.size());
+        assertEquals("d1", single.get(0).getAId());
+        assertTrue(single.get(0).getBId().startsWith(TopicMerger.PARENT_ID_PREFIX));
+
+        Result off = aloneRun("a_teil_von_b", Options.defaults().withParallel(1).withAcrossPlaces(false));
+        assertEquals(0, (int) off.getParentCounts().get("singleCases"));
+        assertEquals("", topicOf(off, "d1").getParentId());
+    }
+
+    /**
+     * The architect's lever (2) after c15h: „Radwegbau“ has three parts, so with a limit of three it is full and takes
+     * „Radwegzählung“ only as the same subject; the limit counts as the batch stands, and 0 sets none.
+     */
+    @Test
+    public void aFullParentTakesAHeadThatStandsAloneOnlyAsTheSameSubject() throws Exception {
+        assertEquals(30, Options.defaults().getFullParts());
+        Result full = aloneRun("a_teil_von_b", Options.defaults().withParallel(1).withFullParts(3));
+        assertEquals(1, (int) full.getParentCounts().get("singleCases"));
+        assertEquals(0, (int) full.getParentCounts().get("singleJoined"));
+        assertEquals(1, (int) full.getParentCounts().get("singleFull"));
+        assertEquals("", topicOf(full, "d1").getParentId());
+
+        Result same = aloneRun("gleich", Options.defaults().withParallel(1).withFullParts(3));
+        assertEquals(1, (int) same.getParentCounts().get("singleJoined"));
+        assertEquals(0, (int) same.getParentCounts().get("singleFull"));
+        assertEquals(topicOf(same, "a1").getParentId(), topicOf(same, "d1").getParentId());
+
+        for (int limit : new int[]{4, 0}) {
+            Result room = aloneRun("a_teil_von_b", Options.defaults().withParallel(1).withFullParts(limit));
+            assertEquals("limit " + limit, 1, (int) room.getParentCounts().get("singleJoined"));
+            assertEquals("limit " + limit, topicOf(room, "a1").getParentId(), topicOf(room, "d1").getParentId());
+        }
+
+        Result loose = looseRun(relation("a_teil_von_b"), Options.defaults().withParallel(1).withFullParts(3));
+        assertEquals("the limit is for the heads that stand alone, not for the loose heads of a place", 1,
+                (int) loose.getParentCounts().get("looseJoined"));
+        assertEquals(topicOf(loose, "a1").getParentId(), topicOf(loose, "d1").getParentId());
+        try {
+            Options.defaults().withFullParts(-1);
+            fail("a negative limit");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("0 (no limit)"));
+        }
+    }
+
+    /**
+     * „Radwegbau“ over „Radwegbreite“, „Radwegbelag“ and „Radwegmarkierung“ goes under the card; „Radwegpflege“ was in
+     * its case and stays out; „Radwegzählung“ stands alone at the top and meets the parent at 0.68. A head put to a
+     * parent with its parts listed is answered with {@code verdict}.
+     */
+    private static Result aloneRun(final String verdict, Options options) throws Exception {
         double far = 0.68;
         Table vectors = new Table()
                 .put("Radwegbreite", SIBLING_SHARED, SIBLING_OWN, 0, 0, 0, 0)
@@ -2133,31 +2208,9 @@ public class TopicMergerTest {
                         : "{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
                         + "\"frage\":\"keine\"}");
             }
-            return relation(request.contains("Teilthemen: ") ? "a_teil_von_b" : "verschieden");
+            return relation(request.contains("Teilthemen: ") ? verdict : "verschieden");
         });
-
-        Result result = new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null,
-                CLOCK).merge(proposals, memory, null);
-
-        Map<String, Integer> counts = result.getParentCounts();
-        assertEquals("no parent at the top: the consolidation of its place has none to offer", 0,
-                (int) counts.get("looseCases"));
-        assertEquals("Radwegpflege was in the parent's case: not asked again", 1, (int) counts.get("singleCases"));
-        assertEquals(1, (int) counts.get("singleJoined"));
-        String parent = topicOf(result, "a1").getParentId();
-        assertEquals("Radwegbau", result.topic(parent).getName());
-        assertEquals("T-rad", result.topic(parent).getParentId());
-        assertEquals(parent, topicOf(result, "d1").getParentId());
-        assertEquals("", topicOf(result, "e1").getParentId());
-        List<Comparison> single = noted(result.getAsked(), TopicMerger.NOTE_SINGLE);
-        assertEquals(1, single.size());
-        assertEquals("d1", single.get(0).getAId());
-        assertTrue(single.get(0).getBId().startsWith(TopicMerger.PARENT_ID_PREFIX));
-
-        Result off = new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1)
-                .withAcrossPlaces(false), null, CLOCK).merge(proposals, memory, null);
-        assertEquals(0, (int) off.getParentCounts().get("singleCases"));
-        assertEquals("", topicOf(off, "d1").getParentId());
+        return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory, null);
     }
 
     /**
@@ -2282,6 +2335,10 @@ public class TopicMergerTest {
 
     /** The fixture of {@link #aHeadNoCaseTookInJoinsTheMostSimilarParentOfItsPlaceUnlessItsCaseJudgedIt}. */
     private static Result looseRun(final MainModelChatResult loose) throws Exception {
+        return looseRun(loose, Options.defaults().withParallel(1));
+    }
+
+    private static Result looseRun(final MainModelChatResult loose, Options options) throws Exception {
         double far = 0.68;
         Table vectors = new Table()
                 .put("Radwegbreite", SIBLING_SHARED, SIBLING_OWN, 0, 0, 0, 0)
@@ -2299,7 +2356,7 @@ public class TopicMergerTest {
             }
             return prompt(m).contains("Teilthemen: ") ? loose : relation("verschieden");
         });
-        return new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null, CLOCK)
+        return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK)
                 .merge(proposals, new ResearchMemory(), null);
     }
 

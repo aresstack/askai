@@ -81,7 +81,8 @@ import static org.junit.Assert.assertTrue;
  *   oberthemaSchritt (true: the parent step), oberthemaAehnlichkeit (0.60: how similar its heads are),
  *   abgleich (true: the parents of one place in pairs, then the loose heads to the parents of their place),
  *   stellenuebergreifend (true, with abgleich: the free parents at the top to the cards again and to the parents of
- *   other places, then each head that stands alone to the most similar parent of any place), parallel,
+ *   other places, then each head that stands alone to the most similar parent of any place), vollAbTeilen (30: a
+ *   parent with that many parts takes a head that stands alone only as the same subject; 0: no limit), parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
@@ -210,6 +211,7 @@ public class TopicMergerStockTest {
         assertTrue(result.getAsJsonObject("einstellungen").get("oberthemaSchritt").getAsBoolean());
         assertTrue(result.getAsJsonObject("einstellungen").get("abgleich").getAsBoolean());
         assertTrue(result.getAsJsonObject("einstellungen").get("stellenuebergreifend").getAsBoolean());
+        assertEquals(30, result.getAsJsonObject("einstellungen").get("vollAbTeilen").getAsInt());
         for (String part : new String[]{"oberthemenpaare", "loseKoepfe", "oberthemenStellen", "einzelneKoepfe"}) {
             assertEquals("no parent, nothing to consolidate: " + part, 0,
                     result.getAsJsonObject("vergleiche").getAsJsonObject(part).get("gefragt").getAsInt());
@@ -296,7 +298,8 @@ public class TopicMergerStockTest {
                 .withParentStep(!"false".equalsIgnoreCase(System.getProperty(P + "oberthemaSchritt", "true")),
                         number("oberthemaAehnlichkeit", 0.60))
                 .withConsolidation(!"false".equalsIgnoreCase(System.getProperty(P + "abgleich", "true")))
-                .withAcrossPlaces(!"false".equalsIgnoreCase(System.getProperty(P + "stellenuebergreifend", "true")));
+                .withAcrossPlaces(!"false".equalsIgnoreCase(System.getProperty(P + "stellenuebergreifend", "true")))
+                .withFullParts(Integer.parseInt(System.getProperty(P + "vollAbTeilen", "30").trim()));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -1084,6 +1087,7 @@ public class TopicMergerStockTest {
         json.addProperty("oberthemaAehnlichkeit", o.getParentSimilarity());
         json.addProperty("abgleich", o.isConsolidation());
         json.addProperty("stellenuebergreifend", o.isAcrossPlaces());
+        json.addProperty("vollAbTeilen", o.getFullParts());
         json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);

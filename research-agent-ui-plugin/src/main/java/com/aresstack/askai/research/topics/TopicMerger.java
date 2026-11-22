@@ -148,17 +148,21 @@ public final class TopicMerger {
         private final double parentSimilarity;
         private final boolean consolidation;
         private final boolean acrossPlaces;
+        private final int fullParts;
 
         private Options(double same, double doubt, double questionSame, double questionDoubt, int parallel,
                         boolean namesOnly, int embedBatch, int candidates, boolean cardStep, int parentSources,
                         int depth, boolean parentStep, double parentSimilarity, boolean consolidation,
-                        boolean acrossPlaces) {
+                        boolean acrossPlaces, int fullParts) {
             if (!(doubt > 0 && doubt <= same && same <= 1) || !(questionDoubt > 0 && questionDoubt <= questionSame
                     && questionSame <= 1)) {
                 throw new IllegalArgumentException("a band needs 0 < doubt <= same <= 1");
             }
             if (!(parentSimilarity > 0 && parentSimilarity <= 1)) {
                 throw new IllegalArgumentException("the parent step needs 0 < similarity <= 1");
+            }
+            if (fullParts < 0) {
+                throw new IllegalArgumentException("a full parent needs 0 (no limit) or more parts");
             }
             this.same = same;
             this.doubt = doubt;
@@ -175,6 +179,7 @@ public final class TopicMerger {
             this.parentSimilarity = parentSimilarity;
             this.consolidation = consolidation;
             this.acrossPlaces = acrossPlaces;
+            this.fullParts = fullParts;
         }
 
         /**
@@ -194,29 +199,32 @@ public final class TopicMerger {
          * 2.3 %.
          */
         public static Options defaults() {
-            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60, true, true);
+            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60, true, true, 30);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {
             return new Options(newSame, newDoubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch,
                     candidates, cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation,
-                    acrossPlaces);
+                    acrossPlaces, fullParts);
         }
 
         public Options withQuestionBand(double newSame, double newDoubt) {
             return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep,
-                    parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces);
+                    parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts);
         }
 
         public Options withParallel(int calls) {
             return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts);
         }
 
         /** Compare proposals by their names alone, without the description. */
         public Options withNamesOnly(boolean names) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts);
         }
 
         /**
@@ -225,7 +233,8 @@ public final class TopicMerger {
          */
         public Options withCandidates(int perKind) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, perKind,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts);
         }
 
         /**
@@ -234,7 +243,8 @@ public final class TopicMerger {
          */
         public Options withCardStep(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    on, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces);
+                    on, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts);
         }
 
         /**
@@ -245,7 +255,8 @@ public final class TopicMerger {
          */
         public Options withSubtopics(int sources, int levels) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, sources, levels, parentStep, parentSimilarity, consolidation, acrossPlaces);
+                    cardStep, sources, levels, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts);
         }
 
         /**
@@ -256,7 +267,7 @@ public final class TopicMerger {
          */
         public Options withParentStep(boolean on, double similarity) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, on, similarity, consolidation, acrossPlaces);
+                    cardStep, parentSources, depth, on, similarity, consolidation, acrossPlaces, fullParts);
         }
 
         /**
@@ -268,7 +279,7 @@ public final class TopicMerger {
          */
         public Options withConsolidation(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity, on, acrossPlaces);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, on, acrossPlaces, fullParts);
         }
 
         /**
@@ -276,11 +287,25 @@ public final class TopicMerger {
          * again when the consolidation changed their text, and to the most similar parents of the other places in
          * pairs; then each head that stands alone (no subtopic, at the top or right under a card) is compared with the
          * most similar parent of any place (the architect's levers (a) and (b) after his run c15g of 22.11.2026: a
-         * subject spread over the top and a card, and many single heads).
+         * subject spread over the top and a card, and many single heads). Across places two parents merge only as the
+         * same subject (his lever (3) after c15h: "part of" across places hung subjects of their own under general
+         * parents of method or law).
          */
         public Options withAcrossPlaces(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, on);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, on, fullParts);
+        }
+
+        /**
+         * A parent with at least {@code parts} parts is full: the heads that stand alone ({@link #withAcrossPlaces})
+         * join it only as the same subject ("gleich"), not as a part of it; 0 sets no limit. The default is 30 (the
+         * architect's lever (2) after his run c15h of 22.11.2026: a collecting parent grew past 100 parts from the
+         * steps across places and was one of the mixed families). Across places a free parent merges with the parent
+         * of another place only as the same subject anyway, so the limit changes nothing there.
+         */
+        public Options withFullParts(int parts) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces, parts);
         }
 
         public double getSame() {
@@ -346,6 +371,11 @@ public final class TopicMerger {
         /** Whether the consolidation also compares across places ({@link #withAcrossPlaces}). */
         public boolean isAcrossPlaces() {
             return acrossPlaces;
+        }
+
+        /** The parts from which a parent takes a head that stands alone only as the same subject; 0: no limit. */
+        public int getFullParts() {
+            return fullParts;
         }
     }
 
@@ -2282,7 +2312,8 @@ public final class TopicMerger {
                 "siblingTopics", "siblingHeads", "siblingInCases", "siblingAlone", "siblingReattached", "siblingLost",
                 "formedTop", "formedUnder", "headParents", "joined", "parentPairs", "parentsMerged",
                 "parentPairsStale", "looseCases", "looseJoined", "cardCasesAgain", "cardPlacedAgain", "acrossPairs",
-                "acrossMerged", "acrossTooDeep", "acrossPairsStale", "singleCases", "singleJoined"}) {
+                "acrossMerged", "acrossTooDeep", "acrossPairsStale", "acrossPartOf", "singleCases", "singleJoined",
+                "singleFull"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -2625,8 +2656,11 @@ public final class TopicMerger {
          * change was answered on the same text already. Then each free parent at the top goes with up to
          * {@link Options#getCandidates()} of the most similar new parents of the other places, at or above
          * {@link Options#getParentSimilarity()}, to the model as two topics, in rounds as in {@link #pairs()}: "gleich"
-         * or "a_teil_von_b" puts its parts under the other parent when each part's family has room there, and the
-         * parent at the top is formed no more; "b_teil_von_a" changes nothing, the other parent stays at its place.
+         * puts its parts under the other parent when each part's family has room there, and the parent at the top is
+         * formed no more; "a_teil_von_b" and "b_teil_von_a" change nothing (the architect's lever (3) after his run
+         * c15h of 22.11.2026: of the 8 parents merged across places 5 were subjects of their own put under a general
+         * parent of method or law, a "part of" that a shared field was enough for; a free parent has parts of its
+         * own, so across places it merges only with the same subject).
          * Last the pairs of each place once more, for the parents that came to a place. A free parent at the top whose
          * text these pairs changed again goes through the card step again on that text, and so on, up to
          * {@value #PAIR_ROUNDS} times (the review of 22.11.2026: a parent that took another's parts in the last pairs
@@ -2775,6 +2809,12 @@ public final class TopicMerger {
                 if (!isStanding(first) || !isStanding(second)) {
                     continue;
                 }
+                if (across && relation != Relation.GLEICH) {
+                    add(counts, "acrossPartOf", 1);
+                    log("topic merge: the parent „" + first.name + "“ stays at the top: across places only the same "
+                            + "subject merges, and „" + second.name + "“ is no such (" + relation.word() + ")");
+                    continue;
+                }
                 Parent keep = across || relation == Relation.A_TEIL_VON_B ? second
                         : relation == Relation.B_TEIL_VON_A ? first
                         : first.parts.size() > second.parts.size() ? first
@@ -2871,8 +2911,9 @@ public final class TopicMerger {
          * {@link Options#getParentSimilarity()}, that has not judged it yet: a parent whose case or whose
          * consolidation at the head's place judged the head is passed over, and the next most similar one is asked.
          * The same two texts are not asked twice in a run; such a head stays where it is. "a_teil_von_b" or "gleich"
-         * puts the head under the parent when it may still go there ({@link #canJoin}); a failed case holds the head
-         * back.
+         * puts the head under the parent when it may still go there ({@link #canJoin}); a full parent
+         * ({@link Options#getFullParts()}, counted as the batch then stands) takes it only on "gleich". A failed case
+         * holds the head back.
          */
         void singles() {
             List<Parent> all = new ArrayList<Parent>();
@@ -2939,7 +2980,8 @@ public final class TopicMerger {
 
         /**
          * The verdicts of heads put to parents ({@code kind} "loose" or "single" for the counts): "a_teil_von_b" or
-         * "gleich" puts the head under the parent when it may still go there; a failed case holds its family back.
+         * "gleich" puts the head under the parent when it may still go there, and for a head that stands alone a full
+         * parent takes it only on "gleich"; a failed case holds its family back.
          */
         private void joinAll(List<Integer> heads, List<Parent> targets, List<Comparison> said, String kind) {
             for (int k = 0; k < heads.size(); k++) {
@@ -2960,12 +3002,24 @@ public final class TopicMerger {
                 // judged for this parent, joined or not: singles() passes the parent over for this head even when the
                 // parent's text changed since, as for the heads its case judged (the review of 22.11.2026)
                 parent.seen.add(root);
+                if ("single".equals(kind) && relation == Relation.A_TEIL_VON_B && full(parent)) {
+                    add(counts, "singleFull", 1);
+                    log("topic merge: " + pool.items.get(itemsOf.get(root).get(0)).id + " stays where it is: „"
+                            + parent.name + "“ has " + parent.parts.size() + " parts and takes a head only as the "
+                            + "same subject");
+                    continue;
+                }
                 if ((relation == Relation.A_TEIL_VON_B || relation == Relation.GLEICH) && canJoin(root, parent)) {
                     unions.parentOf.put(root, parent.node);
                     parent.parts.add(root);
                     add(counts, kind + "Joined", 1);
                 }
             }
+        }
+
+        /** Whether a parent has as many parts as {@link Options#getFullParts()} (never, when that is 0). */
+        private boolean full(Parent parent) {
+            return options.getFullParts() > 0 && parent.parts.size() >= options.getFullParts();
         }
 
         /**
