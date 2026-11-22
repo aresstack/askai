@@ -78,7 +78,7 @@ import static org.junit.Assert.assertTrue;
  *     -Daskai.stock.merge.embedModel=bge-m3:latest -Daskai.stock.merge.out=&lt;folder&gt;
  *   optional: gleich, zweifel, frageGleich, frageZweifel (bands), kandidaten (3), kartenschritt (true),
  *   oberthemaQuellen (2: sources a new topic needs to take subtopics), tiefe (2: levels below the top),
- *   oberthemaSchritt (true: the parent step), oberthemaAehnlichkeit (0.65: how similar its heads are), parallel,
+ *   oberthemaSchritt (true: the parent step), oberthemaAehnlichkeit (0.60: how similar its heads are), parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
@@ -266,7 +266,7 @@ public class TopicMergerStockTest {
                 .withCardStep(!"false".equalsIgnoreCase(System.getProperty(P + "kartenschritt", "true")))
                 .withSubtopics(Integer.getInteger(P + "oberthemaQuellen", 2), Integer.getInteger(P + "tiefe", 2))
                 .withParentStep(!"false".equalsIgnoreCase(System.getProperty(P + "oberthemaSchritt", "true")),
-                        number("oberthemaAehnlichkeit", 0.65));
+                        number("oberthemaAehnlichkeit", 0.60));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -1002,6 +1002,11 @@ public class TopicMergerStockTest {
         json.addProperty("teile", parts);
         json.addProperty("unterBekanntemThema", underKnown);
         json.addProperty("kopfAlsOberthema", headsAsParents);
+        JsonObject step = new JsonObject();
+        for (Map.Entry<String, Integer> count : result.getParentCounts().entrySet()) {
+            step.addProperty(count.getKey(), count.getValue());
+        }
+        json.add("schritt", step);
         json.add("gebildeteOberthemen", examples);
         return json;
     }

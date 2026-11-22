@@ -54,7 +54,7 @@ public class TopicMergeLogTest {
         Comparison formed = read.get(3);
         assertEquals(Comparison.Kind.OBERTHEMA, formed.getKind());
         assertEquals("new parent \u201eRadwege\u201c of T1, T2, T3", formed.getNote());
-        assertEquals(4, formed.getVersion());
+        assertEquals(5, formed.getVersion());
         assertEquals(parent.key(), formed.key());
         assertEquals("the code's note is empty where it read nothing", "", read.get(0).getNote());
         assertEquals("two topics keep the prompt of version 3", 3, read.get(0).getVersion());
