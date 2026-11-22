@@ -14,6 +14,7 @@ import com.aresstack.askai.research.runtime.team.ChatMessage;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.runtime.team.MainModelChatResult;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.Test;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -56,12 +58,12 @@ public class ResearchLeadTest {
                 EvidenceVerdict.Kind.BELEGT, "sank die Zahl der schweren Unfälle um ein Viertel", "nennt die Zahl",
                 "m", 1, 5L));
         searched(memory, "S2", "F02", "standard", 1, 0);
-        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(answer("weiter", "Es gibt noch viel zu tun.",
+        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(answerAsking("weiter",
+                "Es gibt noch viel zu tun.", new String[]{questionsFor("thema-0001", "Grund für thema-0001",
+                        "Wie viele Städte haben Schulstraßen eingerichtet?",
+                        "Wie reagieren Anwohner auf Schulstraßen?")},
                 decision("F02", "strategie_wechseln", "andere_quellenart", "Richtlinien der Länder zu geschützten "
                         + "Radfahrstreifen"),
-                decision("thema-0001", "neue_fragen", "standard", "Erfahrungen der Städte",
-                        "Wie viele Städte haben Schulstraßen eingerichtet?",
-                        "Wie reagieren Anwohner auf Schulstraßen?"),
                 decision("F01", "weiter_verfolgen", "standard", "weitere Unfallzahlen"))));
 
         LeadPlan plan = lead(chat).plan(memory, MISSION, "");
@@ -77,11 +79,13 @@ public class ResearchLeadTest {
         assertEquals(SearchStrategy.ANDERE_QUELLENART, tasks.get(0).getStrategy());
         assertEquals("Richtlinien der Länder zu geschützten Radfahrstreifen", tasks.get(0).getInstruction());
         assertEquals(LeadTask.Origin.MODELL, tasks.get(0).getOrigin());
-        assertEquals(Target.THEMA, tasks.get(1).getTarget());
-        assertEquals("thema-0001", tasks.get(1).getTargetId());
-        assertEquals(Arrays.asList("leitung-r2-1", "leitung-r2-2"), tasks.get(1).getQuestionIds());
-        assertEquals("F01", tasks.get(2).getTargetId());
-        assertEquals(SearchStrategy.STANDARD, tasks.get(2).getStrategy());
+        assertEquals("F01", tasks.get(1).getTargetId());
+        assertEquals(SearchStrategy.STANDARD, tasks.get(1).getStrategy());
+        assertEquals("new questions take no slot but get a free one", Target.THEMA, tasks.get(2).getTarget());
+        assertEquals("thema-0001", tasks.get(2).getTargetId());
+        assertEquals(Arrays.asList("leitung-r2-1", "leitung-r2-2"), tasks.get(2).getQuestionIds());
+        assertEquals(LeadTask.Origin.MODELL, tasks.get(2).getOrigin());
+        assertEquals("Grund für thema-0001", tasks.get(2).getReason());
         assertEquals("a free slot goes to a question never searched", "F03", tasks.get(3).getTargetId());
         assertEquals(LeadTask.Origin.REGEL, tasks.get(3).getOrigin());
         assertEquals(12, plan.getSearchBudget());
@@ -93,9 +97,10 @@ public class ResearchLeadTest {
         assertEquals("andere_quellenart", decisions.get(0).getStrategy());
         assertEquals("test-model", decisions.get(0).getModel());
         assertEquals(Integer.valueOf(1), decisions.get(0).getCounts().get("suchen"));
-        assertEquals(Action.NEUE_FRAGEN, decisions.get(1).getAction());
-        assertEquals(Arrays.asList("leitung-r2-1", "leitung-r2-2"), decisions.get(1).getQuestionIds());
-        assertEquals(Action.WEITER_VERFOLGEN, decisions.get(2).getAction());
+        assertEquals(Action.WEITER_VERFOLGEN, decisions.get(1).getAction());
+        assertEquals(Action.NEUE_FRAGEN, decisions.get(2).getAction());
+        assertEquals(Arrays.asList("leitung-r2-1", "leitung-r2-2"), decisions.get(2).getQuestionIds());
+        assertEquals("Grund für thema-0001", decisions.get(2).getReason());
         assertEquals("", decisions.get(3).getModel());
         assertEquals(Target.LAUF, decisions.get(4).getTarget());
         assertEquals("Es gibt noch viel zu tun.", decisions.get(4).getReason());
@@ -106,13 +111,27 @@ public class ResearchLeadTest {
 
         assertEquals(1, chat.calls.get());
         assertEquals(0.0, chat.temperature, 0.0);
-        assertEquals(16384, chat.tokens);
+        assertEquals(10240, chat.tokens);
         JsonObject schema = JsonParser.parseString(chat.schemas.get(0)).getAsJsonObject();
         JsonArray targets = schema.getAsJsonObject("properties").getAsJsonObject("entscheidungen")
                 .getAsJsonObject("items").getAsJsonObject("properties").getAsJsonObject("ziel")
                 .getAsJsonArray("enum");
         assertEquals("[\"F03\",\"F04\",\"F02\",\"F01\",\"thema-0001\",\"karte-tempo\",\"karte-rad\",\"karte-park\"]",
                 targets.toString());
+        assertEquals("[\"weiter_verfolgen\",\"strategie_wechseln\",\"zurueckstellen\"]", schema
+                .getAsJsonObject("properties").getAsJsonObject("entscheidungen").getAsJsonObject("items")
+                .getAsJsonObject("properties").getAsJsonObject("handlung").getAsJsonArray("enum").toString());
+        JsonObject asked = schema.getAsJsonObject("properties").getAsJsonObject("neue_fragen");
+        assertEquals("a found topic without questions must get some", "[\"thema-0001\"]",
+                asked.getAsJsonArray("required").toString());
+        assertEquals("[thema-0001, karte-tempo, karte-rad, karte-park]",
+                asked.getAsJsonObject("properties").keySet().toString());
+        assertEquals(1, asked.getAsJsonObject("properties").getAsJsonObject("thema-0001")
+                .getAsJsonObject("properties").getAsJsonObject("fragen").get("minItems").getAsInt());
+        assertEquals(0, asked.getAsJsonObject("properties").getAsJsonObject("karte-rad")
+                .getAsJsonObject("properties").getAsJsonObject("fragen").get("minItems").getAsInt());
+        assertEquals("[\"lage\",\"entscheidungen\",\"neue_fragen\",\"lauf\"]",
+                schema.getAsJsonArray("required").toString());
         String prompt = prompt(chat, 0);
         assertTrue(prompt, prompt.startsWith("Buchauftrag:\n" + MISSION + "\n\nStand vor Runde 2: 1 von höchstens 30 "
                 + "Runden gelaufen, 2 von höchstens 120 Suchen verbraucht. In dieser Runde sind bis zu 4 Suchaufgaben "
@@ -141,6 +160,10 @@ public class ResearchLeadTest {
         assertEquals("phase.research.lead", ResearchLead.ROLE.getSlot().getName());
         assertEquals(ThinkingMode.ON, ResearchLead.ROLE.getThinking());
         assertTrue(ResearchLead.ROLE.getOutput().isSchemaPerRequest());
+        assertEquals("the lead needs a fixed context, not Ollama's default", 16384,
+                ResearchLead.ROLE.getContextTokens());
+        assertTrue("prompt and answer fit the context", ResearchLead.Options.defaults().getAnswerTokens() + 6000
+                <= ResearchLead.ROLE.getContextTokens());
     }
 
     @Test
@@ -239,10 +262,12 @@ public class ResearchLeadTest {
                 decisions.get(2).getAction());
         assertEquals(ResearchQuestion.State.ZURUECKGESTELLT, memory.question("F03").getState());
         assertEquals(Target.LAUF, decisions.get(3).getTarget());
-        assertEquals(3, plan.getNotes().size());
+        assertEquals(plan.getNotes().toString(), 4, plan.getNotes().size());
         assertTrue(plan.getNotes().get(1), plan.getNotes().get(1).contains("andere_wortwahl ist die bisherige "
                 + "Strategie, Wechsel zu andere_quellenart"));
         assertTrue(plan.getNotes().get(2), plan.getNotes().get(2).contains("alle Strategien versucht"));
+        assertEquals("the answer gave the found topic no questions", "Leitplanke: Thema thema-0001 innerhalb des "
+                + "Weidezauns blieb ohne Fragen; die nächste Runde legt es wieder vor", plan.getNotes().get(3));
         String prompt = prompt(chat, 0);
         assertTrue(prompt, prompt.contains("Suchen: 3, zuletzt andere_wortwahl, davon 2 in Folge ohne neuen Beleg; "
                 + "seit dem letzten neuen Beleg ohne Ertrag versucht: andere_wortwahl, standard\n"));
@@ -280,44 +305,114 @@ public class ResearchLeadTest {
     @Test
     public void newQuestionsOnlyForTopicsInsideTheFenceAndNeverTwice() throws IOException {
         ResearchMemory memory = memory();
-        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(answer("weiter", "neue Themen",
-                decision("thema-0001", "neue_fragen", "standard", "Erfahrungen der Städte",
-                        "wie wirkt TEMPO 30 auf die Zahl der Unfälle", "Wo?",
-                        "Wie viele Städte haben Schulstraßen eingerichtet?",
-                        "Wie reagieren Anwohner auf Schulstraßen?",
-                        "Welche Regeln gelten für Lieferverkehr in Schulstraßen?",
-                        "Wer kontrolliert die Sperrung einer Schulstraße?"),
-                decision("F03", "neue_fragen", "standard", "Gebühren",
+        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(answerAsking("weiter", "neue Themen",
+                new String[]{questionsFor("karte-park", "Gebühren",
                         "Welche Städte verlangen mehr als 100 Euro im Jahr fürs Anwohnerparken?",
                         "Wie begründen Städte die Höhe der Gebühr?"),
-                decision("thema-0002", "neue_fragen", "standard", "", "Wie schnell fahren Seilbahnen?"))));
+                        questionsFor("thema-0001", "Erfahrungen der Städte",
+                                "wie wirkt TEMPO 30 auf die Zahl der Unfälle", "Wo?",
+                                "Wie viele Städte haben Schulstraßen eingerichtet?",
+                                "Wie reagieren Anwohner auf Schulstraßen?",
+                                "Welche Regeln gelten für Lieferverkehr in Schulstraßen?",
+                                "Wer kontrolliert die Sperrung einer Schulstraße?"),
+                        questionsFor("thema-0002", "Seilbahnen", "Wie schnell fahren Seilbahnen?"),
+                        questionsFor("F03", "keine Kennung eines Themas", "Was kostet ein Parkausweis?")})));
 
         LeadPlan plan = new ResearchLead(chat, "de", ResearchLead.Options.defaults().withNewQuestions(3, 4),
                 ResearchLead.Budget.defaults(), null, CLOCK).plan(memory, MISSION, "");
 
         assertEquals(1, plan.getRound());
         assertEquals(4, plan.getNewQuestions().size());
-        assertEquals("leitung-r1-1", plan.getNewQuestions().get(0).getId());
+        assertEquals("the topic without questions comes first, then one question of each topic in turn",
+                "leitung-r1-1", plan.getNewQuestions().get(0).getId());
         assertEquals("Wie viele Städte haben Schulstraßen eingerichtet?", plan.getNewQuestions().get(0).getText());
+        assertEquals("thema-0001", plan.getNewQuestions().get(0).getTopicId());
+        assertEquals("karte-park", plan.getNewQuestions().get(1).getTopicId());
         assertEquals("thema-0001", plan.getNewQuestions().get(2).getTopicId());
-        assertEquals("a question of a card brings new questions to its card", "karte-park",
-                plan.getNewQuestions().get(3).getTopicId());
+        assertEquals("Wie reagieren Anwohner auf Schulstraßen?", plan.getNewQuestions().get(2).getText());
+        assertEquals("karte-park", plan.getNewQuestions().get(3).getTopicId());
         assertEquals(ResearchQuestion.Origin.LEITUNG, memory.question("leitung-r1-4").getOrigin());
         assertNull(memory.question("leitung-r1-5"));
         List<String> notes = plan.getNotes();
-        assertTrue(notes.toString(), notes.get(0).startsWith("Leitplanke: 3 neue Fragen zu thema-0001 verworfen"));
-        assertTrue(notes.toString(), notes.get(1).startsWith("Leitplanke: 1 neue Fragen zu karte-park verworfen"));
-        assertTrue(notes.toString(), notes.get(2).startsWith("Ziel „thema-0002“ steht nicht im Lagebild"));
+        assertTrue(notes.toString(), notes.get(0).startsWith("Neue Fragen nur zu einem Thema innerhalb des Weidezauns "
+                + "aus dem Lagebild") && notes.get(0).endsWith("thema-0002 ist keines"));
+        assertTrue(notes.toString(), notes.get(1).endsWith("F03 ist keines"));
+        assertTrue(notes.toString(), notes.get(2).startsWith("Leitplanke: 4 neue Fragen zu thema-0001 verworfen"));
         List<LeadTask> tasks = plan.getTasks();
         assertEquals(4, tasks.size());
-        assertEquals(Arrays.asList("leitung-r1-1", "leitung-r1-2", "leitung-r1-3"), tasks.get(0).getQuestionIds());
+        assertEquals(Arrays.asList("leitung-r1-1", "leitung-r1-3"), tasks.get(0).getQuestionIds());
         assertEquals("karte-park", tasks.get(1).getTargetId());
+        assertEquals(Arrays.asList("leitung-r1-2", "leitung-r1-4"), tasks.get(1).getQuestionIds());
         assertEquals("F01", tasks.get(2).getTargetId());
         assertEquals("F02", tasks.get(3).getTargetId());
         LeadDecision taken = memory.decisions().get(0);
         assertEquals(Action.NEUE_FRAGEN, taken.getAction());
         assertEquals(Target.THEMA, taken.getTarget());
         assertEquals(Integer.valueOf(1), taken.getCounts().get("fundstellen"));
+    }
+
+    @Test
+    public void newQuestionsOfFoundTopicsGetTasksBeyondTheSlots() throws IOException {
+        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(answerAsking("weiter", "alle Plätze belegt",
+                new String[]{questionsFor("karte-park", "Gebühren", "Wie begründen Städte die Höhe der Gebühr?"),
+                        questionsFor("thema-0001", "Schulstraßen sind neu",
+                                "Wie viele Städte haben Schulstraßen eingerichtet?"),
+                        questionsFor("thema-0004", "Elterntaxis gefährden Kinder",
+                                "Wie viele Kinder werden mit dem Auto zur Schule gebracht?"),
+                        questionsFor("thema-0005", "Schulwegpläne helfen", "Welche Städte haben Schulwegpläne?")},
+                decision("F01", "weiter_verfolgen", "standard", "Unfallzahlen"),
+                decision("F02", "weiter_verfolgen", "standard", "Radwege"),
+                decision("F03", "weiter_verfolgen", "standard", "Gebühren"),
+                decision("F04", "weiter_verfolgen", "standard", "Zuständigkeit"))));
+        ResearchMemory memory = schoolTopics(memory());
+
+        LeadPlan plan = lead(chat).plan(memory, MISSION, "");
+
+        List<LeadTask> tasks = plan.getTasks();
+        assertEquals(tasks.toString(), 6, tasks.size());
+        for (int i = 0; i < 4; i++) {
+            assertEquals(LeadTask.Origin.MODELL, tasks.get(i).getOrigin());
+        }
+        assertEquals("thema-0001", tasks.get(4).getTargetId());
+        assertEquals(Collections.singletonList("leitung-r1-1"), tasks.get(4).getQuestionIds());
+        assertEquals(LeadTask.Origin.REGEL, tasks.get(4).getOrigin());
+        assertEquals("Schulstraßen sind neu [Leitplanke: neue Fragen eines gefundenen Themas, noch nie gesucht; "
+                + "Aufgabe über die Plätze hinaus]", tasks.get(4).getReason());
+        assertEquals("thema-0004", tasks.get(5).getTargetId());
+        assertEquals(Collections.singletonList("leitung-r1-2"), tasks.get(5).getQuestionIds());
+        assertEquals(18, plan.getSearchBudget());
+        assertEquals(4, plan.getNewQuestions().size());
+        List<String> notes = plan.getNotes();
+        assertTrue(notes.toString(), notes.contains("Fragen zu thema-0005 werden in einer späteren Runde gesucht (kein "
+                + "Platz mehr)"));
+        assertTrue("a card's new questions wait for a free slot", notes.contains("Fragen zu karte-park werden in "
+                + "einer späteren Runde gesucht (kein Platz mehr)"));
+        assertTrue(notes.toString(), notes.contains("Fragen zu thema-0006 werden in einer späteren Runde gesucht (kein "
+                + "Platz mehr)"));
+        LeadDecision rule = null;
+        for (LeadDecision decision : memory.decisions()) {
+            if (decision.getTargetId().equals("thema-0001") && decision.getAction() == Action.WEITER_VERFOLGEN) {
+                rule = decision;
+            }
+        }
+        assertEquals("the extra task is recorded as a decision of the guardrail", "", rule.getModel());
+        assertEquals("standard", rule.getStrategy());
+        assertEquals(Integer.valueOf(1), rule.getCounts().get("fundstellen"));
+
+        LeadPlan tight = new ResearchLead(chat, "de", ResearchLead.Options.defaults(), new ResearchLead.Budget(30, 5,
+                4, 3), null, CLOCK).plan(schoolTopics(memory()), MISSION, "");
+        assertEquals("never more tasks than searches are left", 5, tight.getTasks().size());
+        assertEquals(5, tight.getSearchBudget());
+
+        Scripted broken = new Scripted(messages -> MainModelChatResult.ok("kein JSON"));
+        LeadPlan failed = lead(broken).plan(schoolTopics(memory()), MISSION, "");
+        assertEquals(LeadPlan.Status.FEHLER, failed.getStatus());
+        LeadTask first = failed.getTasks().get(0);
+        assertEquals("a question of a found topic never searched gets a free slot without the model too",
+                "thema-0006", first.getTargetId());
+        assertEquals(Collections.singletonList("F06"), first.getQuestionIds());
+        assertEquals("Leitplanke: freier Platz für neue Fragen, noch nie gesucht", first.getReason());
+        assertEquals(LeadTask.Origin.REGEL, first.getOrigin());
     }
 
     @Test
@@ -329,7 +424,9 @@ public class ResearchLeadTest {
         LeadPlan going = lead(early).plan(memory, MISSION, "");
 
         assertFalse(going.isEnd());
-        assertTrue(going.getNotes().toString(), going.getNotes().get(0).startsWith("Leitplanke: kein Ende, die letzte "
+        assertTrue(going.getNotes().toString(), going.getNotes().get(0).startsWith("Leitplanke: Thema thema-0001 "
+                + "innerhalb des Weidezauns blieb ohne Fragen"));
+        assertTrue(going.getNotes().toString(), going.getNotes().get(1).startsWith("Leitplanke: kein Ende, die letzte "
                 + "Runde brachte noch 1 neue Belege und 0 neue Themen"));
         assertEquals("with no task from the model the guardrails fill every slot", 4, going.getTasks().size());
         assertEquals("F01", going.getTasks().get(3).getTargetId());
@@ -472,11 +569,23 @@ public class ResearchLeadTest {
         assertEquals("zwei Sätze", answer.situation);
         assertEquals("strategie_wechseln", answer.decisions.get(0).action);
         assertFalse(answer.end);
-        assertEquals("decision 1: \"handlung\" must be one of [weiter_verfolgen, strategie_wechseln, neue_fragen, "
+        assertEquals("decision 1: \"handlung\" must be one of [weiter_verfolgen, strategie_wechseln, "
                 + "zurueckstellen]", ResearchLead.parse("{\"entscheidungen\":[{\"grund\":\"x\","
-                + "\"handlung\":\"suchen\"}],\"lauf\":{\"grund\":\"g\",\"handlung\":\"weiter\"}}").problem);
+                + "\"handlung\":\"neue_fragen\"}],\"lauf\":{\"grund\":\"g\",\"handlung\":\"weiter\"}}").problem);
         assertEquals("decision 1: \"grund\" must give the reason", ResearchLead.parse("{\"entscheidungen\":[{\"grund\":"
-                + "\" \",\"handlung\":\"neue_fragen\"}],\"lauf\":{\"grund\":\"g\",\"handlung\":\"weiter\"}}").problem);
+                + "\" \",\"handlung\":\"zurueckstellen\"}],\"lauf\":{\"grund\":\"g\",\"handlung\":\"weiter\"}}")
+                .problem);
+        ResearchLead.Answer asking = ResearchLead.parse("{\"entscheidungen\":[],\"neue_fragen\":{\" thema-1 \":"
+                + "{\"grund\":\"neu\",\"fragen\":[\"Was gilt?\",3]}},\"lauf\":{\"grund\":\"g\","
+                + "\"handlung\":\"weiter\"}}");
+        assertEquals("", asking.problem);
+        assertEquals("neu", asking.asked.get("thema-1").reason);
+        assertEquals(Arrays.asList("Was gilt?", "3"), asking.asked.get("thema-1").questions);
+        assertEquals("\"neue_fragen\" must be an object with a topic id per entry", ResearchLead.parse(
+                "{\"entscheidungen\":[],\"neue_fragen\":[],\"lauf\":{\"grund\":\"g\",\"handlung\":\"weiter\"}}")
+                .problem);
+        assertTrue("an answer without new questions is read", ResearchLead.parse("{\"entscheidungen\":[],"
+                + "\"lauf\":{\"grund\":\"g\",\"handlung\":\"weiter\"}}").asked.isEmpty());
         assertEquals("\"lauf.handlung\" must be weiter or beenden", ResearchLead.parse("{\"entscheidungen\":[],"
                 + "\"lauf\":{\"grund\":\"g\",\"handlung\":\"stopp\"}}").problem);
         assertEquals(SearchStrategy.STANDARD, SearchStrategy.of("keine"));
@@ -519,6 +628,19 @@ public class ResearchLeadTest {
 
     /** Two rounds: the first found direct evidence for every question ({@code F03} only with {@code all}), the
      *  second, with other words, nothing new. */
+    /** Two more found topics inside the fence without questions, and one with a question of the finder. */
+    private static ResearchMemory schoolTopics(ResearchMemory memory) throws IOException {
+        memory.addTopic(ResearchTopic.found("thema-0004", "Elterntaxis", "Eltern fahren ihre Kinder bis vor die "
+                + "Schule.", null, "m", 2L).withFence(Fence.INNEN, "gehört zur Schulwegsicherheit", "m", 3L));
+        memory.addTopic(ResearchTopic.found("thema-0005", "Schulwegpläne", "Pläne der Städte mit sicheren Wegen zur "
+                + "Schule.", null, "m", 2L).withFence(Fence.INNEN, "gehört zur Schulwegsicherheit", "m", 3L));
+        memory.addTopic(ResearchTopic.found("thema-0006", "Schülerlotsen", "Lotsen sichern Übergänge vor Schulen.",
+                null, "m", 2L).withFence(Fence.INNEN, "gehört zur Schulwegsicherheit", "m", 3L));
+        memory.addQuestion(ResearchQuestion.open("F06", "Wo setzen Städte Schülerlotsen ein?", "thema-0006",
+                ResearchQuestion.Origin.FINDER, 2L));
+        return memory;
+    }
+
     private static ResearchMemory quiet(boolean all) throws IOException {
         ResearchMemory quiet = memory();
         quiet.addQuestion(ResearchQuestion.open("F05", "Wie sicher sind Schulwege in Schulstraßen?", "thema-0001",
@@ -566,14 +688,40 @@ public class ResearchLeadTest {
     }
 
     static String answer(String run, String reason, String... decisions) {
+        return answerAsking(run, reason, new String[0], decisions);
+    }
+
+    /** An answer with new questions: each entry is {@link #questionsFor}. */
+    static String answerAsking(String run, String reason, String[] asked, String... decisions) {
         StringBuilder json = new StringBuilder("{\"lage\":\"Lage: zwei Fragen ohne Beleg.\",\"entscheidungen\":[");
         for (int i = 0; i < decisions.length; i++) {
             json.append(i == 0 ? "" : ",").append(decisions[i]);
         }
+        JsonObject questions = new JsonObject();
+        for (String entry : asked) {
+            for (Map.Entry<String, JsonElement> topic : JsonParser.parseString(entry).getAsJsonObject().entrySet()) {
+                questions.add(topic.getKey(), topic.getValue());
+            }
+        }
         JsonObject lauf = new JsonObject();
         lauf.addProperty("grund", reason);
         lauf.addProperty("handlung", run);
-        return json.append("],\"lauf\":").append(lauf).append('}').toString();
+        return json.append("],\"neue_fragen\":").append(questions).append(",\"lauf\":").append(lauf).append('}')
+                .toString();
+    }
+
+    /** New questions for one topic, as one entry of {@code neue_fragen}. */
+    static String questionsFor(String topic, String reason, String... questions) {
+        JsonObject entry = new JsonObject();
+        entry.addProperty("grund", reason);
+        JsonArray list = new JsonArray();
+        for (String question : questions) {
+            list.add(question);
+        }
+        entry.add("fragen", list);
+        JsonObject wrapper = new JsonObject();
+        wrapper.add(topic, entry);
+        return wrapper.toString();
     }
 
     static String prompt(Scripted chat, int call) {

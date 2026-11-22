@@ -92,8 +92,9 @@ import static org.junit.Assert.assertTrue;
  *     -Daskai.stock.lead.belegpaare=&lt;belegpaare-1711.jsonl&gt;
  *     -Daskai.stock.lead.chatUrl=http://127.0.0.1:11434 -Daskai.stock.lead.chatModel=gemma4:12b
  *   optional: rand (text file with the edge of the subject; the out folder gets -rand), lagen (S1,S2,S3,S4,S5),
- *   laeufe (2, runs of S1 to S3), think (true; false, or omit to leave it out), numCtx, timeoutSeconds (600),
- *   antwortTokens (16384), fragen, erwartet, themen, stichworte (files instead of the copies in the test resources)
+ *   laeufe (2, runs of S1 to S3), think (true; false, or omit to leave it out), numCtx (16384, the context of the
+ *   lead's role; omit to leave it to the server), timeoutSeconds (600), antwortTokens (10240), fragen, erwartet,
+ *   themen, stichworte (files instead of the copies in the test resources)
  * </pre>
  */
 public class ResearchLeadStockTest {
@@ -324,7 +325,8 @@ public class ResearchLeadStockTest {
         Assume.assumeTrue("research lead stock test skipped (no -D" + P + "korpus)", !corpusPath.isEmpty());
         String chatUrl = System.getProperty(P + "chatUrl", "http://127.0.0.1:11434");
         String chatModel = System.getProperty(P + "chatModel", "gemma4:12b");
-        String numCtx = System.getProperty(P + "numCtx", "");
+        String numCtxSetting = System.getProperty(P + "numCtx", String.valueOf(ResearchLead.CONTEXT_TOKENS));
+        String numCtx = "omit".equalsIgnoreCase(numCtxSetting) ? "" : numCtxSetting.trim();
         String thinkSetting = System.getProperty(P + "think", "true");
         Boolean think = "omit".equalsIgnoreCase(thinkSetting) ? null : Boolean.valueOf(!"false".equalsIgnoreCase(
                 thinkSetting));
@@ -337,7 +339,7 @@ public class ResearchLeadStockTest {
 
         Settings settings = new Settings();
         settings.options = ResearchLead.Options.defaults().withAnswerTokens(Integer.getInteger(P + "antwortTokens",
-                16384));
+                ResearchLead.Options.defaults().getAnswerTokens()));
         settings.runs = Integer.getInteger(P + "laeufe", 2);
         settings.states = Arrays.asList(System.getProperty(P + "lagen", String.join(",", STATES)).split("\\s*,\\s*"));
 
@@ -701,11 +703,22 @@ public class ResearchLeadStockTest {
                 item.addProperty("ziel", decision.target);
                 item.addProperty("handlung", decision.action);
                 item.addProperty("strategie", decision.strategy);
-                item.addProperty("neueFragen", decision.questions.size());
                 decisions.add(item);
             }
         }
         json.add("entscheidungenDesModells", decisions);
+        JsonObject asked = new JsonObject();
+        if (outcome.answer != null) {
+            for (Map.Entry<String, ResearchLead.Asked> entry : outcome.answer.asked.entrySet()) {
+                asked.addProperty(entry.getKey(), entry.getValue().questions.size());
+            }
+        }
+        json.add("neueFragenDesModells", asked);
+        int wrongTopic = 0;
+        for (String note : plan.getNotes()) {
+            wrongTopic += note.startsWith("Neue Fragen nur zu einem Thema innerhalb des Weidezauns") ? 1 : 0;
+        }
+        json.addProperty("neueFragenFalschesThema", wrongTopic);
         json.addProperty("leitplanken", plan.getNotes().size());
         json.addProperty("verworfen", dropped(plan));
         json.addProperty("wiederholungInAufgaben", repeatsInTasks(outcome, settings));
@@ -1044,12 +1057,12 @@ public class ResearchLeadStockTest {
     static MainModelChatResult goodLead(List<ChatMessage> messages) {
         String prompt = messages.get(1).getContent();
         List<String> decisions = new ArrayList<String>();
+        String[] asked = new String[0];
         if (prompt.contains("(noch ohne Fragen)")) {
-            decisions.add(ResearchLeadTest.decision("thema-0001", "neue_fragen", "standard", "Erfahrungen der Städte",
-                    "Wie viele Schulstraßen gibt es in deutschen Städten?",
-                    "Wer ordnet eine Schulstraße an?"));
-            decisions.add(ResearchLeadTest.decision("thema-0002", "neue_fragen", "standard", "Regeln der Kommunen",
-                    "Wie lange dürfen Lieferwagen in einer Lieferzone halten?"));
+            asked = new String[]{ResearchLeadTest.questionsFor("thema-0001", "Erfahrungen der Städte",
+                    "Wie viele Schulstraßen gibt es in deutschen Städten?", "Wer ordnet eine Schulstraße an?"),
+                    ResearchLeadTest.questionsFor("thema-0002", "Regeln der Kommunen",
+                            "Wie lange dürfen Lieferwagen in einer Lieferzone halten?")};
         } else if (prompt.contains("in Folge ohne neuen Beleg")) {
             decisions.add(ResearchLeadTest.decision("F04", "strategie_wechseln", "andere_quellenart",
                     "Haushaltspläne der Städte"));
@@ -1060,8 +1073,8 @@ public class ResearchLeadStockTest {
                 decisions.add(ResearchLeadTest.decision(id, "weiter_verfolgen", "standard", "Studien und Ämter"));
             }
         }
-        return MainModelChatResult.ok(ResearchLeadTest.answer("weiter", "Grund der Leitung: es gibt noch zu tun.",
-                decisions.toArray(new String[0])));
+        return MainModelChatResult.ok(ResearchLeadTest.answerAsking("weiter", "Grund der Leitung: es gibt noch zu "
+                + "tun.", asked, decisions.toArray(new String[0])));
     }
 
     // ------------------------------------------------------------------------------------------------- helpers

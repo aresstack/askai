@@ -15,10 +15,10 @@ import java.nio.file.Files;
 import java.util.List;
 
 import static com.aresstack.askai.research.lead.ResearchLeadTest.MISSION;
-import static com.aresstack.askai.research.lead.ResearchLeadTest.answer;
-import static com.aresstack.askai.research.lead.ResearchLeadTest.decision;
+import static com.aresstack.askai.research.lead.ResearchLeadTest.answerAsking;
 import static com.aresstack.askai.research.lead.ResearchLeadTest.lead;
 import static com.aresstack.askai.research.lead.ResearchLeadTest.memory;
+import static com.aresstack.askai.research.lead.ResearchLeadTest.questionsFor;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -37,8 +37,8 @@ public class ResearchLeadLogTest {
         assertTrue(log.open().isEmpty());
         ResearchMemory memory = memory();
         ResearchLeadTest.Scripted chat = new ResearchLeadTest.Scripted(messages -> MainModelChatResult.ok(
-                answer("weiter", "los", decision("thema-0001", "neue_fragen", "standard", "Erfahrungen",
-                        "Wie viele Städte haben Schulstraßen eingerichtet?"))));
+                answerAsking("weiter", "los", new String[]{questionsFor("thema-0001", "Erfahrungen",
+                        "Wie viele Städte haben Schulstraßen eingerichtet?")})));
         LeadPlan first = lead(chat).plan(memory, MISSION, "");
         log.append(first, 100L);
         LeadPlan end = new ResearchLead(chat, "de", ResearchLead.Options.defaults(),

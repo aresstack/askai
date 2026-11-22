@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -44,12 +45,16 @@ import java.util.function.Consumer;
  * <p>Rules are only guardrails: the budget of rounds and searches, no search of a question with a strategy that
  * already brought nothing, not even within a topic's task ({@code fruitlessLimit} searches without new evidence force
  * a change, and a strategy that stayed without yield is no change), an end when several rounds brought nothing new,
- * new questions only for topics
- * inside the fence (a card or a found topic with the verdict INNEN), never on AUSSEN or UNKLAR topics, no question set
- * aside before it was searched once, and no end by the model while the last round still brought something, a
- * question was never searched or a question without direct evidence still has a strategy it has not tried (it may set
- * such a question aside first). A free slot goes to a question never searched. Every correction is a note of the plan
- * and part of the recorded reason.</p>
+ * new questions only for topics inside the fence (a card or a found topic with the verdict INNEN), never on AUSSEN or
+ * UNKLAR topics, no question set aside before it was searched once, and no end by the model while the last round
+ * still brought something, a question was never searched or a question without direct evidence still has a strategy
+ * it has not tried (it may set such a question aside first). A free slot goes to a question never searched. Every
+ * correction is a note of the plan and part of the recorded reason.</p>
+ *
+ * <p>New questions are a part of the answer of their own and take no search slot: every topic inside the fence that
+ * has no questions yet must get some (the schema requires them), and questions of found topics that were never
+ * searched get up to {@link Options#getFreshTasks} tasks per round beyond the slots. Stock test of 22.11.2026: while
+ * new questions cost a slot, the model gave all slots to the open questions and no new topic got a question.</p>
  *
  * <p>"Beenden" never means "everything answered": the memory only shows what was found (component 7), and the plan of
  * an end carries the {@link OpenList} for the author, who releases the sources. A failed call (after one repair)
@@ -74,13 +79,14 @@ public final class ResearchLead {
         private final int newQuestionsPerTopic;
         private final int newQuestionsPerRound;
         private final int answerTokens;
+        private final int freshTasks;
 
         private Options(int questionsShown, int topicsShown, int unclearShown, int recentSearches, int quoteChars,
                         int fruitlessLimit, int stagnationRounds, int newQuestionsPerTopic, int newQuestionsPerRound,
-                        int answerTokens) {
+                        int answerTokens, int freshTasks) {
             if (questionsShown < 1 || topicsShown < 0 || unclearShown < 0 || recentSearches < 0 || quoteChars < 0
                     || fruitlessLimit < 1 || stagnationRounds < 1 || newQuestionsPerTopic < 1
-                    || newQuestionsPerRound < 0 || answerTokens < 256) {
+                    || newQuestionsPerRound < 0 || answerTokens < 256 || freshTasks < 0) {
                 throw new IllegalArgumentException("invalid options of the research lead");
             }
             this.questionsShown = questionsShown;
@@ -93,46 +99,55 @@ public final class ResearchLead {
             this.newQuestionsPerTopic = newQuestionsPerTopic;
             this.newQuestionsPerRound = newQuestionsPerRound;
             this.answerTokens = answerTokens;
+            this.freshTasks = freshTasks;
         }
 
         /**
          * 40 questions, 15 found topics and 10 topics of the author shown, the last 12 searches, quotes of up to 200
          * characters; a change after 2 searches without new evidence, an end after 3 rounds with nothing new; up to 3
-         * new questions per topic and 20 per round; 16,384 answer tokens (Ollama counts the thinking in).
+         * new questions per topic and 20 per round; 10,240 answer tokens (Ollama counts the thinking in), so prompt
+         * and answer fit the role's context of 16,384; 2 tasks per round beyond the slots for questions of found
+         * topics never searched.
          */
         public static Options defaults() {
-            return new Options(40, 15, 10, 12, 200, 2, 3, 3, 20, 16384);
+            return new Options(40, 15, 10, 12, 200, 2, 3, 3, 20, 10240, 2);
         }
 
         public Options withShown(int questions, int topics, int unclear) {
             return new Options(questions, topics, unclear, recentSearches, quoteChars, fruitlessLimit,
-                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, answerTokens);
+                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, answerTokens, freshTasks);
         }
 
         public Options withRecentSearches(int count) {
             return new Options(questionsShown, topicsShown, unclearShown, count, quoteChars, fruitlessLimit,
-                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, answerTokens);
+                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, answerTokens, freshTasks);
         }
 
         public Options withQuoteChars(int chars) {
             return new Options(questionsShown, topicsShown, unclearShown, recentSearches, chars, fruitlessLimit,
-                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, answerTokens);
+                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, answerTokens, freshTasks);
         }
 
         /** Searches without new evidence after which a strategy must change; rounds with nothing new until the end. */
         public Options withLimits(int fruitless, int stagnation) {
             return new Options(questionsShown, topicsShown, unclearShown, recentSearches, quoteChars, fruitless,
-                    stagnation, newQuestionsPerTopic, newQuestionsPerRound, answerTokens);
+                    stagnation, newQuestionsPerTopic, newQuestionsPerRound, answerTokens, freshTasks);
         }
 
         public Options withNewQuestions(int perTopic, int perRound) {
             return new Options(questionsShown, topicsShown, unclearShown, recentSearches, quoteChars, fruitlessLimit,
-                    stagnationRounds, perTopic, perRound, answerTokens);
+                    stagnationRounds, perTopic, perRound, answerTokens, freshTasks);
         }
 
         public Options withAnswerTokens(int tokens) {
             return new Options(questionsShown, topicsShown, unclearShown, recentSearches, quoteChars, fruitlessLimit,
-                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, tokens);
+                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, tokens, freshTasks);
+        }
+
+        /** Tasks a round adds beyond its slots for questions of found topics (not cards) that were never searched. */
+        public Options withFreshTasks(int tasks) {
+            return new Options(questionsShown, topicsShown, unclearShown, recentSearches, quoteChars, fruitlessLimit,
+                    stagnationRounds, newQuestionsPerTopic, newQuestionsPerRound, answerTokens, tasks);
         }
 
         public int getQuestionsShown() {
@@ -173,6 +188,10 @@ public final class ResearchLead {
 
         public int getAnswerTokens() {
             return answerTokens;
+        }
+
+        public int getFreshTasks() {
+            return freshTasks;
         }
     }
 
@@ -224,7 +243,15 @@ public final class ResearchLead {
             .output(RoleOutput.schemaPerRequest("lage, entscheidungen (grund, ziel, handlung, strategie, vorgabe, "
                     + "fragen), lauf (grund, handlung)"))
             .thinking(ThinkingMode.ON)
+            .contextTokens(ResearchLead.CONTEXT_TOKENS)
             .build();
+
+    /**
+     * The context the lead needs at least: a prompt of up to about 6,000 tokens and the answer budget of 10,240 with
+     * the thinking. The platform sends the model's own context (gemma4:12b: 16,384) and refuses a smaller one before
+     * the call. Stock test of 22.11.2026: without a context Ollama ran 12b with 256k and calls took up to 14 minutes.
+     */
+    static final int CONTEXT_TOKENS = 16384;
 
     static final double TEMPERATURE = 0.0;
     /** Calls per round: the first and one repair attempt (rules of the build plan). */
@@ -233,8 +260,9 @@ public final class ResearchLead {
     static final String WECHSELN = "strategie_wechseln";
     static final String NEUE_FRAGEN = "neue_fragen";
     static final String ZURUECKSTELLEN = "zurueckstellen";
+    /** The actions of a decision; new questions are a part of the answer of their own ({@value #NEUE_FRAGEN}). */
     private static final List<String> ACTIONS = Collections.unmodifiableList(java.util.Arrays.asList(WEITER, WECHSELN,
-            NEUE_FRAGEN, ZURUECKSTELLEN));
+            ZURUECKSTELLEN));
     private static final int MISSION_CHARS = 2500;
     private static final int TEXT_CHARS = 300;
     private static final int REASON_CHARS = 500;
@@ -292,13 +320,15 @@ public final class ResearchLead {
         }
         Shown shown = shown(situation);
         String prompt = prompt(situation, shown, mission, edge, german, options, budget, slots(situation));
-        Call call = ask(prompt, schema(shown.ids(), options.newQuestionsPerTopic, slots(situation)), shown.ids());
+        Call call = ask(prompt, schema(shown.ids(), shown.topicIds(), shown.freshIds(), options.newQuestionsPerTopic,
+                slots(situation)), shown.ids());
         if (!call.ok()) {
             log("research lead: the call failed in round " + situation.round + ": " + call.problem);
             Round round = new Round(memory, situation, "");
             round.notes.add(say("Modellaufruf gescheitert (" + call.problem + "); diese Runde planen nur die "
                     + "Leitplanken", "The model call failed (" + call.problem + "); only the guardrails plan this "
                     + "round"));
+            round.freshTasks();
             round.fill(true);
             if (round.tasks.isEmpty()) {
                 round.end(say("Keine Aufgabe mehr möglich, und die Leitung war nicht erreichbar",
@@ -468,6 +498,7 @@ public final class ResearchLead {
         final List<String> notes = new ArrayList<String>();
         final Set<String> decided = new HashSet<String>();
         final Set<String> wordings = new HashSet<String>();
+        final Map<String, List<String>> newIds = new LinkedHashMap<String, List<String>>();
         final int slots;
         OpenList openList;
         boolean end;
@@ -497,7 +528,6 @@ public final class ResearchLead {
             for (TopicView view : situation.found) {
                 topics.put(view.id(), view);
             }
-            int newLeft = options.newQuestionsPerRound;
             for (Decision decision : answer.decisions) {
                 QuestionView question = shown.ids().contains(decision.target) ? questions.get(decision.target) : null;
                 TopicView topic = shown.ids().contains(decision.target) ? topics.get(decision.target) : null;
@@ -514,12 +544,12 @@ public final class ResearchLead {
                 }
                 if (ZURUECKSTELLEN.equals(decision.action)) {
                     setAside(decision, question);
-                } else if (NEUE_FRAGEN.equals(decision.action)) {
-                    newLeft -= takeIn(decision, question, topic, newLeft);
                 } else {
                     search(decision, question, topic, WECHSELN.equals(decision.action));
                 }
             }
+            takeIn(answer.asked, topics, shown);
+            freshTasks();
             if (answer.end) {
                 String veto = endVeto(situation, taken.size());
                 if (veto == null) {
@@ -562,71 +592,162 @@ public final class ResearchLead {
                     decision.reason, question.counts(), model, now));
         }
 
-        /** New questions for a topic inside the fence; returns how many were taken in. */
-        private int takeIn(Decision decision, QuestionView question, TopicView topic, int left)
-                throws IOException {
-            TopicView target = topic;
-            if (target == null && question.topic != null) {
-                for (TopicView view : situation.cards) {
-                    if (view.id().equals(question.topic.getId())) {
-                        target = view;
-                    }
-                }
-                for (TopicView view : situation.found) {
-                    if (view.id().equals(question.topic.getId())) {
-                        target = view;
-                    }
+        /**
+         * The new questions of the answer, for topics inside the fence that the prompt showed: the topics without
+         * questions first, then the others in the model's order, one question of each topic in turn up to the limits,
+         * so a full round still gives every topic its first question. A topic left without questions is noted.
+         */
+        private void takeIn(Map<String, Asked> asked, Map<String, TopicView> topics, Shown shown) throws IOException {
+            List<String> order = new ArrayList<String>();
+            for (String id : shown.freshIds()) {
+                if (asked.containsKey(id)) {
+                    order.add(id);
                 }
             }
-            if (target == null) {
-                notes.add(say("Neue Fragen nur zu einem Thema innerhalb des Weidezauns (Karte oder Thema mit dem "
-                        + "Urteil innen); " + decision.target + " gehört zu keinem solchen Thema", "New questions only "
-                        + "for a topic inside the fence (a card or a topic with the verdict INNEN); "
-                        + decision.target + " belongs to no such topic"));
-                return 0;
-            }
-            if (decided.contains(target.id())) {
-                notes.add(say("Thema " + target.id() + " war in dieser Runde schon entschieden; neue Fragen verworfen",
-                        "Topic " + target.id() + " was decided this round already; new questions dropped"));
-                return 0;
-            }
-            List<String> ids = new ArrayList<String>();
-            int dropped = 0;
-            for (String text : decision.questions) {
-                String clean = text.replaceAll("\\s+", " ").trim();
-                String key = wording(clean);
-                if (clean.length() < MIN_QUESTION_CHARS || clean.length() > TEXT_CHARS || wordings.contains(key)
-                        || ids.size() >= options.newQuestionsPerTopic || ids.size() >= left) {
-                    dropped++;
+            for (String id : asked.keySet()) {
+                if (order.contains(id)) {
                     continue;
                 }
-                ResearchQuestion stored = memory.addQuestion(ResearchQuestion.open(nextId(), clean, target.id(),
-                        ResearchQuestion.Origin.LEITUNG, now));
-                wordings.add(key);
-                taken.add(stored);
-                ids.add(stored.getId());
+                if (!shown.topicIds().contains(id) || !topics.containsKey(id)) {
+                    notes.add(say("Neue Fragen nur zu einem Thema innerhalb des Weidezauns aus dem Lagebild (Karte "
+                            + "oder Thema mit dem Urteil innen); " + id + " ist keines", "New questions only for a "
+                            + "topic inside the fence from the situation (a card or a topic with the verdict INNEN); "
+                            + id + " is none"));
+                    continue;
+                }
+                order.add(id);
             }
-            if (dropped > 0) {
-                notes.add(say("Leitplanke: " + dropped + " neue Fragen zu " + target.id() + " verworfen (gleicher "
-                        + "Wortlaut wie eine bekannte Frage, zu kurz, zu lang oder über der Grenze)", "Guardrail: "
-                        + dropped + " new questions for " + target.id() + " dropped (same wording as a known "
-                        + "question, too short, too long or over the limit)"));
+            Map<String, List<String>> candidates = new LinkedHashMap<String, List<String>>();
+            Map<String, Integer> dropped = new LinkedHashMap<String, Integer>();
+            Set<String> seen = new HashSet<String>(wordings);
+            for (String id : order) {
+                List<String> texts = new ArrayList<String>();
+                int bad = 0;
+                for (String text : asked.get(id).questions) {
+                    String clean = text.replaceAll("\\s+", " ").trim();
+                    String key = wording(clean);
+                    if (clean.length() < MIN_QUESTION_CHARS || clean.length() > TEXT_CHARS || !seen.add(key)) {
+                        bad++;
+                        continue;
+                    }
+                    texts.add(clean);
+                }
+                candidates.put(id, texts);
+                dropped.put(id, bad);
             }
-            if (ids.isEmpty()) {
-                return 0;
+            Map<String, List<String>> ids = new LinkedHashMap<String, List<String>>();
+            int left = options.newQuestionsPerRound;
+            for (int turn = 0; turn < options.newQuestionsPerTopic && left > 0; turn++) {
+                for (String id : order) {
+                    List<String> texts = candidates.get(id);
+                    if (turn >= texts.size() || left <= 0) {
+                        continue;
+                    }
+                    ResearchQuestion stored = memory.addQuestion(ResearchQuestion.open(nextId(), texts.get(turn), id,
+                            ResearchQuestion.Origin.LEITUNG, now));
+                    wordings.add(wording(texts.get(turn)));
+                    taken.add(stored);
+                    ids.computeIfAbsent(id, key -> new ArrayList<String>()).add(stored.getId());
+                    left--;
+                }
             }
-            decided.add(target.id());
-            record(new LeadDecision(situation.round, Target.THEMA, target.id(), Action.NEUE_FRAGEN, decision.reason,
-                    target.counts(), model, now, "", decision.instruction, ids));
-            if (tasks.size() < slots) {
-                tasks.add(new LeadTask(situation.round, Target.THEMA, target.id(), ids, SearchStrategy.STANDARD,
-                        decision.instruction, decision.reason, LeadTask.Origin.MODELL));
-            } else {
-                notes.add(say("Fragen zu " + target.id() + " aufgenommen; gesucht wird in einer späteren Runde "
-                        + "(kein Platz mehr)", "Questions for " + target.id() + " taken in; they are searched in a "
-                        + "later round (no slot left)"));
+            for (String id : order) {
+                List<String> of = ids.get(id);
+                int lost = dropped.get(id) + candidates.get(id).size() - (of == null ? 0 : of.size());
+                if (lost > 0) {
+                    notes.add(say("Leitplanke: " + lost + " neue Fragen zu " + id + " verworfen (gleicher Wortlaut "
+                            + "wie eine bekannte Frage, zu kurz, zu lang oder über der Grenze)", "Guardrail: " + lost
+                            + " new questions for " + id + " dropped (same wording as a known question, too short, "
+                            + "too long or over the limit)"));
+                }
+                if (of != null) {
+                    String why = asked.get(id).reason.isEmpty() ? say("(ohne Grund)", "(no reason given)")
+                            : asked.get(id).reason;
+                    record(new LeadDecision(situation.round, Target.THEMA, id, Action.NEUE_FRAGEN, why,
+                            topics.get(id).counts(), model, now, "", "", of));
+                }
             }
-            return ids.size();
+            for (String id : shown.freshIds()) {
+                if (!ids.containsKey(id)) {
+                    notes.add(say("Leitplanke: Thema " + id + " innerhalb des Weidezauns blieb ohne Fragen; die "
+                            + "nächste Runde legt es wieder vor", "Guardrail: topic " + id + " inside the fence got no "
+                            + "questions; the next round shows it again"));
+                }
+            }
+            newIds.putAll(ids);
+        }
+
+        /**
+         * Tasks for questions of found topics (not cards) that were never searched, those taken in this round first:
+         * a free slot if there is one, else up to {@link Options#getFreshTasks} tasks beyond the slots (never more
+         * tasks than searches are left), one per topic with up to three of its questions. New topics so do not compete
+         * with the open questions for the slots. A task by rule is recorded as a decision of the guardrail.
+         */
+        private void freshTasks() throws IOException {
+            Set<String> found = new HashSet<String>();
+            Map<String, TopicView> views = new HashMap<String, TopicView>();
+            for (TopicView view : situation.cards) {
+                views.put(view.id(), view);
+            }
+            for (TopicView view : situation.found) {
+                found.add(view.id());
+                views.put(view.id(), view);
+            }
+            Map<String, String> byModel = new HashMap<String, String>();
+            for (LeadDecision decision : decisions) {
+                if (decision.getAction() == Action.NEUE_FRAGEN) {
+                    byModel.put(decision.getTargetId(), decision.getReason());
+                }
+            }
+            Map<String, List<String>> waiting = new LinkedHashMap<String, List<String>>();
+            for (Map.Entry<String, List<String>> entry : newIds.entrySet()) {
+                waiting.put(entry.getKey(), new ArrayList<String>(entry.getValue()));
+            }
+            for (TopicView view : situation.found) {
+                for (QuestionView question : situation.questions) {
+                    if (question.searches == 0 && !decided.contains(question.id()) && question.topic != null
+                            && question.topic.getId().equals(view.id())) {
+                        waiting.computeIfAbsent(view.id(), key -> new ArrayList<String>()).add(question.id());
+                    }
+                }
+            }
+            int extra = 0;
+            int room = budget.maxSearches - situation.searchesDone;
+            for (Map.Entry<String, List<String>> entry : waiting.entrySet()) {
+                String topic = entry.getKey();
+                boolean free = tasks.size() < slots;
+                if (!free && (!found.contains(topic) || extra >= options.freshTasks || tasks.size() >= room)) {
+                    notes.add(say("Fragen zu " + topic + " werden in einer späteren Runde gesucht (kein Platz mehr)",
+                            "Questions for " + topic + " are searched in a later round (no slot left)"));
+                    continue;
+                }
+                if (!free) {
+                    extra++;
+                }
+                List<String> ids = new ArrayList<String>(entry.getValue().subList(0, Math.min(3,
+                        entry.getValue().size())));
+                decided.addAll(ids);
+                String modelReason = byModel.get(topic);
+                String reason;
+                if (free && modelReason != null) {
+                    reason = modelReason;
+                } else {
+                    String rule = free ? say("Leitplanke: freier Platz für neue Fragen, noch nie gesucht",
+                            "Guardrail: free slot for new questions, never searched")
+                            : say("Leitplanke: neue Fragen eines gefundenen Themas, noch nie gesucht; Aufgabe über die "
+                            + "Plätze hinaus", "Guardrail: new questions of a found topic, never searched; task "
+                            + "beyond the slots");
+                    reason = modelReason == null ? rule : modelReason + " [" + rule + "]";
+                }
+                LeadTask.Origin origin = free && modelReason != null ? LeadTask.Origin.MODELL : LeadTask.Origin.REGEL;
+                if (origin == LeadTask.Origin.REGEL) {
+                    TopicView view = views.get(topic);
+                    record(new LeadDecision(situation.round, Target.THEMA, topic, Action.WEITER_VERFOLGEN, reason,
+                            view == null ? null : view.counts(), "", now, SearchStrategy.STANDARD.wire(), "", null));
+                }
+                tasks.add(new LeadTask(situation.round, Target.THEMA, topic, ids, SearchStrategy.STANDARD, "", reason,
+                        origin));
+            }
         }
 
         private void search(Decision decision, QuestionView question, TopicView topic, boolean change)
@@ -842,6 +963,29 @@ public final class ResearchLead {
         Set<String> ids() {
             return ids;
         }
+
+        /** The topics new questions may go to: the found topics shown (all inside the fence) and the cards. */
+        List<String> topicIds() {
+            List<String> topics = new ArrayList<String>();
+            for (TopicView view : found) {
+                topics.add(view.id());
+            }
+            for (TopicView view : cards) {
+                topics.add(view.id());
+            }
+            return topics;
+        }
+
+        /** The found topics shown that have no questions yet: the answer must give them some. */
+        List<String> freshIds() {
+            List<String> fresh = new ArrayList<String>();
+            for (TopicView view : found) {
+                if (view.fresh) {
+                    fresh.add(view.id());
+                }
+            }
+            return fresh;
+        }
     }
 
     Shown shown(LeadSituation situation) {
@@ -915,6 +1059,11 @@ public final class ResearchLead {
         String action = "";
         String strategy = "";
         String instruction = "";
+    }
+
+    /** New questions for one topic as the model gave them. */
+    static final class Asked {
+        String reason = "";
         List<String> questions = new ArrayList<String>();
     }
 
@@ -922,6 +1071,7 @@ public final class ResearchLead {
     static final class Answer {
         String situation = "";
         List<Decision> decisions = new ArrayList<Decision>();
+        Map<String, Asked> asked = new LinkedHashMap<String, Asked>();
         boolean end;
         String endReason = "";
         String problem = "";
@@ -981,15 +1131,34 @@ public final class ResearchLead {
             decision.target = string(item, "ziel");
             decision.strategy = string(item, "strategie");
             decision.instruction = cut(string(item, "vorgabe"), TEXT_CHARS);
-            JsonElement asked = item.get("fragen");
-            if (asked != null && asked.isJsonArray()) {
-                for (JsonElement question : asked.getAsJsonArray()) {
+            answer.decisions.add(decision);
+        }
+        JsonElement asked = json.get(NEUE_FRAGEN);
+        if (asked == null || asked.isJsonNull()) {
+            return answer;
+        }
+        if (!asked.isJsonObject()) {
+            answer.problem = "\"" + NEUE_FRAGEN + "\" must be an object with a topic id per entry";
+            return answer;
+        }
+        for (Map.Entry<String, JsonElement> entry : asked.getAsJsonObject().entrySet()) {
+            if (!entry.getValue().isJsonObject()) {
+                answer.problem = "\"" + NEUE_FRAGEN + "." + entry.getKey() + "\" must be an object with \"grund\" "
+                        + "and \"fragen\"";
+                return answer;
+            }
+            JsonObject item = entry.getValue().getAsJsonObject();
+            Asked questions = new Asked();
+            questions.reason = cut(string(item, "grund"), REASON_CHARS);
+            JsonElement texts = item.get("fragen");
+            if (texts != null && texts.isJsonArray()) {
+                for (JsonElement question : texts.getAsJsonArray()) {
                     if (question.isJsonPrimitive()) {
-                        decision.questions.add(question.getAsString());
+                        questions.questions.add(question.getAsString());
                     }
                 }
             }
-            answer.decisions.add(decision);
+            answer.asked.put(entry.getKey().trim(), questions);
         }
         return answer;
     }
@@ -1158,53 +1327,64 @@ public final class ResearchLead {
             text.append("  Nach ").append(options.fruitlessLimit).append(" Suchen ohne neuen Beleg mit derselben "
                             + "Strategie ist ein Wechsel Pflicht; eine Strategie, die schon ohne Ertrag blieb, ist "
                             + "kein Wechsel.\n")
-                    .append("- \"neue_fragen\": zu einem Thema bis zu ").append(options.newQuestionsPerTopic)
-                    .append(" neue Fragen aufnehmen (\"fragen\"), die die offenen Fragen noch nicht stellen. Themen, "
-                            + "die das Konzept nicht vorsah, verdienen eigene Fragen: Das Konzept gibt die Richtung "
-                            + "vor, nicht den fertigen Inhalt des Buchs.\n")
                     .append("- \"zurueckstellen\": eine Frage vorerst nicht weiter suchen, etwa wenn mehrere "
                             + "Strategien nichts brachten.\n")
-                    .append("Jede Entscheidung mit \"weiter_verfolgen\", \"strategie_wechseln\" oder \"neue_fragen\" "
-                            + "wird eine Suchaufgabe; mehr als ").append(slots).append(" passen nicht in diese Runde "
-                            + "(neue Fragen bleiben dann für später). Jede Entscheidung braucht einen Grund aus den "
-                            + "Zählwerten oder Belegen. \"ziel\" ist die Kennung einer Frage, eines Themas oder einer "
-                            + "Karte von oben. \"vorgabe\" ist ein Satz für den Suchplaner: was gefunden werden soll "
-                            + "und wo. \"strategie\" ist \"standard\", wenn keine besondere Strategie gemeint ist.\n")
+                    .append("Jede Entscheidung mit \"weiter_verfolgen\" oder \"strategie_wechseln\" wird eine "
+                            + "Suchaufgabe; mehr als ").append(slots).append(" passen nicht in diese Runde. Jede "
+                            + "Entscheidung braucht einen Grund aus den Zählwerten oder Belegen. \"ziel\" ist die "
+                            + "Kennung einer Frage, eines Themas oder einer Karte von oben. \"vorgabe\" ist ein Satz "
+                            + "für den Suchplaner: was gefunden werden soll und wo. \"strategie\" ist \"standard\", "
+                            + "wenn keine besondere Strategie gemeint ist.\n")
+                    .append("Neue Fragen (\"neue_fragen\", je Thema \"grund\" und \"fragen\"): bis zu ")
+                    .append(options.newQuestionsPerTopic).append(" Fragen zu einem Thema oder einer Karte von oben, "
+                            + "die die offenen Fragen noch nicht stellen. Jedes gefundene Thema, das noch keine Fragen "
+                            + "hat, bekommt hier mindestens eine. Themen, die das Konzept nicht vorsah, verdienen "
+                            + "eigene Fragen: Das Konzept gibt die Richtung vor, nicht den fertigen Inhalt des Buchs. "
+                            + "Neue Fragen kosten keinen Platz der Suchaufgaben; gesucht werden sie, sobald Platz ist, "
+                            + "die Fragen gefundener Themen auch über die Plätze hinaus.\n")
                     .append("Zum Lauf (\"lauf\"): \"weiter\" oder \"beenden\". Beenden heißt nie, dass alles "
                             + "beantwortet ist. Beende nur, wenn weitere Suchen nichts Neues erwarten lassen. Solange "
                             + "eine Frage ohne direkten Beleg noch eine Strategie hat, die sie nicht versucht hat, "
                             + "läuft die Recherche weiter; gibst du eine solche Frage auf, stelle sie zurück.\n\n")
                     .append("Antworte nur mit JSON mit den Feldern \"lage\" (zwei bis vier Sätze, zuerst), "
                             + "\"entscheidungen\" (Liste mit \"grund\", \"ziel\", \"handlung\", \"strategie\", "
-                            + "\"vorgabe\", \"fragen\") und \"lauf\" (\"grund\", \"handlung\").");
+                            + "\"vorgabe\"), \"neue_fragen\" (je Thema \"grund\" und \"fragen\") und \"lauf\" "
+                            + "(\"grund\", \"handlung\").");
         } else {
             text.append("  After ").append(options.fruitlessLimit).append(" searches without new evidence with the "
                             + "same strategy a change is a must; a strategy that already stayed without yield is no "
                             + "change.\n")
-                    .append("- \"neue_fragen\": take in up to ").append(options.newQuestionsPerTopic)
-                    .append(" new questions for a topic (\"fragen\") that the open questions do not ask yet. Topics "
-                            + "the concept did not foresee deserve questions of their own: the concept gives the "
-                            + "direction, not the finished content of the book.\n")
                     .append("- \"zurueckstellen\": stop searching a question for now, for instance when several "
                             + "strategies brought nothing.\n")
-                    .append("Every decision with \"weiter_verfolgen\", \"strategie_wechseln\" or \"neue_fragen\" "
-                            + "becomes a search task; more than ").append(slots).append(" do not fit into this round "
-                            + "(new questions then wait). Every decision needs a reason from the counts or the "
-                            + "evidence. \"ziel\" is the id of a question, topic or card from above. \"vorgabe\" is "
-                            + "one sentence for the search planner: what to find and where. \"strategie\" is "
-                            + "\"standard\" when no particular strategy is meant.\n")
+                    .append("Every decision with \"weiter_verfolgen\" or \"strategie_wechseln\" becomes a search "
+                            + "task; more than ").append(slots).append(" do not fit into this round. Every decision "
+                            + "needs a reason from the counts or the evidence. \"ziel\" is the id of a question, topic "
+                            + "or card from above. \"vorgabe\" is one sentence for the search planner: what to find "
+                            + "and where. \"strategie\" is \"standard\" when no particular strategy is meant.\n")
+                    .append("New questions (\"neue_fragen\", per topic \"grund\" and \"fragen\"): up to ")
+                    .append(options.newQuestionsPerTopic).append(" questions for a topic or card from above that the "
+                            + "open questions do not ask yet. Every found topic without questions gets at least one "
+                            + "here. Topics the concept did not foresee deserve questions of their own: the concept "
+                            + "gives the direction, not the finished content of the book. New questions take no slot "
+                            + "of the search tasks; they are searched as soon as there is room, the questions of found "
+                            + "topics also beyond the slots.\n")
                     .append("For the run (\"lauf\"): \"weiter\" or \"beenden\". Ending never means that everything "
                             + "is answered. End only when further searches promise nothing new. While a question "
                             + "without direct evidence still has a strategy it has not tried, the research goes on; "
                             + "if you give such a question up, set it aside.\n\n")
                     .append("Answer only with JSON with the fields \"lage\" (two to four sentences, first), "
                             + "\"entscheidungen\" (list with \"grund\", \"ziel\", \"handlung\", \"strategie\", "
-                            + "\"vorgabe\", \"fragen\") and \"lauf\" (\"grund\", \"handlung\").");
+                            + "\"vorgabe\"), \"neue_fragen\" (per topic \"grund\" and \"fragen\") and \"lauf\" "
+                            + "(\"grund\", \"handlung\").");
         }
     }
 
-    /** The answer schema of a round: targets only from the ids shown, reasons first. */
-    static String schema(Set<String> ids, int questionsPerTopic, int slots) {
+    /**
+     * The answer's schema: decisions only on the ids shown; new questions per topic inside the fence, required (one
+     * at least) for every found topic that has none yet; the reason first.
+     */
+    static String schema(Set<String> ids, List<String> topicIds, List<String> freshIds, int questionsPerTopic,
+                         int slots) {
         JsonObject decision = new JsonObject();
         decision.addProperty("type", "object");
         JsonObject properties = new JsonObject();
@@ -1223,17 +1403,32 @@ public final class ResearchLead {
         strategy.add("enum", strings(wires));
         properties.add("strategie", strategy);
         properties.add("vorgabe", type("string"));
-        JsonObject asked = type("array");
-        asked.add("items", type("string"));
-        asked.addProperty("maxItems", questionsPerTopic);
-        properties.add("fragen", asked);
         decision.add("properties", properties);
-        decision.add("required", strings(java.util.Arrays.asList("grund", "ziel", "handlung", "strategie", "vorgabe",
-                "fragen")));
+        decision.add("required", strings(java.util.Arrays.asList("grund", "ziel", "handlung", "strategie",
+                "vorgabe")));
 
         JsonObject decisions = type("array");
         decisions.add("items", decision);
         decisions.addProperty("maxItems", slots + 12);
+
+        JsonObject asked = type("object");
+        JsonObject perTopic = new JsonObject();
+        for (String id : topicIds) {
+            JsonObject questions = type("array");
+            questions.add("items", type("string"));
+            questions.addProperty("minItems", freshIds.contains(id) ? 1 : 0);
+            questions.addProperty("maxItems", questionsPerTopic);
+            JsonObject entryProperties = new JsonObject();
+            entryProperties.add("grund", type("string"));
+            entryProperties.add("fragen", questions);
+            JsonObject entry = type("object");
+            entry.add("properties", entryProperties);
+            entry.add("required", strings(java.util.Arrays.asList("grund", "fragen")));
+            perTopic.add(id, entry);
+        }
+        asked.add("properties", perTopic);
+        asked.add("required", strings(freshIds));
+        asked.addProperty("additionalProperties", false);
 
         JsonObject run = type("object");
         JsonObject runProperties = new JsonObject();
@@ -1248,9 +1443,10 @@ public final class ResearchLead {
         JsonObject rootProperties = new JsonObject();
         rootProperties.add("lage", type("string"));
         rootProperties.add("entscheidungen", decisions);
+        rootProperties.add(NEUE_FRAGEN, asked);
         rootProperties.add("lauf", run);
         root.add("properties", rootProperties);
-        root.add("required", strings(java.util.Arrays.asList("lage", "entscheidungen", "lauf")));
+        root.add("required", strings(java.util.Arrays.asList("lage", "entscheidungen", NEUE_FRAGEN, "lauf")));
         return root.toString();
     }
 
