@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -57,11 +58,15 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class SentenceCheck {
 
     /**
-     * The prompt's and rules' version; a verdict is reused only under the same one. 2: the quote check takes the
-     * parts of a shortened quote in any order and does not count punctuation (prompt unchanged). 3: the prompt says
-     * that who says something ("laut …", "nach Angaben …") is no part of the claim the passage must cover.
+     * The prompt's and rules' version; a verdict is reused only under the same one, and a test pins the prompt's hash
+     * to it. 2: the quote check takes the parts of a shortened quote in any order and does not count punctuation
+     * (prompt unchanged). 3: the prompt says that who says something ("laut …", "nach Angaben …") is no part of the
+     * claim the passage must cover. 4: that rule holds for the coverage only (prompt changed: "für die Deckung"); the
+     * questions on attribution and legal space read the sentence as written. A number inside the source's own name
+     * ({@link Item#withSourceNames}) no longer counts for the number rule; any other number of a speaker phrase (a
+     * year, a sample size) still must stand in the quote.
      */
-    public static final int VERSION = 3;
+    public static final int VERSION = 4;
 
     /** Prompt, sentence, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
@@ -103,6 +108,7 @@ public final class SentenceCheck {
         private final String passageText;
         private final String sourceKind;
         private final String legalSpace;
+        private final List<String> sourceNames;
 
         /** A pair without what is known of the source: only the coverage is checked. */
         public Item(String sentenceId, String sentence, String passageId, String sourceId, String passageText) {
@@ -117,6 +123,12 @@ public final class SentenceCheck {
          */
         public Item(String sentenceId, String sentence, String passageId, String sourceId, String passageText,
                     String sourceKind, String legalSpace) {
+            this(sentenceId, sentence, passageId, sourceId, passageText, sourceKind, legalSpace,
+                    Collections.<String>emptyList());
+        }
+
+        private Item(String sentenceId, String sentence, String passageId, String sourceId, String passageText,
+                     String sourceKind, String legalSpace, Collection<String> sourceNames) {
             this.sentenceId = clean(sentenceId);
             this.sentence = sentence == null ? "" : sentence;
             this.passageId = clean(passageId);
@@ -124,9 +136,25 @@ public final class SentenceCheck {
             this.passageText = passageText == null ? "" : passageText;
             this.sourceKind = clean(sourceKind).toUpperCase(Locale.ROOT);
             this.legalSpace = clean(legalSpace).toUpperCase(Locale.ROOT);
+            List<String> names = new ArrayList<String>();
+            for (String name : sourceNames == null ? Collections.<String>emptyList() : sourceNames) {
+                String given = clean(name);
+                if (!given.isEmpty() && !names.contains(given)) {
+                    names.add(given);
+                }
+            }
+            this.sourceNames = Collections.unmodifiableList(names);
             if (this.sentenceId.isEmpty() || this.passageId.isEmpty()) {
                 throw new IllegalArgumentException("a pair needs a sentence id and a passage id");
             }
+        }
+
+        /**
+         * The same pair with the names the book gives the source of the passage (its name, its sites): a number inside
+         * one of them is no claim of the sentence ({@link SentenceVerdict#checked}). The prompt does not show them.
+         */
+        public Item withSourceNames(Collection<String> names) {
+            return new Item(sentenceId, sentence, passageId, sourceId, passageText, sourceKind, legalSpace, names);
         }
 
         public String getSentenceId() {
@@ -155,6 +183,11 @@ public final class SentenceCheck {
 
         public String getLegalSpace() {
             return legalSpace;
+        }
+
+        /** The names the book gives the source of the passage; empty when not given. */
+        public List<String> getSourceNames() {
+            return sourceNames;
         }
 
         String sentenceKey() {
@@ -467,7 +500,7 @@ public final class SentenceCheck {
                 SentenceVerdict verdict = SentenceVerdict.checked(item.getSentenceId(), item.getSentence(),
                         item.getPassageId(), item.getSourceId(), item.getPassageText(), answer.verdict, answer.kind,
                         answer.quote, answer.reason, answer.attribution, answer.jurisdiction, chat.modelName(),
-                        VERSION, clock.millis(), clock.millis() - began);
+                        VERSION, clock.millis(), clock.millis() - began, item.getSourceNames());
                 return new Judgement(item, verdict, answers);
             }
             problem = "invalid answer: " + answer.problem;
@@ -500,8 +533,9 @@ public final class SentenceCheck {
             text.append("Satz aus dem Buch:\n„").append(sentence).append("“\n\nZitierte Passage:\n„").append(passage)
                     .append("“\n\nPrüfe, ob die Passage den Satz deckt. Es zählt nur, was in der Passage steht; "
                             + "Allgemeinwissen und andere Quellen zählen nicht. Eine Angabe, wer etwas sagt (etwa "
-                            + "„laut …“, „nach Angaben …“, „…, wie … angibt“ oder „so der …“), gehört nicht zur "
-                            + "Aussage: Sie muss nicht in der Passage stehen. Prüfe die Aussage ohne sie.\n")
+                            + "„laut …“, „nach Angaben …“, „…, wie … angibt“ oder „so der …“), gehört für die Deckung "
+                            + "nicht zur Aussage: Diese Angabe muss nicht in der Passage stehen. Prüfe die Deckung der "
+                            + "Aussage ohne sie.\n")
                     .append("- belegart: Was ist die Passage? TEXT (Text mit Aussagen), MUSTERKLAUSEL (Vorlage oder "
                             + "Mustertext zum Übernehmen), LITERATURLISTE, LINKLISTE, INHALTSVERZEICHNIS oder "
                             + "SONSTIGES (anderes ohne Aussage, etwa Menü, Werbung oder Bildunterschrift).\n")
@@ -516,10 +550,10 @@ public final class SentenceCheck {
         } else {
             text.append("Sentence of the book:\n\"").append(sentence).append("\"\n\nCited passage:\n\"")
                     .append(passage).append("\"\n\nCheck whether the passage covers the sentence. Only what the "
-                            + "passage says counts; general knowledge and other sources do not. A statement of who "
-                            + "says something (such as \"according to …\", \"as stated by …\" or \", as … says\") "
-                            + "is no part of the claim: it need not stand in the passage. Check the claim without "
-                            + "it.\n")
+                            + "passage says counts; general knowledge and other sources do not. For the coverage, a "
+                            + "statement of who says something (such as \"according to …\", \"as stated by …\" or "
+                            + "\", as … says\") is no part of the claim: such a statement need not stand in the "
+                            + "passage. Check the coverage of the claim without it.\n")
                     .append("- belegart: What is the passage? TEXT (text with statements), MUSTERKLAUSEL (a template "
                             + "or model text to copy), LITERATURLISTE (literature list), LINKLISTE (link list), "
                             + "INHALTSVERZEICHNIS (table of contents) or SONSTIGES (anything else without a "

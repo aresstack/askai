@@ -71,6 +71,55 @@ public class SentenceVerdictTest {
     }
 
     @Test
+    public void aNumberInsideTheSourcesOwnNameIsNoClaimOfTheSentence() {
+        String passage = "Das Rad ist wartungsarm und kostet 30 Euro im Jahr. Eine Studie von 2023 zählte 25 Prozent "
+                + "weniger Pannen.";
+        String rad = "Nach Angaben von Rad24 ist das Rad wartungsarm [2].";
+        String quote = "Das Rad ist wartungsarm";
+        assertEquals("without the names the 24 must stand in the quote", Verdict.TEILWEISE,
+                named(rad, passage, quote).getVerdict());
+        assertEquals(Verdict.GEDECKT, named(rad, passage, quote, "Rad24", "rad24.example").getVerdict());
+        assertEquals("in any case and with a genitive s", Verdict.GEDECKT, named("Nach RAD24s Angaben ist das Rad "
+                + "wartungsarm [2].", passage, quote, "Rad24").getVerdict());
+        assertEquals("the name of the site too", Verdict.GEDECKT, named("Laut rad24.example ist das Rad wartungsarm "
+                + "[2].", passage, quote, "rad24.example").getVerdict());
+        assertEquals("in a compound", Verdict.GEDECKT, named("Die Rad24-Angaben nennen das Rad wartungsarm [2].",
+                passage, quote, "Rad24").getVerdict());
+
+        String plakette = "Laut Verkehr360 kostet die Plakette 30 Euro im Jahr [3].";
+        assertEquals("the other numbers still count", Verdict.TEILWEISE, named(plakette, passage, quote,
+                "Verkehr360").getVerdict());
+        assertEquals(Verdict.GEDECKT, named(plakette, passage, "kostet 30 Euro im Jahr", "Verkehr360").getVerdict());
+
+        String studie = "Laut einer Studie von 2023 gab es 25 Prozent weniger Pannen [1].";
+        assertEquals("a year in the speaker phrase is a claim", Verdict.TEILWEISE, named(studie, passage,
+                "25 Prozent weniger Pannen", "Rad24").getVerdict());
+        assertEquals(Verdict.GEDECKT, named(studie, passage, "Eine Studie von 2023 zählte 25 Prozent weniger Pannen",
+                "Rad24").getVerdict());
+        assertEquals("a name of digits only stays", Verdict.TEILWEISE, named("Nach 24 Tests ist das Rad wartungsarm "
+                + "[2].", passage, quote, "24").getVerdict());
+        assertEquals("only whole words", Verdict.TEILWEISE, named("Das Rad24x ist wartungsarm [2].", passage, quote,
+                "Rad24").getVerdict());
+        assertEquals("only whole words", Verdict.TEILWEISE, named("Das XRad24 ist wartungsarm [2].", passage, quote,
+                "Rad24").getVerdict());
+        assertEquals("each time it stands", Verdict.GEDECKT, named("Laut Rad24 ist das Rad wartungsarm, so Rad24 "
+                + "[2].", passage, quote, "Rad24").getVerdict());
+        assertEquals("another name than the source's", Verdict.TEILWEISE, named("Laut Rad25 ist das Rad wartungsarm "
+                + "[2].", passage, quote, "Rad24").getVerdict());
+        assertEquals("the quote must still stand in the passage", Verdict.TEILWEISE, named(rad, passage,
+                "Das Rad ist sehr wartungsarm", "Rad24").getVerdict());
+        assertEquals("  Rad wartungsarm.", SentenceVerdict.withoutNames("Rad24 Rad wartungsarm.",
+                Arrays.asList(null, "", "Rad24")));
+        assertEquals("Rad24 Rad", SentenceVerdict.withoutNames("Rad24 Rad", null));
+    }
+
+    static SentenceVerdict named(String sentence, String passage, String quote, String... names) {
+        return SentenceVerdict.checked("S1", sentence, "p1", "s1", passage, Verdict.GEDECKT, Kind.TEXT, quote,
+                "Die Passage sagt es.", Attribution.NICHT_GEFRAGT, Jurisdiction.NICHT_GEFRAGT, "m",
+                SentenceCheck.VERSION, 10L, 5L, Arrays.asList(names));
+    }
+
+    @Test
     public void citationMarkersAreNoPartOfTheSentence() {
         assertEquals("In Tempo-30-Zonen sank die Zahl der Unfälle mit Verletzten im ersten Jahr um 25 Prozent.",
                 SentenceVerdict.plain(SENTENCE));
