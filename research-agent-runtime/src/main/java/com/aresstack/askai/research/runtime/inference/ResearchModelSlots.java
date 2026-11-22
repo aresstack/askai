@@ -35,6 +35,11 @@ public final class ResearchModelSlots {
     public static final ModelSlot PHASE_OUTLINE_LABELS = ModelSlot.of("phase.outline.labels");
     /** The outline's chapter briefs. */
     public static final ModelSlot PHASE_OUTLINE_BRIEFS = ModelSlot.of("phase.outline.briefs");
+    /**
+     * The section plan (component 9): names the section a topic without a section of its own fits best. Few calls,
+     * thinking off. Inherits the Outline model until the user gives it its own.
+     */
+    public static final ModelSlot PHASE_OUTLINE_PLAN = ModelSlot.of("phase.outline.plan");
     /** The book writer in the Document phase. */
     public static final ModelSlot PHASE_DRAFT_WRITER = ModelSlot.of("phase.draft.writer");
     /**
