@@ -27,6 +27,13 @@ public final class ResearchModelSlots {
     /** The book pipeline's search planner in the Sources phase. */
     public static final ModelSlot PHASE_RESEARCH_PLANNER = ModelSlot.of("phase.research.planner");
     /**
+     * The contradiction check of the Sources phase (component 17): compares two pieces of direct evidence on the same
+     * question or topic from different source groups and says whether they contradict each other; it resolves
+     * nothing. A few calls per round; inherits the Sources model until the user gives it its own; the build plan
+     * names gemma4:12b.
+     */
+    public static final ModelSlot PHASE_RESEARCH_CONTRADICTIONS = ModelSlot.of("phase.research.contradictions");
+    /**
      * The research team's page workers in the Sources phase (plan T4): many parallel calls, one per opened page.
      * Inherits the Sources model until the user gives it its own.
      */
