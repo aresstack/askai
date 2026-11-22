@@ -375,7 +375,7 @@ public class SectionPlannerTest {
     }
 
     @Test
-    public void withoutQuestionsToSplitTheSectionsGrowLongerAndANoteSaysSo() throws IOException {
+    public void whereNothingCanBeSplitTheSectionsGrowLongerAndANoteSaysWhy() throws IOException {
         card("karte-rad", "Radverkehr", 0);
         evidence("karte-rad", 5, 3);
 
@@ -384,7 +384,22 @@ public class SectionPlannerTest {
         assertEquals(Collections.singletonList("abschnitt-karte-rad"), sectionIds(plan.getChapters().get(0)));
         assertEquals(1000, plan.getSections().get(0).getWords());
         assertTrue(plan.getNotes().toString(), plan.getNotes().contains("Das Kapitel „Radverkehr“ hat Wörter für 2 "
-                + "Abschnitte, aber Stoff nur für 1 (zu wenige Themen und Fragen mit direkten Belegen); seine "
+                + "Abschnitte, bildet aber nur 1: zu wenige Themen und Fragen mit direkten Belegen; seine Abschnitte "
+                + "werden länger als 450 Wörter."));
+
+        // Three questions with direct evidence, but a second part of the card's 783 words would stay under 450.
+        found("t-helm", "Helmpflicht", "", ResearchTopic.Fence.INNEN, "anchor-concept-karte-rad");
+        evidence("t-helm", 3, 3);
+        evidence("karte-rad", 2, 1);
+        evidence("karte-rad", 2, 1);
+
+        SectionPlan shorter = planner(1350).plan(TIME);
+
+        assertEquals(Arrays.asList("abschnitt-karte-rad", "abschnitt-t-helm"),
+                sectionIds(shorter.getChapters().get(0)));
+        assertTrue(shorter.getSections().get(0).getWords() / 2 < SectionPlanner.SECTION_WORDS);
+        assertTrue(shorter.getNotes().toString(), shorter.getNotes().contains("Das Kapitel „Radverkehr“ hat Wörter "
+                + "für 3 Abschnitte, bildet aber nur 2: ein weiterer Teil nach Fragen bliebe unter 450 Wörtern; seine "
                 + "Abschnitte werden länger als 450 Wörter."));
     }
 

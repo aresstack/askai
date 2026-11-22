@@ -784,9 +784,16 @@ public final class SectionPlanner {
             extra--;
         }
         if (extra > 0) {
-            notes.add("Das Kapitel „" + family.title + "“ hat Wörter für " + family.slots + " Abschnitte, aber "
-                    + "Stoff nur für " + (family.slots - extra) + " (zu wenige Themen und Fragen mit direkten "
-                    + "Belegen); seine Abschnitte werden länger als " + SECTION_WORDS + " Wörter.");
+            // The true reason: a section with a question left whose next part would stay under 450 words, or no
+            // question left at all.
+            boolean tooShort = false;
+            for (int i = 0; i < k; i++) {
+                tooShort |= split[i] < direct.get(i).size();
+            }
+            notes.add("Das Kapitel „" + family.title + "“ hat Wörter für " + family.slots + " Abschnitte, bildet "
+                    + "aber nur " + (family.slots - extra) + (tooShort ? ": ein weiterer Teil nach Fragen bliebe unter "
+                    + SECTION_WORDS + " Wörtern" : ": zu wenige Themen und Fragen mit direkten Belegen") + "; seine "
+                    + "Abschnitte werden länger als " + SECTION_WORDS + " Wörter.");
         }
 
         List<Part> parts = new ArrayList<Part>();
