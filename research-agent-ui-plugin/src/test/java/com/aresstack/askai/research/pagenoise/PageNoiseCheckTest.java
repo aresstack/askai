@@ -74,9 +74,16 @@ public class PageNoiseCheckTest {
         return answer("Ein Text nennt eine Regel.", "AUSSAGE");
     }
 
+    /** An answer whose statement fits the kind: a rule for AUSSAGE, "keine" for a leftover. */
     static String answer(String description, String kind) {
+        return answer(description, kind.trim().equalsIgnoreCase("AUSSAGE") ? "Für Tempo-30-Zonen gilt eine Regel."
+                : "keine", kind);
+    }
+
+    static String answer(String description, String statement, String kind) {
         JsonObject json = new JsonObject();
         json.addProperty("beschreibung", description);
+        json.addProperty("aussage", statement);
         json.addProperty("art", kind);
         return json.toString();
     }
@@ -222,13 +229,23 @@ public class PageNoiseCheckTest {
         assertTrue(prompt, prompt.contains("eigenes Produkt, seine eigene Leistung oder seine Partnerschaften sagt "
                 + "(Funktionen, Vorteile, Lob, Empfehlung), selbst wenn es sachlich klingt."));
         assertTrue(prompt, prompt.contains("oder spricht über den Beitrag oder das Dokument selbst"));
-        assertTrue(prompt, prompt.contains("etwa Eckdaten eines Dokuments (Titel, Datum, Fundstelle, Aktenzeichen, "
-                + "Herausgeber) oder Formularfelder."));
+        assertTrue(prompt, prompt.contains("etwa Eckdaten eines Dokuments oder einer Vorschrift (Titel, Datum, Stand, "
+                + "Änderungen, Fundstelle, Aktenzeichen, Herausgeber), bloße Namenslisten (Autoren, Mitwirkende, "
+                + "Mitglieder) oder Formularfelder."));
+        assertTrue(prompt, prompt.contains("Erklärt ein Anbieter die Sache allgemein, ohne sein Angebot zu nennen, ist "
+                + "das keine Werbung."));
+        assertTrue(prompt, prompt.contains("Eine Liste, deren Einträge etwas aussagen, ist kein Verzeichnis."));
+        assertTrue(prompt, prompt.contains("die nur Fundstellen nennen, auch wenn ein einleitender Satz davorsteht."));
+        assertTrue(prompt, prompt.contains("eine Zeile, die nur ankündigt, was folgt (etwa eine Liste), ohne selbst "
+                + "etwas auszusagen."));
+        assertTrue(prompt, prompt.contains("für wen er gedacht ist, was der Leser darin erfährt."));
         assertTrue(prompt, prompt.contains("\nKein Seitenrest:\n- \"AUSSAGE\": informiert über die Sache"));
         assertTrue(prompt, prompt.contains("Prüfstein: Ein Sachbuch könnte das Stück als Aussage zur Sache zitieren."));
         assertTrue(prompt, prompt.contains("Ob die Sache zu einem Buch passt, spielt keine Rolle."));
         assertTrue(prompt, prompt.endsWith("Antworte nur mit JSON: {\"beschreibung\": ein kurzer Satz, wer hier "
-                + "spricht und wozu, \"art\": eine der Arten oben}"));
+                + "spricht und wozu, \"aussage\": was das Stück selbst über die Sache aussagt, in einem kurzen Satz, "
+                + "oder \"keine\", wenn es nichts darüber aussagt (es kündigt nur an, verweist, wirbt, stellt vor oder "
+                + "nennt nur Namen, Titel, Daten oder Fundstellen), \"art\": eine der Arten oben}"));
         for (String verdict : new String[]{"RAUSCHEN", "\"INHALT\"", "MISCH", "KEINE", "urteil"}) {
             assertFalse("the model gives no verdict: " + verdict, prompt.contains(verdict));
         }
@@ -240,7 +257,7 @@ public class PageNoiseCheckTest {
         for (String word : new String[]{"STRUKTUR", "KEINE", "RAUSCHEN", "MISCH", "urteil", "klasse"}) {
             assertFalse(word, PageNoiseCheck.SCHEMA.contains(word));
         }
-        assertTrue(PageNoiseCheck.SCHEMA.contains("\"required\":[\"beschreibung\",\"art\"]"));
+        assertTrue(PageNoiseCheck.SCHEMA.contains("\"required\":[\"beschreibung\",\"aussage\",\"art\"]"));
     }
 
     @Test
@@ -260,6 +277,10 @@ public class PageNoiseCheckTest {
         assertTrue(prompt, prompt.contains("\n- \"VERZEICHNIS\": points to other texts"));
         assertTrue(prompt, prompt.contains("\nNo page leftover:\n- \"AUSSAGE\": informs about the matter"));
         assertTrue(prompt, prompt.contains("Whether the matter fits a book does not count."));
+        assertTrue(prompt, prompt.endsWith("\"aussage\": what the piece itself says about the matter, in one short "
+                + "sentence, or \"keine\" if it says nothing about it (it only announces, points elsewhere, "
+                + "advertises, presents someone or only names names, titles, dates or references), \"art\": one of "
+                + "the kinds above}"));
         assertTrue(prompt, prompt.contains(" …\"\n\n"));
         assertTrue(prompt, prompt.indexOf("\"\n\n") < 600);
         assertEquals(PageNoiseCheck.SYSTEM_EN, chat.calls.get(0).get(0).getContent());
@@ -502,6 +523,84 @@ public class PageNoiseCheckTest {
             assertFalse(bad, PageNoiseCheck.parse(bad).problem.isEmpty());
         }
         assertTrue(PageNoiseCheck.parse(answer("", "WERBUNG")).problem.startsWith("\"beschreibung\" must say"));
+        assertEquals("AUSSAGE needs its statement", "\"aussage\" must say in a short sentence what the piece states, "
+                + "or \"keine\"", PageNoiseCheck.parse("{\"beschreibung\":\"Ein Text nennt eine Regel.\",\"art\":"
+                + "\"AUSSAGE\"}").problem);
+        assertEquals("a leftover needs none", "", PageNoiseCheck.parse("{\"beschreibung\":\"Ein Menü der Seite.\","
+                + "\"aussage\":\" \",\"art\":\"NAVIGATION\"}").problem);
+    }
+
+    /** Acceptance of version 3: lines that only announce a list, teasers, lists of names went through as AUSSAGE. */
+    @Test
+    public void aussageWithoutAStatementIsALeftover() throws Exception {
+        for (String nothing : new String[]{"keine", "Keine.", "„keine“", "keine Aussage zur Sache",
+                "keine eigene Aussage", "Keine, es kündigt nur eine Liste an.", "keine (es nennt nur Namen)",
+                "keine – nur Titel und Daten", "nichts", "none", "Das Stück sagt nichts über die Sache aus.",
+                "Sagt selbst nichts aus", "It says nothing about the matter.", "no statement"}) {
+            PageNoiseCheck.Answer answer = PageNoiseCheck.parse(answer("Ein Text leitet eine Liste ein.", nothing,
+                    "AUSSAGE"));
+            assertEquals(nothing, "", answer.problem);
+            assertEquals(nothing, NoiseMark.Verdict.RAUSCHEN, answer.verdict);
+            assertEquals(nothing, NoiseMark.Kind.SONSTIGES, answer.kind);
+            assertTrue(nothing, answer.overruled);
+            assertEquals("Ein Text leitet eine Liste ein. (Art AUSSAGE, aber keine Aussage zur Sache)", answer.reason);
+        }
+        for (String statement : new String[]{"Keine Person darf ohne Helm Rad fahren.", "Keiner muss vor einer roten "
+                + "Ampel länger als zwei Minuten warten.", "Nichts spricht gegen Tempo 30 vor Schulen.",
+                "Kein Beleg ist nötig, wenn die Gemeinde die Zone anordnet.", "Die Gemeinde prüft die Verkehrslage."}) {
+            PageNoiseCheck.Answer answer = PageNoiseCheck.parse(answer("Ein Text nennt eine Regel.", statement,
+                    "AUSSAGE"));
+            assertEquals("a statement that begins with the word says something: " + statement,
+                    NoiseMark.Verdict.INHALT, answer.verdict);
+            assertFalse(statement, answer.overruled);
+        }
+        PageNoiseCheck.Answer list = PageNoiseCheck.parse(answer("Ein Verlag nennt seine Normen.",
+                "Für Helme gilt die Norm DIN EN 1078.", "LITERATUR"));
+        assertEquals("a kind of leftover stays as the model named it", NoiseMark.Kind.LITERATUR, list.kind);
+        assertFalse(list.overruled);
+        PageNoiseCheck.Answer both = PageNoiseCheck.parse(answer("Eine Fahrschule empfiehlt ihre Kurse.", "keine",
+                "AUSSAGE"));
+        assertEquals("the first sentence's kind comes first", NoiseMark.Kind.WERBUNG, both.kind);
+
+        ScriptedChat chat = new ScriptedChat(prompt -> prompt.contains("Kapitel 1")
+                ? answer("Ein Text nennt Kapitel.", "keine", "AUSSAGE") : careful(prompt));
+        NoiseMarks marks = new NoiseMarks();
+        Result result = check(chat).check(Arrays.asList(passage("p1", CONTENT), passage("p2", CONTENTS)), marks);
+
+        assertEquals(1, result.getOverruled());
+        NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage("p2", CONTENTS)));
+        assertTrue(mark.isNoise());
+        assertTrue(PageNoiseCheck.isWithoutStatement(mark));
+        assertFalse(PageNoiseCheck.isOverruled(mark));
+        assertFalse(PageNoiseCheck.isWithoutStatement(marks.mark(PageNoiseCheck.textKey(passage("p1", CONTENT)))));
+    }
+
+    /** Acceptance of version 3: the site-notice rule dropped two passages of content on a single word. */
+    @Test
+    public void aSingleNoticeThatIsAWordOfProseGoesToTheModel() throws Exception {
+        String faq = "Laut den FAQ des Verkehrsministeriums gilt die Helmpflicht nur für Kinder unter zwölf Jahren, "
+                + "und Eltern haften für ihre Kinder auf dem Gehweg.";
+        String settings = "Viele Fahrradcomputer speichern Wege und Zeiten; die Datenschutzeinstellungen legen fest, "
+                + "wer die Daten sehen darf und wie lange sie bleiben.";
+        String credit = "Ein Radweg muss mindestens zwei Meter breit sein, damit sich Radfahrer gefahrlos überholen "
+                + "können. Bildquelle: Stadt Beispielhausen";
+        String two = "Unsere FAQ beantworten alle Fragen zu Kursen und Preisen der Fahrschule. Weitere Angaben finden "
+                + "Sie im Impressum der Seite.";
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        NoiseMarks marks = new NoiseMarks();
+
+        Result result = check(chat).check(Arrays.asList(passage("p1", faq), passage("p2", settings),
+                passage("p3", credit), passage("p4", two), passage("p5", COOKIES)), marks);
+
+        assertEquals("the two words of prose go to the model", 2, result.getAsked());
+        assertFalse(marks.isNoise(PageNoiseCheck.textKey(passage("p1", faq))));
+        assertFalse(marks.isNoise(PageNoiseCheck.textKey(passage("p2", settings))));
+        for (String rules : new String[]{credit, two, COOKIES}) {
+            NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage("p", rules)));
+            assertEquals("a picture credit, two notices or a cookie notice stay with the rules: " + rules,
+                    NoiseMark.RULES, mark.getStage());
+            assertEquals(NoiseMark.Kind.SEITENHINWEIS, mark.getKind());
+        }
     }
 
     @Test

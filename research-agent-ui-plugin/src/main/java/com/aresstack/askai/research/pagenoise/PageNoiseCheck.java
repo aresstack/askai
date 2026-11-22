@@ -32,6 +32,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 /**
  * The page-noise check (Seitenrest-Prüfung) before the topic finder (13). The architect's measurement of 22.11.2026
@@ -42,16 +43,20 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>Stage 1, no model: the prose rules ({@link ProsePassageFilter}): too few words or finished sentences, a long run
  * without punctuation, site notices, promotion, capitals, links; on a page of almost no prose a lone short sentence is
- * a caption. A passage that breaks a rule is RAUSCHEN with the kind of the rule. Stage 2, only on what stage 1 lets
- * through: one call of a small model (slot {@code phase.research.noise}, thinking off) per text. The model first says
- * in a short sentence who speaks and to what end, then names the kind of text by its biggest part: a statement on the
- * matter ({@code AUSSAGE}) or one of the kinds of leftover. The verdict follows from the kind in code: AUSSAGE is
- * INHALT, every kind of leftover is RAUSCHEN. The model gives no verdict of its own, because in version 1 it said
- * INHALT for passages its own reason called advertising or a table of contents. When it names AUSSAGE but its own
- * first sentence plainly calls the piece a leftover (a provider recommends its own product, "Ein Inhaltsverzeichnis
- * ..."), the sentence wins ({@link DescriptionCheck}). The model sees the passage and the domain of its page, not the
- * mission: whether a passage belongs in the book is the fence check's question (14). A failed call is FEHLER and never
- * RAUSCHEN; the text is checked again next time.</p>
+ * a caption. A passage that breaks a rule is RAUSCHEN with the kind of the rule. A single site notice that is also a
+ * word of prose on the matter (cookies, FAQ, privacy settings, ...) breaks no rule here: the model judges that passage
+ * ({@link ProsePassageFilter#rule(String, boolean)}).</p>
+ *
+ * <p>Stage 2, only on what stage 1 lets through: one call of a small model (slot {@code phase.research.noise},
+ * thinking off) per text. The model says in a short sentence who speaks and to what end, then what the piece itself
+ * says about the matter or {@code "keine"}, then names the kind of text by its biggest part: a statement on the matter
+ * ({@code AUSSAGE}) or one of the kinds of leftover. The verdict follows from the kind in code: AUSSAGE is INHALT,
+ * every kind of leftover is RAUSCHEN. The model gives no verdict of its own, because in version 1 it said INHALT for
+ * passages its own reason called advertising or a table of contents. AUSSAGE is overruled in two plain cases: the
+ * model says the piece states nothing ({@code "keine"}), or its first sentence calls the piece a leftover (a provider
+ * recommends its own product, "Ein Inhaltsverzeichnis ...", {@link DescriptionCheck}). The model sees the passage and
+ * the domain of its page, not the mission: whether a passage belongs in the book is the fence check's question (14). A
+ * failed call is FEHLER and never RAUSCHEN; the text is checked again next time.</p>
  *
  * <p>A text with a mark that holds under this {@link #VERSION} is not checked again, except a stage-1 INHALT from a
  * run without a model, which stage 2 checks once a model is there. Every mark goes to the store the moment it is
@@ -63,9 +68,13 @@ public final class PageNoiseCheck {
      * The rules' and prompts' version; a mark is reused only under the same one. 2: the model names the kind of text,
      * the verdict follows from it, there is no MISCH from the model any more. 3: wider definitions of the kinds
      * (partnerships, notes on the document itself, lists of standards, labels of a figure, teasers, key data of a
-     * document) and the first sentence held against the kind.
+     * document) and the first sentence held against the kind. 4: the model also says what the piece itself states, or
+     * "keine", and AUSSAGE without a statement is a leftover; a single site notice that is also a word of prose goes
+     * to the model; the kinds name lines that only announce what follows, lists with an introductory sentence, key
+     * data of a regulation and bare lists of names, and say where a provider's general explanation and a list that
+     * states something stand.
      */
-    public static final int VERSION = 3;
+    public static final int VERSION = 4;
 
     /** Prompt, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
@@ -86,6 +95,12 @@ public final class PageNoiseCheck {
     /** What the reason of a mark says when the first sentence overruled AUSSAGE, before the kind it named. */
     static final String OVERRULED = ", die Beschreibung nennt ";
 
+    /** What the reason of a mark says when the model named AUSSAGE but said the piece states nothing. */
+    static final String NO_STATEMENT = ", aber keine Aussage zur Sache";
+
+    /** The word the model gives as {@code aussage} when the piece says nothing about the matter. */
+    static final String NO_STATEMENT_WORD = "keine";
+
     /**
      * The kinds of leftover the model may name, in the order of the prompt; {@link NoiseMark.Kind#STRUKTUR} belongs to
      * the prose rules, {@link NoiseMark.Kind#KEINE} is content.
@@ -95,17 +110,17 @@ public final class PageNoiseCheck {
             NoiseMark.Kind.NAVIGATION, NoiseMark.Kind.BILDUNTERSCHRIFT, NoiseMark.Kind.UEBERSCHRIFT,
             NoiseMark.Kind.IMPRESSUM, NoiseMark.Kind.SEITENHINWEIS, NoiseMark.Kind.SONSTIGES));
 
-    /** The answer: first who speaks and to what end, then the kind of text. */
+    /** The answer: first who speaks and to what end, then what the piece states, then the kind of text. */
     static final String SCHEMA = schema();
 
     public static final ResearchRole ROLE = ResearchRole.builder("page-noise-check",
                     ResearchModelSlots.PHASE_RESEARCH_NOISE)
-            .purpose("page-noise check before the topic finder: names the kind of a passage the prose rules let "
-                    + "through, a statement on the matter or a page leftover (advertising, site description, table "
-                    + "of contents, literature list, navigation, caption, heading, imprint, site notice); the code "
-                    + "derives content or leftover from the kind; never judges the subject")
+            .purpose("page-noise check before the topic finder: says what a passage the prose rules let through "
+                    + "states and names its kind, a statement on the matter or a page leftover (advertising, site "
+                    + "description, table of contents, literature list, navigation, caption, heading, imprint, site "
+                    + "notice); the code derives content or leftover from the kind; never judges the subject")
             .promptFromCaller()
-            .output(RoleOutput.schema(SCHEMA, "beschreibung, art"))
+            .output(RoleOutput.schema(SCHEMA, "beschreibung, aussage, art"))
             .thinking(ThinkingMode.OFF)
             .contextTokens(CONTEXT_TOKENS)
             .build();
@@ -408,6 +423,12 @@ public final class PageNoiseCheck {
                 && mark.getReason().contains("(Art " + CONTENT_KIND + OVERRULED);
     }
 
+    /** Whether the model named AUSSAGE for the mark's text but said the piece states nothing about the matter. */
+    public static boolean isWithoutStatement(NoiseMark mark) {
+        return mark != null && mark.isNoise() && mark.getStage() == NoiseMark.MODEL
+                && mark.getReason().contains("(Art " + CONTENT_KIND + NO_STATEMENT + ")");
+    }
+
     /** Whether a mark from before holds and need not be given again. */
     private boolean holds(NoiseMark mark) {
         if (mark == null || mark.getStatus() != NoiseMark.Status.OK || mark.getVersion() != VERSION) {
@@ -436,13 +457,16 @@ public final class PageNoiseCheck {
         return ids;
     }
 
-    /** Stage 1: the mark of the prose rules, or {@code null} when stage 2 must decide. */
+    /**
+     * Stage 1: the mark of the prose rules, or {@code null} when stage 2 must decide. A single site notice that is also
+     * a word of prose is left to the model.
+     */
     NoiseMark byRules(Passage passage, String key, boolean caption) {
-        ProsePassageFilter.Rule rule = filter.rule(passage.getText());
+        ProsePassageFilter.Rule rule = filter.rule(passage.getText(), true);
         long now = clock.millis();
         if (rule != ProsePassageFilter.Rule.NONE) {
             return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN, kindOf(rule),
-                    NoiseMark.RULES, filter.reason(passage.getText()), "", VERSION, now, 0);
+                    NoiseMark.RULES, filter.reason(passage.getText(), true), "", VERSION, now, 0);
         }
         if (caption) {
             return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN,
@@ -568,10 +592,12 @@ public final class PageNoiseCheck {
     /** The model's answer as read, or why it holds none. */
     static final class Answer {
         String reason = "";
+        /** What the piece states, as the model says it; {@link #NO_STATEMENT_WORD} when it states nothing. */
+        String statement = "";
         NoiseMark.Verdict verdict;
         NoiseMark.Kind kind = NoiseMark.Kind.SONSTIGES;
         String problem = "";
-        /** The model named AUSSAGE, and its first sentence named a kind of leftover. */
+        /** The model named AUSSAGE, and its first sentence named a kind of leftover or it said "keine". */
         boolean overruled;
     }
 
@@ -579,7 +605,9 @@ public final class PageNoiseCheck {
      * Reads an answer leniently (case and blanks of the kind do not count) and derives the verdict from the kind:
      * {@link #CONTENT_KIND} is INHALT without a kind of leftover, every kind of {@link #MODEL_KINDS} is RAUSCHEN of
      * that kind. Any other word is no answer. AUSSAGE with a first sentence that plainly names a kind of leftover
-     * ({@link DescriptionCheck}) is RAUSCHEN of that kind, and the reason says so.
+     * ({@link DescriptionCheck}) is RAUSCHEN of that kind; AUSSAGE whose statement is {@code "keine"}
+     * ({@link #saysNothing}) is RAUSCHEN of kind SONSTIGES; the reason says which. The statement must be there for
+     * AUSSAGE; for a kind of leftover a missing one does not count.
      */
     static Answer parse(String text) {
         Answer answer = new Answer();
@@ -615,15 +643,48 @@ public final class PageNoiseCheck {
             answer.problem = "\"beschreibung\" must say in a short sentence who speaks and to what end";
             return answer;
         }
-        NoiseMark.Kind named = answer.verdict == NoiseMark.Verdict.INHALT ? DescriptionCheck.kindNamed(answer.reason)
-                : null;
+        answer.statement = cut(string(json, "aussage"), REASON_CHARS);
+        if (answer.verdict != NoiseMark.Verdict.INHALT) {
+            return answer;
+        }
+        if (answer.statement.isEmpty()) {
+            answer.problem = "\"aussage\" must say in a short sentence what the piece states, or \""
+                    + NO_STATEMENT_WORD + "\"";
+            return answer;
+        }
+        NoiseMark.Kind named = DescriptionCheck.kindNamed(answer.reason);
         if (named != null) {
             answer.verdict = NoiseMark.Verdict.RAUSCHEN;
             answer.kind = named;
             answer.overruled = true;
             answer.reason = answer.reason + " (Art " + CONTENT_KIND + OVERRULED + named.name() + ")";
+        } else if (saysNothing(answer.statement)) {
+            answer.verdict = NoiseMark.Verdict.RAUSCHEN;
+            answer.kind = NoiseMark.Kind.SONSTIGES;
+            answer.overruled = true;
+            answer.reason = answer.reason + " (Art " + CONTENT_KIND + NO_STATEMENT + ")";
         }
         return answer;
+    }
+
+    /**
+     * "keine" (or "none", "nichts"), alone or followed by "Aussage ..." or by a comma, colon, dash or bracket with an
+     * explanation, or a sentence that begins with "(das Stück) sagt nichts". A statement that merely begins with the
+     * word ("Keine Person darf ...") says something.
+     */
+    private static final Pattern NOTHING = Pattern.compile("^(?:keine|keiner|keines|nichts|none|nothing)"
+            + "(?:\\s+(?:eigene\\s+)?aussage\\b.*|\\s*[,;:(\u2013\u2014-].*)?$"
+            + "|^(?:(?:das\\s+(?:text)?stück|der\\s+text|es|it|the\\s+piece)\\s+)?(?:sagt|says)\\s+"
+            + "(?:selbst\\s+|itself\\s+)?(?:nichts|nothing)\\b.*|^no\\s+statement\\b.*",
+            Pattern.UNICODE_CHARACTER_CLASS | Pattern.DOTALL);
+
+    /** Quotes and blanks around the statement, and a closing full stop or exclamation mark. */
+    private static final Pattern AROUND = Pattern.compile("^[\\s\"'„“”«»‚‘’]+|[\\s\"'„“”«»‚‘’.!]+$");
+
+    /** Whether the model's statement says that the piece states nothing about the matter. */
+    static boolean saysNothing(String statement) {
+        String text = AROUND.matcher(clean(statement).toLowerCase(Locale.ROOT)).replaceAll("");
+        return NOTHING.matcher(text).matches();
     }
 
     // ------------------------------------------------------------------------------------------------- prompt
@@ -633,49 +694,55 @@ public final class PageNoiseCheck {
             "will verkaufen oder Kunden gewinnen: Angebote, Produkte, Preise, Rabatte, Gutscheine, Aufrufe zum "
                     + "Kaufen, Bestellen, Buchen, Testen, Anmelden oder Anfragen; auch was ein Anbieter über sein "
                     + "eigenes Produkt, seine eigene Leistung oder seine Partnerschaften sagt (Funktionen, Vorteile, "
-                    + "Lob, Empfehlung), selbst wenn es sachlich klingt.",
+                    + "Lob, Empfehlung), selbst wenn es sachlich klingt. Erklärt ein Anbieter die Sache allgemein, "
+                    + "ohne sein Angebot zu nennen, ist das keine Werbung.",
             "stellt die Seite oder ihren Anbieter vor (wer er ist, was er anbietet, Ziele, Team, Partner, Kunden, "
                     + "Referenzen, Auszeichnungen) oder spricht über den Beitrag oder das Dokument selbst: was er "
-                    + "behandelt, wie er aufgebaut ist, für wen er gedacht ist.",
+                    + "behandelt, wie er aufgebaut ist, für wen er gedacht ist, was der Leser darin erfährt.",
             "verweist auf andere Texte: Inhaltsverzeichnis, Register, Liste von Titeln, Kapiteln, Artikeln, "
-                    + "Dokumenten, Downloads, Links, Produkten oder Terminen, deren Einträge selbst nichts aussagen.",
+                    + "Dokumenten, Downloads, Links, Produkten oder Terminen, deren Einträge selbst nichts aussagen. "
+                    + "Eine Liste, deren Einträge etwas aussagen, ist kein Verzeichnis.",
             "Literaturangaben, Quellenlisten, Listen von Normen oder Vorschriften und Fußnoten, die nur Fundstellen "
-                    + "nennen.",
+                    + "nennen, auch wenn ein einleitender Satz davorsteht.",
             "bedient die Seite: Menüs, Pfade, Weiter- und Zurück-Verweise, „Mehr lesen“, Schlagwörter, Kategorien, "
                     + "Seitenzahlen, Knöpfe zum Teilen.",
             "beschreibt ein Bild, eine Grafik oder eine Tabelle, nennt ihren Urheber oder gibt nur ihre "
                     + "Beschriftungen oder Begriffe wieder.",
-            "nur eine Überschrift, ein Titel oder ein Anriss: eine Frage oder ein Satzanfang, der auf einen Text "
-                    + "verweist, ohne selbst etwas auszusagen.",
+            "nur eine Überschrift, ein Titel oder ein Anriss: eine Frage, ein Satzanfang oder eine Zeile, die nur "
+                    + "ankündigt, was folgt (etwa eine Liste), ohne selbst etwas auszusagen.",
             "Impressum, Kontaktdaten, Anschrift, Telefon, Öffnungszeiten, Angaben zum Betreiber.",
             "Hinweise der Seite: Cookies, Datenschutzeinstellungen, Lizenzen, Newsletter, Anmeldung, Kommentare, "
                     + "Nutzungsbedingungen.",
-            "ein anderer Teil der Seite, der nichts über die Sache aussagt, etwa Eckdaten eines Dokuments (Titel, "
-                    + "Datum, Fundstelle, Aktenzeichen, Herausgeber) oder Formularfelder.");
+            "ein anderer Teil der Seite, der nichts über die Sache aussagt, etwa Eckdaten eines Dokuments oder einer "
+                    + "Vorschrift (Titel, Datum, Stand, Änderungen, Fundstelle, Aktenzeichen, Herausgeber), bloße "
+                    + "Namenslisten (Autoren, Mitwirkende, Mitglieder) oder Formularfelder.");
 
     /** What each kind of leftover is, as the English prompt says it. */
     private static final Map<NoiseMark.Kind, String> KINDS_EN = kinds(
             "wants to sell or to win customers: offers, products, prices, discounts, coupons, calls to buy, order, "
                     + "book, try, sign up or get in touch; also what a provider says about its own product, its own "
                     + "service or its partnerships (features, advantages, praise, recommendation), even when it sounds "
-                    + "factual.",
+                    + "factual. When a provider explains the matter in general without naming its offer, it is no "
+                    + "advertising.",
             "presents the site or its provider (who they are, what they offer, aims, team, partners, customers, "
                     + "references, awards) or speaks about the article or document itself: what it covers, how it is "
-                    + "built, whom it is meant for.",
+                    + "built, whom it is meant for, what the reader learns in it.",
             "points to other texts: table of contents, index, list of titles, chapters, articles, documents, "
-                    + "downloads, links, products or dates whose entries say nothing themselves.",
+                    + "downloads, links, products or dates whose entries say nothing themselves. A list whose entries "
+                    + "say something is no index.",
             "literature references, lists of sources, lists of standards or regulations and footnotes that only name "
-                    + "where something is found.",
+                    + "where something is found, also when an introductory sentence stands before them.",
             "operates the page: menus, breadcrumbs, next and back links, \"read more\", tags, categories, page "
                     + "numbers, share buttons.",
             "describes a picture, a chart or a table, names its author or only gives its labels or terms.",
-            "only a heading, a title or a teaser: a question or the start of a sentence that points to a text "
-                    + "without saying anything itself.",
+            "only a heading, a title or a teaser: a question, the start of a sentence or a line that only announces "
+                    + "what follows (such as a list) without saying anything itself.",
             "imprint, contact data, address, phone, opening hours, details of the operator.",
             "notices of the site: cookies, data protection settings, licences, newsletters, login, comments, terms of "
                     + "use.",
-            "another part of the page that says nothing about the matter, such as the key data of a document "
-                    + "(title, date, reference, file number, publisher) or form fields.");
+            "another part of the page that says nothing about the matter, such as the key data of a document or a "
+                    + "regulation (title, date, version, amendments, reference, file number, publisher), bare lists of "
+                    + "names (authors, contributors, members) or form fields.");
 
     String prompt(Passage passage) {
         StringBuilder text = new StringBuilder();
@@ -695,7 +762,10 @@ public final class PageNoiseCheck {
                             + "Prüfstein: Ein Sachbuch könnte das Stück als Aussage zur Sache zitieren.\n\n")
                     .append("Ob die Sache zu einem Buch passt, spielt keine Rolle.\n\n")
                     .append("Antworte nur mit JSON: {\"beschreibung\": ein kurzer Satz, wer hier spricht und wozu, "
-                            + "\"art\": eine der Arten oben}");
+                            + "\"aussage\": was das Stück selbst über die Sache aussagt, in einem kurzen Satz, oder \""
+                            + NO_STATEMENT_WORD + "\", wenn es nichts darüber aussagt (es kündigt nur an, verweist, "
+                            + "wirbt, stellt vor oder nennt nur Namen, Titel, Daten oder Fundstellen), \"art\": eine "
+                            + "der Arten oben}");
         } else {
             text.append("Piece of text")
                     .append(domain.isEmpty() ? " from a source without address" : " from " + domain).append(":\n\"")
@@ -711,7 +781,10 @@ public final class PageNoiseCheck {
                             + "a statement on the matter.\n\n")
                     .append("Whether the matter fits a book does not count.\n\n")
                     .append("Answer only with JSON: {\"beschreibung\": one short sentence, who speaks here and to what "
-                            + "end, \"art\": one of the kinds above}");
+                            + "end, \"aussage\": what the piece itself says about the matter, in one short sentence, "
+                            + "or \"" + NO_STATEMENT_WORD + "\" if it says nothing about it (it only announces, points "
+                            + "elsewhere, advertises, presents someone or only names names, titles, dates or "
+                            + "references), \"art\": one of the kinds above}");
         }
         return text.toString();
     }
@@ -754,6 +827,10 @@ public final class PageNoiseCheck {
         description.addProperty("type", "string");
         description.addProperty("minLength", MIN_REASON_CHARS);
         properties.add("beschreibung", description);
+        JsonObject statement = new JsonObject();
+        statement.addProperty("type", "string");
+        statement.addProperty("minLength", 1);
+        properties.add("aussage", statement);
         JsonObject kind = new JsonObject();
         kind.addProperty("type", "string");
         JsonArray kinds = new JsonArray();
@@ -767,6 +844,7 @@ public final class PageNoiseCheck {
         root.add("properties", properties);
         JsonArray required = new JsonArray();
         required.add("beschreibung");
+        required.add("aussage");
         required.add("art");
         root.add("required", required);
         return root.toString();

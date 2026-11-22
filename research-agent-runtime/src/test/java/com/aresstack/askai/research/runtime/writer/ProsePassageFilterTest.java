@@ -86,6 +86,36 @@ public class ProsePassageFilterTest {
         assertEquals("", filter.reason(prose));
     }
 
+    /**
+     * Acceptance of the page-noise check, 22.11.2026: the notice rule dropped two passages of content on a single word.
+     * Asked to, it spares one notice that is also a word of prose; a credit, a law header, two notices or a cookie
+     * notice still break it, and the other rules still apply.
+     */
+    @Test
+    public void aSingleNoticeThatIsAWordOfProseCanBeSpared() {
+        String consent = "Beschäftigte können ihre Einwilligung widerrufen, ohne dass ihnen daraus Nachteile entstehen "
+                + "dürfen; die Daten der Sensorweste sind dann zu löschen.";
+        String faq = "Nach den FAQ der Aufsichtsbehörde ist eine Ortung während der Pausen unzulässig, und der "
+                + "Betriebsrat muss der Einführung zustimmen.";
+        assertEquals(ProsePassageFilter.Rule.SITE_NOTICES, filter.rule(consent));
+        assertEquals(ProsePassageFilter.Rule.NONE, filter.rule(consent, true));
+        assertEquals("", filter.reason(consent, true));
+        assertEquals(ProsePassageFilter.Rule.NONE, filter.rule(faq, true));
+        assertEquals("1 site notices > 0", filter.reason(faq, false));
+        for (String notice : new String[]{
+                "Bauarbeiter mit Sensorweste auf dem Gerüst einer Großbaustelle in der Stadt. Bildquelle: Beispiel AG",
+                "BaustellV – Ausfertigungsdatum: 10.06.1998, zuletzt geändert durch Artikel 1 der Verordnung vom 19. "
+                        + "Dezember.",
+                "FAQ Häufig gestellte Fragen zu Wearables am Arbeitsplatz und zur Beteiligung des Betriebsrats bei der "
+                        + "Einführung.",
+                "Die Website der EU-OSHA verwendet Cookies, um Informationen zu sammeln, die für die Navigation auf "
+                        + "der Website erforderlich sind und die uns helfen, sie zu verbessern."}) {
+            assertEquals(notice, ProsePassageFilter.Rule.SITE_NOTICES, filter.rule(notice, true));
+        }
+        assertEquals("the other rules still apply", ProsePassageFilter.Rule.LINKS, filter.rule("Die FAQ stehen unter "
+                + "www.example.org, https://example.org/a und https://example.org/b sowie www.example.net.", true));
+    }
+
     /** Live run 4: calendar slogans between the product lines of a shop page formed a topic of their own. */
     @Test
     public void aLoneShortSentenceOnAPageOfAlmostNoProseIsACaption() {

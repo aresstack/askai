@@ -264,15 +264,31 @@ public final class ProsePassageFilter {
      * not read as a blank: "Arbeits\u00ADschutz" is one word, so a hyphenated heading does not count its words twice.
      */
     public String reason(String text) {
-        return finding(text).reason;
+        return finding(text, false).reason;
     }
 
     /** Which rule the passage breaks, by the same check as {@link #reason}; {@link Rule#NONE} when it is prose. */
     public Rule rule(String text) {
-        return finding(text).rule;
+        return finding(text, false).rule;
     }
 
-    private Finding finding(String text) {
+    /**
+     * The rule as {@link #rule(String)}, except that with {@code spareProseWords} a single site notice that is also a
+     * word of prose on the matter ({@link #PROSE_WORD_NOTICE}: cookies, FAQ, privacy settings, withdrawn consent,
+     * home page, imprint, a licence) breaks no rule; the other rules still apply. The page-noise check lets its model
+     * judge such a passage: its acceptance of 22.11.2026 found two passages of content that the notice rule took for
+     * leftovers on one such word. The writer keeps the strict rule.
+     */
+    public Rule rule(String text, boolean spareProseWords) {
+        return finding(text, spareProseWords).rule;
+    }
+
+    /** The reason as {@link #reason(String)}, under the same exception as {@link #rule(String, boolean)}. */
+    public String reason(String text, boolean spareProseWords) {
+        return finding(text, spareProseWords).reason;
+    }
+
+    private Finding finding(String text, boolean spareProseWords) {
         String t = text == null ? "" : text.replace("\u00AD", "").trim();
         String[] words = t.isEmpty() ? new String[0] : t.split("\\s+");
         int count = words(t);
@@ -303,7 +319,7 @@ public final class ProsePassageFilter {
         if (longest > criteria.maxUnpunctuatedRun) {
             return new Finding(Rule.RUN, longest + " words without punctuation > " + criteria.maxUnpunctuatedRun);
         }
-        return promotion(t, words, count);
+        return promotion(t, words, count, spareProseWords);
     }
 
     /** Call-to-action, navigation, price and subscription phrases (German and English). */
@@ -337,19 +353,32 @@ public final class ProsePassageFilter {
             + "|(?:für\\s+)?bestellungen\\s+bis|lieferung\\s+bis\\s+(?:zum|weihnachten))\\b|©"
             + "|www:\\s*https?"
             + "|^\\s*(?:abb|abbildung|fig|figure|tab|tabelle)\\.?\\s*\\d|^\\s*\\p{Lu}\\p{Ll}+,\\s+\\p{Lu}\\.(?:\\s|,|$)");
+    /**
+     * Site notices that are also words of prose on the matter: a text on data protection names cookies, privacy
+     * settings and the withdrawal of consent, a guideline its FAQ, a text on publishing a licence. Picture credits,
+     * the copyright sign, a law's header, a figure label or a reference entry at the start are no such words: they
+     * stand on page furniture only.
+     */
+    private static final Pattern PROSE_WORD_NOTICE = Pattern.compile("(?iu)cookies?|faq|häufig\\s+gestellte\\s+fragen"
+            + "|frequently\\s+asked\\s+questions|startseite|impressum|datenschutzeinstellungen"
+            + "|privatsphäre-?einstellungen|einwilligung\\s+widerrufen|creative\\s+commons|cc[\\s-]by(?:-\\S+)?"
+            + "|licensed\\s+under|lizenziert\\s+unter|unter\\s+der\\s+lizenz");
     private static final Pattern LINK = Pattern.compile("(?i)https?://|www\\.|\\bwww\\b");
 
     /**
      * Why a passage that passed the prose rules is advertising or navigation: too many promotion signals, too many
      * words in capitals, or too many links; empty otherwise.
      */
-    private Finding promotion(String t, String[] words, int count) {
+    private Finding promotion(String t, String[] words, int count, boolean spareProseWords) {
         int notices = 0;
+        String last = "";
         Matcher notice = SITE_NOTICE.matcher(t);
         while (notice.find()) {
             notices++;
+            last = notice.group().trim();
         }
-        if (notices > criteria.maxSiteNotices) {
+        boolean spared = spareProseWords && notices == 1 && PROSE_WORD_NOTICE.matcher(last).matches();
+        if (notices > criteria.maxSiteNotices && !spared) {
             return new Finding(Rule.SITE_NOTICES, notices + " site notices > " + criteria.maxSiteNotices);
         }
         if (criteria.maxPromotionSignals > 0) {

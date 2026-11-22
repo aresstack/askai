@@ -413,16 +413,26 @@ public class PageNoiseStockTest {
         result.addProperty("durchRegeln", run.getByRules());
         result.addProperty("gefragt", run.getAsked());
         int overruled = 0;
+        int withoutStatement = 0;
         Map<String, Integer> overruledByLabel = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> withoutStatementByLabel = new LinkedHashMap<String, Integer>();
         for (Passage passage : checked) {
-            if (PageNoiseCheck.isOverruled(marks.mark(PageNoiseCheck.textKey(passage)))) {
+            NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage));
+            Label label = labels.get(passage.getId());
+            String verdict = label == null ? "OHNE_ETIKETT" : label.verdict;
+            if (PageNoiseCheck.isOverruled(mark)) {
                 overruled++;
-                Label label = labels.get(passage.getId());
-                overruledByLabel.merge(label == null ? "OHNE_ETIKETT" : label.verdict, 1, Integer::sum);
+                overruledByLabel.merge(verdict, 1, Integer::sum);
+            }
+            if (PageNoiseCheck.isWithoutStatement(mark)) {
+                withoutStatement++;
+                withoutStatementByLabel.merge(verdict, 1, Integer::sum);
             }
         }
         result.addProperty("artAusBeschreibung", overruled);
         result.add("artAusBeschreibungNachEtikett", tree(overruledByLabel));
+        result.addProperty("ohneAussage", withoutStatement);
+        result.add("ohneAussageNachEtikett", tree(withoutStatementByLabel));
         result.add("nachUrteil", tree(byVerdict));
         result.add("rauschenNachKlasse", tree(byKind));
         result.add("rauschenNachStufe", tree(byStage));
